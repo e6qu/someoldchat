@@ -17,6 +17,23 @@ message Conversation {
   int64 unread_count = 10;
   bool is_ext_shared = 11;
   bool is_pending_ext_shared = 12;
+  // Unix nanoseconds; zero when unrecorded.
+  int64 created = 13;
+  string creator_id = 14;
+  string topic_set_by = 15;
+  int64 topic_set_at = 16;
+  string purpose_set_by = 17;
+  int64 purpose_set_at = 18;
+  // Facts derived for the reader the conversation was returned to.
+  bool is_member = 19;
+  bool is_general = 20;
+  int64 num_members = 21;
+  string direct_user_id = 22;
+  bool direct_user_deleted = 23;
+  string group_direct_handle = 24;
+  // Set only on the answer to OpenConversation: the conversation was already
+  // open for the caller before the request.
+  bool already_open = 25;
 }
 
 message ConversationPage {

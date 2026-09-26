@@ -19,45 +19,26 @@ func conversationsOf(messages []domain.Message) map[domain.ConversationID]bool {
 	return present
 }
 
-// TestThreadSummariesRespectAIExclusion proves the exclusion an administrator
-// sets actually governs the one AI surface a thread summary reaches: a channel
-// kept out of Slack AI shows no summaries, and removing the exclusion brings them
-// back. Before this, the flag was set and reported but never consulted, so an
-// excluded channel was summarised exactly like any other.
-func TestThreadSummariesRespectAIExclusion(t *testing.T) {
+// TestThreadSummariesAreNotGovernedByTheAIExclusion keeps reply metadata out
+// of the Slack-AI exclusion. A thread summary is a reply count, the
+// participants and the last reply — what Slack's message object carries as
+// reply_count, reply_users and latest_reply in every channel — not an AI
+// summary. Applying the exclusion to it erased reply counts from the timeline
+// and from conversations.history in any excluded channel.
+func TestThreadSummariesAreNotGovernedByTheAIExclusion(t *testing.T) {
 	ctx, repository, messages, root := assistantWorld(t)
 	if _, err := messages.Post(ctx, "T1", "U1", "C1", "here is a reply", root, ""); err != nil {
 		t.Fatal(err)
 	}
-
-	before, err := messages.ThreadSummaries(ctx, "T1", "U1", "C1", []domain.MessageTimestamp{root})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary, ok := before[root]; !ok || summary.ReplyCount < 1 {
-		t.Fatalf("thread summary before exclusion = %+v, want a reply counted", before)
-	}
-
 	if err := repository.SetConversationsExcludedFromAI(ctx, "T1", []domain.ConversationID{"C1"}, true, aiExclusionEvent("E-exclude")); err != nil {
 		t.Fatal(err)
 	}
-	after, err := messages.ThreadSummaries(ctx, "T1", "U1", "C1", []domain.MessageTimestamp{root})
+	summaries, err := messages.ThreadSummaries(ctx, "T1", "U1", "C1", []domain.MessageTimestamp{root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(after) != 0 {
-		t.Fatalf("an AI-excluded channel returned %d summaries, want none", len(after))
-	}
-
-	if err := repository.SetConversationsExcludedFromAI(ctx, "T1", []domain.ConversationID{"C1"}, false, aiExclusionEvent("E-include")); err != nil {
-		t.Fatal(err)
-	}
-	restored, err := messages.ThreadSummaries(ctx, "T1", "U1", "C1", []domain.MessageTimestamp{root})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := restored[root]; !ok {
-		t.Fatalf("removing the exclusion did not restore the summary: %+v", restored)
+	if summary, ok := summaries[root]; !ok || summary.ReplyCount != 1 {
+		t.Fatalf("thread summary in an AI-excluded channel = %+v, want the reply counted", summaries)
 	}
 }
 

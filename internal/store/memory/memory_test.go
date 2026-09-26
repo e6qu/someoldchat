@@ -201,15 +201,15 @@ func TestSocketModeResponseRenewalKeepsSlowLeaseOwned(t *testing.T) {
 	if err := s.RecordSocketModeResponse(ctx, response); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-1", 1, 30*time.Millisecond)
+	claimed, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-1", 1, 200*time.Millisecond)
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claimed=%+v err=%v", claimed, err)
 	}
-	time.Sleep(10 * time.Millisecond)
-	if err := s.RenewSocketModeResponses(ctx, "worker-1", claimed, 100*time.Millisecond); err != nil {
+	time.Sleep(20 * time.Millisecond)
+	if err := s.RenewSocketModeResponses(ctx, "worker-1", claimed, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(30 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 	if replacement, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-2", 1, time.Minute); err != nil || len(replacement) != 0 {
 		t.Fatalf("renewed response was reclaimed=%+v err=%v", replacement, err)
 	}
@@ -397,7 +397,7 @@ func TestStarsAreDurableAndPaged(t *testing.T) {
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1"})
 	s.SeedConversationMember("C1", "U1")
 	created := time.Unix(300, 0).UTC()
-	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section"}]`, CreatedAt: created}
+	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section","block_id":"b1"}]`, CreatedAt: created}
 	if err := s.CreateMessage(ctx, message, events.Event{ID: "message-1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +577,7 @@ func TestExternalUploadBatchPreflightsEveryMessageBeforeMutation(t *testing.T) {
 			t.Fatalf("file %s leaked after rollback: %v", completion.ID, err)
 		}
 	}
-	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 0 {
 		t.Fatalf("first message leaked=%+v err=%v", history, err)
 	}

@@ -165,8 +165,16 @@ type User struct {
 	Presence             string                 `protobuf:"bytes,7,opt,name=presence,proto3" json:"presence,omitempty"`
 	Deleted              bool                   `protobuf:"varint,8,opt,name=deleted,proto3" json:"deleted,omitempty"`
 	LastActiveAtUnixNano int64                  `protobuf:"varint,9,opt,name=last_active_at_unix_nano,json=lastActiveAtUnixNano,proto3" json:"last_active_at_unix_nano,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Unix nanoseconds; zero when unrecorded.
+	UpdatedUnixNano int64 `protobuf:"varint,10,opt,name=updated_unix_nano,json=updatedUnixNano,proto3" json:"updated_unix_nano,omitempty"`
+	// Derived for the reader from the member's bot and workspace membership.
+	BotId           string `protobuf:"bytes,11,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
+	AppId           string `protobuf:"bytes,12,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Role            string `protobuf:"bytes,13,opt,name=role,proto3" json:"role,omitempty"`
+	Restricted      bool   `protobuf:"varint,14,opt,name=restricted,proto3" json:"restricted,omitempty"`
+	UltraRestricted bool   `protobuf:"varint,15,opt,name=ultra_restricted,json=ultraRestricted,proto3" json:"ultra_restricted,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
@@ -260,6 +268,48 @@ func (x *User) GetLastActiveAtUnixNano() int64 {
 		return x.LastActiveAtUnixNano
 	}
 	return 0
+}
+
+func (x *User) GetUpdatedUnixNano() int64 {
+	if x != nil {
+		return x.UpdatedUnixNano
+	}
+	return 0
+}
+
+func (x *User) GetBotId() string {
+	if x != nil {
+		return x.BotId
+	}
+	return ""
+}
+
+func (x *User) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *User) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *User) GetRestricted() bool {
+	if x != nil {
+		return x.Restricted
+	}
+	return false
+}
+
+func (x *User) GetUltraRestricted() bool {
+	if x != nil {
+		return x.UltraRestricted
+	}
+	return false
 }
 
 type SetUserPresenceRequest struct {
@@ -1722,7 +1772,7 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"image_1024\x18\n" +
 	" \x01(\tR\timage1024\x12+\n" +
 	"\x11status_expiration\x18\v \x01(\x03R\x10statusExpiration\x12;\n" +
-	"\x1aactive_scheduled_status_id\x18\f \x01(\tR\x17activeScheduledStatusId\"\xaa\x02\n" +
+	"\x1aactive_scheduled_status_id\x18\f \x01(\tR\x17activeScheduledStatusId\"\xe3\x03\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x14\n" +
@@ -1732,7 +1782,16 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\aprofile\x18\x06 \x01(\v2 .sameoldchat.chat.v1.UserProfileR\aprofile\x12\x1a\n" +
 	"\bpresence\x18\a \x01(\tR\bpresence\x12\x18\n" +
 	"\adeleted\x18\b \x01(\bR\adeleted\x126\n" +
-	"\x18last_active_at_unix_nano\x18\t \x01(\x03R\x14lastActiveAtUnixNano\"p\n" +
+	"\x18last_active_at_unix_nano\x18\t \x01(\x03R\x14lastActiveAtUnixNano\x12*\n" +
+	"\x11updated_unix_nano\x18\n" +
+	" \x01(\x03R\x0fupdatedUnixNano\x12\x15\n" +
+	"\x06bot_id\x18\v \x01(\tR\x05botId\x12\x15\n" +
+	"\x06app_id\x18\f \x01(\tR\x05appId\x12\x12\n" +
+	"\x04role\x18\r \x01(\tR\x04role\x12\x1e\n" +
+	"\n" +
+	"restricted\x18\x0e \x01(\bR\n" +
+	"restricted\x12)\n" +
+	"\x10ultra_restricted\x18\x0f \x01(\bR\x0fultraRestricted\"p\n" +
 	"\x16SetUserPresenceRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1a\n" +

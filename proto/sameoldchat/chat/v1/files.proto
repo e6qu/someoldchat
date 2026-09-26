@@ -21,6 +21,16 @@ message File {
   repeated string shared_channels = 11;
   string description = 12;
   string file_type = 13;
+  repeated FileShare shares = 14;
+}
+
+message FileShare {
+  string conversation_id = 1;
+  string conversation_name = 2;
+  bool private = 3;
+  string ts = 4;
+  string thread_ts = 5;
+  string shared_by = 6;
 }
 
 message FilePage {

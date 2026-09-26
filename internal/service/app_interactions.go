@@ -35,6 +35,20 @@ var (
 	ErrSlashCommandInThread      = errors.New("slash commands cannot be invoked in threads")
 	ErrInvalidAppResponse        = errors.New("application response is invalid")
 	ErrInvalidTrigger            = errors.New("trigger_id is invalid or expired")
+
+	// The response_url refusals Slack distinguishes, which HandleAppResponse
+	// returns so the HTTP boundary can answer Slack's status and reason: 400
+	// invalid_payload and no_text for a body that could never be applied —
+	// refused before a use of the URL is spent — and 404 used_url and
+	// expired_url for a URL that cannot be used any more. A URL this system
+	// never issued is indistinguishable from one that expired and was purged.
+	// They are distinct from ErrInvalidAppResponse, which still reports an
+	// app's unusable acknowledgement body, so each keeps its identity across
+	// the gRPC seam.
+	ErrAppResponsePayloadInvalid = errors.New("response_url payload is not a valid message")
+	ErrAppResponseNoText         = errors.New("response_url payload has no text, blocks, or attachments")
+	ErrAppResponseURLUsed        = errors.New("response_url has no uses left")
+	ErrAppResponseURLExpired     = errors.New("response_url has expired")
 )
 
 func (m Messages) consumeAppTrigger(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, triggerID string) (domain.AppTrigger, error) {
@@ -101,19 +115,27 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 	if err != nil {
 		return err
 	}
+	channelName, err := m.slashCommandChannelName(ctx, conversation)
+	if err != nil {
+		return err
+	}
+	// is_enterprise_install is part of Slack's slash command form, and Bolt's
+	// installation-store authorization reads it; this system has no Enterprise
+	// Grid installations, so it is always false.
 	form := url.Values{
-		"api_app_id":   {string(snapshot.App.ID)},
-		"channel_id":   {string(conversation.ID)},
-		"channel_name": {conversation.Name},
-		"command":      {command},
-		"response_url": {responseURL},
-		"team_domain":  {workspace.Domain},
-		"team_id":      {string(workspace.ID)},
-		"text":         {strings.TrimSpace(text)},
-		"token":        {verificationToken},
-		"trigger_id":   {triggerID},
-		"user_id":      {string(user.ID)},
-		"user_name":    {user.Name},
+		"api_app_id":            {string(snapshot.App.ID)},
+		"channel_id":            {string(conversation.ID)},
+		"channel_name":          {channelName},
+		"command":               {command},
+		"is_enterprise_install": {"false"},
+		"response_url":          {responseURL},
+		"team_domain":           {workspace.Domain},
+		"team_id":               {string(workspace.ID)},
+		"text":                  {strings.TrimSpace(text)},
+		"token":                 {verificationToken},
+		"trigger_id":            {triggerID},
+		"user_id":               {string(user.ID)},
+		"user_name":             {user.Name},
 	}
 	if parsed.SocketModeEnabled {
 		return m.enqueueSocketModeInteraction(ctx, snapshot.App.ID, workspaceID, userID, "slash_commands", formValuesObject(form), capability)
@@ -125,6 +147,31 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 	return m.applyAppResponse(ctx, domain.AppResponseURL{
 		AppID: snapshot.App.ID, WorkspaceID: workspaceID, UserID: userID, ConversationID: conversationID,
 	}, body, "")
+}
+
+// slashCommandChannelName is the channel_name Slack sends with a slash
+// command. Only a public channel is named by its own name: Slack sends
+// "directmessage" from a DM, "privategroup" from a private channel, and the
+// mpdm-style name of a group DM, built from its members' names.
+func (m Messages) slashCommandChannelName(ctx context.Context, conversation domain.Conversation) (string, error) {
+	switch conversation.Kind.OrPublic() {
+	case domain.ConversationTypeIM:
+		return "directmessage", nil
+	case domain.ConversationTypePrivate:
+		return "privategroup", nil
+	case domain.ConversationTypeMPIM:
+		page, err := m.Store.ListConversationMembers(ctx, conversation.ID, domain.PageRequest{Limit: 100})
+		if err != nil {
+			return "", err
+		}
+		names := make([]string, 0, len(page.Users))
+		for _, member := range page.Users {
+			names = append(names, member.Name)
+		}
+		slices.Sort(names)
+		return "mpdm-" + strings.Join(names, "--") + "-1", nil
+	}
+	return conversation.Name, nil
 }
 
 func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, action domain.AppBlockAction, responseBaseURL string) error {
@@ -469,6 +516,12 @@ func appOptionTextObject(value any) string {
 }
 
 func viewContainsAction(payload, blockID, actionID string, actionTypes ...string) bool {
+	// Every stored block and interactive element carries an identifier, so an
+	// empty one names nothing; comparing it would match the first unnamed
+	// block of a surface written before identifiers were assigned.
+	if strings.TrimSpace(blockID) == "" || strings.TrimSpace(actionID) == "" {
+		return false
+	}
 	var view struct {
 		Blocks []map[string]any `json:"blocks"`
 	}
@@ -504,6 +557,9 @@ func viewContainsAction(payload, blockID, actionID string, actionTypes ...string
 }
 
 func viewContainsDispatchableAction(payload, blockID, actionID string, actionTypes ...string) bool {
+	if strings.TrimSpace(blockID) == "" || strings.TrimSpace(actionID) == "" {
+		return false
+	}
 	var view struct {
 		Blocks []map[string]any `json:"blocks"`
 	}
@@ -554,7 +610,7 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 		return domain.ViewInteractionResult{}, err
 	}
 	view["state"] = state
-	_, _, capability, err := m.createInteractionCapabilities(ctx, current.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
+	triggerID, _, capability, err := m.createInteractionCapabilities(ctx, current.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
 	if err != nil {
 		return domain.ViewInteractionResult{}, err
 	}
@@ -562,11 +618,17 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.ViewInteractionResult{}, err
 	}
+	// Slack's view_submission carries a trigger_id — an app opens a follow-up
+	// modal with it — and response_urls, which is empty unless an input block
+	// asked for response_url_enabled. The trigger was minted and discarded.
 	payload := map[string]any{
 		"type": "view_submission", "api_app_id": current.AppID, "token": verificationToken,
-		"team": map[string]any{"id": workspace.ID, "domain": workspace.Domain},
-		"user": map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
-		"view": view,
+		"team":                  map[string]any{"id": workspace.ID, "domain": workspace.Domain},
+		"user":                  map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
+		"view":                  view,
+		"trigger_id":            triggerID,
+		"response_urls":         []any{},
+		"is_enterprise_install": false,
 	}
 	if parsed.SocketModeEnabled {
 		if err := m.enqueueSocketModeInteraction(ctx, current.AppID, workspaceID, userID, "interactive", payload, capability); err != nil {
@@ -1118,12 +1180,20 @@ func appBlockActionState(action map[string]any) map[string]any {
 	return map[string]any{"values": map[string]any{blockID: map[string]any{actionID: state}}}
 }
 
+// HandleAppResponse applies a POST to a response_url. The body is validated
+// before a use of the URL is consumed, so a malformed request does not spend
+// one of the URL's five uses.
 func (m Messages) HandleAppResponse(ctx context.Context, responseToken, payload string) error {
+	if _, err := parseAppResponse([]byte(payload), true); err != nil {
+		return err
+	}
 	response, err := m.Store.UseAppResponseURL(ctx, domain.HashToken(strings.TrimSpace(responseToken)))
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return ErrInvalidAppResponse
-		}
+	switch {
+	case errors.Is(err, store.ErrCapabilityExhausted):
+		return ErrAppResponseURLUsed
+	case errors.Is(err, store.ErrNotFound):
+		return ErrAppResponseURLExpired
+	case err != nil:
 		return err
 	}
 	return m.applyAppResponse(ctx, response, []byte(payload), "")
@@ -1132,6 +1202,13 @@ func (m Messages) HandleAppResponse(ctx context.Context, responseToken, payload 
 func (m Messages) HandleSocketModeResponse(ctx context.Context, appID domain.AppID, envelopeID string, payload []byte) error {
 	interaction, err := m.Store.GetSocketModeInteraction(ctx, appID, strings.TrimSpace(envelopeID))
 	if errors.Is(err, store.ErrNotFound) {
+		// An event envelope acknowledged with {} carries no response: several
+		// official SDKs attach an empty payload to every acknowledgement.
+		// Journalling it wrote one row per event for a response processor that
+		// has nothing to do with it.
+		if emptyJSONObject(payload) {
+			return nil
+		}
 		return m.Store.RecordSocketModeResponse(ctx, domain.SocketModeResponse{
 			AppID: appID, EnvelopeID: strings.TrimSpace(envelopeID), Payload: string(payload), ReceivedAt: time.Now().UTC(),
 		})
@@ -1176,6 +1253,11 @@ func (m Messages) HandleSocketModeResponse(ctx context.Context, appID domain.App
 		return err
 	}
 	return m.applyAppResponse(ctx, interaction.Response, payload, "socket-mode:"+string(appID)+":"+interaction.EnvelopeID)
+}
+
+func emptyJSONObject(payload []byte) bool {
+	var object map[string]json.RawMessage
+	return json.Unmarshal(payload, &object) == nil && object != nil && len(object) == 0
 }
 
 func emptyViewAcknowledgement(payload []byte) bool {
@@ -1476,30 +1558,54 @@ type appResponsePayload struct {
 	DeleteOriginal  bool            `json:"delete_original"`
 }
 
-func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppResponseURL, body []byte, idempotencyKey string) error {
+// parsedAppResponse is an app's message response with its arrays normalised.
+type parsedAppResponse struct {
+	appResponsePayload
+	blocks, attachments string
+}
+
+func (p parsedAppResponse) empty() bool {
+	return strings.TrimSpace(p.Text) == "" && p.blocks == "" && p.attachments == "" && !p.DeleteOriginal
+}
+
+// parseAppResponse decodes an app's message response. An acknowledgement body
+// may be empty or plain text (strict false); a response_url POST must be a JSON
+// message object with something to post (strict true), as Slack requires.
+func parseAppResponse(body []byte, strict bool) (parsedAppResponse, error) {
 	body = bytes.TrimSpace(body)
-	if len(body) == 0 {
-		return nil
-	}
-	response := appResponsePayload{}
-	if body[0] == '{' {
-		if err := json.Unmarshal(body, &response); err != nil {
-			return ErrInvalidAppResponse
+	var parsed parsedAppResponse
+	switch {
+	case len(body) != 0 && body[0] == '{':
+		if err := json.Unmarshal(body, &parsed.appResponsePayload); err != nil {
+			return parsedAppResponse{}, ErrAppResponsePayloadInvalid
 		}
-	} else {
-		response.Text = string(body)
+	case strict:
+		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
+	default:
+		parsed.Text = string(body)
 	}
-	blocks, err := domain.NormalizeBlocks(response.Blocks)
+	var err error
+	if parsed.blocks, err = domain.NormalizeBlocks(parsed.Blocks); err != nil {
+		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
+	}
+	if parsed.attachments, err = domain.NormalizeAttachments(parsed.Attachments); err != nil {
+		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
+	}
+	if strict && parsed.empty() {
+		return parsedAppResponse{}, ErrAppResponseNoText
+	}
+	return parsed, nil
+}
+
+func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppResponseURL, body []byte, idempotencyKey string) error {
+	parsed, err := parseAppResponse(body, false)
 	if err != nil {
 		return ErrInvalidAppResponse
 	}
-	attachments, err := domain.NormalizeAttachments(response.Attachments)
-	if err != nil {
-		return ErrInvalidAppResponse
-	}
-	if strings.TrimSpace(response.Text) == "" && blocks == "" && attachments == "" && !response.DeleteOriginal {
+	if parsed.empty() {
 		return nil
 	}
+	response, blocks, attachments := parsed.appResponsePayload, parsed.blocks, parsed.attachments
 	bot, err := m.Store.GetBotByApp(ctx, capability.WorkspaceID, capability.AppID)
 	if err != nil {
 		return err
@@ -1566,7 +1672,7 @@ func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppRes
 		_, err := m.PostWithBlocksAndAttachments(ctx, capability.WorkspaceID, bot.UserID, capability.ConversationID, response.Text, blocks, attachments, capability.ThreadTimestamp, idempotencyKey, capability.AppID)
 		return err
 	}
-	_, err = m.postEphemeralWithBlocksAndAttachments(ctx, capability.WorkspaceID, bot.UserID, capability.ConversationID, capability.UserID, response.Text, blocks, attachments, capability.AppID, idempotencyKey)
+	_, err = m.postEphemeralWithBlocksAndAttachments(ctx, capability.WorkspaceID, bot.UserID, capability.ConversationID, capability.UserID, response.Text, blocks, attachments, capability.AppID, idempotencyKey, "")
 	return err
 }
 
@@ -1596,8 +1702,13 @@ func ephemeralMessageMutationEvent(value domain.EphemeralMessage, deleted bool) 
 
 func appInteractionMessage(message domain.Message) map[string]any {
 	result := map[string]any{
-		"type": "message", "user": message.AuthorID, "app_id": message.AppID, "text": message.Text,
+		"type": "message", "user": message.AuthorID, "text": message.Text,
 		"ts": domain.NewMessageTimestamp(message.CreatedAt),
+	}
+	// A human's message has no app; Slack omits the field rather than sending
+	// an empty identifier.
+	if message.AppID != "" {
+		result["app_id"] = message.AppID
 	}
 	if message.ThreadTimestamp != "" {
 		result["thread_ts"] = message.ThreadTimestamp

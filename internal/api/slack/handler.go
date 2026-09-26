@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/bearer"
 	"github.com/sameoldchat/sameoldchat/internal/blockkit"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -20,7 +21,6 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"io"
-	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -37,48 +37,113 @@ import (
 type Handler struct {
 	Messages      chatapi.Service
 	Authenticator auth.Authenticator
-	SocketMode    socketmode.Service
-	SocketAuth    auth.Authenticator
+	// appAuthenticator and socketMode are fixed at construction (see
+	// WithAppAuthenticator and WithSocketMode). Register binds every route to
+	// a copy of the Handler, so a field assigned after Register is invisible to
+	// the routes: cmd/server configured Socket Mode after Register and answered
+	// every apps.connections.open with socket_mode_unavailable, while the
+	// qualification fixture, which configured it first, passed. Unexported
+	// fields set only by construction options make that ordering impossible.
+	appAuthenticator auth.Authenticator
+	socketMode       *socketmode.Service
 	// Limiter enforces the Web API rate-limiting contract over every /api/
-	// route when set. Production wiring sets it; a zero Handler serves
-	// unlimited, which is what the package's own request-shaped tests and the
-	// SDK qualification fixture rely on.
+	// route, and the per-webhook allowance over incoming webhooks, when set.
+	// Production wiring sets it; a zero Handler serves unlimited, which is what
+	// the package's own request-shaped tests rely on.
 	Limiter *RateLimiter
+	// PublicURL is the absolute origin clients reach this server on. Every
+	// URL the transport emits — file downloads, the v2 upload URL, the OAuth
+	// authorize URL, message permalinks, auth.test's url — is built on it; see
+	// origin.go. Empty means the request's own origin.
+	PublicURL string
 }
 
 var errAccessLogging = errors.New("access logging failed")
 
 const oauthTokenLifetime = 12 * time.Hour
 
-func NewHandler(messages chatapi.Service, authenticator auth.Authenticator) (Handler, error) {
+// HandlerOption configures a Handler at construction, before any route can
+// capture it.
+type HandlerOption func(*Handler) error
+
+// WithAppAuthenticator authenticates app-level (xapp-) tokens, which
+// apps.event.authorizations.list and apps.connections.open accept.
+func WithAppAuthenticator(authenticator auth.Authenticator) HandlerOption {
+	return func(h *Handler) error {
+		if authenticator == nil {
+			return errors.New("Slack API app-token authenticator is nil")
+		}
+		h.appAuthenticator = authenticator
+		return nil
+	}
+}
+
+// WithSocketMode serves apps.connections.open from service. It requires
+// WithAppAuthenticator: an app-level token is the method's only credential,
+// and a Socket Mode service nobody can authenticate to is a permanently
+// broken feature that would otherwise be reported as a transient outage.
+func WithSocketMode(service socketmode.Service) HandlerOption {
+	return func(h *Handler) error {
+		if service.Store == nil {
+			return errors.New("Slack API Socket Mode requires a connection store")
+		}
+		h.socketMode = &service
+		return nil
+	}
+}
+
+func NewHandler(messages chatapi.Service, authenticator auth.Authenticator, options ...HandlerOption) (Handler, error) {
 	if messages == nil {
 		return Handler{}, errors.New("Slack API requires a chat service")
 	}
 	if authenticator == nil {
 		return Handler{}, errors.New("Slack API requires an authenticator")
 	}
-	return Handler{Messages: messages, Authenticator: authenticator}, nil
+	handler := Handler{Messages: messages, Authenticator: authenticator}
+	for _, option := range options {
+		if err := option(&handler); err != nil {
+			return Handler{}, err
+		}
+	}
+	if handler.socketMode != nil && handler.appAuthenticator == nil {
+		return Handler{}, errors.New("Slack API Socket Mode requires an app-token authenticator")
+	}
+	return handler, nil
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
+	// The Web API registers on an inner mux that one /api/ route fronts: the
+	// OAuth scope headers wrap every method, and the limiter, when set, answers
+	// a limited request before any route handler — including the
+	// unknown-method catch-all — runs. Only /api/ is delegated: the surfaces
+	// outside it (incoming webhooks, external upload URLs, public file and photo
+	// URLs) register on the outer mux. Registering them on the inner mux, as
+	// this once did, left every one of them answering 404 in the default
+	// rate-limited production configuration.
+	api := http.NewServeMux()
+	h.registerWebAPI(api)
+	var front http.Handler = api
 	if h.Limiter != nil {
-		// Every route registers on an inner mux and the limiter fronts the
-		// whole /api/ subtree, so a limited request is answered before any
-		// route handler — including the unknown-method catch-all — runs.
-		inner := http.NewServeMux()
-		unlimited := h
-		unlimited.Limiter = nil
-		unlimited.Register(inner)
-		mux.Handle("/api/", h.Limiter.Middleware(inner))
-		return
+		front = h.Limiter.Middleware(front)
 	}
+	mux.Handle("/api/", withOAuthScopeHeaders(front))
+	h.registerSurfaces(mux)
+}
+
+// registerWebAPI registers every Web API method for both GET and POST. Slack
+// accepts either verb for every method — python-slack-sdk's AsyncWebClient,
+// for one, sends GET for dnd.setSnooze, users.deletePhoto and others — so a
+// method registered for one verb answered the other with unknown_method.
+// TestEveryWebAPIMethodAcceptsGETAndPOST holds every pair together.
+func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/api.test", h.apiTest)
 	mux.HandleFunc("POST /api/api.test", h.apiTest)
+	mux.HandleFunc("GET /api/blocks.validate", h.blocksValidate)
 	mux.HandleFunc("POST /api/blocks.validate", h.blocksValidate)
-	mux.HandleFunc("POST /api/auth.test", h.authTest)
 	mux.HandleFunc("GET /api/auth.test", h.authTest)
-	mux.HandleFunc("POST /api/auth.teams.list", h.authTeamsList)
+	mux.HandleFunc("POST /api/auth.test", h.authTest)
 	mux.HandleFunc("GET /api/auth.teams.list", h.authTeamsList)
+	mux.HandleFunc("POST /api/auth.teams.list", h.authTeamsList)
 	mux.HandleFunc("GET /api/oauth.access", h.oauthAccess)
 	mux.HandleFunc("POST /api/oauth.access", h.oauthAccess)
 	mux.HandleFunc("GET /api/oauth.token", h.oauthAccess)
@@ -117,32 +182,53 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workflows.stepFailed", h.workflowStepFailed)
 	mux.HandleFunc("GET /api/workflows.updateStep", h.workflowUpdateStep)
 	mux.HandleFunc("POST /api/workflows.updateStep", h.workflowUpdateStep)
+	mux.HandleFunc("GET /api/functions.completeSuccess", h.functionsCompleteSuccess)
 	mux.HandleFunc("POST /api/functions.completeSuccess", h.functionsCompleteSuccess)
+	mux.HandleFunc("GET /api/functions.completeError", h.functionsCompleteError)
 	mux.HandleFunc("POST /api/functions.completeError", h.functionsCompleteError)
+	mux.HandleFunc("GET /api/functions.distributions.permissions.add", h.functionsDistributionsPermissionsAdd)
 	mux.HandleFunc("POST /api/functions.distributions.permissions.add", h.functionsDistributionsPermissionsAdd)
+	mux.HandleFunc("GET /api/functions.distributions.permissions.list", h.functionsDistributionsPermissionsList)
 	mux.HandleFunc("POST /api/functions.distributions.permissions.list", h.functionsDistributionsPermissionsList)
+	mux.HandleFunc("GET /api/functions.distributions.permissions.remove", h.functionsDistributionsPermissionsRemove)
 	mux.HandleFunc("POST /api/functions.distributions.permissions.remove", h.functionsDistributionsPermissionsRemove)
+	mux.HandleFunc("GET /api/functions.distributions.permissions.set", h.functionsDistributionsPermissionsSet)
 	mux.HandleFunc("POST /api/functions.distributions.permissions.set", h.functionsDistributionsPermissionsSet)
+	mux.HandleFunc("GET /api/functions.workflows.steps.list", h.functionsWorkflowsStepsList)
 	mux.HandleFunc("POST /api/functions.workflows.steps.list", h.functionsWorkflowsStepsList)
+	mux.HandleFunc("GET /api/workflows.featured.add", h.workflowsFeaturedAdd)
 	mux.HandleFunc("POST /api/workflows.featured.add", h.workflowsFeaturedAdd)
+	mux.HandleFunc("GET /api/workflows.featured.list", h.workflowsFeaturedList)
 	mux.HandleFunc("POST /api/workflows.featured.list", h.workflowsFeaturedList)
+	mux.HandleFunc("GET /api/workflows.featured.remove", h.workflowsFeaturedRemove)
 	mux.HandleFunc("POST /api/workflows.featured.remove", h.workflowsFeaturedRemove)
+	mux.HandleFunc("GET /api/workflows.featured.set", h.workflowsFeaturedSet)
 	mux.HandleFunc("POST /api/workflows.featured.set", h.workflowsFeaturedSet)
+	mux.HandleFunc("GET /api/workflows.triggers.permissions.add", h.workflowsTriggersPermissionsAdd)
 	mux.HandleFunc("POST /api/workflows.triggers.permissions.add", h.workflowsTriggersPermissionsAdd)
+	mux.HandleFunc("GET /api/workflows.triggers.permissions.list", h.workflowsTriggersPermissionsList)
 	mux.HandleFunc("POST /api/workflows.triggers.permissions.list", h.workflowsTriggersPermissionsList)
+	mux.HandleFunc("GET /api/workflows.triggers.permissions.remove", h.workflowsTriggersPermissionsRemove)
 	mux.HandleFunc("POST /api/workflows.triggers.permissions.remove", h.workflowsTriggersPermissionsRemove)
+	mux.HandleFunc("GET /api/workflows.triggers.permissions.set", h.workflowsTriggersPermissionsSet)
 	mux.HandleFunc("POST /api/workflows.triggers.permissions.set", h.workflowsTriggersPermissionsSet)
 	mux.HandleFunc("GET /api/dialog.open", h.dialogOpen)
 	mux.HandleFunc("POST /api/dialog.open", h.dialogOpen)
 	mux.HandleFunc("GET /api/apps.event.authorizations.list", h.appsEventAuthorizationsList)
 	mux.HandleFunc("POST /api/apps.event.authorizations.list", h.appsEventAuthorizationsList)
+	mux.HandleFunc("GET /api/apps.manifest.create", h.appsManifestCreate)
 	mux.HandleFunc("POST /api/apps.manifest.create", h.appsManifestCreate)
+	mux.HandleFunc("GET /api/apps.manifest.delete", h.appsManifestDelete)
 	mux.HandleFunc("POST /api/apps.manifest.delete", h.appsManifestDelete)
+	mux.HandleFunc("GET /api/apps.manifest.export", h.appsManifestExport)
 	mux.HandleFunc("POST /api/apps.manifest.export", h.appsManifestExport)
+	mux.HandleFunc("GET /api/apps.manifest.update", h.appsManifestUpdate)
 	mux.HandleFunc("POST /api/apps.manifest.update", h.appsManifestUpdate)
+	mux.HandleFunc("GET /api/apps.manifest.validate", h.appsManifestValidate)
 	mux.HandleFunc("POST /api/apps.manifest.validate", h.appsManifestValidate)
-	mux.HandleFunc("POST /api/apps.uninstall", h.appsUninstall)
 	mux.HandleFunc("GET /api/apps.uninstall", h.appsUninstall)
+	mux.HandleFunc("POST /api/apps.uninstall", h.appsUninstall)
+	mux.HandleFunc("GET /api/tooling.tokens.rotate", h.toolingTokensRotate)
 	mux.HandleFunc("POST /api/tooling.tokens.rotate", h.toolingTokensRotate)
 	mux.HandleFunc("GET /api/team.info", h.teamInfo)
 	mux.HandleFunc("POST /api/team.info", h.teamInfo)
@@ -152,16 +238,25 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/rtm.connect", h.rtmConnect)
 	mux.HandleFunc("GET /api/rtm.start", h.rtmConnect)
 	mux.HandleFunc("POST /api/rtm.start", h.rtmConnect)
-	mux.HandleFunc("POST /api/apps.connections.open", h.appsConnectionsOpen)
 	mux.HandleFunc("GET /api/apps.connections.open", h.appsConnectionsOpen)
+	mux.HandleFunc("POST /api/apps.connections.open", h.appsConnectionsOpen)
+	mux.HandleFunc("GET /api/apps.datastore.put", h.appsDatastorePut)
 	mux.HandleFunc("POST /api/apps.datastore.put", h.appsDatastorePut)
+	mux.HandleFunc("GET /api/apps.datastore.update", h.appsDatastoreUpdate)
 	mux.HandleFunc("POST /api/apps.datastore.update", h.appsDatastoreUpdate)
+	mux.HandleFunc("GET /api/apps.datastore.get", h.appsDatastoreGet)
 	mux.HandleFunc("POST /api/apps.datastore.get", h.appsDatastoreGet)
+	mux.HandleFunc("GET /api/apps.datastore.query", h.appsDatastoreQuery)
 	mux.HandleFunc("POST /api/apps.datastore.query", h.appsDatastoreQuery)
+	mux.HandleFunc("GET /api/apps.datastore.count", h.appsDatastoreCount)
 	mux.HandleFunc("POST /api/apps.datastore.count", h.appsDatastoreCount)
+	mux.HandleFunc("GET /api/apps.datastore.delete", h.appsDatastoreDelete)
 	mux.HandleFunc("POST /api/apps.datastore.delete", h.appsDatastoreDelete)
+	mux.HandleFunc("GET /api/apps.datastore.bulkPut", h.appsDatastoreBulkPut)
 	mux.HandleFunc("POST /api/apps.datastore.bulkPut", h.appsDatastoreBulkPut)
+	mux.HandleFunc("GET /api/apps.datastore.bulkGet", h.appsDatastoreBulkGet)
 	mux.HandleFunc("POST /api/apps.datastore.bulkGet", h.appsDatastoreBulkGet)
+	mux.HandleFunc("GET /api/apps.datastore.bulkDelete", h.appsDatastoreBulkDelete)
 	mux.HandleFunc("POST /api/apps.datastore.bulkDelete", h.appsDatastoreBulkDelete)
 	mux.HandleFunc("GET /api/bots.info", h.botsInfo)
 	mux.HandleFunc("POST /api/bots.info", h.botsInfo)
@@ -169,6 +264,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/migration.exchange", h.migrationExchange)
 	mux.HandleFunc("GET /api/team.externalTeams.list", h.externalTeamsList)
 	mux.HandleFunc("POST /api/team.externalTeams.list", h.externalTeamsList)
+	mux.HandleFunc("GET /api/team.externalTeams.disconnect", h.externalTeamsDisconnect)
 	mux.HandleFunc("POST /api/team.externalTeams.disconnect", h.externalTeamsDisconnect)
 	mux.HandleFunc("GET /api/team.billableInfo", h.teamBillableInfo)
 	mux.HandleFunc("POST /api/team.billableInfo", h.teamBillableInfo)
@@ -180,10 +276,15 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/team.integrationLogs", h.integrationLogs)
 	mux.HandleFunc("GET /api/admin.users.list", h.adminUsersList)
 	mux.HandleFunc("POST /api/admin.users.list", h.adminUsersList)
+	mux.HandleFunc("GET /api/admin.users.remove", h.adminUsersRemove)
 	mux.HandleFunc("POST /api/admin.users.remove", h.adminUsersRemove)
+	mux.HandleFunc("GET /api/admin.users.session.invalidate", h.adminUsersSessionInvalidate)
 	mux.HandleFunc("POST /api/admin.users.session.invalidate", h.adminUsersSessionInvalidate)
+	mux.HandleFunc("GET /api/admin.users.session.reset", h.adminUsersSessionReset)
 	mux.HandleFunc("POST /api/admin.users.session.reset", h.adminUsersSessionReset)
+	mux.HandleFunc("GET /api/admin.apps.uninstall", h.adminAppsUninstall)
 	mux.HandleFunc("POST /api/admin.apps.uninstall", h.adminAppsUninstall)
+	mux.HandleFunc("GET /api/admin.apps.requests.cancel", h.adminAppRequestCancel)
 	mux.HandleFunc("POST /api/admin.apps.requests.cancel", h.adminAppRequestCancel)
 	mux.HandleFunc("GET /api/users.discoverableContacts.lookup", h.usersDiscoverableContacts)
 	mux.HandleFunc("POST /api/users.discoverableContacts.lookup", h.usersDiscoverableContacts)
@@ -191,20 +292,31 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.functions.list", h.adminFunctionsList)
 	mux.HandleFunc("GET /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.search", h.adminWorkflowsSearch)
+	mux.HandleFunc("GET /api/admin.workflows.unpublish", h.adminWorkflowsUnpublish)
 	mux.HandleFunc("POST /api/admin.workflows.unpublish", h.adminWorkflowsUnpublish)
+	mux.HandleFunc("GET /api/admin.workflows.collaborators.add", h.adminWorkflowsCollaboratorsAdd)
 	mux.HandleFunc("POST /api/admin.workflows.collaborators.add", h.adminWorkflowsCollaboratorsAdd)
+	mux.HandleFunc("GET /api/admin.workflows.collaborators.remove", h.adminWorkflowsCollaboratorsRemove)
 	mux.HandleFunc("POST /api/admin.workflows.collaborators.remove", h.adminWorkflowsCollaboratorsRemove)
 	mux.HandleFunc("GET /api/admin.users.session.list", h.adminUsersSessionList)
 	mux.HandleFunc("POST /api/admin.users.session.list", h.adminUsersSessionList)
+	mux.HandleFunc("GET /api/admin.users.session.resetBulk", h.adminUsersSessionResetBulk)
 	mux.HandleFunc("POST /api/admin.users.session.resetBulk", h.adminUsersSessionResetBulk)
+	mux.HandleFunc("GET /api/admin.users.setAdmin", h.adminUsersSetAdmin)
 	mux.HandleFunc("POST /api/admin.users.setAdmin", h.adminUsersSetAdmin)
+	mux.HandleFunc("GET /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
+	mux.HandleFunc("GET /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
+	mux.HandleFunc("GET /api/admin.users.setExpiration", h.adminUsersSetExpiration)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("GET /api/apps.icon.set", h.appsIconSet)
 	mux.HandleFunc("POST /api/apps.icon.set", h.appsIconSet)
 	mux.HandleFunc("GET /api/apps.auth.external.get", h.appsAuthExternalGet)
 	mux.HandleFunc("POST /api/apps.auth.external.get", h.appsAuthExternalGet)
+	mux.HandleFunc("GET /api/apps.auth.external.delete", h.appsAuthExternalDelete)
 	mux.HandleFunc("POST /api/apps.auth.external.delete", h.appsAuthExternalDelete)
+	mux.HandleFunc("GET /api/apps.user.connection.update", h.appsUserConnectionUpdate)
 	mux.HandleFunc("POST /api/apps.user.connection.update", h.appsUserConnectionUpdate)
 	mux.HandleFunc("GET /api/assistant.search.info", h.assistantSearchInfo)
 	mux.HandleFunc("POST /api/assistant.search.info", h.assistantSearchInfo)
@@ -212,10 +324,13 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/assistant.search.context", h.assistantSearchContext)
 	mux.HandleFunc("GET /api/admin.audit.anomaly.allow.getItem", h.adminAuditAnomalyAllowGetItem)
 	mux.HandleFunc("POST /api/admin.audit.anomaly.allow.getItem", h.adminAuditAnomalyAllowGetItem)
+	mux.HandleFunc("GET /api/admin.audit.anomaly.allow.updateItem", h.adminAuditAnomalyAllowUpdateItem)
 	mux.HandleFunc("POST /api/admin.audit.anomaly.allow.updateItem", h.adminAuditAnomalyAllowUpdateItem)
 	mux.HandleFunc("GET /api/team.billing.info", h.teamBillingInfo)
 	mux.HandleFunc("POST /api/team.billing.info", h.teamBillingInfo)
+	mux.HandleFunc("GET /api/admin.users.unsupportedVersions.export", h.adminUsersUnsupportedVersionsExport)
 	mux.HandleFunc("POST /api/admin.users.unsupportedVersions.export", h.adminUsersUnsupportedVersionsExport)
+	mux.HandleFunc("GET /api/functions.workflows.steps.responses.export", h.functionsWorkflowsStepsResponsesExport)
 	mux.HandleFunc("POST /api/functions.workflows.steps.responses.export", h.functionsWorkflowsStepsResponsesExport)
 	mux.HandleFunc("GET /api/admin.analytics.getFile", h.adminAnalyticsGetFile)
 	mux.HandleFunc("POST /api/admin.analytics.getFile", h.adminAnalyticsGetFile)
@@ -229,123 +344,185 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.apps.activities.list", h.adminAppsActivitiesList)
 	mux.HandleFunc("GET /api/admin.conversations.lookup", h.adminConversationsLookup)
 	mux.HandleFunc("POST /api/admin.conversations.lookup", h.adminConversationsLookup)
+	mux.HandleFunc("GET /api/admin.conversations.bulkMove", h.adminConversationsBulkMove)
 	mux.HandleFunc("POST /api/admin.conversations.bulkMove", h.adminConversationsBulkMove)
+	mux.HandleFunc("GET /api/admin.conversations.bulkSetExcludeFromSlackAi", h.adminConversationsBulkSetExcludeFromAI)
 	mux.HandleFunc("POST /api/admin.conversations.bulkSetExcludeFromSlackAi", h.adminConversationsBulkSetExcludeFromAI)
+	mux.HandleFunc("GET /api/admin.conversations.linkObjects", h.adminConversationsLinkObjects)
 	mux.HandleFunc("POST /api/admin.conversations.linkObjects", h.adminConversationsLinkObjects)
+	mux.HandleFunc("GET /api/admin.conversations.unlinkObjects", h.adminConversationsUnlinkObjects)
 	mux.HandleFunc("POST /api/admin.conversations.unlinkObjects", h.adminConversationsUnlinkObjects)
+	mux.HandleFunc("GET /api/admin.conversations.createForObjects", h.adminConversationsCreateForObjects)
 	mux.HandleFunc("POST /api/admin.conversations.createForObjects", h.adminConversationsCreateForObjects)
 	mux.HandleFunc("GET /api/admin.apps.config.lookup", h.adminAppsConfigLookup)
 	mux.HandleFunc("POST /api/admin.apps.config.lookup", h.adminAppsConfigLookup)
+	mux.HandleFunc("GET /api/admin.apps.config.set", h.adminAppsConfigSet)
 	mux.HandleFunc("POST /api/admin.apps.config.set", h.adminAppsConfigSet)
+	mux.HandleFunc("GET /api/admin.apps.clearResolution", h.adminAppsClearResolution)
 	mux.HandleFunc("POST /api/admin.apps.clearResolution", h.adminAppsClearResolution)
 	mux.HandleFunc("GET /api/admin.functions.permissions.lookup", h.adminFunctionsPermissionsLookup)
 	mux.HandleFunc("POST /api/admin.functions.permissions.lookup", h.adminFunctionsPermissionsLookup)
+	mux.HandleFunc("GET /api/admin.functions.permissions.set", h.adminFunctionsPermissionsSet)
 	mux.HandleFunc("POST /api/admin.functions.permissions.set", h.adminFunctionsPermissionsSet)
 	mux.HandleFunc("GET /api/admin.workflows.permissions.lookup", h.adminWorkflowsPermissionsLookup)
 	mux.HandleFunc("POST /api/admin.workflows.permissions.lookup", h.adminWorkflowsPermissionsLookup)
 	mux.HandleFunc("GET /api/admin.workflows.triggers.types.permissions.lookup", h.adminWorkflowsTriggerTypePermissionsLookup)
 	mux.HandleFunc("POST /api/admin.workflows.triggers.types.permissions.lookup", h.adminWorkflowsTriggerTypePermissionsLookup)
+	mux.HandleFunc("GET /api/admin.workflows.triggers.types.permissions.set", h.adminWorkflowsTriggerTypePermissionsSet)
 	mux.HandleFunc("POST /api/admin.workflows.triggers.types.permissions.set", h.adminWorkflowsTriggerTypePermissionsSet)
+	mux.HandleFunc("GET /api/admin.barriers.create", h.adminBarriersCreate)
 	mux.HandleFunc("POST /api/admin.barriers.create", h.adminBarriersCreate)
+	mux.HandleFunc("GET /api/admin.barriers.update", h.adminBarriersUpdate)
 	mux.HandleFunc("POST /api/admin.barriers.update", h.adminBarriersUpdate)
+	mux.HandleFunc("GET /api/admin.barriers.delete", h.adminBarriersDelete)
 	mux.HandleFunc("POST /api/admin.barriers.delete", h.adminBarriersDelete)
 	mux.HandleFunc("GET /api/admin.barriers.list", h.adminBarriersList)
 	mux.HandleFunc("POST /api/admin.barriers.list", h.adminBarriersList)
+	mux.HandleFunc("GET /api/admin.users.session.setSettings", h.adminUsersSessionSetSettings)
 	mux.HandleFunc("POST /api/admin.users.session.setSettings", h.adminUsersSessionSetSettings)
+	mux.HandleFunc("GET /api/admin.users.session.clearSettings", h.adminUsersSessionClearSettings)
 	mux.HandleFunc("POST /api/admin.users.session.clearSettings", h.adminUsersSessionClearSettings)
 	mux.HandleFunc("GET /api/admin.users.session.getSettings", h.adminUsersSessionGetSettings)
 	mux.HandleFunc("POST /api/admin.users.session.getSettings", h.adminUsersSessionGetSettings)
+	mux.HandleFunc("GET /api/admin.auth.policy.assignEntities", h.adminAuthPolicyAssignEntities)
 	mux.HandleFunc("POST /api/admin.auth.policy.assignEntities", h.adminAuthPolicyAssignEntities)
+	mux.HandleFunc("GET /api/admin.auth.policy.removeEntities", h.adminAuthPolicyRemoveEntities)
 	mux.HandleFunc("POST /api/admin.auth.policy.removeEntities", h.adminAuthPolicyRemoveEntities)
 	mux.HandleFunc("GET /api/admin.auth.policy.getEntities", h.adminAuthPolicyGetEntities)
 	mux.HandleFunc("POST /api/admin.auth.policy.getEntities", h.adminAuthPolicyGetEntities)
+	mux.HandleFunc("GET /api/admin.roles.addAssignments", h.adminRolesAddAssignments)
 	mux.HandleFunc("POST /api/admin.roles.addAssignments", h.adminRolesAddAssignments)
+	mux.HandleFunc("GET /api/admin.roles.removeAssignments", h.adminRolesRemoveAssignments)
 	mux.HandleFunc("POST /api/admin.roles.removeAssignments", h.adminRolesRemoveAssignments)
 	mux.HandleFunc("GET /api/admin.roles.listAssignments", h.adminRolesListAssignments)
 	mux.HandleFunc("POST /api/admin.roles.listAssignments", h.adminRolesListAssignments)
 	mux.HandleFunc("GET /api/admin.users.getExpiration", h.adminUsersGetExpiration)
 	mux.HandleFunc("POST /api/admin.users.getExpiration", h.adminUsersGetExpiration)
+	mux.HandleFunc("GET /api/admin.users.invite", h.adminUsersInvite)
 	mux.HandleFunc("POST /api/admin.users.invite", h.adminUsersInvite)
+	mux.HandleFunc("GET /api/admin.users.assign", h.adminUsersAssign)
 	mux.HandleFunc("POST /api/admin.users.assign", h.adminUsersAssign)
+	mux.HandleFunc("GET /api/admin.inviteRequests.approve", h.adminInviteRequestApprove)
 	mux.HandleFunc("POST /api/admin.inviteRequests.approve", h.adminInviteRequestApprove)
 	mux.HandleFunc("GET /api/admin.inviteRequests.approved.list", h.adminInviteRequestsApprovedList)
 	mux.HandleFunc("POST /api/admin.inviteRequests.approved.list", h.adminInviteRequestsApprovedList)
 	mux.HandleFunc("GET /api/admin.inviteRequests.denied.list", h.adminInviteRequestsDeniedList)
 	mux.HandleFunc("POST /api/admin.inviteRequests.denied.list", h.adminInviteRequestsDeniedList)
+	mux.HandleFunc("GET /api/admin.inviteRequests.deny", h.adminInviteRequestDeny)
 	mux.HandleFunc("POST /api/admin.inviteRequests.deny", h.adminInviteRequestDeny)
 	mux.HandleFunc("GET /api/admin.inviteRequests.list", h.adminInviteRequestsList)
 	mux.HandleFunc("POST /api/admin.inviteRequests.list", h.adminInviteRequestsList)
+	mux.HandleFunc("GET /api/admin.apps.approve", h.adminAppApprove)
 	mux.HandleFunc("POST /api/admin.apps.approve", h.adminAppApprove)
 	mux.HandleFunc("GET /api/admin.apps.approved.list", h.adminAppsApprovedList)
 	mux.HandleFunc("POST /api/admin.apps.approved.list", h.adminAppsApprovedList)
 	mux.HandleFunc("GET /api/admin.apps.requests.list", h.adminAppsRequestsList)
 	mux.HandleFunc("POST /api/admin.apps.requests.list", h.adminAppsRequestsList)
+	mux.HandleFunc("GET /api/admin.apps.restrict", h.adminAppRestrict)
 	mux.HandleFunc("POST /api/admin.apps.restrict", h.adminAppRestrict)
 	mux.HandleFunc("GET /api/admin.apps.restricted.list", h.adminAppsRestrictedList)
 	mux.HandleFunc("POST /api/admin.apps.restricted.list", h.adminAppsRestrictedList)
+	mux.HandleFunc("GET /api/admin.conversations.rename", h.adminConversationRename)
 	mux.HandleFunc("POST /api/admin.conversations.rename", h.adminConversationRename)
+	mux.HandleFunc("GET /api/admin.conversations.create", h.adminConversationCreate)
 	mux.HandleFunc("POST /api/admin.conversations.create", h.adminConversationCreate)
+	mux.HandleFunc("GET /api/admin.conversations.archive", h.adminConversationArchive)
 	mux.HandleFunc("POST /api/admin.conversations.archive", h.adminConversationArchive)
+	mux.HandleFunc("GET /api/admin.conversations.unarchive", h.adminConversationUnarchive)
 	mux.HandleFunc("POST /api/admin.conversations.unarchive", h.adminConversationUnarchive)
+	mux.HandleFunc("GET /api/admin.conversations.delete", h.adminConversationDelete)
 	mux.HandleFunc("POST /api/admin.conversations.delete", h.adminConversationDelete)
+	mux.HandleFunc("GET /api/admin.conversations.restrictAccess.addGroup", h.adminConversationAccessGroupAdd)
 	mux.HandleFunc("POST /api/admin.conversations.restrictAccess.addGroup", h.adminConversationAccessGroupAdd)
 	mux.HandleFunc("GET /api/admin.conversations.restrictAccess.listGroups", h.adminConversationAccessGroupsList)
 	mux.HandleFunc("POST /api/admin.conversations.restrictAccess.listGroups", h.adminConversationAccessGroupsList)
+	mux.HandleFunc("GET /api/admin.conversations.restrictAccess.removeGroup", h.adminConversationAccessGroupRemove)
 	mux.HandleFunc("POST /api/admin.conversations.restrictAccess.removeGroup", h.adminConversationAccessGroupRemove)
+	mux.HandleFunc("GET /api/admin.conversations.invite", h.adminConversationInvite)
 	mux.HandleFunc("POST /api/admin.conversations.invite", h.adminConversationInvite)
+	mux.HandleFunc("GET /api/admin.conversations.convertToPrivate", h.adminConversationConvertToPrivate)
 	mux.HandleFunc("POST /api/admin.conversations.convertToPrivate", h.adminConversationConvertToPrivate)
+	mux.HandleFunc("GET /api/admin.conversations.convertToPublic", h.adminConversationConvertToPublic)
 	mux.HandleFunc("POST /api/admin.conversations.convertToPublic", h.adminConversationConvertToPublic)
+	mux.HandleFunc("GET /api/admin.conversations.bulkArchive", h.adminConversationBulkArchive)
 	mux.HandleFunc("POST /api/admin.conversations.bulkArchive", h.adminConversationBulkArchive)
+	mux.HandleFunc("GET /api/admin.conversations.bulkDelete", h.adminConversationBulkDelete)
 	mux.HandleFunc("POST /api/admin.conversations.bulkDelete", h.adminConversationBulkDelete)
 	mux.HandleFunc("GET /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
+	mux.HandleFunc("GET /api/admin.conversations.setConversationPrefs", h.adminConversationSetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.setConversationPrefs", h.adminConversationSetPrefs)
 	mux.HandleFunc("GET /api/admin.conversations.search", h.adminConversationSearch)
 	mux.HandleFunc("POST /api/admin.conversations.search", h.adminConversationSearch)
 	mux.HandleFunc("GET /api/admin.conversations.getTeams", h.adminConversationGetTeams)
 	mux.HandleFunc("POST /api/admin.conversations.getTeams", h.adminConversationGetTeams)
+	mux.HandleFunc("GET /api/admin.conversations.setTeams", h.adminConversationSetTeams)
 	mux.HandleFunc("POST /api/admin.conversations.setTeams", h.adminConversationSetTeams)
+	mux.HandleFunc("GET /api/admin.conversations.disconnectShared", h.adminConversationDisconnectShared)
 	mux.HandleFunc("POST /api/admin.conversations.disconnectShared", h.adminConversationDisconnectShared)
+	mux.HandleFunc("GET /api/admin.conversations.getCustomRetention", h.adminConversationGetCustomRetention)
 	mux.HandleFunc("POST /api/admin.conversations.getCustomRetention", h.adminConversationGetCustomRetention)
+	mux.HandleFunc("GET /api/admin.conversations.setCustomRetention", h.adminConversationSetCustomRetention)
 	mux.HandleFunc("POST /api/admin.conversations.setCustomRetention", h.adminConversationSetCustomRetention)
+	mux.HandleFunc("GET /api/admin.conversations.removeCustomRetention", h.adminConversationRemoveCustomRetention)
 	mux.HandleFunc("POST /api/admin.conversations.removeCustomRetention", h.adminConversationRemoveCustomRetention)
+	mux.HandleFunc("GET /api/conversations.inviteShared", h.conversationInviteShared)
 	mux.HandleFunc("POST /api/conversations.inviteShared", h.conversationInviteShared)
+	mux.HandleFunc("GET /api/conversations.acceptSharedInvite", h.conversationAcceptSharedInvite)
 	mux.HandleFunc("POST /api/conversations.acceptSharedInvite", h.conversationAcceptSharedInvite)
+	mux.HandleFunc("GET /api/conversations.approveSharedInvite", h.conversationApproveSharedInvite)
 	mux.HandleFunc("POST /api/conversations.approveSharedInvite", h.conversationApproveSharedInvite)
+	mux.HandleFunc("GET /api/conversations.declineSharedInvite", h.conversationDeclineSharedInvite)
 	mux.HandleFunc("POST /api/conversations.declineSharedInvite", h.conversationDeclineSharedInvite)
+	mux.HandleFunc("GET /api/conversations.requestSharedInvite.approve", h.conversationRequestSharedInviteApprove)
 	mux.HandleFunc("POST /api/conversations.requestSharedInvite.approve", h.conversationRequestSharedInviteApprove)
+	mux.HandleFunc("GET /api/conversations.requestSharedInvite.deny", h.conversationRequestSharedInviteDeny)
 	mux.HandleFunc("POST /api/conversations.requestSharedInvite.deny", h.conversationRequestSharedInviteDeny)
+	mux.HandleFunc("GET /api/conversations.requestSharedInvite.list", h.conversationRequestSharedInviteList)
 	mux.HandleFunc("POST /api/conversations.requestSharedInvite.list", h.conversationRequestSharedInviteList)
+	mux.HandleFunc("GET /api/conversations.listConnectInvites", h.conversationListConnectInvites)
 	mux.HandleFunc("POST /api/conversations.listConnectInvites", h.conversationListConnectInvites)
+	mux.HandleFunc("GET /api/conversations.externalInvitePermissions.set", h.conversationExternalInvitePermissionsSet)
 	mux.HandleFunc("POST /api/conversations.externalInvitePermissions.set", h.conversationExternalInvitePermissionsSet)
 	mux.HandleFunc("GET /api/admin.conversations.ekm.listOriginalConnectedChannelInfo", h.adminConnectedChannelInfo)
 	mux.HandleFunc("POST /api/admin.conversations.ekm.listOriginalConnectedChannelInfo", h.adminConnectedChannelInfo)
-	mux.HandleFunc("POST /api/admin.emoji.add", h.adminEmojiAdd)
 	mux.HandleFunc("GET /api/admin.emoji.add", h.adminEmojiAdd)
-	mux.HandleFunc("POST /api/admin.emoji.addAlias", h.adminEmojiAddAlias)
+	mux.HandleFunc("POST /api/admin.emoji.add", h.adminEmojiAdd)
 	mux.HandleFunc("GET /api/admin.emoji.addAlias", h.adminEmojiAddAlias)
+	mux.HandleFunc("POST /api/admin.emoji.addAlias", h.adminEmojiAddAlias)
 	mux.HandleFunc("GET /api/admin.emoji.list", h.adminEmojiList)
 	mux.HandleFunc("POST /api/admin.emoji.list", h.adminEmojiList)
-	mux.HandleFunc("POST /api/admin.emoji.remove", h.adminEmojiRemove)
 	mux.HandleFunc("GET /api/admin.emoji.remove", h.adminEmojiRemove)
-	mux.HandleFunc("POST /api/admin.emoji.rename", h.adminEmojiRename)
+	mux.HandleFunc("POST /api/admin.emoji.remove", h.adminEmojiRemove)
 	mux.HandleFunc("GET /api/admin.emoji.rename", h.adminEmojiRename)
+	mux.HandleFunc("POST /api/admin.emoji.rename", h.adminEmojiRename)
 	mux.HandleFunc("GET /api/emoji.list", h.emojiList)
 	mux.HandleFunc("POST /api/emoji.list", h.emojiList)
+	mux.HandleFunc("GET /api/chat.postMessage", h.postMessage)
 	mux.HandleFunc("POST /api/chat.postMessage", h.postMessage)
+	mux.HandleFunc("GET /api/chat.startStream", h.startMessageStream)
 	mux.HandleFunc("POST /api/chat.startStream", h.startMessageStream)
+	mux.HandleFunc("GET /api/chat.appendStream", h.appendMessageStream)
 	mux.HandleFunc("POST /api/chat.appendStream", h.appendMessageStream)
+	mux.HandleFunc("GET /api/chat.stopStream", h.stopMessageStream)
 	mux.HandleFunc("POST /api/chat.stopStream", h.stopMessageStream)
+	mux.HandleFunc("GET /api/chat.unfurl", h.chatUnfurl)
 	mux.HandleFunc("POST /api/chat.unfurl", h.chatUnfurl)
+	mux.HandleFunc("GET /api/chat.postEphemeral", h.postEphemeral)
 	mux.HandleFunc("POST /api/chat.postEphemeral", h.postEphemeral)
+	mux.HandleFunc("GET /api/chat.meMessage", h.meMessage)
 	mux.HandleFunc("POST /api/chat.meMessage", h.meMessage)
+	mux.HandleFunc("GET /api/chat.update", h.updateMessage)
 	mux.HandleFunc("POST /api/chat.update", h.updateMessage)
+	mux.HandleFunc("GET /api/chat.delete", h.deleteMessage)
 	mux.HandleFunc("POST /api/chat.delete", h.deleteMessage)
 	mux.HandleFunc("GET /api/chat.getPermalink", h.getPermalink)
 	mux.HandleFunc("POST /api/chat.getPermalink", h.getPermalink)
+	mux.HandleFunc("GET /api/chat.scheduleMessage", h.scheduleMessage)
 	mux.HandleFunc("POST /api/chat.scheduleMessage", h.scheduleMessage)
 	mux.HandleFunc("GET /api/chat.scheduledMessages.list", h.scheduledMessagesList)
 	mux.HandleFunc("POST /api/chat.scheduledMessages.list", h.scheduledMessagesList)
+	mux.HandleFunc("GET /api/chat.deleteScheduledMessage", h.deleteScheduledMessage)
 	mux.HandleFunc("POST /api/chat.deleteScheduledMessage", h.deleteScheduledMessage)
 	mux.HandleFunc("GET /api/conversations.history", h.history)
 	mux.HandleFunc("POST /api/conversations.history", h.history)
@@ -361,11 +538,15 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/users.lookupByEmail", h.lookupUserByEmail)
 	mux.HandleFunc("GET /api/users.getPresence", h.getPresence)
 	mux.HandleFunc("POST /api/users.getPresence", h.getPresence)
+	mux.HandleFunc("GET /api/users.setPresence", h.setPresence)
 	mux.HandleFunc("POST /api/users.setPresence", h.setPresence)
 	mux.HandleFunc("GET /api/dnd.info", h.dndInfo)
 	mux.HandleFunc("POST /api/dnd.info", h.dndInfo)
+	mux.HandleFunc("GET /api/dnd.endDnd", h.dndEnd)
 	mux.HandleFunc("POST /api/dnd.endDnd", h.dndEnd)
+	mux.HandleFunc("GET /api/dnd.endSnooze", h.dndEndSnooze)
 	mux.HandleFunc("POST /api/dnd.endSnooze", h.dndEndSnooze)
+	mux.HandleFunc("GET /api/dnd.setSnooze", h.dndSetSnooze)
 	mux.HandleFunc("POST /api/dnd.setSnooze", h.dndSetSnooze)
 	mux.HandleFunc("GET /api/dnd.teamInfo", h.dndTeamInfo)
 	mux.HandleFunc("POST /api/dnd.teamInfo", h.dndTeamInfo)
@@ -373,9 +554,13 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/users.profile.get", h.getUserProfile)
 	mux.HandleFunc("GET /api/users.list", h.usersList)
 	mux.HandleFunc("POST /api/users.list", h.usersList)
+	mux.HandleFunc("GET /api/users.profile.set", h.setUserProfile)
 	mux.HandleFunc("POST /api/users.profile.set", h.setUserProfile)
+	mux.HandleFunc("GET /api/users.deletePhoto", h.deleteUserPhoto)
 	mux.HandleFunc("POST /api/users.deletePhoto", h.deleteUserPhoto)
+	mux.HandleFunc("GET /api/users.setPhoto", h.setUserPhoto)
 	mux.HandleFunc("POST /api/users.setPhoto", h.setUserPhoto)
+	mux.HandleFunc("GET /api/users.setActive", h.usersSetActive)
 	mux.HandleFunc("POST /api/users.setActive", h.usersSetActive)
 	mux.HandleFunc("GET /api/conversations.list", h.conversationsList)
 	mux.HandleFunc("POST /api/conversations.list", h.conversationsList)
@@ -383,108 +568,173 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/users.conversations", h.usersConversations)
 	mux.HandleFunc("GET /api/conversations.members", h.conversationMembers)
 	mux.HandleFunc("POST /api/conversations.members", h.conversationMembers)
+	mux.HandleFunc("GET /api/conversations.create", h.createConversation)
 	mux.HandleFunc("POST /api/conversations.create", h.createConversation)
+	mux.HandleFunc("GET /api/conversations.join", h.joinConversation)
 	mux.HandleFunc("POST /api/conversations.join", h.joinConversation)
+	mux.HandleFunc("GET /api/conversations.invite", h.inviteConversation)
 	mux.HandleFunc("POST /api/conversations.invite", h.inviteConversation)
+	mux.HandleFunc("GET /api/conversations.leave", h.leaveConversation)
 	mux.HandleFunc("POST /api/conversations.leave", h.leaveConversation)
+	mux.HandleFunc("GET /api/conversations.kick", h.kickConversation)
 	mux.HandleFunc("POST /api/conversations.kick", h.kickConversation)
+	mux.HandleFunc("GET /api/conversations.rename", h.renameConversation)
 	mux.HandleFunc("POST /api/conversations.rename", h.renameConversation)
+	mux.HandleFunc("GET /api/conversations.setTopic", h.setConversationTopic)
 	mux.HandleFunc("POST /api/conversations.setTopic", h.setConversationTopic)
+	mux.HandleFunc("GET /api/conversations.setPurpose", h.setConversationPurpose)
 	mux.HandleFunc("POST /api/conversations.setPurpose", h.setConversationPurpose)
+	mux.HandleFunc("GET /api/conversations.archive", h.archiveConversation)
 	mux.HandleFunc("POST /api/conversations.archive", h.archiveConversation)
+	mux.HandleFunc("GET /api/conversations.unarchive", h.unarchiveConversation)
 	mux.HandleFunc("POST /api/conversations.unarchive", h.unarchiveConversation)
+	mux.HandleFunc("GET /api/conversations.close", h.closeConversation)
 	mux.HandleFunc("POST /api/conversations.close", h.closeConversation)
+	mux.HandleFunc("GET /api/conversations.open", h.openConversation)
 	mux.HandleFunc("POST /api/conversations.open", h.openConversation)
+	mux.HandleFunc("GET /api/conversations.mark", h.markConversation)
 	mux.HandleFunc("POST /api/conversations.mark", h.markConversation)
+	mux.HandleFunc("GET /api/reactions.add", h.addReaction)
 	mux.HandleFunc("POST /api/reactions.add", h.addReaction)
+	mux.HandleFunc("GET /api/reactions.remove", h.removeReaction)
 	mux.HandleFunc("POST /api/reactions.remove", h.removeReaction)
 	mux.HandleFunc("GET /api/reactions.get", h.getReactions)
 	mux.HandleFunc("POST /api/reactions.get", h.getReactions)
 	mux.HandleFunc("GET /api/reactions.list", h.listUserReactions)
 	mux.HandleFunc("POST /api/reactions.list", h.listUserReactions)
+	mux.HandleFunc("GET /api/assistant.threads.setTitle", h.setAssistantThreadTitle)
 	mux.HandleFunc("POST /api/assistant.threads.setTitle", h.setAssistantThreadTitle)
+	mux.HandleFunc("GET /api/assistant.threads.setStatus", h.setAssistantThreadStatus)
 	mux.HandleFunc("POST /api/assistant.threads.setStatus", h.setAssistantThreadStatus)
+	mux.HandleFunc("GET /api/assistant.threads.setSuggestedPrompts", h.setAssistantThreadSuggestedPrompts)
 	mux.HandleFunc("POST /api/assistant.threads.setSuggestedPrompts", h.setAssistantThreadSuggestedPrompts)
+	mux.HandleFunc("GET /api/pins.add", h.addPin)
 	mux.HandleFunc("POST /api/pins.add", h.addPin)
+	mux.HandleFunc("GET /api/pins.remove", h.removePin)
 	mux.HandleFunc("POST /api/pins.remove", h.removePin)
 	mux.HandleFunc("GET /api/pins.list", h.listPins)
 	mux.HandleFunc("POST /api/pins.list", h.listPins)
+	mux.HandleFunc("GET /api/stars.add", h.addStar)
 	mux.HandleFunc("POST /api/stars.add", h.addStar)
 	mux.HandleFunc("GET /api/stars.list", h.listStars)
 	mux.HandleFunc("POST /api/stars.list", h.listStars)
+	mux.HandleFunc("GET /api/stars.remove", h.removeStar)
 	mux.HandleFunc("POST /api/stars.remove", h.removeStar)
+	mux.HandleFunc("GET /api/bookmarks.add", h.addBookmark)
 	mux.HandleFunc("POST /api/bookmarks.add", h.addBookmark)
+	mux.HandleFunc("GET /api/bookmarks.edit", h.editBookmark)
 	mux.HandleFunc("POST /api/bookmarks.edit", h.editBookmark)
 	mux.HandleFunc("GET /api/bookmarks.list", h.listBookmarks)
 	mux.HandleFunc("POST /api/bookmarks.list", h.listBookmarks)
+	mux.HandleFunc("GET /api/bookmarks.remove", h.removeBookmark)
 	mux.HandleFunc("POST /api/bookmarks.remove", h.removeBookmark)
+	mux.HandleFunc("GET /api/canvases.create", h.createCanvas)
 	mux.HandleFunc("POST /api/canvases.create", h.createCanvas)
+	mux.HandleFunc("GET /api/canvases.edit", h.editCanvas)
 	mux.HandleFunc("POST /api/canvases.edit", h.editCanvas)
+	mux.HandleFunc("GET /api/canvases.delete", h.deleteCanvas)
 	mux.HandleFunc("POST /api/canvases.delete", h.deleteCanvas)
+	mux.HandleFunc("GET /api/canvases.access.set", h.setCanvasAccess)
 	mux.HandleFunc("POST /api/canvases.access.set", h.setCanvasAccess)
+	mux.HandleFunc("GET /api/canvases.access.delete", h.deleteCanvasAccess)
 	mux.HandleFunc("POST /api/canvases.access.delete", h.deleteCanvasAccess)
+	mux.HandleFunc("GET /api/canvases.sections.lookup", h.lookupCanvasSections)
 	mux.HandleFunc("POST /api/canvases.sections.lookup", h.lookupCanvasSections)
+	mux.HandleFunc("GET /api/conversations.canvases.create", h.createConversationCanvas)
 	mux.HandleFunc("POST /api/conversations.canvases.create", h.createConversationCanvas)
+	mux.HandleFunc("GET /api/slackLists.create", h.createList)
 	mux.HandleFunc("POST /api/slackLists.create", h.createList)
+	mux.HandleFunc("GET /api/slackLists.update", h.updateList)
 	mux.HandleFunc("POST /api/slackLists.update", h.updateList)
+	mux.HandleFunc("GET /api/slackLists.items.create", h.createListItem)
 	mux.HandleFunc("POST /api/slackLists.items.create", h.createListItem)
+	mux.HandleFunc("GET /api/slackLists.items.info", h.listItemInfo)
 	mux.HandleFunc("POST /api/slackLists.items.info", h.listItemInfo)
+	mux.HandleFunc("GET /api/slackLists.items.list", h.listItems)
 	mux.HandleFunc("POST /api/slackLists.items.list", h.listItems)
+	mux.HandleFunc("GET /api/slackLists.items.update", h.updateListItem)
 	mux.HandleFunc("POST /api/slackLists.items.update", h.updateListItem)
+	mux.HandleFunc("GET /api/slackLists.items.delete", h.deleteListItem)
 	mux.HandleFunc("POST /api/slackLists.items.delete", h.deleteListItem)
+	mux.HandleFunc("GET /api/slackLists.items.deleteMultiple", h.deleteListItems)
 	mux.HandleFunc("POST /api/slackLists.items.deleteMultiple", h.deleteListItems)
+	mux.HandleFunc("GET /api/slackLists.access.set", h.setListAccess)
 	mux.HandleFunc("POST /api/slackLists.access.set", h.setListAccess)
+	mux.HandleFunc("GET /api/slackLists.access.delete", h.deleteListAccess)
 	mux.HandleFunc("POST /api/slackLists.access.delete", h.deleteListAccess)
+	mux.HandleFunc("GET /api/slackLists.download.start", h.startListDownload)
 	mux.HandleFunc("POST /api/slackLists.download.start", h.startListDownload)
+	mux.HandleFunc("GET /api/slackLists.download.get", h.getListDownload)
 	mux.HandleFunc("POST /api/slackLists.download.get", h.getListDownload)
+	mux.HandleFunc("GET /api/entity.presentDetails", h.presentEntityDetails)
 	mux.HandleFunc("POST /api/entity.presentDetails", h.presentEntityDetails)
+	mux.HandleFunc("GET /api/entity.presentComments", h.presentEntityComments)
 	mux.HandleFunc("POST /api/entity.presentComments", h.presentEntityComments)
+	mux.HandleFunc("GET /api/entity.acknowledgeCommentAction", h.acknowledgeEntityCommentAction)
 	mux.HandleFunc("POST /api/entity.acknowledgeCommentAction", h.acknowledgeEntityCommentAction)
-	mux.HandleFunc("GET /internal/slack-lists/download.csv", h.downloadListCSV)
-	mux.HandleFunc("GET /internal/exports/workflow-step-responses.csv", h.downloadWorkflowStepResponsesCSV)
+	mux.HandleFunc("GET /api/reminders.add", h.addReminder)
 	mux.HandleFunc("POST /api/reminders.add", h.addReminder)
+	mux.HandleFunc("GET /api/reminders.complete", h.completeReminder)
 	mux.HandleFunc("POST /api/reminders.complete", h.completeReminder)
+	mux.HandleFunc("GET /api/reminders.delete", h.deleteReminder)
 	mux.HandleFunc("POST /api/reminders.delete", h.deleteReminder)
 	mux.HandleFunc("GET /api/reminders.info", h.reminderInfo)
 	mux.HandleFunc("POST /api/reminders.info", h.reminderInfo)
 	mux.HandleFunc("GET /api/reminders.list", h.listReminders)
 	mux.HandleFunc("POST /api/reminders.list", h.listReminders)
+	mux.HandleFunc("GET /api/usergroups.create", h.createUserGroup)
 	mux.HandleFunc("POST /api/usergroups.create", h.createUserGroup)
+	mux.HandleFunc("GET /api/usergroups.update", h.updateUserGroup)
 	mux.HandleFunc("POST /api/usergroups.update", h.updateUserGroup)
+	mux.HandleFunc("GET /api/usergroups.enable", h.enableUserGroup)
 	mux.HandleFunc("POST /api/usergroups.enable", h.enableUserGroup)
+	mux.HandleFunc("GET /api/usergroups.disable", h.disableUserGroup)
 	mux.HandleFunc("POST /api/usergroups.disable", h.disableUserGroup)
 	mux.HandleFunc("GET /api/usergroups.list", h.listUserGroups)
 	mux.HandleFunc("POST /api/usergroups.list", h.listUserGroups)
 	mux.HandleFunc("GET /api/usergroups.users.list", h.userGroupUsers)
 	mux.HandleFunc("POST /api/usergroups.users.list", h.userGroupUsers)
+	mux.HandleFunc("GET /api/usergroups.users.update", h.updateUserGroupUsers)
 	mux.HandleFunc("POST /api/usergroups.users.update", h.updateUserGroupUsers)
+	mux.HandleFunc("GET /api/admin.usergroups.addChannels", h.adminUserGroupAddChannels)
 	mux.HandleFunc("POST /api/admin.usergroups.addChannels", h.adminUserGroupAddChannels)
+	mux.HandleFunc("GET /api/admin.usergroups.addTeams", h.adminUserGroupAddTeams)
 	mux.HandleFunc("POST /api/admin.usergroups.addTeams", h.adminUserGroupAddTeams)
+	mux.HandleFunc("GET /api/admin.usergroups.removeChannels", h.adminUserGroupRemoveChannels)
 	mux.HandleFunc("POST /api/admin.usergroups.removeChannels", h.adminUserGroupRemoveChannels)
 	mux.HandleFunc("GET /api/admin.usergroups.listChannels", h.adminUserGroupListChannels)
 	mux.HandleFunc("POST /api/admin.usergroups.listChannels", h.adminUserGroupListChannels)
 	mux.HandleFunc("GET /api/admin.teams.settings.info", h.adminTeamSettingsInfo)
 	mux.HandleFunc("POST /api/admin.teams.settings.info", h.adminTeamSettingsInfo)
+	mux.HandleFunc("GET /api/admin.teams.settings.setName", h.adminTeamSettingsSetName)
 	mux.HandleFunc("POST /api/admin.teams.settings.setName", h.adminTeamSettingsSetName)
+	mux.HandleFunc("GET /api/admin.teams.settings.setDescription", h.adminTeamSettingsSetDescription)
 	mux.HandleFunc("POST /api/admin.teams.settings.setDescription", h.adminTeamSettingsSetDescription)
+	mux.HandleFunc("GET /api/admin.teams.settings.setDiscoverability", h.adminTeamSettingsSetDiscoverability)
 	mux.HandleFunc("POST /api/admin.teams.settings.setDiscoverability", h.adminTeamSettingsSetDiscoverability)
-	mux.HandleFunc("POST /api/admin.teams.settings.setIcon", h.adminTeamSettingsSetIcon)
 	mux.HandleFunc("GET /api/admin.teams.settings.setIcon", h.adminTeamSettingsSetIcon)
-	mux.HandleFunc("POST /api/admin.teams.settings.setDefaultChannels", h.adminTeamSettingsSetDefaultChannels)
+	mux.HandleFunc("POST /api/admin.teams.settings.setIcon", h.adminTeamSettingsSetIcon)
 	mux.HandleFunc("GET /api/admin.teams.settings.setDefaultChannels", h.adminTeamSettingsSetDefaultChannels)
+	mux.HandleFunc("POST /api/admin.teams.settings.setDefaultChannels", h.adminTeamSettingsSetDefaultChannels)
 	mux.HandleFunc("GET /api/admin.teams.list", h.adminTeamsList)
 	mux.HandleFunc("POST /api/admin.teams.list", h.adminTeamsList)
+	mux.HandleFunc("GET /api/admin.teams.create", h.adminTeamsCreate)
 	mux.HandleFunc("POST /api/admin.teams.create", h.adminTeamsCreate)
 	mux.HandleFunc("GET /api/admin.teams.admins.list", h.adminTeamsAdminsList)
 	mux.HandleFunc("POST /api/admin.teams.admins.list", h.adminTeamsAdminsList)
 	mux.HandleFunc("GET /api/admin.teams.owners.list", h.adminTeamsOwnersList)
 	mux.HandleFunc("POST /api/admin.teams.owners.list", h.adminTeamsOwnersList)
+	mux.HandleFunc("GET /api/calls.add", h.addCall)
 	mux.HandleFunc("POST /api/calls.add", h.addCall)
+	mux.HandleFunc("GET /api/calls.end", h.endCall)
 	mux.HandleFunc("POST /api/calls.end", h.endCall)
 	mux.HandleFunc("GET /api/calls.info", h.callInfo)
 	mux.HandleFunc("POST /api/calls.info", h.callInfo)
+	mux.HandleFunc("GET /api/calls.update", h.updateCall)
 	mux.HandleFunc("POST /api/calls.update", h.updateCall)
+	mux.HandleFunc("GET /api/calls.participants.add", h.addCallParticipants)
 	mux.HandleFunc("POST /api/calls.participants.add", h.addCallParticipants)
+	mux.HandleFunc("GET /api/calls.participants.remove", h.removeCallParticipants)
 	mux.HandleFunc("POST /api/calls.participants.remove", h.removeCallParticipants)
 	mux.HandleFunc("GET /api/search.messages", h.searchMessages)
 	mux.HandleFunc("POST /api/search.messages", h.searchMessages)
@@ -494,42 +744,60 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/search.all", h.searchAll)
 	mux.HandleFunc("GET /api/files.info", h.fileInfo)
 	mux.HandleFunc("POST /api/files.info", h.fileInfo)
+	mux.HandleFunc("GET /api/files.delete", h.deleteFile)
 	mux.HandleFunc("POST /api/files.delete", h.deleteFile)
+	mux.HandleFunc("GET /api/files.comments.delete", h.deleteFileComment)
 	mux.HandleFunc("POST /api/files.comments.delete", h.deleteFileComment)
 	mux.HandleFunc("GET /api/files.list", h.filesList)
 	mux.HandleFunc("POST /api/files.list", h.filesList)
+	mux.HandleFunc("GET /api/files.upload", h.fileUpload)
 	mux.HandleFunc("POST /api/files.upload", h.fileUpload)
+	mux.HandleFunc("GET /api/files.remote.add", h.remoteFileAdd)
 	mux.HandleFunc("POST /api/files.remote.add", h.remoteFileAdd)
 	mux.HandleFunc("GET /api/files.remote.info", h.remoteFileInfo)
 	mux.HandleFunc("POST /api/files.remote.info", h.remoteFileInfo)
 	mux.HandleFunc("GET /api/files.remote.list", h.remoteFilesList)
 	mux.HandleFunc("POST /api/files.remote.list", h.remoteFilesList)
+	mux.HandleFunc("GET /api/files.remote.remove", h.remoteFileRemove)
 	mux.HandleFunc("POST /api/files.remote.remove", h.remoteFileRemove)
 	mux.HandleFunc("GET /api/files.remote.share", h.remoteFileShare)
 	mux.HandleFunc("POST /api/files.remote.share", h.remoteFileShare)
+	mux.HandleFunc("GET /api/files.remote.update", h.remoteFileUpdate)
 	mux.HandleFunc("POST /api/files.remote.update", h.remoteFileUpdate)
-	mux.HandleFunc("POST /api/files.sharedPublicURL", h.shareFilePublic)
 	mux.HandleFunc("GET /api/files.sharedPublicURL", h.shareFilePublic)
+	mux.HandleFunc("POST /api/files.sharedPublicURL", h.shareFilePublic)
+	mux.HandleFunc("GET /api/files.revokePublicURL", h.revokeFilePublic)
 	mux.HandleFunc("POST /api/files.revokePublicURL", h.revokeFilePublic)
-	mux.HandleFunc("GET /api/files/{file}", h.downloadFile)
-	mux.HandleFunc("GET /files/public/{token}", h.downloadPublicFile)
-	mux.HandleFunc("GET /users/{workspace}/{user}/photo/{token}", h.downloadUserPhoto)
 	mux.HandleFunc("GET /api/openid.connect.token", h.openIDConnectToken)
 	mux.HandleFunc("POST /api/openid.connect.token", h.openIDConnectToken)
 	mux.HandleFunc("GET /api/openid.connect.userInfo", h.openIDConnectUserInfo)
 	mux.HandleFunc("POST /api/openid.connect.userInfo", h.openIDConnectUserInfo)
-	mux.HandleFunc("POST /services/{workspace}/{app}/{secret}", h.incomingWebhook)
-	mux.HandleFunc("POST /services/triggers/{workspace}/{trigger}/{secret}", h.workflowTriggerWebhook)
-	mux.HandleFunc("POST /internal/admin/incoming-webhooks/create", h.adminIncomingWebhookCreate)
-	mux.HandleFunc("POST /internal/admin/incoming-webhooks/enable", h.adminIncomingWebhookEnable)
 	mux.HandleFunc("GET /api/files.getUploadURLExternal", h.filesGetUploadURLExternal)
 	mux.HandleFunc("POST /api/files.getUploadURLExternal", h.filesGetUploadURLExternal)
-	mux.HandleFunc("POST /internal/files/external/{upload}", h.externalFileUpload)
 	mux.HandleFunc("GET /api/files.completeUploadExternal", h.filesCompleteUploadExternal)
 	mux.HandleFunc("POST /api/files.completeUploadExternal", h.filesCompleteUploadExternal)
+	// Not a method: the authenticated download of a stored file.
+	mux.HandleFunc("GET /api/files/{file}", h.downloadFile)
 	// Registered last and least specifically, so it claims only what nothing else
 	// does: an unknown method name and a verb no route declares.
 	mux.HandleFunc("/api/", h.unknownMethod)
+}
+
+// registerSurfaces registers the routes outside /api/. They are not Web API
+// methods, so the Web API method budget does not front them; incoming webhooks
+// carry their own documented per-webhook allowance (limitedIncomingWebhook).
+func (h Handler) registerSurfaces(mux *http.ServeMux) {
+	mux.HandleFunc("GET /internal/slack-lists/download.csv", h.downloadListCSV)
+	mux.HandleFunc("GET /internal/exports/workflow-step-responses.csv", h.downloadWorkflowStepResponsesCSV)
+	mux.HandleFunc("GET /files/public/{token}", h.downloadPublicFile)
+	mux.HandleFunc("GET /users/{workspace}/{user}/photo/{token}", h.downloadUserPhoto)
+	mux.HandleFunc("GET /avatars/{workspace}/{user}/{file}", h.defaultAvatar)
+	mux.HandleFunc("GET /team-icons/{workspace}/{file}", h.defaultTeamIcon)
+	mux.HandleFunc("POST /services/{workspace}/{app}/{secret}", h.limitedIncomingWebhook)
+	mux.HandleFunc("POST /services/triggers/{workspace}/{trigger}/{secret}", h.workflowTriggerWebhook)
+	mux.HandleFunc("POST /internal/admin/incoming-webhooks/create", h.adminIncomingWebhookCreate)
+	mux.HandleFunc("POST /internal/admin/incoming-webhooks/enable", h.adminIncomingWebhookEnable)
+	mux.HandleFunc("POST /internal/files/external/{upload}", h.externalFileUpload)
 }
 
 func (h Handler) blocksValidate(w http.ResponseWriter, r *http.Request) {
@@ -596,7 +864,9 @@ func (h Handler) blocksValidate(w http.ResponseWriter, r *http.Request) {
 // keys on `ok`. Every response on /api/* has to be an envelope, so this is the
 // catch-all the mux never had. It is registered without a method and without a
 // trailing route, so it is the least specific pattern under /api/ and is reached
-// only when nothing else matches.
+// only when nothing else matches: an unknown method name, or a verb other than
+// GET and POST (every known method is registered for both — see
+// registerWebAPI).
 //
 // `unknown_method` is not in any of the pinned enums — the snapshot describes no
 // routing failure at all — so it is recorded as a deviation. It is the name Slack
@@ -605,16 +875,8 @@ func (h Handler) unknownMethod(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, "unknown_method")
 }
 
-func (h *Handler) ConfigureSocketMode(service socketmode.Service, authenticator auth.Authenticator) {
-	if h == nil {
-		return
-	}
-	h.SocketMode = service
-	h.SocketAuth = authenticator
-}
-
 func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
-	if h.SocketAuth == nil || h.SocketMode.Store == nil {
+	if h.appAuthenticator == nil || h.socketMode == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "socket_mode_unavailable"})
 		return
 	}
@@ -622,20 +884,34 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 	// transport; collapsing them here told an app holding a revoked token that it
 	// had sent no credential, and a missing connections:write grant produced no
 	// `needed`/`provided` at all.
-	principal, err := h.SocketAuth.Authenticate(r)
+	principal, err := h.appAuthenticator.Authenticate(r)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
-	if !principal.HasScope(auth.ScopeConnectionsWrite) {
-		writeAuthError(w, missingScopeError{needed: auth.ScopeConnectionsWrite, provided: permissionScopes(principal)})
+	recordGrantedScopes(r, principal)
+	if err := requireAnyScope(r, principal, auth.ScopeConnectionsWrite); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	if principal.AppID == "" {
 		writeError(w, "invalid_auth")
 		return
 	}
-	result, err := h.SocketMode.Open(r.Context(), principal.AppID)
+	// The connection URL follows the origin the client reached this method on
+	// (X-Forwarded-Proto included), so an SDK pointed at a TLS-terminating
+	// proxy is handed a wss:// URL on the same host. An operator-configured
+	// Socket Mode host still wins.
+	result, err := h.socketMode.Open(r.Context(), principal.AppID, requestOrigin(r))
+	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
+		// Holding the maximum number of connections is a temporary condition
+		// that clears when one closes. It used to fall through to fatal_error,
+		// which every official Socket Mode client treats as permanent. Slack
+		// documents no dedicated code for it; 429 with Retry-After is the one
+		// answer every official Web API client retries on its own.
+		writeRateLimited(w, socketmode.ConnectionLimitRetryAfter)
+		return
+	}
 	if err != nil {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
@@ -918,22 +1194,52 @@ func writeAppDatastoreError(w http.ResponseWriter, err error) {
 	}
 }
 
+// apiTest echoes the arguments it received under `args`, on success as well as
+// on the error a caller forces with `error` — that echo is what the method is
+// for, and SDK smoke tests assert it. A JSON body's nested values are echoed as
+// the structure they arrived as; only `error` keeps its scalar contract, since
+// it becomes the response's error code. The credential is never echoed.
 func (h Handler) apiTest(w http.ResponseWriter, r *http.Request) {
-	fields, err := decodeFields(w, r)
+	nested := map[string]json.RawMessage{}
+	fields, err := decodeArguments(w, r, func(name string, value json.RawMessage) (string, error) {
+		if name == "error" || jsonIsString(value) {
+			return normalizeJSONField(name, value)
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, value); err != nil {
+			return "", decodeFailure("invalid_json", "field is not valid JSON")
+		}
+		nested[name] = json.RawMessage(compact.Bytes())
+		return compact.String(), nil
+	})
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	errorName := strings.TrimSpace(fields["error"])
-	if errorName != "" {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": errorName, "args": map[string]string{"error": errorName}})
+	args := make(map[string]any, len(fields))
+	for name, value := range fields {
+		if name == "token" {
+			continue
+		}
+		if raw, ok := nested[name]; ok {
+			args[name] = raw
+			continue
+		}
+		args[name] = value
+	}
+	if errorName := strings.TrimSpace(fields["error"]); errorName != "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": errorName, "args": args})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	response := map[string]any{"ok": true}
+	if len(args) != 0 {
+		response["args"] = args
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) history(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	principal, err := h.authenticateConversation(r, conversationHistoryGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -948,21 +1254,27 @@ func (h Handler) history(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	// Slack history is newest-first. Reading the store in that direction also
-	// makes the requested window one index seek instead of filtering the oldest
-	// page of a long conversation and calling it history.
+	if _, ok := h.authorizedConversation(w, r, principal, conversationHistoryGrant, request.Channel, "channel_not_found"); !ok {
+		return
+	}
+	// Slack history is newest-first, and it is channel history: thread
+	// replies are listed only when they were also sent to the channel.
 	request.Page.Descending = true
-	page, err := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, request.Channel, request.Page)
+	page, err := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, request.Channel, domain.HistoryRequest{Page: request.Page, Window: request.Window, RootsOnly: true})
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	result := rangedMessages(page.Messages, request.Range)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": result, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+	messages, err := h.projectMessages(r, principal, request.Channel, page.Messages)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": messages, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
 func (h Handler) replies(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	principal, err := h.authenticateConversation(r, conversationHistoryGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -977,62 +1289,43 @@ func (h Handler) replies(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	if strings.TrimSpace(fields["ts"]) == "" {
-		// /conversations.replies enumerates thread_not_found, not invalid_arguments.
+	timestamp := domain.MessageTimestamp(strings.TrimSpace(fields["ts"]))
+	if _, err := domain.ParseMessageTimestamp(timestamp); err != nil {
+		// /conversations.replies enumerates thread_not_found, not
+		// invalid_arguments, for a ts that names no thread.
 		writeError(w, "thread_not_found")
 		return
 	}
-	page, err := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, request.Channel, domain.MessageTimestamp(strings.TrimSpace(fields["ts"])), request.Page)
+	if _, ok := h.authorizedConversation(w, r, principal, conversationHistoryGrant, request.Channel, "channel_not_found"); !ok {
+		return
+	}
+	page, err := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, request.Channel, timestamp, domain.ThreadRequest{Page: request.Page, Window: request.Window})
 	if err != nil {
 		writeError(w, mapServiceError(err, "thread_not_found"))
 		return
 	}
-	result := rangedMessages(page.Messages, request.Range)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": result, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+	messages, err := h.projectMessages(r, principal, request.Channel, page.Messages)
+	if err != nil {
+		writeError(w, mapServiceError(err, "thread_not_found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": messages, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
 type historyRequest struct {
 	Channel domain.ConversationID
 	Page    domain.PageRequest
-	Range   historyRange
-}
-
-// historyRange is the `oldest`/`latest`/`inclusive` window declared by both
-// /conversations.history and /conversations.replies. All three arguments used to
-// be dropped, so a range-limited request answered `"ok":true` with the channel's
-// entire recent history — the caller received strictly more data than it asked
-// for and had no way to tell.
-//
-// The store has no range-scanning API, so the window is applied at the wire
-// boundary. Paging still works: `has_more` and `next_cursor` continue to describe
-// the underlying scan, so a client that follows the cursor sees every message in
-// the window, and a page may legitimately come back short or empty.
-type historyRange struct {
-	oldest    int64
-	hasOldest bool
-	latest    int64
-	hasLatest bool
-	inclusive bool
-}
-
-func (h historyRange) includes(timestamp string) bool {
-	value, ok := parseSlackTimestamp(timestamp)
-	if !ok {
-		return true
-	}
-	if h.hasOldest && (value < h.oldest || (value == h.oldest && !h.inclusive)) {
-		return false
-	}
-	if h.hasLatest && (value > h.latest || (value == h.latest && !h.inclusive)) {
-		return false
-	}
-	return true
+	Window  domain.MessageWindow
 }
 
 // normalizeHistoryRequest decodes the window /conversations.history and
 // /conversations.replies share. The two operations do not share an enum:
 // history declares invalid_ts_latest and invalid_ts_oldest, replies declares
 // neither, so the caller supplies the code its own enum carries.
+//
+// The window is handed to the store as part of the keyset read. It used to be
+// applied to the fetched page afterwards, so `latest=<ts>&inclusive=true&limit=1`
+// fetched the newest message, filtered it out, and answered an empty page.
 func normalizeHistoryRequest(fields map[string]string, invalidOldest, invalidLatest string) (historyRequest, error) {
 	channel := strings.TrimSpace(fields["channel"])
 	if channel == "" {
@@ -1049,38 +1342,37 @@ func normalizeHistoryRequest(fields map[string]string, invalidOldest, invalidLat
 	if err != nil {
 		return historyRequest{}, err
 	}
-	window := historyRange{}
+	window := domain.MessageWindow{}
 	if raw := strings.TrimSpace(fields["oldest"]); raw != "" {
-		value, ok := parseSlackTimestamp(raw)
-		if !ok {
+		value, err := domain.ParseTimestampBound(raw)
+		if err != nil {
 			return historyRequest{}, decodeFailure(invalidOldest, "oldest is not a Slack timestamp")
 		}
-		window.oldest, window.hasOldest = value, true
+		window.Oldest = unboundedAtEpoch(value)
 	}
 	if raw := strings.TrimSpace(fields["latest"]); raw != "" {
-		value, ok := parseSlackTimestamp(raw)
-		if !ok {
+		value, err := domain.ParseTimestampBound(raw)
+		if err != nil {
 			return historyRequest{}, decodeFailure(invalidLatest, "latest is not a Slack timestamp")
 		}
-		window.latest, window.hasLatest = value, true
+		window.Latest = unboundedAtEpoch(value)
 	}
 	inclusive, err := parseBoolField(fields["inclusive"])
 	if err != nil {
 		return historyRequest{}, decodeFailure("invalid_arg_name", "inclusive must be a boolean")
 	}
-	window.inclusive = inclusive
-	return historyRequest{Channel: domain.ConversationID(channel), Page: domain.PageRequest{Limit: limit, Cursor: cursor}, Range: window}, nil
+	window.Inclusive = inclusive
+	return historyRequest{Channel: domain.ConversationID(channel), Page: domain.PageRequest{Limit: limit, Cursor: cursor}, Window: window}, nil
 }
 
-func rangedMessages(messages []domain.Message, window historyRange) []map[string]any {
-	result := make([]map[string]any, 0, len(messages))
-	for _, message := range messages {
-		if !window.includes(slackTimestamp(message.CreatedAt)) {
-			continue
-		}
-		result = append(result, messageResponse(message))
+// unboundedAtEpoch reads a bound of 0 as no bound. Slack documents 0 as the
+// default `oldest`, and SDKs send it explicitly; clients send `latest=0` to
+// mean "now", its default.
+func unboundedAtEpoch(value time.Time) time.Time {
+	if value.Equal(time.Unix(0, 0)) {
+		return time.Time{}
 	}
-	return result
+	return value
 }
 
 func (h Handler) authTest(w http.ResponseWriter, r *http.Request) {
@@ -1098,7 +1390,10 @@ func (h Handler) authTest(w http.ResponseWriter, r *http.Request) {
 	if teamName == "" {
 		teamName = string(workspace.ID)
 	}
-	response := map[string]any{"ok": true, "url": "http://localhost/", "team": teamName, "team_id": workspace.ID, "user": string(principal.UserID), "user_id": principal.UserID}
+	// `url` is the workspace's own URL. It was the fixed "http://localhost/",
+	// which is wrong on every deployment but a developer's laptop; Bolt and the
+	// SDKs build links from it.
+	response := map[string]any{"ok": true, "url": h.origin(r) + "/", "team": teamName, "team_id": workspace.ID, "user": string(principal.UserID), "user_id": principal.UserID}
 	if principal.TokenType.IsBot() {
 		response["bot_id"] = principal.BotID
 		response["is_enterprise_install"] = false
@@ -1277,7 +1572,7 @@ func (h Handler) appsEventAuthorizationsList(w http.ResponseWriter, r *http.Requ
 		writeError(w, mapServiceError(err, "internal_error"))
 		return
 	}
-	if len(records) != 1 || records[0].Sequence != sequence || records[0].Event.ID != eventID {
+	if len(records) != 1 || records[0].Sequence != sequence || !events.EventIDBelongsToRecord(eventID, records[0].Event.ID) {
 		writeError(w, "invalid_event_context")
 		return
 	}
@@ -2163,6 +2458,8 @@ func (h Handler) appsUninstall(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Messages.UninstallApp(r.Context(), clientID, clientSecret, principal.WorkspaceID, principal.AppID); err != nil {
 		switch {
+		case errors.Is(err, service.ErrBadOAuthClientSecret):
+			writeError(w, "bad_client_secret")
 		case errors.Is(err, service.ErrInvalidOAuthClient):
 			writeError(w, "invalid_client_id")
 		case errors.Is(err, service.ErrOAuthAppMismatch):
@@ -2181,7 +2478,7 @@ func (h Handler) authRevoke(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	token := headerToken(r)
 	if token == "" {
 		token = strings.TrimSpace(fields["token"])
 	}
@@ -2189,10 +2486,12 @@ func (h Handler) authRevoke(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "not_authed")
 		return
 	}
-	if _, err := h.Authenticator.Authenticate(r); err != nil {
+	principal, err := h.Authenticator.Authenticate(r)
+	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
+	recordGrantedScopes(r, principal)
 	test, err := parseBoolField(fields["test"])
 	if err != nil {
 		writeError(w, "invalid_arg_name")
@@ -2240,14 +2539,10 @@ func (h Handler) oauthV2ExchangeToken(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := h.Messages.OAuthV2ExchangeToken(r.Context(), clientID, clientSecret, fields["token"])
 	if err != nil {
-		reason := "invalid_auth"
-		if errors.Is(err, service.ErrInvalidOAuthClient) {
-			reason = "invalid_client_id"
-		}
-		writeError(w, reason)
+		writeError(w, oauthExchangeFailure(err, "invalid_auth"))
 		return
 	}
-	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, false))
+	writeJSON(w, http.StatusOK, oauthV2TokenResponse(h.origin(r), token, false))
 }
 
 func (h Handler) appsManifestValidate(w http.ResponseWriter, r *http.Request) {
@@ -2315,7 +2610,7 @@ func (h Handler) appsManifestCreate(w http.ResponseWriter, r *http.Request) {
 			"verification_token": credentials.VerificationToken,
 			"signing_secret":     credentials.SigningSecret,
 		},
-		"oauth_authorize_url": requestOrigin(r) + "/oauth/v2/authorize?" + query.Encode(),
+		"oauth_authorize_url": h.origin(r) + "/oauth/v2/authorize?" + query.Encode(),
 	})
 }
 
@@ -2439,13 +2734,13 @@ func (h Handler) toolingTokensRotate(w http.ResponseWriter, r *http.Request) {
 }
 
 func appConfigurationToken(r *http.Request, fields map[string]string) (string, string) {
-	headerToken := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	fromHeader := headerToken(r)
 	bodyToken := strings.TrimSpace(fields["token"])
-	if headerToken != "" && bodyToken != "" && headerToken != bodyToken {
+	if fromHeader != "" && bodyToken != "" && fromHeader != bodyToken {
 		return "", "invalid_auth"
 	}
-	if headerToken != "" {
-		return headerToken, ""
+	if fromHeader != "" {
+		return fromHeader, ""
 	}
 	if bodyToken != "" {
 		return bodyToken, ""
@@ -2474,17 +2769,6 @@ func writeAppManifestValidation(w http.ResponseWriter, problems []appmanifest.Er
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "invalid_manifest", "errors": problems})
-}
-
-func requestOrigin(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if forwarded := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])); forwarded == "http" || forwarded == "https" {
-		scheme = forwarded
-	}
-	return scheme + "://" + r.Host
 }
 
 func sameStringSet(left, right []string) bool {
@@ -2549,23 +2833,42 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2, userO
 		if refreshing {
 			reason = "invalid_refresh_token"
 		}
-		if errors.Is(err, service.ErrInvalidOAuthClient) {
-			reason = "invalid_client_id"
-		}
-		writeError(w, reason)
+		writeError(w, oauthExchangeFailure(err, reason))
 		return
 	}
 	if !v2 {
-		response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "team_id": token.WorkspaceID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType}
-		response["team_name"] = ""
-		writeJSON(w, http.StatusOK, response)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "team_id": token.WorkspaceID, "team_name": token.WorkspaceName, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType})
 		return
 	}
-	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, userOnly))
+	// A code redeemed for a user token — a user-scope-only install — is
+	// answered the way oauth.v2.user.access answers: the credential under
+	// authed_user and no bot fields at the top level.
+	writeJSON(w, http.StatusOK, oauthV2TokenResponse(h.origin(r), token, userOnly || !refreshing && !token.TokenType.IsBot()))
 }
 
-func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any {
-	response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType, "team": map[string]any{"id": token.WorkspaceID}, "enterprise": nil, "is_enterprise_install": false}
+// oauthExchangeFailure names a failed code or token exchange. The client and
+// redirect failures have their own codes in Slack's contract; a code or token
+// that is simply not redeemable is the caller's notFound; everything else is
+// classified like any other service failure rather than flattened into
+// invalid_code, which told a caller whose request never reached the code that
+// the code was bad.
+func oauthExchangeFailure(err error, notFound string) string {
+	switch {
+	case errors.Is(err, service.ErrBadOAuthClientSecret):
+		return "bad_client_secret"
+	case errors.Is(err, service.ErrInvalidOAuthClient):
+		return "invalid_client_id"
+	case errors.Is(err, store.ErrOAuthRedirectMismatch):
+		return "bad_redirect_uri"
+	case errors.Is(err, service.ErrInvalidOAuth):
+		return notFound
+	default:
+		return mapServiceError(err, notFound)
+	}
+}
+
+func oauthV2TokenResponse(origin string, token domain.OAuthToken, userOnly bool) map[string]any {
+	response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType, "team": map[string]any{"id": token.WorkspaceID, "name": token.WorkspaceName}, "enterprise": nil, "is_enterprise_install": false}
 	if token.RefreshToken != "" {
 		response["refresh_token"] = token.RefreshToken
 		response["expires_in"] = int64(oauthTokenLifetime / time.Second)
@@ -2602,12 +2905,12 @@ func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any
 	}
 	// An install that requested the incoming-webhook scope and chose a channel
 	// gets the minted hook back here, the one time the app ever sees its URL.
-	if token.IncomingWebhookURL != "" {
+	if token.IncomingWebhookPath != "" {
 		response["incoming_webhook"] = map[string]any{
 			"channel":           "#" + token.IncomingWebhookChannelName,
 			"channel_id":        token.IncomingWebhookChannel,
-			"url":               token.IncomingWebhookURL,
-			"configuration_url": token.IncomingWebhookConfigURL,
+			"url":               originURL(origin, token.IncomingWebhookPath),
+			"configuration_url": originURL(origin, token.IncomingWebhookConfigPath),
 		}
 	}
 	return response
@@ -2693,8 +2996,7 @@ func (h Handler) teamInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
-	domainName := team.Domain
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": map[string]any{"id": team.ID, "name": team.Name, "domain": domainName}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": teamResponse(h.origin(r), team)})
 }
 
 // teamPreferencesList exposes the workspace policies SameOldChat actually
@@ -2802,7 +3104,7 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	token := strings.TrimSpace(fields["token"])
 	if token == "" {
-		token = strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		token = headerToken(r)
 	}
 	if token == "" {
 		writeError(w, "invalid_auth")
@@ -2823,12 +3125,15 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	scheme := "ws"
-	if r.TLS != nil {
-		scheme = "wss"
+	// The scheme follows the request origin, X-Forwarded-Proto included. It
+	// was read from r.TLS alone, so behind a TLS-terminating proxy every RTM
+	// client was handed a ws:// URL the proxy does not serve.
+	streamURL, err := socketmode.WebSocketURL(requestOrigin(r), "/rtm", url.Values{"session_id": []string{connection.ID}})
+	if err != nil {
+		writeError(w, "fatal_error")
+		return
 	}
-	streamURL := url.URL{Scheme: scheme, Host: r.Host, Path: "/rtm", RawQuery: url.Values{"session_id": []string{connection.ID}}.Encode()}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": streamURL.String(), "team": map[string]any{"id": team.ID, "name": team.Name, "domain": team.Domain}, "self": map[string]any{"id": user.ID, "name": user.Name}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": streamURL, "team": map[string]any{"id": team.ID, "name": team.Name, "domain": team.SlackDomain()}, "self": map[string]any{"id": user.ID, "name": user.Name}})
 }
 
 func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
@@ -3045,7 +3350,7 @@ func (h Handler) adminUsersList(w http.ResponseWriter, r *http.Request) {
 	}
 	users := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		users = append(users, adminUserResponse(user))
+		users = append(users, adminUserResponse(h.origin(r), user))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "users": users, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
@@ -5998,10 +6303,10 @@ func (h Handler) adminEmojiFields(w http.ResponseWriter, r *http.Request) (auth.
 }
 
 func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
-	// Pinned /conversations.info token parameter: "Requires scope:
-	// `conversations:read`". Enforcing no scope let a chat:write-only token read
-	// every channel's topic, purpose and privacy.
-	principal, err := h.authenticate(r, auth.ScopeChannelsRead)
+	// Pinned /conversations.info: channels:read, groups:read, im:read or
+	// mpim:read by the conversation's type. Enforcing no scope let a
+	// chat:write-only token read every channel's topic, purpose and privacy.
+	principal, err := h.authenticateConversation(r, conversationReadGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6016,12 +6321,22 @@ func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversationID))
+	options, err := parseBoolFields(fields, "include_num_members", "include_locale")
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	conversation, ok := h.authorizedConversation(w, r, principal, conversationReadGrant, domain.ConversationID(conversationID), "channel_not_found")
+	if !ok {
 		return
 	}
 	response := conversationResponse(conversation)
+	if options[0] && conversation.Kind != domain.ConversationTypeIM {
+		response["num_members"] = conversation.NumMembers
+	}
+	if options[1] {
+		response["locale"] = workspaceLocale
+	}
 	canvas, canvasErr := h.Messages.ConversationCanvas(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID)
 	if canvasErr == nil {
 		var document struct {
@@ -6045,12 +6360,15 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// `user` is required. Slack answers its absence user_not_found; reading
+	// it as the caller answered a question nobody asked.
 	requested := domain.UserID(strings.TrimSpace(fields["user"]))
 	if requested == "" {
-		requested = principal.UserID
-	}
-	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeError(w, "user_not_found")
 		return
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, requested)
@@ -6058,7 +6376,7 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user, principal.HasScope(auth.ScopeUsersReadEmail))})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))})
 }
 
 func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
@@ -6125,7 +6443,7 @@ func (h Handler) lookupUserByEmail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "users_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user, true)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(h.origin(r), user, true)})
 }
 
 func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
@@ -6157,7 +6475,7 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 	}
 	members := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		members = append(members, userResponse(user, principal.HasScope(auth.ScopeUsersReadEmail)))
+		members = append(members, userResponse(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "members": members, "cache_ts": time.Now().Unix(), "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -6209,7 +6527,7 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	profile := profileResponse(user)
+	profile := profileResponse(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(profile, "email")
 	}
@@ -6262,7 +6580,26 @@ func (h Handler) getPresence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "presence": user.Presence.CurrentAt(user.LastActiveAt, time.Now().UTC())})
+	now := time.Now().UTC()
+	presence := user.Presence.CurrentAt(user.LastActiveAt, now)
+	response := map[string]any{"ok": true, "presence": presence}
+	// Slack reports the detail only for the caller's own presence: why they
+	// are away, and when they were last active. Client connections are not
+	// tracked here, so online and connection_count follow observed activity,
+	// the same signal automatic presence resolves against.
+	if user.ID == principal.UserID {
+		online := presence == "active"
+		connections := 0
+		if online {
+			connections = 1
+		}
+		response["online"] = online
+		response["manual_away"] = user.Presence == domain.PresenceAway
+		response["auto_away"] = user.Presence != domain.PresenceAway && presence == "away"
+		response["connection_count"] = connections
+		response["last_activity"] = unixSeconds(user.LastActiveAt)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
@@ -6567,7 +6904,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	responseProfile := profileResponse(user)
+	responseProfile := profileResponse(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(responseProfile, "email")
 	}
@@ -6674,7 +7011,7 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(user)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(h.origin(r), user)})
 }
 
 // concreteImageType reports whether a multipart part's label names one image
@@ -6697,49 +7034,15 @@ func (h Handler) usersSetActive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// adminUserResponse renders the admin projection of a user. The pinned
-// admin.users.list 200 example carries the role and restriction flags below; the
-// plain userResponse omits all of them.
-func adminUserResponse(value domain.AdminUser) map[string]any {
-	result := userResponse(value.User, true)
-	result["is_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
-	result["is_primary_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
-	result["is_admin"] = value.Membership.Role == domain.WorkspaceRoleAdmin || value.Membership.Role == domain.WorkspaceRoleOwner
-	result["is_restricted"] = value.Membership.Restricted
-	result["is_ultra_restricted"] = value.Membership.UltraRestricted
-	result["is_bot"] = false
+// adminUserResponse renders the admin projection of a user: the user object,
+// with the role and guest tier from the membership the admin listing already
+// read, and whether the membership is active.
+func adminUserResponse(origin string, value domain.AdminUser) map[string]any {
+	user := value.User
+	user.Role, user.Restricted, user.UltraRestricted = value.Membership.Role, value.Membership.Restricted, value.Membership.UltraRestricted
+	result := userResponse(origin, user, true)
 	result["is_active"] = value.Membership.Active
 	return result
-}
-
-func userResponse(user domain.User, includeEmail bool) map[string]any {
-	profile := profileResponse(user)
-	if !includeEmail {
-		delete(profile, "email")
-	}
-	return map[string]any{
-		"id": user.ID, "team_id": user.WorkspaceID, "name": user.Name, "real_name": user.RealName, "deleted": user.Deleted, "profile": profile,
-	}
-}
-
-func profileResponse(user domain.User) map[string]any {
-	return map[string]any{
-		"display_name": user.Profile.DisplayName, "display_name_normalized": user.Profile.DisplayName, "email": user.Email,
-		"real_name": user.RealName, "real_name_normalized": user.RealName,
-		"status_text": user.Profile.StatusText, "status_emoji": user.Profile.StatusEmoji, "status_expiration": unixSeconds(user.Profile.StatusExpiration),
-		"image_24": user.Profile.Image24, "image_32": user.Profile.Image32, "image_48": user.Profile.Image48, "image_72": user.Profile.Image72,
-		"image_192": user.Profile.Image192, "image_512": user.Profile.Image512, "image_1024": user.Profile.Image1024,
-		"team": user.WorkspaceID, "user_id": user.ID,
-	}
-}
-
-func conversationResponse(conversation domain.Conversation) map[string]any {
-	return map[string]any{"id": conversation.ID, "name": conversation.Name, "topic": map[string]any{"value": conversation.Topic}, "purpose": map[string]any{"value": conversation.Purpose}, "is_archived": conversation.Archived, "is_private": conversation.PrivateFlag(), "is_channel": conversation.Kind.OrPublic() == domain.ConversationTypePublic, "is_im": conversation.Kind == domain.ConversationTypeIM, "is_mpim": conversation.Kind == domain.ConversationTypeMPIM, "is_member": true, "team_id": conversation.WorkspaceID,
-		// The Slack Connect identity. Pending and shared are different facts —
-		// an outstanding invitation is not a connection — and a client renders
-		// each differently, so neither is derived from the other.
-		"is_ext_shared": conversation.IsExtShared, "is_pending_ext_shared": conversation.IsPendingExtShared,
-		"is_shared": conversation.IsExtShared}
 }
 
 func (h Handler) conversationsList(w http.ResponseWriter, r *http.Request) {
@@ -6751,7 +7054,7 @@ func (h Handler) usersConversations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allowMember bool) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsRead)
+	principal, err := h.authenticateConversation(r, conversationReadGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6766,8 +7069,38 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	if len(request.Types) == 0 {
+		// Both methods default `types` to public_channel. An absent argument
+		// used to list every type, so a caller that named none received its
+		// private channels and DMs as well.
+		request.Types = []domain.ConversationType{domain.ConversationTypePublic}
+	}
+	// The listing is narrowed to the requested types the token may read, as
+	// Slack does: a token holding channels:read and asking for public and
+	// private channels gets the public ones. Only a request none of whose
+	// types the token can read is refused, naming the scopes that would do.
+	permitted := make([]domain.ConversationType, 0, len(request.Types))
+	for _, kind := range request.Types {
+		if conversationReadGrant.permits(principal, kind) {
+			permitted = append(permitted, kind)
+		}
+	}
+	if len(permitted) == 0 {
+		if err := requireAnyScope(r, principal, conversationReadGrant.scopes(principal, request.Types...)...); err != nil {
+			writeAuthError(w, err)
+			return
+		}
+	}
+	recordAcceptedScopes(r, conversationReadGrant.scopes(principal, request.Types...)...)
+	request.Types = permitted
+	// users.conversations lists the conversations one person belongs to, the
+	// caller unless `user` names someone else. Leaving MemberUserID empty for
+	// the caller listed every public channel in the workspace instead.
 	if allowMember {
 		request.MemberUserID = domain.UserID(strings.TrimSpace(fields["user"]))
+		if request.MemberUserID == "" {
+			request.MemberUserID = principal.UserID
+		}
 	}
 	page, err := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, request)
 	if err != nil {
@@ -6776,13 +7109,22 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 	}
 	channels := make([]map[string]any, 0, len(page.Conversations))
 	for _, conversation := range page.Conversations {
-		channels = append(channels, conversationResponse(conversation))
+		channel := conversationResponse(conversation)
+		// conversations.list reports each channel's size; the pinned
+		// users.conversations schema says its objects carry neither
+		// num_members nor is_member.
+		if allowMember {
+			delete(channel, "is_member")
+		} else if !conversation.IsDirectOrGroup() {
+			channel["num_members"] = conversation.NumMembers
+		}
+		channels = append(channels, channel)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channels": channels, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
 
 func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsRead)
+	principal, err := h.authenticateConversation(r, conversationReadGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6802,6 +7144,9 @@ func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationReadGrant, channel, "channel_not_found"); !ok {
+		return
+	}
 	page, err := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, request)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -6815,7 +7160,7 @@ func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant, domain.ConversationTypePublic, domain.ConversationTypePrivate)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6833,6 +7178,14 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 	private, err := parseBoolField(fields["is_private"])
 	if err != nil {
 		writeError(w, "invalid_arg_name")
+		return
+	}
+	kind := domain.ConversationTypePublic
+	if private {
+		kind = domain.ConversationTypePrivate
+	}
+	if err := requireAnyScope(r, principal, conversationWriteGrant.scope(principal, kind)); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
@@ -6879,11 +7232,11 @@ func (h Handler) authenticateConversationJoin(r *http.Request, botScope, userSco
 	// other conversation mutators and requiring channels:manage made an
 	// official bot installation unable to join any public channel.
 	needed := userScope
-	if principal.TokenType.IsBot() || principal.BotID != "" {
+	if isBotPrincipal(principal) {
 		needed = botScope
 	}
-	if !principal.HasScope(needed) {
-		return auth.Principal{}, missingScopeError{needed: needed, provided: permissionScopes(principal)}
+	if err := requireAnyScope(r, principal, needed); err != nil {
+		return auth.Principal{}, err
 	}
 	return principal, nil
 }
@@ -6894,12 +7247,10 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	allInviteScopes := []auth.Scope{
-		auth.ScopeChannelsManage, auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites,
-		auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite,
-	}
-	if !principalHasAnyScope(principal, allInviteScopes...) {
-		writeAuthError(w, missingScopeError{needed: auth.ScopeChannelsManage, provided: permissionScopes(principal)})
+	// Every conversation type's write scope, plus the invite-only grants
+	// Slack accepts for channels, is the family a token must hold one of.
+	if err := requireAnyScope(r, principal, append(conversationWriteGrant.scopes(principal), auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWriteInvites)...); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -6917,21 +7268,8 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	required := []auth.Scope{auth.ScopeChannelsWrite}
-	switch {
-	case conversation.Kind == domain.ConversationTypeIM:
-		required = []auth.Scope{auth.ScopeIMWrite}
-	case conversation.Kind == domain.ConversationTypeMPIM:
-		required = []auth.Scope{auth.ScopeMPIMWrite}
-	case conversation.Kind == domain.ConversationTypePrivate:
-		required = []auth.Scope{auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites}
-	case principal.TokenType.IsBot() || principal.BotID != "":
-		required = []auth.Scope{auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites}
-	default:
-		required = []auth.Scope{auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites}
-	}
-	if !principalHasAnyScope(principal, required...) {
-		writeAuthError(w, missingScopeError{needed: required[0], provided: permissionScopes(principal)})
+	if err := requireAnyScope(r, principal, inviteScopes(principal, conversation.Kind.OrPublic())...); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	if conversation.Archived {
@@ -7044,6 +7382,20 @@ func (h Handler) conversationInviteCandidates(r *http.Request, principal auth.Pr
 	return valid, failures, nil
 }
 
+// inviteScopes is what conversations.invite accepts for a conversation of
+// kind: the conversation write grant, or for a channel the narrower
+// invite-only scope.
+func inviteScopes(principal auth.Principal, kind domain.ConversationType) []auth.Scope {
+	scopes := []auth.Scope{conversationWriteGrant.scope(principal, kind)}
+	switch kind.OrPublic() {
+	case domain.ConversationTypePublic:
+		scopes = append(scopes, auth.ScopeChannelsWriteInvites)
+	case domain.ConversationTypePrivate:
+		scopes = append(scopes, auth.ScopeGroupsWriteInvites)
+	}
+	return scopes
+}
+
 func principalHasAnyScope(principal auth.Principal, scopes ...auth.Scope) bool {
 	for _, scope := range scopes {
 		if principal.HasScope(scope) {
@@ -7054,7 +7406,7 @@ func principalHasAnyScope(principal auth.Principal, scopes ...auth.Scope) bool {
 }
 
 func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7069,9 +7421,8 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conversation := domain.ConversationID(strings.TrimSpace(fields["channel"]))
-	info, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, conversation)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	info, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, conversation, "channel_not_found")
+	if !ok {
 		return
 	}
 	if info.IsDirectOrGroup() {
@@ -7079,22 +7430,25 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, conversation); err != nil {
-		if errors.Is(err, service.ErrCannotLeaveDefault) {
+		switch {
+		case errors.Is(err, service.ErrCannotLeaveDefault):
 			writeError(w, "cant_leave_general")
-			return
-		}
-		if errors.Is(err, service.ErrInvalidConversation) {
+		case errors.Is(err, service.ErrConversationArchived):
 			writeError(w, "is_archived")
-			return
+		case errors.Is(err, service.ErrNotInConversation):
+			// The pinned success schema: leaving a channel you are not in
+			// succeeds and says so, rather than failing.
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "not_in_channel": true})
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
 		}
-		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversation})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7114,15 +7468,27 @@ func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "user_not_found")
 		return
 	}
-	if err := h.Messages.KickConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel, target); err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": channel})
+	if err := h.Messages.KickConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel, target); err != nil {
+		switch {
+		case errors.Is(err, service.ErrCannotKickSelf):
+			writeError(w, "cant_kick_self")
+		case errors.Is(err, service.ErrCannotKickFromDefault):
+			writeError(w, "cant_kick_from_general")
+		case errors.Is(err, service.ErrInvalidConversation):
+			writeError(w, "method_not_supported_for_channel_type")
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7142,9 +7508,8 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_name_required")
 		return
 	}
-	info, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	info, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found")
+	if !ok {
 		return
 	}
 	if info.IsDirectOrGroup() {
@@ -7160,7 +7525,7 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7179,16 +7544,26 @@ func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
+		return
+	}
 	conversation, err := h.Messages.SetConversationTopic(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["topic"])
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		switch {
+		case errors.Is(err, service.ErrConversationArchived):
+			writeError(w, "is_archived")
+		case errors.Is(err, service.ErrConversationTextTooLong):
+			writeError(w, "too_long")
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
 }
 
 func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7207,9 +7582,19 @@ func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) 
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
+		return
+	}
 	conversation, err := h.Messages.SetConversationPurpose(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["purpose"])
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		switch {
+		case errors.Is(err, service.ErrConversationArchived):
+			writeError(w, "is_archived")
+		case errors.Is(err, service.ErrConversationTextTooLong):
+			writeError(w, "too_long")
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -7252,7 +7637,7 @@ func (h Handler) unarchiveConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7267,9 +7652,8 @@ func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "channel_not_found")
 		return
 	}
-	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	conversation, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found")
+	if !ok {
 		return
 	}
 	if !conversation.IsDirectOrGroup() {
@@ -7288,7 +7672,7 @@ func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) changeConversationArchived(w http.ResponseWriter, r *http.Request, archived bool) (bool, error) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return false, nil
@@ -7303,12 +7687,15 @@ func (h Handler) changeConversationArchived(w http.ResponseWriter, r *http.Reque
 		writeError(w, "channel_not_found")
 		return false, nil
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
+		return false, nil
+	}
 	_, err = h.Messages.SetConversationArchived(r.Context(), principal.WorkspaceID, principal.UserID, channel, archived)
 	return true, err
 }
 
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant, domain.ConversationTypeIM, domain.ConversationTypeMPIM)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7337,18 +7724,54 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		seen[user] = struct{}{}
 		users = append(users, user)
 	}
-	conversation, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+	// One other person is a direct message and more is a group direct
+	// message; each takes its own write scope.
+	kind := domain.ConversationTypeIM
+	others := 0
+	for _, user := range users {
+		if user != principal.UserID {
+			others++
+		}
+	}
+	if others > 1 {
+		kind = domain.ConversationTypeMPIM
+	}
+	if err := requireAnyScope(r, principal, conversationWriteGrant.scope(principal, kind)); err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	returnIM, err := parseBoolField(fields["return_im"])
 	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	opening, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidConversation) && len(users) > 8 {
+			writeError(w, "too_many_users")
+			return
+		}
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+	// Slack answers a one-to-one open with the IM's identifier alone unless
+	// return_im asks for the full object; a group DM is always described.
+	channel := conversationResponse(opening.Conversation)
+	if opening.Conversation.Kind == domain.ConversationTypeIM && !returnIM {
+		channel = map[string]any{"id": opening.Conversation.ID}
+	}
+	response := map[string]any{"ok": true, "channel": channel}
+	if opening.AlreadyOpen {
+		response["no_op"], response["already_open"] = true, true
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) markConversation(w http.ResponseWriter, r *http.Request) {
-	// conversations.mark moves the caller's read cursor, so the pinned token
-	// parameter requires `conversations:write`, not a history read scope.
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	// conversations.mark moves the caller's read cursor, so it takes the
+	// conversation write grant for the conversation's type, not a history
+	// read scope.
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7363,9 +7786,13 @@ func (h Handler) markConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "channel_not_found")
 		return
 	}
-	if timestamp == "" {
-		// /conversations.mark enumerates invalid_timestamp.
+	if _, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(timestamp)); err != nil {
+		// /conversations.mark enumerates invalid_timestamp, for a missing ts
+		// and a malformed one alike.
 		writeError(w, "invalid_timestamp")
+		return
+	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, domain.ConversationID(channel), "channel_not_found"); !ok {
 		return
 	}
 	cursor, err := h.Messages.MarkRead(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(channel), domain.MessageTimestamp(timestamp))
@@ -7439,38 +7866,22 @@ func (h Handler) getReactions(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	limit, err := clampLimit(fields["limit"], 200, 200)
-	if err != nil {
-		writeDecodeError(w, err)
-		return
-	}
-	cursor, err := decodeCursor(fields["cursor"], "invalid_arg_name")
-	if err != nil {
-		writeDecodeError(w, err)
-		return
-	}
-	reactions, next, hasMore, err := h.Messages.Reactions(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp, domain.PageRequest{Limit: limit, Cursor: cursor})
+	// Slack answers the item itself — type, channel and the whole message
+	// with its reactions — not a bare reactions array. `full` asks for the
+	// complete user list, which this projection always carries, and the
+	// method has no pagination to decode.
+	message, err := h.Messages.MessageAt(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp)
 	if err != nil {
 		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
-	grouped := make(map[string]map[string]any)
-	order := make([]string, 0)
-	for _, reaction := range reactions {
-		entry, exists := grouped[reaction.Name]
-		if !exists {
-			entry = map[string]any{"name": reaction.Name, "count": 0, "users": []domain.UserID{}}
-			grouped[reaction.Name] = entry
-			order = append(order, reaction.Name)
-		}
-		entry["count"] = entry["count"].(int) + 1
-		entry["users"] = append(entry["users"].([]domain.UserID), reaction.UserID)
+	projected, err := h.projectMessage(r, principal, message)
+	if err != nil {
+		writeError(w, mapServiceError(err, "message_not_found"))
+		return
 	}
-	result := make([]map[string]any, 0, len(order))
-	for _, name := range order {
-		result = append(result, grouped[name])
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": map[string]any{"reactions": result}, "has_more": hasMore, "response_metadata": map[string]string{"next_cursor": string(next)}})
+	projected["permalink"] = h.permalink(r, message)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "type": "message", "channel": channel, "message": projected})
 }
 
 func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
@@ -7502,11 +7913,39 @@ func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	items := make([]map[string]any, 0, len(page.Items))
+	// The store pages reaction rows; Slack lists one item per message, carrying
+	// every reaction on it. Rows of the same message collapse into one item,
+	// and each conversation's messages are projected in one batch.
+	type reactedMessage struct {
+		conversation domain.ConversationID
+		message      domain.Message
+	}
+	ordered := make([]reactedMessage, 0, len(page.Items))
+	seen := make(map[domain.MessageID]struct{}, len(page.Items))
+	byConversation := make(map[domain.ConversationID][]domain.Message)
 	for _, item := range page.Items {
-		message := messageResponse(item.Message)
-		message["reactions"] = []map[string]any{{"name": item.Reaction.Name, "count": 1, "users": []string{string(item.Reaction.UserID)}}}
-		items = append(items, map[string]any{"type": "message", "channel": item.Conversation, "message": message})
+		if _, duplicate := seen[item.Message.ID]; duplicate {
+			continue
+		}
+		seen[item.Message.ID] = struct{}{}
+		ordered = append(ordered, reactedMessage{conversation: item.Conversation, message: item.Message})
+		byConversation[item.Conversation] = append(byConversation[item.Conversation], item.Message)
+	}
+	projected := make(map[domain.MessageID]map[string]any, len(ordered))
+	for conversation, messages := range byConversation {
+		rendered, err := h.projectMessages(r, principal, conversation, messages)
+		if err != nil {
+			writeError(w, mapServiceError(err, "user_not_found"))
+			return
+		}
+		for index, message := range messages {
+			rendered[index]["permalink"] = h.permalink(r, message)
+			projected[message.ID] = rendered[index]
+		}
+	}
+	items := make([]map[string]any, 0, len(ordered))
+	for _, item := range ordered {
+		items = append(items, map[string]any{"type": "message", "channel": item.conversation, "message": projected[item.message.ID]})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -7697,9 +8136,22 @@ func (h Handler) listPins(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	items := make([]map[string]any, 0, len(pins))
+	// Each item carries the whole pinned message, with its permalink and
+	// pinned_to, as Slack's does; it used to carry only {"id": ...}, the
+	// repository's internal identifier, which no Slack client can use.
+	pinned := make([]domain.Message, 0, len(pins))
 	for _, pin := range pins {
-		items = append(items, map[string]any{"type": "message", "channel": channel, "message": map[string]any{"id": pin.Message}, "created": pin.CreatedAt.Unix(), "created_by": pin.UserID})
+		pinned = append(pinned, pin.Item)
+	}
+	messages, err := h.projectMessages(r, principal, channel, pinned)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	items := make([]map[string]any, 0, len(pins))
+	for index, pin := range pins {
+		messages[index]["permalink"] = h.permalink(r, pin.Item)
+		items = append(items, map[string]any{"type": "message", "channel": channel, "message": messages[index], "created": pin.CreatedAt.Unix(), "created_by": pin.UserID})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "has_more": hasMore, "response_metadata": map[string]string{"next_cursor": string(next)}})
 }
@@ -7859,7 +8311,7 @@ func (h Handler) listStars(w http.ResponseWriter, r *http.Request) {
 			result = append(result, map[string]any{"type": "channel", "channel": item.Conversation, "date_create": item.CreatedAt.Unix()})
 			continue
 		}
-		result = append(result, map[string]any{"type": "message", "channel": item.Conversation, "date_create": item.CreatedAt.Unix(), "message": messageResponse(item.Message)})
+		result = append(result, map[string]any{"type": "message", "channel": item.Conversation, "date_create": item.CreatedAt.Unix(), "message": messageResponse(h.origin(r), item.Message)})
 	}
 	// paging describes the whole set: total is every star the member has and
 	// pages how many pages of this size hold them. It used to report the
@@ -8204,15 +8656,12 @@ func (h Handler) listReminders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "reminders": result, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
-// isBotPrincipal is the one test of whether a caller holds a bot token, for
-// the methods Slack serves to user tokens only - the ones that act on a
-// person's own snooze, identity, photo, saved items or search. search.* used
-// to check inline and dnd.*, users.identity, users.setPhoto/deletePhoto and
-// stars.* not at all, so a bot token could set a member's snooze and photo
-// and read their saved items.
-func isBotPrincipal(principal auth.Principal) bool {
-	return principal.TokenType.IsBot() || principal.BotID != ""
-}
+// The methods Slack serves to user tokens only - the ones that act on a
+// person's own snooze, identity, photo, saved items or search - refuse a bot
+// token through the one predicate, isBotPrincipal. search.* used to check
+// inline and dnd.*, users.identity, users.setPhoto/deletePhoto and stars.* not
+// at all, so a bot token could set a member's snooze and photo and read their
+// saved items.
 
 // refuseBotToken answers a bot token with user_is_bot, the code the user-only
 // methods' pinned enums declare, and reports whether it did.
@@ -8258,7 +8707,7 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	response, err := h.searchMessageEnvelope(r.Context(), principal, arguments, page)
+	response, err := h.searchMessageEnvelope(r.Context(), h.origin(r), principal, arguments, page)
 	if err != nil {
 		writeError(w, "fatal_error")
 		return
@@ -8296,7 +8745,7 @@ func (h Handler) searchFiles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "query": arguments.query, "files": searchFileEnvelope(arguments, page)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "query": arguments.query, "files": searchFileEnvelope(h.origin(r), arguments, page)})
 }
 
 func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
@@ -8323,7 +8772,7 @@ func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	messageEnvelope, err := h.searchMessageEnvelope(r.Context(), principal, arguments, messagePage)
+	messageEnvelope, err := h.searchMessageEnvelope(r.Context(), h.origin(r), principal, arguments, messagePage)
 	if err != nil {
 		writeError(w, "fatal_error")
 		return
@@ -8338,7 +8787,7 @@ func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "query": arguments.query,
-		"messages": messageEnvelope, "files": searchFileEnvelope(arguments, filePage),
+		"messages": messageEnvelope, "files": searchFileEnvelope(h.origin(r), arguments, filePage),
 	})
 }
 
@@ -8411,27 +8860,42 @@ func (h Handler) searchMessagePage(ctx context.Context, principal auth.Principal
 	return page, err
 }
 
-func (h Handler) searchMessageEnvelope(ctx context.Context, principal auth.Principal, arguments searchArguments, page domain.MessagePage) (map[string]any, error) {
+func (h Handler) searchMessageEnvelope(ctx context.Context, origin string, principal auth.Principal, arguments searchArguments, page domain.MessagePage) (map[string]any, error) {
 	matches := make([]map[string]any, 0, len(page.Messages))
 	var highlightTerms []string
 	if arguments.highlight {
 		highlightTerms = service.SearchHighlightTerms(arguments.query)
 	}
+	// A page of matches usually repeats a handful of channels and authors, so
+	// each is resolved once; the permalink needs no call at all, because it is
+	// a function of the message and the origin.
+	conversations := make(map[domain.ConversationID]domain.Conversation)
+	authors := make(map[domain.UserID]domain.User)
 	for _, message := range page.Messages {
-		match := messageResponse(message)
+		match := messageResponse(origin, message)
 		if arguments.highlight {
 			match["text"] = highlightSearchText(message.Text, highlightTerms)
 		}
-		conversation, infoErr := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, message.Conversation)
-		author, userErr := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, message.AuthorID)
-		permalink, linkErr := h.Messages.Permalink(ctx, principal.WorkspaceID, principal.UserID, message.Conversation, domain.NewMessageTimestamp(message.CreatedAt))
-		if infoErr != nil || userErr != nil || linkErr != nil {
-			return nil, errors.New("search result hydration failed")
+		conversation, known := conversations[message.Conversation]
+		if !known {
+			resolved, err := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, message.Conversation)
+			if err != nil {
+				return nil, errors.New("search result hydration failed")
+			}
+			conversation, conversations[message.Conversation] = resolved, resolved
+		}
+		author, known := authors[message.AuthorID]
+		if !known {
+			resolved, err := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, message.AuthorID)
+			if err != nil {
+				return nil, errors.New("search result hydration failed")
+			}
+			author, authors[message.AuthorID] = resolved, resolved
 		}
 		match["channel"] = conversationResponse(conversation)
 		match["team"] = principal.WorkspaceID
 		match["username"] = author.Name
-		match["permalink"] = permalink
+		match["permalink"] = messagePermalink(origin, message)
 		matches = append(matches, match)
 	}
 	pageCount := 0
@@ -8499,10 +8963,10 @@ func highlightSearchText(text string, terms []string) string {
 	return result.String()
 }
 
-func searchFileEnvelope(arguments searchArguments, page domain.FilePage) map[string]any {
+func searchFileEnvelope(origin string, arguments searchArguments, page domain.FilePage) map[string]any {
 	matches := make([]map[string]any, 0, len(page.Files))
 	for _, file := range page.Files {
-		matches = append(matches, fileResponse(file))
+		matches = append(matches, fileResponse(origin, file))
 	}
 	pageCount := 0
 	if page.Total > 0 {
@@ -8724,9 +9188,11 @@ func (h Handler) fileInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	response := fileResponse(file)
+	response := fileResponse(h.origin(r), file)
 	h.addSnippetFields(r.Context(), principal, response, file)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response})
+	// The pinned 200 schema requires comments. Slack retired file comments
+	// and no route here creates one, so the page is always empty and final.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response, "comments": []any{}, "response_metadata": map[string]any{"next_cursor": ""}})
 }
 
 func (h Handler) deleteFile(w http.ResponseWriter, r *http.Request) {
@@ -8797,7 +9263,7 @@ func (h Handler) shareFilePublic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file), "permalink_public": "/files/public/" + file.PublicToken})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(h.origin(r), file), "permalink_public": fileURLs{origin: h.origin(r)}.public(file.PublicToken)})
 }
 
 func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
@@ -8821,7 +9287,7 @@ func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(h.origin(r), file)})
 }
 
 func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
@@ -8873,7 +9339,7 @@ func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
 	}
 	files := make([]map[string]any, 0, len(window.files))
 	for _, file := range window.files {
-		files = append(files, fileResponse(file))
+		files = append(files, fileResponse(h.origin(r), file))
 	}
 	pages := (window.total + filter.count - 1) / filter.count
 	if pages == 0 {
@@ -9034,9 +9500,9 @@ func decodeFileFilter(fields map[string]string) (fileFilter, error) {
 }
 
 // optionalEpoch reads a `type: number` epoch-seconds bound as whole microseconds.
-// It shares parseSlackTimestamp's fixed-point reader, which is also the basis of
-// bad_timestamp, so a negative or overflowing value is refused here exactly as it
-// is on every other timestamp path in this transport.
+// It shares domain.ParseTimestampBound, the reader every timestamp bound in
+// this transport uses, so a negative or overflowing value is refused here
+// exactly as it is on every other bound.
 func optionalEpoch(raw string) (int64, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -9047,11 +9513,11 @@ func optionalEpoch(raw string) (int64, bool, error) {
 	if strings.HasPrefix(raw, ".") {
 		raw = "0" + raw
 	}
-	micros, ok := parseSlackTimestamp(raw)
-	if !ok {
+	bound, err := domain.ParseTimestampBound(raw)
+	if err != nil {
 		return 0, false, decodeFailure("invalid_arg_name", "timestamp filters are non-negative epoch seconds")
 	}
-	return micros, true, nil
+	return bound.UnixMicro(), true, nil
 }
 
 func (f fileFilter) matches(file domain.File) bool {
@@ -9232,7 +9698,7 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		file.SharedChannels = shared
 	}
-	response := fileResponse(file)
+	response := fileResponse(h.origin(r), file)
 	h.addSnippetFields(r.Context(), principal, response, file)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response})
 }
@@ -9402,7 +9868,7 @@ func (h Handler) downloadUserPhoto(w http.ResponseWriter, r *http.Request) {
 // spool is bounded by maxUploadBytes, which is the same bound an authenticated
 // upload already has.
 func bodyOnlyToken(r *http.Request) bool {
-	if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+	if headerToken(r) != "" {
 		return false
 	}
 	return strings.ToLower(strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0])) == "multipart/form-data"
@@ -9416,7 +9882,7 @@ func bodyOnlyToken(r *http.Request) bool {
 // multipart file was answered `invalid_form_data`, because the upload had been
 // discarded before the multipart reader ever saw it.
 func promoteQueryToken(r *http.Request) *http.Request {
-	if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+	if headerToken(r) != "" {
 		return r
 	}
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
@@ -9428,12 +9894,19 @@ func promoteQueryToken(r *http.Request) *http.Request {
 	return clone
 }
 
+// headerToken is the bearer credential the Authorization header carries, read
+// with the one case-insensitive parser every surface shares.
+func headerToken(r *http.Request) string {
+	token, _ := bearer.Token(r.Header.Get("Authorization"))
+	return token
+}
+
 // withBearerToken returns r, or a shallow copy carrying token as a bearer header.
 // The copy's body is emptied because its only caller is the deferred
 // authentication that runs after the body has already been spooled.
 func withBearerToken(r *http.Request, token string) *http.Request {
 	token = strings.TrimSpace(token)
-	if token == "" || strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+	if token == "" || headerToken(r) != "" {
 		return r
 	}
 	clone := r.Clone(r.Context())
@@ -9568,7 +10041,7 @@ func spoolUpload(w http.ResponseWriter, r *http.Request) (uploadSpool, map[strin
 		mimeType = fieldMIME
 	}
 	if mimeType == "" && filename != "" {
-		mimeType = "application/octet-stream"
+		mimeType = domain.InferMIMEType(filename)
 	}
 	if mimeType == "" {
 		return cleanup(errors.New("mime type is required"))
@@ -9605,33 +10078,64 @@ func copyUploadPart(destination *os.File, source io.Reader) error {
 	return nil
 }
 
-func fileResponse(file domain.File) map[string]any {
-	// A snippet's file type is the syntax the member chose; a hosted file's is
-	// read from its name, the way Slack derives it. A snippet is editable and
-	// carries mode "snippet"; a hosted upload is neither.
-	fileType := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.Name)), ".")
-	if file.IsSnippet() {
-		fileType = file.FileType
+func fileResponse(origin string, file domain.File) map[string]any {
+	// A deleted file survives only as a tombstone: Slack keeps its id in the
+	// messages that shared it and says nothing else about it, so neither its
+	// name nor a download URL outlives the deletion.
+	if file.Deleted {
+		return map[string]any{"id": file.ID, "mode": file.Mode()}
 	}
+	fileType, prettyType := file.FileTypes()
+	urls := fileURLs{origin: origin}
 	result := map[string]any{
 		"id": file.ID, "name": file.Name, "title": file.Title, "mimetype": file.MIMEType,
 		"size": file.Size, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(),
 		"user": file.Uploader, "is_public": file.PublicToken != "", "team_id": file.WorkspaceID,
-		"filetype": fileType, "pretty_type": strings.ToUpper(fileType), "mode": file.Mode(),
+		"filetype": fileType, "pretty_type": prettyType, "mode": file.Mode(),
 		"is_external": false, "external_type": "", "public_url_shared": file.PublicToken != "",
 		"editable": file.IsSnippet(), "display_as_bot": false,
-	}
-	if !file.Deleted {
-		result["url_private"] = "/api/files/" + url.PathEscape(string(file.ID))
-		result["url_private_download"] = "/api/files/" + url.PathEscape(string(file.ID))
+		// Every URL is absolute: SDKs and apps fetch them verbatim.
+		"url_private":          urls.private(string(file.ID)),
+		"url_private_download": urls.private(string(file.ID)),
+		"permalink":            urls.permalink(string(file.ID)),
 	}
 	if file.PublicToken != "" {
-		result["permalink_public"] = "/files/public/" + file.PublicToken
+		result["permalink_public"] = urls.public(file.PublicToken)
 	}
 	if len(file.SharedChannels) > 0 {
 		result["channels"] = file.SharedChannels
 	}
+	if shares := fileSharesResponse(file); shares != nil {
+		result["shares"] = shares
+	}
 	return result
+}
+
+// fileSharesResponse is Slack's shares map: {public|private: {channel:
+// [share, ...]}}, one entry per message that carries the file.
+func fileSharesResponse(file domain.File) map[string]any {
+	if len(file.Shares) == 0 {
+		return nil
+	}
+	shares := map[string]any{}
+	for _, share := range file.Shares {
+		visibility := "public"
+		if share.Private {
+			visibility = "private"
+		}
+		byChannel, _ := shares[visibility].(map[string]any)
+		if byChannel == nil {
+			byChannel = map[string]any{}
+			shares[visibility] = byChannel
+		}
+		entry := map[string]any{"ts": share.Timestamp, "channel_name": share.ConversationName, "team_id": file.WorkspaceID, "share_user_id": share.SharedBy}
+		if share.ThreadTimestamp != "" {
+			entry["thread_ts"] = share.ThreadTimestamp
+		}
+		existing, _ := byChannel[string(share.Conversation)].([]map[string]any)
+		byChannel[string(share.Conversation)] = append(existing, entry)
+	}
+	return shares
 }
 
 // defaultSnippetFilename names a content= snippet the caller left unnamed. Slack
@@ -9728,7 +10232,10 @@ func normalizeReactionTarget(fields map[string]string) (domain.ConversationID, d
 	if channel == "" || timestamp == "" {
 		return "", "", decodeFailure("no_item_specified", "channel and timestamp are required")
 	}
-	if _, ok := parseSlackTimestamp(timestamp); !ok {
+	// The item is named by its identifier, so it is read with the identifier
+	// parser the service uses. The bound parser accepted `1700000000`, which
+	// the service then refused, and the caller was told invalid_arg_name.
+	if _, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(timestamp)); err != nil {
 		return "", "", decodeFailure("bad_timestamp", "timestamp is not a Slack timestamp")
 	}
 	return domain.ConversationID(channel), domain.MessageTimestamp(timestamp), nil
@@ -9803,8 +10310,15 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, postMessageError(err))
 		return
 	}
+	// The response's message is the same object history returns, so a bot's
+	// post carries bot_id, bot_profile and team from the moment it is made.
+	projected, err := h.projectMessage(r, principal, message)
+	if err != nil {
+		writeError(w, postMessageError(err))
+		return
+	}
 	ts := slackTimestamp(message.CreatedAt)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": ts, "message": messageResponse(message)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": ts, "message": projected})
 }
 
 func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
@@ -9906,12 +10420,35 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 	}
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
-	if blockErr != nil || attachmentErr != nil || strings.TrimSpace(fields["channel"]) == "" || strings.TrimSpace(fields["user"]) == "" || (strings.TrimSpace(fields["text"]) == "" && blocks == "" && attachments == "") {
+	switch {
+	case strings.TrimSpace(fields["channel"]) == "":
+		writeError(w, "channel_not_found")
+		return
+	case strings.TrimSpace(fields["user"]) == "":
+		writeError(w, "user_not_in_channel")
+		return
+	case blockErr != nil || attachmentErr != nil:
 		writeError(w, "invalid_arg_name")
 		return
+	case strings.TrimSpace(fields["text"]) == "" && domain.NoStructuredContent(blocks) && domain.NoStructuredContent(attachments):
+		// /chat.postEphemeral declares no_text for a message with nothing to show.
+		writeError(w, "no_text")
+		return
 	}
-	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks, attachments, principal.AppID)
-	if err != nil {
+	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks, attachments, principal.AppID, domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
+	switch {
+	case errors.Is(err, service.ErrRecipientNotInConversation):
+		writeError(w, "user_not_in_channel")
+		return
+	case errors.Is(err, service.ErrThreadNotFound), errors.Is(err, service.ErrInvalidTimestamp):
+		// The enum declares no thread code; the thread named is not a
+		// message of this channel.
+		writeError(w, "channel_not_found")
+		return
+	case errors.Is(err, service.ErrConversationAlreadyArchived):
+		writeError(w, "is_archived")
+		return
+	case err != nil:
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
@@ -10019,12 +10556,12 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 	if err != nil {
 		return domain.Message{}, err
 	}
-	asUser, err := optionalBool("as_user")
-	if err != nil {
+	// as_user is a legacy argument. A user token always posts as its user,
+	// so as_user=true asks for what the token already does; a bot token posts
+	// as its bot either way. Refusing it with as_user_not_supported broke
+	// every user-token client that still sends it, which Slack does not.
+	if _, err := optionalBool("as_user"); err != nil {
 		return domain.Message{}, err
-	}
-	if asUser != nil && *asUser {
-		return domain.Message{}, decodeFailure("as_user_not_supported", "as_user is only available to classic apps")
 	}
 	username := strings.TrimSpace(fields["username"])
 	iconEmoji := strings.TrimSpace(fields["icon_emoji"])
@@ -10049,12 +10586,22 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 	if markdownText != "" {
 		text = markdownText
 	}
+	channel, err := h.resolvePostChannel(r.Context(), principal, fields["channel"])
+	if err != nil {
+		return domain.Message{}, err
+	}
+	var botID domain.BotID
+	if principal.TokenType.IsBot() {
+		botID = principal.BotID
+	}
 	return h.Messages.PostMessageAs(
 		r.Context(),
 		principal.WorkspaceID,
 		principal.UserID,
 		domain.MessagePostRequest{
-			Conversation: domain.ConversationID(strings.TrimSpace(fields["channel"])),
+			Conversation: channel,
+			BotID:        botID,
+			WritePublic:  principal.TokenType.IsBot() && principal.HasScope(auth.ScopeChatWritePublic),
 			Text:         text, Blocks: blocks, Attachments: attachments, Metadata: fields["metadata"],
 			ThreadTimestamp: domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
 			IdempotencyKey:  strings.TrimSpace(r.Header.Get("Idempotency-Key")), AppID: principal.AppID,
@@ -10089,6 +10636,9 @@ func postMessageError(err error) string {
 	if errors.Is(err, service.ErrInvalidMessage) {
 		return "no_text"
 	}
+	if errors.Is(err, service.ErrThreadNotFound) {
+		return "thread_not_found"
+	}
 	return mapServiceError(err, "channel_not_found")
 }
 
@@ -10113,8 +10663,13 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 	rawAttachments, hasAttachments := fields["attachments"]
 	blocks, blockErr := domain.NormalizeBlocks([]byte(rawBlocks))
 	attachments, attachmentErr := domain.NormalizeAttachments([]byte(rawAttachments))
-	if conversation == "" || timestamp == "" || (!hasText && !hasBlocks && !hasAttachments) || blockErr != nil || attachmentErr != nil {
+	if conversation == "" || timestamp == "" || blockErr != nil || attachmentErr != nil {
 		writeError(w, "invalid_arg_name")
+		return
+	}
+	if !hasText && !hasBlocks && !hasAttachments {
+		// /chat.update declares no_text for an update that carries no content.
+		writeError(w, "no_text")
 		return
 	}
 	patch := domain.MessagePatch{}
@@ -10128,12 +10683,27 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 		patch.Attachments = &attachments
 	}
 	message, err := h.Messages.UpdateMessage(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp), patch)
+	switch {
+	case errors.Is(err, service.ErrMessageNotOwned):
+		// Slack's own code for editing somebody else's message; no_permission
+		// named a scope problem the caller does not have.
+		writeError(w, "cant_update_message")
+		return
+	case errors.Is(err, service.ErrInvalidMessage):
+		// An edit that would leave the message with nothing to show.
+		writeError(w, "no_text")
+		return
+	case err != nil:
+		writeError(w, mapServiceError(err, "message_not_found"))
+		return
+	}
+	projected, err := h.projectMessage(r, principal, message)
 	if err != nil {
 		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	ts := slackTimestamp(message.CreatedAt)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": ts, "text": message.Text, "message": messageResponse(message)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": ts, "text": message.Text, "message": projected})
 }
 
 func (h Handler) startMessageStream(w http.ResponseWriter, r *http.Request) {
@@ -10159,7 +10729,7 @@ func (h Handler) startMessageStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, messageStreamError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, messageStreamResponse(message, false))
+	writeJSON(w, http.StatusOK, messageStreamResponse(h.origin(r), message, false))
 }
 
 func (h Handler) appendMessageStream(w http.ResponseWriter, r *http.Request) {
@@ -10181,7 +10751,7 @@ func (h Handler) appendMessageStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, messageStreamError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, messageStreamResponse(message, false))
+	writeJSON(w, http.StatusOK, messageStreamResponse(h.origin(r), message, false))
 }
 
 func (h Handler) stopMessageStream(w http.ResponseWriter, r *http.Request) {
@@ -10202,10 +10772,10 @@ func (h Handler) stopMessageStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, messageStreamError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, messageStreamResponse(message, true))
+	writeJSON(w, http.StatusOK, messageStreamResponse(h.origin(r), message, true))
 }
 
-func messageStreamResponse(message domain.Message, includeMessage bool) map[string]any {
+func messageStreamResponse(origin string, message domain.Message, includeMessage bool) map[string]any {
 	response := map[string]any{"ok": true, "channel": message.Conversation, "ts": slackTimestamp(message.CreatedAt)}
 	var state domain.MessageStreamState
 	if json.Unmarshal([]byte(message.StreamState), &state) == nil && len(state.Warnings) != 0 {
@@ -10213,7 +10783,7 @@ func messageStreamResponse(message domain.Message, includeMessage bool) map[stri
 		response["response_metadata"] = map[string]any{"warnings": state.Warnings}
 	}
 	if includeMessage {
-		response["message"] = messageResponse(message)
+		response["message"] = messageResponse(origin, message)
 	}
 	return response
 }
@@ -10280,6 +10850,10 @@ func (h Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message, err := h.Messages.Delete(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp))
+	if errors.Is(err, service.ErrMessageNotOwned) {
+		writeError(w, "cant_delete_message")
+		return
+	}
 	if err != nil {
 		writeError(w, mapServiceError(err, "message_not_found"))
 		return
@@ -10363,7 +10937,9 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		return &value, parseErr == nil
 	}
 	replyBroadcast, replyBroadcastOK := optionalBoolean("reply_broadcast")
-	asUser, asUserOK := optionalBoolean("as_user")
+	// as_user is read and then ignored, as chat.postMessage does: a user token
+	// posts as its user, a bot token as its bot.
+	_, asUserOK := optionalBoolean("as_user")
 	linkNames, linkNamesOK := optionalBoolean("link_names")
 	unfurlLinks, unfurlLinksOK := optionalBoolean("unfurl_links")
 	unfurlMedia, unfurlMediaOK := optionalBoolean("unfurl_media")
@@ -10374,10 +10950,22 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_time")
 		return
 	}
-	if channel == "" || (textValue == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil || rawPostAt == "" ||
+	if channel == "" || (textValue == "" && domain.NoStructuredContent(blocks) && domain.NoStructuredContent(attachments)) || blockErr != nil || attachmentErr != nil || rawPostAt == "" ||
 		!replyBroadcastOK || !asUserOK || !linkNamesOK || !unfurlLinksOK || !unfurlMediaOK ||
-		(parse != "" && parse != "none" && parse != "full") || (asUser != nil && *asUser) {
+		(parse != "" && parse != "none" && parse != "full") {
 		writeError(w, "invalid_arguments")
+		return
+	}
+	// chat.scheduleMessage takes the same channel forms chat.postMessage does:
+	// an ID, a name, or a user ID for the direct conversation with them.
+	channel, err = h.resolvePostChannel(r.Context(), principal, string(channel))
+	if err != nil {
+		var refused decodeError
+		if errors.As(err, &refused) {
+			writeError(w, refused.code)
+			return
+		}
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	state := domain.MessageStreamState{
@@ -10524,9 +11112,21 @@ func userGroupResponse(value domain.UserGroup, includeUsers bool) map[string]any
 	for _, user := range value.Users {
 		users = append(users, string(user))
 	}
-	result := map[string]any{"id": value.ID, "team_id": value.WorkspaceID, "is_usergroup": true, "is_subteam": true, "name": value.Name, "description": value.Description, "handle": value.Handle, "is_external": false, "date_create": value.CreatedAt.Unix(), "date_update": value.UpdatedAt.Unix(), "date_delete": int64(0), "auto_provision": false, "enterprise_subteam_id": "", "created_by": value.Creator, "updated_by": value.UpdatedBy, "user_count": len(users)}
+	channels := make([]string, 0, len(value.Channels))
+	for _, channel := range value.Channels {
+		channels = append(channels, string(channel))
+	}
+	// The pinned objs_subteam requires prefs, auto_type and deleted_by, which
+	// were absent. Nothing here provisions a group automatically, so auto_type
+	// is null; a group's default channels are all reported under channels,
+	// because no conversation here has a legacy G-prefixed group identifier.
+	result := map[string]any{"id": value.ID, "team_id": value.WorkspaceID, "is_usergroup": true, "is_subteam": true, "name": value.Name, "description": value.Description, "handle": value.Handle, "is_external": false, "date_create": value.CreatedAt.Unix(), "date_update": value.UpdatedAt.Unix(), "date_delete": int64(0), "auto_provision": false, "enterprise_subteam_id": "", "created_by": value.Creator, "updated_by": value.UpdatedBy, "user_count": len(users),
+		"auto_type": nil, "deleted_by": nil, "channel_count": len(channels), "prefs": map[string]any{"channels": channels, "groups": []string{}}}
 	if !value.DeletedAt.IsZero() {
 		result["date_delete"] = value.DeletedAt.Unix()
+		// Disabling is the only change that sets date_delete, and it records
+		// who made it as the group's last updater.
+		result["deleted_by"] = value.UpdatedBy
 	}
 	if includeUsers {
 		result["users"] = users
@@ -10536,12 +11136,12 @@ func userGroupResponse(value domain.UserGroup, includeUsers bool) map[string]any
 
 func (h Handler) createUserGroup(w http.ResponseWriter, r *http.Request) {
 	h.mutateUserGroup(w, r, userGroupPermissionDenied, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
-		return h.Messages.CreateUserGroup(r.Context(), p.WorkspaceID, p.UserID, f["name"], f["handle"], f["description"])
+		return h.Messages.CreateUserGroup(r.Context(), p.WorkspaceID, p.UserID, f["name"], f["handle"], f["description"], parseIDList[domain.ConversationID](f["channels"]))
 	})
 }
 func (h Handler) updateUserGroup(w http.ResponseWriter, r *http.Request) {
 	h.mutateUserGroup(w, r, userGroupPermissionDenied, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
-		return h.Messages.UpdateUserGroup(r.Context(), p.WorkspaceID, p.UserID, domain.UserGroupID(strings.TrimSpace(f["usergroup"])), f["name"], f["handle"], f["description"])
+		return h.Messages.UpdateUserGroup(r.Context(), p.WorkspaceID, p.UserID, domain.UserGroupID(strings.TrimSpace(f["usergroup"])), f["name"], f["handle"], f["description"], parseIDList[domain.ConversationID](f["channels"]))
 	})
 }
 func (h Handler) enableUserGroup(w http.ResponseWriter, r *http.Request) {
@@ -11263,11 +11863,15 @@ func (h Handler) getPermalink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": channel, "permalink": permalink})
+	// The service answers the path; Slack's permalink is an absolute URL.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": channel, "permalink": h.absoluteURL(r, permalink)})
 }
 
-func messageResponse(message domain.Message) map[string]any {
+func messageResponse(origin string, message domain.Message) map[string]any {
 	result := map[string]any{"type": "message", "user": message.AuthorID, "text": message.Text, "ts": slackTimestamp(message.CreatedAt)}
+	for field, value := range domain.ChannelNoticeFields(message) {
+		result[field] = value
+	}
 	// Slack's message object reports an edit through `edited`, and clients
 	// render "(edited)" from it. It was absent from every method that returns
 	// a message, so no caller could tell an edited message from an untouched
@@ -11284,7 +11888,7 @@ func messageResponse(message domain.Message) map[string]any {
 	if len(message.Files) > 0 {
 		files := make([]map[string]any, 0, len(message.Files))
 		for _, file := range message.Files {
-			files = append(files, fileResponse(file))
+			files = append(files, fileResponse(origin, file))
 		}
 		result["subtype"] = "file_share"
 		result["upload"] = true
@@ -11306,10 +11910,10 @@ func messageResponse(message domain.Message) map[string]any {
 		} else if stream.IconURL != "" {
 			result["icons"] = map[string]string{"image_48": stream.IconURL}
 		}
-		if stream.ReplyBroadcast {
-			result["subtype"] = "thread_broadcast"
-			result["reply_broadcast"] = true
-		}
+	}
+	if message.ReplyBroadcast {
+		result["subtype"] = "thread_broadcast"
+		result["reply_broadcast"] = true
 	}
 	// `thread_ts` used to be emitted unconditionally, so a non-threaded message
 	// serialised as `"thread_ts": ""`, which the strictly typed SDK models (Java
@@ -11317,6 +11921,8 @@ func messageResponse(message domain.Message) map[string]any {
 	if message.ThreadTimestamp != "" {
 		result["thread_ts"] = message.ThreadTimestamp
 	}
+	// Blocks cleared with an explicit [] read back as [], which is what
+	// chat.update's own response says.
 	if message.Blocks != "" {
 		result["blocks"] = json.RawMessage(message.Blocks)
 	}
@@ -11327,7 +11933,7 @@ func messageResponse(message domain.Message) map[string]any {
 		}
 		result["unfurls"] = unfurls
 	}
-	if message.Attachments != "" && message.Attachments != "[]" {
+	if !domain.NoStructuredContent(message.Attachments) {
 		result["attachments"] = json.RawMessage(message.Attachments)
 	}
 	if message.Metadata != "" {
@@ -11400,10 +12006,16 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrSlashCommandNotFound) || errors.Is(err, service.ErrWebhookTriggerSecret) || errors.Is(err, service.ErrAssistantThreadNotFound) {
 		return notFoundReason
 	}
+	// The person an operation names is missing, as distinct from the
+	// conversation it acts on: every enum that can say so declares
+	// user_not_found.
+	if errors.Is(err, service.ErrUserNotFound) {
+		return "user_not_found"
+	}
 	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, service.ErrScheduledStatusLimit) {
 		return "restricted_too_many"
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidProfileField) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidListTemplate) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrInvalidActivitySavedView) || errors.Is(err, service.ErrInvalidSidebarSection) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) || errors.Is(err, service.ErrInvalidAssistantThread) || errors.Is(err, service.ErrAppNotDistributable) || errors.Is(err, service.ErrInvalidExternalAuthProvider) || errors.Is(err, service.ErrExternalAuthConnection) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidProfileField) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrBadOAuthClientSecret) || errors.Is(err, store.ErrOAuthRedirectMismatch) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidListTemplate) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrInvalidActivitySavedView) || errors.Is(err, service.ErrInvalidSidebarSection) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) || errors.Is(err, service.ErrInvalidAssistantThread) || errors.Is(err, service.ErrAppNotDistributable) || errors.Is(err, service.ErrInvalidExternalAuthProvider) || errors.Is(err, service.ErrExternalAuthConnection) {
 		return invalidReason
 	}
 	if errors.Is(err, service.ErrAppInteractionUnavailable) {
@@ -11568,8 +12180,9 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrIdempotencyConflict) {
 		return "invalid_arg_name"
 	}
-	// apps.connections.open is absent from the pinned snapshot; the Socket Mode
-	// connection limit reuses the recorded Socket Mode deviation code.
+	// apps.connections.open answers the connection limit itself, with 429 and
+	// Retry-After. This classification only keeps the sentinel from reading
+	// as fatal_error should another route ever surface it.
 	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
 		return "socket_mode_unavailable"
 	}
@@ -11780,6 +12393,14 @@ func requestCharset(header string) error {
 // reported as a conflicting duplicate rather than resolved by the same precedence
 // every other encoding uses.
 func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
+	return decodeArguments(w, r, normalizeJSONField)
+}
+
+// decodeArguments is decodeFields with the JSON member decoding supplied by the
+// caller. api.test is the one caller that needs another: it echoes whatever a
+// JSON body carried, nested values included, where every other method refuses
+// a non-scalar in a scalar argument.
+func decodeArguments(w http.ResponseWriter, r *http.Request, jsonMember func(name string, value json.RawMessage) (string, error)) (map[string]string, error) {
 	fields := make(map[string]string)
 	if err := collectFormValues(fields, r.URL.Query()); err != nil {
 		return nil, err
@@ -11791,7 +12412,7 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 	}
 	contentType := strings.ToLower(strings.TrimSpace(strings.SplitN(header, ";", 2)[0]))
 	if contentType == "application/json" {
-		body, err := decodeJSONFields(r.Body)
+		body, err := decodeJSONFields(r.Body, jsonMember)
 		if err != nil {
 			// Every raw encoding/json failure is a malformed document; `invalid_json` is
 			// the code the pinned enums declare for it. Returning the bare error left the
@@ -11855,57 +12476,75 @@ type readCloser struct {
 	io.Closer
 }
 
-func decodeJSONFields(body io.Reader) (map[string]string, error) {
+func decodeJSONFields(body io.Reader, jsonMember func(name string, value json.RawMessage) (string, error)) (map[string]string, error) {
 	fields := make(map[string]string)
-	decoder := json.NewDecoder(io.LimitReader(body, maxRequestBody))
-	start, err := decoder.Token()
-	if err == io.EOF {
-		return fields, nil
-	}
+	err := decodeJSONObject(body, func(name string, value json.RawMessage) error {
+		normalized, err := jsonMember(name, value)
+		if err != nil {
+			return err
+		}
+		fields[name] = normalized
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	return fields, nil
+}
+
+// decodeJSONObject walks a JSON request body that must be one object, handing
+// each member to field once. An empty body is an empty object. Duplicate
+// names, a non-object document and trailing values are refused here, so every
+// caller shares one definition of a well-formed JSON request.
+func decodeJSONObject(body io.Reader, field func(name string, value json.RawMessage) error) error {
+	decoder := json.NewDecoder(io.LimitReader(body, maxRequestBody))
+	start, err := decoder.Token()
+	if err == io.EOF {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	if delimiter, ok := start.(json.Delim); !ok || delimiter != '{' {
-		return nil, decodeFailure("json_not_object", "JSON request must be an object")
+		return decodeFailure("json_not_object", "JSON request must be an object")
 	}
 	seen := make(map[string]struct{})
 	for decoder.More() {
 		key, err := decoder.Token()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		name, ok := key.(string)
 		if !ok {
-			return nil, decodeFailure("invalid_json", "JSON object field name is invalid")
+			return decodeFailure("invalid_json", "JSON object field name is invalid")
 		}
 		if _, exists := seen[name]; exists {
-			return nil, decodeFailure("invalid_json", "request contains duplicate JSON field")
+			return decodeFailure("invalid_json", "request contains duplicate JSON field")
 		}
 		seen[name] = struct{}{}
 		var value json.RawMessage
 		if err := decoder.Decode(&value); err != nil {
-			return nil, err
+			return err
 		}
-		fields[name], err = normalizeJSONField(name, value)
-		if err != nil {
-			return nil, err
+		if err := field(name, value); err != nil {
+			return err
 		}
 	}
 	end, err := decoder.Token()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if delimiter, ok := end.(json.Delim); !ok || delimiter != '}' {
-		return nil, decodeFailure("invalid_json", "JSON request object is invalid")
+		return decodeFailure("invalid_json", "JSON request object is invalid")
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return nil, decodeFailure("invalid_json", "request contains multiple JSON values")
+			return decodeFailure("invalid_json", "request contains multiple JSON values")
 		}
-		return nil, err
+		return err
 	}
-	return fields, nil
+	return nil
 }
 
 func collectFormValues(fields map[string]string, source map[string][]string) error {
@@ -11973,9 +12612,16 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // equivalent form-encoded request echoed `my_error`; flattening it always broke
 // workflows.stepFailed for every official SDK. It is decided by the value's own
 // shape instead — see normalizeJSONField.
+//
+// The set is held against its sources by TestStructuredFieldsCoverEveryJSONArgument:
+// every argument the pinned snapshot describes as JSON-bearing, and every
+// argument an official SDK sends as a JSON array or object in a JSON body. It
+// once omitted `prompts` and `loading_messages`, which python-slack-sdk sends
+// as arrays for assistant.threads.setSuggestedPrompts and setStatus, so both
+// methods answered invalid_array_arg to the SDK's own request.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages":
 		return true
 	default:
 		return false
@@ -11986,6 +12632,14 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 	switch {
 	case isListField(name):
 		return normalizeJSONListField(value)
+	case (isStructuredField(name) || name == "profile") && jsonIsString(value):
+		// A structured argument may arrive as the JSON-encoded string the
+		// form encoding carries — python-slack-sdk sends `blocks="[...]"` as
+		// exactly that inside a JSON body, and Slack accepts it. The string is
+		// that encoded document, so it is flattened exactly as its
+		// form-encoded twin is; forwarding it verbatim handed the handler a
+		// quoted string, and chat.postMessage answered no_text.
+		return normalizeJSONScalar(value)
 	case isStructuredField(name):
 		var structured any
 		if err := json.Unmarshal(value, &structured); err != nil || structured == nil {
@@ -12019,14 +12673,21 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 // `type: string`, and 83 of the 99 pinned enums declare invalid_array_arg for
 // exactly the case of an array where a scalar belongs.
 func jsonIsObject(value json.RawMessage) bool {
+	return jsonStartsWith(value, '{')
+}
+
+// jsonIsString reports whether a raw JSON value is a string.
+func jsonIsString(value json.RawMessage) bool {
+	return jsonStartsWith(value, '"')
+}
+
+func jsonStartsWith(value json.RawMessage, first byte) bool {
 	for _, b := range value {
 		switch b {
 		case ' ', '\t', '\n', '\r':
 			continue
-		case '{':
-			return true
 		default:
-			return false
+			return b == first
 		}
 	}
 	return false
@@ -12110,13 +12771,43 @@ func slackTimestamp(value time.Time) string {
 // token actually holds. The pinned `default` response schema declares `needed`
 // and `provided` next to `error` precisely so a client can repair the grant, so
 // dropping them would leave `missing_scope` unactionable.
+//
+// `needed` lists every scope the operation would accept, any one of which
+// suffices — Slack's own answer for conversations.history without a history
+// scope names all four — and a single scope when there is only one.
 type missingScopeError struct {
-	needed   auth.Scope
+	needed   []auth.Scope
 	provided []string
 }
 
 func (e missingScopeError) Error() string {
-	return fmt.Sprintf("missing scope %s", e.needed)
+	return fmt.Sprintf("missing scope %s", e.neededValue())
+}
+
+func (e missingScopeError) neededValue() string {
+	values := make([]string, 0, len(e.needed))
+	for _, scope := range e.needed {
+		values = append(values, string(scope))
+	}
+	return strings.Join(values, ",")
+}
+
+// requireAnyScope refuses a principal that holds none of scopes, any one of
+// which the operation accepts, and records them as the method's accepted
+// scopes for X-Accepted-OAuth-Scopes. Empty names are ignored; with none left
+// the operation needs nothing beyond authentication.
+func requireAnyScope(r *http.Request, principal auth.Principal, scopes ...auth.Scope) error {
+	accepted := make([]auth.Scope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope != "" {
+			accepted = append(accepted, scope)
+		}
+	}
+	recordAcceptedScopes(r, accepted...)
+	if len(accepted) == 0 || principalHasAnyScope(principal, accepted...) {
+		return nil
+	}
+	return missingScopeError{needed: accepted, provided: permissionScopes(principal)}
 }
 
 func (e missingScopeError) Unwrap() error { return auth.ErrMissingScope }
@@ -12143,8 +12834,9 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 	if err != nil {
 		return auth.Principal{}, err
 	}
-	if scope != "" && !principal.HasScope(scope) {
-		return auth.Principal{}, missingScopeError{needed: scope, provided: permissionScopes(principal)}
+	recordGrantedScopes(r, principal)
+	if err := requireAnyScope(r, principal, scope); err != nil {
+		return auth.Principal{}, err
 	}
 	if err := h.Messages.RecordAccess(r.Context(), principal.WorkspaceID, principal.UserID, truncate(r.RemoteAddr, maxAccessLogIP), truncate(r.UserAgent(), maxAccessLogUserAgent)); err != nil {
 		return auth.Principal{}, fmt.Errorf("%w: %v", errAccessLogging, err)
@@ -12153,18 +12845,19 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 }
 
 func (h Handler) authenticateApp(r *http.Request, scope auth.Scope) (auth.Principal, error) {
-	if h.SocketAuth == nil {
+	if h.appAuthenticator == nil {
 		return auth.Principal{}, auth.ErrInvalidToken
 	}
-	principal, err := h.SocketAuth.Authenticate(r)
+	principal, err := h.appAuthenticator.Authenticate(r)
 	if err != nil {
 		return auth.Principal{}, err
 	}
 	if principal.AppID == "" {
 		return auth.Principal{}, auth.ErrInvalidToken
 	}
-	if scope != "" && !principal.HasScope(scope) {
-		return auth.Principal{}, missingScopeError{needed: scope, provided: permissionScopes(principal)}
+	recordGrantedScopes(r, principal)
+	if err := requireAnyScope(r, principal, scope); err != nil {
+		return auth.Principal{}, err
 	}
 	return principal, nil
 }
@@ -12185,7 +12878,7 @@ func writeAuthError(w http.ResponseWriter, err error) {
 	}
 	var missing missingScopeError
 	if errors.As(err, &missing) {
-		body := map[string]any{"ok": false, "error": "missing_scope", "needed": string(missing.needed)}
+		body := map[string]any{"ok": false, "error": "missing_scope", "needed": missing.neededValue()}
 		body["provided"] = strings.Join(missing.provided, ",")
 		writeJSON(w, http.StatusOK, body)
 		return
@@ -12657,8 +13350,9 @@ func listItemResponse(value domain.ListItem) map[string]any {
 }
 
 // clampLimit normalizes a wire `limit`. Slack clamps a limit above a method's
-// documented maximum instead of rejecting it, so only a value that is not a
-// positive integer is an error. This replaces twelve separate limit parsers with
+// documented maximum instead of rejecting it, and reads 0 as "the default" —
+// python-slack-sdk and Bolt send limit=0 when a caller leaves it unset — so
+// only a value that is not a non-negative integer is an error. This replaces twelve separate limit parsers with
 // five different ceilings, one of which (pageRequest) returned a nil error for an
 // out-of-range value and handed Limit: 0 to the store — the store then answered
 // with a bare errors.New that reached the client as a 503.
@@ -12672,8 +13366,11 @@ func clampLimit(raw string, fallback, maximum int) (int, error) {
 		return fallback, nil
 	}
 	value, err := strconv.Atoi(raw)
-	if err != nil || value < 1 {
-		return 0, decodeFailure("invalid_arg_name", "limit must be a positive integer")
+	if err != nil || value < 0 {
+		return 0, decodeFailure("invalid_arg_name", "limit must be a non-negative integer")
+	}
+	if value == 0 {
+		return fallback, nil
 	}
 	if value > maximum {
 		return maximum, nil
@@ -12706,38 +13403,6 @@ func pageNumber(raw string) (int, error) {
 		return 0, decodeFailure("invalid_arg_name", "page must be a positive integer no greater than "+strconv.Itoa(maxPageNumber))
 	}
 	return value, nil
-}
-
-// parseSlackTimestamp reads a Slack `ts` ("seconds.microseconds") into whole
-// microseconds since the epoch. It is the comparison basis for the history range
-// filter and the validity test behind `bad_timestamp`.
-func parseSlackTimestamp(raw string) (int64, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, false
-	}
-	whole, fraction, _ := strings.Cut(raw, ".")
-	seconds, err := strconv.ParseInt(whole, 10, 64)
-	// The result is scaled to microseconds, so a value near math.MaxInt64 would wrap
-	// to a negative instant and compare as older than everything.
-	if err != nil || seconds < 0 || seconds > maxTimestampSeconds {
-		return 0, false
-	}
-	if len(fraction) > 6 {
-		return 0, false
-	}
-	micros := int64(0)
-	if fraction != "" {
-		value, err := strconv.ParseInt(fraction, 10, 64)
-		if err != nil || value < 0 {
-			return 0, false
-		}
-		for i := len(fraction); i < 6; i++ {
-			value *= 10
-		}
-		micros = value
-	}
-	return seconds*1000000 + micros, true
 }
 
 // reminderTime reads the pinned /reminders.add `time` argument: "the Unix
@@ -12801,14 +13466,6 @@ func reminderTime(raw string, now time.Time) (time.Time, error) {
 }
 
 const secondsPerDay = 24 * 60 * 60
-
-// maxTimestampSeconds is the largest `ts` whose microsecond scaling fits in int64
-// WITH its fractional microseconds added. Bounding seconds*1e6 alone was not
-// enough: a value one below MaxInt64/1000000 leaves under a million microseconds
-// of headroom, so a six-digit fraction still overflowed to a negative instant —
-// `9223372036854.8` did. Reserving the largest possible fraction (999999) keeps
-// seconds*1e6 + micros inside int64 for everything accepted.
-const maxTimestampSeconds = (math.MaxInt64 - 999999) / 1000000
 
 func (h Handler) presentEntityDetails(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, "")
@@ -12982,7 +13639,7 @@ func (h Handler) openIDConnectUserInfo(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	token := headerToken(r)
 	if token == "" {
 		token = strings.TrimSpace(fields["token"])
 	}
@@ -13015,13 +13672,44 @@ type incomingWebhookPayload struct {
 	Attachments json.RawMessage `json:"attachments"`
 }
 
+// maxIncomingWebhookBody bounds what an incoming webhook reads, in either
+// encoding.
+const maxIncomingWebhookBody = 1 << 20
+
+// incomingWebhookBody returns the JSON message an incoming webhook POST
+// carries. Slack accepts it as the request body or, as older integrations and
+// `curl --data-urlencode` send it, as the `payload` field of a form-encoded
+// body; the second used to be refused as invalid_payload.
+func incomingWebhookBody(r *http.Request) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxIncomingWebhookBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxIncomingWebhookBody {
+		return nil, errors.New("incoming webhook body is too large")
+	}
+	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if mediaType != "application/x-www-form-urlencoded" && !bytes.HasPrefix(bytes.TrimSpace(body), []byte("payload=")) {
+		return body, nil
+	}
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		return nil, err
+	}
+	payload := values.Get("payload")
+	if payload == "" {
+		return nil, errors.New("form-encoded incoming webhook has no payload field")
+	}
+	return []byte(payload), nil
+}
+
 func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 	workspaceID := domain.WorkspaceID(r.PathValue("workspace"))
 	appID := domain.AppID(r.PathValue("app"))
 	secret := r.PathValue("secret")
 	var payload incomingWebhookPayload
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	if err := decoder.Decode(&payload); err != nil || (payload.Text == "" && len(payload.Blocks) == 0 && len(payload.Attachments) == 0) || (len(payload.Blocks) > 0 && !json.Valid(payload.Blocks)) || (len(payload.Attachments) > 0 && !json.Valid(payload.Attachments)) {
+	raw, err := incomingWebhookBody(r)
+	if err != nil || json.Unmarshal(raw, &payload) != nil || (payload.Text == "" && len(payload.Blocks) == 0 && len(payload.Attachments) == 0) || (len(payload.Blocks) > 0 && !json.Valid(payload.Blocks)) || (len(payload.Attachments) > 0 && !json.Valid(payload.Attachments)) {
 		writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
@@ -13129,7 +13817,7 @@ func (h Handler) adminIncomingWebhookCreate(w http.ResponseWriter, r *http.Reque
 		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "incoming_webhook": map[string]any{"id": webhook.ID, "channel_id": webhook.ConversationID, "url": "https://hooks.slack.com/services/" + string(webhook.WorkspaceID) + "/" + string(webhook.AppID) + "/" + secret}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "incoming_webhook": map[string]any{"id": webhook.ID, "channel_id": webhook.ConversationID, "url": originURL(h.origin(r), service.IncomingWebhookPath(webhook.WorkspaceID, webhook.AppID, secret))}})
 }
 
 func (h Handler) adminIncomingWebhookEnable(w http.ResponseWriter, r *http.Request) {
@@ -13187,22 +13875,24 @@ func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Reques
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	// The v2 flow never states a media type unless the caller passes one;
+	// Slack infers it from the name, as the classic upload does.
 	mimeType := strings.TrimSpace(fields["mime_type"])
 	if mimeType == "" {
-		mimeType = "application/octet-stream"
+		mimeType = domain.InferMIMEType(name)
 	}
 	upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, size, 15*time.Minute)
 	if err != nil {
 		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": externalUploadURL(r, upload.ID), "file_id": upload.ID})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": fileURLs{origin: h.origin(r)}.externalUpload(string(upload.ID)), "file_id": upload.ID})
 }
 
 func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 	id := domain.ExternalUploadID(strings.TrimSpace(r.PathValue("upload")))
 	if id == "" || r.ContentLength < 0 {
-		writeError(w, "invalid_arg_name")
+		writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
 		return
 	}
 	source := io.Reader(r.Body)
@@ -13210,7 +13900,7 @@ func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && mediaType == "multipart/form-data" {
 		reader, err := r.MultipartReader()
 		if err != nil {
-			writeError(w, "invalid_arg_name")
+			writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
 			return
 		}
 		var bodyPart *multipart.Part
@@ -13220,7 +13910,7 @@ func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			if partErr != nil {
-				writeError(w, "invalid_arg_name")
+				writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
 				return
 			}
 			if part.FormName() == "body" {
@@ -13230,7 +13920,7 @@ func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 			_ = part.Close()
 		}
 		if bodyPart == nil {
-			writeError(w, "invalid_arg_name")
+			writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
 			return
 		}
 		defer bodyPart.Close()
@@ -13240,10 +13930,29 @@ func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 		size = -1
 	}
 	if err := h.Messages.UploadExternalFile(r.Context(), id, size, source); err != nil {
-		writeError(w, mapServiceError(err, "file_not_found"))
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeUploadFailure(w, http.StatusNotFound, "file_not_found")
+		case errors.Is(err, service.ErrBlobUnavailable):
+			writeUploadFailure(w, http.StatusServiceUnavailable, "file_storage_unavailable")
+		case errors.Is(err, service.ErrInvalidExternalUpload):
+			writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
+		default:
+			writeUploadFailure(w, http.StatusInternalServerError, "fatal_error")
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// writeUploadFailure answers the upload URL filesGetUploadURLExternal hands
+// out. That URL is not a Web API method: Slack's answers it with a plain HTTP
+// status, and the official SDKs judge the upload by that status alone —
+// @slack/web-api and python slack_sdk both treat any 200 as success and go on
+// to files.completeUploadExternal. A refusal written as 200 {"ok":false} was
+// therefore reported to the caller as a successful upload.
+func writeUploadFailure(w http.ResponseWriter, status int, reason string) {
+	writeJSON(w, status, map[string]any{"ok": false, "error": reason})
 }
 
 func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Request) {
@@ -13299,15 +14008,81 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 	}
 	responses := make([]map[string]any, 0, len(files))
 	for _, file := range files {
-		responses = append(responses, fileResponse(file))
+		responses = append(responses, fileResponse(h.origin(r), file))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": responses})
 }
 
-func externalUploadURL(r *http.Request, id domain.ExternalUploadID) string {
-	scheme := strings.TrimSpace(strings.SplitN(r.Header.Get("X-Forwarded-Proto"), ",", 2)[0])
-	if scheme == "" {
-		scheme = "http"
+// resolvePostChannel reads chat.postMessage's `channel`, which Slack accepts
+// as a conversation ID, a channel name with or without its `#`, or a user ID —
+// the last meaning the direct conversation with that person, opened if it does
+// not exist yet. Only the ID form used to work, so an app that posted to
+// `#general` or DMed a user by ID was told channel_not_found.
+func (h Handler) resolvePostChannel(ctx context.Context, principal auth.Principal, raw string) (domain.ConversationID, error) {
+	raw = strings.TrimSpace(raw)
+	switch {
+	case raw == "":
+		return "", decodeFailure("channel_not_found", "channel is required")
+	case looksLikeUserID(raw):
+		// The caller's own ID names their self-DM, which conversations.open
+		// opens the same way.
+		direct, err := h.Messages.OpenConversation(ctx, principal.WorkspaceID, principal.UserID, []domain.UserID{domain.UserID(raw)})
+		if err != nil {
+			return "", err
+		}
+		return direct.Conversation.ID, nil
+	case strings.HasPrefix(raw, "#") || !looksLikeConversationID(raw):
+		return h.conversationNamed(ctx, principal, strings.TrimPrefix(raw, "#"))
+	default:
+		return domain.ConversationID(raw), nil
 	}
-	return scheme + "://" + r.Host + "/internal/files/external/" + url.PathEscape(string(id))
+}
+
+// conversationNamed finds the channel the caller can see by its exact name.
+// It reads through the directory listing, so it can never resolve a private
+// channel the caller could not list.
+func (h Handler) conversationNamed(ctx context.Context, principal auth.Principal, name string) (domain.ConversationID, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return "", decodeFailure("channel_not_found", "channel is required")
+	}
+	request := domain.ConversationListRequest{Limit: 200, Query: name, Types: []domain.ConversationType{domain.ConversationTypePublic, domain.ConversationTypePrivate}}
+	for {
+		page, err := h.Messages.Conversations(ctx, principal.WorkspaceID, principal.UserID, request)
+		if err != nil {
+			return "", err
+		}
+		for _, conversation := range page.Conversations {
+			if strings.EqualFold(conversation.Name, name) {
+				return conversation.ID, nil
+			}
+		}
+		if page.NextCursor == "" {
+			return "", decodeFailure("channel_not_found", "no channel has that name")
+		}
+		request.Cursor = page.NextCursor
+	}
+}
+
+// looksLikeUserID and looksLikeConversationID recognise identifier shapes: an
+// uppercase kind letter followed by letters and digits. Slack's own identifiers
+// are uppercase throughout and this deployment mints the tail in lowercase hex;
+// a channel name is lowercase from its first letter, so neither is confused
+// with a name.
+func looksLikeUserID(value string) bool {
+	return len(value) > 1 && (value[0] == 'U' || value[0] == 'W') && slackIdentifierTail(value[1:])
+}
+
+func looksLikeConversationID(value string) bool {
+	return len(value) > 1 && (value[0] == 'C' || value[0] == 'G' || value[0] == 'D') && slackIdentifierTail(value[1:])
+}
+
+func slackIdentifierTail(value string) bool {
+	for index := 0; index < len(value); index++ {
+		character := value[index]
+		if (character < 'A' || character > 'Z') && (character < 'a' || character > 'z') && (character < '0' || character > '9') {
+			return false
+		}
+	}
+	return true
 }

@@ -228,8 +228,27 @@ func TestSQLiteAppInteractionCapabilitiesAreOneUseAndBounded(t *testing.T) {
 			t.Fatalf("response use remaining=%d value=%+v err=%v", remaining, got, err)
 		}
 	}
-	if _, err := s.UseAppResponseURL(ctx, response.TokenHash); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.UseAppResponseURL(ctx, response.TokenHash); !errors.Is(err, store.ErrCapabilityExhausted) || !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("exhausted response error=%v, want %v", err, store.ErrNotFound)
+	}
+	// Slack tells an app whether its response_url expired or was used up, so
+	// the SQL profile distinguishes them exactly as the memory profile does.
+	expiredTrigger := trigger
+	expiredTrigger.TokenHash = "expired-trigger"
+	expiredTrigger.CreatedAt = now.Add(-time.Minute)
+	expiredTrigger.ExpiresAt = now.Add(-time.Second)
+	expiredResponse := response
+	expiredResponse.TokenHash = "expired-response"
+	expiredResponse.CreatedAt = expiredTrigger.CreatedAt
+	expiredResponse.ExpiresAt = expiredTrigger.ExpiresAt
+	if err := s.CreateAppInteractionCapabilities(ctx, expiredTrigger, expiredResponse); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UseAppResponseURL(ctx, expiredResponse.TokenHash); !errors.Is(err, store.ErrCapabilityExpired) {
+		t.Fatalf("expired response error=%v, want %v", err, store.ErrCapabilityExpired)
+	}
+	if _, err := s.UseAppResponseURL(ctx, "never-issued"); !errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrCapabilityExpired) || errors.Is(err, store.ErrCapabilityExhausted) {
+		t.Fatalf("unknown response error=%v, want a bare %v", err, store.ErrNotFound)
 	}
 }
 

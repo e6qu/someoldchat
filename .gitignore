@@ -10,3 +10,8 @@
 /specs/generated/*
 /specs/evidence/*
 *.local.yaml
+
+# Stray build outputs at the root (Mach-O binaries were committed here once).
+/server
+/fixture
+/worker

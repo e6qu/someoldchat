@@ -123,7 +123,7 @@ func (h Handler) auditPage(w http.ResponseWriter, r *http.Request) {
 		accessPage = value
 	}
 
-	records, err := h.Messages.ListUserEventsAfter(r.Context(), principal.WorkspaceID, principal.UserID, after, limit)
+	page, err := h.Messages.ListUserEventsAfter(r.Context(), principal.WorkspaceID, principal.UserID, after, limit)
 	if err != nil {
 		h.writeAuthAdminProblem(w, r, auditReadProblem(err, "The activity record could not be read."))
 		return
@@ -136,8 +136,8 @@ func (h Handler) auditPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	names := h.newUserNames(r.Context(), principal)
-	data := auditPageData{Limit: limit, AccessPage: accessPage, NextAfter: after}
-	for _, record := range records {
+	data := auditPageData{Limit: limit, AccessPage: accessPage, NextAfter: page.Through}
+	for _, record := range page.Records {
 		entry := auditEntryView{
 			Sequence:    record.Sequence,
 			Time:        formatTime(record.Event.CreatedAt),
@@ -150,9 +150,6 @@ func (h Handler) auditPage(w http.ResponseWriter, r *http.Request) {
 			entry.Actor = names.name(record.Event.ActorID)
 		}
 		data.Entries = append(data.Entries, entry)
-		if record.Sequence > data.NextAfter {
-			data.NextAfter = record.Sequence
-		}
 	}
 	for _, entry := range logs {
 		data.Access = append(data.Access, auditAccessView{

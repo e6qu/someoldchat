@@ -296,6 +296,13 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoConversation, decodeProtoConversation),
 		},
+		"DirectOpening": {
+			sample: &domain.DirectOpening{},
+			prepare: func(filled any) {
+				filled.(*domain.DirectOpening).Conversation.Kind = domain.ConversationTypeIM
+			},
+			through: through(encodeProtoDirectOpening, decodeProtoDirectOpening),
+		},
 		"ConversationPage": {
 			sample: &domain.ConversationPage{},
 			prepare: func(filled any) {
@@ -466,7 +473,9 @@ func conversionCases() map[string]conversionCase {
 		"OAuthAuthorization":        {sample: &domain.OAuthAuthorization{}, through: through(encodeProtoOAuthAuthorization, decodeProtoOAuthAuthorization)},
 		"Reaction":                  {sample: &domain.Reaction{}, through: through(encodeProtoReaction, decodeProtoReaction)},
 		"UserReactionPage":          {sample: &domain.UserReactionPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoUserReactionPage, decodeProtoUserReactionPage)},
-		"Pin":                       {sample: &domain.Pin{}, through: through(encodeProtoPin, decodeProtoPin)},
+		"Pin":                       {sample: &domain.Pin{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoPin, decodeProtoPin)},
+		"MessageWindow":             {sample: &domain.MessageWindow{}, through: through(encodeProtoMessageWindow, decodeProtoMessageWindow)},
+		"MessageAnnotation":         {sample: &domain.MessageAnnotation{}, through: through(encodeProtoMessageAnnotation, decodeProtoMessageAnnotation)},
 		"Star":                      {sample: &domain.Star{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoStar, decodeProtoStar)},
 		"SavedItem": {
 			sample:  &domain.SavedItem{},
@@ -655,7 +664,7 @@ func conversionCases() map[string]conversionCase {
 		// encodeProtoPinPage left all 271 tests in this package green, and
 		// pins.list would have lost pagination in the distributed composition
 		// while the monolith kept it.
-		"PinPage": {sample: &pinPage{}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
+		"PinPage": {sample: &pinPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			value := filled.(*pinPage)
 			wire := encodeProtoPinPage(value.Pins, value.NextCursor, value.HasMore)
 			decoded, err := decodeProtoPinPage(wire)

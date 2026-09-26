@@ -83,9 +83,14 @@ func runQualification(t *testing.T, open opener) {
 		{"email identity is case folded", emailIdentityIsCaseFolded},
 		{"conversation search treats metacharacters literally", conversationSearchTreatsMetacharactersLiterally},
 		{"search folds Unicode identically", searchFoldsUnicodeIdentically},
+		{"conversation provenance and membership agree", conversationProvenanceAndMembershipAgree},
+		{"user records report when they changed and whose bot they are", userRecordsReportWhenTheyChangedAndWhoseBotTheyAre},
+		{"user group default channels persist with the group", userGroupDefaultChannelsPersistWithTheGroup},
 		{"recent searches are private ordered and deduplicated", recentSearchesArePrivateOrderedAndDeduplicated},
 		{"user group mentions create visibility safe activity", userGroupMentionsCreateVisibilitySafeActivity},
 		{"messages page in both directions", messagesPageInBothDirections},
+		{"history pages roots within its window", historyPagesRootsWithinItsWindow},
+		{"message annotations agree across profiles", messageAnnotationsAgreeAcrossProfiles},
 		{"referential failures are sentinels", referentialFailuresAreSentinels},
 		{"expired Socket Mode connection is not revived", expiredSocketModeConnectionIsNotRevived},
 		{"Socket Mode batches are all or nothing", socketModeBatchesAreAllOrNothing},
@@ -94,6 +99,7 @@ func runQualification(t *testing.T, open opener) {
 		{"blob references tolerate an arbitrary profile photo URL", blobReferencesTolerateAnArbitraryProfilePhotoURL},
 		{"email identity is not Unicode case folded", emailIdentityIsNotUnicodeCaseFolded},
 		{"stars page in chronological order", starsPageInChronologicalOrder},
+		{"personal listings stop at a private conversation the reader left", personalListingsStopAtALeftPrivateConversation},
 		{"messages resolve by their own creation instant", messagesResolveByTheirOwnCreationInstant},
 		{"lists are created with their items or not at all", listsAreCreatedWithTheirItemsOrNotAtAll},
 		{"profile changes commit with every event they carry", profileChangesCommitWithEveryEventTheyCarry},
@@ -107,6 +113,7 @@ func runQualification(t *testing.T, open opener) {
 		{"an unconfigured auth method is enabled", authMethodDefaultsToEnabled},
 		{"revoking an app token announces tokens_revoked once", revokingAnAppTokenAnnouncesTokensRevokedOnce},
 		{"the uninstall announcement outlives the installation", uninstallAnnouncementOutlivesTheInstallation},
+		{"app event delivery state is per record", appEventDeliveryStateIsPerRecord},
 		{"a conversation change and its notice commit together", conversationNoticesCommitWithTheirChange},
 		{"thread summaries are batched and identical across profiles", threadSummariesAreBatchedAndIdentical},
 		{"activity follows the read cursor in both directions", activityFollowsTheReadCursorBothWays},
@@ -157,6 +164,9 @@ func runQualification(t *testing.T, open opener) {
 		{"an external credential keeps its secret in the store", externalCredentialKeepsItsSecret},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
+		{"visible files are newest first", visibleFilesAreNewestFirst},
+		{"OAuth installs reuse their bot and redeem every grant shape", oauthInstallsReuseTheirBotAndRedeemEveryGrantShape},
+		{"file shares name their carrying messages", fileSharesNameTheirCarryingMessages},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -915,7 +925,7 @@ func coreRepositoryContract(t *testing.T, open opener) {
 	if loadedMessage.Text != message.Text || loadedMessage.AuthorID != message.AuthorID {
 		t.Fatalf("message=%+v, want committed message", loadedMessage)
 	}
-	page, err := repository.ListMessages(ctx, conversation.ID, domain.PageRequest{Limit: 10})
+	page, err := repository.ListMessages(ctx, conversation.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil {
 		t.Fatal(err)
 	}

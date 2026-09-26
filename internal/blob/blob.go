@@ -10,6 +10,11 @@ import (
 var ErrNotFound = errors.New("blob not found")
 var ErrUnavailable = errors.New("blob storage is unavailable")
 
+// ErrSizeMismatch reports a source that was shorter or longer than the size
+// its writer declared. It is the caller's fault, not the provider's, so every
+// provider reports it with this one sentinel.
+var ErrSizeMismatch = errors.New("blob source size does not match the declared size")
+
 type Object struct {
 	Key  string
 	Size int64

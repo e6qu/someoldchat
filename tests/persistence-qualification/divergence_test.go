@@ -110,7 +110,7 @@ func messageOrderIsChronological(t *testing.T, open opener) {
 	for index, instant := range instants {
 		f.message(t, ctx, fmt.Sprintf("M%d", index), instant)
 	}
-	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: len(instants) + 1})
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: len(instants) + 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func messageOrderIsChronological(t *testing.T, open opener) {
 	seen := make(map[domain.MessageID]struct{}, len(instants))
 	request := domain.PageRequest{Limit: 1}
 	for visited := 0; visited <= len(instants); visited++ {
-		single, err := f.repository.ListMessages(ctx, f.channelID, request)
+		single, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: request})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -586,6 +586,78 @@ func conversationSearchTreatsMetacharactersLiterally(t *testing.T, open opener) 
 	}
 }
 
+// conversationProvenanceAndMembershipAgree covers what Slack's conversation
+// object reports beyond the name: who created a channel and when, who last set
+// its topic and purpose and when, whether the reader belongs to it, and how
+// many people do. Naming a member narrows a listing to that member's
+// conversations for every type, public channels included, in every profile.
+func conversationProvenanceAndMembershipAgree(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	created := time.Unix(1700000200, 0).UTC()
+	joined := domain.Conversation{ID: domain.ConversationID("C-provenance-" + f.suffix), WorkspaceID: f.workspaceID, Name: "provenance", Created: created, CreatorID: f.userID}
+	if err := f.repository.CreateConversation(ctx, joined, f.userID, f.event("provenance-created", "conversation.created", string(joined.ID))); err != nil {
+		t.Fatal(err)
+	}
+	stranger := domain.UserID("U-provenance-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: stranger, WorkspaceID: f.workspaceID, Email: "provenance-" + f.suffix + "@example.com", Name: "stranger"}); err != nil {
+		t.Fatal(err)
+	}
+	unjoined := domain.Conversation{ID: domain.ConversationID("C-unjoined-" + f.suffix), WorkspaceID: f.workspaceID, Name: "unjoined", Created: created, CreatorID: stranger}
+	if err := f.repository.CreateConversation(ctx, unjoined, stranger, f.event("unjoined-created", "conversation.created", string(unjoined.ID))); err != nil {
+		t.Fatal(err)
+	}
+	topicSet := time.Unix(1700000300, 0).UTC()
+	if _, err := f.repository.SetConversationTopic(ctx, joined.ID, domain.ConversationText{Value: "topic", SetBy: f.userID, SetAt: topicSet}, f.event("provenance-topic", "conversation.topic_changed", string(joined.ID))); err != nil {
+		t.Fatal(err)
+	}
+	purposeSet := time.Unix(1700000400, 0).UTC()
+	stored, err := f.repository.SetConversationPurpose(ctx, joined.ID, domain.ConversationText{Value: "purpose", SetBy: f.userID, SetAt: purposeSet}, f.event("provenance-purpose", "conversation.purpose_changed", string(joined.ID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := f.repository.GetConversation(ctx, joined.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for label, value := range map[string]domain.Conversation{"returned": stored, "read": read} {
+		if !value.Created.Equal(created) || value.CreatorID != f.userID ||
+			value.Topic != "topic" || value.TopicSetBy != f.userID || !value.TopicSetAt.Equal(topicSet) ||
+			value.Purpose != "purpose" || value.PurposeSetBy != f.userID || !value.PurposeSetAt.Equal(purposeSet) {
+			t.Fatalf("%s conversation lost its provenance: %+v", label, value)
+		}
+	}
+
+	all, err := f.repository.ListConversations(ctx, f.workspaceID, f.userID, domain.ConversationListRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[domain.ConversationID]domain.Conversation{}
+	for _, conversation := range all.Conversations {
+		listed[conversation.ID] = conversation
+	}
+	if value := listed[joined.ID]; !value.IsMember || value.NumMembers != 1 || !value.Created.Equal(created) || value.TopicSetBy != f.userID {
+		t.Fatalf("joined channel listed as %+v", value)
+	}
+	if value, present := listed[unjoined.ID]; !present || value.IsMember || value.NumMembers != 1 {
+		t.Fatalf("unjoined public channel listed as %+v (present=%v)", value, present)
+	}
+	mine, err := f.repository.ListConversations(ctx, f.workspaceID, f.userID, domain.ConversationListRequest{Limit: 10, MemberUserID: f.userID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, conversation := range mine.Conversations {
+		if conversation.ID == unjoined.ID {
+			t.Fatalf("a member-only listing included a public channel the member is not in: %+v", mine.Conversations)
+		}
+	}
+	if len(mine.Conversations) != 2 {
+		t.Fatalf("member-only listing = %+v, want the fixture channel and the joined one", mine.Conversations)
+	}
+}
+
 func searchFoldsUnicodeIdentically(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)
@@ -614,11 +686,11 @@ func searchFoldsUnicodeIdentically(t *testing.T, open opener) {
 		t.Fatal(err)
 	}
 	assertConversation("über")
-	if _, err := f.repository.SetConversationTopic(ctx, conversation.ID, "ÉCOLE", f.event("unicode-topic", "conversation.topic_changed", string(conversation.ID))); err != nil {
+	if _, err := f.repository.SetConversationTopic(ctx, conversation.ID, domain.ConversationText{Value: "ÉCOLE"}, f.event("unicode-topic", "conversation.topic_changed", string(conversation.ID))); err != nil {
 		t.Fatal(err)
 	}
 	assertConversation("école")
-	if _, err := f.repository.SetConversationPurpose(ctx, conversation.ID, "ÅNGSTRÖM", f.event("unicode-purpose", "conversation.purpose_changed", string(conversation.ID))); err != nil {
+	if _, err := f.repository.SetConversationPurpose(ctx, conversation.ID, domain.ConversationText{Value: "ÅNGSTRÖM"}, f.event("unicode-purpose", "conversation.purpose_changed", string(conversation.ID))); err != nil {
 		t.Fatal(err)
 	}
 	assertConversation("ångström")
@@ -665,21 +737,21 @@ func messagesPageInBothDirections(t *testing.T, open opener) {
 	if err := f.repository.UpdateMessage(ctx, deleted, f.event("delete-direction-4", "message.deleted", string(deleted.ID))); err != nil {
 		t.Fatal(err)
 	}
-	first, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 2, Descending: true})
+	first, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 2, Descending: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := []domain.MessageID{first.Messages[0].ID, first.Messages[1].ID}; !strings.Contains(string(got[0]), "direction-5") || !strings.Contains(string(got[1]), "direction-3") || !first.HasMore || first.NextCursor == "" {
 		t.Fatalf("first descending page=%+v", first)
 	}
-	second, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 2, Cursor: first.NextCursor, Descending: true})
+	second, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 2, Cursor: first.NextCursor, Descending: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(second.Messages) != 2 || !strings.Contains(string(second.Messages[0].ID), "direction-2") || !strings.Contains(string(second.Messages[1].ID), "direction-1") || second.HasMore {
 		t.Fatalf("second descending page=%+v", second)
 	}
-	forward, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 2, Cursor: first.NextCursor})
+	forward, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 2, Cursor: first.NextCursor}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1159,6 +1231,106 @@ func listsAreCreatedWithTheirItemsOrNotAtAll(t *testing.T, open opener) {
 // retire the bytes the old profile referenced. Appending the second through a
 // separate call left a window in which the profile no longer names the old blob
 // and nothing has been told to delete it.
+// userRecordsReportWhenTheyChangedAndWhoseBotTheyAre covers the stored and
+// looked-up facts Slack's user object reports: the instant a member's record
+// last changed, in whole seconds in every profile, and the bot a bot user
+// belongs to. It also covers the participants of a direct conversation, a
+// deactivated one included, which is how a DM names who it is with.
+func userRecordsReportWhenTheyChangedAndWhoseBotTheyAre(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	changedAt := time.Unix(1700000500, 250_000_000).UTC()
+	event := f.event("updated-profile", "user.profile_changed", string(f.userID))
+	event.CreatedAt = changedAt
+	returned, err := f.repository.UpdateUserProfile(ctx, f.workspaceID, f.userID, domain.UserProfile{DisplayName: "changed"}, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := f.repository.GetUser(ctx, f.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := changedAt.Truncate(time.Second)
+	if !returned.Updated.Equal(want) || !read.Updated.Equal(want) {
+		t.Fatalf("updated returned=%v read=%v, want %v", returned.Updated, read.Updated, want)
+	}
+
+	if _, err := f.repository.GetBotByUser(ctx, f.workspaceID, f.userID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a person's bot lookup err=%v, want not found", err)
+	}
+	botUser := domain.UserID("U-bot-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: botUser, WorkspaceID: f.workspaceID, Name: "robot"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.CreateBot(ctx, domain.Bot{ID: domain.BotID("B-" + f.suffix), WorkspaceID: f.workspaceID, UserID: botUser, Name: "robot", UpdatedAt: time.Unix(1700000600, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	bot, err := f.repository.GetBotByUser(ctx, f.workspaceID, botUser)
+	if err != nil || bot.ID != domain.BotID("B-"+f.suffix) {
+		t.Fatalf("bot by user=%+v err=%v", bot, err)
+	}
+
+	direct := domain.Conversation{ID: domain.ConversationID("D-" + f.suffix), WorkspaceID: f.workspaceID, Name: "direct", Kind: domain.ConversationTypeIM}
+	if err := f.repository.CreateDirectConversation(ctx, direct, []domain.UserID{f.userID, botUser}, f.event("direct-created", "conversation.direct_created", string(direct.ID))); err != nil {
+		t.Fatal(err)
+	}
+	self := domain.Conversation{ID: domain.ConversationID("D-self-" + f.suffix), WorkspaceID: f.workspaceID, Name: "direct", Kind: domain.ConversationTypeIM}
+	if err := f.repository.CreateDirectConversation(ctx, self, []domain.UserID{f.userID}, f.event("self-created", "conversation.direct_created", string(self.ID))); err != nil {
+		t.Fatalf("a self-DM was refused: %v", err)
+	}
+	if found, err := f.repository.FindDirectConversation(ctx, f.workspaceID, []domain.UserID{f.userID}); err != nil || found.ID != self.ID {
+		t.Fatalf("self-DM lookup=%+v err=%v", found, err)
+	}
+	if err := f.repository.SetUserDeleted(ctx, f.workspaceID, botUser, true, f.event("bot-deactivated", "user.deactivated", string(botUser))); err != nil {
+		t.Fatal(err)
+	}
+	participants, err := f.repository.DirectParticipants(ctx, direct.ID)
+	if err != nil || len(participants) != 2 {
+		t.Fatalf("direct participants=%v err=%v, want both including the deactivated one", participants, err)
+	}
+	if _, err := f.repository.DirectParticipants(ctx, f.channelID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a channel's direct participants err=%v, want not found", err)
+	}
+	group := domain.Conversation{ID: domain.ConversationID("G-" + f.suffix), WorkspaceID: f.workspaceID, Name: "direct", Kind: domain.ConversationTypeMPIM}
+	if err := f.repository.CreateDirectConversation(ctx, group, []domain.UserID{f.userID, botUser}, f.event("group-created", "conversation.direct_created", string(group.ID))); err == nil {
+		t.Fatal("a group DM of two was accepted")
+	}
+}
+
+// userGroupDefaultChannelsPersistWithTheGroup covers the default channels a
+// group is created and updated with. The SQL repositories dropped them on
+// create and kept the old list on update while the in-memory one stored them.
+func userGroupDefaultChannelsPersistWithTheGroup(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1700000700, 0).UTC()
+	group := domain.UserGroup{WorkspaceID: f.workspaceID, ID: domain.UserGroupID("S-" + f.suffix), Name: "defaults", Handle: "defaults-" + f.suffix,
+		Creator: f.userID, UpdatedBy: f.userID, CreatedAt: now, UpdatedAt: now, Enabled: true, Channels: []domain.ConversationID{f.channelID}}
+	if err := f.repository.CreateUserGroup(ctx, group, f.event("group-created", "usergroup.created", string(group.ID))); err != nil {
+		t.Fatal(err)
+	}
+	read, err := f.repository.GetUserGroup(ctx, f.workspaceID, group.ID)
+	if err != nil || len(read.Channels) != 1 || read.Channels[0] != f.channelID {
+		t.Fatalf("created group=%+v err=%v", read, err)
+	}
+	group.Channels = nil
+	if err := f.repository.UpdateUserGroup(ctx, group, f.event("group-updated", "usergroup.updated", string(group.ID))); err != nil {
+		t.Fatal(err)
+	}
+	read, err = f.repository.GetUserGroup(ctx, f.workspaceID, group.ID)
+	if err != nil || len(read.Channels) != 0 {
+		t.Fatalf("updated group=%+v err=%v, want the channels the update named: none", read, err)
+	}
+	group.Channels = []domain.ConversationID{"C-missing-" + domain.ConversationID(f.suffix)}
+	if err := f.repository.UpdateUserGroup(ctx, group, f.event("group-bad-channel", "usergroup.updated", string(group.ID))); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a default channel that does not exist err=%v, want not found", err)
+	}
+}
+
 func profileChangesCommitWithEveryEventTheyCarry(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)
@@ -1589,10 +1761,10 @@ func uninstallAnnouncementOutlivesTheInstallation(t *testing.T, open opener) {
 	// the shape an open Socket Mode connection is in when the uninstall lands.
 	// Anything the priming claim leased is acknowledged immediately, so no
 	// lease can outlive this setup and stall the loop below.
-	if record, _, _, claimed, err := f.repository.ClaimAppEvent(ctx, appID, "socket", "conn-1", time.Minute); err != nil {
+	if recordClaim, claimed, err := f.repository.ClaimAppEvent(ctx, appID, "socket", "conn-1", time.Minute); err != nil {
 		t.Fatal(err)
 	} else if claimed {
-		if err := f.repository.AckAppEvent(ctx, appID, "socket", "conn-1", record.Sequence); err != nil {
+		if err := f.repository.AckAppEvent(ctx, appID, "socket", "conn-1", recordClaim.Record.Sequence); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1627,7 +1799,8 @@ func uninstallAnnouncementOutlivesTheInstallation(t *testing.T, open opener) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		record, _, _, claimed, err := f.repository.ClaimAppEvent(ctx, appID, "socket", "conn-1", time.Minute)
+		recordClaim, claimed, err := f.repository.ClaimAppEvent(ctx, appID, "socket", "conn-1", time.Minute)
+		record := recordClaim.Record
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1683,7 +1856,7 @@ func conversationNoticesCommitWithTheirChange(t *testing.T, open opener) {
 	if _, err := f.repository.RenameConversation(ctx, f.channelID, "renamed-"+f.suffix, f.event("notice-rename", "conversation.renamed", string(f.channelID)), renameNotice); err != nil {
 		t.Fatal(err)
 	}
-	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 50})
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 50}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1738,7 +1911,7 @@ func aDeletedFileIsDeletedOnEveryMessageThatCarriesIt(t *testing.T, open opener)
 	}
 	attached := func(stage string) domain.File {
 		t.Helper()
-		page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 10})
+		page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 		if err != nil {
 			t.Fatalf("%s: %v", stage, err)
 		}
@@ -2263,7 +2436,7 @@ func retentionDeletesTheSameContentOnEveryProfile(t *testing.T, open opener) {
 		t.Fatalf("sweep=%+v, want the lone message and the dead thread's two, completely", swept)
 	}
 
-	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 50})
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 50}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2882,7 +3055,7 @@ func fileDescriptionBelongsToItsUploader(t *testing.T, open opener) {
 	if err := f.repository.CreateMessage(ctx, message, f.event("file-message", "message.created", string(message.ID)), ""); err != nil {
 		t.Fatal(err)
 	}
-	page, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 10})
+	page, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3796,6 +3969,17 @@ func searchModifiersMeanTheSame(t *testing.T, open opener) {
 	if err := f.repository.CreateMessage(ctx, linked, f.event("link", "message.created", string(linked.ID)), ""); err != nil {
 		t.Fatal(err)
 	}
+	// A scheme in capitals is still a link. SQLite's LIKE ignores ASCII case
+	// and PostgreSQL's does not, so matching the raw text found this message
+	// on one SQL profile and not the other.
+	shouted := domain.Message{
+		ID: domain.MessageID("M-shouted-link-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+		AuthorID: f.userID, Text: "SEE HTTPS://EXAMPLE.TEST/REPORT", Attachments: "[]",
+		CreatedAt: domain.MessageInstant(time.Unix(1_700_000_350, 0).UTC()),
+	}
+	if err := f.repository.CreateMessage(ctx, shouted, f.event("shouted-link", "message.created", string(shouted.ID)), ""); err != nil {
+		t.Fatal(err)
+	}
 	for _, reaction := range []struct {
 		message domain.MessageID
 		name    string
@@ -3832,8 +4016,12 @@ func searchModifiersMeanTheSame(t *testing.T, open opener) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(links.Messages) != 1 || links.Messages[0].ID != linked.ID {
-		t.Fatalf("has:link = %+v, want only the message carrying a URL", links.Messages)
+	found := map[domain.MessageID]bool{}
+	for _, message := range links.Messages {
+		found[message.ID] = true
+	}
+	if len(links.Messages) != 2 || !found[linked.ID] || !found[shouted.ID] {
+		t.Fatalf("has:link = %+v, want exactly the two messages carrying a URL, whatever its case", links.Messages)
 	}
 }
 

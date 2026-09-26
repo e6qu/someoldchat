@@ -366,6 +366,7 @@ func authorityMatrix() map[string]authority {
 		"LookupCanvasSections":                    authorityAnyMember,
 		"MarkAllRead":                             authorityAnyMember,
 		"MarkRead":                                authorityAnyMember,
+		"MessageAnnotations":                      authorityAnyMember,
 		"MessageAt":                               authorityAnyMember,
 		"MigrationExchange":                       authorityAnyMember,
 		"MutateActivity":                          authorityAnyMember,

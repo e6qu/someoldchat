@@ -478,6 +478,8 @@ var unclassifiedSentinels = map[string]string{
 	"sqlstore.ErrIntegrityCheckUnsupported": "IntegrityCheck is storage maintenance, not part of chatapi.Service, so it never crosses the chat seam; classifying it would make the transport package import a storage backend",
 	"events.ErrPayloadInternal":             "a delivery filter the consumer evaluates on records it already holds (internal/socketmode), never returned by a chat RPC",
 	"events.ErrPayloadRecipientScoped":      "a delivery filter, as above",
+	"store.ErrCapabilityExpired":            "UseAppResponseURL's refusal, which service.HandleAppResponse translates to service.ErrAppResponseURLExpired before it can cross the seam; it wraps store.ErrNotFound regardless",
+	"store.ErrCapabilityExhausted":          "UseAppResponseURL's refusal, translated to service.ErrAppResponseURLUsed as above",
 }
 
 func TestExclusionsNameRealSentinels(t *testing.T) {

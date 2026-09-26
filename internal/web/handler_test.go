@@ -1068,7 +1068,7 @@ func TestWorkspaceUploadsSharesRendersAndDownloadsAFile(t *testing.T) {
 		t.Fatalf("upload status=%d body=%s", response.Code, response.Body)
 	}
 
-	history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || len(history.Messages[0].Files) != 1 {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
@@ -1149,7 +1149,7 @@ func TestComposerStagesPastedAndDroppedFilesIntoOneAtomicMessage(t *testing.T) {
 	if response.Code != http.StatusSeeOther {
 		t.Fatalf("upload status=%d body=%s", response.Code, response.Body)
 	}
-	history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || history.Messages[0].Text != "Two staged files with one message" || len(history.Messages[0].Files) != 2 {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
@@ -1208,7 +1208,7 @@ func TestComposerDraftAttachmentsSurviveReloadAndSendOnce(t *testing.T) {
 	if err != nil || draft.Text != "recover this text and its files" || len(draft.Attachments) != 2 {
 		t.Fatalf("draft=%+v err=%v", draft, err)
 	}
-	if history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10}); err != nil || len(history.Messages) != 0 {
+	if history, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}}); err != nil || len(history.Messages) != 0 {
 		t.Fatalf("staging posted early: history=%+v err=%v", history, err)
 	}
 	reloaded := get(t, mux, "/app?channel=Cdev")
@@ -1234,7 +1234,7 @@ func TestComposerDraftAttachmentsSurviveReloadAndSendOnce(t *testing.T) {
 	if sent.Code != http.StatusSeeOther {
 		t.Fatalf("send status=%d body=%s", sent.Code, sent.Body)
 	}
-	history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || len(history.Messages[0].Files) != 2 || history.Messages[0].Text != "recover this text and its files" {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
@@ -1824,7 +1824,7 @@ func TestWorkspaceRendersEphemeralAppResponsesOnlyToTheirRecipient(t *testing.T)
 	}
 	if _, err := (service.Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(
 		context.Background(), "T1", "UBOT", "Cdev", "U1", "Private result",
-		`[{"type":"section","text":{"type":"plain_text","text":"Build is ready"}},{"type":"actions","block_id":"private-result","elements":[{"type":"button","action_id":"acknowledge","text":{"type":"plain_text","text":"Acknowledge"},"value":"yes"}]}]`, "", "A1",
+		`[{"type":"section","text":{"type":"plain_text","text":"Build is ready"}},{"type":"actions","block_id":"private-result","elements":[{"type":"button","action_id":"acknowledge","text":{"type":"plain_text","text":"Acknowledge"},"value":"yes"}]}]`, "", "A1", "",
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -2770,7 +2770,7 @@ func TestRemindSlashCommandCreatesPrivateChannelReminderListWithoutPosting(t *te
 	if response.Code != http.StatusSeeOther || !strings.Contains(response.Header().Get("Location"), "filter=channel-reminders") {
 		t.Fatalf("/remind status=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body)
 	}
-	history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 0 {
 		t.Fatalf("/remind was posted as chat: messages=%+v err=%v", history.Messages, err)
 	}
@@ -3242,7 +3242,7 @@ func TestMutationsAreRefusedWhenTheBrowserReportsAnotherSite(t *testing.T) {
 		}
 		requireContains(t, "refusal", response.Body.String(), "not made from SameOldChat")
 	}
-	page, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	page, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 0 {
 		t.Fatalf("a forged request was stored: %+v err=%v", page, err)
 	}
@@ -3428,7 +3428,7 @@ type countingChat struct {
 	calls *int
 }
 
-func (c countingChat) History(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, request domain.PageRequest) (domain.MessagePage, error) {
+func (c countingChat) History(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, request domain.HistoryRequest) (domain.MessagePage, error) {
 	*c.calls++
 	return c.Service.History(ctx, workspace, user, conversation, request)
 }
@@ -3654,7 +3654,7 @@ func TestFailedPostKeepsTheDraftAndExplainsTheFailure(t *testing.T) {
 	if strings.Contains(body, `name="text" required autofocus`) {
 		t.Fatal("the composer takes focus past the error it just rendered")
 	}
-	page, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	page, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 0 {
 		t.Fatalf("messages=%+v err=%v", page, err)
 	}
@@ -3670,7 +3670,7 @@ func TestFormBodyLimitIsInstalledBeforeCSRFValidation(t *testing.T) {
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("oversized body status=%d", response.Code)
 	}
-	page, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	page, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 0 {
 		t.Fatalf("an oversized body was still stored: messages=%+v err=%v", page, err)
 	}
@@ -3745,7 +3745,7 @@ func TestHTMXPostMessage(t *testing.T) {
 	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); err == nil {
 		t.Fatal("GET /app advanced the read cursor")
 	}
-	page, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	page, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 {
 		t.Fatalf("messages=%+v err=%v", page, err)
 	}
@@ -3785,7 +3785,7 @@ func TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly(t *tes
 	if scheduled.Code != http.StatusSeeOther || !strings.HasPrefix(scheduled.Header().Get("Location"), "/app/drafts?") || !strings.Contains(scheduled.Header().Get("Location"), "tab=scheduled") {
 		t.Fatalf("schedule status=%d location=%q body=%s", scheduled.Code, scheduled.Header().Get("Location"), scheduled.Body)
 	}
-	history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 {
 		t.Fatalf("scheduled message posted early: history=%+v err=%v", history, err)
 	}
@@ -3827,7 +3827,7 @@ func TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly(t *tes
 	if sent.Code != http.StatusSeeOther || !strings.Contains(sent.Header().Get("Location"), "tab=sent") || !strings.Contains(sent.Header().Get("Location"), "sent=1") {
 		t.Fatalf("send-now status=%d location=%q body=%s", sent.Code, sent.Header().Get("Location"), sent.Body)
 	}
-	history, err = s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	history, err = s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 2 || history.Messages[1].Text != "edited follow up" {
 		t.Fatalf("send-now history=%+v err=%v", history, err)
 	}
@@ -3899,7 +3899,7 @@ func TestScheduledComposerAttachmentJourneyPersistsListsAndSendsFile(t *testing.
 	if sent.Code != http.StatusSeeOther {
 		t.Fatalf("send-now status=%d body=%s", sent.Code, sent.Body)
 	}
-	history, err := s.ListMessages(ctx, "Cdev", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || len(history.Messages[0].Files) != 1 ||
 		history.Messages[0].Files[0].ID != domain.FileID(upload.ID) {
 		t.Fatalf("sent history=%+v err=%v", history, err)
@@ -5159,7 +5159,8 @@ func TestDirectMessageDetailsReviewHistoryExpansionAndConvertInPlace(t *testing.
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
 	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", RealName: "Carol Creator"})
 	messages := service.Messages{Store: s}
-	source, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	sourceOpening, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	source := sourceOpening.Conversation
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5234,7 +5235,7 @@ func TestDirectMessageDetailsReviewHistoryExpansionAndConvertInPlace(t *testing.
 	if err != nil || converted.Name != "project-room" || converted.Kind != domain.ConversationTypePrivate {
 		t.Fatalf("converted=%+v err=%v", converted, err)
 	}
-	history, err := messages.History(ctx, "T1", "U1", group.ID, domain.PageRequest{Limit: 10})
+	history, err := messages.History(ctx, "T1", "U1", group.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 3 || history.Messages[0].Text != "context before adding Carol" {
 		t.Fatalf("converted history=%+v err=%v", history, err)
 	}

@@ -540,10 +540,11 @@ func (m Messages) OpenAppHome(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil || app.BotUserID == "" {
 		return app, view, err
 	}
-	conversation, err := m.OpenConversation(ctx, workspaceID, userID, []domain.UserID{app.BotUserID})
+	opening, err := m.OpenConversation(ctx, workspaceID, userID, []domain.UserID{app.BotUserID})
 	if err != nil {
 		return domain.InstalledApp{}, domain.View{}, err
 	}
+	conversation := opening.Conversation
 	fields := []events.Field{
 		events.String("target_app_id", string(app.ID)),
 		events.String("user_id", string(userID)),
@@ -867,29 +868,36 @@ func (m Messages) AuthorizeOAuth(ctx context.Context, request domain.OAuthAuthor
 			return domain.OAuthAuthorization{}, err
 		}
 		now := time.Now().UTC()
-		botUser = domain.User{ID: botUserID, WorkspaceID: authorization.WorkspaceID, Name: authorization.AppName, RealName: authorization.AppName, Presence: domain.PresenceAuto}
+		botUser = domain.User{ID: botUserID, WorkspaceID: authorization.WorkspaceID, Name: authorization.AppName, RealName: authorization.AppName, Presence: domain.PresenceAuto, Updated: now}
 		bot = domain.Bot{ID: botID, WorkspaceID: authorization.WorkspaceID, AppID: authorization.AppID, UserID: botUserID, Name: authorization.AppName, UpdatedAt: now}
 		authorization.BotID = botID
 		authorization.BotUserID = botUserID
 	}
 	grant := domain.OAuthCode{
-		Code:                   code,
-		ClientID:               authorization.ClientID,
-		WorkspaceID:            authorization.WorkspaceID,
-		UserID:                 authorization.UserID,
-		Scopes:                 append(append([]string(nil), authorization.BotScopes...), authorization.UserScopes...),
-		BotID:                  authorization.BotID,
-		BotUserID:              authorization.BotUserID,
-		BotScopes:              authorization.BotScopes,
-		UserScopes:             authorization.UserScopes,
-		RedirectURI:            authorization.RedirectURI,
+		Code:        code,
+		ClientID:    authorization.ClientID,
+		WorkspaceID: authorization.WorkspaceID,
+		UserID:      authorization.UserID,
+		Scopes:      append(append([]string(nil), authorization.BotScopes...), authorization.UserScopes...),
+		BotID:       authorization.BotID,
+		BotUserID:   authorization.BotUserID,
+		BotScopes:   authorization.BotScopes,
+		UserScopes:  authorization.UserScopes,
+		// The grant keeps the redirect_uri as the request named it, empty
+		// when the request relied on the app's single configured URL: the
+		// exchange must repeat a named one and may omit an implied one.
+		RedirectURI:            strings.TrimSpace(request.RedirectURI),
 		IncomingWebhookChannel: authorization.IncomingWebhookChannel,
 		CodeChallenge:          authorization.CodeChallenge,
 		CodeChallengeMethod:    authorization.CodeChallengeMethod,
 	}
-	if err := m.Store.CreateOAuthAuthorization(ctx, botUser, bot, grant); err != nil {
+	granted, err := m.Store.CreateOAuthAuthorization(ctx, botUser, bot, grant)
+	if err != nil {
 		return domain.OAuthAuthorization{}, err
 	}
+	// A reinstall grants to the bot the app already has in the workspace.
+	authorization.BotID = granted.BotID
+	authorization.BotUserID = granted.BotUserID
 	authorization.Code = code
 	return authorization, nil
 }

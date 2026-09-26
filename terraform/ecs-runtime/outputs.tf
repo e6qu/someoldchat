@@ -9,6 +9,12 @@ output "blob_bucket_name" {
 # the README produced a crash-looping service. The blob settings are exported
 # too, so the task's -blob-s3-prefix can never diverge from the prefix the
 # task-role policy actually grants.
+#
+# SAMEOLDCHAT_SOCKET_TLS is "1" because auth_public_url is validated as HTTPS,
+# so every client reaches the task through TLS. Socket Mode connection URLs
+# otherwise follow X-Forwarded-Proto, which a caller-owned ingress may not send;
+# forcing wss:// keeps apps.connections.open from handing out ws:// URLs the
+# ingress refuses. The host still follows the request.
 output "environment" {
   description = "Non-secret SameOldChat environment configuration for an ECS task."
   value = {
@@ -22,6 +28,7 @@ output "environment" {
     SAMEOLDCHAT_OIDC_CLIENT_ID        = var.oidc_client_id
     SAMEOLDCHAT_OIDC_ISSUER           = var.oidc_issuer
     SAMEOLDCHAT_RELEASE_REVISION      = var.release_revision
+    SAMEOLDCHAT_SOCKET_TLS            = "1"
     SAMEOLDCHAT_STORE                 = var.store
   }
 }

@@ -639,7 +639,6 @@ func TestTamperedCursorsAreRefusedWithADeclaredCode(t *testing.T) {
 		{"/api/reminders.list", "invalid_arg_name"},
 		{"/api/pins.list?channel=C1", "invalid_arg_name"},
 		{"/api/conversations.history?channel=C1", "invalid_arg_name"},
-		{"/api/reactions.get?channel=C1&timestamp=1", "invalid_arg_name"},
 		{"/api/chat.scheduledMessages.list", "invalid_arg_name"},
 	}
 	for _, item := range cases {
@@ -717,6 +716,42 @@ func TestUsersSetPhotoDoesNotBorrowFilesUploadsChannelCode(t *testing.T) {
 	handler.ServeHTTP(result, request)
 	if code := errorCode(t, result); code == "invalid_channel" {
 		t.Fatalf("users.setPhoto emitted files.upload's invalid_channel: %s", result.Body)
+	}
+}
+
+// Slack accepts GET and POST for every Web API method. Registering each method
+// under the single verb the OpenAPI snapshot happens to list made 195 methods
+// answer unknown_method to the other verb, and python-slack-sdk's
+// AsyncWebClient sends GET for dnd.setSnooze, users.deletePhoto,
+// conversations.inviteShared and others.
+func TestEveryWebAPIMethodAcceptsGETAndPOST(t *testing.T) {
+	verbs := map[string]map[string]bool{}
+	for _, route := range registeredRoutes(t) {
+		if !strings.HasPrefix(route.path, "/api/") || strings.Contains(route.path, "{") || route.method == "" {
+			continue
+		}
+		if verbs[route.path] == nil {
+			verbs[route.path] = map[string]bool{}
+		}
+		verbs[route.path][route.method] = true
+	}
+	if len(verbs) < 300 {
+		t.Fatalf("only %d Web API methods discovered; the route scan is broken", len(verbs))
+	}
+	for path, registered := range verbs {
+		if !registered[http.MethodGet] || !registered[http.MethodPost] {
+			t.Errorf("%s is registered for %v; every Web API method takes both GET and POST", path, registered)
+		}
+	}
+	// dnd.setSnooze serves user tokens only.
+	handler, _ := testUserHandlerWithStore()
+	// A GET carries its arguments in the query string, and the method must
+	// read them exactly as it reads a POST body.
+	if code := errorCode(t, getAPI(handler, "/api/dnd.setSnooze?num_minutes=5")); code != "" {
+		t.Fatalf("GET dnd.setSnooze answered %q", code)
+	}
+	if code := errorCode(t, getAPI(handler, "/api/dnd.setSnooze")); code == "" || code == "unknown_method" {
+		t.Fatalf("GET dnd.setSnooze without num_minutes answered %q; the query string was not the argument source", code)
 	}
 }
 

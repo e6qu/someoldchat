@@ -20,6 +20,10 @@ import (
 // state will be shown — and they answer a bare {"ok": true} as the SDK's own
 // response types expect.
 
+// assistantLoadingMessageLimit is Slack's documented maximum for
+// assistant.threads.setStatus loading_messages.
+const assistantLoadingMessageLimit = 10
+
 func (h Handler) setAssistantThreadTitle(w http.ResponseWriter, r *http.Request) {
 	principal, fields, target, thread, ok := h.assistantTarget(w, r)
 	if !ok {
@@ -36,6 +40,18 @@ func (h Handler) setAssistantThreadStatus(w http.ResponseWriter, r *http.Request
 	principal, fields, target, thread, ok := h.assistantTarget(w, r)
 	if !ok {
 		return
+	}
+	// loading_messages is the list a client rotates through instead of the
+	// bare status, at most ten. It is validated so a malformed list is refused
+	// as Slack refuses it, but not yet stored or shown: carrying it needs a
+	// column, a wire field and a renderer, recorded as a deviation on
+	// assistant.threads.setStatus in specs/compatibility.yaml.
+	if raw, present := fields["loading_messages"]; present {
+		var messages []string
+		if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &messages); err != nil || len(messages) > assistantLoadingMessageLimit {
+			writeError(w, "invalid_arguments")
+			return
+		}
 	}
 	if err := h.Messages.SetAssistantThreadStatus(r.Context(), principal.WorkspaceID, principal.UserID, target, thread, fields["status"]); err != nil {
 		writeAssistantError(w, err)

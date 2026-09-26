@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
-	"path/filepath"
 	"strings"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -520,10 +519,15 @@ func projectMessageSnapshot(ctx context.Context, state any, record events.Record
 		if _, recorded := current["edited"]; !recorded {
 			current["edited"] = map[string]any{"user": record.Event.ActorID, "ts": editedAt}
 		}
+		// The outer ts is the change's own timestamp, as Slack sends it; the
+		// edited message's ts is inside `message`.
 		body := map[string]any{
 			"type": "message", "subtype": "message_changed", "hidden": true,
-			"channel": snapshot.Current.Conversation, "ts": string(domain.NewMessageTimestamp(snapshot.Current.CreatedAt)),
+			"channel": snapshot.Current.Conversation, "ts": editedAt,
 			"event_ts": editedAt, "message": current, "previous_message": previous,
+		}
+		if err := setChannelType(ctx, state, body, snapshot.Current.Conversation); err != nil {
+			return events.Record{}, false, err
 		}
 		return encodeProjectedEvent(record, body)
 	case "message.deleted":
@@ -540,7 +544,10 @@ func projectMessageSnapshot(ctx context.Context, state any, record events.Record
 			"type": "message", "subtype": "message_deleted", "hidden": true,
 			"channel":    snapshot.Previous.Conversation,
 			"deleted_ts": string(domain.NewMessageTimestamp(snapshot.Previous.CreatedAt)),
-			"event_ts":   deletedAt, "previous_message": previous,
+			"ts":         deletedAt, "event_ts": deletedAt, "previous_message": previous,
+		}
+		if err := setChannelType(ctx, state, body, snapshot.Previous.Conversation); err != nil {
+			return events.Record{}, false, err
 		}
 		return encodeProjectedEvent(record, body)
 	default:
@@ -553,8 +560,35 @@ func projectMessageSnapshot(ctx context.Context, state any, record events.Record
 		if botUserID != "" && strings.Contains(snapshot.Current.Text, "<@"+string(botUserID)+">") {
 			body["app_mentioned"] = true
 		}
+		if err := setChannelType(ctx, state, body, snapshot.Current.Conversation); err != nil {
+			return events.Record{}, false, err
+		}
 		return encodeProjectedEvent(record, body)
 	}
+}
+
+type conversationReader interface {
+	GetConversation(context.Context, domain.ConversationID) (domain.Conversation, error)
+}
+
+// setChannelType adds the Events API channel_type to an outer message event.
+// AppEventProjectionStore always reads conversations; a narrower projection
+// store that cannot leaves the field out. A conversation that has since
+// disappeared leaves it out too rather than failing delivery.
+func setChannelType(ctx context.Context, state any, body map[string]any, conversationID domain.ConversationID) error {
+	conversations, ok := state.(conversationReader)
+	if !ok {
+		return nil
+	}
+	conversation, err := conversations.GetConversation(ctx, conversationID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	body["channel_type"] = conversation.SlackChannelType()
+	return nil
 }
 
 func appEventMessage(ctx context.Context, state any, message domain.Message) (map[string]any, error) {
@@ -754,18 +788,21 @@ func deliveredString(delivered events.Delivered, name string) (string, error) {
 }
 
 func appEventFile(file domain.File) map[string]any {
-	fileType := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.Name)), ".")
-	value := map[string]any{
+	// A deleted file is a tombstone in an event exactly as in a Web API read.
+	if file.Deleted {
+		return map[string]any{"id": file.ID, "mode": file.Mode()}
+	}
+	fileType, prettyType := file.FileTypes()
+	return map[string]any{
 		"id": file.ID, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(),
 		"name": file.Name, "title": file.Title, "mimetype": file.MIMEType,
-		"filetype": fileType, "pretty_type": strings.ToUpper(fileType), "user": file.Uploader,
-		"editable": false, "size": file.Size, "mode": "hosted", "is_external": false,
+		"filetype": fileType, "pretty_type": prettyType, "user": file.Uploader,
+		"editable": file.IsSnippet(), "size": file.Size, "mode": file.Mode(), "is_external": false,
 		"external_type": "", "is_public": file.PublicToken != "", "public_url_shared": file.PublicToken != "",
 		"display_as_bot": false,
+		// The projection runs in delivery workers that know no public origin,
+		// so these stay origin-relative; see docs/files.md.
+		"url_private":          "/api/files/" + url.PathEscape(string(file.ID)),
+		"url_private_download": "/api/files/" + url.PathEscape(string(file.ID)),
 	}
-	if !file.Deleted {
-		value["url_private"] = "/api/files/" + url.PathEscape(string(file.ID))
-		value["url_private_download"] = "/api/files/" + url.PathEscape(string(file.ID))
-	}
-	return value
 }

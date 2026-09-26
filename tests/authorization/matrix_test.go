@@ -410,6 +410,12 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureMessageTimestamp)
 	case reflect.TypeOf(domain.PageRequest{}):
 		return reflect.ValueOf(domain.PageRequest{Limit: 10})
+	case reflect.TypeOf(domain.HistoryRequest{}):
+		return reflect.ValueOf(domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
+	case reflect.TypeOf(domain.ThreadRequest{}):
+		return reflect.ValueOf(domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
+	case reflect.TypeOf([]domain.MessageID(nil)):
+		return reflect.ValueOf([]domain.MessageID{fixtureMessageID})
 	case reflect.TypeOf(domain.ListColumnType("")):
 		// A real column type, so AddListColumn passes schema validation and the
 		// holder's write grant carries it to success.

@@ -37,6 +37,8 @@ message Pin {
   string message_id = 1;
   string user_id = 2;
   string created_at = 3;
+  // item is the pinned message as it reads now.
+  Message item = 4;
 }
 
 message PinPage {

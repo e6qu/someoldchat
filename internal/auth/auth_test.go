@@ -37,6 +37,30 @@ func TestStaticAuthenticatorReturnsTypedPrincipal(t *testing.T) {
 	}
 }
 
+// The Authorization auth-scheme is case-insensitive (RFC 9110 §11.1). The
+// literal "Bearer " prefix used to be trimmed, so `bearer token` was compared
+// whole and answered invalid_auth for a credential that was correct.
+func TestAuthenticatorReadsTheBearerSchemeCaseInsensitively(t *testing.T) {
+	authenticator, err := NewStatic("token", Principal{WorkspaceID: "T1", UserID: "U1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, header := range []string{"Bearer token", "bearer token", "BEARER  token"} {
+		request := httptest.NewRequest("POST", "/", nil)
+		request.Header.Set("Authorization", header)
+		if _, err := authenticator.Authenticate(request); err != nil {
+			t.Errorf("%q: %v", header, err)
+		}
+	}
+	// Another scheme carries no bearer credential; the form token still counts.
+	request := httptest.NewRequest("POST", "/", strings.NewReader("token=token"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+	if _, err := authenticator.Authenticate(request); err != nil {
+		t.Errorf("a non-bearer Authorization header hid the form token: %v", err)
+	}
+}
+
 func TestStaticAuthenticatorRejectsWrongToken(t *testing.T) {
 	authenticator, err := NewStatic("token", Principal{WorkspaceID: "T1", UserID: "U1"})
 	if err != nil {

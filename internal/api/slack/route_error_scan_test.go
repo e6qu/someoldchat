@@ -91,15 +91,17 @@ func parseHandlerSource(t *testing.T) (*token.FileSet, []*ast.File) {
 	return fileSet, files
 }
 
-// registeredRoutes reads every mux.HandleFunc call in Register.
+// registeredRoutes reads every mux.HandleFunc call in Register and the
+// registration functions it delegates to.
 func registeredRoutes(t *testing.T) []registeredRoute {
 	t.Helper()
 	fileSet, parsed := parseHandlerSource(t)
+	registrationFunctions := registrationFunctionNames(parsed)
 	routes := make([]registeredRoute, 0, 400)
 	for _, file := range parsed {
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Name.Name != "Register" {
+			if !ok || !registrationFunctions[function.Name.Name] {
 				continue
 			}
 			ast.Inspect(function.Body, func(node ast.Node) bool {
@@ -137,6 +139,33 @@ func registeredRoutes(t *testing.T) []registeredRoute {
 		t.Fatalf("only %d routes discovered; the Register scan is broken", len(routes))
 	}
 	return routes
+}
+
+// registrationFunctionNames is Register plus every method of this package it
+// delegates registration to (h.registerWebAPI, h.registerSurfaces). Reading them
+// from Register's body, rather than naming them here, keeps a route registered
+// in a newly split-out function visible to the scan.
+func registrationFunctionNames(parsed []*ast.File) map[string]bool {
+	names := map[string]bool{"Register": true}
+	for _, file := range parsed {
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Name.Name != "Register" {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if selector, ok := call.Fun.(*ast.SelectorExpr); ok && strings.HasPrefix(selector.Sel.Name, "register") {
+					names[selector.Sel.Name] = true
+				}
+				return true
+			})
+		}
+	}
+	return names
 }
 
 func stringLiteral(expression ast.Expr) (string, bool) {
@@ -278,8 +307,50 @@ var scopeArguments = map[string][]int{
 	"authenticate":                 {1},
 	"authenticateApp":              {1},
 	"authenticateConversationJoin": {1, 2},
+	"authenticateConversation":     {1},
+	"requireAnyScope":              {2, 3, 4, 5, 6, 7, 8, 9},
 	"listEmoji":                    {2},
 	"deleteListItemsWithScope":     {2},
+}
+
+// scopeGrants reads the package-level conversationGrant values: a handler that
+// enforces a grant by name (authenticateConversation(r, conversationHistoryGrant))
+// enforces every scope the grant's literal names.
+func scopeGrants(parsed []*ast.File) map[string][]string {
+	grants := make(map[string][]string)
+	for _, file := range parsed {
+		for _, declaration := range file.Decls {
+			general, ok := declaration.(*ast.GenDecl)
+			if !ok || general.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range general.Specs {
+				value, ok := spec.(*ast.ValueSpec)
+				if !ok || len(value.Names) != len(value.Values) {
+					continue
+				}
+				for index, expression := range value.Values {
+					composite, ok := expression.(*ast.CompositeLit)
+					if !ok {
+						continue
+					}
+					if identifier, ok := composite.Type.(*ast.Ident); !ok || identifier.Name != "conversationGrant" {
+						continue
+					}
+					for _, element := range composite.Elts {
+						pair, ok := element.(*ast.KeyValueExpr)
+						if !ok {
+							continue
+						}
+						if scope, ok := scopeSelector(pair.Value); ok {
+							grants[value.Names[index].Name] = append(grants[value.Names[index].Name], scope)
+						}
+					}
+				}
+			}
+		}
+	}
+	return grants
 }
 
 // codeReturningFunctions return a code rather than writing one, so every string
@@ -294,6 +365,10 @@ func handlerFacts(t *testing.T) map[string]functionFacts {
 	t.Helper()
 	_, parsed := parseHandlerSource(t)
 	arguments := codeArguments(t)
+	grants := scopeGrants(parsed)
+	if len(grants) == 0 {
+		t.Fatal("no conversationGrant values discovered; the grant scan is broken")
+	}
 	facts := make(map[string]functionFacts)
 	for _, file := range parsed {
 		for _, declaration := range file.Decls {
@@ -301,13 +376,13 @@ func handlerFacts(t *testing.T) map[string]functionFacts {
 			if !ok || function.Body == nil {
 				continue
 			}
-			collectFunctionFacts(function, arguments, facts)
+			collectFunctionFacts(function, arguments, grants, facts)
 		}
 	}
 	return facts
 }
 
-func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, facts map[string]functionFacts) {
+func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, grants map[string][]string, facts map[string]functionFacts) {
 	{
 		name := function.Name.Name
 		entry, exists := facts[name]
@@ -333,9 +408,24 @@ func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, fa
 				// position of a call that refuses the request without it.
 				for _, index := range scopeArguments[callee] {
 					if index < len(value.Args) {
-						if scope, ok := scopeSelector(value.Args[index]); ok {
-							entry.scopes[scope] = struct{}{}
-						}
+						// The whole argument expression is the enforced value,
+						// so a scope or grant anywhere inside it — an append
+						// of a grant's family and an invite scope — counts.
+						ast.Inspect(value.Args[index], func(argument ast.Node) bool {
+							expression, ok := argument.(ast.Expr)
+							if !ok {
+								return true
+							}
+							if scope, ok := scopeSelector(expression); ok {
+								entry.scopes[scope] = struct{}{}
+							}
+							if identifier, ok := expression.(*ast.Ident); ok {
+								for _, scope := range grants[identifier.Name] {
+									entry.scopes[scope] = struct{}{}
+								}
+							}
+							return true
+						})
 					}
 				}
 
@@ -344,13 +434,6 @@ func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, fa
 				// inline or assembled in a local first.
 				for _, code := range envelopeCodes(value) {
 					entry.codes[code] = struct{}{}
-				}
-				// A route may also enforce a scope without authenticate: reading
-				// the principal from another authenticator and refusing with
-				// missingScopeError is how /apps.connections.open does it. The
-				// refusal is the enforcement, so the scope is recorded from it.
-				if scope, ok := missingScopeLiteral(value); ok {
-					entry.scopes[scope] = struct{}{}
 				}
 			case *ast.ReturnStmt:
 				if !returnsCode {
@@ -378,26 +461,6 @@ func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, fa
 		})
 		facts[name] = entry
 	}
-}
-
-// missingScopeLiteral reads `missingScopeError{needed: auth.Scope…}`.
-func missingScopeLiteral(composite *ast.CompositeLit) (string, bool) {
-	identifier, ok := composite.Type.(*ast.Ident)
-	if !ok || identifier.Name != "missingScopeError" {
-		return "", false
-	}
-	for _, element := range composite.Elts {
-		pair, ok := element.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		key, ok := pair.Key.(*ast.Ident)
-		if !ok || key.Name != "needed" {
-			continue
-		}
-		return scopeSelector(pair.Value)
-	}
-	return "", false
 }
 
 // scopeSelector reads an `auth.Scope…` argument.
@@ -522,6 +585,7 @@ func sentinelDrivenCodes() map[string]string {
 		"no_permission":              "service.ErrMessageNotOwned / ErrNotWorkspaceAdmin, classified by sentinel",
 		"not_an_admin":               "mapAdminError's role denial, classified by sentinel",
 		"not_in_channel":             "service.ErrNotInConversation, classified by sentinel",
+		"user_not_found":             "service.ErrUserNotFound, classified by sentinel: the person an operation names is missing, as distinct from the conversation it acts on",
 		"restricted_action":          "service.ErrConversationPostingRestricted, classified by sentinel: the channel's posting permissions refuse a member who may read it",
 		"cant_invite_self":           "service.ErrCannotInviteSelf, classified by sentinel",
 		"cant_delete_primary_owner":  "service.ErrLastWorkspaceOwner, classified by sentinel",
@@ -553,6 +617,7 @@ func sentinelDrivenCodes() map[string]string {
 		"channel_not_found":          "postMessageError's name for store.ErrNotFound on a message write",
 		"is_archived":                "postMessageError's name for service.ErrConversationAlreadyArchived on a message write",
 		"no_text":                    "postMessageError's name for service.ErrInvalidMessage",
+		"thread_not_found":           "postMessageError's name for service.ErrThreadNotFound: a thread_ts naming no live message is not a missing channel",
 		"invitation_expired":         "mutationErrorCode's name for service.ErrInvitationExpired: the invitation is real and the request well formed, so neither not_found nor an invalid-argument code describes it",
 		"invalid_duration":           "mutationErrorCode's name for service.ErrInvalidRetentionDuration: Slack's own code for a duration outside its documented range",
 		"channel_type_not_supported": "mutationErrorCode's name for service.ErrRetentionNotSupported: the conversation is real and the request well formed, but its type carries no retention policy",
@@ -627,7 +692,7 @@ func (h Handler) mentionsWithoutEnforcing(w http.ResponseWriter, r *http.Request
 		if !ok || function.Body == nil {
 			continue
 		}
-		collectFunctionFacts(function, codeWriters, facts)
+		collectFunctionFacts(function, codeWriters, nil, facts)
 	}
 	scopes := sortedKeys(facts["mentionsWithoutEnforcing"].scopes)
 	if len(scopes) != 1 || scopes[0] != "ScopeUsersRead" {
