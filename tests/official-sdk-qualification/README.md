@@ -13,6 +13,12 @@ suites use `com.slack.api:slack-api-client` 1.49.0, the Java Bolt suite uses
 `com.slack.api:bolt` 1.49.0, and the Deno suite uses `deno-slack-runtime` 1.1.3. Their immutable artifact
 hashes and suite paths are recorded in [`../../specs/sdk-compatibility.yaml`](../../specs/sdk-compatibility.yaml).
 
+The fixture registers the Slack handler exactly as the production server does
+with its default `-api-rate-limit`, limiter included, so a route the limited
+registration fails to serve fails qualification. The suites stay inside the
+limiter's budgets: the Tier 4 floor per method and five posts in a burst per
+channel.
+
 The Node, Python, and Java Web API suites exercise presence-sensitive rich-message
 updates through the SDKs' own array encoders: omitted blocks and attachments
 must survive, while explicit empty arrays must remove them. They also parse the
