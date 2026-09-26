@@ -9323,7 +9323,37 @@ func fileResponse(origin string, file domain.File) map[string]any {
 	if len(file.SharedChannels) > 0 {
 		result["channels"] = file.SharedChannels
 	}
+	if shares := fileSharesResponse(file); shares != nil {
+		result["shares"] = shares
+	}
 	return result
+}
+
+// fileSharesResponse is Slack's shares map: {public|private: {channel:
+// [share, ...]}}, one entry per message that carries the file.
+func fileSharesResponse(file domain.File) map[string]any {
+	if len(file.Shares) == 0 {
+		return nil
+	}
+	shares := map[string]any{}
+	for _, share := range file.Shares {
+		visibility := "public"
+		if share.Private {
+			visibility = "private"
+		}
+		byChannel, _ := shares[visibility].(map[string]any)
+		if byChannel == nil {
+			byChannel = map[string]any{}
+			shares[visibility] = byChannel
+		}
+		entry := map[string]any{"ts": share.Timestamp, "channel_name": share.ConversationName, "team_id": file.WorkspaceID, "share_user_id": share.SharedBy}
+		if share.ThreadTimestamp != "" {
+			entry["thread_ts"] = share.ThreadTimestamp
+		}
+		existing, _ := byChannel[string(share.Conversation)].([]map[string]any)
+		byChannel[string(share.Conversation)] = append(existing, entry)
+	}
+	return shares
 }
 
 // defaultSnippetFilename names a content= snippet the caller left unnamed. Slack

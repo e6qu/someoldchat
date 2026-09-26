@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -154,5 +155,54 @@ func oauthInstallsReuseTheirBotAndRedeemEveryGrantShape(t *testing.T, open opene
 	}
 	if exchanged.InstallerID != f.userID || exchanged.UserID != first.BotUserID || exchanged.WorkspaceName != "Divergence" {
 		t.Fatalf("exchanged token=%+v", exchanged)
+	}
+}
+
+// fileSharesNameTheirCarryingMessages pins files.info's shares read: one entry
+// per live message that carries the file, oldest first, with the
+// conversation's name and privacy, on every profile.
+func fileSharesNameTheirCarryingMessages(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	file := domain.File{
+		ID: domain.FileID("F-shares-" + f.suffix), WorkspaceID: f.workspaceID, Uploader: f.userID,
+		Name: "plan.txt", Title: "Plan", MIMEType: "text/plain", BlobKey: string(f.workspaceID) + "/plan", Size: 4,
+		CreatedAt: time.Unix(1_700_000_500, 0).UTC(),
+	}
+	if err := f.repository.CreateFile(ctx, file, f.event("shares-file", "file.created", string(file.ID))); err != nil {
+		t.Fatal(err)
+	}
+	share := func(name string, at int64, thread domain.MessageTimestamp) domain.Message {
+		t.Helper()
+		message := domain.Message{
+			ID: domain.MessageID("M-" + name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+			AuthorID: f.userID, Text: name, Attachments: "[]", ThreadTimestamp: thread,
+			CreatedAt: domain.MessageInstant(time.Unix(at, 0).UTC()),
+		}
+		if err := f.repository.CreateFileShareMessage(ctx, []domain.FileID{file.ID}, message,
+			[]events.Event{f.event("shares-"+name, "message.created", string(message.ID))}); err != nil {
+			t.Fatal(err)
+		}
+		return message
+	}
+	first := share("first", 1_700_000_501, "")
+	reply := share("reply", 1_700_000_502, domain.NewMessageTimestamp(first.CreatedAt))
+	shares, err := f.repository.ListFileShares(ctx, file.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shares) != 2 {
+		t.Fatalf("shares=%+v, want two", shares)
+	}
+	want := []domain.FileShare{
+		{Conversation: f.channelID, ConversationName: "divergence", Timestamp: domain.NewMessageTimestamp(first.CreatedAt), SharedBy: f.userID},
+		{Conversation: f.channelID, ConversationName: "divergence", Timestamp: domain.NewMessageTimestamp(reply.CreatedAt), ThreadTimestamp: reply.ThreadTimestamp, SharedBy: f.userID},
+	}
+	for index := range want {
+		if shares[index] != want[index] {
+			t.Fatalf("shares[%d]=%+v, want %+v", index, shares[index], want[index])
+		}
 	}
 }

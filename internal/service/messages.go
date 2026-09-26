@@ -663,6 +663,29 @@ func (m Messages) FileInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if err := m.authorizeFileAccess(ctx, userID, file); err != nil {
 		return domain.File{}, err
 	}
+	shares, err := m.Store.ListFileShares(ctx, file.ID)
+	if err != nil {
+		return domain.File{}, err
+	}
+	// A share names a message and a conversation, so the reader sees only the
+	// shares in public channels and conversations they belong to.
+	membership := make(map[domain.ConversationID]bool)
+	for _, share := range shares {
+		if share.Private {
+			member, known := membership[share.Conversation]
+			if !known {
+				member, err = m.Store.IsConversationMember(ctx, share.Conversation, userID)
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
+					return domain.File{}, err
+				}
+				membership[share.Conversation] = member
+			}
+			if !member {
+				continue
+			}
+		}
+		file.Shares = append(file.Shares, share)
+	}
 	return file, nil
 }
 

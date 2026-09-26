@@ -1968,6 +1968,23 @@ type File struct {
 	CreatedAt      time.Time
 	Deleted        bool
 	SharedChannels []ConversationID
+	// Shares are the live messages that carry the file, as files.info
+	// reports them. Only files.info reads them, so every other file value
+	// leaves them empty rather than paying a join per file.
+	Shares []FileShare
+}
+
+// FileShare is one message that shared a file into a conversation: an entry
+// of the file object's shares map in Slack's files.info.
+type FileShare struct {
+	Conversation     ConversationID
+	ConversationName string
+	// Private places the share under shares.private: a private channel, a
+	// direct message, or a group direct message.
+	Private         bool
+	Timestamp       MessageTimestamp
+	ThreadTimestamp MessageTimestamp
+	SharedBy        UserID
 }
 
 // IsSnippet reports whether this file is an inline text/code snippet rather than

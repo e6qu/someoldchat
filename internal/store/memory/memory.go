@@ -10469,6 +10469,43 @@ func (s *Store) ListFiles(_ context.Context, workspace domain.WorkspaceID, reque
 	return page, nil
 }
 
+func (s *Store) ListFileShares(_ context.Context, id domain.FileID) ([]domain.FileShare, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	type carried struct {
+		share     domain.FileShare
+		createdAt time.Time
+		message   domain.MessageID
+	}
+	var found []carried
+	for conversationID, values := range s.messages {
+		conversation := s.conversations[conversationID]
+		for _, message := range values {
+			if message.Deleted || !slices.ContainsFunc(message.Files, func(file domain.File) bool { return file.ID == id }) {
+				continue
+			}
+			found = append(found, carried{share: domain.FileShare{
+				Conversation: conversationID, ConversationName: conversation.Name, Private: conversation.PrivateFlag(),
+				Timestamp: domain.NewMessageTimestamp(message.CreatedAt), ThreadTimestamp: message.ThreadTimestamp, SharedBy: message.AuthorID,
+			}, createdAt: message.CreatedAt, message: message.ID})
+		}
+	}
+	sort.Slice(found, func(left, right int) bool {
+		if !found[left].createdAt.Equal(found[right].createdAt) {
+			return found[left].createdAt.Before(found[right].createdAt)
+		}
+		if found[left].share.Conversation != found[right].share.Conversation {
+			return found[left].share.Conversation < found[right].share.Conversation
+		}
+		return found[left].message < found[right].message
+	})
+	shares := make([]domain.FileShare, 0, len(found))
+	for _, value := range found {
+		shares = append(shares, value.share)
+	}
+	return shares, nil
+}
+
 func (s *Store) ListVisibleFiles(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.FilePage, error) {
 	if err := store.CheckPage(request); err != nil {
 		return domain.FilePage{}, err

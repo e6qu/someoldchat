@@ -35,6 +35,8 @@ func newFileFixture(t *testing.T, publicURL string, withBlob bool) fileFixture {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("C1", "U1")
+	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "hideout", Kind: domain.ConversationTypePrivate})
+	s.SeedConversationMember("C2", "U1")
 	messages := service.Messages{Store: s}
 	if withBlob {
 		objects, err := blob.NewFilesystem(t.TempDir(), 1<<20)
@@ -44,7 +46,7 @@ func newFileFixture(t *testing.T, publicURL string, withBlob bool) fileFixture {
 		messages.Blob = objects
 	}
 	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{
-		auth.ScopeFilesRead: {}, auth.ScopeFilesWrite: {}, auth.ScopeChannelsHistory: {}, auth.ScopeChatWrite: {},
+		auth.ScopeFilesRead: {}, auth.ScopeFilesWrite: {}, auth.ScopeChannelsHistory: {}, auth.ScopeChatWrite: {}, auth.ScopeChannelsManage: {},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -359,5 +361,34 @@ func TestFilesInfoCarriesTheRequiredCommentsArray(t *testing.T) {
 	}
 	if metadata, ok := info["response_metadata"].(map[string]any); !ok || metadata["next_cursor"] != "" {
 		t.Fatalf("files.info=%v", info)
+	}
+}
+
+// files.info reports the messages that shared the file under shares, split
+// into public and private, and only in conversations the reader can see.
+func TestFilesInfoReportsItsSharesByVisibility(t *testing.T) {
+	f := newFileFixture(t, "", true)
+	id := f.uploadV2("a.txt", "x", url.Values{"channels": {"C1,C2"}, "initial_comment": {"see attached"}})["id"].(string)
+	history := f.call("conversations.history", url.Values{"channel": {"C1"}}, nil)["messages"].([]any)
+	shareTS := history[0].(map[string]any)["ts"]
+	shares, _ := f.call("files.info", url.Values{"file": {id}}, nil)["file"].(map[string]any)["shares"].(map[string]any)
+	public, _ := shares["public"].(map[string]any)["C1"].([]any)
+	private, _ := shares["private"].(map[string]any)["C2"].([]any)
+	if len(public) != 1 || len(private) != 1 {
+		t.Fatalf("shares=%v", shares)
+	}
+	entry := public[0].(map[string]any)
+	if entry["ts"] != shareTS || entry["channel_name"] != "general" || entry["team_id"] != "T1" || entry["share_user_id"] != "U1" {
+		t.Fatalf("public share=%v, want ts %v", entry, shareTS)
+	}
+	if private[0].(map[string]any)["channel_name"] != "hideout" {
+		t.Fatalf("private share=%v", private[0])
+	}
+	if left := f.call("conversations.leave", url.Values{"channel": {"C2"}}, nil); left["ok"] != true {
+		t.Fatalf("leave=%v", left)
+	}
+	after, _ := f.call("files.info", url.Values{"file": {id}}, nil)["file"].(map[string]any)["shares"].(map[string]any)
+	if _, present := after["private"]; present || after["public"] == nil {
+		t.Fatalf("shares after leaving the private channel=%v", after)
 	}
 }

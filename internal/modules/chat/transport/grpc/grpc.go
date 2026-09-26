@@ -11851,7 +11851,7 @@ func encodeProtoFile(value domain.File) *chatv1.File {
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Uploader: string(value.Uploader),
 		Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size,
 		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, PublicToken: value.PublicToken,
-		SharedChannels: conversationStrings(value.SharedChannels), Description: value.Description, FileType: value.FileType,
+		SharedChannels: conversationStrings(value.SharedChannels), Description: value.Description, FileType: value.FileType, Shares: encodeFileShares(value.Shares),
 	}
 }
 
@@ -11869,7 +11869,7 @@ func decodeProtoFile(value *chatv1.File) (domain.File, error) {
 	if err != nil {
 		return domain.File{}, errors.New("typed file created_at is invalid")
 	}
-	return domain.File{ID: domain.FileID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), PublicToken: value.GetPublicToken(), SharedChannels: conversationIDs(value.GetSharedChannels()), Description: value.GetDescription(), FileType: value.GetFileType()}, nil
+	return domain.File{ID: domain.FileID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), PublicToken: value.GetPublicToken(), SharedChannels: conversationIDs(value.GetSharedChannels()), Description: value.GetDescription(), FileType: value.GetFileType(), Shares: decodeFileShares(value.GetShares())}, nil
 }
 
 func encodeProtoFilePage(page domain.FilePage) *chatv1.FilePage {
@@ -14551,4 +14551,26 @@ func decodeProtoOAuthAuthorization(value *chatv1.OAuthAuthorization) (domain.OAu
 		return domain.OAuthAuthorization{}, errors.New("typed oauth authorization is incomplete")
 	}
 	return domain.OAuthAuthorization{AppID: domain.AppID(value.GetAppId()), AppName: value.GetAppName(), ClientID: value.GetClientId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), RedirectURI: value.GetRedirectUri(), BotScopes: append([]string(nil), value.GetBotScopes()...), UserScopes: append([]string(nil), value.GetUserScopes()...), State: value.GetState(), Code: value.GetCode(), BotID: domain.BotID(value.GetBotId()), BotUserID: domain.UserID(value.GetBotUserId()), IncomingWebhookChannel: domain.ConversationID(value.GetIncomingWebhookChannel()), CodeChallenge: value.GetCodeChallenge(), CodeChallengeMethod: value.GetCodeChallengeMethod()}, nil
+}
+
+func encodeFileShares(values []domain.FileShare) []*chatv1.FileShare {
+	if len(values) == 0 {
+		return nil
+	}
+	shares := make([]*chatv1.FileShare, 0, len(values))
+	for _, value := range values {
+		shares = append(shares, &chatv1.FileShare{ConversationId: string(value.Conversation), ConversationName: value.ConversationName, Private: value.Private, Ts: string(value.Timestamp), ThreadTs: string(value.ThreadTimestamp), SharedBy: string(value.SharedBy)})
+	}
+	return shares
+}
+
+func decodeFileShares(values []*chatv1.FileShare) []domain.FileShare {
+	if len(values) == 0 {
+		return nil
+	}
+	shares := make([]domain.FileShare, 0, len(values))
+	for _, value := range values {
+		shares = append(shares, domain.FileShare{Conversation: domain.ConversationID(value.GetConversationId()), ConversationName: value.GetConversationName(), Private: value.GetPrivate(), Timestamp: domain.MessageTimestamp(value.GetTs()), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()), SharedBy: domain.UserID(value.GetSharedBy())})
+	}
+	return shares
 }

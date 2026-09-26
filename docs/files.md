@@ -59,6 +59,14 @@ by delivery workers that know no public origin, so their `url_private` values
 are still origin-relative; a consumer resolves them against the API base URL
 or reads the file through `files.info`.
 
+## Shares
+
+`files.info` reports `shares` as Slack does — `{"public"|"private": {channel:
+[{ts, thread_ts?, channel_name, team_id, share_user_id}]}}` — one entry per
+live message that carries the file, limited to public channels and the
+conversations the reader belongs to. Other file objects carry only `channels`,
+so a list read does not pay a message join per file.
+
 ## Listing and deletion
 
 `files.list` returns files newest first (`created` descending, then id), so a

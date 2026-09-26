@@ -1135,6 +1135,10 @@ type Store interface {
 	// ListVisibleFiles reads the files user may see newest first (created_at
 	// DESC, id DESC) with a FileCursor; see file_order.go.
 	ListVisibleFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FilePage, error)
+	// ListFileShares reads the live messages that carry a file, oldest first,
+	// with the conversation each one is in. It does not check who may read
+	// them; the caller filters by conversation access.
+	ListFileShares(context.Context, domain.FileID) ([]domain.FileShare, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearch) (domain.FilePage, error)
 	// SearchCanvases answers Slack's Canvases search tab. It applies exactly
 	// the visibility rule ListCanvases applies, because a search that matched

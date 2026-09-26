@@ -439,11 +439,15 @@ operations:
       - go-test:internal/api/slack:TestFileMetadataEndpoints
       - go-test:internal/api/slack:TestFileURLsAreAbsoluteOnTheConfiguredPublicURL
       - go-test:internal/api/slack:TestFilesInfoCarriesTheRequiredCommentsArray
+      - go-test:internal/api/slack:TestFilesInfoReportsItsSharesByVisibility
+      - persistence:tests/persistence-qualification/files_oauth_test.go
     deviations:
       - >-
-        The file object carries no thumb_* URLs (no token-authenticated
-        thumbnail route exists on the Web API surface) and no shares map;
-        channels lists the conversations the file is shared into.
+        The file object carries no thumb_* URLs: no token-authenticated
+        thumbnail route exists on the Web API surface. A shares entry carries
+        ts, thread_ts, channel_name, team_id and share_user_id but not the
+        reply_count/reply_users thread summary, and shares appear on
+        files.info only, not on list or message file objects.
   - method: files.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi

@@ -19155,6 +19155,33 @@ func (s *Store) ListFiles(ctx context.Context, workspace domain.WorkspaceID, req
 	return page, nil
 }
 
+func (s *Store) ListFileShares(ctx context.Context, id domain.FileID) ([]domain.FileShare, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT m.conversation, c.name, c.is_private, m.created_at, m.thread_timestamp, m.author_id
+		FROM message_files mf JOIN messages m ON m.id = mf.message_id JOIN conversations c ON c.id = m.conversation
+		WHERE mf.file_id = ? AND m.deleted = 0 ORDER BY m.created_at, m.conversation, m.id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	shares := make([]domain.FileShare, 0)
+	for rows.Next() {
+		var share domain.FileShare
+		var private int
+		var created string
+		if err := rows.Scan(&share.Conversation, &share.ConversationName, &private, &created, &share.ThreadTimestamp, &share.SharedBy); err != nil {
+			return nil, err
+		}
+		createdAt, err := domain.ParseStoredTime(created)
+		if err != nil {
+			return nil, err
+		}
+		share.Private = private != 0
+		share.Timestamp = domain.NewMessageTimestamp(createdAt)
+		shares = append(shares, share)
+	}
+	return shares, rows.Err()
+}
+
 func (s *Store) ListVisibleFiles(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.FilePage, error) {
 	if err := store.CheckPage(request); err != nil {
 		return domain.FilePage{}, err
