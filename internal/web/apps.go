@@ -163,8 +163,15 @@ func (h Handler) developerApps(w http.ResponseWriter, r *http.Request) {
 // app URL. This endpoint is deliberately read-only: it authenticates and
 // converts that retained-method reload into the canonical GET without
 // repeating app creation or returning the secret again.
+//
+// It still requires the CSRF token, like every other POST: the reload re-sends
+// the original form, token included, so a genuine reload passes, and the route
+// is not left as the one POST a cross-site page may drive with the session.
 func (h Handler) reloadDeveloperApps(w http.ResponseWriter, r *http.Request) {
 	if _, _, ok := h.developerPrincipal(w, r); !ok {
+		return
+	}
+	if !h.requireCSRF(w, r) {
 		return
 	}
 	target := "/app/developer/apps"

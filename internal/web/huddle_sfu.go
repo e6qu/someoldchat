@@ -68,12 +68,12 @@ func (h Handler) huddleSFUOffer(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	if h.SFU == nil {
-		http.Error(w, "Huddle media is not available on this server.", http.StatusServiceUnavailable)
+	fields, ok := decodeFetchMutation(w, r, "invalid_offer")
+	if !ok {
 		return
 	}
-	fields, err := decodeFormFields(w, r)
-	if err != nil {
+	if h.SFU == nil {
+		http.Error(w, "Huddle media is not available on this server.", http.StatusServiceUnavailable)
 		return
 	}
 	callID := domain.CallID(strings.TrimSpace(fields["call_id"]))
@@ -102,12 +102,12 @@ func (h Handler) huddleSFUSignal(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	if h.SFU == nil {
-		http.Error(w, "Huddle media is not available on this server.", http.StatusServiceUnavailable)
+	fields, ok := decodeFetchMutation(w, r, "invalid_signal")
+	if !ok {
 		return
 	}
-	fields, err := decodeFormFields(w, r)
-	if err != nil {
+	if h.SFU == nil {
+		http.Error(w, "Huddle media is not available on this server.", http.StatusServiceUnavailable)
 		return
 	}
 	callID := strings.TrimSpace(fields["call_id"])
@@ -136,12 +136,12 @@ func (h Handler) huddlePresence(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	if h.HuddleStore == nil {
-		http.Error(w, "Huddle media is not available on this server.", http.StatusServiceUnavailable)
+	fields, ok := decodeFetchMutation(w, r, "invalid_presence")
+	if !ok {
 		return
 	}
-	fields, err := decodeFormFields(w, r)
-	if err != nil {
+	if h.HuddleStore == nil {
+		http.Error(w, "Huddle media is not available on this server.", http.StatusServiceUnavailable)
 		return
 	}
 	callID := domain.CallID(strings.TrimSpace(fields["call_id"]))
@@ -167,8 +167,15 @@ func (h Handler) huddlePresence(w http.ResponseWriter, r *http.Request) {
 		events.String("camera", huddleBool(fields["camera"])),
 		events.String("presenting", huddleBool(fields["presenting"])),
 	), time.Now().UTC())
-	if err == nil {
-		_ = h.HuddleStore.AppendEvent(r.Context(), event)
+	if err != nil {
+		http.Error(w, "The presence update could not be sent.", http.StatusInternalServerError)
+		return
+	}
+	// A broadcast that was not stored reached nobody; answering 204 anyway told
+	// the browser everyone could see a mute that no one would.
+	if err := h.HuddleStore.AppendEvent(r.Context(), event); err != nil {
+		http.Error(w, "The presence update could not be sent. Try again.", http.StatusServiceUnavailable)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
