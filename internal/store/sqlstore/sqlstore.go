@@ -282,6 +282,12 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_conversation_created ON messages(conversation, created_at, id);
 CREATE INDEX IF NOT EXISTS messages_thread ON messages(conversation, thread_timestamp, created_at, id);
+-- The messages a member wrote across every conversation (ListAuthoredMessages,
+-- the Sent view) page by author and time. The only other message
+-- indexes lead with conversation, so that listing read every message in the
+-- workspace. Base-schema indexes run after the version ladder on databases of
+-- every age, so an existing database gains this one on its next start.
+CREATE INDEX IF NOT EXISTS messages_workspace_author_created ON messages(workspace_id, author_id, created_at, id);
 CREATE TABLE IF NOT EXISTS ephemeral_messages (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  conversation_id TEXT NOT NULL REFERENCES conversations(id), author_id TEXT NOT NULL REFERENCES users(id),
@@ -20359,11 +20365,9 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 	return page, nil
 }
 
-func (s *Store) ListAuthoredMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.MessagePage, error) {
-	if err := store.CheckPage(request); err != nil {
-		return domain.MessagePage{}, err
-	}
-	query := `SELECT ` + qualifiedMessageSelectColumns + `
+// authoredMessagesQuery is served by messages_workspace_author_created, which
+// TestAuthoredMessagesAreReadThroughTheAuthorIndex holds it to.
+const authoredMessagesQuery = `SELECT ` + qualifiedMessageSelectColumns + `
 		FROM messages m
 		JOIN conversations c ON c.id = m.conversation
 		WHERE m.workspace_id = ? AND m.author_id = ? AND m.deleted = 0
@@ -20371,6 +20375,12 @@ func (s *Store) ListAuthoredMessages(ctx context.Context, workspace domain.Works
 			SELECT 1 FROM conversation_members cm
 			WHERE cm.conversation_id = m.conversation AND cm.user_id = ?
 		))`
+
+func (s *Store) ListAuthoredMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.MessagePage, error) {
+	if err := store.CheckPage(request); err != nil {
+		return domain.MessagePage{}, err
+	}
+	query := authoredMessagesQuery
 	args := []any{workspace, user, user}
 	if request.Cursor != "" {
 		createdAt, id, err := domain.DecodeMessageCursor(request.Cursor)
