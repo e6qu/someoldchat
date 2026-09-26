@@ -8316,8 +8316,15 @@ func (h Handler) searchMessagePage(ctx context.Context, principal auth.Principal
 
 func (h Handler) searchMessageEnvelope(ctx context.Context, principal auth.Principal, arguments searchArguments, page domain.MessagePage) (map[string]any, error) {
 	matches := make([]map[string]any, 0, len(page.Messages))
+	var highlightTerms []string
+	if arguments.highlight {
+		highlightTerms = service.SearchHighlightTerms(arguments.query)
+	}
 	for _, message := range page.Messages {
 		match := messageResponse(message)
+		if arguments.highlight {
+			match["text"] = highlightSearchText(message.Text, highlightTerms)
+		}
 		conversation, infoErr := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, message.Conversation)
 		author, userErr := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, message.AuthorID)
 		permalink, linkErr := h.Messages.Permalink(ctx, principal.WorkspaceID, principal.UserID, message.Conversation, domain.NewMessageTimestamp(message.CreatedAt))
@@ -8342,6 +8349,57 @@ func (h Handler) searchMessageEnvelope(ctx context.Context, principal auth.Princ
 	pagination := map[string]any{"first": first, "last": last, "page": arguments.page, "per_page": arguments.count, "page_count": pageCount, "total_count": page.Total}
 	paging := map[string]any{"count": arguments.count, "page": arguments.page, "pages": pageCount, "total": page.Total}
 	return map[string]any{"matches": matches, "total": page.Total, "pagination": pagination, "paging": paging}, nil
+}
+
+// Slack's highlight markers: search with highlight=true wraps each matched
+// term in U+E000 and U+E001, private-use characters no message text carries.
+const (
+	searchHighlightStart = "\ue000"
+	searchHighlightEnd   = "\ue001"
+)
+
+// highlightSearchText wraps every case-insensitive occurrence of each term in
+// Slack's highlight markers. Overlapping matches merge into one span. Text
+// whose lower-casing changes its byte length is left unmarked rather than
+// marked at the wrong offsets.
+func highlightSearchText(text string, terms []string) string {
+	lower := strings.ToLower(text)
+	if len(lower) != len(text) || len(terms) == 0 {
+		return text
+	}
+	marked := make([]bool, len(text))
+	for _, term := range terms {
+		term = strings.ToLower(term)
+		if term == "" || len(term) > len(lower) {
+			continue
+		}
+		for offset := 0; ; {
+			index := strings.Index(lower[offset:], term)
+			if index < 0 {
+				break
+			}
+			for position := offset + index; position < offset+index+len(term); position++ {
+				marked[position] = true
+			}
+			offset += index + len(term)
+		}
+	}
+	var result strings.Builder
+	inside := false
+	for position := 0; position < len(text); position++ {
+		if marked[position] && !inside {
+			result.WriteString(searchHighlightStart)
+			inside = true
+		} else if !marked[position] && inside {
+			result.WriteString(searchHighlightEnd)
+			inside = false
+		}
+		result.WriteByte(text[position])
+	}
+	if inside {
+		result.WriteString(searchHighlightEnd)
+	}
+	return result.String()
 }
 
 func searchFileEnvelope(arguments searchArguments, page domain.FilePage) map[string]any {

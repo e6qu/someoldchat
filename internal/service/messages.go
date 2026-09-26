@@ -1064,7 +1064,7 @@ func (m Messages) SearchMessages(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.MessagePage{}, ErrInvalidSearch
 	}
-	parsed, err := parseSearchQuery(request.Query)
+	parsed, err := parseSearchQuery(request.Query, m.searchClockFor(ctx, workspaceID, userID))
 	if err != nil {
 		return domain.MessagePage{}, ErrInvalidSearch
 	}
@@ -1115,7 +1115,7 @@ func (m Messages) SearchFiles(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil {
 		return domain.FilePage{}, ErrInvalidSearch
 	}
-	parsed, err := parseSearchQuery(request.Query)
+	parsed, err := parseSearchQuery(request.Query, m.searchClockFor(ctx, workspaceID, userID))
 	if err != nil {
 		return domain.FilePage{}, ErrInvalidSearch
 	}
@@ -1183,24 +1183,70 @@ type parsedSearchQuery struct {
 	hasLink                              bool
 }
 
+// searchClock is the searcher's "now" and time zone. Slack resolves today,
+// yesterday, a bare month and a calendar date against the searcher's own day,
+// not the server's: at 01:00 in Tokyo, "on:today" is not the UTC date.
+type searchClock struct {
+	now      time.Time
+	location *time.Location
+}
+
+// searchClockFor is the searcher's clock. The member's zone is the one their
+// notification schedule carries - the only zone this product records for a
+// member, supplied by their own browser - and UTC when they have none.
+func (m Messages) searchClockFor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) searchClock {
+	clock := searchClock{now: time.Now(), location: time.UTC}
+	preferences, err := m.Store.GetWorkspaceNotificationPreferences(ctx, workspaceID, userID)
+	if err == nil && preferences.Schedule.TimeZone != "" {
+		if location, loadErr := time.LoadLocation(preferences.Schedule.TimeZone); loadErr == nil {
+			clock.location = location
+		}
+	}
+	return clock
+}
+
+// day parses a search date: an ISO calendar date, today, or yesterday, as the
+// start of that day in the searcher's zone.
+func (clock searchClock) day(value string) (time.Time, bool) {
+	now := clock.now.In(clock.location)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, clock.location)
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "today":
+		return today, true
+	case "yesterday":
+		return today.AddDate(0, 0, -1), true
+	}
+	if date, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(value), clock.location); err == nil {
+		return date, true
+	}
+	return time.Time{}, false
+}
+
 // parseSearchPeriod accepts the forms Slack's search help shows for during:.
 // A month alone means that month of the current year, which is what a member
-// typing "during:July" in July means; a year alone means the whole year. The
-// numeric form is kept because it is unambiguous and was already accepted.
-func parseSearchPeriod(value string) (time.Time, time.Time, bool) {
+// typing "during:July" in July means; a year alone means the whole year; today
+// and yesterday mean that day. The numeric form is kept because it is
+// unambiguous and was already accepted. Every period is in the searcher's zone.
+func parseSearchPeriod(value string, clock searchClock) (time.Time, time.Time, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return time.Time{}, time.Time{}, false
 	}
-	if month, err := time.Parse("2006-01", value); err == nil {
+	if day, ok := clock.day(value); ok && !strings.Contains(value, "-") {
+		return day, day.AddDate(0, 0, 1), true
+	}
+	if month, err := time.ParseInLocation("2006-01", value, clock.location); err == nil {
 		return month, month.AddDate(0, 1, 0), true
 	}
+	if day, err := time.ParseInLocation("2006-01-02", value, clock.location); err == nil {
+		return day, day.AddDate(0, 0, 1), true
+	}
 	for _, layout := range []string{"January 2006", "Jan 2006"} {
-		if month, err := time.Parse(layout, value); err == nil {
+		if month, err := time.ParseInLocation(layout, value, clock.location); err == nil {
 			return month, month.AddDate(0, 1, 0), true
 		}
 	}
-	if year, err := time.Parse("2006", value); err == nil {
+	if year, err := time.ParseInLocation("2006", value, clock.location); err == nil {
 		return year, year.AddDate(1, 0, 0), true
 	}
 	for _, layout := range []string{"January", "Jan"} {
@@ -1208,14 +1254,56 @@ func parseSearchPeriod(value string) (time.Time, time.Time, bool) {
 			// A bare month means this year. Reading it as year zero would
 			// return nothing and look like "no results" rather than a
 			// misunderstanding.
-			dated := time.Date(time.Now().UTC().Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
+			dated := time.Date(clock.now.In(clock.location).Year(), month.Month(), 1, 0, 0, 0, 0, clock.location)
 			return dated, dated.AddDate(0, 1, 0), true
 		}
 	}
 	return time.Time{}, time.Time{}, false
 }
 
-func parseSearchQuery(raw string) (parsedSearchQuery, error) {
+// searchTerm is one free-text search word. Slack's `term*` is a prefix
+// search; terms already match as substrings of the folded text, so the
+// wildcard is removed rather than searched for as a literal asterisk, which
+// matched nothing.
+func searchTerm(token string) (string, bool) {
+	term := strings.TrimRight(token, "*")
+	if strings.Trim(term, "\"") == "" {
+		return "", false
+	}
+	return domain.FoldSearchText(term), true
+}
+
+// SearchHighlightTerms are the free-text words of a search query that
+// highlight=true marks in each match: the ones a match must contain, without
+// modifiers, exclusions or wildcards.
+func SearchHighlightTerms(query string) []string {
+	tokens, err := domain.SearchQueryTokens(query)
+	if err != nil {
+		return nil
+	}
+	terms := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if strings.HasPrefix(token, "-") && len(token) > 1 {
+			continue
+		}
+		if name, _, modifier := strings.Cut(token, ":"); modifier && searchModifiers[strings.ToLower(name)] {
+			continue
+		}
+		if term := strings.Trim(strings.TrimRight(token, "*"), "\""); term != "" {
+			terms = append(terms, term)
+		}
+	}
+	return terms
+}
+
+// searchModifiers are the `name:` prefixes parseSearchQuery reads as a
+// modifier rather than as text.
+var searchModifiers = map[string]bool{
+	"in": true, "from": true, "with": true, "before": true, "after": true, "on": true,
+	"during": true, "is": true, "has": true, "type": true,
+}
+
+func parseSearchQuery(raw string, clock searchClock) (parsedSearchQuery, error) {
 	tokens, err := domain.SearchQueryTokens(raw)
 	if err != nil {
 		return parsedSearchQuery{}, err
@@ -1253,9 +1341,9 @@ func parseSearchQuery(raw string) (parsedSearchQuery, error) {
 				if excluded {
 					break
 				}
-				date, parseErr := time.Parse("2006-01-02", value)
-				if parseErr != nil {
-					return parsedSearchQuery{}, parseErr
+				date, parsed := clock.day(value)
+				if !parsed {
+					return parsedSearchQuery{}, errors.New("invalid search date")
 				}
 				switch name {
 				case "before":
@@ -1270,7 +1358,7 @@ func parseSearchQuery(raw string) (parsedSearchQuery, error) {
 				if excluded {
 					break
 				}
-				after, before, parsed := parseSearchPeriod(value)
+				after, before, parsed := parseSearchPeriod(value, clock)
 				if !parsed {
 					return parsedSearchQuery{}, errors.New("invalid during: period")
 				}
@@ -1323,10 +1411,14 @@ func parseSearchQuery(raw string) (parsedSearchQuery, error) {
 				}
 			}
 		}
+		term, ok := searchTerm(token)
+		if !ok {
+			continue
+		}
 		if excluded {
-			result.excludedTerms = append(result.excludedTerms, domain.FoldSearchText(token))
+			result.excludedTerms = append(result.excludedTerms, term)
 		} else {
-			result.terms = append(result.terms, domain.FoldSearchText(token))
+			result.terms = append(result.terms, term)
 		}
 	}
 	if len(result.terms) == 0 && result.conversation == "" && result.author == "" && result.withUser == "" && result.after.IsZero() && result.before.IsZero() && !result.threadOnly && !result.hasFiles && !result.hasPins && !result.hasReactions && !result.hasLink && !result.saved && result.fileType == "" {

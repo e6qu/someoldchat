@@ -5728,3 +5728,37 @@ func TestDoNotDisturbSnoozeContracts(t *testing.T) {
 		t.Fatalf("endSnooze of an active snooze: %q", code)
 	}
 }
+
+// highlight=true wraps each matched term in Slack's private-use markers.
+func TestSearchHighlightUsesSlacksMarkers(t *testing.T) {
+	for _, item := range []struct {
+		text  string
+		terms []string
+		want  string
+	}{
+		{"Deploy the deployment", []string{"deploy"}, "\ue000Deploy\ue001 the \ue000deploy\ue001ment"},
+		{"ab abc", []string{"ab", "abc"}, "\ue000ab\ue001 \ue000abc\ue001"},
+		{"nothing here", []string{"deploy"}, "nothing here"},
+	} {
+		if got := highlightSearchText(item.text, item.terms); got != item.want {
+			t.Errorf("highlight(%q, %q) = %q, want %q", item.text, item.terms, got, item.want)
+		}
+	}
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	repository.SeedConversationMember("C1", "U1")
+	if _, err := (service.Messages{Store: repository}).Post(context.Background(), "T1", "U1", "C1", "Deploying the release", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	handler := userSearchHandler(t, repository)
+	body := getAPIWithToken(handler, "/api/search.messages?query=depl*&highlight=true", "user-token").Body.String()
+	if !strings.Contains(body, "\"text\":\"\ue000Depl\ue001oying the release\"") {
+		t.Fatalf("highlighted search=%s", body)
+	}
+	plain := getAPIWithToken(handler, "/api/search.messages?query=depl*", "user-token").Body.String()
+	if !strings.Contains(plain, `"text":"Deploying the release"`) {
+		t.Fatalf("unhighlighted search=%s", plain)
+	}
+}

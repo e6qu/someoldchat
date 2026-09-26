@@ -277,9 +277,14 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/05-search-and-activity.md
       - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
+      - go-test:internal/api/slack:TestSearchHighlightUsesSlacksMarkers
+      - go-test:internal/service:TestSearchDatesResolveRelativeDaysInTheSearchersZone
+      - go-test:internal/service:TestSearchTrailingWildcardIsAPrefix
     deviations:
       - Relevance scoring is deterministic but has not been compared with Slack's ranking model.
-      - Highlight markers, every reaction-specific modifier, and live indexing-delay behavior remain unqualified.
+      - Highlight markers wrap case-insensitive occurrences of each free-text term in message text only; attachment and block text are not marked.
+      - Relative dates resolve in the zone of the searcher's notification schedule, the only member time zone this product records, and in UTC when there is none.
+      - Every reaction-specific modifier and live indexing-delay behavior remain unqualified.
     audit:
       downgraded_from: behavior-compatible
       reason: The previous claim covered substring matching and response decoding, not Slack's current modifier, token-type, sorting, ranking, and highlighting behavior.
