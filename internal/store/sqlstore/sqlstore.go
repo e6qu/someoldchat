@@ -15394,8 +15394,12 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 	if err != nil {
 		return nil, "", false, err
 	}
-	query := `SELECT s.created_at, m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted FROM stars s JOIN messages m ON m.id = s.message_id WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0`
-	args := []any{user, workspace}
+	// A star in a private conversation is listed only while the user is still a
+	// member, the rule ListUserReactions and saved items already apply: leaving
+	// a private channel must end access to its messages' text, and a starred
+	// message used to keep it readable here indefinitely.
+	query := `SELECT s.created_at, m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted FROM stars s JOIN messages m ON m.id = s.message_id JOIN conversations c ON c.id = m.conversation WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
+	args := []any{user, workspace, user}
 	if after != "" {
 		separator := strings.IndexByte(after, 0)
 		if separator < 1 || separator == len(after)-1 {

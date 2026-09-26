@@ -8585,6 +8585,13 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 	s.mu.RLock()
 	values := make([]domain.UserReaction, 0, request.Limit+1)
 	for conversationID, messages := range s.messages {
+		// The SQL repositories list a reaction in a private conversation only
+		// while the reactor is still a member. Without the same rule here a
+		// member who left, or was removed from, a private channel kept reading
+		// the text of every message they had reacted to in it.
+		if !s.memberMayReadLocked(conversationID, user) {
+			continue
+		}
 		for _, message := range messages {
 			if message.WorkspaceID != workspace {
 				continue
@@ -8613,6 +8620,23 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 		}
 	}
 	return page, nil
+}
+
+// memberMayReadLocked is the SQL repositories' visibility predicate for a
+// conversation's content in a personal listing: a public conversation is
+// readable by any workspace member, a private one (including direct and group
+// direct messages) only by its current members, and a conversation that no
+// longer exists by nobody — the SQL join drops it.
+func (s *Store) memberMayReadLocked(conversationID domain.ConversationID, user domain.UserID) bool {
+	conversation, exists := s.conversations[conversationID]
+	if !exists {
+		return false
+	}
+	if !conversation.PrivateFlag() {
+		return true
+	}
+	_, member := s.memberships[conversationID][user]
+	return member
 }
 
 // userReactionKey is an ordering key AND a keyset cursor, compared with plain
@@ -8741,7 +8765,18 @@ func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user 
 	defer s.mu.RUnlock()
 	values := make([]domain.Star, 0, request.Limit+1)
 	for _, star := range s.stars[user] {
+		// The star holds the message as it was when starred; the SQL
+		// repositories join the message as it is now, so an edit or a deletion
+		// since then must show here too.
+		current, err := s.messageLocked(star.Message.ID)
+		if err != nil {
+			continue
+		}
+		star.Message = current
 		if star.Message.WorkspaceID != workspace || star.Message.Deleted || (after != "" && starKey(star) <= after) {
+			continue
+		}
+		if !s.memberMayReadLocked(star.Message.Conversation, user) {
 			continue
 		}
 		star.Message = s.cloneMessage(star.Message)
