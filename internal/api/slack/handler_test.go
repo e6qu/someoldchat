@@ -624,7 +624,14 @@ func TestBotIdentityAndEventAuthorizationsUseTheirRequiredTokenTypes(t *testing.
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	eventContext, err := events.EventContext("A1", events.Record{Sequence: 1, Event: event})
+	record := events.Record{Sequence: 1, Event: event}
+	eventContext, err := events.EventContext("A1", record, event.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A record that fans out gives each callback its own event_id, and the
+	// event_context each one carries must resolve to the same record.
+	fannedOutContext, err := events.EventContext("A1", record, events.SlackEventID(record, 1, 2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,6 +642,7 @@ func TestBotIdentityAndEventAuthorizationsUseTheirRequiredTokenTypes(t *testing.
 	}{
 		{"/api/auth.test", "xoxb-test", []string{`"user_id":"Ubot"`, `"bot_id":"B1"`, `"is_enterprise_install":false`}},
 		{"/api/apps.event.authorizations.list?event_context=" + url.QueryEscape(eventContext), "xapp-test", []string{`"user_id":"Ubot"`, `"is_bot":true`, `"user_id":"U1"`, `"is_bot":false`}},
+		{"/api/apps.event.authorizations.list?event_context=" + url.QueryEscape(fannedOutContext), "xapp-test", []string{`"user_id":"Ubot"`, `"is_bot":true`}},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		request.Header.Set("Authorization", "Bearer "+test.token)

@@ -40,8 +40,10 @@ func TestSlackEventBodiesFanOutInvitedMembers(t *testing.T) {
 	if len(bodies) != 2 {
 		t.Fatalf("bodies=%d, want one member_joined_channel per invited user", len(bodies))
 	}
+	seen := make(map[string]bool)
 	for index, wantUser := range []string{"U2", "U3"} {
 		var envelope struct {
+			EventID      string `json:"event_id"`
 			EventContext string `json:"event_context"`
 			Event        struct {
 				Type    string `json:"type"`
@@ -56,9 +58,30 @@ func TestSlackEventBodiesFanOutInvitedMembers(t *testing.T) {
 		if envelope.Event.Type != "member_joined_channel" || envelope.Event.User != wantUser || envelope.Event.Channel != "C1" || envelope.Event.EventTS == "" {
 			t.Fatalf("body[%d]=%s", index, bodies[index])
 		}
+		// Apps deduplicate on event_id, so two callbacks from one record must
+		// not share it, and a retry must reproduce it.
+		if envelope.EventID == "" || seen[envelope.EventID] || !EventIDBelongsToRecord(domain.EventID(envelope.EventID), "Ev1") {
+			t.Fatalf("body[%d] event_id=%q, want a distinct identifier derived from Ev1", index, envelope.EventID)
+		}
+		seen[envelope.EventID] = true
 		appID, sequence, eventID, err := ParseEventContext(envelope.EventContext)
-		if err != nil || appID != "A1" || sequence != 1 || eventID != "Ev1" {
+		if err != nil || appID != "A1" || sequence != 1 || string(eventID) != envelope.EventID {
 			t.Fatalf("event_context=%q decoded app=%q sequence=%d event=%q err=%v", envelope.EventContext, appID, sequence, eventID, err)
+		}
+	}
+	again, err := SlackEventBodies(Record{Sequence: 1, Event: event}, "A1")
+	if err != nil || string(again[1]) != string(bodies[1]) {
+		t.Fatalf("re-rendered body differs: %s vs %s err=%v", again[1], bodies[1], err)
+	}
+	sockets, err := SocketModeEnvelopes(Record{Sequence: 1, Event: event}, "A1")
+	if err != nil || len(sockets) != 2 {
+		t.Fatalf("socket envelopes=%d err=%v", len(sockets), err)
+	}
+	for index, envelope := range sockets {
+		payload := envelope.Frame["payload"].(map[string]json.RawMessage)
+		var eventID string
+		if err := json.Unmarshal(payload["event_id"], &eventID); err != nil || eventID != string(SlackEventID(Record{Sequence: 1, Event: event}, index, 2)) {
+			t.Fatalf("socket envelope %d event_id=%s err=%v", index, payload["event_id"], err)
 		}
 	}
 	if _, _, _, err := ParseEventContext("qualification-event"); !errors.Is(err, ErrPayloadFieldInvalid) {
@@ -525,5 +548,29 @@ func TestProjectedMessageDerivesAppMentionFromTheProjectionMarker(t *testing.T) 
 	}
 	if inners, err := SlackInner(plain.Topic, deliveredPlain, SurfaceEventsAPI); err != nil || len(inners) != 1 || inners[0].Type() != "message" {
 		t.Fatalf("plain inners=%v err=%v", inners, err)
+	}
+}
+
+func TestEventIDBelongsToRecordAcceptsOnlyDerivedIdentifiers(t *testing.T) {
+	for _, test := range []struct {
+		eventID domain.EventID
+		want    bool
+	}{
+		{"evt_1", true},
+		{"evt_1-0", true},
+		{"evt_1-12", true},
+		{"evt_1-", false},
+		{"evt_1-01", false},
+		{"evt_1-x", false},
+		{"evt_1-1-1", false},
+		{"evt_2", false},
+		{"evt_10", false},
+	} {
+		if got := EventIDBelongsToRecord(test.eventID, "evt_1"); got != test.want {
+			t.Errorf("EventIDBelongsToRecord(%q, evt_1)=%v, want %v", test.eventID, got, test.want)
+		}
+	}
+	if EventIDBelongsToRecord("", "") {
+		t.Fatal("an empty record identifier owns nothing")
 	}
 }

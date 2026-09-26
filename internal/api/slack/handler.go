@@ -1277,7 +1277,7 @@ func (h Handler) appsEventAuthorizationsList(w http.ResponseWriter, r *http.Requ
 		writeError(w, mapServiceError(err, "internal_error"))
 		return
 	}
-	if len(records) != 1 || records[0].Sequence != sequence || records[0].Event.ID != eventID {
+	if len(records) != 1 || records[0].Sequence != sequence || !events.EventIDBelongsToRecord(eventID, records[0].Event.ID) {
 		writeError(w, "invalid_event_context")
 		return
 	}
