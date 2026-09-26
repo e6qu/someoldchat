@@ -323,6 +323,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestConversationAndUserInfo
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
+      - go-test:internal/api/slack:TestAdminUsersRemoveDeactivatesUser
     deviations:
       - Nothing records a member's time zone, so every member reports tz UTC with a zero offset.
       - A workspace has owners but no distinguished primary owner, so every owner reports is_primary_owner.
@@ -580,6 +581,14 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestLookupUserByEmail
+    deviations:
+      - >-
+        A deactivated member is not found by e-mail (users_not_found), while
+        users.info and users.list describe it with deleted:true. Whether
+        Slack's lookupByEmail finds a deactivated account is not settled by
+        the pinned material and could not be checked against the current
+        reference from the build network; the address of a deactivated
+        account is not treated as a live identity.
   - method: users.getPresence
     status: sdk-compatible
     provenance: slack-api-specs-openapi

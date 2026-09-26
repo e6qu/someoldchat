@@ -1656,9 +1656,14 @@ func (m Messages) UserInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 		return domain.User{}, err
 	}
 	user, err := m.Store.GetUser(ctx, requestedID)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+	if err != nil || user.WorkspaceID != workspaceID {
 		return domain.User{}, store.ErrNotFound
 	}
+	// A deactivated member is still a member of the directory: Slack's
+	// users.info answers it with deleted:true, as users.list lists it, and
+	// clients rely on that to render the author of an old message. It used to
+	// be user_not_found. A caller that needs an active account — sign-in, an
+	// invitation — checks Deleted itself.
 	return m.describeUser(ctx, user)
 }
 

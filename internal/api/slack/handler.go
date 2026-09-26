@@ -7198,8 +7198,10 @@ func (h Handler) conversationInviteCandidates(r *http.Request, principal auth.Pr
 		case targetID == principal.UserID:
 			reason = "cant_invite_self"
 		default:
-			if _, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
-				if !errors.Is(err, store.ErrNotFound) {
+			if target, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil || target.Deleted {
+				// A deactivated account cannot join a conversation; UserInfo
+				// describes it, so the refusal is made here.
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
 					return nil, nil, err
 				}
 				reason = "user_not_found"

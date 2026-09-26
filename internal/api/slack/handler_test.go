@@ -1993,8 +1993,26 @@ func TestAdminUsersRemoveDeactivatesUser(t *testing.T) {
 	info.Header.Set("Authorization", "Bearer token")
 	after := httptest.NewRecorder()
 	handler.ServeHTTP(after, info)
-	if after.Code != http.StatusOK || !strings.Contains(after.Body.String(), `"error":"user_not_found"`) {
+	// Slack keeps a deactivated member in the directory: users.info answers
+	// it with deleted:true rather than user_not_found, and users.list lists it.
+	if after.Code != http.StatusOK || !strings.Contains(after.Body.String(), `"ok":true`) || !strings.Contains(after.Body.String(), `"deleted":true`) || !strings.Contains(after.Body.String(), `"id":"U2"`) {
 		t.Fatalf("removed user status=%d body=%s", after.Code, after.Body)
+	}
+	list := httptest.NewRequest(http.MethodGet, "/api/users.list", nil)
+	list.Header.Set("Authorization", "Bearer token")
+	listed := httptest.NewRecorder()
+	handler.ServeHTTP(listed, list)
+	if !strings.Contains(listed.Body.String(), `"deleted":true`) || !strings.Contains(listed.Body.String(), `"id":"U2"`) {
+		t.Fatalf("users.list omits the deactivated member: %s", listed.Body)
+	}
+	// A deactivated account cannot be invited back into a conversation.
+	invite := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C1&users=U2"))
+	invite.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	invite.Header.Set("Authorization", "Bearer token")
+	invited := httptest.NewRecorder()
+	handler.ServeHTTP(invited, invite)
+	if !strings.Contains(invited.Body.String(), `"error":"user_not_found"`) {
+		t.Fatalf("a deactivated member was invited: %s", invited.Body)
 	}
 	token, err := store.LookupToken(context.Background(), "user-two-token")
 	if err != nil || !token.Revoked {
