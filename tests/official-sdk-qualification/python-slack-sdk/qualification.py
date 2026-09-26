@@ -1,12 +1,18 @@
 import base64
+import http.client
 import io
 import json
 import os
+import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from slack_sdk.oauth import AuthorizeUrlGenerator
+from slack_sdk.oauth.installation_store import FileInstallationStore, Installation
+from slack_sdk.oauth.state_store import FileOAuthStateStore
 
 
 client = WebClient(
@@ -569,6 +575,24 @@ revoked_public_file = client.files_revokePublicURL(file=file_id)
 assert revoked_public_file["ok"] is True
 deleted_file = client.files_delete(file=file_id)
 assert deleted_file["ok"] is True
+
+# files_upload_v2 is the SDK's current upload path: getUploadURLExternal, a
+# POST of the bytes to the returned upload_url, then completeUploadExternal.
+# Every URL it hands back is fetched verbatim, so each must be absolute on the
+# origin the client reached, and url_private must serve the bytes.
+api_origin = "{0.scheme}://{0.netloc}".format(urllib.parse.urlparse(client.base_url))
+uploaded_v2 = client.files_upload_v2(content="sdk upload v2", filename="sdk-upload-v2.txt", title="SDK upload v2")
+assert uploaded_v2["ok"] is True
+uploaded_v2_file = uploaded_v2["files"][0]
+for field in ("url_private", "url_private_download", "permalink"):
+    assert uploaded_v2_file[field].startswith(api_origin + "/"), (field, uploaded_v2_file[field])
+assert uploaded_v2_file["mimetype"] == "text/plain"
+download_request = urllib.request.Request(uploaded_v2_file["url_private"], headers={"Authorization": "Bearer " + client.token})
+with urllib.request.urlopen(download_request) as downloaded:
+    assert downloaded.status == 200
+    assert downloaded.read() == b"sdk upload v2"
+assert client.files_info(file=uploaded_v2_file["id"])["comments"] == []
+assert client.files_delete(file=uploaded_v2_file["id"])["ok"] is True
 remote_file = client.files_remote_add(
     external_id="remote-qualification",
     title="Remote qualification",
@@ -894,5 +918,85 @@ assert revoked["revoked"] is False
 uninstall_client = WebClient(token="xoxp-uninstall-python", base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"))
 uninstalled = uninstall_client.apps_uninstall(client_id="uninstall-python", client_secret="uninstall-secret")
 assert uninstalled["ok"] is True
+
+
+
+# An app installed from nothing through slack_sdk.oauth, the pieces a Bolt
+# OAuth flow is built from: the state store and URL generator start the
+# install, the fixture approves the authorize URL as U1 through the service
+# call the consent page makes, and oauth.v2.access redeems the code into an
+# Installation the installation store keeps.
+oauth_directory = tempfile.mkdtemp()
+state_store = FileOAuthStateStore(expiration_seconds=300, base_dir=oauth_directory)
+installation_store = FileInstallationStore(base_dir=oauth_directory)
+oauth_client = WebClient(base_url=client.base_url)
+
+
+def install(scopes, user_scopes, redirect_uri=None):
+    generator = AuthorizeUrlGenerator(
+        client_id="install-client",
+        scopes=scopes,
+        user_scopes=user_scopes,
+        redirect_uri=redirect_uri,
+        authorization_url=api_origin + "/qualification/authorize",
+    )
+    state = state_store.issue()
+    authorize_url = urllib.parse.urlparse(generator.generate(state))
+    connection = http.client.HTTPConnection(authorize_url.hostname, authorize_url.port)
+    connection.request("GET", authorize_url.path + "?" + authorize_url.query)
+    approved = connection.getresponse()
+    approved.read()
+    assert approved.status == 302, approved.status
+    callback = urllib.parse.parse_qs(urllib.parse.urlparse(approved.getheader("Location")).query)
+    assert state_store.consume(callback["state"][0]) is True
+    arguments = {"client_id": "install-client", "client_secret": "install-secret", "code": callback["code"][0]}
+    if redirect_uri is not None:
+        arguments["redirect_uri"] = redirect_uri
+    response = oauth_client.oauth_v2_access(**arguments)
+    assert response["ok"] is True
+    installer = response.get("authed_user") or {}
+    bot_token = response.get("access_token")
+    installation = Installation(
+        app_id=response["app_id"],
+        enterprise_id=(response.get("enterprise") or {}).get("id"),
+        team_id=response["team"]["id"],
+        team_name=response["team"]["name"],
+        bot_token=bot_token,
+        bot_id=WebClient(token=bot_token, base_url=client.base_url).auth_test()["bot_id"] if bot_token else None,
+        bot_user_id=response.get("bot_user_id"),
+        bot_scopes=response.get("scope"),
+        user_id=installer["id"],
+        user_token=installer.get("access_token"),
+        user_scopes=installer.get("scope"),
+        is_enterprise_install=response.get("is_enterprise_install"),
+        token_type=response.get("token_type"),
+    )
+    installation_store.save(installation)
+    return installation
+
+
+first_install = install(["chat:write"], ["search:read"], "https://example.com/install")
+assert first_install.team_id == "T1"
+assert first_install.team_name
+assert first_install.user_id == "U1"
+assert first_install.user_token.startswith("xoxp-")
+assert first_install.bot_token.startswith("xoxb-")
+stored_bot = installation_store.find_bot(enterprise_id=None, team_id="T1")
+assert stored_bot.bot_token == first_install.bot_token
+assert WebClient(token=stored_bot.bot_token, base_url=client.base_url).auth_test()["user_id"] == first_install.bot_user_id
+# A reinstall that leaves the redirect implied keeps the same bot user.
+reinstall = install(["chat:write"], [])
+assert reinstall.bot_user_id == first_install.bot_user_id
+assert reinstall.bot_id == first_install.bot_id
+# A user-scope-only install is redeemable and carries no bot.
+user_install = install([], ["search:read"])
+assert user_install.bot_token is None
+assert user_install.user_id == "U1"
+assert WebClient(token=user_install.user_token, base_url=client.base_url).auth_test()["user_id"] == "U1"
+try:
+    oauth_client.oauth_v2_access(client_id="install-client", client_secret="wrong", code="unused")
+    raise AssertionError("a wrong client secret was accepted")
+except SlackApiError as error:
+    assert error.response["error"] == "bad_client_secret"
 
 print("python-slack-sdk qualification passed")

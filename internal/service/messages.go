@@ -102,21 +102,25 @@ var (
 	// ErrTriggerTypeRestricted refuses a builder who creates a trigger of a type
 	// an administrator has restricted. Same restricted_action shape as a function
 	// restriction: the actor may build in general, but not with this trigger type.
-	ErrTriggerTypeRestricted       = errors.New("this trigger type is restricted from you")
-	ErrWorkflowPermissionDenied    = errors.New("workflow trigger is not available to this actor")
-	ErrFunctionAccessDenied        = errors.New("actor does not have access to this function execution")
-	ErrFunctionNotRunning          = errors.New("function execution is not running")
-	ErrAutomationUserNotFound      = errors.New("automation permission user was not found")
-	ErrAutomationChannelNotFound   = errors.New("automation permission channel was not found")
-	ErrAutomationTeamNotFound      = errors.New("automation permission workspace was not found")
-	ErrAutomationOrgNotFound       = errors.New("automation permission organization was not found")
-	ErrAutomationEntitiesEmpty     = errors.New("automation named entities cannot be empty")
-	ErrWorkflowFunctionNotFound    = errors.New("workflow function was not found")
-	ErrInvalidDialog               = errors.New("dialog payload is invalid")
-	ErrInvalidBot                  = errors.New("bot identifier is required")
-	ErrInvalidMigration            = errors.New("migration user identifiers are invalid")
-	ErrInvalidOAuth                = errors.New("oauth authorization is invalid")
-	ErrInvalidOAuthClient          = errors.New("oauth client is invalid")
+	ErrTriggerTypeRestricted     = errors.New("this trigger type is restricted from you")
+	ErrWorkflowPermissionDenied  = errors.New("workflow trigger is not available to this actor")
+	ErrFunctionAccessDenied      = errors.New("actor does not have access to this function execution")
+	ErrFunctionNotRunning        = errors.New("function execution is not running")
+	ErrAutomationUserNotFound    = errors.New("automation permission user was not found")
+	ErrAutomationChannelNotFound = errors.New("automation permission channel was not found")
+	ErrAutomationTeamNotFound    = errors.New("automation permission workspace was not found")
+	ErrAutomationOrgNotFound     = errors.New("automation permission organization was not found")
+	ErrAutomationEntitiesEmpty   = errors.New("automation named entities cannot be empty")
+	ErrWorkflowFunctionNotFound  = errors.New("workflow function was not found")
+	ErrInvalidDialog             = errors.New("dialog payload is invalid")
+	ErrInvalidBot                = errors.New("bot identifier is required")
+	ErrInvalidMigration          = errors.New("migration user identifiers are invalid")
+	ErrInvalidOAuth              = errors.New("oauth authorization is invalid")
+	ErrInvalidOAuthClient        = errors.New("oauth client is invalid")
+	// ErrBadOAuthClientSecret is a known client presenting the wrong secret.
+	// Slack reports it as bad_client_secret, distinct from an unknown
+	// client's invalid_client_id.
+	ErrBadOAuthClientSecret        = errors.New("oauth client secret is wrong")
 	ErrOAuthAppMismatch            = errors.New("oauth client and token app do not match")
 	ErrInvalidIntegrationLogs      = errors.New("integration log arguments are invalid")
 	ErrInvalidBookmark             = errors.New("bookmark title, type, and link are invalid")
@@ -238,11 +242,14 @@ func (m Messages) ListAppAuthorizations(ctx context.Context, appID domain.AppID,
 
 func (m Messages) UninstallApp(ctx context.Context, clientID, clientSecret string, workspaceID domain.WorkspaceID, appID domain.AppID) error {
 	client, err := m.Store.GetOAuthClient(ctx, strings.TrimSpace(clientID))
-	if err != nil || !secretDigestsEqual(client.SecretHash, domain.HashToken(strings.TrimSpace(clientSecret))) {
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return err
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return ErrInvalidOAuthClient
 		}
-		return ErrInvalidOAuthClient
+		return err
+	}
+	if !secretDigestsEqual(client.SecretHash, domain.HashToken(strings.TrimSpace(clientSecret))) {
+		return ErrBadOAuthClientSecret
 	}
 	if client.AppID != appID {
 		return ErrOAuthAppMismatch
@@ -659,6 +666,29 @@ func (m Messages) FileInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if err := m.authorizeFileAccess(ctx, userID, file); err != nil {
 		return domain.File{}, err
 	}
+	shares, err := m.Store.ListFileShares(ctx, file.ID)
+	if err != nil {
+		return domain.File{}, err
+	}
+	// A share names a message and a conversation, so the reader sees only the
+	// shares in public channels and conversations they belong to.
+	membership := make(map[domain.ConversationID]bool)
+	for _, share := range shares {
+		if share.Private {
+			member, known := membership[share.Conversation]
+			if !known {
+				member, err = m.Store.IsConversationMember(ctx, share.Conversation, userID)
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
+					return domain.File{}, err
+				}
+				membership[share.Conversation] = member
+			}
+			if !member {
+				continue
+			}
+		}
+		file.Shares = append(file.Shares, share)
+	}
 	return file, nil
 }
 
@@ -737,14 +767,18 @@ func (m Messages) DeleteFile(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil || file.WorkspaceID != workspaceID || file.Uploader != userID {
 		return store.ErrNotFound
 	}
-	event, err := newEvent(workspaceID, userID, events.BlobKey(events.FileBlobDeleteTopic, file.BlobKey), time.Now().UTC())
+	now := time.Now().UTC()
+	blobDelete, err := newEvent(workspaceID, userID, events.BlobKey(events.FileBlobDeleteTopic, file.BlobKey), now)
 	if err != nil {
 		return err
 	}
-	if err := m.Store.DeleteFile(ctx, fileID, event); err != nil {
+	// file_deleted commits with the deletion, so a subscriber can never see
+	// the announcement without the tombstone or the tombstone without it.
+	deleted, err := newEvent(workspaceID, userID, events.NewPayload("file.deleted", events.String("file_id", string(fileID))), now)
+	if err != nil {
 		return err
 	}
-	return nil
+	return m.Store.DeleteFile(ctx, fileID, blobDelete, deleted)
 }
 
 // FileDescriptionLimit bounds a description. It is generous enough for the
@@ -2946,7 +2980,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 		return domain.OAuthToken{}, err
 	}
 	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
-		return domain.OAuthToken{}, ErrInvalidOAuthClient
+		return domain.OAuthToken{}, ErrBadOAuthClientSecret
 	}
 	rotating := false
 	if rotationAllowed {
@@ -2995,7 +3029,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 			exchange.AuthedUserExpiresAt = exchange.ExpiresAt
 		}
 	}
-	token, err := m.Store.ExchangeOAuthCode(ctx, clientID, clientSecret, code, redirectURI, accessToken, exchange)
+	token, err := m.Store.ExchangeOAuthCode(ctx, clientID, clientSecret, code, strings.TrimSpace(redirectURI), accessToken, exchange)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return domain.OAuthToken{}, ErrInvalidOAuth
@@ -3003,9 +3037,10 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 		return domain.OAuthToken{}, err
 	}
 	token.AppID = client.AppID
-	token.TokenType = tokenType
-	if tokenType == domain.TokenBot {
-		if err := m.recordAppBotToken(ctx, token.AppID, token.WorkspaceID, accessToken, token.InstallerID); err != nil {
+	// The store decides the issued type: a user-scope-only grant redeems for
+	// the installer's user token even when a bot token was asked for.
+	if token.TokenType.IsBot() {
+		if err := m.recordAppBotToken(ctx, token.AppID, token.WorkspaceID, token.AccessToken, token.InstallerID); err != nil {
 			return domain.OAuthToken{}, err
 		}
 	}
@@ -3064,7 +3099,7 @@ func (m Messages) OAuthV2Refresh(ctx context.Context, clientID, clientSecret, re
 		return domain.OAuthToken{}, err
 	}
 	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
-		return domain.OAuthToken{}, ErrInvalidOAuthClient
+		return domain.OAuthToken{}, ErrBadOAuthClientSecret
 	}
 	app, _, err := m.Store.GetApp(ctx, client.AppID)
 	if err != nil {
@@ -3122,7 +3157,7 @@ func (m Messages) OAuthV2ExchangeToken(ctx context.Context, clientID, clientSecr
 		return domain.OAuthToken{}, err
 	}
 	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
-		return domain.OAuthToken{}, ErrInvalidOAuthClient
+		return domain.OAuthToken{}, ErrBadOAuthClientSecret
 	}
 	app, _, err := m.Store.GetApp(ctx, client.AppID)
 	if err != nil || !app.TokenRotationEnabled {
@@ -10027,8 +10062,11 @@ func (m Messages) UploadExternalFile(ctx context.Context, id domain.ExternalUplo
 	// is not exposed by net/http. The upload ticket remains authoritative and
 	// the blob store still reads exactly Size+1 bytes, so short and oversized
 	// parts fail closed just like raw bodies.
-	if m.Blob == nil || source == nil || size < -1 {
+	if source == nil || size < -1 {
 		return ErrInvalidExternalUpload
+	}
+	if m.Blob == nil {
+		return ErrBlobUnavailable
 	}
 	value, err := m.Store.GetExternalUpload(ctx, id)
 	if err != nil {
@@ -10037,12 +10075,21 @@ func (m Messages) UploadExternalFile(ctx context.Context, id domain.ExternalUplo
 	if size == -1 {
 		size = value.Size
 	}
-	if value.Status != domain.ExternalUploadPending || !value.ExpiresAt.After(time.Now().UTC()) || value.Size != size {
+	// A ticket that already received its bytes, or outlived its window, is
+	// spent: it no longer names an upload that can happen. A length that
+	// disagrees with the ticket is a bad request against a live one.
+	if value.Status != domain.ExternalUploadPending || !value.ExpiresAt.After(time.Now().UTC()) {
+		return store.ErrNotFound
+	}
+	if value.Size != size {
 		return ErrInvalidExternalUpload
 	}
 	if _, err := m.Blob.Put(ctx, value.BlobKey, value.Size, source); err != nil {
 		if errors.Is(err, blob.ErrUnavailable) {
 			return ErrBlobUnavailable
+		}
+		if errors.Is(err, blob.ErrSizeMismatch) {
+			return ErrInvalidExternalUpload
 		}
 		return err
 	}
@@ -10177,8 +10224,9 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 		return completed, nil
 	}
 	for _, value := range values {
+		// A ticket whose bytes never arrived names no file yet.
 		if value.Status != domain.ExternalUploadUploaded {
-			return nil, ErrInvalidExternalUpload
+			return nil, store.ErrNotFound
 		}
 	}
 	files := make([]domain.File, len(values))

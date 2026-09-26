@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import http from "node:http";
+import { InstallProvider } from "@slack/oauth";
 import { LogLevel, WebClient } from "@slack/web-api";
 
 const apiUrl = process.env.SAMEOLDCHAT_API_URL ?? "http://127.0.0.1:18080/api/";
@@ -944,6 +946,16 @@ const uploadedFile = await client.filesUploadV2({
 assert.equal(uploadedFile.ok, true);
 const uploadedFileMetadata = uploadedFile.files[0].files[0];
 assert.equal(typeof uploadedFileMetadata.id, "string");
+// A file's URLs are fetched verbatim, so they must be absolute on the origin
+// the client reached, and url_private must serve the bytes to the bearer.
+const apiOrigin = new URL(apiUrl).origin;
+for (const field of ["url_private", "url_private_download", "permalink"]) {
+	assert.equal(uploadedFileMetadata[field].startsWith(`${apiOrigin}/`), true, `${field}=${uploadedFileMetadata[field]}`);
+}
+assert.equal(uploadedFileMetadata.mimetype, "text/plain");
+const privateDownload = await fetch(uploadedFileMetadata.url_private, { headers: { Authorization: `Bearer ${token}` } });
+assert.equal(privateDownload.status, 200);
+assert.equal(await privateDownload.text(), "sdk upload");
 const files = await client.files.list({ count: 10 });
 assert.equal(files.ok, true);
 assert.equal(files.files.length, 2);
@@ -955,9 +967,14 @@ assert.equal(deletedComment.ok, true);
 const fileInfo = await client.files.info({ file: fileId });
 assert.equal(fileInfo.ok, true);
 assert.equal(fileInfo.file.id, fileId);
+assert.equal(fileInfo.file.url_private, uploadedFileMetadata.url_private);
+assert.deepEqual(fileInfo.comments, []);
 const publicFile = await client.files.sharedPublicURL({ file: fileId });
 assert.equal(publicFile.ok, true);
-assert.equal(typeof publicFile.permalink_public, "string");
+assert.equal(publicFile.permalink_public.startsWith(`${apiOrigin}/files/public/`), true);
+const publicDownload = await fetch(publicFile.permalink_public);
+assert.equal(publicDownload.status, 200);
+assert.equal(await publicDownload.text(), "sdk upload");
 const revokedPublicFile = await client.files.revokePublicURL({ file: fileId });
 assert.equal(revokedPublicFile.ok, true);
 const deletedFile = await client.files.delete({ file: fileId });
@@ -1566,7 +1583,7 @@ const externalMessages = externalHistory.messages.filter((message) =>
 assert.equal(externalMessages.length, 1);
 assert.equal(externalMessages[0].text, "external upload");
 assert.equal(externalMessages[0].files[0].mode, "hosted");
-assert.equal(externalMessages[0].files[0].url_private, `/api/files/${externalUpload.file_id}`);
+assert.equal(externalMessages[0].files[0].url_private, `${apiOrigin}/api/files/${externalUpload.file_id}`);
 
 // The upload is single-use: completing it again must not mint a second file.
 const repeatedExternal = await client.files.completeUploadExternal({
@@ -1590,5 +1607,92 @@ assert.equal(revoked.revoked, false);
 const uninstallClient = new WebClient("xoxp-uninstall-node", { slackApiUrl: apiUrl });
 const uninstalled = await uninstallClient.apps.uninstall({ client_id: "uninstall-node", client_secret: "uninstall-secret" });
 assert.equal(uninstalled.ok, true);
+
+
+// An app installed from nothing through @slack/oauth's InstallProvider, as a
+// Bolt app's /slack/install and /slack/oauth_redirect do: the provider builds
+// the authorize URL, the fixture approves it as U1 through the service call
+// the consent page makes, and the provider redeems the code with
+// oauth.v2.access and stores the installation it decodes.
+const installations = new Map();
+const installer = new InstallProvider({
+	clientId: "install-client",
+	clientSecret: "install-secret",
+	stateSecret: "sdk-qualification-state",
+	authorizationUrl: `${apiOrigin}/qualification/authorize`,
+	clientOptions,
+	installationStore: {
+		storeInstallation: async (installation) => {
+			installations.set(installation.team.id, installation);
+		},
+		fetchInstallation: async (query) => installations.get(query.teamId),
+		deleteInstallation: async (query) => {
+			installations.delete(query.teamId);
+		},
+	},
+});
+async function install(options) {
+	let outcome;
+	const server = http.createServer((request, response) => {
+		if (request.url.startsWith("/slack/install")) {
+			installer.handleInstallPath(request, response, {}, options);
+			return;
+		}
+		installer.handleCallback(request, response, {
+			success: (installation) => {
+				outcome = { installation };
+				response.writeHead(200);
+				response.end();
+			},
+			failure: (error) => {
+				outcome = { error };
+				response.writeHead(500);
+				response.end();
+			},
+		});
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const local = `http://127.0.0.1:${server.address().port}`;
+	try {
+		const started = await fetch(`${local}/slack/install`, { redirect: "manual" });
+		const stateCookie = started.headers.get("set-cookie").split(";")[0];
+		const page = await started.text();
+		const authorizeUrl = started.headers.get("location") ?? page.match(/href="([^"]*qualification\/authorize[^"]*)"/)[1].replaceAll("&amp;", "&");
+		assert.equal(authorizeUrl.startsWith(`${apiOrigin}/qualification/authorize?`), true, authorizeUrl);
+		const approved = await fetch(authorizeUrl, { redirect: "manual" });
+		assert.equal(approved.status, 302);
+		const callback = new URL(approved.headers.get("location"));
+		const finished = await fetch(`${local}/slack/oauth_redirect${callback.search}`, { headers: { cookie: stateCookie } });
+		assert.equal(finished.status, 200, String(outcome?.error));
+		return outcome.installation;
+	} finally {
+		server.close();
+	}
+}
+const firstInstall = await install({ scopes: ["chat:write"], userScopes: ["search:read"], redirectUri: "https://example.com/install" });
+assert.equal(firstInstall.team.id, "T1");
+assert.equal(typeof firstInstall.team.name, "string");
+assert.notEqual(firstInstall.team.name, "");
+assert.equal(firstInstall.user.id, "U1");
+assert.equal(firstInstall.user.token.startsWith("xoxp-"), true);
+assert.equal(firstInstall.bot.token.startsWith("xoxb-"), true);
+const installedBot = await new WebClient(firstInstall.bot.token, clientOptions).auth.test();
+assert.equal(installedBot.user_id, firstInstall.bot.userId);
+assert.equal(installedBot.bot_id, firstInstall.bot.id);
+const authorized = await installer.authorize({ teamId: "T1", isEnterpriseInstall: false });
+assert.equal(authorized.botToken, firstInstall.bot.token);
+// A reinstall that leaves the redirect implied keeps the same bot user.
+const reinstall = await install({ scopes: ["chat:write"], userScopes: [] });
+assert.equal(reinstall.bot.userId, firstInstall.bot.userId);
+assert.equal(reinstall.bot.id, firstInstall.bot.id);
+// A user-scope-only install carries the installer's token and no bot.
+const userInstall = await install({ scopes: [], userScopes: ["search:read"] });
+assert.equal(userInstall.bot, undefined);
+assert.equal(userInstall.user.id, "U1");
+assert.equal(userInstall.user.token.startsWith("xoxp-"), true);
+assert.equal((await new WebClient(userInstall.user.token, clientOptions).auth.test()).user_id, "U1");
+// The provider surfaces a refused exchange: the wrong secret is named.
+const wrongSecret = await client.oauth.v2.access({ client_id: "install-client", client_secret: "wrong", code: "unused" }).catch((error) => error.data);
+assert.equal(wrongSecret.error, "bad_client_secret");
 
 console.log("node-web-api qualification passed");

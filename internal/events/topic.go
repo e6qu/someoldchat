@@ -290,6 +290,8 @@ var topicRules = []topicRule{
 		note: "current Slack reference; delivery authorizes against the channel recorded before the final share is removed"},
 	{topic: "file.public_shared", slack: translated("file_public", everySurface, filePublic),
 		note: "pinned topic; like Slack's other file events the inner carries identifiers only ({file_id, user_id, file{id}}), and a consumer hydrates through files.info"},
+	{topic: "file.deleted", slack: translated("file_deleted", everySurface, fileDeleted),
+		note: "pinned topic and current Slack reference; the inner carries the identifier only ({file_id, event_ts}) because the file is gone and nothing else about it is readable any more"},
 	{topic: "file.public_revoked",
 		note: "not pinned: file_unshared is a different fact"},
 	{topic: "file.description_changed",

@@ -1013,6 +1013,20 @@ func filePublic(delivered Delivered, _ Surface) ([]Inner, error) {
 	return []Inner{inner}, nil
 }
 
+// fileDeleted renders Slack's file_deleted: the deleted file's id and nothing
+// else, since the file can no longer be read.
+func fileDeleted(delivered Delivered, _ Surface) ([]Inner, error) {
+	values, err := stringFields(delivered, "file_id")
+	if err != nil {
+		return nil, err
+	}
+	inner, err := newInner("file_deleted", delivered, String("file_id", values["file_id"]))
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
 // projectedMessage carries the per-app message projection through to the
 // surface. The body in the payload was written by
 // service.projectMessageSnapshot after conversation visibility was proved;

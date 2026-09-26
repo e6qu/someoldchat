@@ -57,7 +57,7 @@ func (s Filesystem) Put(ctx context.Context, key string, size int64, source io.R
 	}
 	if written != size {
 		_ = temporary.Close()
-		return Object{}, fmt.Errorf("blob size mismatch: wrote %d, expected %d", written, size)
+		return Object{}, fmt.Errorf("%w: wrote %d, expected %d", ErrSizeMismatch, written, size)
 	}
 	if err := temporary.Sync(); err != nil {
 		_ = temporary.Close()

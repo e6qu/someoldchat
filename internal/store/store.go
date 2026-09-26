@@ -184,15 +184,18 @@ func accessEntityRank(entityType domain.GrantEntity) int {
 }
 
 var (
-	ErrNotFound                  = errors.New("not found")
-	ErrLeaseConflict             = errors.New("outbox lease conflict")
-	ErrIdempotencyConflict       = errors.New("idempotency key already committed")
-	ErrAlreadyExists             = errors.New("already exists")
-	ErrInvalidArgument           = errors.New("invalid argument")
-	ErrInvalidConversationType   = errors.New("invalid conversation type")
-	ErrInvalidInviteRequest      = errors.New("invalid invite request")
-	ErrInvalidAppApproval        = errors.New("invalid app approval")
-	ErrConflict                  = errors.New("state conflict")
+	ErrNotFound                = errors.New("not found")
+	ErrLeaseConflict           = errors.New("outbox lease conflict")
+	ErrIdempotencyConflict     = errors.New("idempotency key already committed")
+	ErrAlreadyExists           = errors.New("already exists")
+	ErrInvalidArgument         = errors.New("invalid argument")
+	ErrInvalidConversationType = errors.New("invalid conversation type")
+	ErrInvalidInviteRequest    = errors.New("invalid invite request")
+	ErrInvalidAppApproval      = errors.New("invalid app approval")
+	ErrConflict                = errors.New("state conflict")
+	// ErrOAuthRedirectMismatch is a live authorization code redeemed with a
+	// redirect_uri other than the one its authorization named.
+	ErrOAuthRedirectMismatch     = errors.New("oauth redirect_uri does not match the authorization")
 	ErrBookmarkLimit             = errors.New("bookmark limit reached")
 	ErrScheduledMessageLimit     = errors.New("scheduled message channel window limit reached")
 	ErrScheduledStatusLimit      = errors.New("scheduled status limit reached")
@@ -702,7 +705,11 @@ type Store interface {
 	CreateOAuthClient(context.Context, domain.OAuthClient) error
 	GetOAuthClient(context.Context, string) (domain.OAuthClient, error)
 	CreateOAuthCode(context.Context, domain.OAuthCode) error
-	CreateOAuthAuthorization(context.Context, domain.User, domain.Bot, domain.OAuthCode) error
+	// CreateOAuthAuthorization stores a consented grant. When the grant has
+	// bot scopes and the app already has a live bot in the workspace, the grant
+	// names that bot and the candidate bot user and bot are not created; the
+	// returned grant carries the bot the code will redeem for.
+	CreateOAuthAuthorization(context.Context, domain.User, domain.Bot, domain.OAuthCode) (domain.OAuthCode, error)
 	ExchangeOAuthCode(context.Context, string, string, string, string, string, domain.OAuthToken) (domain.OAuthToken, error)
 	LookupOAuthRefreshToken(context.Context, string, string) (domain.OAuthRefreshGrant, error)
 	ExchangeOAuthRefreshToken(context.Context, string, string, string, string, string, time.Time) (domain.OAuthToken, error)
@@ -1122,7 +1129,7 @@ type Store interface {
 	CompleteScheduledExternalUploads(context.Context, domain.ScheduledMessageID, []UploadedFile, []domain.ConversationID, []events.Event, PostedMessage) error
 	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, []events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
-	DeleteFile(context.Context, domain.FileID, events.Event) error
+	DeleteFile(context.Context, domain.FileID, ...events.Event) error
 	// SetFileDescription records what an image is, in words, for a reader who
 	// cannot see it. The uploader is part of the write rather than checked
 	// before it, so the permission cannot be lost between the check and the
@@ -1133,7 +1140,13 @@ type Store interface {
 	RevokeFilePublic(context.Context, domain.WorkspaceID, domain.FileID, events.Event) error
 	GetPublicFile(context.Context, string) (domain.File, error)
 	ListFiles(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.FilePage, error)
+	// ListVisibleFiles reads the files user may see newest first (created_at
+	// DESC, id DESC) with a FileCursor; see file_order.go.
 	ListVisibleFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FilePage, error)
+	// ListFileShares reads the live messages that carry a file, oldest first,
+	// with the conversation each one is in. It does not check who may read
+	// them; the caller filters by conversation access.
+	ListFileShares(context.Context, domain.FileID) ([]domain.FileShare, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearch) (domain.FilePage, error)
 	// SearchCanvases answers Slack's Canvases search tab. It applies exactly
 	// the visibility rule ListCanvases applies, because a search that matched

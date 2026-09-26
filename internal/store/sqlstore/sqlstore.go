@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS conversation_prefs (
 );
 CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES users(id), channel_ids TEXT NOT NULL DEFAULT '[]', custom_message TEXT NOT NULL DEFAULT '', real_name TEXT NOT NULL DEFAULT '', resend INTEGER NOT NULL DEFAULT 0, restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0, guest_expiration_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0, accepted_by TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
+CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, installer_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (app_id, workspace_id));
 CREATE TABLE IF NOT EXISTS app_bot_tokens (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), token_ciphertext TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
 CREATE TABLE IF NOT EXISTS incoming_webhooks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id), user_id TEXT NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspace_id, app_id, secret_hash, enabled);
@@ -567,7 +567,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 176
+const schemaVersion = 177
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3400,6 +3400,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 177 {
+		// The member whose code redemption installed the app. oauth.v2.exchange
+		// reports it as authed_user.id for a bot token, whose own row names
+		// only the bot user. Existing installations predate the record and
+		// keep the empty marker until their next install.
+		columns, err := s.tableColumns(ctx, db, "app_installations")
+		if err != nil {
+			return err
+		}
+		if !columns["installer_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE app_installations ADD COLUMN installer_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate app installer: %w", err)
+			}
+		}
+	}
 	if version < 176 && !s.sqliteDialect {
 		if err := installOutboxCommitOrder(ctx, db); err != nil {
 			return err
@@ -4499,6 +4514,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 // caller's input.
 var migratableTables = []string{
 	"activity_items",
+	"app_installations",
 	"app_tokens",
 	"calls",
 	"canvases",
@@ -10777,7 +10793,7 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	}
 	var grant domain.OAuthCode
 	var scopes, botScopes, userScopes string
-	if err := tx.QueryRowContext(ctx, `SELECT code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, incoming_webhook_channel, code_challenge, code_challenge_method FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ? AND expires_at > ?`, codeHash, clientID, redirect, now.UnixNano()).Scan(&grant.Code, &grant.ClientID, &grant.WorkspaceID, &grant.UserID, &scopes, &grant.BotID, &grant.BotUserID, &botScopes, &userScopes, &grant.RedirectURI, &grant.IncomingWebhookChannel, &grant.CodeChallenge, &grant.CodeChallengeMethod); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, incoming_webhook_channel, code_challenge, code_challenge_method FROM oauth_codes WHERE code = ? AND client_id = ? AND expires_at > ?`, codeHash, clientID, now.UnixNano()).Scan(&grant.Code, &grant.ClientID, &grant.WorkspaceID, &grant.UserID, &scopes, &grant.BotID, &grant.BotUserID, &botScopes, &userScopes, &grant.RedirectURI, &grant.IncomingWebhookChannel, &grant.CodeChallenge, &grant.CodeChallengeMethod); err != nil {
 		return domain.OAuthToken{}, translateNotFound(err)
 	}
 	if err := json.Unmarshal([]byte(scopes), &grant.Scopes); err != nil {
@@ -10789,6 +10805,9 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	if err := json.Unmarshal([]byte(userScopes), &grant.UserScopes); err != nil {
 		return domain.OAuthToken{}, err
 	}
+	if !store.OAuthRedirectMatches(grant.RedirectURI, redirect) {
+		return domain.OAuthToken{}, store.ErrOAuthRedirectMismatch
+	}
 	if !domain.VerifyPKCE(grant.CodeChallenge, grant.CodeChallengeMethod, token.CodeVerifier) {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
@@ -10796,6 +10815,10 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	tokenType := domain.TokenType(strings.TrimSpace(string(token.TokenType)))
 	if tokenType == "" {
 		tokenType = domain.TokenUser
+	}
+	tokenType, accessToken, token, err = store.OAuthGrantIssue(grant, tokenType, accessToken, token)
+	if err != nil {
+		return domain.OAuthToken{}, err
 	}
 	subjectID := grant.UserID
 	var tokenBotID domain.BotID
@@ -10822,7 +10845,7 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	if rotating && (!token.ExpiresAt.After(now) || tokenType == domain.TokenBot && len(normalizedUserScopes) != 0 && (strings.TrimSpace(token.AuthedUserRefreshToken) == "" || !token.AuthedUserExpiresAt.After(now))) {
 		return domain.OAuthToken{}, store.InvalidArgument("invalid rotating OAuth credentials")
 	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ?`, codeHash, clientID, redirect)
+	result, err := tx.ExecContext(ctx, `DELETE FROM oauth_codes WHERE code = ? AND client_id = ?`, codeHash, clientID)
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
@@ -10869,8 +10892,13 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	// state transition. Keeping this in the same transaction prevents an
 	// installation write failure from consuming the one-time code while
 	// leaving an orphaned live token behind.
-	if _, err := tx.ExecContext(ctx, `INSERT INTO app_installations(app_id, workspace_id, enabled, created_at) VALUES (?, ?, 1, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET created_at = CASE WHEN app_installations.enabled = 0 THEN excluded.created_at ELSE app_installations.created_at END, enabled = 1`, appID, grant.WorkspaceID, now.UnixNano()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO app_installations(app_id, workspace_id, enabled, created_at, installer_id) VALUES (?, ?, 1, ?, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET created_at = CASE WHEN app_installations.enabled = 0 THEN excluded.created_at ELSE app_installations.created_at END, enabled = 1, installer_id = excluded.installer_id`, appID, grant.WorkspaceID, now.UnixNano(), grant.UserID); err != nil {
 		return domain.OAuthToken{}, err
+	}
+	// The workspace name is read in the redeeming transaction, so the
+	// response that hands out the credential can always name the team.
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = ?`, grant.WorkspaceID).Scan(&token.WorkspaceName); err != nil {
+		return domain.OAuthToken{}, translateNotFound(err)
 	}
 	token.AccessToken = accessToken
 	token.AppID = appID
@@ -10992,10 +11020,14 @@ func (s *Store) exchangeOAuthRefreshTokenOnce(ctx context.Context, clientID, sec
 			return domain.OAuthToken{}, err
 		}
 	}
+	var workspaceName string
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = ?`, grant.WorkspaceID).Scan(&workspaceName); err != nil {
+		return domain.OAuthToken{}, translateNotFound(err)
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.OAuthToken{}, err
 	}
-	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt.UTC(), ClientID: clientID, AppID: grant.AppID, WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, InstallerID: grant.InstallerID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType}, nil
+	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt.UTC(), ClientID: clientID, AppID: grant.AppID, WorkspaceID: grant.WorkspaceID, WorkspaceName: workspaceName, UserID: grant.UserID, InstallerID: grant.InstallerID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType}, nil
 }
 
 func (s *Store) ExchangeOAuthAccessToken(ctx context.Context, clientID, secret, oldAccessToken, nextAccessToken, nextRefreshToken string, expiresAt time.Time) (domain.OAuthToken, error) {
@@ -11048,22 +11080,37 @@ func (s *Store) exchangeOAuthAccessTokenOnce(ctx context.Context, clientID, secr
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	record.Scopes = domain.NormalizeScopes(strings.Fields(scopes))
+	// A user token's installer is its own user. A bot token names only the bot
+	// user, so its installer is the member who installed the app.
+	installer := record.UserID
+	if record.TokenType.IsBot() {
+		if err := tx.QueryRowContext(ctx, `SELECT installer_id FROM app_installations WHERE app_id = ? AND workspace_id = ?`, record.AppID, record.WorkspaceID).Scan(&installer); err != nil {
+			if err := translateNotFound(err); !errors.Is(err, store.ErrNotFound) {
+				return domain.OAuthToken{}, err
+			}
+			installer = ""
+		}
+	}
 	nextAccessHash := domain.HashToken(nextAccessToken)
 	nextRefreshHash := domain.HashToken(nextRefreshToken)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, app_id, bot_id, scopes, token_type, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`, nextAccessHash, record.WorkspaceID, record.UserID, record.AppID, record.BotID, strings.Join(record.Scopes, " "), record.TokenType, expiresAt.UTC().UnixNano()); err != nil {
 		return domain.OAuthToken{}, classify(err)
 	}
 	legacyHash := "legacy:" + oldAccessHash
-	if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)`, legacyHash, oldAccessHash, clientID, record.AppID, record.WorkspaceID, record.UserID, record.UserID, record.BotID, strings.Join(record.Scopes, " "), record.TokenType, now.Add(-time.Nanosecond).UnixNano()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)`, legacyHash, oldAccessHash, clientID, record.AppID, record.WorkspaceID, record.UserID, installer, record.BotID, strings.Join(record.Scopes, " "), record.TokenType, now.Add(-time.Nanosecond).UnixNano()); err != nil {
 		return domain.OAuthToken{}, classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, nextRefreshHash, nextAccessHash, clientID, record.AppID, record.WorkspaceID, record.UserID, record.UserID, record.BotID, strings.Join(record.Scopes, " "), record.TokenType, expiresAt.UTC().UnixNano(), now.UnixNano()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, nextRefreshHash, nextAccessHash, clientID, record.AppID, record.WorkspaceID, record.UserID, installer, record.BotID, strings.Join(record.Scopes, " "), record.TokenType, expiresAt.UTC().UnixNano(), now.UnixNano()); err != nil {
 		return domain.OAuthToken{}, classify(err)
+	}
+	var workspaceName string
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = ?`, record.WorkspaceID).Scan(&workspaceName); err != nil {
+		return domain.OAuthToken{}, translateNotFound(err)
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.OAuthToken{}, err
 	}
-	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt.UTC(), ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, UserID: record.UserID, InstallerID: record.UserID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType}, nil
+	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt.UTC(), ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, WorkspaceName: workspaceName, UserID: record.UserID, InstallerID: installer, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType}, nil
 }
 
 func (s *Store) CreateOpenIDRefreshToken(ctx context.Context, value domain.OpenIDRefreshToken) error {
@@ -19068,7 +19115,7 @@ func (s *Store) SetFileDescription(ctx context.Context, workspace domain.Workspa
 	return tx.Commit()
 }
 
-func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, event events.Event) error {
+func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, emitted ...events.Event) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
@@ -19085,8 +19132,10 @@ func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, event events.E
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return err
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -19206,22 +19255,49 @@ func (s *Store) ListFiles(ctx context.Context, workspace domain.WorkspaceID, req
 	return page, nil
 }
 
+func (s *Store) ListFileShares(ctx context.Context, id domain.FileID) ([]domain.FileShare, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT m.conversation, c.name, c.is_private, m.created_at, m.thread_timestamp, m.author_id
+		FROM message_files mf JOIN messages m ON m.id = mf.message_id JOIN conversations c ON c.id = m.conversation
+		WHERE mf.file_id = ? AND m.deleted = 0 ORDER BY m.created_at, m.conversation, m.id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	shares := make([]domain.FileShare, 0)
+	for rows.Next() {
+		var share domain.FileShare
+		var private int
+		var created string
+		if err := rows.Scan(&share.Conversation, &share.ConversationName, &private, &created, &share.ThreadTimestamp, &share.SharedBy); err != nil {
+			return nil, err
+		}
+		createdAt, err := domain.ParseStoredTime(created)
+		if err != nil {
+			return nil, err
+		}
+		share.Private = private != 0
+		share.Timestamp = domain.NewMessageTimestamp(createdAt)
+		shares = append(shares, share)
+	}
+	return shares, rows.Err()
+}
+
 func (s *Store) ListVisibleFiles(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.FilePage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+	if err := store.CheckPage(request); err != nil {
 		return domain.FilePage{}, err
 	}
-	after, err := domain.DecodeListCursor(request.Cursor)
+	after, err := store.DecodeFileCursor(request.Cursor)
 	if err != nil {
 		return domain.FilePage{}, err
 	}
 	query := `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token, f.description, f.file_type
 		FROM files f WHERE f.workspace_id = ? AND f.deleted = 0 AND ` + visibleFilePredicate("f")
 	args := []any{workspace, user, user}
-	if after != "" {
-		query += ` AND f.id > ?`
-		args = append(args, after)
+	if !after.IsZero() {
+		query += ` AND (f.created_at < ? OR (f.created_at = ? AND f.id < ?))`
+		args = append(args, domain.NewStoredTime(after.CreatedAt), domain.NewStoredTime(after.CreatedAt), after.ID)
 	}
-	query += ` ORDER BY f.id LIMIT ?`
+	query += ` ORDER BY f.created_at DESC, f.id DESC LIMIT ?`
 	args = append(args, request.Limit+1)
 	values, err := s.readFiles(ctx, query, args...)
 	if err != nil {
@@ -19236,7 +19312,7 @@ func (s *Store) ListVisibleFiles(ctx context.Context, workspace domain.Workspace
 	}
 	page := domain.FilePage{Files: values, HasMore: hasMore}
 	if hasMore {
-		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+		page.NextCursor, err = store.NewFileCursor(values[len(values)-1])
 	}
 	return page, err
 }

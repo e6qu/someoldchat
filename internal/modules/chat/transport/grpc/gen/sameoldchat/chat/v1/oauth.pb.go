@@ -135,6 +135,7 @@ type OAuthToken struct {
 	IncomingWebhookId           string                 `protobuf:"bytes,18,opt,name=incoming_webhook_id,json=incomingWebhookId,proto3" json:"incoming_webhook_id,omitempty"`
 	IncomingWebhookUrl          string                 `protobuf:"bytes,19,opt,name=incoming_webhook_url,json=incomingWebhookUrl,proto3" json:"incoming_webhook_url,omitempty"`
 	IncomingWebhookConfigUrl    string                 `protobuf:"bytes,20,opt,name=incoming_webhook_config_url,json=incomingWebhookConfigUrl,proto3" json:"incoming_webhook_config_url,omitempty"`
+	WorkspaceName               string                 `protobuf:"bytes,21,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
 	unknownFields               protoimpl.UnknownFields
 	sizeCache                   protoimpl.SizeCache
 }
@@ -305,6 +306,13 @@ func (x *OAuthToken) GetIncomingWebhookUrl() string {
 func (x *OAuthToken) GetIncomingWebhookConfigUrl() string {
 	if x != nil {
 		return x.IncomingWebhookConfigUrl
+	}
+	return ""
+}
+
+func (x *OAuthToken) GetWorkspaceName() string {
+	if x != nil {
+		return x.WorkspaceName
 	}
 	return ""
 }
@@ -681,7 +689,7 @@ const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
 	"\fredirect_uri\x18\x04 \x01(\tR\vredirectUri\x12\x1b\n" +
 	"\tuser_only\x18\x05 \x01(\bR\buserOnly\x12#\n" +
 	"\rrefresh_token\x18\x06 \x01(\tR\frefreshToken\x12\x14\n" +
-	"\x05token\x18\a \x01(\tR\x05token\"\xed\x06\n" +
+	"\x05token\x18\a \x01(\tR\x05token\"\x94\a\n" +
 	"\n" +
 	"OAuthToken\x12!\n" +
 	"\faccess_token\x18\x01 \x01(\tR\vaccessToken\x12\x1b\n" +
@@ -705,7 +713,8 @@ const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
 	"\x1dincoming_webhook_channel_name\x18\x11 \x01(\tR\x1aincomingWebhookChannelName\x12.\n" +
 	"\x13incoming_webhook_id\x18\x12 \x01(\tR\x11incomingWebhookId\x120\n" +
 	"\x14incoming_webhook_url\x18\x13 \x01(\tR\x12incomingWebhookUrl\x12=\n" +
-	"\x1bincoming_webhook_config_url\x18\x14 \x01(\tR\x18incomingWebhookConfigUrl\"\xfd\x01\n" +
+	"\x1bincoming_webhook_config_url\x18\x14 \x01(\tR\x18incomingWebhookConfigUrl\x12%\n" +
+	"\x0eworkspace_name\x18\x15 \x01(\tR\rworkspaceName\"\xfd\x01\n" +
 	"\x19OpenIDConnectTokenRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12#\n" +
 	"\rclient_secret\x18\x02 \x01(\tR\fclientSecret\x12\x12\n" +

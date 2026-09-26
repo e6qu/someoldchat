@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
-	"path/filepath"
 	"strings"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -754,18 +753,21 @@ func deliveredString(delivered events.Delivered, name string) (string, error) {
 }
 
 func appEventFile(file domain.File) map[string]any {
-	fileType := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.Name)), ".")
-	value := map[string]any{
+	// A deleted file is a tombstone in an event exactly as in a Web API read.
+	if file.Deleted {
+		return map[string]any{"id": file.ID, "mode": file.Mode()}
+	}
+	fileType, prettyType := file.FileTypes()
+	return map[string]any{
 		"id": file.ID, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(),
 		"name": file.Name, "title": file.Title, "mimetype": file.MIMEType,
-		"filetype": fileType, "pretty_type": strings.ToUpper(fileType), "user": file.Uploader,
-		"editable": false, "size": file.Size, "mode": "hosted", "is_external": false,
+		"filetype": fileType, "pretty_type": prettyType, "user": file.Uploader,
+		"editable": file.IsSnippet(), "size": file.Size, "mode": file.Mode(), "is_external": false,
 		"external_type": "", "is_public": file.PublicToken != "", "public_url_shared": file.PublicToken != "",
 		"display_as_bot": false,
+		// The projection runs in delivery workers that know no public origin,
+		// so these stay origin-relative; see docs/files.md.
+		"url_private":          "/api/files/" + url.PathEscape(string(file.ID)),
+		"url_private_download": "/api/files/" + url.PathEscape(string(file.ID)),
 	}
-	if !file.Deleted {
-		value["url_private"] = "/api/files/" + url.PathEscape(string(file.ID))
-		value["url_private_download"] = "/api/files/" + url.PathEscape(string(file.ID))
-	}
-	return value
 }

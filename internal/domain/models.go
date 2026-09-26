@@ -592,10 +592,13 @@ type OAuthCode struct {
 }
 
 type OAuthToken struct {
-	AccessToken            string
-	ClientID               string
-	AppID                  AppID
-	WorkspaceID            WorkspaceID
+	AccessToken string
+	ClientID    string
+	AppID       AppID
+	WorkspaceID WorkspaceID
+	// WorkspaceName is the installing workspace's name, which oauth.v2.access
+	// reports as team.name and oauth.access as team_name.
+	WorkspaceName          string
 	UserID                 UserID
 	InstallerID            UserID
 	BotID                  BotID
@@ -1965,6 +1968,23 @@ type File struct {
 	CreatedAt      time.Time
 	Deleted        bool
 	SharedChannels []ConversationID
+	// Shares are the live messages that carry the file, as files.info
+	// reports them. Only files.info reads them, so every other file value
+	// leaves them empty rather than paying a join per file.
+	Shares []FileShare
+}
+
+// FileShare is one message that shared a file into a conversation: an entry
+// of the file object's shares map in Slack's files.info.
+type FileShare struct {
+	Conversation     ConversationID
+	ConversationName string
+	// Private places the share under shares.private: a private channel, a
+	// direct message, or a group direct message.
+	Private         bool
+	Timestamp       MessageTimestamp
+	ThreadTimestamp MessageTimestamp
+	SharedBy        UserID
 }
 
 // IsSnippet reports whether this file is an inline text/code snippet rather than
@@ -1973,8 +1993,12 @@ func (f File) IsSnippet() bool {
 	return strings.TrimSpace(f.FileType) != ""
 }
 
-// Mode is the Slack file mode: a snippet the member typed, or a hosted upload.
+// Mode is the Slack file mode: a snippet the member typed, a hosted upload, or
+// the tombstone a deleted file leaves behind.
 func (f File) Mode() string {
+	if f.Deleted {
+		return "tombstone"
+	}
 	if f.IsSnippet() {
 		return "snippet"
 	}

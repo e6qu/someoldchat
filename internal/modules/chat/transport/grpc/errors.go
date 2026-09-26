@@ -136,6 +136,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_migration", code: codes.InvalidArgument, sentinel: service.ErrInvalidMigration},
 	{key: "service.invalid_oauth", code: codes.InvalidArgument, sentinel: service.ErrInvalidOAuth},
 	{key: "service.invalid_oauth_client", code: codes.InvalidArgument, sentinel: service.ErrInvalidOAuthClient},
+	{key: "service.bad_oauth_client_secret", code: codes.InvalidArgument, sentinel: service.ErrBadOAuthClientSecret},
 	{key: "service.oauth_app_mismatch", code: codes.PermissionDenied, sentinel: service.ErrOAuthAppMismatch},
 	{key: "service.invalid_integration_logs", code: codes.InvalidArgument, sentinel: service.ErrInvalidIntegrationLogs},
 	{key: "service.invalid_list", code: codes.InvalidArgument, sentinel: service.ErrInvalidList},
@@ -157,6 +158,12 @@ var errorClasses = []errorClass{
 	// InvalidArgument: a peer that sent no detail still yields an
 	// invalid-argument classification (HTTP 400) rather than codes.Unavailable
 	// (HTTP 503, which asks a caller to retry a request that can never succeed).
+	// A body shorter or longer than its declared size is the uploader's
+	// mistake. UploadExternalFile names it ErrInvalidExternalUpload; the other
+	// blob writers return it unchanged, so it needs its own class to stay a
+	// client error in both compositions.
+	{key: "blob.size_mismatch", code: codes.InvalidArgument, sentinel: blob.ErrSizeMismatch},
+	{key: "store.oauth_redirect_mismatch", code: codes.InvalidArgument, sentinel: store.ErrOAuthRedirectMismatch},
 	{key: "store.invalid_argument", code: codes.InvalidArgument, sentinel: store.ErrInvalidArgument, restoresCode: true},
 
 	// Configuration tokens authenticate a developer rather than an installed

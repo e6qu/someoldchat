@@ -42,7 +42,27 @@ sdks:
     note: >-
       Includes apps.datastore CRUD and bulk methods through WebClient.apiCall;
       @slack/web-api 8.0.0 does not generate convenience methods for that
-      current Slack method family.
+      current Slack method family. Downloads url_private and permalink_public
+      through the absolute URLs file objects carry.
+  - id: node-oauth
+    ecosystem: npm
+    package: '@slack/oauth'
+    upstream: https://github.com/slackapi/node-slack-sdk
+    release: 4.0.0
+    revision: 70e15b8442745d215f9ae259a2c970b306aff51a
+    artifact: slack-oauth-4.0.0.tgz
+    sha256: 4cfc0b04698885a41a50e902cc57e0fa3cb08fa96b8a13d7d9e5f1d7c024abc4
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/node-web-api/qualification.mjs
+    note: >-
+      InstallProvider installs an app from nothing (install path, state
+      cookie, callback, oauth.v2.access, installation store, authorize), then
+      reinstalls with an implied redirect_uri and keeps the bot user, and
+      completes a user-scope-only install. The fixture's
+      /qualification/authorize stands in for the browser consent page by
+      approving through the same service call; the page itself is qualified by
+      the browser suite.
   - id: node-bolt
     ecosystem: npm
     package: '@slack/bolt'
@@ -100,6 +120,11 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    note: >-
+      Includes files_upload_v2 with a url_private download, and an install
+      from nothing through slack_sdk.oauth (state store, authorize URL
+      generator, oauth.v2.access, installation store), a reinstall that keeps
+      the bot user, and a user-scope-only install.
   - id: python-bolt
     ecosystem: pypi
     package: slack-bolt

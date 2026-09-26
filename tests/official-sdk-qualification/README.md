@@ -4,7 +4,7 @@ Qualification is fail-closed. A suite is recorded as passed only after the
 exact pinned artifact has been installed and its executable suite has passed
 against the seeded local fixture.
 
-The Node Web API suite uses `@slack/web-api` 8.0.0, the Node Bolt suite uses
+The Node Web API suite uses `@slack/web-api` 8.0.0 and `@slack/oauth` 4.0.0, the Node Bolt suite uses
 `@slack/bolt` 5.0.0, the Node Socket Mode suite uses `@slack/socket-mode`
 3.0.0, and the Node Real Time Messaging suite uses `@slack/rtm-api` 7.0.4.
 The Python Web API and Socket Mode suites use `slack-sdk` 3.43.0, the
@@ -27,6 +27,16 @@ documented user-token `search.messages`, `search.files`, and legacy combined
 legacy paging, and pagination fields, including Slack's `cursor="*"` first-page
 convention and 100-result clamp; file results are matched against a real hosted
 file through each SDK's generated response types.
+
+The Node and Python Web API suites upload through the SDKs' current v2 helpers
+and download `url_private` (and, in Node, `permalink_public`) through the
+absolute URLs the file objects carry. They also install an app from nothing:
+Node through `@slack/oauth`'s `InstallProvider`, Python through
+`slack_sdk.oauth`'s state store, URL generator, and installation store. Each
+walk reinstalls with an implied `redirect_uri` and keeps the bot user, and
+completes a user-scope-only install through `oauth.v2.access`. The fixture's
+`GET /qualification/authorize` stands in for the browser consent page, which
+the browser suite qualifies, by approving through the same service call.
 
 Scheduling qualification deliberately covers only Slack's public Web API:
 `chat.scheduleMessage`, `chat.scheduledMessages.list`, and
@@ -62,7 +72,7 @@ The individual suite commands remain useful for debugging:
 
 ```sh
 go run ./tests/official-sdk-qualification/node-web-api/fixture
-npm install --prefix /tmp/soc-sdk-web-run @slack/web-api@8.0.0
+npm install --prefix /tmp/soc-sdk-web-run @slack/web-api@8.0.0 @slack/oauth@4.0.0
 cp tests/official-sdk-qualification/node-web-api/qualification.mjs /tmp/soc-sdk-web-run/qualification.mjs
 node /tmp/soc-sdk-web-run/qualification.mjs
 

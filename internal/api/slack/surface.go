@@ -38,7 +38,10 @@ type Surface struct {
 	Responses socketmode.ResponseSink
 	// Limiter enforces the Web API rate-limiting contract when set.
 	Limiter *RateLimiter
-	Logger  *slog.Logger
+	// PublicURL is the deployment's configured public origin, the base of
+	// every absolute URL the Web API emits. Empty follows the request origin.
+	PublicURL string
+	Logger    *slog.Logger
 }
 
 // Mount registers the surface on mux.
@@ -60,6 +63,9 @@ func Mount(mux *http.ServeMux, surface Surface) error {
 		return err
 	}
 	handler.Limiter = surface.Limiter
+	if err := handler.SetPublicURL(surface.PublicURL); err != nil {
+		return err
+	}
 	handler.Register(mux)
 	if surface.AppAuthenticator != nil {
 		responses := surface.Responses

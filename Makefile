@@ -381,4 +381,4 @@ clean:
 		deploy/ecs-scale-zero/.activator.zip deploy/ecs-scale-zero/__pycache__
 
 run:
-	GOCACHE=$(GOCACHE) go run ./cmd/server -chat-mode local -store memory -api-token xoxb-dev -session-token dev-session
+	GOCACHE=$(GOCACHE) go run ./cmd/server -chat-mode local -store memory -blob-dir $(CURDIR)/.cache/dev-blobs -api-token xoxb-dev -session-token dev-session

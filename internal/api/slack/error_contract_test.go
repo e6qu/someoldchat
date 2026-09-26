@@ -1151,11 +1151,11 @@ func TestListItemDeleteRefusesAListInTheSingleIDField(t *testing.T) {
 // A non-threaded message used to serialise as `"thread_ts": ""`, which the
 // strictly typed SDK models parse as a timestamp.
 func TestMessageResponseOmitsAnEmptyThreadTimestamp(t *testing.T) {
-	plain := messageResponse(domain.Message{AuthorID: "U1", Text: "hi", CreatedAt: time.Unix(1700000000, 0).UTC()})
+	plain := messageResponse("http://chat.test", domain.Message{AuthorID: "U1", Text: "hi", CreatedAt: time.Unix(1700000000, 0).UTC()})
 	if _, present := plain["thread_ts"]; present {
 		t.Errorf("thread_ts present on a non-threaded message: %v", plain)
 	}
-	threaded := messageResponse(domain.Message{AuthorID: "U1", Text: "hi", ThreadTimestamp: "1700000000.000000", CreatedAt: time.Unix(1700000001, 0).UTC()})
+	threaded := messageResponse("http://chat.test", domain.Message{AuthorID: "U1", Text: "hi", ThreadTimestamp: "1700000000.000000", CreatedAt: time.Unix(1700000001, 0).UTC()})
 	if threaded["thread_ts"] != domain.MessageTimestamp("1700000000.000000") {
 		t.Errorf("thread_ts missing on a threaded message: %v", threaded)
 	}

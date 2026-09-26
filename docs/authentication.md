@@ -69,6 +69,11 @@ credential is supplied, the workspace, lookup user, public HTTPS URL, and
 32-byte state key are required. GitHub login also requires the GitHub email
 endpoint, which the server configures as `https://api.github.com/user/emails`.
 
+`-auth-public-url` is also the origin of every absolute URL the Slack Web API
+emits — file downloads, the v2 upload URL, the OAuth authorize URL — so a
+deployment behind a proxy should set it even without an identity provider;
+see [Files](files.md#absolute-urls).
+
 For container deployment, `SAMEOLDCHAT_API_TOKEN`,
 `SAMEOLDCHAT_SESSION_TOKEN`, `SAMEOLDCHAT_AUTH_STATE_KEY_HEX`,
 `SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX`,

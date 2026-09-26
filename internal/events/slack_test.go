@@ -439,6 +439,13 @@ func TestPromotedTopicsTranslateFromTheirProducerPayloads(t *testing.T) {
 			want:    []string{"file_public"},
 			fields:  map[string]string{"file_id": `"F1"`, "file": `"id":"F1"`},
 		},
+		{
+			name:    "file deleted",
+			payload: NewPayload("file.deleted", String("file_id", "F1")),
+			surface: SurfaceSocketMode,
+			want:    []string{"file_deleted"},
+			fields:  map[string]string{"file_id": `"F1"`},
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
