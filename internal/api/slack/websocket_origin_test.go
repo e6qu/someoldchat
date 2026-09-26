@@ -133,7 +133,7 @@ func TestAppsConnectionsOpenAtTheLimitIsRetryable(t *testing.T) {
 		OK    bool   `json:"ok"`
 		Error string `json:"error"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.OK || body.Error != "rate_limited" {
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.OK || body.Error != "ratelimited" {
 		t.Fatalf("body=%s", response.Body)
 	}
 }

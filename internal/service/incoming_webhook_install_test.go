@@ -73,6 +73,10 @@ func TestInstallWithIncomingWebhookMintsAWorkingHook(t *testing.T) {
 	if message.Conversation != "C1" || message.Text != "from the hook" {
 		t.Fatalf("hook posted %+v", message)
 	}
+	// The hook posts as the app's bot, so the message names that bot.
+	if message.AppID != "A1" || message.PostingBot() != "B1" {
+		t.Fatalf("hook message app=%q bot=%q, want A1/B1", message.AppID, message.PostingBot())
+	}
 }
 
 // TestInstallWithoutIncomingWebhookScopeMintsNoHook proves the channel alone

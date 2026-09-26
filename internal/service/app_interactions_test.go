@@ -80,7 +80,7 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	repository := memory.New()
 	for _, seed := range []func() error{
 		func() error {
-			return repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Test", Domain: "test"})
+			return repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Test"})
 		},
 		func() error { return repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}) },
 		func() error {
@@ -135,7 +135,7 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	mu.Unlock()
 	assertSlackInteractionSignature(t, signingSecret, slash.body, slash.timestamp, slash.signature)
 	for field, want := range map[string]string{
-		"api_app_id": "A1", "team_id": "T1", "team_domain": "test",
+		"api_app_id": "A1", "team_id": "T1", "team_domain": "t1",
 		"channel_id": "C1", "channel_name": "general", "user_id": "U1",
 		"user_name": "alice", "command": "/deploy", "text": "ask <@U1> in <#C1|general> <https://example.com/runbook>",
 		"token": verificationToken, "is_enterprise_install": "false",
@@ -174,7 +174,11 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 		Type        string `json:"type"`
 		APIAppID    string `json:"api_app_id"`
 		ResponseURL string `json:"response_url"`
-		Actions     []struct {
+		Team        struct {
+			ID     string `json:"id"`
+			Domain string `json:"domain"`
+		} `json:"team"`
+		Actions []struct {
 			Type           string `json:"type"`
 			ActionID       string `json:"action_id"`
 			BlockID        string `json:"block_id"`
@@ -191,6 +195,12 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	}
 	if err := json.Unmarshal([]byte(actionRequest.form.Get("payload")), &actionPayload); err != nil {
 		t.Fatal(err)
+	}
+	// A workspace seeded without a subdomain is addressed by its folded
+	// identifier on every surface, exactly as team.info reports it; the
+	// payload used to carry an empty domain.
+	if actionPayload.Team.ID != "T1" || actionPayload.Team.Domain != "t1" {
+		t.Fatalf("block action team=%+v, want T1/t1", actionPayload.Team)
 	}
 	if actionPayload.Type != "block_actions" || actionPayload.APIAppID != "A1" || len(actionPayload.Actions) != 1 ||
 		actionPayload.Actions[0].Type != "static_select" || actionPayload.Actions[0].ActionID != "view_build" ||

@@ -477,6 +477,30 @@ func TestAnObserverWithoutCollaboratorsIsInert(t *testing.T) {
 	}
 }
 
+// The seam's event read used to answer a request naming neither a member nor
+// an app with the whole workspace journal — every record about every private
+// conversation — to any caller holding a client certificate. It is now the
+// member read, which refuses a caller it cannot place in the workspace; the
+// member's head is answered for a member only.
+func TestTheSeamServesNoUnfilteredJournal(t *testing.T) {
+	target := seededStore(t)
+	remote, connection := serve(t, service.Messages{Store: target}, target, Observer{})
+	client := chatv1.NewEventsServiceClient(connection)
+	if _, err := client.ListEventsAfter(context.Background(), &chatv1.EventsRequest{WorkspaceId: "T1", Limit: 10}); err == nil {
+		t.Fatal("a read naming no member was answered with the workspace journal")
+	}
+	head, err := remote.LatestEventSequence(context.Background(), "T1", "U1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := target.LatestEventSequence(context.Background(), "T1"); head != want {
+		t.Fatalf("head=%d, want %d", head, want)
+	}
+	if _, err := remote.LatestEventSequence(context.Background(), "T1", "U-stranger"); err == nil {
+		t.Fatal("a stranger was told the workspace's journal head")
+	}
+}
+
 // TestAMessageLargerThanTheDefaultBoundCrossesTheSeam covers the bound defect: the
 // grpc-go default is 4 MiB on both receive paths, which is smaller than a single
 // HTTP request body this system accepts, so a payload the monolith took failed
@@ -881,7 +905,7 @@ func (c *pageRecordingChat) observed() []int {
 	return append([]int(nil), c.records...)
 }
 
-func (c *pageRecordingChat) ListEventsAfter(_ context.Context, _ domain.WorkspaceID, _ uint64, limit int) ([]events.Record, error) {
+func (c *pageRecordingChat) ListAppEventsAfter(_ context.Context, _ domain.AppID, _ uint64, limit int) ([]events.Record, error) {
 	c.record(limit)
 	return nil, nil
 }
@@ -907,7 +931,7 @@ func TestAPageLimitIsBoundedByATransportResourceLimit(t *testing.T) {
 	recorder := &pageRecordingChat{Service: service.Messages{Store: target}}
 	remote, _ := serve(t, recorder, target, Observer{})
 	ctx := context.Background()
-	if _, err := remote.ListEventsAfter(ctx, "T1", 0, math.MaxInt32); err != nil {
+	if _, err := remote.ListAppEventsAfter(ctx, "A1", 0, math.MaxInt32); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: math.MaxInt32}}); err != nil {
@@ -924,7 +948,7 @@ func TestAPageLimitIsBoundedByATransportResourceLimit(t *testing.T) {
 	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 201}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := remote.ListEventsAfter(ctx, "T1", 0, 1000); err != nil {
+	if _, err := remote.ListAppEventsAfter(ctx, "A1", 0, 1000); err != nil {
 		t.Fatal(err)
 	}
 	ordinary := recorder.observed()[before:]

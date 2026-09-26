@@ -891,9 +891,11 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	}
 	// Sequence 1 is the fixture's own role seed, which is a durable journal record
 	// like any other role change. The contract records this test asserts begin
-	// after it; the count, ordering, payload and actor assertions are unchanged.
-	records, err := remote.ListEventsAfter(ctx, "T1", 1, 23)
-	if err != nil || len(records) != 23 || records[0].Sequence != 2 || records[0].Event.Topic != "user.created" {
+	// after it. The member's view of the journal is what crosses the seam; the
+	// unfiltered workspace journal does not.
+	journal, err := remote.ListUserEventsAfter(ctx, "T1", "U1", 1, 23)
+	records := journal.Records
+	if err != nil || len(records) == 0 || records[0].Sequence != 2 || records[0].Event.Topic != "user.created" {
 		t.Fatalf("events=%+v err=%v", records, err)
 	}
 	// The payload is a self-describing JSON object and crosses the seam verbatim;

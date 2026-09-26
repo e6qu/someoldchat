@@ -168,7 +168,7 @@ operations:
         The full current payload is validated and persisted, but link-name
         expansion and external media unfurl fetching have not been qualified
         against live Slack outcomes.
-      - The Web API now enforces the documented posting allowance — one message per second per channel with a short burst — and a uniform per-method budget at Tier 4's floor, answering 429 with Retry-After and rate_limited. Budgets are replica-local and per-method tier assignments below that floor are not enforced.
+      - The Web API now enforces the documented posting allowance — one message per second per channel with a short burst — and a uniform per-method budget at Tier 4's floor, answering 429 with Retry-After. A method budget answers Slack's ratelimited and the per-channel posting allowance answers the pinned rate_limited (provenance under rate-limit-codes). Budgets are replica-local and per-method tier assignments below that floor are not enforced.
     audit:
       downgraded_from: behavior-compatible
       reason: >-
@@ -329,6 +329,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestConversationAndUserInfo
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
+      - go-test:internal/api/slack:TestAdminUsersRemoveDeactivatesUser
     deviations:
       - Nothing records a member's time zone, so every member reports tz UTC with a zero offset.
       - A workspace has owners but no distinguished primary owner, so every owner reports is_primary_owner.
@@ -590,6 +591,14 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestLookupUserByEmail
+    deviations:
+      - >-
+        A deactivated member is not found by e-mail (users_not_found), while
+        users.info and users.list describe it with deleted:true. Whether
+        Slack's lookupByEmail finds a deactivated account is not settled by
+        the pinned material and could not be checked against the current
+        reference from the build network; the address of a deactivated
+        account is not treated as a live identity.
   - method: users.getPresence
     status: sdk-compatible
     provenance: slack-api-specs-openapi
@@ -1077,7 +1086,7 @@ operations:
       - go-test:internal/api/slack:TestPostMessageResolvesNamesAndUsers
     deviations:
       - markdown_text, metadata, reply_broadcast, parse, link_names, and unfurl controls are not implemented (as_user is read and ignored, as chat.postMessage does; a user token posts as its user, a bot token as its bot)
-      - Web API rate limiting now answers 429 with Retry-After and rate_limited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
+      - Web API rate limiting now answers 429 with Retry-After and ratelimited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
       - schedules created before schema 102 lack reconstructable app attribution
   - method: chat.scheduledMessages.list
     status: behavior-compatible
@@ -1094,7 +1103,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - org-level team_id selection is not implemented
-      - Web API rate limiting now answers 429 with Retry-After and rate_limited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
+      - Web API rate limiting now answers 429 with Retry-After and ratelimited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
       - schedules created before schema 102 recorded no app or bot, so schema 186 assigns them to their author with no app; they list for the author's first-party session, not for an app's token
   - method: chat.unfurl
     status: behavior-compatible
@@ -2336,7 +2345,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
       - Historical function-step occurrences are durable, but removed-step is_deleted projection has not been live-Slack qualified.
-      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and rate_limited; this method's stricter Tier 3 budget is not separately enforced.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
   - method: functions.workflows.steps.responses.export
     status: behavior-compatible
     provenance: slack-reference
@@ -2444,7 +2453,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
-      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and rate_limited; this method's stricter Tier 3 budget is not separately enforced.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
   - method: workflows.triggers.permissions.add
     status: sdk-compatible
     provenance: slack-reference
@@ -2490,8 +2499,8 @@ decisions:
       Event compatibility is topic-specific. A real service-created
       message.created record is hydrated into a Slack message only after
       installed-bot or connected-user conversation visibility is proved, and
-      current Node, Python, and Java Socket Mode plus Node RTM clients parse that
-      result. Message mutation and file create/share callbacks use immutable
+      current Node, Python, and Java Socket Mode plus Node and Python RTM clients
+      parse that result. Message mutation and file create/share callbacks use immutable
       outbox snapshots; HTTP and Socket Mode select bot/user authorization
       perspectives by granted scope, membership, and manifest subscription.
       The formerly withheld topic-table rows are translated now:
@@ -2502,7 +2511,10 @@ decisions:
       its current-catalog user_profile_changed and user_status_changed
       companions, dnd_updated, presence_change (RTM only), team_rename and
       file_public, each from a producer-snapshotted payload pinned by builder
-      and producer-seam tests. user_typing is delivered on RTM and on the
+      and producer-seam tests. The user object team_join and user_change carry
+      is users.info's own (internal/slackobject), and every URL an event
+      carries — a file's url_private, a user's image_* — is built on
+      -auth-public-url at delivery, origin-relative when none is configured. user_typing is delivered on RTM and on the
       first-party SSE stream and is deliberately outside this translation
       table: it is the one Slack event produced without a journal record, read
       as expiring state rather than translated from the outbox, so it is never
@@ -2512,7 +2524,10 @@ decisions:
       committed with the install's bot-token issuance, target-routed and
       automatic. Remaining recorded gaps: tokens_revoked (the revocation
       mutation reaches the token store directly across the auth seam, so the
-      event must be owned by the store mutation), app_uninstalled (the
+      event must be owned by the store mutation), app_requested (a
+      current-catalog event for admin apps whose app_request object the
+      durable payload does not carry; no product path requests an app yet, so
+      the mapping is withheld), app_uninstalled (the
       app_installations join that scopes app event reads would hide the
       app's own announcement), dnd_updated_user (delivery does not vary the
       event name per recipient), Bolt callback qualifications still submit
@@ -2537,9 +2552,10 @@ decisions:
       qualification. The returned URL follows the origin the client called
       (X-Forwarded-Proto included) unless -socket-host overrides it. Slack
       documents no error code for an app already holding its ten connections;
-      this server answers HTTP 429 with Retry-After and rate_limited, the one
-      failure every official Web API client retries on its own, rather than a
-      code an SDK treats as permanent. On the socket, envelopes carry
+      this server answers HTTP 429 with Retry-After and ratelimited, the one
+      failure every official client retries on its own (python-slack-sdk's
+      SocketModeClient retries this method only when error == "ratelimited"),
+      rather than a code an SDK treats as permanent. On the socket, envelopes carry
       retry_attempt and retry_reason; an unacknowledged envelope is retried
       three times on Slack's Events API schedule (immediately, after one
       minute, after five minutes) and then dropped; interactions are delivered
@@ -2564,3 +2580,21 @@ decisions:
   - method: openid
     evidence: https://docs.slack.dev/reference/methods/openid.connect.token/
     decision: The current official method reference defines the Sign in with Slack OpenID Connect token and user-info methods, while the pinned Web API OpenAPI snapshot predates them. Track the methods against the official references and SDK qualifications until the vendored snapshot is refreshed.
+  - method: rate-limit-codes
+    evidence: specs/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json
+    decision: >-
+      A 429 carries one of two Slack codes, decided from primary evidence
+      (docs.slack.dev is unreachable from the build network, so the evidence is
+      the pinned artifacts). The pinned OpenAPI document declares rate_limited
+      only for chat.postMessage, chat.meMessage, chat.scheduleMessage and
+      chat.update, as the posting limit ("Application has posted too many
+      messages"); the per-channel posting allowance answers it. A method's
+      tier budget, and apps.connections.open's connection limit, answer
+      ratelimited: python-slack-sdk 3.43.0 (sha256 recorded in
+      specs/sdk-compatibility.yaml) waits out Retry-After and retries
+      apps.connections.open (socket_mode/client.py, async_client.py) and
+      rtm.connect (rtm_v2/__init__.py) only when error == "ratelimited" and
+      raises on any other code, so rate_limited there crashed a Socket Mode app
+      on a transient limit. Node and Java clients key on status 429 and
+      Retry-After alone. Incoming webhooks answer in plain text and keep
+      rate_limited, which no pinned client reads.

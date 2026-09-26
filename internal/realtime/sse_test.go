@@ -978,3 +978,53 @@ func (s *testTypingSource) recorded() []domain.TypingSignal {
 	defer s.mu.Unlock()
 	return append([]domain.TypingSignal(nil), s.written...)
 }
+
+func (emptyEventSource) LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error) {
+	return 0, nil
+}
+
+func (*testSource) LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error) {
+	return 0, nil
+}
+
+func (*scriptedSource) LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error) {
+	return 0, nil
+}
+
+func (*countingSource) LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error) {
+	return 0, nil
+}
+
+func (failingEventSource) LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error) {
+	return 0, nil
+}
+
+func (*recordingEventSource) LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error) {
+	return 0, nil
+}
+
+// headSource is a recordingEventSource whose journal head is known.
+type headSource struct {
+	recordingEventSource
+	head uint64
+}
+
+func (s *headSource) LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error) {
+	return s.head, nil
+}
+
+// A stream opened with no cursor starts at the journal head, as an RTM ticket
+// does; it used to start at zero and replay the reader's whole visible history
+// as live events. A cursor the client names — zero included — still wins.
+func TestEventStreamWithNoCursorOpensAtTheJournalHead(t *testing.T) {
+	fresh := &headSource{head: 42}
+	_ = streamAs(t, fresh, "U1", "")
+	if got := fresh.firstCursor(); got != 42 {
+		t.Fatalf("a fresh stream started after %d, want the head 42", got)
+	}
+	resumed := &headSource{head: 42}
+	_ = streamAs(t, resumed, "U1", "0")
+	if got := resumed.firstCursor(); got != 0 {
+		t.Fatalf("an explicit cursor 0 started after %d", got)
+	}
+}

@@ -54,10 +54,10 @@ otherwise it is the request's own: `https` for a TLS connection or an
 and the `Host` header. A deployment behind a proxy should set the public URL.
 The one place that decides this is `internal/api/slack/origin.go`.
 
-The file objects inside Events API and Socket Mode message payloads are built
-by delivery workers that know no public origin, so their `url_private` values
-are still origin-relative; a consumer resolves them against the API base URL
-or reads the file through `files.info`.
+The file objects inside Events API, Socket Mode and RTM payloads are the same
+object `files.info` returns, built on the configured public URL. An event has
+no request to take an origin from, so a deployment without `-auth-public-url`
+delivers them origin-relative; see [Public URL](operations.md#public-url).
 
 ## Shares
 

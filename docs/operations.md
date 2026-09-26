@@ -164,7 +164,7 @@ acknowledged event sequence is stored per app, so a replacement process
 resumes after the last confirmed event instead of depending on process memory.
 The implementation allows up to ten active connections per app; an eleventh
 `apps.connections.open` is answered with HTTP 429, `Retry-After`, and
-`rate_limited`, which official clients retry. Each active connection renews
+`ratelimited`, which official clients retry. Each active connection renews
 its durable lease and releases it when the WebSocket closes.
 
 The connection URL follows the origin the client called
@@ -310,6 +310,35 @@ Malformed Socket Mode event payloads are closed as protocol errors; the server
 does not synthesize a replacement payload from an internal topic and string.
 The Real Time Messaging event stream applies the same rule and rejects invalid
 or type-less JSON event payloads.
+
+## Public URL
+
+`-auth-public-url` / `SAMEOLDCHAT_AUTH_PUBLIC_URL` is the one statement of
+where clients reach a deployment, and every process that builds a URL a client
+follows reads it:
+
+- `sameoldchat-server` builds the Web API's absolute URLs and the web
+  client's links on it, and in local composition the chat service it hosts
+  builds event payloads on it too.
+- `sameoldchat-chatd` builds the Events API, Socket Mode and RTM payloads in
+  distributed composition, so it takes the same flag.
+- `sameoldchat-worker -delivery-format slack-events` builds the HTTP Events API
+  callbacks, so it takes the same flag; record delivery refuses it.
+
+The URLs an event carries — a shared file's `url_private`,
+`url_private_download` and `permalink`, and the `image_*` of the user object in
+`team_join`, `user_change`, `user_profile_changed` and `user_status_changed` —
+are built on it, exactly as `files.info` and `users.info` build theirs. Journal
+records store those URLs origin-relative and are resolved when an event is
+delivered, so a changed public URL applies to every later delivery.
+
+Without a public URL the Web API builds its URLs on the origin of each request
+(see [Files](files.md#absolute-urls)), but an event has no request to take an
+origin from, so its URLs stay origin-relative and each process that builds
+events logs a warning at startup. A listen address is deliberately not used as
+a fallback: it names a local interface or an internal port behind a proxy, not
+an address a client can reach. Set the public URL on every deployment an app
+connects to.
 
 ## Snapshot retention and verification
 

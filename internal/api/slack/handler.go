@@ -18,6 +18,7 @@ import (
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"io"
@@ -907,8 +908,10 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 		// Holding the maximum number of connections is a temporary condition
 		// that clears when one closes. It used to fall through to fatal_error,
 		// which every official Socket Mode client treats as permanent. Slack
-		// documents no dedicated code for it; 429 with Retry-After is the one
-		// answer every official Web API client retries on its own.
+		// documents no dedicated code for it; 429 with Retry-After and
+		// `ratelimited` is the answer every official client retries on its own —
+		// python-slack-sdk's SocketModeClient retries this method only on that
+		// exact code.
 		writeRateLimited(w, socketmode.ConnectionLimitRetryAfter)
 		return
 	}
@@ -6376,7 +6379,7 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": slackobject.User(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))})
 }
 
 func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
@@ -6443,7 +6446,7 @@ func (h Handler) lookupUserByEmail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "users_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(h.origin(r), user, true)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": slackobject.User(h.origin(r), user, true)})
 }
 
 func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
@@ -6475,7 +6478,7 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 	}
 	members := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		members = append(members, userResponse(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail)))
+		members = append(members, slackobject.User(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "members": members, "cache_ts": time.Now().Unix(), "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -6527,7 +6530,7 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	profile := profileResponse(h.origin(r), user)
+	profile := slackobject.Profile(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(profile, "email")
 	}
@@ -6904,7 +6907,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	responseProfile := profileResponse(h.origin(r), user)
+	responseProfile := slackobject.Profile(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(responseProfile, "email")
 	}
@@ -7011,7 +7014,7 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(h.origin(r), user)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": slackobject.Profile(h.origin(r), user)})
 }
 
 // concreteImageType reports whether a multipart part's label names one image
@@ -7040,7 +7043,7 @@ func (h Handler) usersSetActive(w http.ResponseWriter, r *http.Request) {
 func adminUserResponse(origin string, value domain.AdminUser) map[string]any {
 	user := value.User
 	user.Role, user.Restricted, user.UltraRestricted = value.Membership.Role, value.Membership.Restricted, value.Membership.UltraRestricted
-	result := userResponse(origin, user, true)
+	result := slackobject.User(origin, user, true)
 	result["is_active"] = value.Membership.Active
 	return result
 }
@@ -7364,8 +7367,10 @@ func (h Handler) conversationInviteCandidates(r *http.Request, principal auth.Pr
 		case targetID == principal.UserID:
 			reason = "cant_invite_self"
 		default:
-			if _, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
-				if !errors.Is(err, store.ErrNotFound) {
+			if target, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil || target.Deleted {
+				// A deactivated account cannot join a conversation; UserInfo
+				// describes it, so the refusal is made here.
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
 					return nil, nil, err
 				}
 				reason = "user_not_found"
@@ -7694,6 +7699,41 @@ func (h Handler) changeConversationArchived(w http.ResponseWriter, r *http.Reque
 	return true, err
 }
 
+// directConversationUsers names the users a conversations.open of an existing
+// IM or MPIM stands for: its members other than the caller, or the caller
+// alone for a self-DM. A conversation the caller cannot see is
+// channel_not_found; a channel that is not a direct conversation is
+// method_not_supported_for_channel_type, as the pinned enum names it.
+func (h Handler) directConversationUsers(r *http.Request, principal auth.Principal, channelID domain.ConversationID) (string, string) {
+	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channelID)
+	if err != nil {
+		return "", mapServiceError(err, "channel_not_found")
+	}
+	if conversation.Kind != domain.ConversationTypeIM && conversation.Kind != domain.ConversationTypeMPIM {
+		return "", "method_not_supported_for_channel_type"
+	}
+	page, err := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channelID, domain.PageRequest{Limit: 10})
+	if err != nil {
+		return "", mapServiceError(err, "channel_not_found")
+	}
+	others := make([]string, 0, len(page.Users))
+	member := false
+	for _, user := range page.Users {
+		if user.ID == principal.UserID {
+			member = true
+			continue
+		}
+		others = append(others, string(user.ID))
+	}
+	if !member {
+		return "", "channel_not_found"
+	}
+	if len(others) == 0 {
+		others = append(others, string(principal.UserID))
+	}
+	return strings.Join(others, ","), ""
+}
+
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticateConversation(r, conversationWriteGrant, domain.ConversationTypeIM, domain.ConversationTypeMPIM)
 	if err != nil {
@@ -7705,14 +7745,28 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	if strings.TrimSpace(fields["users"]) == "" {
-		// /conversations.open enumerates users_list_not_supplied.
-		writeError(w, "users_list_not_supplied")
-		return
+	rawUsers := strings.TrimSpace(fields["users"])
+	if rawUsers == "" {
+		channelID := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+		if channelID == "" {
+			// /conversations.open enumerates users_list_not_supplied.
+			writeError(w, "users_list_not_supplied")
+			return
+		}
+		// "Resume a conversation by supplying an im or mpim's ID": the
+		// conversation's own members are the users an open names, so the
+		// resume is the same open — it reopens a closed DM and reports
+		// already_open for an open one.
+		resumed, failure := h.directConversationUsers(r, principal, channelID)
+		if failure != "" {
+			writeError(w, failure)
+			return
+		}
+		rawUsers = resumed
 	}
 	users := make([]domain.UserID, 0)
 	seen := make(map[domain.UserID]struct{})
-	for _, raw := range strings.Split(fields["users"], ",") {
+	for _, raw := range strings.Split(rawUsers, ",") {
 		user := domain.UserID(strings.TrimSpace(raw))
 		if user == "" {
 			writeError(w, "invalid_array_arg")
@@ -7913,9 +7967,11 @@ func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	// The store pages reaction rows; Slack lists one item per message, carrying
-	// every reaction on it. Rows of the same message collapse into one item,
-	// and each conversation's messages are projected in one batch.
+	// Slack lists one item per message, carrying every reaction on it. The
+	// store pages by message and returns each message's reaction rows
+	// together (domain.UserReactionPage), so the rows collapse into one item
+	// here and a message never repeats on the next page. Each conversation's
+	// messages are projected in one batch.
 	type reactedMessage struct {
 		conversation domain.ConversationID
 		message      domain.Message
@@ -8966,7 +9022,7 @@ func highlightSearchText(text string, terms []string) string {
 func searchFileEnvelope(origin string, arguments searchArguments, page domain.FilePage) map[string]any {
 	matches := make([]map[string]any, 0, len(page.Files))
 	for _, file := range page.Files {
-		matches = append(matches, fileResponse(origin, file))
+		matches = append(matches, slackobject.File(origin, file))
 	}
 	pageCount := 0
 	if page.Total > 0 {
@@ -9188,7 +9244,7 @@ func (h Handler) fileInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	response := fileResponse(h.origin(r), file)
+	response := slackobject.File(h.origin(r), file)
 	h.addSnippetFields(r.Context(), principal, response, file)
 	// The pinned 200 schema requires comments. Slack retired file comments
 	// and no route here creates one, so the page is always empty and final.
@@ -9263,7 +9319,7 @@ func (h Handler) shareFilePublic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(h.origin(r), file), "permalink_public": fileURLs{origin: h.origin(r)}.public(file.PublicToken)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": slackobject.File(h.origin(r), file), "permalink_public": slackobject.FileURLs{Origin: h.origin(r)}.Public(file.PublicToken)})
 }
 
 func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
@@ -9287,7 +9343,7 @@ func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(h.origin(r), file)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": slackobject.File(h.origin(r), file)})
 }
 
 func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
@@ -9339,7 +9395,7 @@ func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
 	}
 	files := make([]map[string]any, 0, len(window.files))
 	for _, file := range window.files {
-		files = append(files, fileResponse(h.origin(r), file))
+		files = append(files, slackobject.File(h.origin(r), file))
 	}
 	pages := (window.total + filter.count - 1) / filter.count
 	if pages == 0 {
@@ -9698,7 +9754,7 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		file.SharedChannels = shared
 	}
-	response := fileResponse(h.origin(r), file)
+	response := slackobject.File(h.origin(r), file)
 	h.addSnippetFields(r.Context(), principal, response, file)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response})
 }
@@ -10076,66 +10132,6 @@ func copyUploadPart(destination *os.File, source io.Reader) error {
 		return err
 	}
 	return nil
-}
-
-func fileResponse(origin string, file domain.File) map[string]any {
-	// A deleted file survives only as a tombstone: Slack keeps its id in the
-	// messages that shared it and says nothing else about it, so neither its
-	// name nor a download URL outlives the deletion.
-	if file.Deleted {
-		return map[string]any{"id": file.ID, "mode": file.Mode()}
-	}
-	fileType, prettyType := file.FileTypes()
-	urls := fileURLs{origin: origin}
-	result := map[string]any{
-		"id": file.ID, "name": file.Name, "title": file.Title, "mimetype": file.MIMEType,
-		"size": file.Size, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(),
-		"user": file.Uploader, "is_public": file.PublicToken != "", "team_id": file.WorkspaceID,
-		"filetype": fileType, "pretty_type": prettyType, "mode": file.Mode(),
-		"is_external": false, "external_type": "", "public_url_shared": file.PublicToken != "",
-		"editable": file.IsSnippet(), "display_as_bot": false,
-		// Every URL is absolute: SDKs and apps fetch them verbatim.
-		"url_private":          urls.private(string(file.ID)),
-		"url_private_download": urls.private(string(file.ID)),
-		"permalink":            urls.permalink(string(file.ID)),
-	}
-	if file.PublicToken != "" {
-		result["permalink_public"] = urls.public(file.PublicToken)
-	}
-	if len(file.SharedChannels) > 0 {
-		result["channels"] = file.SharedChannels
-	}
-	if shares := fileSharesResponse(file); shares != nil {
-		result["shares"] = shares
-	}
-	return result
-}
-
-// fileSharesResponse is Slack's shares map: {public|private: {channel:
-// [share, ...]}}, one entry per message that carries the file.
-func fileSharesResponse(file domain.File) map[string]any {
-	if len(file.Shares) == 0 {
-		return nil
-	}
-	shares := map[string]any{}
-	for _, share := range file.Shares {
-		visibility := "public"
-		if share.Private {
-			visibility = "private"
-		}
-		byChannel, _ := shares[visibility].(map[string]any)
-		if byChannel == nil {
-			byChannel = map[string]any{}
-			shares[visibility] = byChannel
-		}
-		entry := map[string]any{"ts": share.Timestamp, "channel_name": share.ConversationName, "team_id": file.WorkspaceID, "share_user_id": share.SharedBy}
-		if share.ThreadTimestamp != "" {
-			entry["thread_ts"] = share.ThreadTimestamp
-		}
-		existing, _ := byChannel[string(share.Conversation)].([]map[string]any)
-		byChannel[string(share.Conversation)] = append(existing, entry)
-	}
-	return shares
 }
 
 // defaultSnippetFilename names a content= snippet the caller left unnamed. Slack
@@ -11888,7 +11884,7 @@ func messageResponse(origin string, message domain.Message) map[string]any {
 	if len(message.Files) > 0 {
 		files := make([]map[string]any, 0, len(message.Files))
 		for _, file := range message.Files {
-			files = append(files, fileResponse(origin, file))
+			files = append(files, slackobject.File(origin, file))
 		}
 		result["subtype"] = "file_share"
 		result["upload"] = true
@@ -11898,10 +11894,10 @@ func messageResponse(origin string, message domain.Message) map[string]any {
 		result["app_id"] = message.AppID
 	}
 	var stream domain.MessageStreamState
+	if bot := message.PostingBot(); bot != "" {
+		result["bot_id"] = bot
+	}
 	if json.Unmarshal([]byte(message.StreamState), &stream) == nil {
-		if stream.BotID != "" {
-			result["bot_id"] = stream.BotID
-		}
 		if stream.Username != "" {
 			result["username"] = stream.Username
 		}
@@ -13886,7 +13882,7 @@ func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Reques
 		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": fileURLs{origin: h.origin(r)}.externalUpload(string(upload.ID)), "file_id": upload.ID})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": slackobject.FileURLs{Origin: h.origin(r)}.ExternalUpload(string(upload.ID)), "file_id": upload.ID})
 }
 
 func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
@@ -14008,7 +14004,7 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 	}
 	responses := make([]map[string]any, 0, len(files))
 	for _, file := range files {
-		responses = append(responses, fileResponse(h.origin(r), file))
+		responses = append(responses, slackobject.File(h.origin(r), file))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": responses})
 }
@@ -14065,10 +14061,10 @@ func (h Handler) conversationNamed(ctx context.Context, principal auth.Principal
 }
 
 // looksLikeUserID and looksLikeConversationID recognise identifier shapes: an
-// uppercase kind letter followed by letters and digits. Slack's own identifiers
-// are uppercase throughout and this deployment mints the tail in lowercase hex;
-// a channel name is lowercase from its first letter, so neither is confused
-// with a name.
+// uppercase kind letter followed by letters and digits. Slack's identifiers,
+// and those domain.SlackID mints, are uppercase throughout; identifiers minted
+// before SlackID carry a lowercase hex tail and stay valid. A channel name is
+// lowercase from its first letter, so neither is confused with a name.
 func looksLikeUserID(value string) bool {
 	return len(value) > 1 && (value[0] == 'U' || value[0] == 'W') && slackIdentifierTail(value[1:])
 }

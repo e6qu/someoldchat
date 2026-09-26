@@ -76,25 +76,3 @@ func requestOrigin(r *http.Request) string {
 	}
 	return scheme + "://" + r.Host
 }
-
-// fileURLs are the absolute locations of one file's bytes and pages.
-type fileURLs struct {
-	origin string
-}
-
-func (u fileURLs) private(id string) string {
-	return u.origin + "/api/files/" + url.PathEscape(id)
-}
-
-// permalink is the file's page for a signed-in member of the web client.
-func (u fileURLs) permalink(id string) string {
-	return u.origin + "/app/files/" + url.PathEscape(id)
-}
-
-func (u fileURLs) public(token string) string {
-	return u.origin + "/files/public/" + url.PathEscape(token)
-}
-
-func (u fileURLs) externalUpload(id string) string {
-	return u.origin + "/internal/files/external/" + url.PathEscape(id)
-}

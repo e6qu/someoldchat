@@ -201,10 +201,10 @@ func TestPromotedEventsHonorScopeAndLifecycleVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 1, Event: dndEvent}); err != nil || !visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 1, Event: dndEvent}); err != nil || !visible {
 		t.Fatalf("dnd:read app visible=%v err=%v", visible, err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A2", events.Record{Sequence: 1, Event: dndEvent}); err != nil || visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A2", events.Record{Sequence: 1, Event: dndEvent}); err != nil || visible {
 		t.Fatalf("users:read must not admit dnd_updated: visible=%v err=%v", visible, err)
 	}
 
@@ -212,10 +212,10 @@ func TestPromotedEventsHonorScopeAndLifecycleVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 2, Event: renameEvent}); err != nil || !visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 2, Event: renameEvent}); err != nil || !visible {
 		t.Fatalf("team:read app visible=%v err=%v", visible, err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A2", events.Record{Sequence: 2, Event: renameEvent}); err != nil || visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A2", events.Record{Sequence: 2, Event: renameEvent}); err != nil || visible {
 		t.Fatalf("team_rename without team:read: visible=%v err=%v", visible, err)
 	}
 
@@ -225,7 +225,7 @@ func TestPromotedEventsHonorScopeAndLifecycleVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 3, Event: createdEvent}); err != nil || !visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 3, Event: createdEvent}); err != nil || !visible {
 		t.Fatalf("public channel_created hidden from channels:read app: visible=%v err=%v", visible, err)
 	}
 
@@ -235,7 +235,7 @@ func TestPromotedEventsHonorScopeAndLifecycleVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A2", events.Record{Sequence: 4, Event: privateRename}); err != nil || visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A2", events.Record{Sequence: 4, Event: privateRename}); err != nil || visible {
 		t.Fatalf("private rename leaked to a bot outside the room: visible=%v err=%v", visible, err)
 	}
 }
@@ -286,7 +286,7 @@ func TestAppMentionIsDerivedForTheMentionedAppOnly(t *testing.T) {
 	}
 	bodiesFor := func(appID domain.AppID) []string {
 		t.Helper()
-		prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, appID, posted)
+		prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", appID, posted)
 		if err != nil || !visible {
 			t.Fatalf("%s visible=%v err=%v", appID, visible, err)
 		}

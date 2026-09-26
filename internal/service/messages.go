@@ -25,6 +25,7 @@ import (
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -232,6 +233,11 @@ type Messages struct {
 	Blob             blob.Store
 	AppCredentialKey []byte
 	AppHTTPClient    *http.Client
+	// PublicURL is the deployment's public URL (-auth-public-url), the one
+	// origin every URL a service-built event carries is resolved against —
+	// the same coordinate the Web API and the web client build on. Empty
+	// leaves those URLs origin-relative; see docs/operations.md.
+	PublicURL string
 }
 
 type conversationInviteFailureReason string
@@ -320,7 +326,7 @@ func (m Messages) ListAppEventsAfter(ctx context.Context, appID domain.AppID, af
 		}
 		for _, record := range records {
 			cursor = record.Sequence
-			prepared, visible, prepareErr := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, appID, record)
+			prepared, visible, prepareErr := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, slackobject.Origin(m.PublicURL), appID, record)
 			if prepareErr != nil {
 				return nil, prepareErr
 			}
@@ -359,7 +365,7 @@ func (m Messages) ListUserEventsAfter(ctx context.Context, workspaceID domain.Wo
 			return events.UserEventPage{}, err
 		}
 		for _, record := range records {
-			prepared, visible, prepareErr := PrepareUserEvent(ctx, m.Store, workspaceID, userID, record)
+			prepared, visible, prepareErr := PrepareUserEvent(ctx, m.Store, slackobject.Origin(m.PublicURL), workspaceID, userID, record)
 			if prepareErr != nil {
 				return events.UserEventPage{}, prepareErr
 			}
@@ -399,7 +405,7 @@ func (m Messages) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface
 			return claim, found, err
 		}
 		record := claim.Record
-		prepared, visible, err := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, appID, record)
+		prepared, visible, err := PrepareAppEvent(ctx, m.Store, m.AppCredentialKey, slackobject.Origin(m.PublicURL), appID, record)
 		if err != nil {
 			m.deferAppEvent(ctx, appID, surface, owner, record.Sequence, "event_projection_failed")
 			return events.AppEventClaim{}, false, err
@@ -1578,8 +1584,14 @@ func (m Messages) resolveSearchUser(ctx context.Context, workspaceID domain.Work
 	return domain.UserID("__no_search_match__")
 }
 
-func (m Messages) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceID, after uint64, limit int) ([]events.Record, error) {
-	return m.Store.ListEventsAfter(ctx, workspace, after, limit)
+// LatestEventSequence is where a member's new live stream opens: the journal
+// head now, so the stream carries what happens next rather than replaying the
+// workspace's history. An RTM ticket takes the same position at rtm.connect.
+func (m Messages) LatestEventSequence(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (uint64, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return 0, err
+	}
+	return m.Store.LatestEventSequence(ctx, workspaceID)
 }
 
 // IntegrationLogs answers team.integrationLogs, the administrative record of who
@@ -1757,9 +1769,14 @@ func (m Messages) UserInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 		return domain.User{}, err
 	}
 	user, err := m.Store.GetUser(ctx, requestedID)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+	if err != nil || user.WorkspaceID != workspaceID {
 		return domain.User{}, store.ErrNotFound
 	}
+	// A deactivated member is still a member of the directory: Slack's
+	// users.info answers it with deleted:true, as users.list lists it, and
+	// clients rely on that to render the author of an old message. It used to
+	// be user_not_found. A caller that needs an active account — sign-in, an
+	// invitation — checks Deleted itself.
 	return m.describeUser(ctx, user)
 }
 
@@ -10552,7 +10569,20 @@ func (m Messages) PostIncomingWebhookWithAttachments(ctx context.Context, worksp
 	if err != nil {
 		return domain.Message{}, err
 	}
-	return m.PostWithBlocksAndAttachments(ctx, workspaceID, value.UserID, value.ConversationID, text, blocks, attachments, threadTimestamp, idempotencyKey, value.AppID)
+	// A hook posts as its app's bot (CreateIncomingWebhook proved the hook's
+	// user is that bot), so the message names the bot the way a bot-token
+	// post does: Slack's webhook messages carry bot_id, and every projection
+	// reads it from domain.Message.PostingBot.
+	request := domain.MessagePostRequest{
+		Conversation: value.ConversationID, Text: text, Blocks: blocks, Attachments: attachments,
+		ThreadTimestamp: threadTimestamp, IdempotencyKey: idempotencyKey, AppID: value.AppID,
+	}
+	if bot, botErr := m.Store.GetBotByApp(ctx, workspaceID, value.AppID); botErr == nil && bot.UserID == value.UserID {
+		request.BotID = bot.ID
+	} else if botErr != nil && !errors.Is(botErr, store.ErrNotFound) {
+		return domain.Message{}, botErr
+	}
+	return m.PostMessageAs(ctx, workspaceID, value.UserID, request)
 }
 
 func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks, attachments string) (domain.Message, error) {

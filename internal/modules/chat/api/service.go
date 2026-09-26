@@ -550,5 +550,10 @@ type Service interface {
 	PresentEntityDetails(context.Context, domain.WorkspaceID, domain.UserID, string, string, bool, string, string) error
 	PresentEntityComments(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, bool, string, bool, string, string) error
 	AcknowledgeEntityCommentAction(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) error
-	events.Source
+	// LatestEventSequence is the journal head a new live stream for this
+	// member opens at. The raw workspace journal (events.Source) is
+	// deliberately not part of this surface: it carries records about
+	// conversations a reader is not in. Readers use ListUserEventsAfter or
+	// ListAppEventsAfter, which filter by audience.
+	LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error)
 }

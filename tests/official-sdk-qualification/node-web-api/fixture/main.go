@@ -199,17 +199,28 @@ func main() {
 	}
 	// A request the walk withdraws. Cancelling applies only to a request nobody
 	// has decided, so the walk needs one that is really open.
-	if err := store.SetAppApproval(context.Background(), "T1", "request:Rq-sdk", "Rq-sdk", domain.AppApprovalRequested, now, events.Event{
-		ID: "evt-app-request-sdk", WorkspaceID: "T1", ActorID: "U1", Topic: "app.requested", Payload: "Rq-sdk", CreatedAt: now,
-	}); err != nil {
+	// Both records are the ones the service writes for these facts, built
+	// through the typed constructor. They used to be hand-written with a bare
+	// identifier as the payload (and an invented topic for the credential),
+	// which every event stream then reported as an undeliverable malformed
+	// record on each qualification run.
+	requested, err := events.New("evt-app-request-sdk", "T1", "U1", events.NewPayload("app.requested", events.String("app_id", "request:Rq-sdk"), events.String("app_request_id", "Rq-sdk")), now)
+	if err != nil {
+		panic(err)
+	}
+	if err := store.SetAppApproval(context.Background(), "T1", "request:Rq-sdk", "Rq-sdk", domain.AppApprovalRequested, now, requested); err != nil {
 		panic(err)
 	}
 	// An external credential for the walk to read and revoke. The ciphertext is
 	// here so the walk can prove the secret does not come back out.
+	connected, err := events.New("evt-external-qualification", "T1", "U1", events.NewPayload("app.external_token_connected", events.String("app_id", "A1"), events.String("provider_name", "example")), now)
+	if err != nil {
+		panic(err)
+	}
 	if err := store.SetExternalAuthToken(context.Background(), domain.ExternalAuthToken{
 		ID: "Et-qualification", AppID: "A1", WorkspaceID: "T1", UserID: "U1", Provider: "example",
 		Ciphertext: "sealed-qualification", ExpiresAt: now.Add(12 * time.Hour), CreatedAt: now,
-	}, events.Event{ID: "evt-external-qualification", WorkspaceID: "T1", Topic: "app.external_token_set", Payload: "Et-qualification", CreatedAt: now}); err != nil {
+	}, connected); err != nil {
 		panic(err)
 	}
 	for _, candidate := range []struct {
@@ -264,7 +275,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	messages := service.Messages{Store: store, Blob: blobs, AppCredentialKey: appCredentialKey}
+	// The fixture is reached on one address, which is its public URL: the Web
+	// API and every event payload build their absolute URLs on it, as a
+	// deployment's -auth-public-url makes them.
+	messages := service.Messages{Store: store, Blob: blobs, AppCredentialKey: appCredentialKey, PublicURL: fixturePublicURL}
 	qualificationWorkflow := domain.WorkflowDefinition{
 		ID: "WfQualification", WorkspaceID: "T1", AppID: "A3", OwnerID: "U1", CallbackID: "qualification-workflow",
 		Title: "Qualification workflow", InputSchema: `{}`, Steps: `[{"function_id":"triage","title":"Triage"}]`,
@@ -370,7 +384,7 @@ func main() {
 	// upload URL among them — answering 404 by default.
 	if err := slack.Mount(mux, slack.Surface{
 		Messages: messages, Authenticator: authenticator, AppAuthenticator: appAuthenticator, Responses: responses,
-		Limiter: slack.NewRateLimiter(),
+		Limiter: slack.NewRateLimiter(), PublicURL: fixturePublicURL,
 	}); err != nil {
 		panic(err)
 	}
@@ -568,7 +582,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	server := &http.Server{Addr: "127.0.0.1:18080", Handler: serverHandler}
+	server := &http.Server{Addr: strings.TrimPrefix(fixturePublicURL, "http://"), Handler: serverHandler}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			panic(err)
@@ -645,3 +659,7 @@ func (s *qualificationResponseSink) get(envelopeID string) (string, bool) {
 	payload, ok := s.values[envelopeID]
 	return payload, ok
 }
+
+// fixturePublicURL is the one address every qualification suite reaches the
+// fixture on.
+const fixturePublicURL = "http://127.0.0.1:18080"

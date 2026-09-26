@@ -29,6 +29,11 @@ func TestWithheldTopicsAreExactlyTheMessageProjectionRows(t *testing.T) {
 		"file.created":  true,
 		"file.shared":   true,
 		"file.unshared": true,
+		// app_requested is a current-catalog event whose app_request object
+		// (app profile, requester, team, described scopes, message) the
+		// durable payload does not carry, and no product path requests an
+		// app yet; see the row's note.
+		"app.requested": true,
 	}
 	for _, rule := range topicRules {
 		mapped := rule.slack.eventType != "" && rule.slack.build == nil

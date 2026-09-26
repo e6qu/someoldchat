@@ -1026,9 +1026,9 @@ func TestBrowserSessionScopesFollowTheWorkspaceRole(t *testing.T) {
 		target string
 		body   string
 	}{
-		{name: "self promotion", target: "/api/admin.auth.users.set", body: "user_id=" + string(provisioned.ID) + "&action=role&role=admin"},
-		{name: "lock out the administrator", target: "/api/admin.auth.users.set", body: "user_id=U1&action=disable"},
-		{name: "disable the only login provider", target: "/api/admin.auth.methods.set", body: "provider=oidc&enabled=false"},
+		{name: "self promotion", target: "/app/admin/auth/users.set", body: "user_id=" + string(provisioned.ID) + "&action=role&role=admin"},
+		{name: "lock out the administrator", target: "/app/admin/auth/users.set", body: "user_id=U1&action=disable"},
+		{name: "disable the only login provider", target: "/app/admin/auth/methods.set", body: "provider=oidc&enabled=false"},
 	} {
 		t.Run(attempt.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, attempt.target, strings.NewReader(attempt.body+"&_csrf="+csrf))
@@ -1079,7 +1079,7 @@ func TestAdministratorSessionKeepsTheControlPlane(t *testing.T) {
 		t.Fatalf("administrator session carries no control-plane scope: %v", record.Scopes)
 	}
 	csrf := auth.CSRFToken(sessionCookie.Value)
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.auth.users.set", strings.NewReader("user_id=U1&action=role&role=admin&_csrf="+csrf))
+	request := httptest.NewRequest(http.MethodPost, "/app/admin/auth/users.set", strings.NewReader("user_id=U1&action=role&role=admin&_csrf="+csrf))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: sessionCookie.Value})

@@ -18,7 +18,8 @@ retrieved_at: 2026-07-28T00:00:00Z
 # Event-surface coverage is method- and topic-specific. Node, Python, and Java
 # Socket Mode qualifications consume a real service-posted message that
 # internal/service hydrates and translates after installed-bot visibility is
-# proved; the Node RTM qualification does the same for the connected user.
+# proved; the Node and Python RTM qualifications do the same for the connected
+# user.
 # Bolt callback suites still submit an independently constructed signed event
 # callback, so they qualify framework decoding and request authentication, not
 # producer translation. Immutable producer snapshots and bot/user perspective
@@ -154,6 +155,24 @@ sdks:
     note: >-
       Consumes and acknowledges a real message created through internal/service,
       projected only after installed-bot conversation visibility is proved.
+  - id: python-rtm
+    ecosystem: pypi
+    package: slack-sdk
+    upstream: https://github.com/slackapi/python-slack-sdk
+    release: 3.43.0
+    revision: 3a5cec2e79ebe58467c2c65781492a42938fdbfa
+    artifact: slack_sdk-3.43.0-py2.py3-none-any.whl
+    sha256: 4b6557c65577fc172f685af218b811f9f3b4909e24cddd839ada09565f10c585
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/python-rtm/qualification.py
+    note: >-
+      slack_sdk.rtm_v2.RTMClient opens the socket rtm.connect hands it and
+      consumes a real message a user token posted after the socket opened.
+      The client drops events whose bot_id is its own (learned from
+      auth.test), so the suite also posts as the bot and requires that post
+      to be filtered and the person's post, from a user token issued to the
+      same app, to carry no bot_id.
   - id: java-slack-api
     ecosystem: maven
     package: com.slack.api:slack-api-client

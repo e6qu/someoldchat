@@ -3914,6 +3914,24 @@ type MessageStreamState struct {
 	UnfurlMedia    *bool  `json:"unfurl_media,omitempty"`
 }
 
+// PostingBot is the bot a message was posted as: the bot a bot token
+// authenticated, which the service records in the stream state of every
+// bot-token post. A message a person posted with a user token issued to an
+// app carries that app's app_id but no bot, exactly as on Slack — clients such
+// as python-slack-sdk's RTM client drop every event whose bot_id is their own,
+// so naming the app's bot on a user-token post hid it from the very app that
+// posted it. Every projection (Web API, Events API, RTM) reads the bot here.
+func (m Message) PostingBot() BotID {
+	if m.StreamState == "" {
+		return ""
+	}
+	var state MessageStreamState
+	if json.Unmarshal([]byte(m.StreamState), &state) != nil {
+		return ""
+	}
+	return state.BotID
+}
+
 // MessagePostRequest is the complete current chat.postMessage payload after
 // transport decoding. Keeping it typed prevents the Web API, scheduled worker,
 // and first-party composer from silently supporting different message shapes.

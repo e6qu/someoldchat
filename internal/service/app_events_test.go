@@ -59,7 +59,7 @@ func TestPrepareAppEventHydratesOnlyConversationVisibleMessagesAndFiles(t *testi
 		t.Fatal(err)
 	}
 
-	prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 2, Event: messageEvent})
+	prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "https://chat.example.test", "A1", events.Record{Sequence: 2, Event: messageEvent})
 	if err != nil || !visible {
 		t.Fatalf("prepared=%+v visible=%v err=%v", prepared, visible, err)
 	}
@@ -68,7 +68,10 @@ func TestPrepareAppEventHydratesOnlyConversationVisibleMessagesAndFiles(t *testi
 		t.Fatalf("bodies=%q err=%v", bodies, err)
 	}
 	body := string(bodies[0])
-	for _, expected := range []string{`"type":"message"`, `"text":"private report"`, `"subtype":"file_share"`, `"files":[`, `"id":"F1"`} {
+	for _, expected := range []string{`"type":"message"`, `"text":"private report"`, `"subtype":"file_share"`, `"files":[`, `"id":"F1"`,
+		// The file object is files.info's own, on the deployment's public URL:
+		// an app fetches url_private verbatim.
+		`"url_private":"https://chat.example.test/api/files/F1"`, `"permalink":"https://chat.example.test/app/files/F1"`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("callback is missing %s: %s", expected, body)
 		}
@@ -77,7 +80,7 @@ func TestPrepareAppEventHydratesOnlyConversationVisibleMessagesAndFiles(t *testi
 		t.Fatalf("storage blob key crossed the app boundary: %s", body)
 	}
 
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A2", events.Record{Sequence: 2, Event: messageEvent}); err != nil || visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A2", events.Record{Sequence: 2, Event: messageEvent}); err != nil || visible {
 		t.Fatalf("outsider visible=%v err=%v", visible, err)
 	}
 	reactionEvent, err := newEvent("T1", "U1", events.NewPayload("reaction.added",
@@ -86,13 +89,13 @@ func TestPrepareAppEventHydratesOnlyConversationVisibleMessagesAndFiles(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 3, Event: reactionEvent}); err != nil || !visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 3, Event: reactionEvent}); err != nil || !visible {
 		t.Fatalf("member bot reaction visible=%v err=%v", visible, err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A2", events.Record{Sequence: 3, Event: reactionEvent}); err != nil || visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A2", events.Record{Sequence: 3, Event: reactionEvent}); err != nil || visible {
 		t.Fatalf("outsider bot reaction visible=%v err=%v", visible, err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A3", events.Record{Sequence: 3, Event: reactionEvent}); err != nil || visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A3", events.Record{Sequence: 3, Event: reactionEvent}); err != nil || visible {
 		t.Fatalf("member bot without reactions:read visible=%v err=%v", visible, err)
 	}
 	starEvent, err := newEvent("T1", "U1", events.NewPayload("star.added",
@@ -101,13 +104,13 @@ func TestPrepareAppEventHydratesOnlyConversationVisibleMessagesAndFiles(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 4, Event: starEvent}); err != nil || visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 4, Event: starEvent}); err != nil || visible {
 		t.Fatalf("user-scoped star exposed without a user authorization: visible=%v err=%v", visible, err)
 	}
 	if err := state.SeedToken(ctx, "xoxp-A1-U1", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user", Scopes: []string{"stars:read"}}); err != nil {
 		t.Fatal(err)
 	}
-	preparedStar, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 4, Event: starEvent})
+	preparedStar, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 4, Event: starEvent})
 	if err != nil || !visible {
 		t.Fatalf("user-authorized star visible=%v err=%v", visible, err)
 	}
@@ -116,7 +119,7 @@ func TestPrepareAppEventHydratesOnlyConversationVisibleMessagesAndFiles(t *testi
 		!strings.Contains(string(starBodies[0]), `"user_id":"U1"`) || !strings.Contains(string(starBodies[0]), `"is_bot":false`) {
 		t.Fatalf("user-authorized star bodies=%q err=%v", starBodies, err)
 	}
-	preparedFile, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 1, Event: fileEvent})
+	preparedFile, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 1, Event: fileEvent})
 	if err != nil || !visible {
 		t.Fatalf("prepared file=%+v visible=%v err=%v", preparedFile, visible, err)
 	}
@@ -130,7 +133,7 @@ func TestPrepareAppEventHydratesOnlyConversationVisibleMessagesAndFiles(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	preparedShared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 5, Event: sharedEvent})
+	preparedShared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 5, Event: sharedEvent})
 	if err != nil || !visible {
 		t.Fatalf("prepared shared=%+v visible=%v err=%v", preparedShared, visible, err)
 	}
@@ -163,7 +166,7 @@ func TestPrepareUserEventHydratesOnlyJoinedConversationMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prepared, visible, err := PrepareUserEvent(ctx, state, "T1", "U1", events.Record{Sequence: 1, Event: event})
+	prepared, visible, err := PrepareUserEvent(ctx, state, "", "T1", "U1", events.Record{Sequence: 1, Event: event})
 	if err != nil || !visible {
 		t.Fatalf("prepared=%+v visible=%v err=%v", prepared, visible, err)
 	}
@@ -175,7 +178,7 @@ func TestPrepareUserEventHydratesOnlyJoinedConversationMessages(t *testing.T) {
 	if err != nil || !strings.Contains(body, `"text":"real RTM message"`) || !strings.Contains(body, `"channel":"C1"`) {
 		t.Fatalf("body=%s err=%v", body, err)
 	}
-	if _, visible, err := PrepareUserEvent(ctx, state, "T1", "U2", events.Record{Sequence: 1, Event: event}); err != nil || visible {
+	if _, visible, err := PrepareUserEvent(ctx, state, "", "T1", "U2", events.Record{Sequence: 1, Event: event}); err != nil || visible {
 		t.Fatalf("outsider visible=%v err=%v", visible, err)
 	}
 	reactionEvent, err := newEvent("T1", "U1", events.NewPayload("reaction.added",
@@ -184,10 +187,10 @@ func TestPrepareUserEventHydratesOnlyJoinedConversationMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareUserEvent(ctx, state, "T1", "U1", events.Record{Sequence: 2, Event: reactionEvent}); err != nil || !visible {
+	if _, visible, err := PrepareUserEvent(ctx, state, "", "T1", "U1", events.Record{Sequence: 2, Event: reactionEvent}); err != nil || !visible {
 		t.Fatalf("member reaction visible=%v err=%v", visible, err)
 	}
-	if _, visible, err := PrepareUserEvent(ctx, state, "T1", "U2", events.Record{Sequence: 2, Event: reactionEvent}); err != nil || visible {
+	if _, visible, err := PrepareUserEvent(ctx, state, "", "T1", "U2", events.Record{Sequence: 2, Event: reactionEvent}); err != nil || visible {
 		t.Fatalf("outsider reaction visible=%v err=%v", visible, err)
 	}
 }
@@ -251,7 +254,7 @@ func TestMessageEventSnapshotsPreserveEveryMutationVersion(t *testing.T) {
 		"deleted": {deleteEvent, []string{`"subtype":"message_deleted"`, `"text":"version two"`, `"deleted_ts":"1700001000.123456"`}, map[string]string{"channel_type": "group", "ts": "1700001120.123456", "event_ts": "1700001120.123456", "deleted_ts": "1700001000.123456"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 1, Event: test.event})
+			prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 1, Event: test.event})
 			if err != nil || !visible {
 				t.Fatalf("visible=%v err=%v", visible, err)
 			}
@@ -287,4 +290,65 @@ func mustDeliverable(t *testing.T, event events.Event) events.Delivered {
 		t.Fatal(err)
 	}
 	return delivered
+}
+
+// A message event names the bot a message was posted AS, never the bot of the
+// app a user token was issued to. python-slack-sdk's RTM client drops every
+// event whose bot_id equals its own, so the second shape used to hide a
+// person's post from the app that made it on their behalf.
+func TestMessageEventBotIDIsThePostingBotNotTheTokenApp(t *testing.T) {
+	ctx := context.Background()
+	state := memory.New()
+	state.SeedWorkspace(domain.Workspace{ID: "T1"})
+	state.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	state.SeedUser(domain.User{ID: "UB", WorkspaceID: "T1"})
+	state.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Kind: domain.ConversationTypePublic})
+	state.SeedConversationMember("C1", "U1")
+	state.SeedConversationMember("C1", "UB")
+	if err := state.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "UB", Name: "bot", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SeedToken(ctx, "xoxb-A1", domain.TokenRecord{WorkspaceID: "T1", UserID: "UB", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: []string{"channels:history"}}); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(1_700_000_000, 0).UTC()
+	for index, test := range []struct {
+		name    string
+		message domain.Message
+		botID   string
+	}{
+		{"user token issued to the app", domain.Message{ID: "M1", AuthorID: "U1", AppID: "A1", Text: "person"}, ""},
+		{"bot token", domain.Message{ID: "M2", AuthorID: "UB", AppID: "A1", Text: "bot", StreamState: `{"active":false,"bot_id":"B1"}`}, "B1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			message := test.message
+			message.WorkspaceID, message.Conversation = "T1", "C1"
+			message.CreatedAt = created.Add(time.Duration(index) * time.Second)
+			event, err := newEvent("T1", message.AuthorID, messagePayload("message.created", message), message.CreatedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := state.CreateMessage(ctx, message, event, ""); err != nil {
+				t.Fatal(err)
+			}
+			prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: uint64(index + 1), Event: event})
+			if err != nil || !visible {
+				t.Fatalf("visible=%v err=%v", visible, err)
+			}
+			bodies, err := events.SlackEventBodies(prepared, "A1")
+			if err != nil || len(bodies) != 1 {
+				t.Fatalf("bodies=%q err=%v", bodies, err)
+			}
+			var envelope struct {
+				Event map[string]any `json:"event"`
+			}
+			if err := json.Unmarshal(bodies[0], &envelope); err != nil {
+				t.Fatal(err)
+			}
+			body := envelope.Event
+			if got, _ := body["bot_id"].(string); got != test.botID || body["app_id"] != "A1" {
+				t.Fatalf("bot_id=%v app_id=%v, want bot_id %q: %s", body["bot_id"], body["app_id"], test.botID, bodies[0])
+			}
+		})
+	}
 }

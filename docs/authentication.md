@@ -76,7 +76,10 @@ the OAuth authorize URL, message permalinks (`chat.getPermalink` and the
 Official SDKs follow those URLs as given, so a deployment behind a proxy —
 where the request's `Host` is the upstream name — should set it to the address
 clients use, even without an identity provider. Without it the URLs are built
-on the origin of each request; see [Files](files.md#absolute-urls).
+on the origin of each request; see [Files](files.md#absolute-urls). The same
+value is the origin of the URLs in event payloads, which `sameoldchat-chatd`
+and the `slack-events` worker also take; see
+[Public URL](operations.md#public-url).
 
 For container deployment, `SAMEOLDCHAT_API_TOKEN`,
 `SAMEOLDCHAT_SESSION_TOKEN`, `SAMEOLDCHAT_AUTH_STATE_KEY_HEX`,
@@ -225,15 +228,18 @@ the supplied verified email, creates durable workspace membership, and accepts
 only the `member` or `admin` role. It does not create a password or bypass the
 configured authorization source.
 
-The internal administration endpoints are:
+The internal administration endpoints are first-party routes of the web client,
+not Slack Web API methods, so they live under the page they serve rather than
+in the Web API's `/api/` namespace (which answers `unknown_method` for these
+names):
 
 ```text
-GET  /api/admin.auth.methods.list
-POST /api/admin.auth.methods.set
-GET  /api/admin.auth.users.list
-POST /api/admin.auth.users.invite
-POST /api/admin.auth.users.create
-POST /api/admin.auth.users.set
+GET  /app/admin/auth/methods.list
+POST /app/admin/auth/methods.set
+GET  /app/admin/auth/users.list
+POST /app/admin/auth/users.invite
+POST /app/admin/auth/users.create
+POST /app/admin/auth/users.set
 ```
 
 The user list accepts `limit` from 1 through 100 and an opaque `cursor`. It
