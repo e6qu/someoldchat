@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -327,6 +328,76 @@ func TestStartupInterruptedByShutdownIsACleanStop(t *testing.T) {
 	arguments := []string{"-chat-mode", "local", "-store", "sqlite", "-db", filepath.Join(t.TempDir(), "chat.db"), "-api-token", "xoxb-test", "-addr", "127.0.0.1:0", "-app-credential-key-hex", strings.Repeat("01", 32)}
 	if code := run(stopped, discardLogger(), arguments); code != 0 {
 		t.Fatalf("a startup interrupted by SIGTERM exited %d, want 0", code)
+	}
+}
+
+// The default command line is the production shape: -api-rate-limit is on.
+// Every harness that boots this binary turned it off, so when the limited
+// registration mounted only /api/ nothing noticed that the external upload URL
+// files_upload_v2 posts to, incoming webhooks and public file URLs all answered
+// the mux's text/plain 404. This boots the binary with defaults and asks each
+// surface outside /api/ for an answer from its own handler. (The public file
+// and photo URLs answer an unknown token with the same text/plain 404 by
+// design, so their reachability is held by the slack package route gate.)
+func TestDefaultConfigurationServesTheSurfacesOutsideTheWebAPI(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	exited := make(chan int, 1)
+	go func() {
+		exited <- run(ctx, discardLogger(), []string{"-chat-mode", "local", "-store", "memory", "-api-token", "xoxb-test", "-addr", address})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-exited
+	})
+	base := "http://" + address
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		response, err := http.Get(base + "/healthz")
+		if err == nil {
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		select {
+		case code := <-exited:
+			t.Fatalf("server exited %d before becoming healthy", code)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("server did not become healthy")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	for _, probe := range []struct{ method, path string }{
+		{http.MethodPost, "/internal/files/external/unknown-upload"},
+		{http.MethodPost, "/services/T0/A0/secret"},
+		{http.MethodPost, "/services/triggers/T0/Ft0/secret"},
+		{http.MethodPost, "/internal/admin/incoming-webhooks/create"},
+		{http.MethodGet, "/api/dnd.setSnooze"},
+	} {
+		request, err := http.NewRequest(probe.method, base+probe.path, strings.NewReader("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if string(body) == "404 page not found\n" || response.StatusCode == http.StatusMethodNotAllowed {
+			t.Errorf("%s %s is unrouted in the default configuration: %d %q", probe.method, probe.path, response.StatusCode, body)
+		}
 	}
 }
 

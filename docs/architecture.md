@@ -168,6 +168,7 @@ internal/
   app/localchat/  explicit local storage and blob composition
   web/            page and HTMX fragment handlers
   auth/           browser sessions, bearer tokens, scopes
+  bearer/         the shared case-insensitive Authorization: Bearer parser
   domain/         entities and domain invariants
   service/        transactions and application use cases
   store/          persistence ports

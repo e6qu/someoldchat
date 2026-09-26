@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/bearer"
 	"github.com/sameoldchat/sameoldchat/internal/blockkit"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -40,9 +41,9 @@ type Handler struct {
 	SocketMode    socketmode.Service
 	SocketAuth    auth.Authenticator
 	// Limiter enforces the Web API rate-limiting contract over every /api/
-	// route when set. Production wiring sets it; a zero Handler serves
-	// unlimited, which is what the package's own request-shaped tests and the
-	// SDK qualification fixture rely on.
+	// route, and the per-webhook allowance over incoming webhooks, when set.
+	// Production wiring sets it; a zero Handler serves unlimited, which is what
+	// the package's own request-shaped tests rely on.
 	Limiter *RateLimiter
 }
 
@@ -61,24 +62,38 @@ func NewHandler(messages chatapi.Service, authenticator auth.Authenticator) (Han
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
+	// The Web API registers on an inner mux that one /api/ route fronts: the
+	// OAuth scope headers wrap every method, and the limiter, when set, answers
+	// a limited request before any route handler — including the
+	// unknown-method catch-all — runs. Only /api/ is delegated: the surfaces
+	// outside it (incoming webhooks, external upload URLs, public file and photo
+	// URLs) register on the outer mux. Registering them on the inner mux, as
+	// this once did, left every one of them answering 404 in the default
+	// rate-limited production configuration.
+	api := http.NewServeMux()
+	h.registerWebAPI(api)
+	var front http.Handler = api
 	if h.Limiter != nil {
-		// Every route registers on an inner mux and the limiter fronts the
-		// whole /api/ subtree, so a limited request is answered before any
-		// route handler — including the unknown-method catch-all — runs.
-		inner := http.NewServeMux()
-		unlimited := h
-		unlimited.Limiter = nil
-		unlimited.Register(inner)
-		mux.Handle("/api/", h.Limiter.Middleware(inner))
-		return
+		front = h.Limiter.Middleware(front)
 	}
+	mux.Handle("/api/", withOAuthScopeHeaders(front))
+	h.registerSurfaces(mux)
+}
+
+// registerWebAPI registers every Web API method for both GET and POST. Slack
+// accepts either verb for every method — python-slack-sdk's AsyncWebClient,
+// for one, sends GET for dnd.setSnooze, users.deletePhoto and others — so a
+// method registered for one verb answered the other with unknown_method.
+// TestEveryWebAPIMethodAcceptsGETAndPOST holds every pair together.
+func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/api.test", h.apiTest)
 	mux.HandleFunc("POST /api/api.test", h.apiTest)
+	mux.HandleFunc("GET /api/blocks.validate", h.blocksValidate)
 	mux.HandleFunc("POST /api/blocks.validate", h.blocksValidate)
-	mux.HandleFunc("POST /api/auth.test", h.authTest)
 	mux.HandleFunc("GET /api/auth.test", h.authTest)
-	mux.HandleFunc("POST /api/auth.teams.list", h.authTeamsList)
+	mux.HandleFunc("POST /api/auth.test", h.authTest)
 	mux.HandleFunc("GET /api/auth.teams.list", h.authTeamsList)
+	mux.HandleFunc("POST /api/auth.teams.list", h.authTeamsList)
 	mux.HandleFunc("GET /api/oauth.access", h.oauthAccess)
 	mux.HandleFunc("POST /api/oauth.access", h.oauthAccess)
 	mux.HandleFunc("GET /api/oauth.token", h.oauthAccess)
@@ -117,32 +132,53 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workflows.stepFailed", h.workflowStepFailed)
 	mux.HandleFunc("GET /api/workflows.updateStep", h.workflowUpdateStep)
 	mux.HandleFunc("POST /api/workflows.updateStep", h.workflowUpdateStep)
+	mux.HandleFunc("GET /api/functions.completeSuccess", h.functionsCompleteSuccess)
 	mux.HandleFunc("POST /api/functions.completeSuccess", h.functionsCompleteSuccess)
+	mux.HandleFunc("GET /api/functions.completeError", h.functionsCompleteError)
 	mux.HandleFunc("POST /api/functions.completeError", h.functionsCompleteError)
+	mux.HandleFunc("GET /api/functions.distributions.permissions.add", h.functionsDistributionsPermissionsAdd)
 	mux.HandleFunc("POST /api/functions.distributions.permissions.add", h.functionsDistributionsPermissionsAdd)
+	mux.HandleFunc("GET /api/functions.distributions.permissions.list", h.functionsDistributionsPermissionsList)
 	mux.HandleFunc("POST /api/functions.distributions.permissions.list", h.functionsDistributionsPermissionsList)
+	mux.HandleFunc("GET /api/functions.distributions.permissions.remove", h.functionsDistributionsPermissionsRemove)
 	mux.HandleFunc("POST /api/functions.distributions.permissions.remove", h.functionsDistributionsPermissionsRemove)
+	mux.HandleFunc("GET /api/functions.distributions.permissions.set", h.functionsDistributionsPermissionsSet)
 	mux.HandleFunc("POST /api/functions.distributions.permissions.set", h.functionsDistributionsPermissionsSet)
+	mux.HandleFunc("GET /api/functions.workflows.steps.list", h.functionsWorkflowsStepsList)
 	mux.HandleFunc("POST /api/functions.workflows.steps.list", h.functionsWorkflowsStepsList)
+	mux.HandleFunc("GET /api/workflows.featured.add", h.workflowsFeaturedAdd)
 	mux.HandleFunc("POST /api/workflows.featured.add", h.workflowsFeaturedAdd)
+	mux.HandleFunc("GET /api/workflows.featured.list", h.workflowsFeaturedList)
 	mux.HandleFunc("POST /api/workflows.featured.list", h.workflowsFeaturedList)
+	mux.HandleFunc("GET /api/workflows.featured.remove", h.workflowsFeaturedRemove)
 	mux.HandleFunc("POST /api/workflows.featured.remove", h.workflowsFeaturedRemove)
+	mux.HandleFunc("GET /api/workflows.featured.set", h.workflowsFeaturedSet)
 	mux.HandleFunc("POST /api/workflows.featured.set", h.workflowsFeaturedSet)
+	mux.HandleFunc("GET /api/workflows.triggers.permissions.add", h.workflowsTriggersPermissionsAdd)
 	mux.HandleFunc("POST /api/workflows.triggers.permissions.add", h.workflowsTriggersPermissionsAdd)
+	mux.HandleFunc("GET /api/workflows.triggers.permissions.list", h.workflowsTriggersPermissionsList)
 	mux.HandleFunc("POST /api/workflows.triggers.permissions.list", h.workflowsTriggersPermissionsList)
+	mux.HandleFunc("GET /api/workflows.triggers.permissions.remove", h.workflowsTriggersPermissionsRemove)
 	mux.HandleFunc("POST /api/workflows.triggers.permissions.remove", h.workflowsTriggersPermissionsRemove)
+	mux.HandleFunc("GET /api/workflows.triggers.permissions.set", h.workflowsTriggersPermissionsSet)
 	mux.HandleFunc("POST /api/workflows.triggers.permissions.set", h.workflowsTriggersPermissionsSet)
 	mux.HandleFunc("GET /api/dialog.open", h.dialogOpen)
 	mux.HandleFunc("POST /api/dialog.open", h.dialogOpen)
 	mux.HandleFunc("GET /api/apps.event.authorizations.list", h.appsEventAuthorizationsList)
 	mux.HandleFunc("POST /api/apps.event.authorizations.list", h.appsEventAuthorizationsList)
+	mux.HandleFunc("GET /api/apps.manifest.create", h.appsManifestCreate)
 	mux.HandleFunc("POST /api/apps.manifest.create", h.appsManifestCreate)
+	mux.HandleFunc("GET /api/apps.manifest.delete", h.appsManifestDelete)
 	mux.HandleFunc("POST /api/apps.manifest.delete", h.appsManifestDelete)
+	mux.HandleFunc("GET /api/apps.manifest.export", h.appsManifestExport)
 	mux.HandleFunc("POST /api/apps.manifest.export", h.appsManifestExport)
+	mux.HandleFunc("GET /api/apps.manifest.update", h.appsManifestUpdate)
 	mux.HandleFunc("POST /api/apps.manifest.update", h.appsManifestUpdate)
+	mux.HandleFunc("GET /api/apps.manifest.validate", h.appsManifestValidate)
 	mux.HandleFunc("POST /api/apps.manifest.validate", h.appsManifestValidate)
-	mux.HandleFunc("POST /api/apps.uninstall", h.appsUninstall)
 	mux.HandleFunc("GET /api/apps.uninstall", h.appsUninstall)
+	mux.HandleFunc("POST /api/apps.uninstall", h.appsUninstall)
+	mux.HandleFunc("GET /api/tooling.tokens.rotate", h.toolingTokensRotate)
 	mux.HandleFunc("POST /api/tooling.tokens.rotate", h.toolingTokensRotate)
 	mux.HandleFunc("GET /api/team.info", h.teamInfo)
 	mux.HandleFunc("POST /api/team.info", h.teamInfo)
@@ -152,16 +188,25 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/rtm.connect", h.rtmConnect)
 	mux.HandleFunc("GET /api/rtm.start", h.rtmConnect)
 	mux.HandleFunc("POST /api/rtm.start", h.rtmConnect)
-	mux.HandleFunc("POST /api/apps.connections.open", h.appsConnectionsOpen)
 	mux.HandleFunc("GET /api/apps.connections.open", h.appsConnectionsOpen)
+	mux.HandleFunc("POST /api/apps.connections.open", h.appsConnectionsOpen)
+	mux.HandleFunc("GET /api/apps.datastore.put", h.appsDatastorePut)
 	mux.HandleFunc("POST /api/apps.datastore.put", h.appsDatastorePut)
+	mux.HandleFunc("GET /api/apps.datastore.update", h.appsDatastoreUpdate)
 	mux.HandleFunc("POST /api/apps.datastore.update", h.appsDatastoreUpdate)
+	mux.HandleFunc("GET /api/apps.datastore.get", h.appsDatastoreGet)
 	mux.HandleFunc("POST /api/apps.datastore.get", h.appsDatastoreGet)
+	mux.HandleFunc("GET /api/apps.datastore.query", h.appsDatastoreQuery)
 	mux.HandleFunc("POST /api/apps.datastore.query", h.appsDatastoreQuery)
+	mux.HandleFunc("GET /api/apps.datastore.count", h.appsDatastoreCount)
 	mux.HandleFunc("POST /api/apps.datastore.count", h.appsDatastoreCount)
+	mux.HandleFunc("GET /api/apps.datastore.delete", h.appsDatastoreDelete)
 	mux.HandleFunc("POST /api/apps.datastore.delete", h.appsDatastoreDelete)
+	mux.HandleFunc("GET /api/apps.datastore.bulkPut", h.appsDatastoreBulkPut)
 	mux.HandleFunc("POST /api/apps.datastore.bulkPut", h.appsDatastoreBulkPut)
+	mux.HandleFunc("GET /api/apps.datastore.bulkGet", h.appsDatastoreBulkGet)
 	mux.HandleFunc("POST /api/apps.datastore.bulkGet", h.appsDatastoreBulkGet)
+	mux.HandleFunc("GET /api/apps.datastore.bulkDelete", h.appsDatastoreBulkDelete)
 	mux.HandleFunc("POST /api/apps.datastore.bulkDelete", h.appsDatastoreBulkDelete)
 	mux.HandleFunc("GET /api/bots.info", h.botsInfo)
 	mux.HandleFunc("POST /api/bots.info", h.botsInfo)
@@ -169,6 +214,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/migration.exchange", h.migrationExchange)
 	mux.HandleFunc("GET /api/team.externalTeams.list", h.externalTeamsList)
 	mux.HandleFunc("POST /api/team.externalTeams.list", h.externalTeamsList)
+	mux.HandleFunc("GET /api/team.externalTeams.disconnect", h.externalTeamsDisconnect)
 	mux.HandleFunc("POST /api/team.externalTeams.disconnect", h.externalTeamsDisconnect)
 	mux.HandleFunc("GET /api/team.billableInfo", h.teamBillableInfo)
 	mux.HandleFunc("POST /api/team.billableInfo", h.teamBillableInfo)
@@ -180,10 +226,15 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/team.integrationLogs", h.integrationLogs)
 	mux.HandleFunc("GET /api/admin.users.list", h.adminUsersList)
 	mux.HandleFunc("POST /api/admin.users.list", h.adminUsersList)
+	mux.HandleFunc("GET /api/admin.users.remove", h.adminUsersRemove)
 	mux.HandleFunc("POST /api/admin.users.remove", h.adminUsersRemove)
+	mux.HandleFunc("GET /api/admin.users.session.invalidate", h.adminUsersSessionInvalidate)
 	mux.HandleFunc("POST /api/admin.users.session.invalidate", h.adminUsersSessionInvalidate)
+	mux.HandleFunc("GET /api/admin.users.session.reset", h.adminUsersSessionReset)
 	mux.HandleFunc("POST /api/admin.users.session.reset", h.adminUsersSessionReset)
+	mux.HandleFunc("GET /api/admin.apps.uninstall", h.adminAppsUninstall)
 	mux.HandleFunc("POST /api/admin.apps.uninstall", h.adminAppsUninstall)
+	mux.HandleFunc("GET /api/admin.apps.requests.cancel", h.adminAppRequestCancel)
 	mux.HandleFunc("POST /api/admin.apps.requests.cancel", h.adminAppRequestCancel)
 	mux.HandleFunc("GET /api/users.discoverableContacts.lookup", h.usersDiscoverableContacts)
 	mux.HandleFunc("POST /api/users.discoverableContacts.lookup", h.usersDiscoverableContacts)
@@ -191,20 +242,31 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.functions.list", h.adminFunctionsList)
 	mux.HandleFunc("GET /api/admin.workflows.search", h.adminWorkflowsSearch)
 	mux.HandleFunc("POST /api/admin.workflows.search", h.adminWorkflowsSearch)
+	mux.HandleFunc("GET /api/admin.workflows.unpublish", h.adminWorkflowsUnpublish)
 	mux.HandleFunc("POST /api/admin.workflows.unpublish", h.adminWorkflowsUnpublish)
+	mux.HandleFunc("GET /api/admin.workflows.collaborators.add", h.adminWorkflowsCollaboratorsAdd)
 	mux.HandleFunc("POST /api/admin.workflows.collaborators.add", h.adminWorkflowsCollaboratorsAdd)
+	mux.HandleFunc("GET /api/admin.workflows.collaborators.remove", h.adminWorkflowsCollaboratorsRemove)
 	mux.HandleFunc("POST /api/admin.workflows.collaborators.remove", h.adminWorkflowsCollaboratorsRemove)
 	mux.HandleFunc("GET /api/admin.users.session.list", h.adminUsersSessionList)
 	mux.HandleFunc("POST /api/admin.users.session.list", h.adminUsersSessionList)
+	mux.HandleFunc("GET /api/admin.users.session.resetBulk", h.adminUsersSessionResetBulk)
 	mux.HandleFunc("POST /api/admin.users.session.resetBulk", h.adminUsersSessionResetBulk)
+	mux.HandleFunc("GET /api/admin.users.setAdmin", h.adminUsersSetAdmin)
 	mux.HandleFunc("POST /api/admin.users.setAdmin", h.adminUsersSetAdmin)
+	mux.HandleFunc("GET /api/admin.users.setOwner", h.adminUsersSetOwner)
 	mux.HandleFunc("POST /api/admin.users.setOwner", h.adminUsersSetOwner)
+	mux.HandleFunc("GET /api/admin.users.setRegular", h.adminUsersSetRegular)
 	mux.HandleFunc("POST /api/admin.users.setRegular", h.adminUsersSetRegular)
+	mux.HandleFunc("GET /api/admin.users.setExpiration", h.adminUsersSetExpiration)
 	mux.HandleFunc("POST /api/admin.users.setExpiration", h.adminUsersSetExpiration)
+	mux.HandleFunc("GET /api/apps.icon.set", h.appsIconSet)
 	mux.HandleFunc("POST /api/apps.icon.set", h.appsIconSet)
 	mux.HandleFunc("GET /api/apps.auth.external.get", h.appsAuthExternalGet)
 	mux.HandleFunc("POST /api/apps.auth.external.get", h.appsAuthExternalGet)
+	mux.HandleFunc("GET /api/apps.auth.external.delete", h.appsAuthExternalDelete)
 	mux.HandleFunc("POST /api/apps.auth.external.delete", h.appsAuthExternalDelete)
+	mux.HandleFunc("GET /api/apps.user.connection.update", h.appsUserConnectionUpdate)
 	mux.HandleFunc("POST /api/apps.user.connection.update", h.appsUserConnectionUpdate)
 	mux.HandleFunc("GET /api/assistant.search.info", h.assistantSearchInfo)
 	mux.HandleFunc("POST /api/assistant.search.info", h.assistantSearchInfo)
@@ -212,10 +274,13 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/assistant.search.context", h.assistantSearchContext)
 	mux.HandleFunc("GET /api/admin.audit.anomaly.allow.getItem", h.adminAuditAnomalyAllowGetItem)
 	mux.HandleFunc("POST /api/admin.audit.anomaly.allow.getItem", h.adminAuditAnomalyAllowGetItem)
+	mux.HandleFunc("GET /api/admin.audit.anomaly.allow.updateItem", h.adminAuditAnomalyAllowUpdateItem)
 	mux.HandleFunc("POST /api/admin.audit.anomaly.allow.updateItem", h.adminAuditAnomalyAllowUpdateItem)
 	mux.HandleFunc("GET /api/team.billing.info", h.teamBillingInfo)
 	mux.HandleFunc("POST /api/team.billing.info", h.teamBillingInfo)
+	mux.HandleFunc("GET /api/admin.users.unsupportedVersions.export", h.adminUsersUnsupportedVersionsExport)
 	mux.HandleFunc("POST /api/admin.users.unsupportedVersions.export", h.adminUsersUnsupportedVersionsExport)
+	mux.HandleFunc("GET /api/functions.workflows.steps.responses.export", h.functionsWorkflowsStepsResponsesExport)
 	mux.HandleFunc("POST /api/functions.workflows.steps.responses.export", h.functionsWorkflowsStepsResponsesExport)
 	mux.HandleFunc("GET /api/admin.analytics.getFile", h.adminAnalyticsGetFile)
 	mux.HandleFunc("POST /api/admin.analytics.getFile", h.adminAnalyticsGetFile)
@@ -229,123 +294,185 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.apps.activities.list", h.adminAppsActivitiesList)
 	mux.HandleFunc("GET /api/admin.conversations.lookup", h.adminConversationsLookup)
 	mux.HandleFunc("POST /api/admin.conversations.lookup", h.adminConversationsLookup)
+	mux.HandleFunc("GET /api/admin.conversations.bulkMove", h.adminConversationsBulkMove)
 	mux.HandleFunc("POST /api/admin.conversations.bulkMove", h.adminConversationsBulkMove)
+	mux.HandleFunc("GET /api/admin.conversations.bulkSetExcludeFromSlackAi", h.adminConversationsBulkSetExcludeFromAI)
 	mux.HandleFunc("POST /api/admin.conversations.bulkSetExcludeFromSlackAi", h.adminConversationsBulkSetExcludeFromAI)
+	mux.HandleFunc("GET /api/admin.conversations.linkObjects", h.adminConversationsLinkObjects)
 	mux.HandleFunc("POST /api/admin.conversations.linkObjects", h.adminConversationsLinkObjects)
+	mux.HandleFunc("GET /api/admin.conversations.unlinkObjects", h.adminConversationsUnlinkObjects)
 	mux.HandleFunc("POST /api/admin.conversations.unlinkObjects", h.adminConversationsUnlinkObjects)
+	mux.HandleFunc("GET /api/admin.conversations.createForObjects", h.adminConversationsCreateForObjects)
 	mux.HandleFunc("POST /api/admin.conversations.createForObjects", h.adminConversationsCreateForObjects)
 	mux.HandleFunc("GET /api/admin.apps.config.lookup", h.adminAppsConfigLookup)
 	mux.HandleFunc("POST /api/admin.apps.config.lookup", h.adminAppsConfigLookup)
+	mux.HandleFunc("GET /api/admin.apps.config.set", h.adminAppsConfigSet)
 	mux.HandleFunc("POST /api/admin.apps.config.set", h.adminAppsConfigSet)
+	mux.HandleFunc("GET /api/admin.apps.clearResolution", h.adminAppsClearResolution)
 	mux.HandleFunc("POST /api/admin.apps.clearResolution", h.adminAppsClearResolution)
 	mux.HandleFunc("GET /api/admin.functions.permissions.lookup", h.adminFunctionsPermissionsLookup)
 	mux.HandleFunc("POST /api/admin.functions.permissions.lookup", h.adminFunctionsPermissionsLookup)
+	mux.HandleFunc("GET /api/admin.functions.permissions.set", h.adminFunctionsPermissionsSet)
 	mux.HandleFunc("POST /api/admin.functions.permissions.set", h.adminFunctionsPermissionsSet)
 	mux.HandleFunc("GET /api/admin.workflows.permissions.lookup", h.adminWorkflowsPermissionsLookup)
 	mux.HandleFunc("POST /api/admin.workflows.permissions.lookup", h.adminWorkflowsPermissionsLookup)
 	mux.HandleFunc("GET /api/admin.workflows.triggers.types.permissions.lookup", h.adminWorkflowsTriggerTypePermissionsLookup)
 	mux.HandleFunc("POST /api/admin.workflows.triggers.types.permissions.lookup", h.adminWorkflowsTriggerTypePermissionsLookup)
+	mux.HandleFunc("GET /api/admin.workflows.triggers.types.permissions.set", h.adminWorkflowsTriggerTypePermissionsSet)
 	mux.HandleFunc("POST /api/admin.workflows.triggers.types.permissions.set", h.adminWorkflowsTriggerTypePermissionsSet)
+	mux.HandleFunc("GET /api/admin.barriers.create", h.adminBarriersCreate)
 	mux.HandleFunc("POST /api/admin.barriers.create", h.adminBarriersCreate)
+	mux.HandleFunc("GET /api/admin.barriers.update", h.adminBarriersUpdate)
 	mux.HandleFunc("POST /api/admin.barriers.update", h.adminBarriersUpdate)
+	mux.HandleFunc("GET /api/admin.barriers.delete", h.adminBarriersDelete)
 	mux.HandleFunc("POST /api/admin.barriers.delete", h.adminBarriersDelete)
 	mux.HandleFunc("GET /api/admin.barriers.list", h.adminBarriersList)
 	mux.HandleFunc("POST /api/admin.barriers.list", h.adminBarriersList)
+	mux.HandleFunc("GET /api/admin.users.session.setSettings", h.adminUsersSessionSetSettings)
 	mux.HandleFunc("POST /api/admin.users.session.setSettings", h.adminUsersSessionSetSettings)
+	mux.HandleFunc("GET /api/admin.users.session.clearSettings", h.adminUsersSessionClearSettings)
 	mux.HandleFunc("POST /api/admin.users.session.clearSettings", h.adminUsersSessionClearSettings)
 	mux.HandleFunc("GET /api/admin.users.session.getSettings", h.adminUsersSessionGetSettings)
 	mux.HandleFunc("POST /api/admin.users.session.getSettings", h.adminUsersSessionGetSettings)
+	mux.HandleFunc("GET /api/admin.auth.policy.assignEntities", h.adminAuthPolicyAssignEntities)
 	mux.HandleFunc("POST /api/admin.auth.policy.assignEntities", h.adminAuthPolicyAssignEntities)
+	mux.HandleFunc("GET /api/admin.auth.policy.removeEntities", h.adminAuthPolicyRemoveEntities)
 	mux.HandleFunc("POST /api/admin.auth.policy.removeEntities", h.adminAuthPolicyRemoveEntities)
 	mux.HandleFunc("GET /api/admin.auth.policy.getEntities", h.adminAuthPolicyGetEntities)
 	mux.HandleFunc("POST /api/admin.auth.policy.getEntities", h.adminAuthPolicyGetEntities)
+	mux.HandleFunc("GET /api/admin.roles.addAssignments", h.adminRolesAddAssignments)
 	mux.HandleFunc("POST /api/admin.roles.addAssignments", h.adminRolesAddAssignments)
+	mux.HandleFunc("GET /api/admin.roles.removeAssignments", h.adminRolesRemoveAssignments)
 	mux.HandleFunc("POST /api/admin.roles.removeAssignments", h.adminRolesRemoveAssignments)
 	mux.HandleFunc("GET /api/admin.roles.listAssignments", h.adminRolesListAssignments)
 	mux.HandleFunc("POST /api/admin.roles.listAssignments", h.adminRolesListAssignments)
 	mux.HandleFunc("GET /api/admin.users.getExpiration", h.adminUsersGetExpiration)
 	mux.HandleFunc("POST /api/admin.users.getExpiration", h.adminUsersGetExpiration)
+	mux.HandleFunc("GET /api/admin.users.invite", h.adminUsersInvite)
 	mux.HandleFunc("POST /api/admin.users.invite", h.adminUsersInvite)
+	mux.HandleFunc("GET /api/admin.users.assign", h.adminUsersAssign)
 	mux.HandleFunc("POST /api/admin.users.assign", h.adminUsersAssign)
+	mux.HandleFunc("GET /api/admin.inviteRequests.approve", h.adminInviteRequestApprove)
 	mux.HandleFunc("POST /api/admin.inviteRequests.approve", h.adminInviteRequestApprove)
 	mux.HandleFunc("GET /api/admin.inviteRequests.approved.list", h.adminInviteRequestsApprovedList)
 	mux.HandleFunc("POST /api/admin.inviteRequests.approved.list", h.adminInviteRequestsApprovedList)
 	mux.HandleFunc("GET /api/admin.inviteRequests.denied.list", h.adminInviteRequestsDeniedList)
 	mux.HandleFunc("POST /api/admin.inviteRequests.denied.list", h.adminInviteRequestsDeniedList)
+	mux.HandleFunc("GET /api/admin.inviteRequests.deny", h.adminInviteRequestDeny)
 	mux.HandleFunc("POST /api/admin.inviteRequests.deny", h.adminInviteRequestDeny)
 	mux.HandleFunc("GET /api/admin.inviteRequests.list", h.adminInviteRequestsList)
 	mux.HandleFunc("POST /api/admin.inviteRequests.list", h.adminInviteRequestsList)
+	mux.HandleFunc("GET /api/admin.apps.approve", h.adminAppApprove)
 	mux.HandleFunc("POST /api/admin.apps.approve", h.adminAppApprove)
 	mux.HandleFunc("GET /api/admin.apps.approved.list", h.adminAppsApprovedList)
 	mux.HandleFunc("POST /api/admin.apps.approved.list", h.adminAppsApprovedList)
 	mux.HandleFunc("GET /api/admin.apps.requests.list", h.adminAppsRequestsList)
 	mux.HandleFunc("POST /api/admin.apps.requests.list", h.adminAppsRequestsList)
+	mux.HandleFunc("GET /api/admin.apps.restrict", h.adminAppRestrict)
 	mux.HandleFunc("POST /api/admin.apps.restrict", h.adminAppRestrict)
 	mux.HandleFunc("GET /api/admin.apps.restricted.list", h.adminAppsRestrictedList)
 	mux.HandleFunc("POST /api/admin.apps.restricted.list", h.adminAppsRestrictedList)
+	mux.HandleFunc("GET /api/admin.conversations.rename", h.adminConversationRename)
 	mux.HandleFunc("POST /api/admin.conversations.rename", h.adminConversationRename)
+	mux.HandleFunc("GET /api/admin.conversations.create", h.adminConversationCreate)
 	mux.HandleFunc("POST /api/admin.conversations.create", h.adminConversationCreate)
+	mux.HandleFunc("GET /api/admin.conversations.archive", h.adminConversationArchive)
 	mux.HandleFunc("POST /api/admin.conversations.archive", h.adminConversationArchive)
+	mux.HandleFunc("GET /api/admin.conversations.unarchive", h.adminConversationUnarchive)
 	mux.HandleFunc("POST /api/admin.conversations.unarchive", h.adminConversationUnarchive)
+	mux.HandleFunc("GET /api/admin.conversations.delete", h.adminConversationDelete)
 	mux.HandleFunc("POST /api/admin.conversations.delete", h.adminConversationDelete)
+	mux.HandleFunc("GET /api/admin.conversations.restrictAccess.addGroup", h.adminConversationAccessGroupAdd)
 	mux.HandleFunc("POST /api/admin.conversations.restrictAccess.addGroup", h.adminConversationAccessGroupAdd)
 	mux.HandleFunc("GET /api/admin.conversations.restrictAccess.listGroups", h.adminConversationAccessGroupsList)
 	mux.HandleFunc("POST /api/admin.conversations.restrictAccess.listGroups", h.adminConversationAccessGroupsList)
+	mux.HandleFunc("GET /api/admin.conversations.restrictAccess.removeGroup", h.adminConversationAccessGroupRemove)
 	mux.HandleFunc("POST /api/admin.conversations.restrictAccess.removeGroup", h.adminConversationAccessGroupRemove)
+	mux.HandleFunc("GET /api/admin.conversations.invite", h.adminConversationInvite)
 	mux.HandleFunc("POST /api/admin.conversations.invite", h.adminConversationInvite)
+	mux.HandleFunc("GET /api/admin.conversations.convertToPrivate", h.adminConversationConvertToPrivate)
 	mux.HandleFunc("POST /api/admin.conversations.convertToPrivate", h.adminConversationConvertToPrivate)
+	mux.HandleFunc("GET /api/admin.conversations.convertToPublic", h.adminConversationConvertToPublic)
 	mux.HandleFunc("POST /api/admin.conversations.convertToPublic", h.adminConversationConvertToPublic)
+	mux.HandleFunc("GET /api/admin.conversations.bulkArchive", h.adminConversationBulkArchive)
 	mux.HandleFunc("POST /api/admin.conversations.bulkArchive", h.adminConversationBulkArchive)
+	mux.HandleFunc("GET /api/admin.conversations.bulkDelete", h.adminConversationBulkDelete)
 	mux.HandleFunc("POST /api/admin.conversations.bulkDelete", h.adminConversationBulkDelete)
 	mux.HandleFunc("GET /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
+	mux.HandleFunc("GET /api/admin.conversations.setConversationPrefs", h.adminConversationSetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.setConversationPrefs", h.adminConversationSetPrefs)
 	mux.HandleFunc("GET /api/admin.conversations.search", h.adminConversationSearch)
 	mux.HandleFunc("POST /api/admin.conversations.search", h.adminConversationSearch)
 	mux.HandleFunc("GET /api/admin.conversations.getTeams", h.adminConversationGetTeams)
 	mux.HandleFunc("POST /api/admin.conversations.getTeams", h.adminConversationGetTeams)
+	mux.HandleFunc("GET /api/admin.conversations.setTeams", h.adminConversationSetTeams)
 	mux.HandleFunc("POST /api/admin.conversations.setTeams", h.adminConversationSetTeams)
+	mux.HandleFunc("GET /api/admin.conversations.disconnectShared", h.adminConversationDisconnectShared)
 	mux.HandleFunc("POST /api/admin.conversations.disconnectShared", h.adminConversationDisconnectShared)
+	mux.HandleFunc("GET /api/admin.conversations.getCustomRetention", h.adminConversationGetCustomRetention)
 	mux.HandleFunc("POST /api/admin.conversations.getCustomRetention", h.adminConversationGetCustomRetention)
+	mux.HandleFunc("GET /api/admin.conversations.setCustomRetention", h.adminConversationSetCustomRetention)
 	mux.HandleFunc("POST /api/admin.conversations.setCustomRetention", h.adminConversationSetCustomRetention)
+	mux.HandleFunc("GET /api/admin.conversations.removeCustomRetention", h.adminConversationRemoveCustomRetention)
 	mux.HandleFunc("POST /api/admin.conversations.removeCustomRetention", h.adminConversationRemoveCustomRetention)
+	mux.HandleFunc("GET /api/conversations.inviteShared", h.conversationInviteShared)
 	mux.HandleFunc("POST /api/conversations.inviteShared", h.conversationInviteShared)
+	mux.HandleFunc("GET /api/conversations.acceptSharedInvite", h.conversationAcceptSharedInvite)
 	mux.HandleFunc("POST /api/conversations.acceptSharedInvite", h.conversationAcceptSharedInvite)
+	mux.HandleFunc("GET /api/conversations.approveSharedInvite", h.conversationApproveSharedInvite)
 	mux.HandleFunc("POST /api/conversations.approveSharedInvite", h.conversationApproveSharedInvite)
+	mux.HandleFunc("GET /api/conversations.declineSharedInvite", h.conversationDeclineSharedInvite)
 	mux.HandleFunc("POST /api/conversations.declineSharedInvite", h.conversationDeclineSharedInvite)
+	mux.HandleFunc("GET /api/conversations.requestSharedInvite.approve", h.conversationRequestSharedInviteApprove)
 	mux.HandleFunc("POST /api/conversations.requestSharedInvite.approve", h.conversationRequestSharedInviteApprove)
+	mux.HandleFunc("GET /api/conversations.requestSharedInvite.deny", h.conversationRequestSharedInviteDeny)
 	mux.HandleFunc("POST /api/conversations.requestSharedInvite.deny", h.conversationRequestSharedInviteDeny)
+	mux.HandleFunc("GET /api/conversations.requestSharedInvite.list", h.conversationRequestSharedInviteList)
 	mux.HandleFunc("POST /api/conversations.requestSharedInvite.list", h.conversationRequestSharedInviteList)
+	mux.HandleFunc("GET /api/conversations.listConnectInvites", h.conversationListConnectInvites)
 	mux.HandleFunc("POST /api/conversations.listConnectInvites", h.conversationListConnectInvites)
+	mux.HandleFunc("GET /api/conversations.externalInvitePermissions.set", h.conversationExternalInvitePermissionsSet)
 	mux.HandleFunc("POST /api/conversations.externalInvitePermissions.set", h.conversationExternalInvitePermissionsSet)
 	mux.HandleFunc("GET /api/admin.conversations.ekm.listOriginalConnectedChannelInfo", h.adminConnectedChannelInfo)
 	mux.HandleFunc("POST /api/admin.conversations.ekm.listOriginalConnectedChannelInfo", h.adminConnectedChannelInfo)
-	mux.HandleFunc("POST /api/admin.emoji.add", h.adminEmojiAdd)
 	mux.HandleFunc("GET /api/admin.emoji.add", h.adminEmojiAdd)
-	mux.HandleFunc("POST /api/admin.emoji.addAlias", h.adminEmojiAddAlias)
+	mux.HandleFunc("POST /api/admin.emoji.add", h.adminEmojiAdd)
 	mux.HandleFunc("GET /api/admin.emoji.addAlias", h.adminEmojiAddAlias)
+	mux.HandleFunc("POST /api/admin.emoji.addAlias", h.adminEmojiAddAlias)
 	mux.HandleFunc("GET /api/admin.emoji.list", h.adminEmojiList)
 	mux.HandleFunc("POST /api/admin.emoji.list", h.adminEmojiList)
-	mux.HandleFunc("POST /api/admin.emoji.remove", h.adminEmojiRemove)
 	mux.HandleFunc("GET /api/admin.emoji.remove", h.adminEmojiRemove)
-	mux.HandleFunc("POST /api/admin.emoji.rename", h.adminEmojiRename)
+	mux.HandleFunc("POST /api/admin.emoji.remove", h.adminEmojiRemove)
 	mux.HandleFunc("GET /api/admin.emoji.rename", h.adminEmojiRename)
+	mux.HandleFunc("POST /api/admin.emoji.rename", h.adminEmojiRename)
 	mux.HandleFunc("GET /api/emoji.list", h.emojiList)
 	mux.HandleFunc("POST /api/emoji.list", h.emojiList)
+	mux.HandleFunc("GET /api/chat.postMessage", h.postMessage)
 	mux.HandleFunc("POST /api/chat.postMessage", h.postMessage)
+	mux.HandleFunc("GET /api/chat.startStream", h.startMessageStream)
 	mux.HandleFunc("POST /api/chat.startStream", h.startMessageStream)
+	mux.HandleFunc("GET /api/chat.appendStream", h.appendMessageStream)
 	mux.HandleFunc("POST /api/chat.appendStream", h.appendMessageStream)
+	mux.HandleFunc("GET /api/chat.stopStream", h.stopMessageStream)
 	mux.HandleFunc("POST /api/chat.stopStream", h.stopMessageStream)
+	mux.HandleFunc("GET /api/chat.unfurl", h.chatUnfurl)
 	mux.HandleFunc("POST /api/chat.unfurl", h.chatUnfurl)
+	mux.HandleFunc("GET /api/chat.postEphemeral", h.postEphemeral)
 	mux.HandleFunc("POST /api/chat.postEphemeral", h.postEphemeral)
+	mux.HandleFunc("GET /api/chat.meMessage", h.meMessage)
 	mux.HandleFunc("POST /api/chat.meMessage", h.meMessage)
+	mux.HandleFunc("GET /api/chat.update", h.updateMessage)
 	mux.HandleFunc("POST /api/chat.update", h.updateMessage)
+	mux.HandleFunc("GET /api/chat.delete", h.deleteMessage)
 	mux.HandleFunc("POST /api/chat.delete", h.deleteMessage)
 	mux.HandleFunc("GET /api/chat.getPermalink", h.getPermalink)
 	mux.HandleFunc("POST /api/chat.getPermalink", h.getPermalink)
+	mux.HandleFunc("GET /api/chat.scheduleMessage", h.scheduleMessage)
 	mux.HandleFunc("POST /api/chat.scheduleMessage", h.scheduleMessage)
 	mux.HandleFunc("GET /api/chat.scheduledMessages.list", h.scheduledMessagesList)
 	mux.HandleFunc("POST /api/chat.scheduledMessages.list", h.scheduledMessagesList)
+	mux.HandleFunc("GET /api/chat.deleteScheduledMessage", h.deleteScheduledMessage)
 	mux.HandleFunc("POST /api/chat.deleteScheduledMessage", h.deleteScheduledMessage)
 	mux.HandleFunc("GET /api/conversations.history", h.history)
 	mux.HandleFunc("POST /api/conversations.history", h.history)
@@ -361,11 +488,15 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/users.lookupByEmail", h.lookupUserByEmail)
 	mux.HandleFunc("GET /api/users.getPresence", h.getPresence)
 	mux.HandleFunc("POST /api/users.getPresence", h.getPresence)
+	mux.HandleFunc("GET /api/users.setPresence", h.setPresence)
 	mux.HandleFunc("POST /api/users.setPresence", h.setPresence)
 	mux.HandleFunc("GET /api/dnd.info", h.dndInfo)
 	mux.HandleFunc("POST /api/dnd.info", h.dndInfo)
+	mux.HandleFunc("GET /api/dnd.endDnd", h.dndEnd)
 	mux.HandleFunc("POST /api/dnd.endDnd", h.dndEnd)
+	mux.HandleFunc("GET /api/dnd.endSnooze", h.dndEndSnooze)
 	mux.HandleFunc("POST /api/dnd.endSnooze", h.dndEndSnooze)
+	mux.HandleFunc("GET /api/dnd.setSnooze", h.dndSetSnooze)
 	mux.HandleFunc("POST /api/dnd.setSnooze", h.dndSetSnooze)
 	mux.HandleFunc("GET /api/dnd.teamInfo", h.dndTeamInfo)
 	mux.HandleFunc("POST /api/dnd.teamInfo", h.dndTeamInfo)
@@ -373,9 +504,13 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/users.profile.get", h.getUserProfile)
 	mux.HandleFunc("GET /api/users.list", h.usersList)
 	mux.HandleFunc("POST /api/users.list", h.usersList)
+	mux.HandleFunc("GET /api/users.profile.set", h.setUserProfile)
 	mux.HandleFunc("POST /api/users.profile.set", h.setUserProfile)
+	mux.HandleFunc("GET /api/users.deletePhoto", h.deleteUserPhoto)
 	mux.HandleFunc("POST /api/users.deletePhoto", h.deleteUserPhoto)
+	mux.HandleFunc("GET /api/users.setPhoto", h.setUserPhoto)
 	mux.HandleFunc("POST /api/users.setPhoto", h.setUserPhoto)
+	mux.HandleFunc("GET /api/users.setActive", h.usersSetActive)
 	mux.HandleFunc("POST /api/users.setActive", h.usersSetActive)
 	mux.HandleFunc("GET /api/conversations.list", h.conversationsList)
 	mux.HandleFunc("POST /api/conversations.list", h.conversationsList)
@@ -383,108 +518,173 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/users.conversations", h.usersConversations)
 	mux.HandleFunc("GET /api/conversations.members", h.conversationMembers)
 	mux.HandleFunc("POST /api/conversations.members", h.conversationMembers)
+	mux.HandleFunc("GET /api/conversations.create", h.createConversation)
 	mux.HandleFunc("POST /api/conversations.create", h.createConversation)
+	mux.HandleFunc("GET /api/conversations.join", h.joinConversation)
 	mux.HandleFunc("POST /api/conversations.join", h.joinConversation)
+	mux.HandleFunc("GET /api/conversations.invite", h.inviteConversation)
 	mux.HandleFunc("POST /api/conversations.invite", h.inviteConversation)
+	mux.HandleFunc("GET /api/conversations.leave", h.leaveConversation)
 	mux.HandleFunc("POST /api/conversations.leave", h.leaveConversation)
+	mux.HandleFunc("GET /api/conversations.kick", h.kickConversation)
 	mux.HandleFunc("POST /api/conversations.kick", h.kickConversation)
+	mux.HandleFunc("GET /api/conversations.rename", h.renameConversation)
 	mux.HandleFunc("POST /api/conversations.rename", h.renameConversation)
+	mux.HandleFunc("GET /api/conversations.setTopic", h.setConversationTopic)
 	mux.HandleFunc("POST /api/conversations.setTopic", h.setConversationTopic)
+	mux.HandleFunc("GET /api/conversations.setPurpose", h.setConversationPurpose)
 	mux.HandleFunc("POST /api/conversations.setPurpose", h.setConversationPurpose)
+	mux.HandleFunc("GET /api/conversations.archive", h.archiveConversation)
 	mux.HandleFunc("POST /api/conversations.archive", h.archiveConversation)
+	mux.HandleFunc("GET /api/conversations.unarchive", h.unarchiveConversation)
 	mux.HandleFunc("POST /api/conversations.unarchive", h.unarchiveConversation)
+	mux.HandleFunc("GET /api/conversations.close", h.closeConversation)
 	mux.HandleFunc("POST /api/conversations.close", h.closeConversation)
+	mux.HandleFunc("GET /api/conversations.open", h.openConversation)
 	mux.HandleFunc("POST /api/conversations.open", h.openConversation)
+	mux.HandleFunc("GET /api/conversations.mark", h.markConversation)
 	mux.HandleFunc("POST /api/conversations.mark", h.markConversation)
+	mux.HandleFunc("GET /api/reactions.add", h.addReaction)
 	mux.HandleFunc("POST /api/reactions.add", h.addReaction)
+	mux.HandleFunc("GET /api/reactions.remove", h.removeReaction)
 	mux.HandleFunc("POST /api/reactions.remove", h.removeReaction)
 	mux.HandleFunc("GET /api/reactions.get", h.getReactions)
 	mux.HandleFunc("POST /api/reactions.get", h.getReactions)
 	mux.HandleFunc("GET /api/reactions.list", h.listUserReactions)
 	mux.HandleFunc("POST /api/reactions.list", h.listUserReactions)
+	mux.HandleFunc("GET /api/assistant.threads.setTitle", h.setAssistantThreadTitle)
 	mux.HandleFunc("POST /api/assistant.threads.setTitle", h.setAssistantThreadTitle)
+	mux.HandleFunc("GET /api/assistant.threads.setStatus", h.setAssistantThreadStatus)
 	mux.HandleFunc("POST /api/assistant.threads.setStatus", h.setAssistantThreadStatus)
+	mux.HandleFunc("GET /api/assistant.threads.setSuggestedPrompts", h.setAssistantThreadSuggestedPrompts)
 	mux.HandleFunc("POST /api/assistant.threads.setSuggestedPrompts", h.setAssistantThreadSuggestedPrompts)
+	mux.HandleFunc("GET /api/pins.add", h.addPin)
 	mux.HandleFunc("POST /api/pins.add", h.addPin)
+	mux.HandleFunc("GET /api/pins.remove", h.removePin)
 	mux.HandleFunc("POST /api/pins.remove", h.removePin)
 	mux.HandleFunc("GET /api/pins.list", h.listPins)
 	mux.HandleFunc("POST /api/pins.list", h.listPins)
+	mux.HandleFunc("GET /api/stars.add", h.addStar)
 	mux.HandleFunc("POST /api/stars.add", h.addStar)
 	mux.HandleFunc("GET /api/stars.list", h.listStars)
 	mux.HandleFunc("POST /api/stars.list", h.listStars)
+	mux.HandleFunc("GET /api/stars.remove", h.removeStar)
 	mux.HandleFunc("POST /api/stars.remove", h.removeStar)
+	mux.HandleFunc("GET /api/bookmarks.add", h.addBookmark)
 	mux.HandleFunc("POST /api/bookmarks.add", h.addBookmark)
+	mux.HandleFunc("GET /api/bookmarks.edit", h.editBookmark)
 	mux.HandleFunc("POST /api/bookmarks.edit", h.editBookmark)
 	mux.HandleFunc("GET /api/bookmarks.list", h.listBookmarks)
 	mux.HandleFunc("POST /api/bookmarks.list", h.listBookmarks)
+	mux.HandleFunc("GET /api/bookmarks.remove", h.removeBookmark)
 	mux.HandleFunc("POST /api/bookmarks.remove", h.removeBookmark)
+	mux.HandleFunc("GET /api/canvases.create", h.createCanvas)
 	mux.HandleFunc("POST /api/canvases.create", h.createCanvas)
+	mux.HandleFunc("GET /api/canvases.edit", h.editCanvas)
 	mux.HandleFunc("POST /api/canvases.edit", h.editCanvas)
+	mux.HandleFunc("GET /api/canvases.delete", h.deleteCanvas)
 	mux.HandleFunc("POST /api/canvases.delete", h.deleteCanvas)
+	mux.HandleFunc("GET /api/canvases.access.set", h.setCanvasAccess)
 	mux.HandleFunc("POST /api/canvases.access.set", h.setCanvasAccess)
+	mux.HandleFunc("GET /api/canvases.access.delete", h.deleteCanvasAccess)
 	mux.HandleFunc("POST /api/canvases.access.delete", h.deleteCanvasAccess)
+	mux.HandleFunc("GET /api/canvases.sections.lookup", h.lookupCanvasSections)
 	mux.HandleFunc("POST /api/canvases.sections.lookup", h.lookupCanvasSections)
+	mux.HandleFunc("GET /api/conversations.canvases.create", h.createConversationCanvas)
 	mux.HandleFunc("POST /api/conversations.canvases.create", h.createConversationCanvas)
+	mux.HandleFunc("GET /api/slackLists.create", h.createList)
 	mux.HandleFunc("POST /api/slackLists.create", h.createList)
+	mux.HandleFunc("GET /api/slackLists.update", h.updateList)
 	mux.HandleFunc("POST /api/slackLists.update", h.updateList)
+	mux.HandleFunc("GET /api/slackLists.items.create", h.createListItem)
 	mux.HandleFunc("POST /api/slackLists.items.create", h.createListItem)
+	mux.HandleFunc("GET /api/slackLists.items.info", h.listItemInfo)
 	mux.HandleFunc("POST /api/slackLists.items.info", h.listItemInfo)
+	mux.HandleFunc("GET /api/slackLists.items.list", h.listItems)
 	mux.HandleFunc("POST /api/slackLists.items.list", h.listItems)
+	mux.HandleFunc("GET /api/slackLists.items.update", h.updateListItem)
 	mux.HandleFunc("POST /api/slackLists.items.update", h.updateListItem)
+	mux.HandleFunc("GET /api/slackLists.items.delete", h.deleteListItem)
 	mux.HandleFunc("POST /api/slackLists.items.delete", h.deleteListItem)
+	mux.HandleFunc("GET /api/slackLists.items.deleteMultiple", h.deleteListItems)
 	mux.HandleFunc("POST /api/slackLists.items.deleteMultiple", h.deleteListItems)
+	mux.HandleFunc("GET /api/slackLists.access.set", h.setListAccess)
 	mux.HandleFunc("POST /api/slackLists.access.set", h.setListAccess)
+	mux.HandleFunc("GET /api/slackLists.access.delete", h.deleteListAccess)
 	mux.HandleFunc("POST /api/slackLists.access.delete", h.deleteListAccess)
+	mux.HandleFunc("GET /api/slackLists.download.start", h.startListDownload)
 	mux.HandleFunc("POST /api/slackLists.download.start", h.startListDownload)
+	mux.HandleFunc("GET /api/slackLists.download.get", h.getListDownload)
 	mux.HandleFunc("POST /api/slackLists.download.get", h.getListDownload)
+	mux.HandleFunc("GET /api/entity.presentDetails", h.presentEntityDetails)
 	mux.HandleFunc("POST /api/entity.presentDetails", h.presentEntityDetails)
+	mux.HandleFunc("GET /api/entity.presentComments", h.presentEntityComments)
 	mux.HandleFunc("POST /api/entity.presentComments", h.presentEntityComments)
+	mux.HandleFunc("GET /api/entity.acknowledgeCommentAction", h.acknowledgeEntityCommentAction)
 	mux.HandleFunc("POST /api/entity.acknowledgeCommentAction", h.acknowledgeEntityCommentAction)
-	mux.HandleFunc("GET /internal/slack-lists/download.csv", h.downloadListCSV)
-	mux.HandleFunc("GET /internal/exports/workflow-step-responses.csv", h.downloadWorkflowStepResponsesCSV)
+	mux.HandleFunc("GET /api/reminders.add", h.addReminder)
 	mux.HandleFunc("POST /api/reminders.add", h.addReminder)
+	mux.HandleFunc("GET /api/reminders.complete", h.completeReminder)
 	mux.HandleFunc("POST /api/reminders.complete", h.completeReminder)
+	mux.HandleFunc("GET /api/reminders.delete", h.deleteReminder)
 	mux.HandleFunc("POST /api/reminders.delete", h.deleteReminder)
 	mux.HandleFunc("GET /api/reminders.info", h.reminderInfo)
 	mux.HandleFunc("POST /api/reminders.info", h.reminderInfo)
 	mux.HandleFunc("GET /api/reminders.list", h.listReminders)
 	mux.HandleFunc("POST /api/reminders.list", h.listReminders)
+	mux.HandleFunc("GET /api/usergroups.create", h.createUserGroup)
 	mux.HandleFunc("POST /api/usergroups.create", h.createUserGroup)
+	mux.HandleFunc("GET /api/usergroups.update", h.updateUserGroup)
 	mux.HandleFunc("POST /api/usergroups.update", h.updateUserGroup)
+	mux.HandleFunc("GET /api/usergroups.enable", h.enableUserGroup)
 	mux.HandleFunc("POST /api/usergroups.enable", h.enableUserGroup)
+	mux.HandleFunc("GET /api/usergroups.disable", h.disableUserGroup)
 	mux.HandleFunc("POST /api/usergroups.disable", h.disableUserGroup)
 	mux.HandleFunc("GET /api/usergroups.list", h.listUserGroups)
 	mux.HandleFunc("POST /api/usergroups.list", h.listUserGroups)
 	mux.HandleFunc("GET /api/usergroups.users.list", h.userGroupUsers)
 	mux.HandleFunc("POST /api/usergroups.users.list", h.userGroupUsers)
+	mux.HandleFunc("GET /api/usergroups.users.update", h.updateUserGroupUsers)
 	mux.HandleFunc("POST /api/usergroups.users.update", h.updateUserGroupUsers)
+	mux.HandleFunc("GET /api/admin.usergroups.addChannels", h.adminUserGroupAddChannels)
 	mux.HandleFunc("POST /api/admin.usergroups.addChannels", h.adminUserGroupAddChannels)
+	mux.HandleFunc("GET /api/admin.usergroups.addTeams", h.adminUserGroupAddTeams)
 	mux.HandleFunc("POST /api/admin.usergroups.addTeams", h.adminUserGroupAddTeams)
+	mux.HandleFunc("GET /api/admin.usergroups.removeChannels", h.adminUserGroupRemoveChannels)
 	mux.HandleFunc("POST /api/admin.usergroups.removeChannels", h.adminUserGroupRemoveChannels)
 	mux.HandleFunc("GET /api/admin.usergroups.listChannels", h.adminUserGroupListChannels)
 	mux.HandleFunc("POST /api/admin.usergroups.listChannels", h.adminUserGroupListChannels)
 	mux.HandleFunc("GET /api/admin.teams.settings.info", h.adminTeamSettingsInfo)
 	mux.HandleFunc("POST /api/admin.teams.settings.info", h.adminTeamSettingsInfo)
+	mux.HandleFunc("GET /api/admin.teams.settings.setName", h.adminTeamSettingsSetName)
 	mux.HandleFunc("POST /api/admin.teams.settings.setName", h.adminTeamSettingsSetName)
+	mux.HandleFunc("GET /api/admin.teams.settings.setDescription", h.adminTeamSettingsSetDescription)
 	mux.HandleFunc("POST /api/admin.teams.settings.setDescription", h.adminTeamSettingsSetDescription)
+	mux.HandleFunc("GET /api/admin.teams.settings.setDiscoverability", h.adminTeamSettingsSetDiscoverability)
 	mux.HandleFunc("POST /api/admin.teams.settings.setDiscoverability", h.adminTeamSettingsSetDiscoverability)
-	mux.HandleFunc("POST /api/admin.teams.settings.setIcon", h.adminTeamSettingsSetIcon)
 	mux.HandleFunc("GET /api/admin.teams.settings.setIcon", h.adminTeamSettingsSetIcon)
-	mux.HandleFunc("POST /api/admin.teams.settings.setDefaultChannels", h.adminTeamSettingsSetDefaultChannels)
+	mux.HandleFunc("POST /api/admin.teams.settings.setIcon", h.adminTeamSettingsSetIcon)
 	mux.HandleFunc("GET /api/admin.teams.settings.setDefaultChannels", h.adminTeamSettingsSetDefaultChannels)
+	mux.HandleFunc("POST /api/admin.teams.settings.setDefaultChannels", h.adminTeamSettingsSetDefaultChannels)
 	mux.HandleFunc("GET /api/admin.teams.list", h.adminTeamsList)
 	mux.HandleFunc("POST /api/admin.teams.list", h.adminTeamsList)
+	mux.HandleFunc("GET /api/admin.teams.create", h.adminTeamsCreate)
 	mux.HandleFunc("POST /api/admin.teams.create", h.adminTeamsCreate)
 	mux.HandleFunc("GET /api/admin.teams.admins.list", h.adminTeamsAdminsList)
 	mux.HandleFunc("POST /api/admin.teams.admins.list", h.adminTeamsAdminsList)
 	mux.HandleFunc("GET /api/admin.teams.owners.list", h.adminTeamsOwnersList)
 	mux.HandleFunc("POST /api/admin.teams.owners.list", h.adminTeamsOwnersList)
+	mux.HandleFunc("GET /api/calls.add", h.addCall)
 	mux.HandleFunc("POST /api/calls.add", h.addCall)
+	mux.HandleFunc("GET /api/calls.end", h.endCall)
 	mux.HandleFunc("POST /api/calls.end", h.endCall)
 	mux.HandleFunc("GET /api/calls.info", h.callInfo)
 	mux.HandleFunc("POST /api/calls.info", h.callInfo)
+	mux.HandleFunc("GET /api/calls.update", h.updateCall)
 	mux.HandleFunc("POST /api/calls.update", h.updateCall)
+	mux.HandleFunc("GET /api/calls.participants.add", h.addCallParticipants)
 	mux.HandleFunc("POST /api/calls.participants.add", h.addCallParticipants)
+	mux.HandleFunc("GET /api/calls.participants.remove", h.removeCallParticipants)
 	mux.HandleFunc("POST /api/calls.participants.remove", h.removeCallParticipants)
 	mux.HandleFunc("GET /api/search.messages", h.searchMessages)
 	mux.HandleFunc("POST /api/search.messages", h.searchMessages)
@@ -494,42 +694,58 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/search.all", h.searchAll)
 	mux.HandleFunc("GET /api/files.info", h.fileInfo)
 	mux.HandleFunc("POST /api/files.info", h.fileInfo)
+	mux.HandleFunc("GET /api/files.delete", h.deleteFile)
 	mux.HandleFunc("POST /api/files.delete", h.deleteFile)
+	mux.HandleFunc("GET /api/files.comments.delete", h.deleteFileComment)
 	mux.HandleFunc("POST /api/files.comments.delete", h.deleteFileComment)
 	mux.HandleFunc("GET /api/files.list", h.filesList)
 	mux.HandleFunc("POST /api/files.list", h.filesList)
+	mux.HandleFunc("GET /api/files.upload", h.fileUpload)
 	mux.HandleFunc("POST /api/files.upload", h.fileUpload)
+	mux.HandleFunc("GET /api/files.remote.add", h.remoteFileAdd)
 	mux.HandleFunc("POST /api/files.remote.add", h.remoteFileAdd)
 	mux.HandleFunc("GET /api/files.remote.info", h.remoteFileInfo)
 	mux.HandleFunc("POST /api/files.remote.info", h.remoteFileInfo)
 	mux.HandleFunc("GET /api/files.remote.list", h.remoteFilesList)
 	mux.HandleFunc("POST /api/files.remote.list", h.remoteFilesList)
+	mux.HandleFunc("GET /api/files.remote.remove", h.remoteFileRemove)
 	mux.HandleFunc("POST /api/files.remote.remove", h.remoteFileRemove)
 	mux.HandleFunc("GET /api/files.remote.share", h.remoteFileShare)
 	mux.HandleFunc("POST /api/files.remote.share", h.remoteFileShare)
+	mux.HandleFunc("GET /api/files.remote.update", h.remoteFileUpdate)
 	mux.HandleFunc("POST /api/files.remote.update", h.remoteFileUpdate)
-	mux.HandleFunc("POST /api/files.sharedPublicURL", h.shareFilePublic)
 	mux.HandleFunc("GET /api/files.sharedPublicURL", h.shareFilePublic)
+	mux.HandleFunc("POST /api/files.sharedPublicURL", h.shareFilePublic)
+	mux.HandleFunc("GET /api/files.revokePublicURL", h.revokeFilePublic)
 	mux.HandleFunc("POST /api/files.revokePublicURL", h.revokeFilePublic)
-	mux.HandleFunc("GET /api/files/{file}", h.downloadFile)
-	mux.HandleFunc("GET /files/public/{token}", h.downloadPublicFile)
-	mux.HandleFunc("GET /users/{workspace}/{user}/photo/{token}", h.downloadUserPhoto)
 	mux.HandleFunc("GET /api/openid.connect.token", h.openIDConnectToken)
 	mux.HandleFunc("POST /api/openid.connect.token", h.openIDConnectToken)
 	mux.HandleFunc("GET /api/openid.connect.userInfo", h.openIDConnectUserInfo)
 	mux.HandleFunc("POST /api/openid.connect.userInfo", h.openIDConnectUserInfo)
-	mux.HandleFunc("POST /services/{workspace}/{app}/{secret}", h.incomingWebhook)
-	mux.HandleFunc("POST /services/triggers/{workspace}/{trigger}/{secret}", h.workflowTriggerWebhook)
-	mux.HandleFunc("POST /internal/admin/incoming-webhooks/create", h.adminIncomingWebhookCreate)
-	mux.HandleFunc("POST /internal/admin/incoming-webhooks/enable", h.adminIncomingWebhookEnable)
 	mux.HandleFunc("GET /api/files.getUploadURLExternal", h.filesGetUploadURLExternal)
 	mux.HandleFunc("POST /api/files.getUploadURLExternal", h.filesGetUploadURLExternal)
-	mux.HandleFunc("POST /internal/files/external/{upload}", h.externalFileUpload)
 	mux.HandleFunc("GET /api/files.completeUploadExternal", h.filesCompleteUploadExternal)
 	mux.HandleFunc("POST /api/files.completeUploadExternal", h.filesCompleteUploadExternal)
+	// Not a method: the authenticated download of a stored file.
+	mux.HandleFunc("GET /api/files/{file}", h.downloadFile)
 	// Registered last and least specifically, so it claims only what nothing else
 	// does: an unknown method name and a verb no route declares.
 	mux.HandleFunc("/api/", h.unknownMethod)
+}
+
+// registerSurfaces registers the routes outside /api/. They are not Web API
+// methods, so the Web API method budget does not front them; incoming webhooks
+// carry their own documented per-webhook allowance (limitedIncomingWebhook).
+func (h Handler) registerSurfaces(mux *http.ServeMux) {
+	mux.HandleFunc("GET /internal/slack-lists/download.csv", h.downloadListCSV)
+	mux.HandleFunc("GET /internal/exports/workflow-step-responses.csv", h.downloadWorkflowStepResponsesCSV)
+	mux.HandleFunc("GET /files/public/{token}", h.downloadPublicFile)
+	mux.HandleFunc("GET /users/{workspace}/{user}/photo/{token}", h.downloadUserPhoto)
+	mux.HandleFunc("POST /services/{workspace}/{app}/{secret}", h.limitedIncomingWebhook)
+	mux.HandleFunc("POST /services/triggers/{workspace}/{trigger}/{secret}", h.workflowTriggerWebhook)
+	mux.HandleFunc("POST /internal/admin/incoming-webhooks/create", h.adminIncomingWebhookCreate)
+	mux.HandleFunc("POST /internal/admin/incoming-webhooks/enable", h.adminIncomingWebhookEnable)
+	mux.HandleFunc("POST /internal/files/external/{upload}", h.externalFileUpload)
 }
 
 func (h Handler) blocksValidate(w http.ResponseWriter, r *http.Request) {
@@ -596,7 +812,9 @@ func (h Handler) blocksValidate(w http.ResponseWriter, r *http.Request) {
 // keys on `ok`. Every response on /api/* has to be an envelope, so this is the
 // catch-all the mux never had. It is registered without a method and without a
 // trailing route, so it is the least specific pattern under /api/ and is reached
-// only when nothing else matches.
+// only when nothing else matches: an unknown method name, or a verb other than
+// GET and POST (every known method is registered for both — see
+// registerWebAPI).
 //
 // `unknown_method` is not in any of the pinned enums — the snapshot describes no
 // routing failure at all — so it is recorded as a deviation. It is the name Slack
@@ -627,8 +845,9 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if !principal.HasScope(auth.ScopeConnectionsWrite) {
-		writeAuthError(w, missingScopeError{needed: auth.ScopeConnectionsWrite, provided: permissionScopes(principal)})
+	recordGrantedScopes(r, principal)
+	if err := requireAnyScope(r, principal, auth.ScopeConnectionsWrite); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	if principal.AppID == "" {
@@ -918,22 +1137,52 @@ func writeAppDatastoreError(w http.ResponseWriter, err error) {
 	}
 }
 
+// apiTest echoes the arguments it received under `args`, on success as well as
+// on the error a caller forces with `error` — that echo is what the method is
+// for, and SDK smoke tests assert it. A JSON body's nested values are echoed as
+// the structure they arrived as; only `error` keeps its scalar contract, since
+// it becomes the response's error code. The credential is never echoed.
 func (h Handler) apiTest(w http.ResponseWriter, r *http.Request) {
-	fields, err := decodeFields(w, r)
+	nested := map[string]json.RawMessage{}
+	fields, err := decodeArguments(w, r, func(name string, value json.RawMessage) (string, error) {
+		if name == "error" || jsonIsString(value) {
+			return normalizeJSONField(name, value)
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, value); err != nil {
+			return "", decodeFailure("invalid_json", "field is not valid JSON")
+		}
+		nested[name] = json.RawMessage(compact.Bytes())
+		return compact.String(), nil
+	})
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	errorName := strings.TrimSpace(fields["error"])
-	if errorName != "" {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": errorName, "args": map[string]string{"error": errorName}})
+	args := make(map[string]any, len(fields))
+	for name, value := range fields {
+		if name == "token" {
+			continue
+		}
+		if raw, ok := nested[name]; ok {
+			args[name] = raw
+			continue
+		}
+		args[name] = value
+	}
+	if errorName := strings.TrimSpace(fields["error"]); errorName != "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": errorName, "args": args})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	response := map[string]any{"ok": true}
+	if len(args) != 0 {
+		response["args"] = args
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) history(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	principal, err := h.authenticateConversation(r, conversationHistoryGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -946,6 +1195,9 @@ func (h Handler) history(w http.ResponseWriter, r *http.Request) {
 	request, err := normalizeHistoryRequest(fields, "invalid_ts_oldest", "invalid_ts_latest")
 	if err != nil {
 		writeDecodeError(w, err)
+		return
+	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationHistoryGrant, request.Channel, "channel_not_found"); !ok {
 		return
 	}
 	// Slack history is newest-first. Reading the store in that direction also
@@ -962,7 +1214,7 @@ func (h Handler) history(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) replies(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	principal, err := h.authenticateConversation(r, conversationHistoryGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -980,6 +1232,9 @@ func (h Handler) replies(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(fields["ts"]) == "" {
 		// /conversations.replies enumerates thread_not_found, not invalid_arguments.
 		writeError(w, "thread_not_found")
+		return
+	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationHistoryGrant, request.Channel, "channel_not_found"); !ok {
 		return
 	}
 	page, err := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, request.Channel, domain.MessageTimestamp(strings.TrimSpace(fields["ts"])), request.Page)
@@ -2181,7 +2436,7 @@ func (h Handler) authRevoke(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	token := headerToken(r)
 	if token == "" {
 		token = strings.TrimSpace(fields["token"])
 	}
@@ -2189,10 +2444,12 @@ func (h Handler) authRevoke(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "not_authed")
 		return
 	}
-	if _, err := h.Authenticator.Authenticate(r); err != nil {
+	principal, err := h.Authenticator.Authenticate(r)
+	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
+	recordGrantedScopes(r, principal)
 	test, err := parseBoolField(fields["test"])
 	if err != nil {
 		writeError(w, "invalid_arg_name")
@@ -2439,13 +2696,13 @@ func (h Handler) toolingTokensRotate(w http.ResponseWriter, r *http.Request) {
 }
 
 func appConfigurationToken(r *http.Request, fields map[string]string) (string, string) {
-	headerToken := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	fromHeader := headerToken(r)
 	bodyToken := strings.TrimSpace(fields["token"])
-	if headerToken != "" && bodyToken != "" && headerToken != bodyToken {
+	if fromHeader != "" && bodyToken != "" && fromHeader != bodyToken {
 		return "", "invalid_auth"
 	}
-	if headerToken != "" {
-		return headerToken, ""
+	if fromHeader != "" {
+		return fromHeader, ""
 	}
 	if bodyToken != "" {
 		return bodyToken, ""
@@ -2802,7 +3059,7 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	token := strings.TrimSpace(fields["token"])
 	if token == "" {
-		token = strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		token = headerToken(r)
 	}
 	if token == "" {
 		writeError(w, "invalid_auth")
@@ -5898,10 +6155,10 @@ func (h Handler) adminEmojiFields(w http.ResponseWriter, r *http.Request) (auth.
 }
 
 func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
-	// Pinned /conversations.info token parameter: "Requires scope:
-	// `conversations:read`". Enforcing no scope let a chat:write-only token read
-	// every channel's topic, purpose and privacy.
-	principal, err := h.authenticate(r, auth.ScopeChannelsRead)
+	// Pinned /conversations.info: channels:read, groups:read, im:read or
+	// mpim:read by the conversation's type. Enforcing no scope let a
+	// chat:write-only token read every channel's topic, purpose and privacy.
+	principal, err := h.authenticateConversation(r, conversationReadGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -5916,9 +6173,8 @@ func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversationID))
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	conversation, ok := h.authorizedConversation(w, r, principal, conversationReadGrant, domain.ConversationID(conversationID), "channel_not_found")
+	if !ok {
 		return
 	}
 	response := conversationResponse(conversation)
@@ -6582,7 +6838,7 @@ func (h Handler) usersConversations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allowMember bool) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsRead)
+	principal, err := h.authenticateConversation(r, conversationReadGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6597,6 +6853,30 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	if len(request.Types) == 0 {
+		// Both methods default `types` to public_channel. An absent argument
+		// used to list every type, so a caller that named none received its
+		// private channels and DMs as well.
+		request.Types = []domain.ConversationType{domain.ConversationTypePublic}
+	}
+	// The listing is narrowed to the requested types the token may read, as
+	// Slack does: a token holding channels:read and asking for public and
+	// private channels gets the public ones. Only a request none of whose
+	// types the token can read is refused, naming the scopes that would do.
+	permitted := make([]domain.ConversationType, 0, len(request.Types))
+	for _, kind := range request.Types {
+		if conversationReadGrant.permits(principal, kind) {
+			permitted = append(permitted, kind)
+		}
+	}
+	if len(permitted) == 0 {
+		if err := requireAnyScope(r, principal, conversationReadGrant.scopes(principal, request.Types...)...); err != nil {
+			writeAuthError(w, err)
+			return
+		}
+	}
+	recordAcceptedScopes(r, conversationReadGrant.scopes(principal, request.Types...)...)
+	request.Types = permitted
 	if allowMember {
 		request.MemberUserID = domain.UserID(strings.TrimSpace(fields["user"]))
 	}
@@ -6613,7 +6893,7 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 }
 
 func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsRead)
+	principal, err := h.authenticateConversation(r, conversationReadGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6633,6 +6913,9 @@ func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationReadGrant, channel, "channel_not_found"); !ok {
+		return
+	}
 	page, err := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, request)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -6646,7 +6929,7 @@ func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant, domain.ConversationTypePublic, domain.ConversationTypePrivate)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6664,6 +6947,14 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 	private, err := parseBoolField(fields["is_private"])
 	if err != nil {
 		writeError(w, "invalid_arg_name")
+		return
+	}
+	kind := domain.ConversationTypePublic
+	if private {
+		kind = domain.ConversationTypePrivate
+	}
+	if err := requireAnyScope(r, principal, conversationWriteGrant.scope(principal, kind)); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
@@ -6710,11 +7001,11 @@ func (h Handler) authenticateConversationJoin(r *http.Request, botScope, userSco
 	// other conversation mutators and requiring channels:manage made an
 	// official bot installation unable to join any public channel.
 	needed := userScope
-	if principal.TokenType.IsBot() || principal.BotID != "" {
+	if isBotPrincipal(principal) {
 		needed = botScope
 	}
-	if !principal.HasScope(needed) {
-		return auth.Principal{}, missingScopeError{needed: needed, provided: permissionScopes(principal)}
+	if err := requireAnyScope(r, principal, needed); err != nil {
+		return auth.Principal{}, err
 	}
 	return principal, nil
 }
@@ -6725,12 +7016,10 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	allInviteScopes := []auth.Scope{
-		auth.ScopeChannelsManage, auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites,
-		auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite,
-	}
-	if !principalHasAnyScope(principal, allInviteScopes...) {
-		writeAuthError(w, missingScopeError{needed: auth.ScopeChannelsManage, provided: permissionScopes(principal)})
+	// Every conversation type's write scope, plus the invite-only grants
+	// Slack accepts for channels, is the family a token must hold one of.
+	if err := requireAnyScope(r, principal, append(conversationWriteGrant.scopes(principal), auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWriteInvites)...); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -6748,21 +7037,8 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	required := []auth.Scope{auth.ScopeChannelsWrite}
-	switch {
-	case conversation.Kind == domain.ConversationTypeIM:
-		required = []auth.Scope{auth.ScopeIMWrite}
-	case conversation.Kind == domain.ConversationTypeMPIM:
-		required = []auth.Scope{auth.ScopeMPIMWrite}
-	case conversation.Kind == domain.ConversationTypePrivate:
-		required = []auth.Scope{auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites}
-	case principal.TokenType.IsBot() || principal.BotID != "":
-		required = []auth.Scope{auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites}
-	default:
-		required = []auth.Scope{auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites}
-	}
-	if !principalHasAnyScope(principal, required...) {
-		writeAuthError(w, missingScopeError{needed: required[0], provided: permissionScopes(principal)})
+	if err := requireAnyScope(r, principal, inviteScopes(principal, conversation.Kind.OrPublic())...); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	if conversation.Archived {
@@ -6875,6 +7151,20 @@ func (h Handler) conversationInviteCandidates(r *http.Request, principal auth.Pr
 	return valid, failures, nil
 }
 
+// inviteScopes is what conversations.invite accepts for a conversation of
+// kind: the conversation write grant, or for a channel the narrower
+// invite-only scope.
+func inviteScopes(principal auth.Principal, kind domain.ConversationType) []auth.Scope {
+	scopes := []auth.Scope{conversationWriteGrant.scope(principal, kind)}
+	switch kind.OrPublic() {
+	case domain.ConversationTypePublic:
+		scopes = append(scopes, auth.ScopeChannelsWriteInvites)
+	case domain.ConversationTypePrivate:
+		scopes = append(scopes, auth.ScopeGroupsWriteInvites)
+	}
+	return scopes
+}
+
 func principalHasAnyScope(principal auth.Principal, scopes ...auth.Scope) bool {
 	for _, scope := range scopes {
 		if principal.HasScope(scope) {
@@ -6885,7 +7175,7 @@ func principalHasAnyScope(principal auth.Principal, scopes ...auth.Scope) bool {
 }
 
 func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6900,9 +7190,8 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conversation := domain.ConversationID(strings.TrimSpace(fields["channel"]))
-	info, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, conversation)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	info, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, conversation, "channel_not_found")
+	if !ok {
 		return
 	}
 	if info.IsDirectOrGroup() {
@@ -6925,7 +7214,7 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6945,6 +7234,9 @@ func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "user_not_found")
 		return
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
+		return
+	}
 	if err := h.Messages.KickConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel, target); err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
@@ -6953,7 +7245,7 @@ func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6973,9 +7265,8 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_name_required")
 		return
 	}
-	info, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	info, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found")
+	if !ok {
 		return
 	}
 	if info.IsDirectOrGroup() {
@@ -6991,7 +7282,7 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7010,6 +7301,9 @@ func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
+		return
+	}
 	conversation, err := h.Messages.SetConversationTopic(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["topic"])
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -7019,7 +7313,7 @@ func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7036,6 +7330,9 @@ func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) 
 	}
 	if _, present := fields["purpose"]; !present {
 		writeError(w, "invalid_arg_name")
+		return
+	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
 		return
 	}
 	conversation, err := h.Messages.SetConversationPurpose(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["purpose"])
@@ -7083,7 +7380,7 @@ func (h Handler) unarchiveConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7098,9 +7395,8 @@ func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "channel_not_found")
 		return
 	}
-	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	conversation, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found")
+	if !ok {
 		return
 	}
 	if !conversation.IsDirectOrGroup() {
@@ -7119,7 +7415,7 @@ func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) changeConversationArchived(w http.ResponseWriter, r *http.Request, archived bool) (bool, error) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return false, nil
@@ -7134,12 +7430,15 @@ func (h Handler) changeConversationArchived(w http.ResponseWriter, r *http.Reque
 		writeError(w, "channel_not_found")
 		return false, nil
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
+		return false, nil
+	}
 	_, err = h.Messages.SetConversationArchived(r.Context(), principal.WorkspaceID, principal.UserID, channel, archived)
 	return true, err
 }
 
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant, domain.ConversationTypeIM, domain.ConversationTypeMPIM)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7168,6 +7467,22 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		seen[user] = struct{}{}
 		users = append(users, user)
 	}
+	// One other person is a direct message and more is a group direct
+	// message; each takes its own write scope.
+	kind := domain.ConversationTypeIM
+	others := 0
+	for _, user := range users {
+		if user != principal.UserID {
+			others++
+		}
+	}
+	if others > 1 {
+		kind = domain.ConversationTypeMPIM
+	}
+	if err := requireAnyScope(r, principal, conversationWriteGrant.scope(principal, kind)); err != nil {
+		writeAuthError(w, err)
+		return
+	}
 	conversation, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -7177,9 +7492,10 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) markConversation(w http.ResponseWriter, r *http.Request) {
-	// conversations.mark moves the caller's read cursor, so the pinned token
-	// parameter requires `conversations:write`, not a history read scope.
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	// conversations.mark moves the caller's read cursor, so it takes the
+	// conversation write grant for the conversation's type, not a history
+	// read scope.
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7197,6 +7513,9 @@ func (h Handler) markConversation(w http.ResponseWriter, r *http.Request) {
 	if timestamp == "" {
 		// /conversations.mark enumerates invalid_timestamp.
 		writeError(w, "invalid_timestamp")
+		return
+	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, domain.ConversationID(channel), "channel_not_found"); !ok {
 		return
 	}
 	cursor, err := h.Messages.MarkRead(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(channel), domain.MessageTimestamp(timestamp))
@@ -9080,7 +9399,7 @@ func (h Handler) downloadUserPhoto(w http.ResponseWriter, r *http.Request) {
 // spool is bounded by maxUploadBytes, which is the same bound an authenticated
 // upload already has.
 func bodyOnlyToken(r *http.Request) bool {
-	if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+	if headerToken(r) != "" {
 		return false
 	}
 	return strings.ToLower(strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0])) == "multipart/form-data"
@@ -9094,7 +9413,7 @@ func bodyOnlyToken(r *http.Request) bool {
 // multipart file was answered `invalid_form_data`, because the upload had been
 // discarded before the multipart reader ever saw it.
 func promoteQueryToken(r *http.Request) *http.Request {
-	if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+	if headerToken(r) != "" {
 		return r
 	}
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
@@ -9106,12 +9425,19 @@ func promoteQueryToken(r *http.Request) *http.Request {
 	return clone
 }
 
+// headerToken is the bearer credential the Authorization header carries, read
+// with the one case-insensitive parser every surface shares.
+func headerToken(r *http.Request) string {
+	token, _ := bearer.Token(r.Header.Get("Authorization"))
+	return token
+}
+
 // withBearerToken returns r, or a shallow copy carrying token as a bearer header.
 // The copy's body is emptied because its only caller is the deferred
 // authentication that runs after the body has already been spooled.
 func withBearerToken(r *http.Request, token string) *http.Request {
 	token = strings.TrimSpace(token)
-	if token == "" || strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+	if token == "" || headerToken(r) != "" {
 		return r
 	}
 	clone := r.Clone(r.Context())
@@ -11331,6 +11657,14 @@ func requestCharset(header string) error {
 // reported as a conflicting duplicate rather than resolved by the same precedence
 // every other encoding uses.
 func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
+	return decodeArguments(w, r, normalizeJSONField)
+}
+
+// decodeArguments is decodeFields with the JSON member decoding supplied by the
+// caller. api.test is the one caller that needs another: it echoes whatever a
+// JSON body carried, nested values included, where every other method refuses
+// a non-scalar in a scalar argument.
+func decodeArguments(w http.ResponseWriter, r *http.Request, jsonMember func(name string, value json.RawMessage) (string, error)) (map[string]string, error) {
 	fields := make(map[string]string)
 	if err := collectFormValues(fields, r.URL.Query()); err != nil {
 		return nil, err
@@ -11342,7 +11676,7 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 	}
 	contentType := strings.ToLower(strings.TrimSpace(strings.SplitN(header, ";", 2)[0]))
 	if contentType == "application/json" {
-		body, err := decodeJSONFields(r.Body)
+		body, err := decodeJSONFields(r.Body, jsonMember)
 		if err != nil {
 			// Every raw encoding/json failure is a malformed document; `invalid_json` is
 			// the code the pinned enums declare for it. Returning the bare error left the
@@ -11406,57 +11740,75 @@ type readCloser struct {
 	io.Closer
 }
 
-func decodeJSONFields(body io.Reader) (map[string]string, error) {
+func decodeJSONFields(body io.Reader, jsonMember func(name string, value json.RawMessage) (string, error)) (map[string]string, error) {
 	fields := make(map[string]string)
-	decoder := json.NewDecoder(io.LimitReader(body, maxRequestBody))
-	start, err := decoder.Token()
-	if err == io.EOF {
-		return fields, nil
-	}
+	err := decodeJSONObject(body, func(name string, value json.RawMessage) error {
+		normalized, err := jsonMember(name, value)
+		if err != nil {
+			return err
+		}
+		fields[name] = normalized
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	return fields, nil
+}
+
+// decodeJSONObject walks a JSON request body that must be one object, handing
+// each member to field once. An empty body is an empty object. Duplicate
+// names, a non-object document and trailing values are refused here, so every
+// caller shares one definition of a well-formed JSON request.
+func decodeJSONObject(body io.Reader, field func(name string, value json.RawMessage) error) error {
+	decoder := json.NewDecoder(io.LimitReader(body, maxRequestBody))
+	start, err := decoder.Token()
+	if err == io.EOF {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	if delimiter, ok := start.(json.Delim); !ok || delimiter != '{' {
-		return nil, decodeFailure("json_not_object", "JSON request must be an object")
+		return decodeFailure("json_not_object", "JSON request must be an object")
 	}
 	seen := make(map[string]struct{})
 	for decoder.More() {
 		key, err := decoder.Token()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		name, ok := key.(string)
 		if !ok {
-			return nil, decodeFailure("invalid_json", "JSON object field name is invalid")
+			return decodeFailure("invalid_json", "JSON object field name is invalid")
 		}
 		if _, exists := seen[name]; exists {
-			return nil, decodeFailure("invalid_json", "request contains duplicate JSON field")
+			return decodeFailure("invalid_json", "request contains duplicate JSON field")
 		}
 		seen[name] = struct{}{}
 		var value json.RawMessage
 		if err := decoder.Decode(&value); err != nil {
-			return nil, err
+			return err
 		}
-		fields[name], err = normalizeJSONField(name, value)
-		if err != nil {
-			return nil, err
+		if err := field(name, value); err != nil {
+			return err
 		}
 	}
 	end, err := decoder.Token()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if delimiter, ok := end.(json.Delim); !ok || delimiter != '}' {
-		return nil, decodeFailure("invalid_json", "JSON request object is invalid")
+		return decodeFailure("invalid_json", "JSON request object is invalid")
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return nil, decodeFailure("invalid_json", "request contains multiple JSON values")
+			return decodeFailure("invalid_json", "request contains multiple JSON values")
 		}
-		return nil, err
+		return err
 	}
-	return fields, nil
+	return nil
 }
 
 func collectFormValues(fields map[string]string, source map[string][]string) error {
@@ -11524,9 +11876,16 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // equivalent form-encoded request echoed `my_error`; flattening it always broke
 // workflows.stepFailed for every official SDK. It is decided by the value's own
 // shape instead — see normalizeJSONField.
+//
+// The set is held against its sources by TestStructuredFieldsCoverEveryJSONArgument:
+// every argument the pinned snapshot describes as JSON-bearing, and every
+// argument an official SDK sends as a JSON array or object in a JSON body. It
+// once omitted `prompts` and `loading_messages`, which python-slack-sdk sends
+// as arrays for assistant.threads.setSuggestedPrompts and setStatus, so both
+// methods answered invalid_array_arg to the SDK's own request.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages":
 		return true
 	default:
 		return false
@@ -11537,6 +11896,14 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 	switch {
 	case isListField(name):
 		return normalizeJSONListField(value)
+	case (isStructuredField(name) || name == "profile") && jsonIsString(value):
+		// A structured argument may arrive as the JSON-encoded string the
+		// form encoding carries — python-slack-sdk sends `blocks="[...]"` as
+		// exactly that inside a JSON body, and Slack accepts it. The string is
+		// that encoded document, so it is flattened exactly as its
+		// form-encoded twin is; forwarding it verbatim handed the handler a
+		// quoted string, and chat.postMessage answered no_text.
+		return normalizeJSONScalar(value)
 	case isStructuredField(name):
 		var structured any
 		if err := json.Unmarshal(value, &structured); err != nil || structured == nil {
@@ -11570,14 +11937,21 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 // `type: string`, and 83 of the 99 pinned enums declare invalid_array_arg for
 // exactly the case of an array where a scalar belongs.
 func jsonIsObject(value json.RawMessage) bool {
+	return jsonStartsWith(value, '{')
+}
+
+// jsonIsString reports whether a raw JSON value is a string.
+func jsonIsString(value json.RawMessage) bool {
+	return jsonStartsWith(value, '"')
+}
+
+func jsonStartsWith(value json.RawMessage, first byte) bool {
 	for _, b := range value {
 		switch b {
 		case ' ', '\t', '\n', '\r':
 			continue
-		case '{':
-			return true
 		default:
-			return false
+			return b == first
 		}
 	}
 	return false
@@ -11661,13 +12035,43 @@ func slackTimestamp(value time.Time) string {
 // token actually holds. The pinned `default` response schema declares `needed`
 // and `provided` next to `error` precisely so a client can repair the grant, so
 // dropping them would leave `missing_scope` unactionable.
+//
+// `needed` lists every scope the operation would accept, any one of which
+// suffices — Slack's own answer for conversations.history without a history
+// scope names all four — and a single scope when there is only one.
 type missingScopeError struct {
-	needed   auth.Scope
+	needed   []auth.Scope
 	provided []string
 }
 
 func (e missingScopeError) Error() string {
-	return fmt.Sprintf("missing scope %s", e.needed)
+	return fmt.Sprintf("missing scope %s", e.neededValue())
+}
+
+func (e missingScopeError) neededValue() string {
+	values := make([]string, 0, len(e.needed))
+	for _, scope := range e.needed {
+		values = append(values, string(scope))
+	}
+	return strings.Join(values, ",")
+}
+
+// requireAnyScope refuses a principal that holds none of scopes, any one of
+// which the operation accepts, and records them as the method's accepted
+// scopes for X-Accepted-OAuth-Scopes. Empty names are ignored; with none left
+// the operation needs nothing beyond authentication.
+func requireAnyScope(r *http.Request, principal auth.Principal, scopes ...auth.Scope) error {
+	accepted := make([]auth.Scope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope != "" {
+			accepted = append(accepted, scope)
+		}
+	}
+	recordAcceptedScopes(r, accepted...)
+	if len(accepted) == 0 || principalHasAnyScope(principal, accepted...) {
+		return nil
+	}
+	return missingScopeError{needed: accepted, provided: permissionScopes(principal)}
 }
 
 func (e missingScopeError) Unwrap() error { return auth.ErrMissingScope }
@@ -11694,8 +12098,9 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 	if err != nil {
 		return auth.Principal{}, err
 	}
-	if scope != "" && !principal.HasScope(scope) {
-		return auth.Principal{}, missingScopeError{needed: scope, provided: permissionScopes(principal)}
+	recordGrantedScopes(r, principal)
+	if err := requireAnyScope(r, principal, scope); err != nil {
+		return auth.Principal{}, err
 	}
 	if err := h.Messages.RecordAccess(r.Context(), principal.WorkspaceID, principal.UserID, truncate(r.RemoteAddr, maxAccessLogIP), truncate(r.UserAgent(), maxAccessLogUserAgent)); err != nil {
 		return auth.Principal{}, fmt.Errorf("%w: %v", errAccessLogging, err)
@@ -11714,8 +12119,9 @@ func (h Handler) authenticateApp(r *http.Request, scope auth.Scope) (auth.Princi
 	if principal.AppID == "" {
 		return auth.Principal{}, auth.ErrInvalidToken
 	}
-	if scope != "" && !principal.HasScope(scope) {
-		return auth.Principal{}, missingScopeError{needed: scope, provided: permissionScopes(principal)}
+	recordGrantedScopes(r, principal)
+	if err := requireAnyScope(r, principal, scope); err != nil {
+		return auth.Principal{}, err
 	}
 	return principal, nil
 }
@@ -11736,7 +12142,7 @@ func writeAuthError(w http.ResponseWriter, err error) {
 	}
 	var missing missingScopeError
 	if errors.As(err, &missing) {
-		body := map[string]any{"ok": false, "error": "missing_scope", "needed": string(missing.needed)}
+		body := map[string]any{"ok": false, "error": "missing_scope", "needed": missing.neededValue()}
 		body["provided"] = strings.Join(missing.provided, ",")
 		writeJSON(w, http.StatusOK, body)
 		return
@@ -12498,7 +12904,7 @@ func (h Handler) openIDConnectUserInfo(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	token := headerToken(r)
 	if token == "" {
 		token = strings.TrimSpace(fields["token"])
 	}

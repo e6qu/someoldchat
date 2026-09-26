@@ -206,7 +206,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeAdminBarriersRead, auth.ScopeAdminBarriersWrite, auth.ScopeAdminAnalyticsRead, auth.ScopeAuditLogsRead, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeGroupsHistory, auth.ScopeIMHistory, auth.ScopeMPIMHistory, auth.ScopeGroupsRead, auth.ScopeIMRead, auth.ScopeMPIMRead, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeAdminBarriersRead, auth.ScopeAdminBarriersWrite, auth.ScopeAdminAnalyticsRead, auth.ScopeAuditLogsRead, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -230,6 +230,15 @@ func testHandlerWithStoredTokenAuth(scopes ...auth.Scope) (http.Handler, *memory
 }
 
 func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store) {
+	h, s := testHandlerValue(stored, scopes...)
+	mux := http.NewServeMux()
+	h.Register(mux)
+	return mux, s
+}
+
+// testHandlerValue is testFixture before registration, for a test that has to
+// configure the Handler itself — mounting a limiter, for one.
+func testHandlerValue(stored bool, scopes ...auth.Scope) (Handler, *memory.Store) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
@@ -316,9 +325,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 	if err != nil {
 		panic(err)
 	}
-	mux := http.NewServeMux()
-	h.Register(mux)
-	return mux, s
+	return h, s
 }
 
 func TestListDownloadStreamsCSVAndPreservesArchiveOption(t *testing.T) {
@@ -3271,7 +3278,7 @@ func TestInviteConversationUsesCurrentTokenAndChannelScopeMatrix(t *testing.T) {
 		repository.SeedConversation(domain.Conversation{ID: "C-private-scope", WorkspaceID: "T1", Name: "private-scope", Kind: domain.ConversationTypePrivate})
 		repository.SeedConversationMember("C-private-scope", "U1")
 		response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C-private-scope&users=U2")
-		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"error":"missing_scope"`) || !strings.Contains(response.Body.String(), `"needed":"groups:write"`) {
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"error":"missing_scope"`) || !strings.Contains(response.Body.String(), `"needed":"groups:write,groups:write.invites"`) {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body)
 		}
 	})
@@ -5190,7 +5197,7 @@ func TestDecodeJSONFieldsPreservesStructuredArrayArguments(t *testing.T) {
 		"blocks":[{"type":"divider"}],
 		"attachments":[{"text":"attachment"}],
 		"files":[{"id":"F1","title":"report"}]
-	}`))
+	}`), normalizeJSONField)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5302,6 +5309,10 @@ func TestExternalUploadHTTPBatchCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Mounted the way production mounts it. The upload URL is outside /api/,
+	// and a limiter-fronted Register once left it answering 404 while this test,
+	// registered without a limiter, passed.
+	handler.Limiter = NewRateLimiter()
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	create := func(name string, content string, sdkMultipart bool) string {

@@ -1,12 +1,16 @@
 package slack
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
 func limiterAt(now *time.Time) *RateLimiter {
@@ -136,5 +140,102 @@ func TestRegisterMountsTheLimiterOverTheWholeAPITree(t *testing.T) {
 	}
 	if response := limitedRequest(t, mux, http.MethodPost, "/api/api.test", "", "", ""); response.Code != http.StatusTooManyRequests {
 		t.Fatalf("mounted limiter never limited: status=%d", response.Code)
+	}
+}
+
+// The limiter buckets by the same bearer credential the authenticator reads,
+// whatever the scheme's case: a lowercase `bearer` used to fall to the
+// client-address bucket, so the same app's budget depended on its spelling.
+func TestRateLimiterBucketsTheBearerCredentialCaseInsensitively(t *testing.T) {
+	for _, header := range []string{"Bearer xoxb-one", "bearer xoxb-one", "BEARER xoxb-one"} {
+		request := httptest.NewRequest(http.MethodPost, "/api/users.list", nil)
+		request.Header.Set("Authorization", header)
+		if got := rateLimitCredential(request); got != domain.HashToken("xoxb-one") {
+			t.Errorf("%q bucketed as %q", header, got)
+		}
+	}
+}
+
+// Register once mounted only "/api/" on the outer mux when a limiter was set,
+// so every route outside /api/ — the files_upload_v2 upload URL, incoming
+// webhooks, workflow trigger webhooks, public file and photo URLs — answered
+// the mux's text/plain 404 in the default, rate-limited production
+// configuration while every unlimited test passed. Every registered route must
+// resolve to the same pattern with and without a limiter.
+func TestRegisterKeepsEveryRouteReachableBehindTheLimiter(t *testing.T) {
+	limited := http.NewServeMux()
+	Handler{Limiter: NewRateLimiter()}.Register(limited)
+	unlimited := http.NewServeMux()
+	Handler{}.Register(unlimited)
+	wildcard := regexp.MustCompile(`\{[^}]+\}`)
+	checked := 0
+	for _, route := range registeredRoutes(t) {
+		if route.method == "" {
+			continue
+		}
+		target := wildcard.ReplaceAllString(route.path, "x")
+		request := httptest.NewRequest(route.method, target, nil)
+		// The Web API is one fronted /api/ route on the outer mux, with or
+		// without a limiter; everything else is its own route there.
+		want := route.method + " " + route.path
+		if strings.HasPrefix(route.path, "/api/") {
+			want = "/api/"
+		}
+		for name, mux := range map[string]*http.ServeMux{"without a limiter": unlimited, "behind the limiter": limited} {
+			if _, pattern := mux.Handler(request); pattern != want {
+				t.Errorf("%s %s resolves to %q %s, want %q", route.method, target, pattern, name, want)
+			}
+		}
+		checked++
+	}
+	if checked < 600 {
+		t.Fatalf("only %d routes checked; the route scan is broken", checked)
+	}
+}
+
+// Incoming webhooks carry Slack's documented one-per-second-per-webhook
+// allowance. In the production (limited) configuration a webhook delivers,
+// a burst beyond the allowance answers 429 with Retry-After and the
+// plain-text body the webhook surface uses, and another webhook — a different
+// URL — is a different budget.
+func TestIncomingWebhookIsServedAndLimitedPerWebhookBehindTheLimiter(t *testing.T) {
+	handler, store := testHandlerValue(false, defaultTestScopes()...)
+	now := time.Unix(1_700_000_000, 0).UTC()
+	handler.Limiter = limiterAt(&now)
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	if err := store.CreateAppInstallation(t.Context(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	created := callAPI(t, mux, http.MethodPost, "/internal/admin/incoming-webhooks/create", "app_id=A1&channel_id=C1&bot_user_id=U2")
+	var hook struct {
+		OK              bool `json:"ok"`
+		IncomingWebhook struct {
+			URL string `json:"url"`
+		} `json:"incoming_webhook"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &hook); err != nil || !hook.OK {
+		t.Fatalf("create through the limited mux status=%d body=%s", created.Code, created.Body)
+	}
+	path := hook.IncomingWebhook.URL[strings.Index(hook.IncomingWebhook.URL, "/services/"):]
+	deliver := func(path string) *httptest.ResponseRecorder {
+		return limitedRequest(t, mux, http.MethodPost, path, "", `{"text":"hello"}`, "application/json")
+	}
+	for i := 0; i < postMessageBurst; i++ {
+		if response := deliver(path); response.Code != http.StatusOK || response.Body.String() != "ok" {
+			t.Fatalf("delivery %d status=%d body=%q", i, response.Code, response.Body)
+		}
+	}
+	limited := deliver(path)
+	if limited.Code != http.StatusTooManyRequests || limited.Body.String() != "rate_limited" || limited.Header().Get("Retry-After") == "" {
+		t.Fatalf("burst overflow status=%d body=%q Retry-After=%q", limited.Code, limited.Body, limited.Header().Get("Retry-After"))
+	}
+	// Another URL is another webhook's budget; it is answered by the handler.
+	if response := deliver(path + "-other"); response.Code != http.StatusNotFound {
+		t.Fatalf("another webhook status=%d body=%q", response.Code, response.Body)
+	}
+	now = now.Add(time.Second)
+	if response := deliver(path); response.Code != http.StatusOK {
+		t.Fatalf("after one second status=%d body=%q", response.Code, response.Body)
 	}
 }

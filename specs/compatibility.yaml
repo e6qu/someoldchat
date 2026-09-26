@@ -75,6 +75,7 @@ operations:
     status: behavior-compatible
     evidence:
       - go-test:internal/api/slack:TestAPITestEchoesTheSameErrorForJSONAndForm
+      - go-test:internal/api/slack:TestAPITestEchoesItsArguments
   - method: bookmarks.add
     status: behavior-compatible
     provenance: slack-reference
@@ -227,11 +228,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestHistoryPostForm
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
   - method: conversations.replies
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationRepliesReturnsRootAndThread
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
   - method: reactions.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -295,21 +298,25 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationAndUserInfo
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
   - method: conversations.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestConversationListingNarrowsToTheTypesTheTokenMayRead
   - method: users.conversations
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestConversationListingNarrowsToTheTypesTheTokenMayRead
   - method: conversations.members
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationMembers
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
   - method: team.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -349,6 +356,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCreatePrivateConversation
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.join
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -385,26 +393,31 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.rename
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.setTopic
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.setPurpose
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.archive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.unarchive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -420,11 +433,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationsOpenReusesDirectConversation
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.mark
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestMarkConversation
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: files.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1961,8 +1976,10 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:internal/service:TestAssistantWritesTouchOneFieldEach
+      - go-test:internal/api/slack:TestAssistantThreadWritesAcceptTheSDKsJSONArrays
     deviations:
       - The transient status an assistant shows while it works. Clearing it is an empty status, which is why an empty value is accepted here and refused for a title.
+      - loading_messages is accepted in every encoding (python-slack-sdk sends it as a JSON array) and validated — a list of at most ten strings, otherwise invalid_arguments — but it is not stored or rendered; the thread shows the status alone. Carrying it needs an assistant_threads column (a schema migration), a SetAssistantThreadRequest/AssistantThread wire field and a rotating renderer in the web client.
       - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.threads.setStatus/
@@ -1971,6 +1988,7 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:internal/service:TestAssistantWritesTouchOneFieldEach
+      - go-test:internal/api/slack:TestAssistantThreadWritesAcceptTheSDKsJSONArrays
     deviations:
       - Prompts offered before anyone has typed. Bounded at eight, which Slack does not document; the pane is short and an unbounded list would be a different surface.
       - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
