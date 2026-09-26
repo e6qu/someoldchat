@@ -20484,7 +20484,12 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 		// scheme whether the member typed it or pasted it, and matching the
 		// scheme finds both without a second parser to disagree with the
 		// renderer.
-		querySQL += ` AND (m.text LIKE ? ESCAPE '\' OR m.text LIKE ? ESCAPE '\')`
+		//
+		// It matches the folded text, as the term search does and as
+		// domain.TextCarriesLink does in memory. SQLite's LIKE ignores ASCII case
+		// and PostgreSQL's does not, so matching m.text found "HTTPS://" on one
+		// profile and not the other.
+		querySQL += ` AND (m.text_folded LIKE ? ESCAPE '\' OR m.text_folded LIKE ? ESCAPE '\')`
 		args = append(args, "%http://%", "%https://%")
 	}
 	if search.SavedBy != "" {
