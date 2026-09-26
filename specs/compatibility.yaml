@@ -327,6 +327,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestTeamProfileGet
       - go-test:internal/api/slack:TestCustomProfileFieldsThroughTeamAndUserProfile
+      - go-test:internal/api/slack:TestTeamProfileGetFiltersByVisibility
   - method: emoji.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -346,6 +347,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestUsersIdentity
       - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
+      - go-test:internal/api/slack:TestUsersIdentityFollowsItsScopes
   - method: users.deletePhoto
     status: behavior-compatible
     provenance: slack-api-specs-openapi

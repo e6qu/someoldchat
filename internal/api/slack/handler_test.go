@@ -5873,3 +5873,73 @@ func TestUserGroupValidationAndPermissionCodes(t *testing.T) {
 		}
 	}
 }
+
+// team.profile.get's visibility argument filters hidden fields in or out.
+func TestTeamProfileGetFiltersByVisibility(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	now := time.Now().UTC()
+	for _, definition := range []domain.ProfileFieldDefinition{
+		{WorkspaceID: "T1", ID: "Xf1", Label: "Title", Type: domain.ProfileFieldText, CreatedAt: now},
+		{WorkspaceID: "T1", ID: "Xf2", Label: "Salary band", Type: domain.ProfileFieldText, IsHidden: true, Ordering: 1, CreatedAt: now},
+	} {
+		if err := store.SetWorkspaceProfileField(context.Background(), definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	labels := func(query string) []string {
+		var body struct {
+			OK      bool   `json:"ok"`
+			Error   string `json:"error"`
+			Profile struct {
+				Fields []struct {
+					Label string `json:"label"`
+				} `json:"fields"`
+			} `json:"profile"`
+		}
+		if err := json.Unmarshal(getAPI(handler, "/api/team.profile.get"+query).Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if !body.OK {
+			return []string{"error:" + body.Error}
+		}
+		result := []string{}
+		for _, field := range body.Profile.Fields {
+			result = append(result, field.Label)
+		}
+		return result
+	}
+	for query, want := range map[string]string{
+		"":                    "Title,Salary band",
+		"?visibility=all":     "Title,Salary band",
+		"?visibility=visible": "Title",
+		"?visibility=hidden":  "Salary band",
+		"?visibility=secret":  "error:invalid_arg_name",
+	} {
+		if got := strings.Join(labels(query), ","); got != want {
+			t.Errorf("team.profile.get%s = %q, want %q", query, got, want)
+		}
+	}
+}
+
+// users.identity widens with each identity scope the token holds.
+func TestUsersIdentityFollowsItsScopes(t *testing.T) {
+	basic, _ := testFixtureAs(false, domain.TokenUser, auth.ScopeIdentityBasic)
+	body := getAPI(basic, "/api/users.identity").Body.String()
+	if !strings.Contains(body, `"user":{"id":"U1","name":"alice"}`) || !strings.Contains(body, `"team":{"id":"T1"}`) {
+		t.Fatalf("basic identity=%s", body)
+	}
+	full, store := testFixtureAs(false, domain.TokenUser, auth.ScopeIdentityBasic, auth.ScopeIdentityEmail, auth.ScopeIdentityAvatar, auth.ScopeIdentityTeam)
+	if err := store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test", Domain: "testing"}); err != nil {
+		t.Fatal(err)
+	}
+	var identity struct {
+		User map[string]any `json:"user"`
+		Team map[string]any `json:"team"`
+	}
+	if err := json.Unmarshal(getAPI(full, "/api/users.identity").Body.Bytes(), &identity); err != nil {
+		t.Fatal(err)
+	}
+	if _, hasPhoto := identity.User["image_192"]; identity.User["email"] != "alice@example.com" || !hasPhoto || identity.Team["name"] != "test" || identity.Team["domain"] != "testing" {
+		t.Fatalf("full identity=%+v", identity)
+	}
+}

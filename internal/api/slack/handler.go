@@ -2837,6 +2837,19 @@ func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	arguments, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// visibility filters the definitions: all (the default), visible, or
+	// hidden. It was ignored, so a client asking for the visible fields got
+	// the hidden ones too.
+	visibility := strings.ToLower(strings.TrimSpace(arguments["visibility"]))
+	if visibility != "" && visibility != "all" && visibility != "visible" && visibility != "hidden" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	definitions, err := h.Messages.WorkspaceProfileFields(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
 		writeError(w, mapServiceError(err, "invalid_auth"))
@@ -2844,6 +2857,9 @@ func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := make([]map[string]any, 0, len(definitions))
 	for _, definition := range definitions {
+		if (visibility == "visible" && definition.IsHidden) || (visibility == "hidden" && !definition.IsHidden) {
+			continue
+		}
 		fields = append(fields, profileFieldDefinitionResponse(definition))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": map[string]any{"fields": fields}})
@@ -6064,7 +6080,29 @@ func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "invalid_auth"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"id": user.ID, "name": user.Name}, "team": map[string]any{"id": team.ID}})
+	// Sign in with Slack widens the identity with each scope granted:
+	// identity.email adds the address, identity.avatar the photo sizes, and
+	// identity.team the workspace's name and domain. Only the id and name were
+	// ever returned, whatever the grant.
+	identityUser := map[string]any{"id": user.ID, "name": user.Name}
+	if principal.HasScope(auth.ScopeIdentityEmail) {
+		identityUser["email"] = user.Email
+	}
+	if principal.HasScope(auth.ScopeIdentityAvatar) {
+		for size, image := range map[string]string{
+			"image_24": user.Profile.Image24, "image_32": user.Profile.Image32, "image_48": user.Profile.Image48,
+			"image_72": user.Profile.Image72, "image_192": user.Profile.Image192, "image_512": user.Profile.Image512,
+			"image_1024": user.Profile.Image1024,
+		} {
+			identityUser[size] = image
+		}
+	}
+	identityTeam := map[string]any{"id": team.ID}
+	if principal.HasScope(auth.ScopeIdentityTeam) {
+		identityTeam["name"] = team.Name
+		identityTeam["domain"] = team.Domain
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": identityUser, "team": identityTeam})
 }
 
 func (h Handler) lookupUserByEmail(w http.ResponseWriter, r *http.Request) {
