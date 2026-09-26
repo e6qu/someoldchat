@@ -164,7 +164,7 @@ acknowledged event sequence is stored per app, so a replacement process
 resumes after the last confirmed event instead of depending on process memory.
 The implementation allows up to ten active connections per app; an eleventh
 `apps.connections.open` is answered with HTTP 429, `Retry-After`, and
-`rate_limited`, which official clients retry. Each active connection renews
+`ratelimited`, which official clients retry. Each active connection renews
 its durable lease and releases it when the WebSocket closes.
 
 The connection URL follows the origin the client called

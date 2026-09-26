@@ -908,8 +908,10 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 		// Holding the maximum number of connections is a temporary condition
 		// that clears when one closes. It used to fall through to fatal_error,
 		// which every official Socket Mode client treats as permanent. Slack
-		// documents no dedicated code for it; 429 with Retry-After is the one
-		// answer every official Web API client retries on its own.
+		// documents no dedicated code for it; 429 with Retry-After and
+		// `ratelimited` is the answer every official client retries on its own —
+		// python-slack-sdk's SocketModeClient retries this method only on that
+		// exact code.
 		writeRateLimited(w, socketmode.ConnectionLimitRetryAfter)
 		return
 	}
