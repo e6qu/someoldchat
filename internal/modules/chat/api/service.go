@@ -51,9 +51,9 @@ type Service interface {
 	PostIncomingWebhookWithAttachments(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
 	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) ([]events.Record, error)
-	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
+	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.AppEventClaim, bool, error)
 	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
-	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
+	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, events.AppEventRelease) error
 	DispatchSlashCommand(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, string, string) error
 	DispatchBlockAction(context.Context, domain.WorkspaceID, domain.UserID, domain.AppBlockAction, string) error
 	DispatchViewBlockAction(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.AppViewBlockAction, string) error

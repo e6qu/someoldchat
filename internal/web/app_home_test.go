@@ -74,7 +74,8 @@ func TestInstalledAppDirectoryRendersPublishedHomeAndDispatchesActions(t *testin
 		`name="home_action" value="0"`, `name="view_id" value="`+string(published.ID)+`"`,
 		`action="/app/apps/A1/action?channel=Cdev"`, "Messages", "About",
 	)
-	record, _, _, found, err := messages.ClaimAppEvent(ctx, "A1", "socket", "home-events", time.Minute)
+	recordClaim, found, err := messages.ClaimAppEvent(ctx, "A1", "socket", "home-events", time.Minute)
+	record := recordClaim.Record
 	if err != nil || !found || record.Event.Topic != "app.home_opened" {
 		t.Fatalf("app_home_opened record=%+v found=%v err=%v", record, found, err)
 	}

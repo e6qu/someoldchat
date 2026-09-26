@@ -570,8 +570,8 @@ func TestSocketModeInteractionsQueueSlackEnvelopesAndApplyAcknowledgementPayload
 	if err := repository.AppendEvent(ctx, unsubscribed); err != nil {
 		t.Fatal(err)
 	}
-	if record, _, _, found, err := messages.ClaimAppEvent(ctx, "A1", "socket", "socket-filter", time.Minute); err != nil || found {
-		t.Fatalf("unsubscribed Socket Mode event leaked: record=%+v found=%v err=%v", record, found, err)
+	if recordClaim, found, err := messages.ClaimAppEvent(ctx, "A1", "socket", "socket-filter", time.Minute); err != nil || found {
+		t.Fatalf("unsubscribed Socket Mode event leaked: record=%+v found=%v err=%v", recordClaim.Record, found, err)
 	}
 
 	if err := messages.DispatchSlashCommand(ctx, "T1", "U1", "C1", "", "/deploy", "production", "https://chat.example.test"); err != nil {

@@ -918,9 +918,20 @@ type Store interface {
 	ConsumeAppTrigger(context.Context, string, domain.AppID) (domain.AppTrigger, error)
 	UseAppResponseURL(context.Context, string) (domain.AppResponseURL, error)
 	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
-	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
-	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
-	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
+	// ClaimAppEvent leases the next record due for delivery to an app on one
+	// surface: a released record whose retry is due, else the next journal
+	// record after the app's position, which it advances. Each claimed record
+	// carries its own lease and retry state (events.AppEventClaim), so several
+	// records of one app can be in flight at once and a record waiting for a
+	// retry never holds back the records after it. found is false when nothing
+	// is due.
+	ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (claim events.AppEventClaim, found bool, err error)
+	// AckAppEvent finishes a claimed record: delivered, or deliberately
+	// dropped. It fails with ErrLeaseConflict when owner no longer holds it.
+	AckAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64) error
+	// ReleaseAppEvent returns a claimed record for a retry at release.RetryAt.
+	// Only a release that is not Internal counts as a delivery attempt.
+	ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, release events.AppEventRelease) error
 	GetAppEventCursor(context.Context, domain.AppID, string) (domain.AppEventCursor, error)
 	// ListAppDeliveryAttempts returns the retained delivery outcomes for an app's
 	// surface, newest first. It is the history behind AppDeliveryHealth, bounded to

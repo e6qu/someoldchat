@@ -206,10 +206,24 @@ complete and allowed on the Events API surface, and signs each resulting
 `event_callback` body.
 Topics with no safe Slack representation are acknowledged without being sent;
 malformed or incomplete typed payloads are permanent producer failures rather
-than retry loops. A record may fan out into several deliveries (for example,
-one `member_joined_channel` event per invited user), each with a distinct
-idempotency key. The request includes `X-Slack-Request-Timestamp`,
-`X-Slack-Signature`, and that key as `Idempotency-Key`.
+than retry loops. A record may fan out into several callbacks (for example,
+one `member_joined_channel` event per invited user), each with its own stable
+`event_id`, which is what Slack apps deduplicate on. Each request carries
+`X-Slack-Request-Timestamp` and `X-Slack-Signature`; a retry adds
+`X-Slack-Retry-Num` and `X-Slack-Retry-Reason`. (The `record` format instead
+sends the event ID as `Idempotency-Key`.)
+
+Delivery state is kept per record, not per app. A callback an app fails is
+retried on Slack's schedule — immediately, after one minute, after five
+minutes — and then dropped, while the app's later events keep being delivered.
+A record that fans out is retried only for the callbacks the app did not
+accept. A failure on this side of the delivery, such as a storage read that
+could not project the event, is retried after a few seconds without spending
+one of the app's retries, and its reason is recorded in the app's delivery
+history but never sent to the app. Each cycle delivers up to 32 records per
+app, stops taking more for an app after about a second, and serves up to eight
+apps concurrently, so one slow endpoint does not delay another app. Every
+claimed record carries its own `-lease`, so several workers can share an app.
 
 The same process executes due scheduled messages and first-party Later/channel
 reminders in both delivery formats. `record` is explicitly workspace-scoped;

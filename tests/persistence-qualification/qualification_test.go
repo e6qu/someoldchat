@@ -107,6 +107,7 @@ func runQualification(t *testing.T, open opener) {
 		{"an unconfigured auth method is enabled", authMethodDefaultsToEnabled},
 		{"revoking an app token announces tokens_revoked once", revokingAnAppTokenAnnouncesTokensRevokedOnce},
 		{"the uninstall announcement outlives the installation", uninstallAnnouncementOutlivesTheInstallation},
+		{"app event delivery state is per record", appEventDeliveryStateIsPerRecord},
 		{"a conversation change and its notice commit together", conversationNoticesCommitWithTheirChange},
 		{"thread summaries are batched and identical across profiles", threadSummariesAreBatchedAndIdentical},
 		{"activity follows the read cursor in both directions", activityFollowsTheReadCursorBothWays},

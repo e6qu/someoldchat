@@ -2706,9 +2706,14 @@ type AppAuthorization struct {
 	Scopes      []string
 }
 
-// AppEventCursor is the durable delivery position for one app transport. It is
-// intentionally payload-free: administration can explain queue progress and
-// retry state without exposing event bodies from installed workspaces.
+// AppEventCursor summarises the durable delivery state of one app transport.
+// It is intentionally payload-free: administration can explain queue progress
+// and retry state without exposing event bodies from installed workspaces.
+//
+// Delivery state is kept per record, so this is a summary: every record at or
+// below AcknowledgedSequence is settled; InFlight* names the earliest record a
+// worker holds a lease on; Retry* describes the earliest record waiting for a
+// retry; Pending counts the records claimed but not yet settled.
 type AppEventCursor struct {
 	AppID                AppID
 	Surface              string
@@ -2718,6 +2723,7 @@ type AppEventCursor struct {
 	RetryAt              time.Time
 	RetryCount           int
 	RetryReason          string
+	Pending              int
 }
 
 // AppDeliveryHealth is the developer-facing projection of an app's configured

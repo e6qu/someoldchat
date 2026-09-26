@@ -386,7 +386,8 @@ func TestUninstallAnnouncementReachesTheOpenSocket(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		record, _, _, claimed, err := messages.ClaimAppEvent(ctx, "A1", "socket", "conn-1", time.Minute)
+		recordClaim, claimed, err := messages.ClaimAppEvent(ctx, "A1", "socket", "conn-1", time.Minute)
+		record := recordClaim.Record
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -81,9 +81,9 @@ func appDeliverySummary(health domain.AppDeliveryHealth, now time.Time) (string,
 	case !health.Installed:
 		return "Not installed", "Install the app in a workspace before event delivery can run."
 	case health.RetryCount > 0 && health.RetryAt.After(now):
-		return "Retry scheduled", "The last attempt was not acknowledged. The durable worker will retry at the recorded time."
+		return "Retry scheduled", "An event was not acknowledged and will be retried at the recorded time. Later events keep being delivered meanwhile."
 	case health.InFlightSequence != 0 && health.InFlightUntil.After(now):
-		return "Delivery in progress", "A worker currently holds the durable lease for the next journal record."
+		return "Delivery in progress", "A worker currently holds a durable lease on the earliest undelivered journal record."
 	case health.PendingEvaluation:
 		return "Queued", "At least one journal record is waiting for subscription and visibility evaluation."
 	default:

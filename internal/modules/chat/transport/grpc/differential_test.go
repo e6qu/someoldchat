@@ -6394,7 +6394,9 @@ func parityCases() []parityCase {
 				requireSeed(t, target.AppendEvent(context.Background(), event))
 			},
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				first, firstAttempt, firstReason, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-1", time.Minute)
+				firstClaim, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-1", time.Minute)
+				first := firstClaim.Record
+				firstAttempt, firstReason := firstClaim.Attempt, firstClaim.RetryReason
 				if err != nil {
 					return nil, err
 				}
@@ -6405,14 +6407,16 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.ReleaseAppEvent(ctx, "A1", "socket", "connection-1", first.Sequence, "connection_closed", time.Now().UTC().Add(-time.Second)); err != nil {
+				if err := chat.ReleaseAppEvent(ctx, "A1", "socket", "connection-1", first.Sequence, events.AppEventRelease{Reason: "connection_closed", RetryAt: time.Now().UTC().Add(-time.Second)}); err != nil {
 					return nil, err
 				}
 				health, err := chat.GetDeveloperAppDeliveryHealth(ctx, "T1", "U1", "A1")
 				if err != nil {
 					return nil, err
 				}
-				second, secondAttempt, secondReason, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-2", time.Minute)
+				secondClaim, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-2", time.Minute)
+				second := secondClaim.Record
+				secondAttempt, secondReason := secondClaim.Attempt, secondClaim.RetryReason
 				if err != nil {
 					return nil, err
 				}

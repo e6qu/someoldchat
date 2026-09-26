@@ -57,9 +57,9 @@ type ConnectionStore interface {
 }
 
 type EventQueue interface {
-	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
+	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.AppEventClaim, bool, error)
 	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
-	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
+	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, events.AppEventRelease) error
 }
 
 type InteractionQueue interface {
@@ -576,15 +576,15 @@ func (d *leasedDelivery) next(ctx context.Context) (events.Record, bool, error) 
 	if d.sequence != 0 {
 		return events.Record{}, false, errors.New("Socket Mode delivery already owns an event")
 	}
-	record, _, _, found, err := d.queue.ClaimAppEvent(ctx, d.appID, "socket", d.owner, envelopeTimeout+writeTimeout)
+	claim, found, err := d.queue.ClaimAppEvent(ctx, d.appID, "socket", d.owner, envelopeTimeout+writeTimeout)
 	if errors.Is(err, store.ErrNotFound) {
 		return events.Record{}, false, nil
 	}
 	if err != nil || !found {
 		return events.Record{}, false, err
 	}
-	d.sequence = record.Sequence
-	return record, true, nil
+	d.sequence = claim.Record.Sequence
+	return claim.Record, true, nil
 }
 
 func (d *leasedDelivery) consume(ctx context.Context, sequence uint64) error {
@@ -602,7 +602,9 @@ func (d *leasedDelivery) release(ctx context.Context, reason string, retryAt tim
 	if d.sequence == 0 {
 		return nil
 	}
-	if err := d.queue.ReleaseAppEvent(ctx, d.appID, "socket", d.owner, d.sequence, reason, retryAt); err != nil {
+	// An unacknowledged envelope or a closed connection is the app's side of
+	// the delivery, so it counts as an attempt.
+	if err := d.queue.ReleaseAppEvent(ctx, d.appID, "socket", d.owner, d.sequence, events.AppEventRelease{Reason: reason, RetryAt: retryAt}); err != nil {
 		return err
 	}
 	d.sequence = 0
