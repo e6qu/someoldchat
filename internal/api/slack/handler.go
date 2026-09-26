@@ -6566,13 +6566,13 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "fatal_error")
 		return
 	}
-	// slack-api-client 1.49.0 labels this multipart part imageData/*.
-	// Web API 8.0 sends a Buffer as application/octet-stream instead. Preserve
-	// both official client behaviors while still letting the message service
-	// enforce that the detected bytes exactly match an allow-listed image type.
-	if mimeType == "imageData/*" {
-		mimeType = "image/png"
-	} else if mimeType == "application/octet-stream" {
+	// The label on the part is not a reliable image type: slack-api-client
+	// 1.49.0 labels it imageData/*, a wildcard, and Web API 8.0 sends a Buffer
+	// as application/octet-stream. Anything that is not a concrete image/* type
+	// is read from the bytes instead, and the message service still checks
+	// that the bytes match an allow-listed image type. imageData/* used to be
+	// taken for PNG, so a JPEG from the Java client was refused as a mismatch.
+	if !concreteImageType(mimeType) {
 		head := make([]byte, 512)
 		read, readErr := io.ReadFull(temporary, head)
 		if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
@@ -6585,6 +6585,10 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if stat.Size() > service.MaxUserPhotoBytes {
+		writeError(w, "too_large")
+		return
+	}
 	// crop_w/crop_x/crop_y are declared but not implemented. Silently ignoring a
 	// crop would return a differently framed image than the caller asked for while
 	// claiming success, so the request is refused instead.
@@ -6596,10 +6600,27 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.Messages.SetUserPhoto(r.Context(), principal.WorkspaceID, principal.UserID, mimeType, stat.Size(), temporary)
 	if err != nil {
+		// The service refuses bytes that are not an allow-listed image, or
+		// that disagree with their declared type, as an invalid profile; the
+		// pinned enum names that bad_image.
+		if errors.Is(err, service.ErrInvalidProfile) {
+			writeError(w, "bad_image")
+			return
+		}
 		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(user)})
+}
+
+// concreteImageType reports whether a multipart part's label names one image
+// type, as opposed to a wildcard, an absent type or a generic byte stream.
+func concreteImageType(value string) bool {
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(mediaType, "image/") && !strings.Contains(mediaType, "*")
 }
 
 // users.setActive is deprecated and non-functional in Slack. Preserve that

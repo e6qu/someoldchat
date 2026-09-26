@@ -3364,7 +3364,8 @@ func (m Messages) DeleteScheduledUserStatus(ctx context.Context, workspaceID dom
 	return m.Store.DeleteScheduledStatus(ctx, workspaceID, userID, id)
 }
 
-const maxUserPhotoBytes = 10 << 20
+// MaxUserPhotoBytes is the largest profile photo users.setPhoto accepts.
+const MaxUserPhotoBytes = 10 << 20
 
 // userPhotoContentTypes is the closed set of types a profile photo may be. It is
 // an allow-list rather than an "image/" prefix test because the prefix admits
@@ -3481,7 +3482,7 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 		return domain.User{}, ErrBlobUnavailable
 	}
 	mimeType = normalizeImageContentType(mimeType)
-	if !userPhotoContentTypes[mimeType] || size <= 0 || size > maxUserPhotoBytes || source == nil {
+	if !userPhotoContentTypes[mimeType] || size <= 0 || size > MaxUserPhotoBytes || source == nil {
 		return domain.User{}, ErrInvalidProfile
 	}
 	user, err := m.Store.GetUser(ctx, userID)

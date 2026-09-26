@@ -4359,21 +4359,38 @@ func TestUsersSetPhotoAcceptsOfficialMultipartField(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	for _, contentType := range []string{"image/png", "application/octet-stream"} {
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	jpeg := []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01")
+	for _, test := range []struct {
+		contentType string
+		content     []byte
+		want        string
+	}{
+		// A real signature: the profile service sniffs the bytes and refuses a
+		// stream whose content disagrees with the declared type, which is the
+		// upload half of the stored-XSS repair.
+		{"image/png", png, `"ok":true`},
+		// What Web API 8 emits for a Buffer.
+		{"application/octet-stream", png, `"ok":true`},
+		// What slack-api-client 1.49.0 labels every photo, whatever its
+		// format; it used to be taken for PNG, so a JPEG was refused.
+		{"imageData/*", jpeg, `"ok":true`},
+		{"imageData/*", png, `"ok":true`},
+		// Bytes that are no allow-listed image, or that contradict their
+		// declared type, are the pinned bad_image.
+		{"imageData/*", []byte("<svg onload=alert(1)>"), `"error":"bad_image"`},
+		{"image/png", jpeg, `"error":"bad_image"`},
+	} {
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
 		part, err := writer.CreatePart(textproto.MIMEHeader{
-			"Content-Disposition": {`form-data; name="image"; filename="photo.png"`},
-			"Content-Type":        {contentType},
+			"Content-Disposition": {`form-data; name="image"; filename="photo"`},
+			"Content-Type":        {test.contentType},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		// A real PNG signature: the profile service sniffs the bytes and refuses a
-		// stream whose content disagrees with the declared type, which is the upload
-		// half of the stored-XSS repair. The octet-stream case is what Web API 8
-		// emits for a Buffer.
-		if _, err := part.Write([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")); err != nil {
+		if _, err := part.Write(test.content); err != nil {
 			t.Fatal(err)
 		}
 		if err := writer.Close(); err != nil {
@@ -4384,8 +4401,8 @@ func TestUsersSetPhotoAcceptsOfficialMultipartField(t *testing.T) {
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 		result := httptest.NewRecorder()
 		mux.ServeHTTP(result, req)
-		if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
-			t.Fatalf("content-type=%s status=%d body=%s", contentType, result.Code, result.Body)
+		if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), test.want) {
+			t.Fatalf("content-type=%s status=%d body=%s, want %s", test.contentType, result.Code, result.Body, test.want)
 		}
 	}
 }
