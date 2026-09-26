@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/bearer"
 	"github.com/sameoldchat/sameoldchat/internal/blockkit"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -2396,7 +2397,7 @@ func (h Handler) authRevoke(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	token := headerToken(r)
 	if token == "" {
 		token = strings.TrimSpace(fields["token"])
 	}
@@ -2654,13 +2655,13 @@ func (h Handler) toolingTokensRotate(w http.ResponseWriter, r *http.Request) {
 }
 
 func appConfigurationToken(r *http.Request, fields map[string]string) (string, string) {
-	headerToken := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	fromHeader := headerToken(r)
 	bodyToken := strings.TrimSpace(fields["token"])
-	if headerToken != "" && bodyToken != "" && headerToken != bodyToken {
+	if fromHeader != "" && bodyToken != "" && fromHeader != bodyToken {
 		return "", "invalid_auth"
 	}
-	if headerToken != "" {
-		return headerToken, ""
+	if fromHeader != "" {
+		return fromHeader, ""
 	}
 	if bodyToken != "" {
 		return bodyToken, ""
@@ -3017,7 +3018,7 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	token := strings.TrimSpace(fields["token"])
 	if token == "" {
-		token = strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		token = headerToken(r)
 	}
 	if token == "" {
 		writeError(w, "invalid_auth")
@@ -9295,7 +9296,7 @@ func (h Handler) downloadUserPhoto(w http.ResponseWriter, r *http.Request) {
 // spool is bounded by maxUploadBytes, which is the same bound an authenticated
 // upload already has.
 func bodyOnlyToken(r *http.Request) bool {
-	if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+	if headerToken(r) != "" {
 		return false
 	}
 	return strings.ToLower(strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0])) == "multipart/form-data"
@@ -9309,7 +9310,7 @@ func bodyOnlyToken(r *http.Request) bool {
 // multipart file was answered `invalid_form_data`, because the upload had been
 // discarded before the multipart reader ever saw it.
 func promoteQueryToken(r *http.Request) *http.Request {
-	if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+	if headerToken(r) != "" {
 		return r
 	}
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
@@ -9321,12 +9322,19 @@ func promoteQueryToken(r *http.Request) *http.Request {
 	return clone
 }
 
+// headerToken is the bearer credential the Authorization header carries, read
+// with the one case-insensitive parser every surface shares.
+func headerToken(r *http.Request) string {
+	token, _ := bearer.Token(r.Header.Get("Authorization"))
+	return token
+}
+
 // withBearerToken returns r, or a shallow copy carrying token as a bearer header.
 // The copy's body is emptied because its only caller is the deferred
 // authentication that runs after the body has already been spooled.
 func withBearerToken(r *http.Request, token string) *http.Request {
 	token = strings.TrimSpace(token)
-	if token == "" || strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+	if token == "" || headerToken(r) != "" {
 		return r
 	}
 	clone := r.Clone(r.Context())
@@ -12735,7 +12743,7 @@ func (h Handler) openIDConnectUserInfo(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	token := headerToken(r)
 	if token == "" {
 		token = strings.TrimSpace(fields["token"])
 	}

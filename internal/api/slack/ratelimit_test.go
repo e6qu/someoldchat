@@ -143,6 +143,19 @@ func TestRegisterMountsTheLimiterOverTheWholeAPITree(t *testing.T) {
 	}
 }
 
+// The limiter buckets by the same bearer credential the authenticator reads,
+// whatever the scheme's case: a lowercase `bearer` used to fall to the
+// client-address bucket, so the same app's budget depended on its spelling.
+func TestRateLimiterBucketsTheBearerCredentialCaseInsensitively(t *testing.T) {
+	for _, header := range []string{"Bearer xoxb-one", "bearer xoxb-one", "BEARER xoxb-one"} {
+		request := httptest.NewRequest(http.MethodPost, "/api/users.list", nil)
+		request.Header.Set("Authorization", header)
+		if got := rateLimitCredential(request); got != domain.HashToken("xoxb-one") {
+			t.Errorf("%q bucketed as %q", header, got)
+		}
+	}
+}
+
 // Register once mounted only "/api/" on the outer mux when a limiter was set,
 // so every route outside /api/ — the files_upload_v2 upload URL, incoming
 // webhooks, workflow trigger webhooks, public file and photo URLs — answered

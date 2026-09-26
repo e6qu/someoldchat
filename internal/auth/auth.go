@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/bearer"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
@@ -449,7 +450,7 @@ func multipartBoundary(r *http.Request) string {
 // therefore scanned through a bounded, replayable prefix so the body the
 // handler sees is byte-for-byte the body that arrived.
 func requestToken(r *http.Request) string {
-	if token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")); token != "" {
+	if token, ok := bearer.Token(r.Header.Get("Authorization")); ok {
 		return token
 	}
 	if boundary := multipartBoundary(r); boundary != "" && r.Body != nil && r.MultipartForm == nil {

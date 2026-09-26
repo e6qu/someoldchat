@@ -163,9 +163,8 @@ func (l *RateLimiter) sweep(now time.Time) {
 // Form-carried tokens deliberately fall to the address bucket: reading the
 // body here would tax every request to serve a legacy authentication shape.
 func rateLimitCredential(r *http.Request) string {
-	header := strings.TrimSpace(r.Header.Get("Authorization"))
-	if token, ok := strings.CutPrefix(header, "Bearer "); ok && strings.TrimSpace(token) != "" {
-		return domain.HashToken(strings.TrimSpace(token))
+	if token := headerToken(r); token != "" {
+		return domain.HashToken(token)
 	}
 	// r.RemoteAddr is the peer the listener accepted, the same identity the
 	// access log records; a forwarded-for header is spoofable and is not
