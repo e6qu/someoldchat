@@ -107,6 +107,7 @@ type Store struct {
 	remoteFileShares              map[domain.FileID][]domain.ConversationID
 	dnd                           map[domain.UserID]domain.DoNotDisturb
 	stars                         map[domain.UserID]map[domain.MessageID]domain.Star
+	channelStars                  map[domain.UserID]map[domain.ConversationID]domain.Star
 	savedItems                    map[domain.SavedItemID]domain.SavedItem
 	bookmarks                     map[domain.BookmarkID]domain.Bookmark
 	reminders                     map[domain.ReminderID]domain.Reminder
@@ -361,6 +362,7 @@ func New() *Store {
 		remoteFileShares:              make(map[domain.FileID][]domain.ConversationID),
 		dnd:                           make(map[domain.UserID]domain.DoNotDisturb),
 		stars:                         make(map[domain.UserID]map[domain.MessageID]domain.Star),
+		channelStars:                  make(map[domain.UserID]map[domain.ConversationID]domain.Star),
 		savedItems:                    make(map[domain.SavedItemID]domain.SavedItem),
 		reminders:                     make(map[domain.ReminderID]domain.Reminder),
 		reminderDelivery:              make(map[domain.ReminderID]time.Time),
@@ -3849,6 +3851,9 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 	}
 	if value.IsDirectOrGroup() {
 		return store.ErrInvalidConversationType
+	}
+	for _, stars := range s.channelStars {
+		delete(stars, conversation)
 	}
 	for _, message := range s.messages[conversation] {
 		delete(s.reactions, message.ID)
@@ -8757,13 +8762,36 @@ func (s *Store) ListPins(_ context.Context, conversation domain.ConversationID, 
 // starKey is an ordering key AND a keyset cursor. See userReactionKey: the
 // variable-width encoding reordered stars.list and made the next page skip
 // every row whose fraction was a strict extension of the cursor's.
+// starKey orders stars the way the SQL store does: by when they were made,
+// then by message ID, or "channel:" and the channel for a channel star.
 func starKey(value domain.Star) string {
-	return string(domain.NewStoredTime(value.CreatedAt)) + "\x00" + string(value.Message.ID)
+	return string(domain.NewStoredTime(value.CreatedAt)) + "\x00" + starItemKey(value)
+}
+
+func starItemKey(value domain.Star) string {
+	if value.IsChannel() {
+		return "channel:" + string(value.Conversation)
+	}
+	return string(value.Message.ID)
 }
 
 func (s *Store) AddStar(_ context.Context, star domain.Star, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if star.IsChannel() {
+		if _, ok := s.conversations[star.Conversation]; !ok {
+			return store.ErrNotFound
+		}
+		if s.channelStars[star.UserID] == nil {
+			s.channelStars[star.UserID] = make(map[domain.ConversationID]domain.Star)
+		}
+		if _, exists := s.channelStars[star.UserID][star.Conversation]; exists {
+			return store.ErrAlreadyExists
+		}
+		s.channelStars[star.UserID][star.Conversation] = star
+		s.outbox = append(s.outbox, event)
+		return nil
+	}
 	message, err := s.messageLocked(star.Message.ID)
 	if err != nil {
 		return err
@@ -8783,6 +8811,14 @@ func (s *Store) AddStar(_ context.Context, star domain.Star, event events.Event)
 func (s *Store) RemoveStar(_ context.Context, star domain.Star, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if star.IsChannel() {
+		if _, exists := s.channelStars[star.UserID][star.Conversation]; !exists {
+			return store.ErrNotFound
+		}
+		delete(s.channelStars[star.UserID], star.Conversation)
+		s.outbox = append(s.outbox, event)
+		return nil
+	}
 	if _, err := s.messageLocked(star.Message.ID); err != nil {
 		return err
 	}
@@ -8794,36 +8830,49 @@ func (s *Store) RemoveStar(_ context.Context, star domain.Star, event events.Eve
 	return nil
 }
 
-func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error) {
+func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.StarPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	values := make([]domain.Star, 0, request.Limit+1)
+	page := domain.StarPage{Stars: make([]domain.Star, 0, request.Limit+1)}
+	less := func(left, right domain.Star) bool { return starKey(left) < starKey(right) }
 	for _, star := range s.stars[user] {
-		if star.Message.WorkspaceID != workspace || star.Message.Deleted || (after != "" && starKey(star) <= after) {
+		if star.Message.WorkspaceID != workspace || star.Message.Deleted {
+			continue
+		}
+		page.Total++
+		if after != "" && starKey(star) <= after {
 			continue
 		}
 		star.Message = s.cloneMessage(star.Message)
-		values = appendSorted(values, star, request.Limit+1, func(left, right domain.Star) bool { return starKey(left) < starKey(right) })
+		page.Stars = appendSorted(page.Stars, star, request.Limit+1, less)
 	}
-	hasMore := len(values) > request.Limit
-	if hasMore {
-		values = values[:request.Limit]
+	for conversationID, star := range s.channelStars[user] {
+		conversation, ok := s.conversations[conversationID]
+		if !ok || conversation.WorkspaceID != workspace {
+			continue
+		}
+		page.Total++
+		if after != "" && starKey(star) <= after {
+			continue
+		}
+		page.Stars = appendSorted(page.Stars, star, request.Limit+1, less)
 	}
-	var next domain.Cursor
-	if hasMore {
-		next, err = domain.NewListCursor(starKey(values[len(values)-1]))
+	page.HasMore = len(page.Stars) > request.Limit
+	if page.HasMore {
+		page.Stars = page.Stars[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(starKey(page.Stars[len(page.Stars)-1]))
 		if err != nil {
-			return nil, "", false, err
+			return domain.StarPage{}, err
 		}
 	}
-	return values, next, hasMore, nil
+	return page, nil
 }
 
 func savedItemKey(value domain.SavedItem) string {

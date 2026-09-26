@@ -308,6 +308,14 @@ func TestPromotedTopicsTranslateFromTheirProducerPayloads(t *testing.T) {
 			fields:  map[string]string{"user": `"U1"`, "channel": `"is_im":true`},
 		},
 		{
+			name: "emoji removal names the aliases removed with it",
+			payload: NewPayload("emoji.removed",
+				String("name", "party"), Strings("names", []string{"party", "celebrate"})),
+			surface: SurfaceEventsAPI,
+			want:    []string{"emoji_changed"},
+			fields:  map[string]string{"names": `["party","celebrate"]`},
+		},
+		{
 			name: "public rename",
 			payload: NewPayload("conversation.renamed",
 				String("channel_id", "C1"), String("name", "renamed"), Bool("is_private", false), String("user_id", "U1")),
@@ -525,5 +533,28 @@ func TestProjectedMessageDerivesAppMentionFromTheProjectionMarker(t *testing.T) 
 	}
 	if inners, err := SlackInner(plain.Topic, deliveredPlain, SurfaceEventsAPI); err != nil || len(inners) != 1 || inners[0].Type() != "message" {
 		t.Fatalf("plain inners=%v err=%v", inners, err)
+	}
+}
+
+// A star on a channel carries a channel item with no ts.
+func TestChannelStarEventHasAChannelItem(t *testing.T) {
+	encoded, err := NewPayload("star.added", String("message_id", ""), String("channel_id", "C1"), String("ts", ""), String("user_id", "U1")).encode(time.Unix(1700000000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered, err := Deliverable(Event{ID: "E1", WorkspaceID: "T1", Topic: "star.added", Payload: encoded, CreatedAt: time.Unix(1700000000, 0).UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inners, err := itemEvent("star_added", false)(delivered, SurfaceEventsAPI)
+	if err != nil || len(inners) != 1 {
+		t.Fatalf("inners=%+v err=%v", inners, err)
+	}
+	body, err := inners[0].Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inners[0].Type() != "star_added" || !strings.Contains(body, `"item":{"channel":"C1","type":"channel"}`) {
+		t.Fatalf("channel star event=%s", body)
 	}
 }

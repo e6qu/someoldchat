@@ -4981,16 +4981,12 @@ func (r Remote) RemoveStar(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return nil
 }
 
-func (r Remote) Stars(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error) {
+func (r Remote) Stars(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.StarPage, error) {
 	out, err := r.reactions.Stars(ctx, &chatv1.StarsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
 	if err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
-	page, err := decodeProtoStarPage(out)
-	if err != nil {
-		return nil, "", false, err
-	}
-	return page.Stars, page.NextCursor, page.HasMore, nil
+	return decodeProtoStarPage(out)
 }
 
 func (r Remote) SaveForLater(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.SavedItem, error) {
@@ -10747,11 +10743,11 @@ func (s *Server) removeStarProto(ctx context.Context, input *chatv1.PinRequest) 
 
 func (s *Server) starsProto(ctx context.Context, input *chatv1.StarsRequest) (*chatv1.StarPage, error) {
 	request := protoPageRequest(input.GetLimit(), input.GetCursor())
-	items, next, more, err := s.implementation.Stars(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
+	page, err := s.implementation.Stars(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return encodeProtoStarPage(items, next, more), nil
+	return encodeProtoStarPage(page), nil
 }
 
 func (s *Server) addBookmarkProto(ctx context.Context, input *chatv1.AddBookmarkRequest) (*chatv1.Bookmark, error) {
@@ -12209,15 +12205,19 @@ func decodeProtoPinPage(value *chatv1.PinPage) (struct {
 }
 
 func encodeProtoStar(value domain.Star) *chatv1.Star {
-	return &chatv1.Star{MessageId: string(value.Message.ID), ConversationId: string(value.Conversation), UserId: string(value.UserID), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Message: encodeProtoMessage(value.Message)}
+	result := &chatv1.Star{MessageId: string(value.Message.ID), ConversationId: string(value.Conversation), UserId: string(value.UserID), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano)}
+	if !value.IsChannel() {
+		result.Message = encodeProtoMessage(value.Message)
+	}
+	return result
 }
 
-func encodeProtoStarPage(items []domain.Star, next domain.Cursor, more bool) *chatv1.StarPage {
-	result := make([]*chatv1.Star, 0, len(items))
-	for _, item := range items {
+func encodeProtoStarPage(page domain.StarPage) *chatv1.StarPage {
+	result := make([]*chatv1.Star, 0, len(page.Stars))
+	for _, item := range page.Stars {
 		result = append(result, encodeProtoStar(item))
 	}
-	return &chatv1.StarPage{Stars: result, NextCursor: string(next), HasMore: more}
+	return &chatv1.StarPage{Stars: result, NextCursor: string(page.NextCursor), HasMore: page.HasMore, Total: int64(page.Total)}
 }
 
 func encodeProtoSavedItem(value domain.SavedItem) *chatv1.SavedItem {
@@ -12293,49 +12293,37 @@ func decodeProtoBookmark(value *chatv1.Bookmark) (domain.Bookmark, error) {
 }
 
 func decodeProtoStar(value *chatv1.Star) (domain.Star, error) {
-	if value == nil || value.GetMessageId() == "" || value.GetConversationId() == "" || value.GetUserId() == "" || value.GetCreatedAt() == "" {
+	if value == nil || value.GetConversationId() == "" || value.GetUserId() == "" || value.GetCreatedAt() == "" {
 		return domain.Star{}, errors.New("typed star is incomplete")
 	}
 	created, err := time.Parse(time.RFC3339Nano, value.GetCreatedAt())
 	if err != nil {
 		return domain.Star{}, errors.New("typed star created_at is invalid")
 	}
-	message, err := decodeProtoMessage(value.GetMessage())
+	star := domain.Star{Conversation: domain.ConversationID(value.GetConversationId()), UserID: domain.UserID(value.GetUserId()), CreatedAt: created.UTC()}
+	if value.GetMessageId() == "" {
+		return star, nil
+	}
+	star.Message, err = decodeProtoMessage(value.GetMessage())
 	if err != nil {
 		return domain.Star{}, err
 	}
-	return domain.Star{Message: message, Conversation: domain.ConversationID(value.GetConversationId()), UserID: domain.UserID(value.GetUserId()), CreatedAt: created.UTC()}, nil
+	return star, nil
 }
 
-func decodeProtoStarPage(value *chatv1.StarPage) (struct {
-	Stars      []domain.Star
-	NextCursor domain.Cursor
-	HasMore    bool
-}, error) {
+func decodeProtoStarPage(value *chatv1.StarPage) (domain.StarPage, error) {
 	if value == nil {
-		return struct {
-			Stars      []domain.Star
-			NextCursor domain.Cursor
-			HasMore    bool
-		}{}, errors.New("typed star page is required")
+		return domain.StarPage{}, errors.New("typed star page is required")
 	}
-	items := make([]domain.Star, 0, len(value.GetStars()))
+	page := domain.StarPage{Stars: make([]domain.Star, 0, len(value.GetStars())), NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore(), Total: int(value.GetTotal())}
 	for _, item := range value.GetStars() {
 		decoded, err := decodeProtoStar(item)
 		if err != nil {
-			return struct {
-				Stars      []domain.Star
-				NextCursor domain.Cursor
-				HasMore    bool
-			}{}, err
+			return domain.StarPage{}, err
 		}
-		items = append(items, decoded)
+		page.Stars = append(page.Stars, decoded)
 	}
-	return struct {
-		Stars      []domain.Star
-		NextCursor domain.Cursor
-		HasMore    bool
-	}{items, domain.Cursor(value.GetNextCursor()), value.GetHasMore()}, nil
+	return page, nil
 }
 
 func encodeProtoReminder(value domain.Reminder) *chatv1.Reminder {

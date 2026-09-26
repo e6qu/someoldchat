@@ -7061,35 +7061,61 @@ func (m Messages) Pins(ctx context.Context, workspaceID domain.WorkspaceID, user
 	return m.Store.ListPins(ctx, conversationID, request)
 }
 
+// AddStar stars a message, or - with no timestamp - the channel itself, as
+// stars.add does when it is given only a channel.
 func (m Messages) AddStar(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) error {
-	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversationID, timestamp)
+	star, err := m.starTarget(ctx, workspaceID, userID, conversationID, timestamp)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, messageItemPayload("star.added", message.ID, conversationID, userID, timestamp), now)
+	star.CreatedAt = now
+	event, err := newEvent(workspaceID, userID, messageItemPayload("star.added", star.Message.ID, conversationID, userID, timestamp), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.AddStar(ctx, domain.Star{Message: message, Conversation: conversationID, UserID: userID, CreatedAt: now}, event)
+	return m.Store.AddStar(ctx, star, event)
 }
 
+// RemoveStar unstars a message or a channel. Removing a star that is not
+// there is Slack's not_starred; it used to be reported as the message itself
+// not being found.
 func (m Messages) RemoveStar(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) error {
-	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversationID, timestamp)
+	star, err := m.starTarget(ctx, workspaceID, userID, conversationID, timestamp)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, messageItemPayload("star.removed", message.ID, conversationID, userID, timestamp), now)
+	event, err := newEvent(workspaceID, userID, messageItemPayload("star.removed", star.Message.ID, conversationID, userID, timestamp), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.RemoveStar(ctx, domain.Star{Message: message, Conversation: conversationID, UserID: userID}, event)
+	if err := m.Store.RemoveStar(ctx, star, event); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return ErrNotStarred
+		}
+		return err
+	}
+	return nil
 }
 
-func (m Messages) Stars(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error) {
+func (m Messages) starTarget(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.Star, error) {
+	if timestamp == "" {
+		if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+			return domain.Star{}, err
+		}
+		return domain.Star{Conversation: conversationID, UserID: userID}, nil
+	}
+	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversationID, timestamp)
+	if err != nil {
+		return domain.Star{}, err
+	}
+	return domain.Star{Message: message, Conversation: conversationID, UserID: userID}, nil
+}
+
+func (m Messages) Stars(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.StarPage, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	return m.Store.ListStars(ctx, workspaceID, userID, request)
 }

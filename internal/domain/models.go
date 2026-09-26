@@ -1898,11 +1898,24 @@ type Pin struct {
 	CreatedAt time.Time
 }
 
+// Star is a legacy stars.* item: a starred message, or - when Message is the
+// zero value - a starred channel.
 type Star struct {
 	Message      Message
 	Conversation ConversationID
 	UserID       UserID
 	CreatedAt    time.Time
+}
+
+// IsChannel reports whether the star is on a channel rather than a message.
+func (s Star) IsChannel() bool { return s.Message.ID == "" }
+
+// StarPage is one page of a member's stars and how many they have in all.
+type StarPage struct {
+	Stars      []Star
+	NextCursor Cursor
+	HasMore    bool
+	Total      int
 }
 
 type SavedItemState string

@@ -1012,10 +1012,32 @@ func starsPageInChronologicalOrder(t *testing.T, open opener) {
 		}
 	}
 
-	page, _, _, err := f.repository.ListStars(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: len(instants) + 1})
+	// A channel star sorts among the message stars by when it was made.
+	channelStar := domain.Star{Conversation: f.channelID, UserID: f.userID, CreatedAt: instants[0].Add(time.Nanosecond)}
+	if err := f.repository.AddStar(ctx, channelStar, f.event("star-channel", "star.added", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.AddStar(ctx, channelStar, f.event("star-channel-again", "star.added", string(f.channelID))); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("a second channel star: %v", err)
+	}
+	listed, err := f.repository.ListStars(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: len(instants) + 2})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if listed.Total != len(instants)+1 || len(listed.Stars) != len(instants)+1 || !listed.Stars[1].IsChannel() || listed.Stars[1].Conversation != f.channelID {
+		t.Fatalf("listed %+v, want %d stars with the channel star second", listed, len(instants)+1)
+	}
+	if err := f.repository.RemoveStar(ctx, channelStar, f.event("unstar-channel", "star.removed", string(f.channelID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.RemoveStar(ctx, channelStar, f.event("unstar-channel-again", "star.removed", string(f.channelID))); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("removing an absent channel star: %v", err)
+	}
+	listed, err = f.repository.ListStars(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: len(instants) + 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := listed.Stars
 	if len(page) != len(instants) {
 		t.Fatalf("listed %d stars, want %d", len(page), len(instants))
 	}
@@ -1030,10 +1052,11 @@ func starsPageInChronologicalOrder(t *testing.T, open opener) {
 	seen := make(map[domain.MessageID]struct{}, len(instants))
 	request := domain.PageRequest{Limit: 1}
 	for {
-		single, next, hasMore, err := f.repository.ListStars(ctx, f.workspaceID, f.userID, request)
+		listedPage, err := f.repository.ListStars(ctx, f.workspaceID, f.userID, request)
 		if err != nil {
 			t.Fatal(err)
 		}
+		single, next, hasMore := listedPage.Stars, listedPage.NextCursor, listedPage.HasMore
 		for _, star := range single {
 			if _, repeated := seen[star.Message.ID]; repeated {
 				t.Fatalf("keyset pagination repeated %q", star.Message.ID)

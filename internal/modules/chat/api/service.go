@@ -409,7 +409,7 @@ type Service interface {
 	Pins(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) ([]domain.Pin, domain.Cursor, bool, error)
 	AddStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
 	RemoveStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
-	Stars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
+	Stars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.StarPage, error)
 	SaveForLater(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.SavedItem, error)
 	SavedItemForMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)
 	SavedItemsForMessages(context.Context, domain.WorkspaceID, domain.UserID, []domain.MessageID) ([]domain.SavedItem, error)

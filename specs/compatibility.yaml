@@ -1238,18 +1238,21 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestStarsMessageLifecycle
       - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
+      - go-test:internal/api/slack:TestStarsChannelItemsErrorsAndPaging
   - method: stars.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestStarsListEmitsTheCursorThatReachesPageTwo
       - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
+      - go-test:internal/api/slack:TestStarsChannelItemsErrorsAndPaging
   - method: stars.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestStarsMessageLifecycle
       - go-test:internal/api/slack:TestUserTokenOnlyMethodsRefuseABotToken
+      - go-test:internal/api/slack:TestStarsChannelItemsErrorsAndPaging
   - method: team.accessLogs
     status: behavior-compatible
     provenance: slack-api-specs-openapi

@@ -1402,8 +1402,9 @@ func TestSQLiteStarsAreDurable(t *testing.T) {
 	if err := s.AddStar(ctx, domain.Star{Message: message, Conversation: "C1", UserID: "U1", CreatedAt: created}, events.Event{ID: "star-1", WorkspaceID: "T1", Topic: "star.added", Payload: "M1", CreatedAt: created}); err != nil {
 		t.Fatal(err)
 	}
-	stars, _, more, err := s.ListStars(ctx, "T1", "U1", domain.PageRequest{Limit: 1})
-	if err != nil || len(stars) != 1 || stars[0].Message.ID != "M1" || stars[0].Message.Blocks != message.Blocks || more {
+	page, err := s.ListStars(ctx, "T1", "U1", domain.PageRequest{Limit: 1})
+	stars, more := page.Stars, page.HasMore
+	if err != nil || len(stars) != 1 || stars[0].Message.ID != "M1" || stars[0].Message.Blocks != message.Blocks || more || page.Total != 1 {
 		t.Fatalf("stars=%+v more=%v err=%v", stars, more, err)
 	}
 }

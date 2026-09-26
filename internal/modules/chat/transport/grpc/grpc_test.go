@@ -718,8 +718,9 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := remote.AddStar(ctx, "T1", "U1", "C1", starTimestamp); err != nil {
 		t.Fatalf("add star: %v", err)
 	}
-	stars, _, more, err := remote.Stars(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
-	if err != nil || len(stars) != 1 || stars[0].Message.ID == "" || more {
+	starPage, err := remote.Stars(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+	stars, more := starPage.Stars, starPage.HasMore
+	if err != nil || len(stars) != 1 || stars[0].Message.ID == "" || more || starPage.Total != 1 {
 		t.Fatalf("stars=%+v more=%v err=%v", stars, more, err)
 	}
 	if err := remote.RemoveStar(ctx, "T1", "U1", "C1", starTimestamp); err != nil {

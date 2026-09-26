@@ -404,8 +404,9 @@ func TestStarsAreDurableAndPaged(t *testing.T) {
 	if err := s.AddStar(ctx, domain.Star{Message: message, Conversation: "C1", UserID: "U1", CreatedAt: created}, events.Event{ID: "star-1", WorkspaceID: "T1", Topic: "star.added", Payload: "M1", CreatedAt: created}); err != nil {
 		t.Fatal(err)
 	}
-	stars, next, more, err := s.ListStars(ctx, "T1", "U1", domain.PageRequest{Limit: 1})
-	if err != nil || len(stars) != 1 || stars[0].Message.ID != "M1" || stars[0].Message.Blocks != message.Blocks || more || next != "" {
+	page, err := s.ListStars(ctx, "T1", "U1", domain.PageRequest{Limit: 1})
+	stars, next, more := page.Stars, page.NextCursor, page.HasMore
+	if err != nil || len(stars) != 1 || stars[0].Message.ID != "M1" || stars[0].Message.Blocks != message.Blocks || more || next != "" || page.Total != 1 {
 		t.Fatalf("stars=%+v next=%q more=%v err=%v", stars, next, more, err)
 	}
 }

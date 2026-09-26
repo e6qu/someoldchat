@@ -414,6 +414,10 @@ CREATE TABLE IF NOT EXISTS stars (
  PRIMARY KEY (user_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS stars_user_created ON stars(user_id, created_at, message_id);
+CREATE TABLE IF NOT EXISTS channel_stars (
+ user_id TEXT NOT NULL REFERENCES users(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), created_at TEXT NOT NULL,
+ PRIMARY KEY (user_id, conversation_id)
+);
 CREATE TABLE IF NOT EXISTS saved_items (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  message_id TEXT NOT NULL REFERENCES messages(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
@@ -570,7 +574,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 179
+const schemaVersion = 180
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3466,6 +3470,16 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 180 {
+		// stars.add given only a channel stars the channel. stars could only
+		// hold messages, so a channel star was refused.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS channel_stars (
+			user_id TEXT NOT NULL REFERENCES users(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), created_at TEXT NOT NULL,
+			PRIMARY KEY (user_id, conversation_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate channel stars: %w", err)
 		}
 	}
 	if version < 179 {
@@ -7751,6 +7765,7 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM pins WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM stars WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		`DELETE FROM channel_stars WHERE conversation_id = ?`,
 		// saved_items.message_id carries an enforced foreign key, so deleting a
 		// conversation in which anyone had saved a message failed outright
 		// until this line existed. activity_items and idempotency have no key
@@ -15526,9 +15541,14 @@ func (s *Store) AddStar(ctx context.Context, star domain.Star, event events.Even
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `INSERT INTO stars(user_id, message_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id, message_id) DO NOTHING`, star.UserID, star.Message.ID, domain.NewStoredTime(star.CreatedAt))
+	var result sql.Result
+	if star.IsChannel() {
+		result, err = tx.ExecContext(ctx, `INSERT INTO channel_stars(user_id, conversation_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id, conversation_id) DO NOTHING`, star.UserID, star.Conversation, domain.NewStoredTime(star.CreatedAt))
+	} else {
+		result, err = tx.ExecContext(ctx, `INSERT INTO stars(user_id, message_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id, message_id) DO NOTHING`, star.UserID, star.Message.ID, domain.NewStoredTime(star.CreatedAt))
+	}
 	if err != nil {
-		return err
+		return classify(err)
 	}
 	count, err := result.RowsAffected()
 	if err != nil {
@@ -15549,7 +15569,12 @@ func (s *Store) RemoveStar(ctx context.Context, star domain.Star, event events.E
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `DELETE FROM stars WHERE user_id = ? AND message_id = ?`, star.UserID, star.Message.ID)
+	var result sql.Result
+	if star.IsChannel() {
+		result, err = tx.ExecContext(ctx, `DELETE FROM channel_stars WHERE user_id = ? AND conversation_id = ?`, star.UserID, star.Conversation)
+	} else {
+		result, err = tx.ExecContext(ctx, `DELETE FROM stars WHERE user_id = ? AND message_id = ?`, star.UserID, star.Message.ID)
+	}
 	if err != nil {
 		return err
 	}
@@ -15566,78 +15591,104 @@ func (s *Store) RemoveStar(ctx context.Context, star domain.Star, event events.E
 	return tx.Commit()
 }
 
-func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error) {
+// starredItems is every message and channel star of one member in one
+// workspace, as one relation ordered by (created_at, item_key). A channel's
+// item_key is "channel:" and its ID, which no message ID can equal.
+const starredItems = `SELECT s.created_at AS created_at, s.message_id AS item_key, 0 AS is_channel, m.conversation AS conversation,
+	m.id AS message_id, m.workspace_id AS workspace_id, m.author_id AS author_id, m.app_id AS app_id, m.text AS text, m.blocks AS blocks,
+	m.attachments AS attachments, m.thread_timestamp AS thread_timestamp, m.created_at AS message_created_at, m.deleted AS deleted
+	FROM stars s JOIN messages m ON m.id = s.message_id WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0
+	UNION ALL
+	SELECT c.created_at, 'channel:' || c.conversation_id, 1, c.conversation_id, '', v.workspace_id, '', '', '', '', '', '', '', 0
+	FROM channel_stars c JOIN conversations v ON v.id = c.conversation_id WHERE c.user_id = ? AND v.workspace_id = ?`
+
+func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.StarPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
-	query := `SELECT s.created_at, m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted FROM stars s JOIN messages m ON m.id = s.message_id WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0`
-	args := []any{user, workspace}
+	var page domain.StarPage
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+starredItems+`) AS starred`, user, workspace, user, workspace).Scan(&page.Total); err != nil {
+		return domain.StarPage{}, err
+	}
+	query := `SELECT created_at, item_key, is_channel, conversation, message_id, workspace_id, author_id, app_id, text, blocks, attachments, thread_timestamp, message_created_at, deleted FROM (` + starredItems + `) AS starred`
+	args := []any{user, workspace, user, workspace}
 	if after != "" {
 		separator := strings.IndexByte(after, 0)
 		if separator < 1 || separator == len(after)-1 {
-			return nil, "", false, domain.ErrInvalidCursor
+			return domain.StarPage{}, domain.ErrInvalidCursor
 		}
-		created, messageID := after[:separator], after[separator+1:]
-		query += ` AND (s.created_at > ? OR (s.created_at = ? AND s.message_id > ?))`
-		args = append(args, created, created, messageID)
+		created, key := after[:separator], after[separator+1:]
+		query += ` WHERE (created_at > ? OR (created_at = ? AND item_key > ?))`
+		args = append(args, created, created, key)
 	}
-	query += ` ORDER BY s.created_at, s.message_id LIMIT ?`
+	query += ` ORDER BY created_at, item_key LIMIT ?`
 	args = append(args, request.Limit+1)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	defer rows.Close()
 	values := make([]domain.Star, 0, request.Limit+1)
+	keys := make([]string, 0, request.Limit+1)
 	for rows.Next() {
 		var star domain.Star
-		var starCreated, messageCreated string
-		var deleted int
-		if err := rows.Scan(&starCreated, &star.Message.ID, &star.Message.WorkspaceID, &star.Message.Conversation, &star.Message.AuthorID, &star.Message.AppID, &star.Message.Text, &star.Message.Blocks, &star.Message.Attachments, &star.Message.ThreadTimestamp, &messageCreated, &deleted); err != nil {
-			return nil, "", false, err
+		var starCreated, key, messageCreated string
+		var isChannel, deleted int
+		if err := rows.Scan(&starCreated, &key, &isChannel, &star.Conversation, &star.Message.ID, &star.Message.WorkspaceID, &star.Message.AuthorID, &star.Message.AppID, &star.Message.Text, &star.Message.Blocks, &star.Message.Attachments, &star.Message.ThreadTimestamp, &messageCreated, &deleted); err != nil {
+			return domain.StarPage{}, err
 		}
 		star.UserID = user
-		star.Conversation = star.Message.Conversation
-		star.Message.Deleted = deleted != 0
 		star.CreatedAt, err = domain.ParseStoredTime(starCreated)
 		if err != nil {
-			return nil, "", false, err
+			return domain.StarPage{}, err
 		}
-		star.Message.CreatedAt, err = domain.ParseStoredTime(messageCreated)
-		if err != nil {
-			return nil, "", false, err
+		if isChannel != 0 {
+			star.Message = domain.Message{}
+		} else {
+			star.Message.Conversation = star.Conversation
+			star.Message.Deleted = deleted != 0
+			star.Message.CreatedAt, err = domain.ParseStoredTime(messageCreated)
+			if err != nil {
+				return domain.StarPage{}, err
+			}
 		}
 		values = append(values, star)
+		keys = append(keys, key)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
-	hasMore := len(values) > request.Limit
-	if hasMore {
+	page.HasMore = len(values) > request.Limit
+	if page.HasMore {
 		values = values[:request.Limit]
 	}
-	messages := make([]domain.Message, len(values))
+	messages := make([]domain.Message, 0, len(values))
+	positions := make([]int, 0, len(values))
 	for index := range values {
-		messages[index] = values[index].Message
-	}
-	if err := s.hydrateMessageFiles(ctx, messages); err != nil {
-		return nil, "", false, err
-	}
-	for index := range values {
-		values[index].Message = messages[index]
-	}
-	var next domain.Cursor
-	if hasMore {
-		next, err = domain.NewListCursor(string(domain.NewStoredTime(values[len(values)-1].CreatedAt)) + "\x00" + string(values[len(values)-1].Message.ID))
-		if err != nil {
-			return nil, "", false, err
+		if !values[index].IsChannel() {
+			messages = append(messages, values[index].Message)
+			positions = append(positions, index)
 		}
 	}
-	return values, next, hasMore, nil
+	if err := s.hydrateMessageFiles(ctx, messages); err != nil {
+		return domain.StarPage{}, err
+	}
+	for index, position := range positions {
+		values[position].Message = messages[index]
+	}
+	page.Stars = values
+	if page.HasMore {
+		last := len(values) - 1
+		page.NextCursor, err = domain.NewListCursor(string(domain.NewStoredTime(values[last].CreatedAt)) + "\x00" + keys[last])
+		if err != nil {
+			return domain.StarPage{}, err
+		}
+	}
+	return page, nil
 }
 
 const savedItemColumns = `id, workspace_id, user_id, message_id, conversation_id, state, created_at, updated_at`

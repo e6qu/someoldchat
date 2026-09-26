@@ -7680,21 +7680,27 @@ func (h Handler) addStar(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	channel, timestamp, err := normalizeReactionTarget(fields)
-	if err != nil {
-		writeDecodeError(w, err)
-		return
-	}
-	// This system stars messages only. stars.add/remove enumerate file_not_found
-	// and file_comment_not_found for the file forms, so a request naming a file is
-	// rejected with the code for the thing that cannot be found rather than with a
-	// generic argument error.
+	// This system stars messages and channels. stars.add/remove enumerate
+	// file_not_found and file_comment_not_found for the file forms, so a
+	// request naming a file is rejected with the code for the thing that cannot
+	// be found rather than with a generic argument error.
 	if strings.TrimSpace(fields["file"]) != "" {
 		writeError(w, "file_not_found")
 		return
 	}
 	if strings.TrimSpace(fields["file_comment"]) != "" {
 		writeError(w, "file_comment_not_found")
+		return
+	}
+	channel, timestamp, err := normalizeStarTarget(fields)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// A channel nobody can see is channel_not_found; it used to be reported
+	// as message_not_found, naming the wrong missing thing.
+	if _, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	if err := h.Messages.AddStar(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
@@ -7719,15 +7725,10 @@ func (h Handler) removeStar(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	channel, timestamp, err := normalizeReactionTarget(fields)
-	if err != nil {
-		writeDecodeError(w, err)
-		return
-	}
-	// This system stars messages only. stars.add/remove enumerate file_not_found
-	// and file_comment_not_found for the file forms, so a request naming a file is
-	// rejected with the code for the thing that cannot be found rather than with a
-	// generic argument error.
+	// This system stars messages and channels. stars.add/remove enumerate
+	// file_not_found and file_comment_not_found for the file forms, so a
+	// request naming a file is rejected with the code for the thing that cannot
+	// be found rather than with a generic argument error.
 	if strings.TrimSpace(fields["file"]) != "" {
 		writeError(w, "file_not_found")
 		return
@@ -7736,7 +7737,19 @@ func (h Handler) removeStar(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "file_comment_not_found")
 		return
 	}
+	channel, timestamp, err := normalizeStarTarget(fields)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// A channel nobody can see is channel_not_found; it used to be reported
+	// as message_not_found, naming the wrong missing thing.
+	if _, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
 	if err := h.Messages.RemoveStar(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
+		// service.ErrNotStarred is the pinned not_starred.
 		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
@@ -7757,35 +7770,76 @@ func (h Handler) listStars(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	limit, err := clampLimit(fields["limit"], 100, 1000)
+	// stars.list pages two ways: cursor/limit, and the legacy count/page its
+	// paging object describes. A caller naming either cursor argument gets
+	// cursor paging; otherwise count and page choose the page.
+	cursorMode := strings.TrimSpace(fields["cursor"]) != "" || strings.TrimSpace(fields["limit"]) != ""
+	var (
+		limit, count, page int
+		cursor             domain.Cursor
+	)
+	if cursorMode {
+		if limit, err = clampLimit(fields["limit"], 100, 1000); err == nil {
+			cursor, err = decodeCursor(fields["cursor"], "invalid_arg_name")
+		}
+		count, page = limit, 1
+	} else {
+		if count, err = clampLimit(fields["count"], 100, 1000); err == nil {
+			page, err = pageNumber(fields["page"])
+		}
+		limit = count
+	}
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	cursor, err := decodeCursor(fields["cursor"], "invalid_arg_name")
-	if err != nil {
-		writeDecodeError(w, err)
+	if page > maxStarPages {
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	items, next, more, err := h.Messages.Stars(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: limit, Cursor: cursor})
-	if err != nil {
-		writeError(w, mapServiceError(err, "fatal_error"))
-		return
+	// A page past the first is reached by walking the keyset from the start;
+	// it is bounded by maxStarPages.
+	var starred domain.StarPage
+	for current := 1; ; current++ {
+		starred, err = h.Messages.Stars(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: limit, Cursor: cursor})
+		if err != nil {
+			writeError(w, mapServiceError(err, "fatal_error"))
+			return
+		}
+		if current >= page {
+			break
+		}
+		if !starred.HasMore {
+			starred.Stars, starred.HasMore, starred.NextCursor = nil, false, ""
+			break
+		}
+		cursor = starred.NextCursor
 	}
-	result := make([]map[string]any, 0, len(items))
-	for _, item := range items {
+	result := make([]map[string]any, 0, len(starred.Stars))
+	for _, item := range starred.Stars {
+		if item.IsChannel() {
+			result = append(result, map[string]any{"type": "channel", "channel": item.Conversation, "date_create": item.CreatedAt.Unix()})
+			continue
+		}
 		result = append(result, map[string]any{"type": "message", "channel": item.Conversation, "date_create": item.CreatedAt.Unix(), "message": messageResponse(item.Message)})
 	}
-	// The cursor the store returns is the only way to reach page two. It used to be
-	// discarded and replaced by an invented `spill` key, so a workspace with more
-	// stars than one page could never be read in full.
-	paging := map[string]any{"page": 1, "total": len(result), "per_page": limit}
+	// paging describes the whole set: total is every star the member has and
+	// pages how many pages of this size hold them. It used to report the
+	// length of the page as the total.
+	pages := 1
+	if starred.Total > 0 {
+		pages = (starred.Total + count - 1) / count
+	}
+	paging := map[string]any{"per_page": count, "page": page, "total": starred.Total, "pages": pages}
 	body := map[string]any{"ok": true, "items": result, "paging": paging}
-	if more {
-		body["response_metadata"] = map[string]string{"next_cursor": string(next)}
+	if cursorMode && starred.HasMore {
+		body["response_metadata"] = map[string]string{"next_cursor": string(starred.NextCursor)}
 	}
 	writeJSON(w, http.StatusOK, body)
 }
+
+// maxStarPages bounds stars.list's page walk.
+const maxStarPages = 100
 
 func reminderResponse(reminder domain.Reminder) map[string]any {
 	response := map[string]any{"id": reminder.ID, "creator": reminder.Creator, "user": reminder.User, "text": reminder.Text, "time": reminder.Time.Unix(), "recurring": reminder.Recurring}
@@ -9607,6 +9661,20 @@ func normalizeReactionFields(fields map[string]string) (domain.ConversationID, d
 		return "", "", "", decodeFailure("invalid_name", "name is required")
 	}
 	return channel, timestamp, name, nil
+}
+
+// normalizeStarTarget reads a stars.add/remove item: a channel with a message
+// timestamp stars the message, and a channel alone stars the channel.
+func normalizeStarTarget(fields map[string]string) (domain.ConversationID, domain.MessageTimestamp, error) {
+	channel := strings.TrimSpace(fields["channel"])
+	timestamp := strings.TrimSpace(fields["timestamp"])
+	if channel == "" {
+		return "", "", decodeFailure("no_item_specified", "channel is required")
+	}
+	if timestamp == "" {
+		return domain.ConversationID(channel), "", nil
+	}
+	return normalizeReactionTarget(fields)
 }
 
 func normalizeReactionTarget(fields map[string]string) (domain.ConversationID, domain.MessageTimestamp, error) {

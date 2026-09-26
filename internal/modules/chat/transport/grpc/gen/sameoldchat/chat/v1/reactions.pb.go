@@ -761,6 +761,7 @@ func (x *PinsRequest) GetCursor() string {
 	return ""
 }
 
+// A star on a channel carries no message_id and no message.
 type Star struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	MessageId      string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
@@ -910,6 +911,7 @@ type StarPage struct {
 	Stars         []*Star                `protobuf:"bytes,1,rep,name=stars,proto3" json:"stars,omitempty"`
 	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
 	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	Total         int64                  `protobuf:"varint,4,opt,name=total,proto3" json:"total,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -963,6 +965,13 @@ func (x *StarPage) GetHasMore() bool {
 		return x.HasMore
 	}
 	return false
+}
+
+func (x *StarPage) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
 }
 
 var File_sameoldchat_chat_v1_reactions_proto protoreflect.FileDescriptor
@@ -1044,12 +1053,13 @@ const file_sameoldchat_chat_v1_reactions_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"w\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"\x8d\x01\n" +
 	"\bStarPage\x12/\n" +
 	"\x05stars\x18\x01 \x03(\v2\x19.sameoldchat.chat.v1.StarR\x05stars\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore2\xed\x06\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12\x14\n" +
+	"\x05total\x18\x04 \x01(\x03R\x05total2\xed\x06\n" +
 	"\x10ReactionsService\x12Z\n" +
 	"\vAddReaction\x12$.sameoldchat.chat.v1.ReactionRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12]\n" +
 	"\x0eRemoveReaction\x12$.sameoldchat.chat.v1.ReactionRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12X\n" +

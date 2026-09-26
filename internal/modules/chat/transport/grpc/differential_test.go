@@ -6217,15 +6217,30 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				stars, _, starsMore, err := chat.Stars(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err := chat.AddStar(ctx, "T1", "U1", "C1", ""); err != nil {
+					return nil, err
+				}
+				starred, err := chat.Stars(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
+				stars, starsMore := starred.Stars, starred.HasMore
+				channelStars := 0
+				for _, star := range stars {
+					if star.IsChannel() {
+						channelStars++
+					}
+				}
+				unstarTwice := chat.RemoveStar(ctx, "T1", "U1", "C1", "")
+				if unstarTwice != nil {
+					return nil, unstarTwice
+				}
+				notStarred := chat.RemoveStar(ctx, "T1", "U1", "C1", "")
 				names := make([]string, 0, len(reactions))
 				for _, reaction := range reactions {
 					names = append(names, reaction.Name)
 				}
-				return []any{names, reactionsMore, len(pins), pinsMore, len(stars), starsMore}, nil
+				return []any{names, reactionsMore, len(pins), pinsMore, len(stars), starsMore, starred.Total, channelStars, errors.Is(notStarred, service.ErrNotStarred)}, nil
 			},
 		},
 		{

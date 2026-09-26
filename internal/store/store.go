@@ -1010,7 +1010,9 @@ type Store interface {
 	ListPins(context.Context, domain.ConversationID, domain.PageRequest) ([]domain.Pin, domain.Cursor, bool, error)
 	AddStar(context.Context, domain.Star, events.Event) error
 	RemoveStar(context.Context, domain.Star, events.Event) error
-	ListStars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
+	// ListStars pages a member's message and channel stars together, oldest
+	// first, with the total across both.
+	ListStars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.StarPage, error)
 	CreateSavedItem(context.Context, domain.SavedItem, events.Event) (domain.SavedItem, bool, error)
 	GetSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID) (domain.SavedItem, error)
 	GetSavedItemByMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)

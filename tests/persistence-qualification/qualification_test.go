@@ -1124,15 +1124,16 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 	if err := repository.AddStar(ctx, star, event("star", "star.added", string(message.ID))); err != nil {
 		t.Fatal(err)
 	}
-	stars, nextStar, moreStars, err := repository.ListStars(ctx, workspaceID, userID, domain.PageRequest{Limit: 1})
-	if err != nil || len(stars) != 1 || stars[0].Message.ID != message.ID || nextStar != "" || moreStars {
+	starPage, err := repository.ListStars(ctx, workspaceID, userID, domain.PageRequest{Limit: 1})
+	stars, nextStar, moreStars := starPage.Stars, starPage.NextCursor, starPage.HasMore
+	if err != nil || len(stars) != 1 || stars[0].Message.ID != message.ID || nextStar != "" || moreStars || starPage.Total != 1 {
 		t.Fatalf("stars=%+v next=%q more=%v err=%v", stars, nextStar, moreStars, err)
 	}
 	if err := repository.RemoveStar(ctx, star, event("star-remove", "star.removed", string(message.ID))); err != nil {
 		t.Fatal(err)
 	}
-	stars, _, _, err = repository.ListStars(ctx, workspaceID, userID, domain.PageRequest{Limit: 1})
-	if err != nil || len(stars) != 0 {
+	starPage, err = repository.ListStars(ctx, workspaceID, userID, domain.PageRequest{Limit: 1})
+	if stars = starPage.Stars; err != nil || len(stars) != 0 || starPage.Total != 0 {
 		t.Fatalf("stars after remove=%+v err=%v", stars, err)
 	}
 

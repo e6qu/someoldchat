@@ -5762,3 +5762,61 @@ func TestSearchHighlightUsesSlacksMarkers(t *testing.T) {
 		t.Fatalf("unhighlighted search=%s", plain)
 	}
 }
+
+// stars.add with only a channel stars the channel; removing a star that is
+// not there is not_starred; an unknown channel is channel_not_found; and the
+// legacy count/page paging describes the whole set.
+func TestStarsChannelItemsErrorsAndPaging(t *testing.T) {
+	handler, _ := testUserHandlerWithStore()
+	var timestamps []string
+	for _, text := range []string{"one", "two", "three"} {
+		var posted struct {
+			TS string `json:"ts"`
+		}
+		if err := json.Unmarshal(postForm(handler, "/api/chat.postMessage", "channel=C1&text="+text).Body.Bytes(), &posted); err != nil || posted.TS == "" {
+			t.Fatalf("post %s: %v", text, err)
+		}
+		timestamps = append(timestamps, posted.TS)
+		if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=C1&timestamp="+posted.TS)); code != "" {
+			t.Fatalf("stars.add message: %q", code)
+		}
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=C1")); code != "" {
+		t.Fatalf("stars.add channel: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=C1")); code != "already_starred" {
+		t.Fatalf("stars.add channel twice: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=CNOPE&timestamp="+timestamps[0])); code != "channel_not_found" {
+		t.Fatalf("stars.add unknown channel: %q", code)
+	}
+	var list struct {
+		OK     bool             `json:"ok"`
+		Items  []map[string]any `json:"items"`
+		Paging struct {
+			PerPage int `json:"per_page"`
+			Page    int `json:"page"`
+			Pages   int `json:"pages"`
+			Total   int `json:"total"`
+		} `json:"paging"`
+	}
+	if err := json.Unmarshal(getAPI(handler, "/api/stars.list?count=3&page=2").Body.Bytes(), &list); err != nil || !list.OK {
+		t.Fatalf("stars.list: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0]["type"] != "channel" || list.Items[0]["channel"] != "C1" ||
+		list.Paging.PerPage != 3 || list.Paging.Page != 2 || list.Paging.Pages != 2 || list.Paging.Total != 4 {
+		t.Fatalf("stars.list page 2=%+v", list)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1")); code != "" {
+		t.Fatalf("stars.remove channel: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1")); code != "not_starred" {
+		t.Fatalf("stars.remove channel twice: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1&timestamp="+timestamps[0])); code != "" {
+		t.Fatalf("stars.remove message: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1&timestamp="+timestamps[0])); code != "not_starred" {
+		t.Fatalf("stars.remove message twice: %q", code)
+	}
+}
