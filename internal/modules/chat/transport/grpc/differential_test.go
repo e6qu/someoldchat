@@ -4673,6 +4673,10 @@ func parityCases() []parityCase {
 				// the app over HTTP where this case cannot read it.
 				responseErr := chat.HandleAppResponse(ctx, "response_dispatch", `{"text":"from the app"}`)
 				spentErr := chat.HandleAppResponse(ctx, "response-absent", `{"text":"nobody"}`)
+				// Each response_url refusal keeps its identity across the
+				// seam, because the HTTP boundary answers each differently.
+				malformedErr := chat.HandleAppResponse(ctx, "response_dispatch", `not json`)
+				emptyErr := chat.HandleAppResponse(ctx, "response_dispatch", `{}`)
 				page, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 20})
 				if err != nil {
 					return nil, err
@@ -4688,7 +4692,9 @@ func parityCases() []parityCase {
 					actionErr == nil, viewActionErr == nil,
 					optionsErr == nil, loaded,
 					responseErr == nil, spentErr != nil,
-					errors.Is(spentErr, service.ErrInvalidAppResponse), texts,
+					errors.Is(spentErr, service.ErrAppResponseURLExpired),
+					errors.Is(malformedErr, service.ErrAppResponsePayloadInvalid), errors.Is(emptyErr, service.ErrAppResponseNoText),
+					texts,
 				}, nil
 			},
 		},

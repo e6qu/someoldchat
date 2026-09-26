@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -374,13 +375,29 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 		t.Fatal(err)
 	}
 	responseToken := strings.TrimPrefix(responseURL.Path, "/app-response/")
+	// A body that can never be applied is refused before a use is spent:
+	// every one of the URL's uses is still available below.
+	for body, want := range map[string]error{
+		`not json`:                       ErrAppResponsePayloadInvalid,
+		`{"text":`:                       ErrAppResponsePayloadInvalid,
+		`{"blocks":{"type":"divider"}}`:  ErrAppResponsePayloadInvalid,
+		`{}`:                             ErrAppResponseNoText,
+		`{"response_type":"in_channel"}`: ErrAppResponseNoText,
+	} {
+		if err := messages.HandleAppResponse(ctx, responseToken, body); !errors.Is(err, want) {
+			t.Fatalf("response body %q error=%v, want %v", body, err, want)
+		}
+	}
 	for index := 0; index < appResponseUses; index++ {
 		if err := messages.HandleAppResponse(ctx, responseToken, `{"response_type":"in_channel","text":"late response"}`); err != nil {
 			t.Fatalf("response URL use %d: %v", index+1, err)
 		}
 	}
-	if err := messages.HandleAppResponse(ctx, responseToken, `{"response_type":"in_channel","text":"exhausted"}`); err != ErrInvalidAppResponse {
-		t.Fatalf("exhausted response URL error=%v, want %v", err, ErrInvalidAppResponse)
+	if err := messages.HandleAppResponse(ctx, responseToken, `{"response_type":"in_channel","text":"exhausted"}`); !errors.Is(err, ErrAppResponseURLUsed) {
+		t.Fatalf("exhausted response URL error=%v, want %v", err, ErrAppResponseURLUsed)
+	}
+	if err := messages.HandleAppResponse(ctx, "never-issued", `{"text":"hello"}`); !errors.Is(err, ErrAppResponseURLExpired) {
+		t.Fatalf("unknown response URL error=%v, want %v", err, ErrAppResponseURLExpired)
 	}
 
 	// A message shortcut on a person's message: the message has no app, and

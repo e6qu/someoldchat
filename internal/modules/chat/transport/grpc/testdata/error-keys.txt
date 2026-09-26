@@ -17,6 +17,10 @@ service.app_home_not_enabled
 service.app_interaction_unavailable
 service.app_not_distributable
 service.app_not_hosted
+service.app_response_no_text
+service.app_response_payload_invalid
+service.app_response_url_expired
+service.app_response_url_used
 service.assistant_thread_not_found
 service.automation_channel_not_found
 service.automation_entities_empty

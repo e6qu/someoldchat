@@ -206,6 +206,13 @@ var (
 	// classified error — AGENTS.md: handled errors must not become HTTP 500 —
 	// instead of as raw driver text.
 	ErrTransient = errors.New("transient storage failure")
+	// ErrCapabilityExpired and ErrCapabilityExhausted refuse a bounded
+	// capability — a response_url — that exists but can no longer be used,
+	// because its lifetime ended or its uses ran out. Slack tells an app which
+	// (expired_url, used_url), so a store must too. Both wrap ErrNotFound: a
+	// caller that only asks whether the capability is usable keeps working.
+	ErrCapabilityExpired   = fmt.Errorf("capability expired: %w", ErrNotFound)
+	ErrCapabilityExhausted = fmt.Errorf("capability exhausted: %w", ErrNotFound)
 )
 
 // InvalidArgument classifies a malformed request as a caller mistake.

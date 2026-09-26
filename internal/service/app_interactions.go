@@ -35,6 +35,20 @@ var (
 	ErrSlashCommandInThread      = errors.New("slash commands cannot be invoked in threads")
 	ErrInvalidAppResponse        = errors.New("application response is invalid")
 	ErrInvalidTrigger            = errors.New("trigger_id is invalid or expired")
+
+	// The response_url refusals Slack distinguishes, which HandleAppResponse
+	// returns so the HTTP boundary can answer Slack's status and reason: 400
+	// invalid_payload and no_text for a body that could never be applied —
+	// refused before a use of the URL is spent — and 404 used_url and
+	// expired_url for a URL that cannot be used any more. A URL this system
+	// never issued is indistinguishable from one that expired and was purged.
+	// They are distinct from ErrInvalidAppResponse, which still reports an
+	// app's unusable acknowledgement body, so each keeps its identity across
+	// the gRPC seam.
+	ErrAppResponsePayloadInvalid = errors.New("response_url payload is not a valid message")
+	ErrAppResponseNoText         = errors.New("response_url payload has no text, blocks, or attachments")
+	ErrAppResponseURLUsed        = errors.New("response_url has no uses left")
+	ErrAppResponseURLExpired     = errors.New("response_url has expired")
 )
 
 func (m Messages) consumeAppTrigger(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, triggerID string) (domain.AppTrigger, error) {
@@ -1166,12 +1180,20 @@ func appBlockActionState(action map[string]any) map[string]any {
 	return map[string]any{"values": map[string]any{blockID: map[string]any{actionID: state}}}
 }
 
+// HandleAppResponse applies a POST to a response_url. The body is validated
+// before a use of the URL is consumed, so a malformed request does not spend
+// one of the URL's five uses.
 func (m Messages) HandleAppResponse(ctx context.Context, responseToken, payload string) error {
+	if _, err := parseAppResponse([]byte(payload), true); err != nil {
+		return err
+	}
 	response, err := m.Store.UseAppResponseURL(ctx, domain.HashToken(strings.TrimSpace(responseToken)))
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return ErrInvalidAppResponse
-		}
+	switch {
+	case errors.Is(err, store.ErrCapabilityExhausted):
+		return ErrAppResponseURLUsed
+	case errors.Is(err, store.ErrNotFound):
+		return ErrAppResponseURLExpired
+	case err != nil:
 		return err
 	}
 	return m.applyAppResponse(ctx, response, []byte(payload), "")
@@ -1524,30 +1546,54 @@ type appResponsePayload struct {
 	DeleteOriginal  bool            `json:"delete_original"`
 }
 
-func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppResponseURL, body []byte, idempotencyKey string) error {
+// parsedAppResponse is an app's message response with its arrays normalised.
+type parsedAppResponse struct {
+	appResponsePayload
+	blocks, attachments string
+}
+
+func (p parsedAppResponse) empty() bool {
+	return strings.TrimSpace(p.Text) == "" && p.blocks == "" && p.attachments == "" && !p.DeleteOriginal
+}
+
+// parseAppResponse decodes an app's message response. An acknowledgement body
+// may be empty or plain text (strict false); a response_url POST must be a JSON
+// message object with something to post (strict true), as Slack requires.
+func parseAppResponse(body []byte, strict bool) (parsedAppResponse, error) {
 	body = bytes.TrimSpace(body)
-	if len(body) == 0 {
-		return nil
-	}
-	response := appResponsePayload{}
-	if body[0] == '{' {
-		if err := json.Unmarshal(body, &response); err != nil {
-			return ErrInvalidAppResponse
+	var parsed parsedAppResponse
+	switch {
+	case len(body) != 0 && body[0] == '{':
+		if err := json.Unmarshal(body, &parsed.appResponsePayload); err != nil {
+			return parsedAppResponse{}, ErrAppResponsePayloadInvalid
 		}
-	} else {
-		response.Text = string(body)
+	case strict:
+		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
+	default:
+		parsed.Text = string(body)
 	}
-	blocks, err := domain.NormalizeBlocks(response.Blocks)
+	var err error
+	if parsed.blocks, err = domain.NormalizeBlocks(parsed.Blocks); err != nil {
+		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
+	}
+	if parsed.attachments, err = domain.NormalizeAttachments(parsed.Attachments); err != nil {
+		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
+	}
+	if strict && parsed.empty() {
+		return parsedAppResponse{}, ErrAppResponseNoText
+	}
+	return parsed, nil
+}
+
+func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppResponseURL, body []byte, idempotencyKey string) error {
+	parsed, err := parseAppResponse(body, false)
 	if err != nil {
 		return ErrInvalidAppResponse
 	}
-	attachments, err := domain.NormalizeAttachments(response.Attachments)
-	if err != nil {
-		return ErrInvalidAppResponse
-	}
-	if strings.TrimSpace(response.Text) == "" && blocks == "" && attachments == "" && !response.DeleteOriginal {
+	if parsed.empty() {
 		return nil
 	}
+	response, blocks, attachments := parsed.appResponsePayload, parsed.blocks, parsed.attachments
 	bot, err := m.Store.GetBotByApp(ctx, capability.WorkspaceID, capability.AppID)
 	if err != nil {
 		return err

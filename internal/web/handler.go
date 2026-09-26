@@ -12227,18 +12227,55 @@ func (h Handler) appResponse(w http.ResponseWriter, r *http.Request) {
 	secureHeaders(w, workspaceContentSecurityPolicy)
 	body, err := io.ReadAll(io.LimitReader(r.Body, service.MaxMessageBodyBytes+1))
 	if err != nil || len(body) > service.MaxMessageBodyBytes {
-		http.Error(w, "invalid response payload", http.StatusBadRequest)
+		writeAppResponseError(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
 	if err := h.Messages.HandleAppResponse(r.Context(), r.PathValue("token"), string(body)); err != nil {
-		if errors.Is(err, service.ErrInvalidAppResponse) {
-			http.Error(w, "response URL is invalid, expired, or exhausted", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "response could not be applied", http.StatusServiceUnavailable)
+		status, reason := appResponseFailure(err)
+		writeAppResponseError(w, status, reason)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// appResponseFailure maps a refused response_url POST to the status and
+// plain-text reason Slack answers with. Every handled refusal is a 4xx: a body
+// that can never be applied is 400, a URL or destination that is gone is 404.
+// Only a transient failure asks the app to retry (503), and only an error
+// nothing classified is a 500.
+func appResponseFailure(err error) (int, string) {
+	switch {
+	case errors.Is(err, service.ErrAppResponseNoText):
+		return http.StatusBadRequest, "no_text"
+	case errors.Is(err, service.ErrAppResponsePayloadInvalid):
+		return http.StatusBadRequest, "invalid_payload"
+	case errors.Is(err, service.ErrAppResponseURLUsed):
+		return http.StatusNotFound, "used_url"
+	case errors.Is(err, service.ErrAppResponseURLExpired):
+		return http.StatusNotFound, "expired_url"
+	case errors.Is(err, service.ErrConversationAlreadyArchived):
+		return http.StatusGone, "channel_is_archived"
+	case errors.Is(err, service.ErrConversationPostingRestricted):
+		return http.StatusForbidden, "restricted_action"
+	case errors.Is(err, service.ErrMessageAlreadyDeleted):
+		return http.StatusNotFound, "message_not_found"
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, service.ErrNotInConversation):
+		// The capability was valid; what it points at — the channel, the
+		// original message, the app's bot — no longer exists.
+		return http.StatusNotFound, "channel_not_found"
+	case errors.Is(err, service.ErrInvalidAppResponse), errors.Is(err, store.ErrInvalidArgument), errors.Is(err, service.ErrInvalidMessage):
+		return http.StatusBadRequest, "invalid_payload"
+	case errors.Is(err, store.ErrTransient), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return http.StatusServiceUnavailable, "service_unavailable"
+	}
+	return http.StatusInternalServerError, "internal_error"
+}
+
+func writeAppResponseError(w http.ResponseWriter, status int, reason string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, reason)
 }
 
 func (h Handler) responseBaseURL(r *http.Request) string {

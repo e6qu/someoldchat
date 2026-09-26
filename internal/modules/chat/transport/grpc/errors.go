@@ -148,6 +148,12 @@ var errorClasses = []errorClass{
 	{key: "service.app_not_distributable", code: codes.InvalidArgument, sentinel: service.ErrAppNotDistributable},
 	{key: "service.invalid_external_auth_provider", code: codes.InvalidArgument, sentinel: service.ErrInvalidExternalAuthProvider},
 	{key: "service.external_auth_connection", code: codes.FailedPrecondition, sentinel: service.ErrExternalAuthConnection},
+	// The response_url refusals. The two URL states are NotFound, as the HTTP
+	// boundary answers them 404.
+	{key: "service.app_response_payload_invalid", code: codes.InvalidArgument, sentinel: service.ErrAppResponsePayloadInvalid},
+	{key: "service.app_response_no_text", code: codes.InvalidArgument, sentinel: service.ErrAppResponseNoText},
+	{key: "service.app_response_url_used", code: codes.NotFound, sentinel: service.ErrAppResponseURLUsed},
+	{key: "service.app_response_url_expired", code: codes.NotFound, sentinel: service.ErrAppResponseURLExpired},
 	{key: "service.invalid_app_response", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppResponse},
 	{key: "service.invalid_datastore_item", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreItem},
 	{key: "service.invalid_datastore_query", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreQuery},
