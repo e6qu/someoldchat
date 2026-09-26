@@ -3665,8 +3665,16 @@ type MessagePatch struct {
 	Attachments *string
 }
 
+// NormalizeBlocks validates and compacts a message's blocks and fills in the
+// block_id and action_id values Slack generates when an app leaves them out
+// (see AssignBlockIdentifiers). Every message write path calls it, so a stored
+// message is always addressable by interactions.
 func NormalizeBlocks(raw []byte) (string, error) {
-	return normalizeJSONArrayObjects(raw, "blocks")
+	normalized, err := normalizeJSONArrayObjects(raw, "blocks")
+	if err != nil || normalized == "" {
+		return normalized, err
+	}
+	return assignMessageBlockIdentifiers(normalized)
 }
 
 func NormalizeAttachments(raw []byte) (string, error) {

@@ -396,7 +396,7 @@ func TestStarsAreDurableAndPaged(t *testing.T) {
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1"})
 	s.SeedConversationMember("C1", "U1")
 	created := time.Unix(300, 0).UTC()
-	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section"}]`, CreatedAt: created}
+	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section","block_id":"b1"}]`, CreatedAt: created}
 	if err := s.CreateMessage(ctx, message, events.Event{ID: "message-1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}

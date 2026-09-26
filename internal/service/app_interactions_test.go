@@ -843,6 +843,49 @@ func TestOnlyAuthoredDispatchableBlockActionsCanBeSent(t *testing.T) {
 	if !blocksContainDispatchableAction(blocks, "live", "filter", "plain_text_input") {
 		t.Fatal("an input block with dispatch_action was not dispatchable")
 	}
+	// An empty identifier names nothing. It used to match the first block of a
+	// legacy surface that also lacked one.
+	unnamed := `[{"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"Run"}}]}]`
+	if blocksContainDispatchableAction(unnamed, "", "", "button") || blocksContainAction(unnamed, "", "", "button") {
+		t.Fatal("an empty block_id/action_id pair was dispatchable")
+	}
+}
+
+// Slack names every block and interactive element an app leaves unnamed, and
+// the interaction that element later produces is addressed by those names. A
+// message posted without them must therefore be stored with them and be
+// clickable through them.
+func TestUnnamedMessageBlocksAreStoredAddressable(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	repository.SeedConversationMember("C1", "U1")
+	posted, err := (Messages{Store: repository}).PostWithBlocks(ctx, "T1", "U1", "C1", "Deploy?",
+		`[{"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"Run"},"value":"go"}]}]`, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.GetMessage(ctx, posted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blocks []struct {
+		BlockID  string `json:"block_id"`
+		Elements []struct {
+			ActionID string `json:"action_id"`
+		} `json:"elements"`
+	}
+	if err := json.Unmarshal([]byte(stored.Blocks), &blocks); err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 || blocks[0].BlockID == "" || len(blocks[0].Elements) != 1 || blocks[0].Elements[0].ActionID == "" {
+		t.Fatalf("stored blocks carry no identifiers: %s", stored.Blocks)
+	}
+	if !blocksContainDispatchableAction(stored.Blocks, blocks[0].BlockID, blocks[0].Elements[0].ActionID, "button") {
+		t.Fatalf("the generated identifiers do not address the button: %s", stored.Blocks)
+	}
 }
 
 func assertSlackInteractionSignature(t *testing.T, secret string, body []byte, timestamp, signature string) {

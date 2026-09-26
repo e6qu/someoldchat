@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -5043,7 +5044,8 @@ func TestScheduleMessageFormAcceptsBlocksWithoutFallbackText(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	testHandler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"blocks":[{"type":"divider"}]`) {
+	// The divider comes back with the block_id Slack assigns an unnamed block.
+	if res.Code != http.StatusOK || !regexp.MustCompile(`"blocks":\[\{"block_id":"[A-Z2-7]{5,}","type":"divider"\}\]`).MatchString(res.Body.String()) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
 }
@@ -5185,7 +5187,7 @@ func TestPostEphemeralAcceptsBlocksWithoutFallbackText(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	testHandler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"blocks":[{"type":"divider"}]`) {
+	if res.Code != http.StatusOK || !regexp.MustCompile(`"blocks":\[\{"block_id":"[A-Z2-7]{5,}","type":"divider"\}\]`).MatchString(res.Body.String()) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
 }
@@ -5214,7 +5216,7 @@ func TestPostMessageJSONAcceptsStructuredArrays(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
-	for _, want := range []string{`"blocks":[{"type":"section"`, `"attachments":[{"text":"from attachments"}]`} {
+	for _, want := range []string{`"blocks":[{"block_id":`, `"text":{"text":"from blocks","type":"plain_text"},"type":"section"}]`, `"attachments":[{"text":"from attachments"}]`} {
 		if !strings.Contains(res.Body.String(), want) {
 			t.Fatalf("response does not contain %q: %s", want, res.Body)
 		}

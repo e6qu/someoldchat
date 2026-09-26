@@ -469,6 +469,12 @@ func appOptionTextObject(value any) string {
 }
 
 func viewContainsAction(payload, blockID, actionID string, actionTypes ...string) bool {
+	// Every stored block and interactive element carries an identifier, so an
+	// empty one names nothing; comparing it would match the first unnamed
+	// block of a surface written before identifiers were assigned.
+	if strings.TrimSpace(blockID) == "" || strings.TrimSpace(actionID) == "" {
+		return false
+	}
 	var view struct {
 		Blocks []map[string]any `json:"blocks"`
 	}
@@ -504,6 +510,9 @@ func viewContainsAction(payload, blockID, actionID string, actionTypes ...string
 }
 
 func viewContainsDispatchableAction(payload, blockID, actionID string, actionTypes ...string) bool {
+	if strings.TrimSpace(blockID) == "" || strings.TrimSpace(actionID) == "" {
+		return false
+	}
 	var view struct {
 		Blocks []map[string]any `json:"blocks"`
 	}

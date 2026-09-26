@@ -2475,8 +2475,10 @@ func viewPayload(payload string) (string, string, error) {
 			if !ok {
 				return "", "", ErrInvalidView
 			}
-			actionID := strings.TrimSpace(stringValue(element["action_id"]))
-			if actionID == "" || utf8.RuneCountInString(actionID) > 255 {
+			// action_id is optional, as in Slack: normalizeViewPayload assigns
+			// one to an element that has none.
+			actionID, actionIDOK := element["action_id"].(string)
+			if (!actionIDOK && element["action_id"] != nil) || utf8.RuneCountInString(actionID) > 255 {
 				return "", "", ErrInvalidView
 			}
 		}
@@ -2528,6 +2530,10 @@ func normalizeViewPayload(id domain.ViewID, payload string) (string, error) {
 		}
 		seen[blockID] = struct{}{}
 	}
+	// Block IDs above keep the view-scoped shape views have always had; the
+	// shared assignment fills in the action_id Slack generates for every
+	// interactive element an app left unnamed, as message blocks get too.
+	domain.AssignBlockIdentifiers(blocks)
 	encoded, err := json.Marshal(fields)
 	if err != nil {
 		return "", ErrInvalidView

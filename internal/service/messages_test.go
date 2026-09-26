@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -561,9 +562,23 @@ func TestViewsAreTypedDurableAndHashChecked(t *testing.T) {
 	seedInteractionTrigger(t, s, "trigger-2")
 	messages := Messages{Store: s}
 	ctx := context.Background()
-	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"First"},"blocks":[]}`)
+	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"First"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","label":{"type":"plain_text","text":"Name"},"element":{"type":"plain_text_input"}}]}`)
 	if err != nil || opened.RootViewID != opened.ID || opened.Hash == "" {
 		t.Fatalf("opened=%+v err=%v", opened, err)
+	}
+	// The unnamed input is stored with the block_id and action_id Slack would
+	// assign, which is what its view_submission state is keyed by.
+	var openedPayload struct {
+		Blocks []struct {
+			BlockID string `json:"block_id"`
+			Element struct {
+				ActionID string `json:"action_id"`
+			} `json:"element"`
+		} `json:"blocks"`
+	}
+	if err := json.Unmarshal([]byte(opened.Payload), &openedPayload); err != nil || len(openedPayload.Blocks) != 1 ||
+		openedPayload.Blocks[0].BlockID == "" || openedPayload.Blocks[0].Element.ActionID == "" {
+		t.Fatalf("opened view payload has no identifiers: %s err=%v", opened.Payload, err)
 	}
 	pushed, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-2", `{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`)
 	if err != nil || pushed.RootViewID != opened.RootViewID || pushed.PreviousViewID != opened.ID {
@@ -1509,15 +1524,15 @@ func TestPostWithBlocksPersistsNormalizedPayload(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("C1", "U1")
-	message, err := (Messages{Store: s}).PostWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [ { "type": "section" } ] `, "", "")
+	message, err := (Messages{Store: s}).PostWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [ { "type": "section", "block_id": "b1" } ] `, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if message.Text != "" || message.Blocks != `[{"type":"section"}]` {
+	if message.Text != "" || message.Blocks != `[{"type":"section","block_id":"b1"}]` {
 		t.Fatalf("unexpected message: %+v", message)
 	}
-	updated, err := (Messages{Store: s}).UpdateWithBlocks(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), "updated", `[{"type":"divider"}]`)
-	if err != nil || updated.Text != "updated" || updated.Blocks != `[{"type":"divider"}]` {
+	updated, err := (Messages{Store: s}).UpdateWithBlocks(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), "updated", `[{"type":"divider","block_id":"b2"}]`)
+	if err != nil || updated.Text != "updated" || updated.Blocks != `[{"type":"divider","block_id":"b2"}]` {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
 }
@@ -1973,11 +1988,11 @@ func TestScheduleMessageWithBlocksPersistsNormalizedPayload(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("C1", "U1")
-	value, err := (Messages{Store: s}).ScheduleMessageWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [{"type":"divider"}] `, time.Now().UTC().Add(time.Hour))
+	value, err := (Messages{Store: s}).ScheduleMessageWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [{"type":"divider","block_id":"b1"}] `, time.Now().UTC().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.Text != "" || value.Blocks != `[{"type":"divider"}]` {
+	if value.Text != "" || value.Blocks != `[{"type":"divider","block_id":"b1"}]` {
 		t.Fatalf("scheduled=%+v", value)
 	}
 	page, err := (Messages{Store: s}).ScheduledMessages(context.Background(), "T1", "U1", "C1", domain.PageRequest{Limit: 10})
@@ -2401,15 +2416,15 @@ func TestPostEphemeralWithBlocksPersistsNormalizedEvent(t *testing.T) {
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("C1", "U1")
 	s.SeedConversationMember("C1", "U2")
-	value, err := (Messages{Store: s}).PostEphemeralWithBlocks(context.Background(), "T1", "U1", "C1", "U2", "", ` [{"type":"divider"}] `)
+	value, err := (Messages{Store: s}).PostEphemeralWithBlocks(context.Background(), "T1", "U1", "C1", "U2", "", ` [{"type":"divider","block_id":"b1"}] `)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.Text != "" || value.Blocks != `[{"type":"divider"}]` {
+	if value.Text != "" || value.Blocks != `[{"type":"divider","block_id":"b1"}]` {
 		t.Fatalf("ephemeral=%+v", value)
 	}
 	records, err := s.ListEventsAfter(context.Background(), "T1", 0, 10)
-	if err != nil || len(records) != 1 || !strings.Contains(records[0].Event.Payload, `"blocks":"[{\"type\":\"divider\"}]"`) {
+	if err != nil || len(records) != 1 || !strings.Contains(records[0].Event.Payload, `"blocks":"[{\"type\":\"divider\",\"block_id\":\"b1\"}]"`) {
 		t.Fatalf("events=%+v err=%v", records, err)
 	}
 }
