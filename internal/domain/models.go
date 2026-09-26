@@ -3702,6 +3702,24 @@ func normalizeJSONArrayObjects(raw []byte, name string) (string, error) {
 	return compact.String(), nil
 }
 
+// NewUnfurlID names the posted message whose links a link_shared event asks
+// an app to unfurl. chat.unfurl accepts it, with source=conversations_history,
+// in place of channel and ts. Slack treats the value as opaque; this one is the
+// conversation and the message timestamp joined by a dot, which neither part's
+// leading segment can contain.
+func NewUnfurlID(conversation ConversationID, timestamp MessageTimestamp) string {
+	return string(conversation) + "." + string(timestamp)
+}
+
+// ParseUnfurlID reverses NewUnfurlID.
+func ParseUnfurlID(value string) (ConversationID, MessageTimestamp, bool) {
+	conversation, timestamp, found := strings.Cut(strings.TrimSpace(value), ".")
+	if !found || conversation == "" || timestamp == "" {
+		return "", "", false
+	}
+	return ConversationID(conversation), MessageTimestamp(timestamp), true
+}
+
 func NormalizeUnfurls(values map[string]string) (map[string]string, error) {
 	result := make(map[string]string, len(values))
 	for key, raw := range values {

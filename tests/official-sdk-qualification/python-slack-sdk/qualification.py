@@ -739,7 +739,7 @@ assert photo["ok"] is True
 deleted_photo = client.users_deletePhoto()
 assert deleted_photo["ok"] is True
 
-root = client.chat_postMessage(channel="C1", text="thread root")
+root = client.chat_postMessage(channel="C1", text="thread root <https://example.com/qualification>")
 assert root["ok"] is True
 unfurled = client.chat_unfurl(
     channel="C1",

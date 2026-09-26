@@ -1149,7 +1149,7 @@ assert.equal(photo.ok, true);
 const deletedPhoto = await client.users.deletePhoto();
 assert.equal(deletedPhoto.ok, true);
 
-const root = await client.chat.postMessage({ channel: "C1", text: "thread root" });
+const root = await client.chat.postMessage({ channel: "C1", text: "thread root <https://example.com/qualification>" });
 assert.equal(root.ok, true);
 // Exercise Slack's current high-level ChatStreamer, not only raw method names.
 // It buffers fragments, starts on the first flush, appends against the returned

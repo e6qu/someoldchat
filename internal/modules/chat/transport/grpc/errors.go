@@ -98,6 +98,13 @@ var errorClasses = []errorClass{
 	// cannot_complete_others rather than a generic not_found.
 	{key: "service.reminder_recurring", code: codes.FailedPrecondition, sentinel: service.ErrReminderRecurring},
 	{key: "service.reminder_owned_by_other", code: codes.PermissionDenied, sentinel: service.ErrReminderOwnedByOther},
+	{key: "service.snooze_not_active", code: codes.FailedPrecondition, sentinel: service.ErrSnoozeNotActive},
+	{key: "service.snooze_too_long", code: codes.InvalidArgument, sentinel: service.ErrSnoozeTooLong},
+	{key: "service.reminder_unparseable", code: codes.InvalidArgument, sentinel: service.ErrReminderUnparseable},
+	{key: "service.not_starred", code: codes.FailedPrecondition, sentinel: service.ErrNotStarred},
+	{key: "service.user_group_name_taken", code: codes.AlreadyExists, sentinel: service.ErrUserGroupNameTaken},
+	{key: "service.user_group_handle_taken", code: codes.AlreadyExists, sentinel: service.ErrUserGroupHandleTaken},
+	{key: "service.cannot_unfurl_url", code: codes.FailedPrecondition, sentinel: service.ErrCannotUnfurlURL},
 	{key: "service.scheduled_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeInPast},
 	{key: "service.scheduled_time_too_far", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeTooFar},
 	{key: "service.scheduled_too_many", code: codes.ResourceExhausted, sentinel: service.ErrScheduledTooMany},

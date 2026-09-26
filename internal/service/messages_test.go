@@ -1065,6 +1065,23 @@ func TestUnfurlPersistsNormalizedMetadata(t *testing.T) {
 	if err != nil || loaded.Unfurls["https://example.com"] != `{"title":"Example"}` {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
+
+	// Any member of the conversation may unfurl - the app is rarely the
+	// author - but a non-member may not, and neither may anyone unfurl a URL
+	// the message does not contain.
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1"})
+	s.SeedConversationMember("C1", "U2")
+	timestamp := domain.NewMessageTimestamp(message.CreatedAt)
+	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "C1", timestamp, map[string]string{"https://example.com": `{"title":"Again"}`}); err != nil {
+		t.Fatalf("member unfurl err=%v", err)
+	}
+	if _, err := messages.Unfurl(context.Background(), "T1", "U3", "C1", timestamp, map[string]string{"https://example.com": `{"title":"X"}`}); !errors.Is(err, ErrNotInConversation) {
+		t.Fatalf("non-member unfurl err=%v", err)
+	}
+	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "C1", timestamp, map[string]string{"https://other.example": `{"title":"X"}`}); !errors.Is(err, ErrCannotUnfurlURL) {
+		t.Fatalf("foreign URL unfurl err=%v", err)
+	}
 }
 
 func TestDeleteFileCommentIsDurableAndWorkspaceScoped(t *testing.T) {

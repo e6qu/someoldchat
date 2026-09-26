@@ -998,6 +998,9 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestChatUnfurlPersistsMetadata
+      - go-test:internal/service:TestUnfurlPersistsNormalizedMetadata
+    deviations:
+      - No link_shared event is emitted yet, so the unfurl_id form is only reachable with an ID built by domain.NewUnfurlID; source=composer is answered cannot_unfurl_url because no composer preview exists.
   - method: dialog.open
     status: behavior-compatible
     provenance: slack-api-specs-openapi

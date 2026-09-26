@@ -9570,14 +9570,38 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 	for key, raw := range rawUnfurls {
 		unfurls[key] = string(raw)
 	}
-	message, err := h.Messages.Unfurl(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.MessageTimestamp(strings.TrimSpace(fields["ts"])), unfurls)
-	if err != nil {
-		// /chat.unfurl declares cannot_unfurl_url; message_not_found is not in its
-		// enum.
+	// A message is named either by channel and ts or, as a link_shared event
+	// hands it to the app, by source and unfurl_id. A composer unfurl names a
+	// message that has not been posted, which this product never offers, so
+	// there is nothing it could attach to.
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	timestamp := domain.MessageTimestamp(strings.TrimSpace(fields["ts"]))
+	if unfurlID := strings.TrimSpace(fields["unfurl_id"]); unfurlID != "" {
+		source := strings.TrimSpace(fields["source"])
+		parsedChannel, parsedTimestamp, ok := domain.ParseUnfurlID(unfurlID)
+		if (source != "" && source != "conversations_history") || !ok {
+			writeError(w, "cannot_unfurl_url")
+			return
+		}
+		channel, timestamp = parsedChannel, parsedTimestamp
+	}
+	if channel == "" || timestamp == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	if _, err := h.Messages.Unfurl(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp, unfurls); err != nil {
+		// /chat.unfurl declares cannot_unfurl_url; message_not_found and
+		// not_in_channel are not in its enum.
+		if errors.Is(err, service.ErrNotInConversation) || errors.Is(err, service.ErrMessageAlreadyDeleted) {
+			writeError(w, "cannot_unfurl_url")
+			return
+		}
 		writeError(w, mapServiceError(err, "cannot_unfurl_url"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": messageResponse(message)})
+	// The pinned success schema is exactly {"ok": true}: additionalProperties
+	// is false, so the message this used to echo was outside the contract.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h Handler) meMessage(w http.ResponseWriter, r *http.Request) {
@@ -11096,6 +11120,24 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) {
 		return "emoji_already_exists"
+	}
+	// Each of these is raised by one operation family and names the code that
+	// family's contract declares for it.
+	switch {
+	case errors.Is(err, service.ErrSnoozeNotActive):
+		return "snooze_not_active"
+	case errors.Is(err, service.ErrSnoozeTooLong):
+		return "too_long"
+	case errors.Is(err, service.ErrReminderUnparseable):
+		return "cannot_parse"
+	case errors.Is(err, service.ErrNotStarred):
+		return "not_starred"
+	case errors.Is(err, service.ErrUserGroupNameTaken):
+		return "name_already_exists"
+	case errors.Is(err, service.ErrUserGroupHandleTaken):
+		return "handle_already_exists"
+	case errors.Is(err, service.ErrCannotUnfurlURL):
+		return "cannot_unfurl_url"
 	}
 	// service.ErrNotWorkspaceAdmin is the role denial raised by every admin.*
 	// method. It belongs in the permission branch so mapAdminError can name it

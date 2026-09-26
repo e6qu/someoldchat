@@ -3375,7 +3375,15 @@ func TestPostMessageRejectsArchivedChannelWithSlackCode(t *testing.T) {
 
 func TestChatUnfurlPersistsMetadata(t *testing.T) {
 	handler := testHandler()
-	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text=link"))
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/chat.unfurl", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, request)
+		return result
+	}
+	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text="+url.QueryEscape("see <https://example.com> and https://example.org/b?x=1&y=2")))
 	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	post.Header.Set("Authorization", "Bearer token")
 	posted := httptest.NewRecorder()
@@ -3386,13 +3394,34 @@ func TestChatUnfurlPersistsMetadata(t *testing.T) {
 	if err := json.NewDecoder(posted.Body).Decode(&body); err != nil || body.TS == "" {
 		t.Fatalf("post body=%s err=%v", posted.Body, err)
 	}
-	unfurl := httptest.NewRequest(http.MethodPost, "/api/chat.unfurl", strings.NewReader("channel=C1&ts="+body.TS+"&unfurls=%7B%22https%3A%2F%2Fexample.com%22%3A%7B%22title%22%3A%22Example%22%7D%7D"))
-	unfurl.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	unfurl.Header.Set("Authorization", "Bearer token")
-	result := httptest.NewRecorder()
-	handler.ServeHTTP(result, unfurl)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"unfurls":{"https://example.com":{"title":"Example"}}`) {
+	unfurls := func(value string) string { return url.QueryEscape(value) }
+	// The success schema is exactly {"ok":true}.
+	if result := call("channel=C1&ts=" + body.TS + "&unfurls=" + unfurls(`{"https://example.com":{"title":"Example"}}`)); result.Code != http.StatusOK || strings.TrimSpace(result.Body.String()) != `{"ok":true}` {
 		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+	// A second call names the message by unfurl_id, and adds a preview for
+	// another URL without dropping the first.
+	unfurlID := url.QueryEscape("C1." + body.TS)
+	if result := call("source=conversations_history&unfurl_id=" + unfurlID + "&unfurls=" + unfurls(`{"https://example.org/b?x=1&y=2":{"title":"B"}}`)); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+		t.Fatalf("unfurl_id status=%d body=%s", result.Code, result.Body)
+	}
+	history := httptest.NewRequest(http.MethodGet, "/api/conversations.history?channel=C1&limit=1", nil)
+	history.Header.Set("Authorization", "Bearer token")
+	read := httptest.NewRecorder()
+	handler.ServeHTTP(read, history)
+	if !strings.Contains(read.Body.String(), `"title":"Example"`) || !strings.Contains(read.Body.String(), `"title":"B"`) {
+		t.Fatalf("history after two unfurls=%s", read.Body)
+	}
+	// A URL the message does not contain cannot be unfurled, and neither can a
+	// composer unfurl, which names no posted message.
+	for _, rejected := range []string{
+		"channel=C1&ts=" + body.TS + "&unfurls=" + unfurls(`{"https://elsewhere.example":{"title":"X"}}`),
+		"source=composer&unfurl_id=" + unfurlID + "&unfurls=" + unfurls(`{"https://example.com":{"title":"X"}}`),
+		"channel=C1&ts=1.000001&unfurls=" + unfurls(`{"https://example.com":{"title":"X"}}`),
+	} {
+		if result := call(rejected); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"error":"cannot_unfurl_url"`) {
+			t.Fatalf("%s: status=%d body=%s", rejected, result.Code, result.Body)
+		}
 	}
 }
 

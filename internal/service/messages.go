@@ -69,17 +69,27 @@ var (
 	ErrReminderTimeInPast            = errors.New("reminder time is in the past")
 	ErrReminderRecurring             = errors.New("a recurring reminder cannot be marked complete")
 	ErrReminderOwnedByOther          = errors.New("a reminder can only be completed by the member it is for")
-	ErrScheduledTimeInPast           = errors.New("scheduled message time is in the past")
-	ErrScheduledTimeTooFar           = errors.New("scheduled message time is more than 120 days away")
-	ErrScheduledTooMany              = errors.New("too many messages are scheduled in the channel window")
-	ErrInvalidUserGroup              = errors.New("user group name, handle, and members are invalid")
-	ErrInvalidCall                   = errors.New("call external id and join URL are required")
-	ErrInvalidEphemeral              = errors.New("ephemeral message recipient, conversation, and text are required")
-	ErrInvalidAccessLog              = errors.New("access log fields are invalid")
-	ErrInvalidEmoji                  = errors.New("custom emoji name or URL is invalid")
-	ErrEmojiAlreadyExists            = errors.New("custom emoji already exists")
-	ErrInvalidRemoteFile             = errors.New("remote file metadata is invalid")
-	ErrInvalidInviteRequest          = errors.New("invite request is invalid")
+	// The sentinels below each carry one Slack error code their operation's
+	// contract declares, so the handler can name the failure exactly rather
+	// than folding it into a generic invalid or not-found answer.
+	ErrSnoozeNotActive      = errors.New("no snooze is active")                          // dnd.endSnooze: snooze_not_active
+	ErrSnoozeTooLong        = errors.New("a snooze may last at most 1440 minutes")       // dnd.setSnooze: too_long
+	ErrReminderUnparseable  = errors.New("reminder time could not be parsed")            // reminders.add: cannot_parse
+	ErrNotStarred           = errors.New("the item is not starred")                      // stars.remove: not_starred
+	ErrUserGroupNameTaken   = errors.New("a user group with this name already exists")   // name_already_exists
+	ErrUserGroupHandleTaken = errors.New("a user group with this handle already exists") // handle_already_exists
+	ErrCannotUnfurlURL      = errors.New("the URL does not appear in the message")       // chat.unfurl: cannot_unfurl_url
+	ErrScheduledTimeInPast  = errors.New("scheduled message time is in the past")
+	ErrScheduledTimeTooFar  = errors.New("scheduled message time is more than 120 days away")
+	ErrScheduledTooMany     = errors.New("too many messages are scheduled in the channel window")
+	ErrInvalidUserGroup     = errors.New("user group name, handle, and members are invalid")
+	ErrInvalidCall          = errors.New("call external id and join URL are required")
+	ErrInvalidEphemeral     = errors.New("ephemeral message recipient, conversation, and text are required")
+	ErrInvalidAccessLog     = errors.New("access log fields are invalid")
+	ErrInvalidEmoji         = errors.New("custom emoji name or URL is invalid")
+	ErrEmojiAlreadyExists   = errors.New("custom emoji already exists")
+	ErrInvalidRemoteFile    = errors.New("remote file metadata is invalid")
+	ErrInvalidInviteRequest = errors.New("invite request is invalid")
 	// ErrInvitationExpired is distinct from ErrInvalidInviteRequest because the
 	// person reading it needs to know whether to ask for a new invitation or
 	// to check which address they signed in with.
@@ -8991,8 +9001,22 @@ func (m Messages) PostIncomingWebhook(ctx context.Context, workspaceID domain.Wo
 	return m.PostIncomingWebhookWithAttachments(ctx, workspaceID, appID, secret, text, blocks, "", threadTimestamp, idempotencyKey)
 }
 
+// Unfurl attaches link previews to a message.
+//
+// An app unfurls links in other people's messages, so the authority is
+// membership of the conversation (with links:write, which the transport
+// checks), not authorship: requiring the author refused every unfurl an app
+// was asked to make. Each key must be a URL the message actually contains -
+// Slack answers cannot_unfurl_url otherwise - and a call adds or replaces
+// previews per URL, leaving the previews of other URLs in place.
 func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, unfurls map[string]string) (domain.Message, error) {
-	message, err := m.messageForMutation(ctx, workspaceID, userID, conversation, timestamp)
+	if strings.TrimSpace(string(conversation)) == "" {
+		return domain.Message{}, ErrInvalidMessage
+	}
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversation); err != nil {
+		return domain.Message{}, err
+	}
+	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversation, timestamp)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -9006,7 +9030,22 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 	if err != nil {
 		return domain.Message{}, ErrInvalidMessage
 	}
-	message.Unfurls = normalized
+	for link := range normalized {
+		if !messageContainsLink(message, link) {
+			return domain.Message{}, ErrCannotUnfurlURL
+		}
+	}
+	merged := make(map[string]string, len(message.Unfurls)+len(normalized))
+	for link, preview := range message.Unfurls {
+		merged[link] = preview
+	}
+	for link, preview := range normalized {
+		merged[link] = preview
+	}
+	if messageUnfurlsTooLong(merged) {
+		return domain.Message{}, ErrInvalidMessage
+	}
+	message.Unfurls = merged
 	event, err := messageEvent(workspaceID, "message.unfurled", message)
 	if err != nil {
 		return domain.Message{}, err
@@ -9015,6 +9054,23 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 		return domain.Message{}, err
 	}
 	return message, nil
+}
+
+// messageContainsLink reports whether a URL appears in a message's text,
+// blocks or attachments. Slack's text escapes `&` as `&amp;`, and a JSON
+// encoder may escape `/` as `\/`, so both are undone before comparing.
+func messageContainsLink(message domain.Message, link string) bool {
+	link = strings.TrimSpace(link)
+	if link == "" {
+		return false
+	}
+	unescape := strings.NewReplacer("&amp;", "&", `\/`, "/", `\u0026`, "&")
+	for _, surface := range []string{message.Text, message.Blocks, message.Attachments} {
+		if strings.Contains(unescape.Replace(surface), link) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Messages) Update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text string) (domain.Message, error) {

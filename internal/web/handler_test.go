@@ -2911,7 +2911,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 		t.Fatal(err)
 	}
 	timestamp := domain.NewMessageTimestamp(message.CreatedAt)
-	if _, err := chat.Update(ctx, "T1", "U1", "Cdev", timestamp, "hello again"); err != nil {
+	if _, err := chat.Update(ctx, "T1", "U1", "Cdev", timestamp, "hello again https://example.test"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := chat.Unfurl(ctx, "T1", "U1", "Cdev", timestamp, map[string]string{"https://example.test": `{"title":"x"}`}); err != nil {

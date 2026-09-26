@@ -280,6 +280,12 @@ func recordedNonPinnedCodes() map[string]string {
 		"error_invalid_channels":         "current workflows.featured.list method reference",
 		"error_modifying_workflows":      "current workflows.featured.add, remove, and set method references",
 		"unknown_workflow_id":            "current functions.workflows.steps.list method reference",
+		// Slack answers a usergroups.create/update that takes a name or handle
+		// another group already uses with these codes; the pinned snapshot's
+		// enums declare only permission_denied and user_is_restricted, and the
+		// alternative - succeeding with a duplicate - is what this used to do.
+		"name_already_exists":   "usergroups.create and usergroups.update: the name is taken by another group",
+		"handle_already_exists": "usergroups.create and usergroups.update: the handle is taken by another group",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so

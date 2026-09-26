@@ -843,7 +843,7 @@ public final class Qualification {
             ChatPostMessageResponse root = methods.chatPostMessage(
                     com.slack.api.methods.request.chat.ChatPostMessageRequest.builder()
                             .channel("C1")
-                            .text("thread root")
+                            .text("thread root <https://example.com/qualification>")
                             .build());
             require(root.isOk(), "thread root failed: " + root.getError());
             com.slack.api.methods.response.chat.ChatUnfurlResponse unfurled = methods.chatUnfurl(
