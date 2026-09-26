@@ -2,6 +2,7 @@ package slack
 
 import (
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -166,6 +167,20 @@ func TestAssistantThreadWritesAcceptTheSDKsJSONArrays(t *testing.T) {
 		`{"channel_id":"C1","thread_ts":"`+message.TS+`","status":"is thinking...","loading_messages":["Reading the thread","Drafting"]}`)
 	if code := errorCode(t, status); code != "" {
 		t.Fatalf("setStatus answered %q", code)
+	}
+	// The form encoding carries the same list as a JSON-encoded string.
+	form := callSlackForm(t, handler, "/api/assistant.threads.setStatus",
+		"channel_id=C1&thread_ts="+message.TS+"&status=working&loading_messages="+url.QueryEscape(`["Reading"]`))
+	if code := errorCode(t, form); code != "" {
+		t.Fatalf("form-encoded setStatus answered %q", code)
+	}
+	eleven := `["1","2","3","4","5","6","7","8","9","10","11"]`
+	for _, invalid := range []string{eleven, `"not a list"`, `[1]`} {
+		refused := postJSON(handler, "/api/assistant.threads.setStatus",
+			`{"channel_id":"C1","thread_ts":"`+message.TS+`","status":"working","loading_messages":`+invalid+`}`)
+		if code := errorCode(t, refused); code != "invalid_arguments" {
+			t.Errorf("loading_messages %s answered %q, want invalid_arguments", invalid, code)
+		}
 	}
 }
 
