@@ -3051,7 +3051,7 @@ func (m Messages) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, actor, events.NewPayload("dialog.opened", events.String("dialog_id", string(id)), events.String("callback_id", strings.TrimSpace(callbackID))), now)
+	event, err := newEvent(workspaceID, actor, events.NewPayload("dialog.opened", events.String("dialog_id", string(id)), events.String("callback_id", strings.TrimSpace(callbackID)), events.String("user_id", string(trigger.UserID))), now)
 	if err != nil {
 		return err
 	}

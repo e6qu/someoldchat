@@ -3388,6 +3388,11 @@ type AppOption struct {
 	Value       string
 	Description string
 	Group       string
+	// Token vouches for Text when the option was loaded for a view: the
+	// client returns it with a chosen option so the service can put the
+	// option's text in view_submission and block_actions payloads, as Slack
+	// does, without trusting text the browser made up.
+	Token string
 }
 
 type AppShortcut struct {

@@ -4834,7 +4834,7 @@ func (r Remote) LoadAppOptions(ctx context.Context, workspaceID domain.Workspace
 			return nil, errors.New("typed application option is incomplete")
 		}
 		options = append(options, domain.AppOption{
-			Text: option.GetText(), Value: option.GetValue(), Description: option.GetDescription(), Group: option.GetGroup(),
+			Text: option.GetText(), Value: option.GetValue(), Description: option.GetDescription(), Group: option.GetGroup(), Token: option.GetToken(),
 		})
 	}
 	return options, nil
@@ -9361,7 +9361,7 @@ func (s *Server) LoadAppOptions(ctx context.Context, input *chatv1.AppOptionQuer
 	out := &chatv1.AppOptionListResponse{Options: make([]*chatv1.AppOption, 0, len(options))}
 	for _, option := range options {
 		out.Options = append(out.Options, &chatv1.AppOption{
-			Text: option.Text, Value: option.Value, Description: option.Description, Group: option.Group,
+			Text: option.Text, Value: option.Value, Description: option.Description, Group: option.Group, Token: option.Token,
 		})
 	}
 	return out, nil

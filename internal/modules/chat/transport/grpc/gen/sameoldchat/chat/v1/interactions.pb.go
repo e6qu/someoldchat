@@ -2290,11 +2290,13 @@ func (x *AppOptionQueryRequest) GetResponseBaseUrl() string {
 }
 
 type AppOption struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	Group         string                 `protobuf:"bytes,4,opt,name=group,proto3" json:"group,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Text        string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	Value       string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	Description string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	Group       string                 `protobuf:"bytes,4,opt,name=group,proto3" json:"group,omitempty"`
+	// token vouches for text when the option was loaded for a view.
+	Token         string `protobuf:"bytes,5,opt,name=token,proto3" json:"token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2353,6 +2355,13 @@ func (x *AppOption) GetDescription() string {
 func (x *AppOption) GetGroup() string {
 	if x != nil {
 		return x.Group
+	}
+	return ""
+}
+
+func (x *AppOption) GetToken() string {
+	if x != nil {
+		return x.Token
 	}
 	return ""
 }
@@ -3474,12 +3483,13 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\taction_id\x18\b \x01(\tR\bactionId\x12\x14\n" +
 	"\x05value\x18\t \x01(\tR\x05value\x12*\n" +
 	"\x11response_base_url\x18\n" +
-	" \x01(\tR\x0fresponseBaseUrl\"m\n" +
+	" \x01(\tR\x0fresponseBaseUrl\"\x83\x01\n" +
 	"\tAppOption\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x14\n" +
-	"\x05group\x18\x04 \x01(\tR\x05group\"Q\n" +
+	"\x05group\x18\x04 \x01(\tR\x05group\x12\x14\n" +
+	"\x05token\x18\x05 \x01(\tR\x05token\"Q\n" +
 	"\x15AppOptionListResponse\x128\n" +
 	"\aoptions\x18\x01 \x03(\v2\x1e.sameoldchat.chat.v1.AppOptionR\aoptions\"D\n" +
 	"\x12AppResponseRequest\x12\x14\n" +

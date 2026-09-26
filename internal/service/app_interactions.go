@@ -294,16 +294,17 @@ func (m Messages) DispatchViewBlockAction(ctx context.Context, workspaceID domai
 	if !viewContainsDispatchableAction(current.Payload, action.BlockID, action.ActionID, action.Type) {
 		return store.ErrNotFound
 	}
+	stateJSON, err := m.sanitizeViewState(current, action.State)
+	if err != nil {
+		return err
+	}
 	var state map[string]any
-	if json.Unmarshal([]byte(action.State), &state) != nil || state == nil {
+	if json.Unmarshal([]byte(stateJSON), &state) != nil || state == nil {
 		return ErrInvalidAppResponse
 	}
-	current.State = action.State
+	current.State = stateJSON
 	current.UpdatedAt = time.Now().UTC()
-	stateEvent, err := newEvent(current.WorkspaceID, userID, events.NewPayload("view.updated",
-		events.String("view_id", string(current.ID)), events.String("app_id", string(current.AppID)),
-		events.String("user_id", string(current.UserID)),
-	), current.UpdatedAt)
+	stateEvent, err := newEvent(current.WorkspaceID, userID, viewStateSavedPayload(current), current.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -328,6 +329,7 @@ func (m Messages) DispatchViewBlockAction(ctx context.Context, workspaceID domai
 	actionPayload := appBlockActionPayload(current.Payload, domain.AppBlockAction{
 		BlockID: action.BlockID, ActionID: action.ActionID, Type: action.Type, Value: action.Value,
 	})
+	withAcceptedOptionText(actionPayload, stateJSON, action.BlockID, action.ActionID)
 	payload := map[string]any{
 		"type":       "block_actions",
 		"api_app_id": snapshot.App.ID,
@@ -437,7 +439,7 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 		if requestErr != nil {
 			return nil, requestErr
 		}
-		return parseAppOptions(body)
+		return m.vouchViewOptions(query)(parseAppOptions(body))
 	}
 	_, _, capability, err := m.createInteractionCapabilities(ctx, query.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
 	if err != nil {
@@ -454,7 +456,7 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 	for {
 		response, responseErr := m.Store.GetSocketModeResponse(ctx, query.AppID, envelopeID)
 		if responseErr == nil {
-			return parseAppOptions([]byte(response.Payload))
+			return m.vouchViewOptions(query)(parseAppOptions([]byte(response.Payload)))
 		}
 		if !errors.Is(responseErr, store.ErrNotFound) {
 			return nil, responseErr
@@ -601,6 +603,10 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.ViewInteractionResult{}, err
 	}
+	stateJSON, err = m.sanitizeViewState(current, stateJSON)
+	if err != nil {
+		return domain.ViewInteractionResult{}, err
+	}
 	var state map[string]any
 	if json.Unmarshal([]byte(stateJSON), &state) != nil || state == nil {
 		return domain.ViewInteractionResult{}, ErrInvalidAppResponse
@@ -608,10 +614,7 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 	current.State = stateJSON
 	current.Errors = nil
 	current.UpdatedAt = time.Now().UTC()
-	stateEvent, err := newEvent(current.WorkspaceID, userID, events.NewPayload("view.updated",
-		events.String("view_id", string(current.ID)), events.String("app_id", string(current.AppID)),
-		events.String("user_id", string(current.UserID)),
-	), current.UpdatedAt)
+	stateEvent, err := newEvent(current.WorkspaceID, userID, viewStateSavedPayload(current), current.UpdatedAt)
 	if err != nil {
 		return domain.ViewInteractionResult{}, err
 	}

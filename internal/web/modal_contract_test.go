@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
+	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
@@ -118,4 +120,218 @@ func TestModalClosesAfterItsAppIsUninstalled(t *testing.T) {
 		t.Fatalf("close status=%d body=%s", response.Code, response.Body)
 	}
 	requireMissing(t, "closed modal", get(t, mux, "/app?channel=Cdev").Body.String(), `role="dialog"`)
+}
+
+// An option loaded through block_suggestion reports its text in the
+// submission, as Slack does; text the browser changed is dropped.
+func TestExternalSelectSubmissionCarriesLoadedOptionText(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedSocketModeModalApp(t, s, "")
+	seedOpenModal(t, s, "Vx", `{"type":"modal","title":{"type":"plain_text","text":"Ext"},"submit":{"type":"plain_text","text":"Go"},"blocks":[{"type":"input","block_id":"ex","label":{"type":"plain_text","text":"Ext"},"element":{"type":"external_select","action_id":"exa","min_query_length":0}}]}`)
+	messages := service.Messages{Store: s, AppCredentialKey: []byte(strings.Repeat("k", 32))}
+	answered := make(chan error, 1)
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			interaction, found, err := s.ClaimSocketModeInteraction(context.Background(), "A1", "modal-client", time.Minute)
+			if err != nil {
+				answered <- err
+				return
+			}
+			if found {
+				answered <- messages.HandleSocketModeResponse(context.Background(), "A1", interaction.EnvelopeID, []byte(`{"options":[{"text":{"type":"plain_text","text":"Option One"},"value":"one"}]}`))
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		answered <- errors.New("no block_suggestion arrived")
+	}()
+	loaded := postForm(t, mux, "/app/options?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "app_id": {"A1"}, "view_id": {"Vx"}, "block_id": {"ex"}, "action_id": {"exa"}, "channel": {"Cdev"}, "query": {"on"},
+	}.Encode(), false)
+	if err := <-answered; err != nil {
+		t.Fatal(err)
+	}
+	var options struct {
+		Options []struct{ Text, Value, Choice string } `json:"options"`
+	}
+	if loaded.Code != http.StatusOK || json.Unmarshal(loaded.Body.Bytes(), &options) != nil || len(options.Options) != 1 || options.Options[0].Choice == "" {
+		t.Fatalf("options status=%d body=%s", loaded.Code, loaded.Body)
+	}
+	submit := func(choice string) map[string]any {
+		response := postForm(t, mux, "/app/view/submit?channel=Cdev", url.Values{
+			"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vx"}, "input_0": {choice},
+		}.Encode(), false)
+		if response.Code != http.StatusAccepted {
+			t.Fatalf("submit status=%d body=%s", response.Code, response.Body)
+		}
+		values := viewState(t, claimInteraction(t, s))
+		return values["ex"].(map[string]any)["exa"].(map[string]any)["selected_option"].(map[string]any)
+	}
+	selected := submit(options.Options[0].Choice)
+	if selected["value"] != "one" || selected["text"].(map[string]any)["text"] != "Option One" || selected["token"] != nil {
+		t.Fatalf("selected_option = %v", selected)
+	}
+	forged, _ := decodeExternalChoice(options.Options[0].Choice)
+	forged.Text = "Something else"
+	selected = submit(encodeExternalChoice(forged))
+	if selected["value"] != "one" || selected["text"] != nil {
+		t.Fatalf("forged selected_option = %v", selected)
+	}
+}
+
+// The input script is served under the workspace policy, and the live stream
+// does not reload the page for a record that only saved what the viewer
+// entered (a reload would discard focus and newer typing).
+func TestViewInputScriptIsPermittedAndStateSavesDoNotReload(t *testing.T) {
+	if !strings.Contains(workspaceContentSecurityPolicy, inlineScriptHashes(viewInputScript)[0]) {
+		t.Fatal("the view input script is not permitted by the workspace policy")
+	}
+	if !strings.Contains(progressiveEnhancementScript, "viewFrame.state_only)return;window.location.reload()") {
+		t.Fatal("a state-only view record still reloads the workspace page")
+	}
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedSocketModeModalApp(t, s, "")
+	seedOpenModal(t, s, "Vp", elementsModal)
+	requireContains(t, "workspace scripts", get(t, mux, "/app?channel=Cdev").Body.String(), "window.sameoldchatLocalizeViews=localize")
+	postForm(t, mux, "/app/view/action?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vp"}, "modal_input_action": {"9"}, "input_0": {"x"}, "input_9": {"typed"},
+	}.Encode(), false)
+	records, err := s.ListEventsAfter(context.Background(), "T1", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := false
+	for _, record := range records {
+		saved = saved || record.Event.Topic == "view.updated" && strings.Contains(record.Event.Payload, `"state_only":true`)
+	}
+	if !saved {
+		t.Fatal("the block action's state save is not marked state_only")
+	}
+}
+
+const elementsModal = `{"type":"modal","title":{"type":"plain_text","text":"Probe"},"submit":{"type":"plain_text","text":"Go"},"blocks":[` +
+	`{"type":"input","block_id":"rt","label":{"type":"plain_text","text":"RichLabel"},"element":{"type":"rich_text_input","action_id":"rta","initial_value":{"type":"rich_text","elements":[{"type":"rich_text_section","elements":[{"type":"text","text":"Seed"}]}]}}},` +
+	`{"type":"input","block_id":"fi","optional":true,"label":{"type":"plain_text","text":"FileLabel"},"element":{"type":"file_input","action_id":"fia"}},` +
+	`{"type":"input","block_id":"dt","optional":true,"label":{"type":"plain_text","text":"When"},"element":{"type":"datetimepicker","action_id":"dta","initial_date_time":1700000000}},` +
+	`{"type":"input","block_id":"txt","optional":true,"label":{"type":"plain_text","text":"Txt"},"element":{"type":"plain_text_input","action_id":"ta","max_length":5,"min_length":2}},` +
+	`{"type":"input","block_id":"num","optional":true,"label":{"type":"plain_text","text":"Num"},"element":{"type":"number_input","action_id":"na","is_decimal_allowed":true,"min_value":"1","max_value":"9"}},` +
+	`{"type":"input","block_id":"dp","optional":true,"label":{"type":"plain_text","text":"Day"},"element":{"type":"datepicker","action_id":"dpa"}},` +
+	`{"type":"input","block_id":"us","optional":true,"label":{"type":"plain_text","text":"User"},"element":{"type":"users_select","action_id":"usa"}},` +
+	`{"type":"input","block_id":"ss","optional":true,"label":{"type":"plain_text","text":"Sel"},"element":{"type":"static_select","action_id":"ssa","options":[{"text":{"type":"plain_text","text":"One"},"value":"1"}]}},` +
+	`{"type":"input","block_id":"ex","optional":true,"label":{"type":"plain_text","text":"Ext"},"element":{"type":"external_select","action_id":"exa"}},` +
+	`{"type":"input","block_id":"disp","dispatch_action":true,"optional":true,"label":{"type":"plain_text","text":"Dispatch"},"element":{"type":"plain_text_input","action_id":"dispa","dispatch_action_config":{"trigger_actions_on":["on_character_entered"]}}}` +
+	`]}`
+
+// Every input element renders with its constraints, and a submission reports
+// entered values in Slack's shapes: rich_text for rich text, Unix seconds read
+// in the viewer's zone for a datetimepicker, and null for what was left empty.
+func TestModalInputElementsRenderAndSubmitInSlackShapes(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedSocketModeModalApp(t, s, "")
+	seedOpenModal(t, s, "Vp", elementsModal)
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "modal elements", body,
+		"RichLabel", ">Seed</textarea>", "FileLabel", "cannot attach files to app forms",
+		`value="2023-11-14T22:13" data-unix="1700000000"`, `minlength="2" maxlength="5"`,
+		`step="any" min="1" max="9"`, `data-dispatch-input="9" data-dispatch-on="character"`,
+		`name="modal_input_action" value="9"`, `name="timezone" data-browser-timezone value="UTC"`,
+	)
+	response := postForm(t, mux, "/app/view/submit?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vp"}, "timezone": {"America/New_York"},
+		"input_0": {"Hello\nworld"}, "input_2": {"2023-11-14T17:13"}, "input_3": {""}, "input_4": {"1.5"},
+		"input_5": {""}, "input_6": {""}, "input_7": {""}, "input_8": {""}, "input_9": {""},
+	}.Encode(), false)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("submit status=%d body=%s", response.Code, response.Body)
+	}
+	values := viewState(t, claimInteraction(t, s))
+	entry := func(block, action string) map[string]any {
+		return values[block].(map[string]any)[action].(map[string]any)
+	}
+	rich, _ := json.Marshal(entry("rt", "rta")["rich_text_value"])
+	if string(rich) != `{"elements":[{"elements":[{"text":"Hello\nworld","type":"text"}],"type":"rich_text_section"}],"type":"rich_text"}` {
+		t.Fatalf("rich_text_value = %s", rich)
+	}
+	if files, ok := entry("fi", "fia")["files"].([]any); !ok || len(files) != 0 {
+		t.Fatalf("optional file input = %v", entry("fi", "fia"))
+	}
+	if at := entry("dt", "dta")["selected_date_time"]; at != float64(1700000000-20) {
+		t.Fatalf("selected_date_time = %v, want the New York wall time as Unix seconds", at)
+	}
+	for _, empty := range []struct{ block, action, field string }{
+		{"txt", "ta", "value"}, {"dp", "dpa", "selected_date"}, {"us", "usa", "selected_user"},
+		{"ss", "ssa", "selected_option"}, {"ex", "exa", "selected_option"}, {"disp", "dispa", "value"},
+	} {
+		value, present := entry(empty.block, empty.action)[empty.field]
+		if !present || value != nil {
+			t.Fatalf("%s.%s = %v (present %v), want null", empty.block, empty.field, value, present)
+		}
+	}
+	if value := entry("num", "na")["value"]; value != "1.5" {
+		t.Fatalf("number value = %v", value)
+	}
+}
+
+// Slack's client refuses a submission that breaks an element's declared
+// constraints; the app is not asked.
+func TestModalSubmissionEnforcesElementConstraints(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedSocketModeModalApp(t, s, "")
+	seedOpenModal(t, s, "Vp", elementsModal)
+	for _, bad := range []struct {
+		field, value, message string
+	}{
+		{"input_3", "x", "Enter at least 2 characters."},
+		{"input_3", "toolong", "Enter no more than 5 characters."},
+		{"input_4", "12", "Enter a number no larger than 9."},
+		{"input_0", "", "This field is required."},
+	} {
+		form := url.Values{"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vp"}, "input_0": {"x"}}
+		form.Set(bad.field, bad.value)
+		response := postForm(t, mux, "/app/view/submit?channel=Cdev", form.Encode(), false)
+		if response.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("%s=%q status=%d", bad.field, bad.value, response.Code)
+		}
+		requireContains(t, "constraint error", response.Body.String(), bad.message)
+	}
+	if _, found, _ := s.ClaimSocketModeInteraction(context.Background(), "A1", "modal-client", time.Minute); found {
+		t.Fatal("an invalid submission reached the app")
+	}
+	seedOpenModal(t, s, "Vf", `{"type":"modal","title":{"type":"plain_text","text":"Files"},"submit":{"type":"plain_text","text":"Go"},"blocks":[{"type":"input","block_id":"fi","label":{"type":"plain_text","text":"Attach"},"element":{"type":"file_input","action_id":"fia"}}]}`)
+	response := postForm(t, mux, "/app/view/submit?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vf"}}.Encode(), false)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("required file input status=%d", response.Code)
+	}
+	requireContains(t, "required file input", response.Body.String(), "cannot attach files to app forms")
+}
+
+// An input block with dispatch_action sends block_actions for its own
+// element.
+func TestDispatchingInputSendsBlockActions(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedSocketModeModalApp(t, s, "")
+	seedOpenModal(t, s, "Vp", elementsModal)
+	response := postForm(t, mux, "/app/view/action?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vp"}, "modal_input_action": {"9"}, "input_0": {"x"}, "input_9": {"typed"},
+	}.Encode(), false)
+	if response.Code != http.StatusOK {
+		t.Fatalf("dispatch status=%d body=%s", response.Code, response.Body)
+	}
+	payload := claimInteraction(t, s)
+	actions, _ := payload["actions"].([]any)
+	if len(actions) != 1 {
+		t.Fatalf("dispatched payload = %v", payload)
+	}
+	action, _ := actions[0].(map[string]any)
+	if payload["type"] != "block_actions" || action["action_id"] != "dispa" || action["block_id"] != "disp" || action["value"] != "typed" {
+		t.Fatalf("dispatched payload = %v", payload)
+	}
+	// An input block without dispatch_action cannot be dispatched.
+	response = postForm(t, mux, "/app/view/action?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vp"}, "modal_input_action": {"3"}, "input_0": {"x"},
+	}.Encode(), false)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("non-dispatching input status=%d", response.Code)
+	}
 }

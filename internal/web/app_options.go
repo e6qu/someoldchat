@@ -13,7 +13,7 @@ import (
 )
 
 const appOptionsScript = `<script>(function(){
-function optionNode(value){var option=document.createElement('option');option.value=value.value;option.textContent=value.description?value.text+' — '+value.description:value.text;return option}
+function optionNode(value){var option=document.createElement('option');option.value=value.choice||value.value;option.textContent=value.description?value.text+' — '+value.description:value.text;return option}
 async function load(control){
  var input=control.querySelector('[data-options-query]'),button=control.querySelector('[data-options-load]'),results=control.querySelector('[data-options-results]'),choose=control.querySelector('[data-options-choose]'),status=control.querySelector('[data-options-status]'),form=control.closest('form');
  if(!input||!button||!results||!status||!form)return;
@@ -77,14 +77,20 @@ func (h Handler) appOptions(w http.ResponseWriter, r *http.Request) {
 		Value       string `json:"value"`
 		Description string `json:"description,omitempty"`
 		Group       string `json:"group,omitempty"`
+		// Choice is the <option value> for an option loaded into a view: it
+		// carries the text and the service's token so the submission can
+		// report the option's text as Slack does.
+		Choice string `json:"choice,omitempty"`
 	}
 	response := struct {
 		Options []option `json:"options"`
 	}{Options: make([]option, 0, len(options))}
 	for _, value := range options {
-		response.Options = append(response.Options, option{
-			Text: value.Text, Value: value.Value, Description: value.Description, Group: value.Group,
-		})
+		entry := option{Text: value.Text, Value: value.Value, Description: value.Description, Group: value.Group}
+		if value.Token != "" {
+			entry.Choice = encodeExternalChoice(externalChoice{Value: value.Value, Text: value.Text, Token: value.Token})
+		}
+		response.Options = append(response.Options, entry)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(response)
