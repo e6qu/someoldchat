@@ -378,6 +378,7 @@ var topicRules = []topicRule{
 	{topic: "list.download.started", note: "not pinned: lists postdate the snapshot"},
 	{topic: "dialog.opened", recipient: true, note: "an interaction payload, not an event; a different transport contract; addressed to the member the dialog was opened for"},
 	{topic: "dialog.closed", recipient: true, note: "an interaction payload, not an event; addressed to the member who submitted or cancelled the dialog"},
+	{topic: "dialog.updated", recipient: true, note: "an interaction payload, not an event; the app answered a dialog submission with errors, addressed to the member who submitted it"},
 	{topic: "app.home_opened", slack: translated("app_home_opened", appSurfaces, appHomeOpened),
 		note: "current first-party app_home_opened reference and @slack/types AppHomeOpenedEvent; app-targeted because opening one app must never fan out to another installed app"},
 	// A view belongs to one member (its user_id): the browser that shows it

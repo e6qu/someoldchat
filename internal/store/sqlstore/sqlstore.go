@@ -268,7 +268,8 @@ CREATE TABLE IF NOT EXISTS featured_workflows (
  UNIQUE (workspace_id, conversation_id, position)
 );
 CREATE INDEX IF NOT EXISTS featured_workflows_channels ON featured_workflows(workspace_id, conversation_id, position);
-CREATE TABLE IF NOT EXISTS dialogs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), payload TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS dialogs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), app_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, errors TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS dialogs_user_created ON dialogs(workspace_id, user_id, created_at);
 CREATE TABLE IF NOT EXISTS bots (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, image_36 TEXT NOT NULL DEFAULT '', image_48 TEXT NOT NULL DEFAULT '', image_72 TEXT NOT NULL DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS user_migrations (workspace_id TEXT NOT NULL REFERENCES workspaces(id), old_id TEXT NOT NULL, global_id TEXT NOT NULL, PRIMARY KEY (workspace_id, old_id), UNIQUE (workspace_id, global_id));
 CREATE INDEX IF NOT EXISTS app_approvals_workspace_status ON app_approvals(workspace_id, status, app_id);
@@ -578,7 +579,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 182
+const schemaVersion = 183
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3411,6 +3412,26 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	if version < 183 {
+		// A dialog is rendered by the first-party client and submitted to the
+		// app that opened it, so it records that app and the per-element
+		// errors the app answered a submission with. A dialog stored before
+		// this has no app to deliver to; the client closes it as unavailable.
+		columns, err := s.tableColumns(ctx, db, "dialogs")
+		if err != nil {
+			return err
+		}
+		if !columns["app_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE dialogs ADD COLUMN app_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate dialog app: %w", err)
+			}
+		}
+		if !columns["errors"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE dialogs ADD COLUMN errors TEXT NOT NULL DEFAULT '{}'`); err != nil {
+				return fmt.Errorf("migrate dialog errors: %w", err)
+			}
+		}
+	}
 	if version < 182 {
 		// Direct conversation keys were joined with NUL, which PostgreSQL text
 		// refuses, so no direct message could be opened there; SQLite and
@@ -4638,6 +4659,7 @@ var migratableTables = []string{
 	"calls",
 	"canvases",
 	"conversations",
+	"dialogs",
 	"draft_attachments",
 	"drafts",
 	"ephemeral_messages",
@@ -10099,7 +10121,11 @@ func (s *Store) CreateDialog(ctx context.Context, value domain.Dialog, event eve
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO dialogs(id, workspace_id, user_id, payload, created_at) VALUES (?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.Payload, value.CreatedAt.UTC().UnixNano()); err != nil {
+	encodedErrors, err := encodeDialogErrors(value.Errors)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO dialogs(id, workspace_id, user_id, app_id, payload, errors, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.AppID, value.Payload, encodedErrors, value.CreatedAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -10108,15 +10134,88 @@ func (s *Store) CreateDialog(ctx context.Context, value domain.Dialog, event eve
 	return tx.Commit()
 }
 
-func (s *Store) GetDialog(ctx context.Context, workspace domain.WorkspaceID, id domain.DialogID) (domain.Dialog, error) {
+const dialogColumns = `id, workspace_id, user_id, app_id, payload, errors, created_at`
+
+func scanDialog(row interface{ Scan(...any) error }) (domain.Dialog, error) {
 	var value domain.Dialog
 	var created int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, user_id, payload, created_at FROM dialogs WHERE workspace_id = ? AND id = ?`, workspace, id).Scan(&value.ID, &value.WorkspaceID, &value.UserID, &value.Payload, &created)
-	if err := translateNotFound(err); err != nil {
-		return domain.Dialog{}, err
+	var encodedErrors string
+	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.UserID, &value.AppID, &value.Payload, &encodedErrors, &created); err != nil {
+		return domain.Dialog{}, translateNotFound(err)
+	}
+	if err := json.Unmarshal([]byte(encodedErrors), &value.Errors); err != nil {
+		return domain.Dialog{}, fmt.Errorf("decode dialog %s errors: %w", value.ID, err)
+	}
+	if len(value.Errors) == 0 {
+		value.Errors = nil
 	}
 	value.CreatedAt = time.Unix(0, created).UTC()
 	return value, nil
+}
+
+func encodeDialogErrors(values map[string]string) (string, error) {
+	if len(values) == 0 {
+		return "{}", nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return "", store.InvalidArgument("invalid dialog errors")
+	}
+	return string(encoded), nil
+}
+
+func (s *Store) GetDialog(ctx context.Context, workspace domain.WorkspaceID, id domain.DialogID) (domain.Dialog, error) {
+	return scanDialog(s.db.QueryRowContext(ctx, `SELECT `+dialogColumns+` FROM dialogs WHERE workspace_id = ? AND id = ?`, workspace, id))
+}
+
+func (s *Store) GetCurrentDialog(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.Dialog, error) {
+	return scanDialog(s.db.QueryRowContext(ctx, `SELECT `+dialogColumns+` FROM dialogs WHERE workspace_id = ? AND user_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`, workspace, user))
+}
+
+func (s *Store) SetDialogErrors(ctx context.Context, value domain.Dialog, event events.Event) error {
+	encodedErrors, err := encodeDialogErrors(value.Errors)
+	if err != nil {
+		return err
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE dialogs SET errors = ? WHERE workspace_id = ? AND user_id = ? AND id = ?`, encodedErrors, value.WorkspaceID, value.UserID, value.ID)
+	if err != nil {
+		return classify(err)
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed == 0 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteDialog(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.DialogID, event events.Event) error {
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM dialogs WHERE workspace_id = ? AND user_id = ? AND id = ?`, workspace, user, id)
+	if err != nil {
+		return classify(err)
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed == 0 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreateBot(ctx context.Context, value domain.Bot) error {

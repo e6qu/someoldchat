@@ -5358,7 +5358,65 @@ func (s *Store) GetDialog(_ context.Context, workspace domain.WorkspaceID, id do
 	if !exists || value.WorkspaceID != workspace {
 		return domain.Dialog{}, store.ErrNotFound
 	}
-	return value, nil
+	return cloneDialog(value), nil
+}
+
+func (s *Store) GetCurrentDialog(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.Dialog, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var current domain.Dialog
+	found := false
+	for _, value := range s.dialogs {
+		if value.WorkspaceID != workspace || value.UserID != user {
+			continue
+		}
+		if !found || value.CreatedAt.After(current.CreatedAt) || (value.CreatedAt.Equal(current.CreatedAt) && value.ID > current.ID) {
+			current, found = value, true
+		}
+	}
+	if !found {
+		return domain.Dialog{}, store.ErrNotFound
+	}
+	return cloneDialog(current), nil
+}
+
+func (s *Store) SetDialogErrors(_ context.Context, value domain.Dialog, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.dialogs[value.ID]
+	if !exists || current.WorkspaceID != value.WorkspaceID || current.UserID != value.UserID {
+		return store.ErrNotFound
+	}
+	current.Errors = make(map[string]string, len(value.Errors))
+	for name, message := range value.Errors {
+		current.Errors[name] = message
+	}
+	s.dialogs[value.ID] = current
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) DeleteDialog(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.DialogID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.dialogs[id]
+	if !exists || current.WorkspaceID != workspace || current.UserID != user {
+		return store.ErrNotFound
+	}
+	delete(s.dialogs, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func cloneDialog(value domain.Dialog) domain.Dialog {
+	if value.Errors != nil {
+		copied := make(map[string]string, len(value.Errors))
+		for name, message := range value.Errors {
+			copied[name] = message
+		}
+		value.Errors = copied
+	}
+	return value
 }
 
 func (s *Store) CreateBot(_ context.Context, value domain.Bot) error {

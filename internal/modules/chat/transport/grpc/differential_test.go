@@ -3903,6 +3903,13 @@ func parityCases() []parityCase {
 				// and the spent trigger is what makes the refusal observable:
 				// both compositions must reject the payload, not the trigger.
 				invalidDialogErr := chat.OpenDialog(ctx, "T1", "UBOT", "A1", "trigger_replay", `{"callback_id":"ticket"}`)
+				// The member the trigger belongs to sees the dialog, a submission
+				// that leaves a required element empty is refused before the app
+				// is asked, and cancelling closes it.
+				openDialog, currentErr := chat.CurrentDialog(ctx, "T1", "U1")
+				refused, submitErr := chat.SubmitDialog(ctx, "T1", "U1", "C1", openDialog.ID, map[string]string{}, "https://chat.example.test")
+				cancelErr := chat.CancelDialog(ctx, "T1", "U1", "C1", openDialog.ID, "https://chat.example.test")
+				_, afterCancelErr := chat.CurrentDialog(ctx, "T1", "U1")
 				return []any{
 					opened.Type, opened.ExternalID, opened.AppID, opened.UserID,
 					opened.Hash != "", opened.RootViewID == "", opened.PreviousViewID == "",
@@ -3916,6 +3923,9 @@ func parityCases() []parityCase {
 					messagesTab.Kind, messagesTab.ID != "",
 					dialogErr == nil, invalidDialogErr != nil,
 					errors.Is(invalidDialogErr, service.ErrInvalidDialog),
+					currentErr == nil, openDialog.AppID, openDialog.UserID, openDialog.Payload != "",
+					submitErr == nil, refused.Errors["summary"], refused.Pending,
+					cancelErr == nil, errors.Is(afterCancelErr, storepkg.ErrNotFound),
 				}, nil
 			},
 		},

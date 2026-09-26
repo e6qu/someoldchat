@@ -1257,7 +1257,7 @@ func TestCurrentWorkflowPermissionFeaturedAndStepMethodsAreDurable(t *testing.T)
 func TestDialogOpenHTTP(t *testing.T) {
 	handler, store := testHandlerWithStore()
 	seedHTTPInteractionTrigger(t, store, "trigger-http")
-	values := url.Values{"trigger_id": {"trigger-http"}, "dialog": {`{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`}}
+	values := url.Values{"trigger_id": {"trigger-http"}, "dialog": {`{"callback_id":"callback","title":"Title","elements":[{"type":"text","name":"summary","label":"Summary"}]}`}}
 	req := httptest.NewRequest(http.MethodPost, "/api/dialog.open", strings.NewReader(values.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Bearer token")

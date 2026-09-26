@@ -106,6 +106,14 @@ func TestViewsMethodsNameEachFailureAsSlackDoes(t *testing.T) {
 	expectSlackError(t, "publish modal", call("/api/views.publish", url.Values{"user_id": {"U1"}, "view": {testModal("x", "")}}), "invalid_arguments")
 
 	seedHTTPInteractionTrigger(t, st, "t-dialog")
+	for name, invalid := range map[string]string{
+		"element without a name": `{"callback_id":"c","title":"T","elements":[{"type":"text","label":"L"}]}`,
+		"title over 24":          `{"callback_id":"c","title":"` + strings.Repeat("t", 25) + `","elements":[{"type":"text","label":"L","name":"n"}]}`,
+		"eleven elements":        `{"callback_id":"c","title":"T","elements":[` + strings.TrimSuffix(strings.Repeat(`{"type":"text","label":"L","name":"n"},`, 11), ",") + `]}`,
+		"select without options": `{"callback_id":"c","title":"T","elements":[{"type":"select","label":"L","name":"n"}]}`,
+	} {
+		expectSlackError(t, "dialog.open "+name, call("/api/dialog.open", url.Values{"trigger_id": {"t-dialog"}, "dialog": {invalid}}), "validation_errors")
+	}
 	dialog := `{"callback_id":"c","title":"T","elements":[{"type":"text","label":"L","name":"n"}]}`
 	if body := call("/api/dialog.open", url.Values{"trigger_id": {"t-dialog"}, "dialog": {dialog}}); body["ok"] != true {
 		t.Fatalf("dialog.open = %v", body)

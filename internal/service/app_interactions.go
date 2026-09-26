@@ -1276,8 +1276,24 @@ func (m Messages) HandleSocketModeResponse(ctx context.Context, appID domain.App
 	if json.Unmarshal([]byte(interaction.Payload), &interactionPayload) == nil &&
 		(interactionPayload.Type == "shortcut" || interactionPayload.Type == "message_action" ||
 			(interactionPayload.Type == "block_actions" && interactionPayload.Container.Type == "view") ||
-			interactionPayload.Type == "view_closed") {
+			interactionPayload.Type == "view_closed" || interactionPayload.Type == "dialog_cancellation") {
 		return nil
+	}
+	if interactionPayload.Type == "dialog_submission" {
+		// The acknowledgement answers the member's open dialog from this
+		// app: empty closes it, {"errors":[…]} keeps it open with them.
+		current, err := m.Store.GetCurrentDialog(ctx, interaction.WorkspaceID, interaction.UserID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if current.AppID != appID {
+			return nil
+		}
+		_, err = m.applyDialogResponse(ctx, current, payload)
+		return err
 	}
 	if interactionPayload.Type == "block_suggestion" {
 		return m.Store.RecordSocketModeResponse(ctx, domain.SocketModeResponse{

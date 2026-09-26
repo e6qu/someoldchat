@@ -3024,38 +3024,31 @@ func (m Messages) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
 	}
-	trigger, err := m.consumeAppTrigger(ctx, workspaceID, appID, triggerID)
+	// The dialog is validated before the trigger is spent, as a view is, so
+	// an app can correct it and retry within the trigger's lifetime.
+	payload = strings.TrimSpace(payload)
+	definition, err := ParseDialog(payload)
 	if err != nil {
 		return err
 	}
-	payload = strings.TrimSpace(payload)
-	var fields map[string]json.RawMessage
-	if payload == "" || json.Unmarshal([]byte(payload), &fields) != nil || fields == nil {
-		return ErrInvalidDialog
-	}
-	for _, name := range []string{"callback_id", "title", "elements"} {
-		if _, ok := fields[name]; !ok {
-			return ErrInvalidDialog
-		}
-	}
-	var callbackID, title string
-	if json.Unmarshal(fields["callback_id"], &callbackID) != nil || strings.TrimSpace(callbackID) == "" || json.Unmarshal(fields["title"], &title) != nil || strings.TrimSpace(title) == "" {
-		return ErrInvalidDialog
-	}
-	var elements []json.RawMessage
-	if json.Unmarshal(fields["elements"], &elements) != nil || len(elements) == 0 {
-		return ErrInvalidDialog
+	trigger, err := m.consumeAppTrigger(ctx, workspaceID, appID, triggerID)
+	if err != nil {
+		return err
 	}
 	id, err := domain.NewDialogID()
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, actor, events.NewPayload("dialog.opened", events.String("dialog_id", string(id)), events.String("callback_id", strings.TrimSpace(callbackID)), events.String("user_id", string(trigger.UserID))), now)
+	value := domain.Dialog{ID: id, WorkspaceID: workspaceID, UserID: trigger.UserID, AppID: appID, Payload: payload, CreatedAt: now}
+	event, err := newEvent(workspaceID, actor, events.NewPayload("dialog.opened",
+		events.String("dialog_id", string(id)), events.String("callback_id", strings.TrimSpace(definition.CallbackID)),
+		events.String("app_id", string(appID)), events.String("user_id", string(trigger.UserID)),
+	), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.CreateDialog(ctx, domain.Dialog{ID: id, WorkspaceID: workspaceID, UserID: trigger.UserID, Payload: payload, CreatedAt: now}, event)
+	return m.Store.CreateDialog(ctx, value, event)
 }
 
 func (m Messages) BotInfo(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, botID domain.BotID) (domain.Bot, error) {

@@ -744,7 +744,7 @@ func TestDialogOpenValidatesAndPersistsPayload(t *testing.T) {
 	seedInteractionTrigger(t, s, "trigger-1")
 	seedInteractionTrigger(t, s, "trigger-2")
 	messages := Messages{Store: s}
-	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-1", `{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`); err != nil {
+	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-1", `{"callback_id":"callback","title":"Title","elements":[{"type":"text","name":"summary","label":"Summary"}]}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-2", `{"callback_id":"callback","title":"Title"}`); err != ErrInvalidDialog {

@@ -2422,7 +2422,7 @@ func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.OpenDialog(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["trigger_id"]), fields["dialog"]); err != nil {
-		reason := mapServiceError(err, "validation_errors")
+		reason := mapServiceErrorNamed(err, "validation_errors", "validation_errors", "")
 		switch {
 		case errors.Is(err, service.ErrTriggerExchanged):
 			reason = "trigger_exchanged"

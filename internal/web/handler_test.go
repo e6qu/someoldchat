@@ -2978,6 +2978,25 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	if err := s.DeleteView(ctx, "T1", "U1", firstView.ID, false, viewEvent("event-view-closed", "view.closed", now.Add(4*time.Second))); err != nil {
 		t.Fatal(err)
 	}
+	// A legacy dialog is opened, answered with errors, and closed.
+	dialogEvent := func(id, topic string) events.Event {
+		event, err := events.New(domain.EventID(id), "T1", "U1", events.NewPayload(topic, events.String("dialog_id", "D-live"), events.String("user_id", "U1")), now.Add(5*time.Second))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return event
+	}
+	dialog := domain.Dialog{ID: "D-live", WorkspaceID: "T1", UserID: "U1", AppID: "A-live", Payload: `{"callback_id":"c","title":"Live","elements":[{"type":"text","name":"n","label":"L"}]}`, CreatedAt: now}
+	if err := s.CreateDialog(ctx, dialog, dialogEvent("event-dialog-opened", "dialog.opened")); err != nil {
+		t.Fatal(err)
+	}
+	dialog.Errors = map[string]string{"n": "No"}
+	if err := s.SetDialogErrors(ctx, dialog, dialogEvent("event-dialog-updated", "dialog.updated")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteDialog(ctx, "T1", "U1", dialog.ID, dialogEvent("event-dialog-closed", "dialog.closed")); err != nil {
+		t.Fatal(err)
+	}
 	// A huddle is started, joined by a second person, carries a signal and a
 	// reaction, and is then left by both, so every huddle topic the page
 	// subscribes to is emitted by a real mutation rather than asserted from a
@@ -3011,7 +3030,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	emitted := map[string]bool{}
 	for _, record := range records {
 		topic := record.Event.Topic
-		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") || strings.HasPrefix(topic, "huddle.") {
+		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") || strings.HasPrefix(topic, "dialog.") || strings.HasPrefix(topic, "huddle.") {
 			emitted[topic] = true
 		}
 	}

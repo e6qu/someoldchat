@@ -674,6 +674,13 @@ type Store interface {
 	ListFeaturedWorkflows(context.Context, domain.WorkspaceID, []domain.ConversationID) ([]domain.FeaturedWorkflow, error)
 	CreateDialog(context.Context, domain.Dialog, events.Event) error
 	GetDialog(context.Context, domain.WorkspaceID, domain.DialogID) (domain.Dialog, error)
+	// GetCurrentDialog is the member's most recently opened dialog that is
+	// still open.
+	GetCurrentDialog(context.Context, domain.WorkspaceID, domain.UserID) (domain.Dialog, error)
+	// SetDialogErrors records the per-element errors an app answered a
+	// submission with; DeleteDialog closes a dialog on submission or cancel.
+	SetDialogErrors(context.Context, domain.Dialog, events.Event) error
+	DeleteDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.DialogID, events.Event) error
 	CreateBot(context.Context, domain.Bot) error
 	GetBot(context.Context, domain.WorkspaceID, domain.BotID) (domain.Bot, error)
 	CreateUserMigration(context.Context, domain.UserMigration, events.Event) error

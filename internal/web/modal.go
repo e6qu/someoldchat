@@ -32,6 +32,10 @@ type modalView struct {
 	SubmitDisabled  bool
 	Error           string
 	Blocks          []modalBlockView
+	// Dialog marks a legacy dialog (dialog.open) shown with the modal
+	// machinery: it submits to /app/dialog/submit and closes through
+	// /app/dialog/close, identified by dialog_id.
+	Dialog bool
 }
 
 type modalBlockView struct {
@@ -82,6 +86,9 @@ type modalInputView struct {
 	// block_actions itself, on the triggers DispatchOn names.
 	Dispatch   bool
 	DispatchOn string
+	// Unsupported explains an element this client cannot collect a value
+	// for; it is shown instead of a control, never silently dropped.
+	Unsupported string
 }
 
 // DispatchTriggers is when an input block with dispatch_action sends
@@ -208,6 +215,9 @@ func (h Handler) newModalView(ctx context.Context, principal auth.Principal, val
 				MinValue: action.MinValue, MaxValue: action.MaxValue, Step: action.Step,
 				DecimalAllowed: action.DecimalAllowed, DateTimeUnix: action.DateTimeUnix,
 				Dispatch: boolValue(raw["dispatch_action"]), DispatchOn: action.DispatchOn,
+			}
+			if input.Control == "file" {
+				input.Unsupported = fileInputUnsupported
 			}
 			values, hasSubmitted := submitted[inputIndex]
 			if !hasSubmitted && submitted == nil {
@@ -671,7 +681,7 @@ func (h Handler) viewSubmit(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	values, ok := h.decodeModalMutation(w, r)
+	values, ok := h.decodeModalMutation(w, r, "view_id")
 	if !ok {
 		return
 	}
@@ -745,9 +755,9 @@ func modalInputFailures(modal *modalView, submitted modalFormState) map[string]s
 		for _, value := range values {
 			entered = entered || strings.TrimSpace(value) != ""
 		}
-		if input.Control == "file" {
+		if input.Unsupported != "" {
 			if !input.Optional {
-				failures[input.BlockID] = fileInputUnsupported
+				failures[input.BlockID] = input.Unsupported + " " + unsupportedRequired
 			}
 			continue
 		}
@@ -785,10 +795,14 @@ func modalInputFailures(modal *modalView, submitted modalFormState) map[string]s
 	return failures
 }
 
-// fileInputUnsupported is shown on a required file_input: this client cannot
-// attach files to an app form, and saying so is better than submitting the
-// form without a value the app requires.
-const fileInputUnsupported = "This client cannot attach files to app forms yet, so this form cannot be submitted here."
+// fileInputUnsupported explains a file_input: this client cannot attach files
+// to an app form, and saying so is better than submitting the form without a
+// value the app requires.
+const fileInputUnsupported = "This client cannot attach files to app forms yet."
+
+// unsupportedRequired completes the explanation for a required element this
+// client cannot fill.
+const unsupportedRequired = "The app requires a value here, so this form cannot be submitted from this client."
 
 func (h Handler) viewAction(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
@@ -796,7 +810,7 @@ func (h Handler) viewAction(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	values, ok := h.decodeModalMutation(w, r)
+	values, ok := h.decodeModalMutation(w, r, "view_id")
 	if !ok {
 		return
 	}
@@ -886,7 +900,7 @@ func modalDispatchInputAt(modal *modalView, index int) (modalInputView, bool) {
 		return modalInputView{}, false
 	}
 	for _, block := range modal.Blocks {
-		if block.Input != nil && block.Input.Index == index && block.Input.Dispatch && block.Input.Control != "file" {
+		if block.Input != nil && block.Input.Index == index && block.Input.Dispatch && block.Input.Unsupported == "" {
 			return *block.Input, true
 		}
 	}
@@ -965,7 +979,7 @@ func (h Handler) renderModalResult(w http.ResponseWriter, r *http.Request, princ
 	h.renderApp(w, r, reader, state)
 }
 
-func (h Handler) decodeModalMutation(w http.ResponseWriter, r *http.Request) (map[string][]string, bool) {
+func (h Handler) decodeModalMutation(w http.ResponseWriter, r *http.Request, idField string) (map[string][]string, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
 	var err error
 	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
@@ -973,11 +987,17 @@ func (h Handler) decodeModalMutation(w http.ResponseWriter, r *http.Request) (ma
 	} else {
 		err = r.ParseForm()
 	}
-	if err != nil || len(r.Form["view_id"]) != 1 || len(r.Form["_csrf"]) != 1 {
+	if err != nil || len(r.Form["_csrf"]) != 1 {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That app form could not be read", "Reload the workspace and submit the modal again.")
 		return nil, false
 	}
+	// The CSRF check precedes every other check on the form, so a forged
+	// request is refused as forged rather than as incomplete.
 	if !h.requireCSRF(w, r) {
+		return nil, false
+	}
+	if len(r.Form[idField]) != 1 || strings.TrimSpace(r.Form[idField][0]) == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That app form could not be read", "Reload the workspace and submit the form again.")
 		return nil, false
 	}
 	return r.Form, true

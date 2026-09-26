@@ -297,7 +297,7 @@ func (h Handler) appHomeAction(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	values, ok := h.decodeModalMutation(w, r)
+	values, ok := h.decodeModalMutation(w, r, "view_id")
 	if !ok {
 		return
 	}

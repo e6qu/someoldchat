@@ -224,6 +224,9 @@ type Service interface {
 	ListFeaturedWorkflows(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) ([]domain.FeaturedWorkflow, error)
 	ListFunctionWorkflowSteps(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, domain.WorkflowID, string, domain.AppID) ([]domain.WorkflowStepVersion, error)
 	OpenDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) error
+	CurrentDialog(context.Context, domain.WorkspaceID, domain.UserID) (domain.Dialog, error)
+	SubmitDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.DialogID, map[string]string, string) (domain.ViewInteractionResult, error)
+	CancelDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.DialogID, string) error
 	BotInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.BotID) (domain.Bot, error)
 	MigrationExchange(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID, bool) (domain.MigrationExchange, error)
 	AdminDisconnectSharedConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.WorkspaceID) error

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -178,6 +179,79 @@ func TestExternalSelectSubmissionCarriesLoadedOptionText(t *testing.T) {
 	if selected["value"] != "one" || selected["text"] != nil {
 		t.Fatalf("forged selected_option = %v", selected)
 	}
+}
+
+// A dialog.open dialog renders in the client, submits dialog_submission with
+// Slack's submission map, shows the errors the app answers with, closes on an
+// empty acknowledgement, and sends dialog_cancellation when asked to.
+func TestLegacyDialogRendersSubmitsAndCancels(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedSocketModeModalApp(t, s, "")
+	ctx := context.Background()
+	messages := service.Messages{Store: s, AppCredentialKey: []byte(strings.Repeat("k", 32))}
+	openDialog := func(id domain.DialogID, payload string) {
+		t.Helper()
+		if err := s.CreateDialog(ctx, domain.Dialog{ID: id, WorkspaceID: "T1", UserID: "U1", AppID: "A1", Payload: payload, CreatedAt: time.Now().UTC()},
+			events.Event{ID: domain.EventID("E-" + string(id)), WorkspaceID: "T1", Topic: "dialog.opened", Payload: `{"type":"dialog.opened","user_id":"U1"}`, CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	openDialog("Dl1", `{"callback_id":"ticket","title":"File a ticket","submit_label":"File","state":"s1","elements":[`+
+		`{"type":"text","name":"summary","label":"Summary","min_length":3},`+
+		`{"type":"textarea","name":"details","label":"Details","optional":true},`+
+		`{"type":"select","name":"priority","label":"Priority","options":[{"label":"High","value":"high"},{"label":"Low","value":"low"}]},`+
+		`{"type":"select","name":"owner","label":"Owner","data_source":"users","optional":true},`+
+		`{"type":"select","name":"remote","label":"Remote","data_source":"external","optional":true}]}`)
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "dialog", body, "File a ticket", `action="/app/dialog/submit?channel=Cdev"`, `name="dialog_id" value="Dl1"`,
+		"Summary", "Details", `<option value="high"`, "Priority", "Owner", "cannot load this app", ">File</button>")
+	submit := func(values url.Values) *httptest.ResponseRecorder {
+		values.Set("_csrf", auth.CSRFToken("session"))
+		values.Set("dialog_id", "Dl1")
+		return postForm(t, mux, "/app/dialog/submit?channel=Cdev", values.Encode(), false)
+	}
+	if response := submit(url.Values{"input_0": {"ab"}, "input_2": {"high"}}); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "Enter between 3 and 150 characters.") {
+		t.Fatalf("short summary status=%d", response.Code)
+	}
+	if response := submit(url.Values{"input_0": {"Broken build"}, "input_2": {"high"}}); response.Code != http.StatusAccepted {
+		t.Fatalf("submit status=%d body=%s", response.Code, response.Body)
+	}
+	interaction, found, err := s.ClaimSocketModeInteraction(ctx, "A1", "modal-client", time.Minute)
+	if err != nil || !found {
+		t.Fatalf("no dialog_submission: found=%v err=%v", found, err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(interaction.Payload), &payload); err != nil {
+		t.Fatal(err)
+	}
+	submission, _ := payload["submission"].(map[string]any)
+	if payload["type"] != "dialog_submission" || payload["callback_id"] != "ticket" || payload["state"] != "s1" ||
+		submission["summary"] != "Broken build" || submission["priority"] != "high" || submission["details"] != nil ||
+		payload["response_url"] == "" || payload["channel"].(map[string]any)["id"] != "Cdev" {
+		t.Fatalf("dialog_submission = %v", payload)
+	}
+	// The app's acknowledgement is applied to the member's open dialog.
+	if err := messages.HandleSocketModeResponse(ctx, "A1", interaction.EnvelopeID, []byte(`{"errors":[{"name":"summary","error":"Be more specific"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, "dialog errors", get(t, mux, "/app?channel=Cdev").Body.String(), "Be more specific")
+	if err := messages.HandleSocketModeResponse(ctx, "A1", interaction.EnvelopeID, []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AckSocketModeInteraction(ctx, "A1", interaction.EnvelopeID, "modal-client"); err != nil {
+		t.Fatal(err)
+	}
+	requireMissing(t, "closed dialog", get(t, mux, "/app?channel=Cdev").Body.String(), "File a ticket")
+
+	openDialog("Dl2", `{"callback_id":"feedback","title":"Feedback","notify_on_cancel":true,"elements":[{"type":"text","name":"note","label":"Note"}]}`)
+	response := postForm(t, mux, "/app/dialog/close?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}, "dialog_id": {"Dl2"}}.Encode(), false)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("cancel status=%d body=%s", response.Code, response.Body)
+	}
+	if cancelled := claimInteraction(t, s); cancelled["type"] != "dialog_cancellation" || cancelled["callback_id"] != "feedback" {
+		t.Fatalf("dialog_cancellation = %v", cancelled)
+	}
+	requireMissing(t, "cancelled dialog", get(t, mux, "/app?channel=Cdev").Body.String(), "Feedback")
 }
 
 // The input script is served under the workspace policy, and the live stream

@@ -19,7 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DialogsService_OpenDialog_FullMethodName = "/sameoldchat.chat.v1.DialogsService/OpenDialog"
+	DialogsService_OpenDialog_FullMethodName    = "/sameoldchat.chat.v1.DialogsService/OpenDialog"
+	DialogsService_CurrentDialog_FullMethodName = "/sameoldchat.chat.v1.DialogsService/CurrentDialog"
+	DialogsService_SubmitDialog_FullMethodName  = "/sameoldchat.chat.v1.DialogsService/SubmitDialog"
+	DialogsService_CancelDialog_FullMethodName  = "/sameoldchat.chat.v1.DialogsService/CancelDialog"
 )
 
 // DialogsServiceClient is the client API for DialogsService service.
@@ -27,6 +30,9 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DialogsServiceClient interface {
 	OpenDialog(ctx context.Context, in *OpenDialogRequest, opts ...grpc.CallOption) (*DialogMutationResponse, error)
+	CurrentDialog(ctx context.Context, in *CurrentDialogRequest, opts ...grpc.CallOption) (*Dialog, error)
+	SubmitDialog(ctx context.Context, in *SubmitDialogRequest, opts ...grpc.CallOption) (*ViewInteractionResult, error)
+	CancelDialog(ctx context.Context, in *CancelDialogRequest, opts ...grpc.CallOption) (*DialogMutationResponse, error)
 }
 
 type dialogsServiceClient struct {
@@ -47,11 +53,44 @@ func (c *dialogsServiceClient) OpenDialog(ctx context.Context, in *OpenDialogReq
 	return out, nil
 }
 
+func (c *dialogsServiceClient) CurrentDialog(ctx context.Context, in *CurrentDialogRequest, opts ...grpc.CallOption) (*Dialog, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Dialog)
+	err := c.cc.Invoke(ctx, DialogsService_CurrentDialog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dialogsServiceClient) SubmitDialog(ctx context.Context, in *SubmitDialogRequest, opts ...grpc.CallOption) (*ViewInteractionResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ViewInteractionResult)
+	err := c.cc.Invoke(ctx, DialogsService_SubmitDialog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dialogsServiceClient) CancelDialog(ctx context.Context, in *CancelDialogRequest, opts ...grpc.CallOption) (*DialogMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DialogMutationResponse)
+	err := c.cc.Invoke(ctx, DialogsService_CancelDialog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DialogsServiceServer is the server API for DialogsService service.
 // All implementations should embed UnimplementedDialogsServiceServer
 // for forward compatibility.
 type DialogsServiceServer interface {
 	OpenDialog(context.Context, *OpenDialogRequest) (*DialogMutationResponse, error)
+	CurrentDialog(context.Context, *CurrentDialogRequest) (*Dialog, error)
+	SubmitDialog(context.Context, *SubmitDialogRequest) (*ViewInteractionResult, error)
+	CancelDialog(context.Context, *CancelDialogRequest) (*DialogMutationResponse, error)
 }
 
 // UnimplementedDialogsServiceServer should be embedded to have
@@ -63,6 +102,15 @@ type UnimplementedDialogsServiceServer struct{}
 
 func (UnimplementedDialogsServiceServer) OpenDialog(context.Context, *OpenDialogRequest) (*DialogMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenDialog not implemented")
+}
+func (UnimplementedDialogsServiceServer) CurrentDialog(context.Context, *CurrentDialogRequest) (*Dialog, error) {
+	return nil, status.Error(codes.Unimplemented, "method CurrentDialog not implemented")
+}
+func (UnimplementedDialogsServiceServer) SubmitDialog(context.Context, *SubmitDialogRequest) (*ViewInteractionResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitDialog not implemented")
+}
+func (UnimplementedDialogsServiceServer) CancelDialog(context.Context, *CancelDialogRequest) (*DialogMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CancelDialog not implemented")
 }
 func (UnimplementedDialogsServiceServer) testEmbeddedByValue() {}
 
@@ -102,6 +150,60 @@ func _DialogsService_OpenDialog_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DialogsService_CurrentDialog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CurrentDialogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DialogsServiceServer).CurrentDialog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DialogsService_CurrentDialog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DialogsServiceServer).CurrentDialog(ctx, req.(*CurrentDialogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DialogsService_SubmitDialog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitDialogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DialogsServiceServer).SubmitDialog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DialogsService_SubmitDialog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DialogsServiceServer).SubmitDialog(ctx, req.(*SubmitDialogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DialogsService_CancelDialog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelDialogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DialogsServiceServer).CancelDialog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DialogsService_CancelDialog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DialogsServiceServer).CancelDialog(ctx, req.(*CancelDialogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DialogsService_ServiceDesc is the grpc.ServiceDesc for DialogsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -112,6 +214,18 @@ var DialogsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OpenDialog",
 			Handler:    _DialogsService_OpenDialog_Handler,
+		},
+		{
+			MethodName: "CurrentDialog",
+			Handler:    _DialogsService_CurrentDialog_Handler,
+		},
+		{
+			MethodName: "SubmitDialog",
+			Handler:    _DialogsService_SubmitDialog_Handler,
+		},
+		{
+			MethodName: "CancelDialog",
+			Handler:    _DialogsService_CancelDialog_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
