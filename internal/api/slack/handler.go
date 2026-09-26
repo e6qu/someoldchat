@@ -11739,9 +11739,16 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // equivalent form-encoded request echoed `my_error`; flattening it always broke
 // workflows.stepFailed for every official SDK. It is decided by the value's own
 // shape instead — see normalizeJSONField.
+//
+// The set is held against its sources by TestStructuredFieldsCoverEveryJSONArgument:
+// every argument the pinned snapshot describes as JSON-bearing, and every
+// argument an official SDK sends as a JSON array or object in a JSON body. It
+// once omitted `prompts` and `loading_messages`, which python-slack-sdk sends
+// as arrays for assistant.threads.setSuggestedPrompts and setStatus, so both
+// methods answered invalid_array_arg to the SDK's own request.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages":
 		return true
 	default:
 		return false
@@ -11752,6 +11759,14 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 	switch {
 	case isListField(name):
 		return normalizeJSONListField(value)
+	case (isStructuredField(name) || name == "profile") && jsonIsString(value):
+		// A structured argument may arrive as the JSON-encoded string the
+		// form encoding carries — python-slack-sdk sends `blocks="[...]"` as
+		// exactly that inside a JSON body, and Slack accepts it. The string is
+		// that encoded document, so it is flattened exactly as its
+		// form-encoded twin is; forwarding it verbatim handed the handler a
+		// quoted string, and chat.postMessage answered no_text.
+		return normalizeJSONScalar(value)
 	case isStructuredField(name):
 		var structured any
 		if err := json.Unmarshal(value, &structured); err != nil || structured == nil {
@@ -11785,14 +11800,21 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 // `type: string`, and 83 of the 99 pinned enums declare invalid_array_arg for
 // exactly the case of an array where a scalar belongs.
 func jsonIsObject(value json.RawMessage) bool {
+	return jsonStartsWith(value, '{')
+}
+
+// jsonIsString reports whether a raw JSON value is a string.
+func jsonIsString(value json.RawMessage) bool {
+	return jsonStartsWith(value, '"')
+}
+
+func jsonStartsWith(value json.RawMessage, first byte) bool {
 	for _, b := range value {
 		switch b {
 		case ' ', '\t', '\n', '\r':
 			continue
-		case '{':
-			return true
 		default:
-			return false
+			return b == first
 		}
 	}
 	return false
