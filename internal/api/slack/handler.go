@@ -7530,6 +7530,41 @@ func (h Handler) changeConversationArchived(w http.ResponseWriter, r *http.Reque
 	return true, err
 }
 
+// directConversationUsers names the users a conversations.open of an existing
+// IM or MPIM stands for: its members other than the caller, or the caller
+// alone for a self-DM. A conversation the caller cannot see is
+// channel_not_found; a channel that is not a direct conversation is
+// method_not_supported_for_channel_type, as the pinned enum names it.
+func (h Handler) directConversationUsers(r *http.Request, principal auth.Principal, channelID domain.ConversationID) (string, string) {
+	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channelID)
+	if err != nil {
+		return "", mapServiceError(err, "channel_not_found")
+	}
+	if conversation.Kind != domain.ConversationTypeIM && conversation.Kind != domain.ConversationTypeMPIM {
+		return "", "method_not_supported_for_channel_type"
+	}
+	page, err := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channelID, domain.PageRequest{Limit: 10})
+	if err != nil {
+		return "", mapServiceError(err, "channel_not_found")
+	}
+	others := make([]string, 0, len(page.Users))
+	member := false
+	for _, user := range page.Users {
+		if user.ID == principal.UserID {
+			member = true
+			continue
+		}
+		others = append(others, string(user.ID))
+	}
+	if !member {
+		return "", "channel_not_found"
+	}
+	if len(others) == 0 {
+		others = append(others, string(principal.UserID))
+	}
+	return strings.Join(others, ","), ""
+}
+
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticateConversation(r, conversationWriteGrant, domain.ConversationTypeIM, domain.ConversationTypeMPIM)
 	if err != nil {
@@ -7541,14 +7576,28 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	if strings.TrimSpace(fields["users"]) == "" {
-		// /conversations.open enumerates users_list_not_supplied.
-		writeError(w, "users_list_not_supplied")
-		return
+	rawUsers := strings.TrimSpace(fields["users"])
+	if rawUsers == "" {
+		channelID := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+		if channelID == "" {
+			// /conversations.open enumerates users_list_not_supplied.
+			writeError(w, "users_list_not_supplied")
+			return
+		}
+		// "Resume a conversation by supplying an im or mpim's ID": the
+		// conversation's own members are the users an open names, so the
+		// resume is the same open — it reopens a closed DM and reports
+		// already_open for an open one.
+		resumed, failure := h.directConversationUsers(r, principal, channelID)
+		if failure != "" {
+			writeError(w, failure)
+			return
+		}
+		rawUsers = resumed
 	}
 	users := make([]domain.UserID, 0)
 	seen := make(map[domain.UserID]struct{})
-	for _, raw := range strings.Split(fields["users"], ",") {
+	for _, raw := range strings.Split(rawUsers, ",") {
 		user := domain.UserID(strings.TrimSpace(raw))
 		if user == "" {
 			writeError(w, "invalid_array_arg")
