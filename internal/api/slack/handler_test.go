@@ -5197,7 +5197,7 @@ func TestDecodeJSONFieldsPreservesStructuredArrayArguments(t *testing.T) {
 		"blocks":[{"type":"divider"}],
 		"attachments":[{"text":"attachment"}],
 		"files":[{"id":"F1","title":"report"}]
-	}`))
+	}`), normalizeJSONField)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -1077,6 +1078,39 @@ func TestAPITestEchoesTheSameErrorForJSONAndForm(t *testing.T) {
 		if envelope.OK || envelope.Error != "my_error" {
 			t.Errorf("%s: error=%q, want my_error", name, envelope.Error)
 		}
+	}
+}
+
+// api.test echoes its arguments on success too — it echoed them only beside a
+// forced error, so `{"ok":true}` answered every SDK smoke test that asserts
+// its arguments came back — and a JSON body's nested values are echoed as
+// structure rather than refused as non-scalar arguments. The credential is
+// never echoed.
+func TestAPITestEchoesItsArguments(t *testing.T) {
+	handler, _ := testHandlerWithStore()
+	decode := func(response *httptest.ResponseRecorder) map[string]any {
+		t.Helper()
+		var body map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("body=%s", response.Body)
+		}
+		return body
+	}
+	form := decode(callAPI(t, handler, http.MethodPost, "/api/api.test?q=1", "foo=bar&token=secret"))
+	if form["ok"] != true || !reflect.DeepEqual(form["args"], map[string]any{"foo": "bar", "q": "1"}) {
+		t.Fatalf("form echo=%v", form)
+	}
+	nested := decode(callJSON(t, handler, "/api/api.test", `{"foo":{"a":[1,true]},"n":2,"s":"x"}`))
+	want := map[string]any{"foo": map[string]any{"a": []any{float64(1), true}}, "n": float64(2), "s": "x"}
+	if nested["ok"] != true || !reflect.DeepEqual(nested["args"], want) {
+		t.Fatalf("JSON echo=%v", nested)
+	}
+	failed := decode(callAPI(t, handler, http.MethodGet, "/api/api.test?error=my_error&foo=bar", ""))
+	if failed["ok"] != false || failed["error"] != "my_error" || !reflect.DeepEqual(failed["args"], map[string]any{"error": "my_error", "foo": "bar"}) {
+		t.Fatalf("forced error echo=%v", failed)
+	}
+	if bare := decode(callAPI(t, handler, http.MethodPost, "/api/api.test", "")); bare["ok"] != true || bare["args"] != nil {
+		t.Fatalf("argument-less echo=%v", bare)
 	}
 }
 

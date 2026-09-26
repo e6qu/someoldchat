@@ -75,6 +75,7 @@ operations:
     status: behavior-compatible
     evidence:
       - go-test:internal/api/slack:TestAPITestEchoesTheSameErrorForJSONAndForm
+      - go-test:internal/api/slack:TestAPITestEchoesItsArguments
   - method: bookmarks.add
     status: behavior-compatible
     provenance: slack-reference

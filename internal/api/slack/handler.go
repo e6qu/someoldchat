@@ -1134,18 +1134,48 @@ func writeAppDatastoreError(w http.ResponseWriter, err error) {
 	}
 }
 
+// apiTest echoes the arguments it received under `args`, on success as well as
+// on the error a caller forces with `error` — that echo is what the method is
+// for, and SDK smoke tests assert it. A JSON body's nested values are echoed as
+// the structure they arrived as; only `error` keeps its scalar contract, since
+// it becomes the response's error code. The credential is never echoed.
 func (h Handler) apiTest(w http.ResponseWriter, r *http.Request) {
-	fields, err := decodeFields(w, r)
+	nested := map[string]json.RawMessage{}
+	fields, err := decodeArguments(w, r, func(name string, value json.RawMessage) (string, error) {
+		if name == "error" || jsonIsString(value) {
+			return normalizeJSONField(name, value)
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, value); err != nil {
+			return "", decodeFailure("invalid_json", "field is not valid JSON")
+		}
+		nested[name] = json.RawMessage(compact.Bytes())
+		return compact.String(), nil
+	})
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	errorName := strings.TrimSpace(fields["error"])
-	if errorName != "" {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": errorName, "args": map[string]string{"error": errorName}})
+	args := make(map[string]any, len(fields))
+	for name, value := range fields {
+		if name == "token" {
+			continue
+		}
+		if raw, ok := nested[name]; ok {
+			args[name] = raw
+			continue
+		}
+		args[name] = value
+	}
+	if errorName := strings.TrimSpace(fields["error"]); errorName != "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": errorName, "args": args})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	response := map[string]any{"ok": true}
+	if len(args) != 0 {
+		response["args"] = args
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) history(w http.ResponseWriter, r *http.Request) {
@@ -11554,6 +11584,14 @@ func requestCharset(header string) error {
 // reported as a conflicting duplicate rather than resolved by the same precedence
 // every other encoding uses.
 func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
+	return decodeArguments(w, r, normalizeJSONField)
+}
+
+// decodeArguments is decodeFields with the JSON member decoding supplied by the
+// caller. api.test is the one caller that needs another: it echoes whatever a
+// JSON body carried, nested values included, where every other method refuses
+// a non-scalar in a scalar argument.
+func decodeArguments(w http.ResponseWriter, r *http.Request, jsonMember func(name string, value json.RawMessage) (string, error)) (map[string]string, error) {
 	fields := make(map[string]string)
 	if err := collectFormValues(fields, r.URL.Query()); err != nil {
 		return nil, err
@@ -11565,7 +11603,7 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 	}
 	contentType := strings.ToLower(strings.TrimSpace(strings.SplitN(header, ";", 2)[0]))
 	if contentType == "application/json" {
-		body, err := decodeJSONFields(r.Body)
+		body, err := decodeJSONFields(r.Body, jsonMember)
 		if err != nil {
 			// Every raw encoding/json failure is a malformed document; `invalid_json` is
 			// the code the pinned enums declare for it. Returning the bare error left the
@@ -11629,57 +11667,75 @@ type readCloser struct {
 	io.Closer
 }
 
-func decodeJSONFields(body io.Reader) (map[string]string, error) {
+func decodeJSONFields(body io.Reader, jsonMember func(name string, value json.RawMessage) (string, error)) (map[string]string, error) {
 	fields := make(map[string]string)
-	decoder := json.NewDecoder(io.LimitReader(body, maxRequestBody))
-	start, err := decoder.Token()
-	if err == io.EOF {
-		return fields, nil
-	}
+	err := decodeJSONObject(body, func(name string, value json.RawMessage) error {
+		normalized, err := jsonMember(name, value)
+		if err != nil {
+			return err
+		}
+		fields[name] = normalized
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	return fields, nil
+}
+
+// decodeJSONObject walks a JSON request body that must be one object, handing
+// each member to field once. An empty body is an empty object. Duplicate
+// names, a non-object document and trailing values are refused here, so every
+// caller shares one definition of a well-formed JSON request.
+func decodeJSONObject(body io.Reader, field func(name string, value json.RawMessage) error) error {
+	decoder := json.NewDecoder(io.LimitReader(body, maxRequestBody))
+	start, err := decoder.Token()
+	if err == io.EOF {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	if delimiter, ok := start.(json.Delim); !ok || delimiter != '{' {
-		return nil, decodeFailure("json_not_object", "JSON request must be an object")
+		return decodeFailure("json_not_object", "JSON request must be an object")
 	}
 	seen := make(map[string]struct{})
 	for decoder.More() {
 		key, err := decoder.Token()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		name, ok := key.(string)
 		if !ok {
-			return nil, decodeFailure("invalid_json", "JSON object field name is invalid")
+			return decodeFailure("invalid_json", "JSON object field name is invalid")
 		}
 		if _, exists := seen[name]; exists {
-			return nil, decodeFailure("invalid_json", "request contains duplicate JSON field")
+			return decodeFailure("invalid_json", "request contains duplicate JSON field")
 		}
 		seen[name] = struct{}{}
 		var value json.RawMessage
 		if err := decoder.Decode(&value); err != nil {
-			return nil, err
+			return err
 		}
-		fields[name], err = normalizeJSONField(name, value)
-		if err != nil {
-			return nil, err
+		if err := field(name, value); err != nil {
+			return err
 		}
 	}
 	end, err := decoder.Token()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if delimiter, ok := end.(json.Delim); !ok || delimiter != '}' {
-		return nil, decodeFailure("invalid_json", "JSON request object is invalid")
+		return decodeFailure("invalid_json", "JSON request object is invalid")
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return nil, decodeFailure("invalid_json", "request contains multiple JSON values")
+			return decodeFailure("invalid_json", "request contains multiple JSON values")
 		}
-		return nil, err
+		return err
 	}
-	return fields, nil
+	return nil
 }
 
 func collectFormValues(fields map[string]string, source map[string][]string) error {

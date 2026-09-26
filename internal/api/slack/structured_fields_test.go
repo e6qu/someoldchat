@@ -99,7 +99,7 @@ func TestStructuredFieldsCoverEveryJSONArgument(t *testing.T) {
 			t.Errorf("%s is sent as JSON by an official SDK but the decoder flattens it", name)
 			continue
 		}
-		fields, err := decodeJSONFields(strings.NewReader(`{"` + name + `":` + shape + `}`))
+		fields, err := decodeJSONFields(strings.NewReader(`{"`+name+`":`+shape+`}`), normalizeJSONField)
 		if err != nil {
 			t.Errorf("%s: the SDK's JSON body %s was refused: %v", name, shape, err)
 			continue
@@ -136,7 +136,7 @@ func TestStructuredArgumentsAcceptAJSONEncodedString(t *testing.T) {
 		t.Fatalf("the blocks were not stored: %s", result.Body)
 	}
 	for name, value := range map[string]string{"blocks": blocks, "profile": `{"status_text":"a"}`} {
-		fromJSON, err := decodeJSONFields(strings.NewReader(`{"` + name + `":` + string(mustMarshal(t, value)) + `}`))
+		fromJSON, err := decodeJSONFields(strings.NewReader(`{"`+name+`":`+string(mustMarshal(t, value))+`}`), normalizeJSONField)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
