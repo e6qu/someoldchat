@@ -5099,8 +5099,8 @@ func (r Remote) RemoveBookmark(ctx context.Context, workspaceID domain.Workspace
 	return requireAcknowledgement(out.GetOk(), "bookmark removal")
 }
 
-func (r Remote) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, due time.Time) (domain.Reminder, error) {
-	out, err := r.reminders.AddReminder(ctx, &chatv1.AddReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Text: text, Time: due.Unix()})
+func (r Remote) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, schedule domain.ReminderSchedule) (domain.Reminder, error) {
+	out, err := r.reminders.AddReminder(ctx, &chatv1.AddReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Text: text, Time: schedule.Due.Unix(), Recurrence: string(schedule.Recurrence), TimeZone: schedule.TimeZone})
 	if err != nil {
 		return domain.Reminder{}, err
 	}
@@ -10793,7 +10793,8 @@ func (s *Server) removeBookmarkProto(ctx context.Context, input *chatv1.Bookmark
 }
 
 func (s *Server) addReminderProto(ctx context.Context, input *chatv1.AddReminderRequest) (*chatv1.Reminder, error) {
-	reminder, err := s.implementation.AddReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), input.GetText(), time.Unix(input.GetTime(), 0).UTC())
+	reminder, err := s.implementation.AddReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), input.GetText(),
+		domain.ReminderSchedule{Due: time.Unix(input.GetTime(), 0).UTC(), Recurrence: domain.ReminderRecurrence(input.GetRecurrence()), TimeZone: input.GetTimeZone()})
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -12327,7 +12328,8 @@ func decodeProtoStarPage(value *chatv1.StarPage) (domain.StarPage, error) {
 }
 
 func encodeProtoReminder(value domain.Reminder) *chatv1.Reminder {
-	result := &chatv1.Reminder{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), CreatorId: string(value.Creator), UserId: string(value.User), Text: value.Text, Time: value.Time.Unix(), Recurring: value.Recurring}
+	result := &chatv1.Reminder{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), CreatorId: string(value.Creator), UserId: string(value.User), Text: value.Text, Time: value.Time.Unix(), Recurring: value.Recurring,
+		Recurrence: string(value.Recurrence), TimeZone: value.TimeZone, RecurrenceAnchor: unixOrZero(value.RecurrenceAnchor)}
 	if !value.CompleteAt.IsZero() {
 		result.CompleteTs = value.CompleteAt.Unix()
 	}
@@ -12338,7 +12340,8 @@ func decodeProtoReminder(value *chatv1.Reminder) (domain.Reminder, error) {
 	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetCreatorId() == "" || value.GetUserId() == "" || value.GetText() == "" || value.GetTime() <= 0 {
 		return domain.Reminder{}, errors.New("typed reminder is incomplete")
 	}
-	result := domain.Reminder{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.ReminderID(value.GetId()), Creator: domain.UserID(value.GetCreatorId()), User: domain.UserID(value.GetUserId()), Text: value.GetText(), Time: time.Unix(value.GetTime(), 0).UTC(), Recurring: value.GetRecurring()}
+	result := domain.Reminder{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.ReminderID(value.GetId()), Creator: domain.UserID(value.GetCreatorId()), User: domain.UserID(value.GetUserId()), Text: value.GetText(), Time: time.Unix(value.GetTime(), 0).UTC(), Recurring: value.GetRecurring(),
+		Recurrence: domain.ReminderRecurrence(value.GetRecurrence()), TimeZone: value.GetTimeZone(), RecurrenceAnchor: timeFromUnix(value.GetRecurrenceAnchor())}
 	if value.GetCompleteTs() != 0 {
 		result.CompleteAt = time.Unix(value.GetCompleteTs(), 0).UTC()
 	}

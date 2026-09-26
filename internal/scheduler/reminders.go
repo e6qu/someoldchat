@@ -147,26 +147,34 @@ func (w ReminderWorker) postChannelReminder(ctx context.Context, reminder domain
 // calendar recurrence behaves. Daily and weekly have no month-length to clamp,
 // so they still advance by a fixed span.
 func NextReminderDue(reminder domain.LaterReminder, after time.Time) (time.Time, error) {
-	if reminder.Recurrence == domain.ReminderOnce {
+	return nextRecurrence(reminder.Recurrence, reminder.TimeZone, reminder.RecurrenceAnchor, reminder.DueAt, after)
+}
+
+// nextRecurrence is NextReminderDue for any reminder: Later reminders and the
+// Web API's recurring reminders.add reminders recur the same way.
+func nextRecurrence(recurrence domain.ReminderRecurrence, timeZone string, anchor, due, after time.Time) (time.Time, error) {
+	if recurrence == domain.ReminderOnce {
 		return time.Time{}, nil
 	}
-	location, err := time.LoadLocation(reminder.TimeZone)
+	if timeZone == "" {
+		timeZone = "UTC"
+	}
+	location, err := time.LoadLocation(timeZone)
 	if err != nil {
 		return time.Time{}, err
 	}
-	anchor := reminder.RecurrenceAnchor
 	if anchor.IsZero() {
 		// A reminder stored before the anchor existed carries none; its current
 		// due instant is the best anchor available and is at least self-consistent.
-		anchor = reminder.DueAt
+		anchor = due
 	}
 	anchorLocal := anchor.In(location)
 	afterLocal := after.In(location)
-	next := reminder.DueAt.In(location)
+	next := due.In(location)
 	for !next.After(afterLocal) {
-		next = advanceReminder(reminder.Recurrence, anchorLocal, next, location)
+		next = advanceReminder(recurrence, anchorLocal, next, location)
 		if next.IsZero() {
-			return time.Time{}, store.InvalidArgument("Later reminder recurrence is invalid")
+			return time.Time{}, store.InvalidArgument("reminder recurrence is invalid")
 		}
 	}
 	return next.UTC(), nil

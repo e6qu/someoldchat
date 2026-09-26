@@ -2760,7 +2760,7 @@ func aReminderIsDeliveredOnce(t *testing.T, open opener) {
 		return events.Event{ID: domain.EventID(name + "-" + suffix), WorkspaceID: workspaceID, ActorID: userID,
 			Topic: "reminder.delivered", Payload: "{}", CreatedAt: now}
 	}
-	claimed, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, notice("first"))
+	claimed, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, time.Time{}, notice("first"))
 	if err != nil || !claimed {
 		t.Fatalf("the first claim did not win: claimed=%t err=%v", claimed, err)
 	}
@@ -2780,7 +2780,7 @@ func aReminderIsDeliveredOnce(t *testing.T, open opener) {
 		t.Fatalf("the member was marked reminded and shown %d reminders", reminded)
 	}
 	// The second claim loses rather than delivering again, and writes no notice.
-	second, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, notice("second"))
+	second, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, time.Time{}, notice("second"))
 	if err != nil || second {
 		t.Fatalf("a delivered reminder was claimed twice: claimed=%t err=%v", second, err)
 	}
@@ -2810,9 +2810,44 @@ func aReminderIsDeliveredOnce(t *testing.T, open opener) {
 	// A reminder that is not there loses the claim rather than failing. The
 	// worker only claims what it has just read as due, so losing and never
 	// existing are the same answer to it.
-	absent, err := repository.MarkReminderDelivered(ctx, workspaceID, domain.ReminderID("Rm-absent-"+suffix), now, notice("absent"))
+	absent, err := repository.MarkReminderDelivered(ctx, workspaceID, domain.ReminderID("Rm-absent-"+suffix), now, time.Time{}, notice("absent"))
 	if err != nil || absent {
 		t.Fatalf("claiming a reminder that does not exist: claimed=%t err=%v", absent, err)
+	}
+
+	// A recurring reminder keeps its cadence, zone and anchor, and its claim
+	// moves it to the next occurrence rather than retiring it; a second claim
+	// at the same instant loses.
+	weekly := domain.ReminderID("Rm-weekly-" + suffix)
+	if err := repository.CreateReminder(ctx, domain.Reminder{
+		WorkspaceID: workspaceID, ID: weekly, Creator: userID, User: userID, Text: "weekly", Time: now.Add(-time.Second),
+		Recurring: true, Recurrence: domain.ReminderWeekly, TimeZone: "Europe/Paris", RecurrenceAnchor: now.Add(-time.Second),
+	}, events.Event{ID: domain.EventID("evt-weekly-" + suffix), WorkspaceID: workspaceID, ActorID: userID,
+		Topic: "reminder.created", Payload: string(weekly), CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.GetReminder(ctx, workspaceID, userID, weekly)
+	if err != nil || stored.Recurrence != domain.ReminderWeekly || stored.TimeZone != "Europe/Paris" || !stored.RecurrenceAnchor.Equal(now.Add(-time.Second)) || !stored.Recurring {
+		t.Fatalf("recurring reminder=%+v err=%v", stored, err)
+	}
+	next := now.Add(7*24*time.Hour - time.Second)
+	if claimed, err := repository.MarkReminderDelivered(ctx, workspaceID, weekly, now, next, notice("weekly")); err != nil || !claimed {
+		t.Fatalf("recurring claim=%t err=%v", claimed, err)
+	}
+	if claimed, err := repository.MarkReminderDelivered(ctx, workspaceID, weekly, now, next, notice("weekly-again")); err != nil || claimed {
+		t.Fatalf("a recurring reminder was claimed twice: claimed=%t err=%v", claimed, err)
+	}
+	moved, err := repository.GetReminder(ctx, workspaceID, userID, weekly)
+	if err != nil || !moved.Time.Equal(next) {
+		t.Fatalf("recurring reminder after delivery=%+v err=%v", moved, err)
+	}
+	nextDue, err := repository.DueReminders(ctx, workspaceID, next, 10)
+	if err != nil || len(nextDue) != 2 || nextDue[1].ID != weekly {
+		t.Fatalf("the next occurrence is not due at its time: %+v err=%v", nextDue, err)
+	}
+	// A reminder written with no zone reads back in UTC on every profile.
+	if unzoned, err := repository.ReminderInWorkspace(ctx, workspaceID, future); err != nil || unzoned.TimeZone != "UTC" {
+		t.Fatalf("unzoned reminder=%+v err=%v", unzoned, err)
 	}
 }
 

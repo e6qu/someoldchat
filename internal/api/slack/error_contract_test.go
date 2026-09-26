@@ -806,8 +806,14 @@ func TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse(t *testing.
 	if created.Reminder.Time < time.Now().Unix() {
 		t.Fatalf("time=300 stored %d, which is in the past", created.Reminder.Time)
 	}
-	if envelope := decodeEnvelope(t, callAPI(t, handler, http.MethodPost, "/api/reminders.add", "text=standup&time=in+15+minutes")); envelope.Error != "cannot_parse" {
-		t.Fatalf("natural language time: body=%+v, want cannot_parse", envelope)
+	// The phrases Slack documents are read; anything else is cannot_parse.
+	if envelope := decodeEnvelope(t, callAPI(t, handler, http.MethodPost, "/api/reminders.add", "text=standup&time=in+15+minutes")); !envelope.OK {
+		t.Fatalf("natural language time: body=%+v", envelope)
+	}
+	for _, phrase := range []string{"whenever", "in 15 fortnights", "every blue moon", "yesterday"} {
+		if envelope := decodeEnvelope(t, callAPI(t, handler, http.MethodPost, "/api/reminders.add", "text=standup&time="+url.QueryEscape(phrase))); envelope.Error != "cannot_parse" {
+			t.Fatalf("time=%q: body=%+v, want cannot_parse", phrase, envelope)
+		}
 	}
 }
 

@@ -741,7 +741,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := remote.RemoveBookmark(ctx, "T1", "U1", "C1", bookmark.ID); err != nil {
 		t.Fatalf("remove bookmark: %v", err)
 	}
-	reminder, err := remote.AddReminder(ctx, "T1", "U1", "", "remote reminder", time.Now().UTC().Add(time.Hour))
+	reminder, err := remote.AddReminder(ctx, "T1", "U1", "", "remote reminder", domain.ReminderSchedule{Due: time.Now().UTC().Add(time.Hour)})
 	if err != nil || reminder.ID == "" || reminder.Text != "remote reminder" {
 		t.Fatalf("reminder=%+v err=%v", reminder, err)
 	}

@@ -1064,13 +1064,21 @@ await assert.rejects(
 	reminderClient.reminders.add({ text: "not another user's reminder", time: 300, user: "U2" }),
 	(error) => error?.data?.error === "cannot_add_others",
 );
+// Slack's documented natural-language forms are read; a recurring one is
+// reported as recurring.
+const phrased = await reminderClient.reminders.add({ text: "documented natural language", time: "in 15 minutes" });
+assert.equal(phrased.ok, true);
+assert.ok(phrased.reminder.time > Date.now() / 1000 + 14 * 60);
+const recurringReminder = await reminderClient.reminders.add({ text: "weekly sync", time: "every Thursday at 9am" });
+assert.equal(recurringReminder.ok, true);
+assert.equal(recurringReminder.reminder.recurring, true);
 await assert.rejects(
-	reminderClient.reminders.add({ text: "documented natural language", time: "in 15 minutes" }),
+	reminderClient.reminders.add({ text: "undocumented phrasing", time: "whenever" }),
 	(error) => error?.data?.error === "cannot_parse",
 );
 const reminders = await reminderClient.reminders.list();
 assert.equal(reminders.ok, true);
-assert.equal(reminders.reminders.length, 1);
+assert.equal(reminders.reminders.length, 3);
 const reminderInfo = await reminderClient.reminders.info({ reminder: reminder.reminder.id });
 assert.equal(reminderInfo.ok, true);
 assert.equal(reminderInfo.reminder.id, reminder.reminder.id);

@@ -2382,9 +2382,25 @@ type Reminder struct {
 	Creator     UserID
 	User        UserID
 	Text        string
-	Time        time.Time
-	CompleteAt  time.Time
-	Recurring   bool
+	// Time is when the reminder next comes due; a recurring reminder's Time
+	// moves to its next occurrence each time it is delivered.
+	Time       time.Time
+	CompleteAt time.Time
+	// Recurring is Slack's flag; Recurrence, TimeZone and RecurrenceAnchor
+	// say how a recurring reminder recurs ("every Thursday" in the member's
+	// zone, positioned by its first occurrence).
+	Recurring        bool
+	Recurrence       ReminderRecurrence
+	TimeZone         string
+	RecurrenceAnchor time.Time
+}
+
+// ReminderSchedule is when a reminders.add reminder comes due and whether,
+// and in which zone, it recurs.
+type ReminderSchedule struct {
+	Due        time.Time
+	Recurrence ReminderRecurrence
+	TimeZone   string
 }
 
 type ReminderPage struct {

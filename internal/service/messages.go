@@ -1192,18 +1192,22 @@ type searchClock struct {
 	location *time.Location
 }
 
-// searchClockFor is the searcher's clock. The member's zone is the one their
+// MemberLocation is the zone a member's day is reckoned in: the one their
 // notification schedule carries - the only zone this product records for a
 // member, supplied by their own browser - and UTC when they have none.
-func (m Messages) searchClockFor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) searchClock {
-	clock := searchClock{now: time.Now(), location: time.UTC}
+func (m Messages) MemberLocation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) *time.Location {
 	preferences, err := m.Store.GetWorkspaceNotificationPreferences(ctx, workspaceID, userID)
 	if err == nil && preferences.Schedule.TimeZone != "" {
 		if location, loadErr := time.LoadLocation(preferences.Schedule.TimeZone); loadErr == nil {
-			clock.location = location
+			return location
 		}
 	}
-	return clock
+	return time.UTC
+}
+
+// searchClockFor is the searcher's clock, in their MemberLocation.
+func (m Messages) searchClockFor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) searchClock {
+	return searchClock{now: time.Now(), location: m.MemberLocation(ctx, workspaceID, userID)}
 }
 
 // day parses a search date: an ISO calendar date, today, or yesterday, as the
@@ -7349,7 +7353,7 @@ func bookmarkPayload(topic string, id domain.BookmarkID, conversationID domain.C
 	return events.NewPayload(topic, events.String("bookmark_id", string(id)), events.String("channel_id", string(conversationID)))
 }
 
-func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, due time.Time) (domain.Reminder, error) {
+func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, schedule domain.ReminderSchedule) (domain.Reminder, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.Reminder{}, err
 	}
@@ -7364,14 +7368,23 @@ func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.Reminder{}, store.ErrNotFound
 	}
 	text = strings.TrimSpace(text)
-	if text == "" || len(text) > 3000 || due.IsZero() {
+	if text == "" || len(text) > 3000 || schedule.Due.IsZero() || !schedule.Recurrence.Valid() {
+		return domain.Reminder{}, ErrInvalidReminder
+	}
+	timeZone := strings.TrimSpace(schedule.TimeZone)
+	if timeZone == "" {
+		timeZone = "UTC"
+	}
+	if _, err := time.LoadLocation(timeZone); err != nil {
 		return domain.Reminder{}, ErrInvalidReminder
 	}
 	id, err := domain.NewReminderID()
 	if err != nil {
 		return domain.Reminder{}, err
 	}
-	reminder := domain.Reminder{WorkspaceID: workspaceID, ID: id, Creator: userID, User: targetID, Text: text, Time: due.UTC()}
+	due := schedule.Due.UTC()
+	reminder := domain.Reminder{WorkspaceID: workspaceID, ID: id, Creator: userID, User: targetID, Text: text, Time: due,
+		Recurring: schedule.Recurrence != domain.ReminderOnce, Recurrence: schedule.Recurrence, TimeZone: timeZone, RecurrenceAnchor: due}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("reminder.created", events.String("reminder_id", string(id)), events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
 		return domain.Reminder{}, err
@@ -7408,6 +7421,14 @@ func (m Messages) CompleteReminder(ctx context.Context, workspaceID domain.Works
 	reminder, err := m.Store.ReminderInWorkspace(ctx, workspaceID, reminderID)
 	if err != nil {
 		return err
+	}
+	// A reminder the caller neither set nor receives is not_found, as
+	// reminders.info and reminders.delete answer; cannot_complete_others is
+	// for one the caller set for someone else. It used to answer
+	// cannot_complete_others for anybody's reminder, confirming that an ID
+	// existed to a member who could not otherwise see it.
+	if reminder.User != userID && reminder.Creator != userID {
+		return store.ErrNotFound
 	}
 	if reminder.User != userID {
 		return ErrReminderOwnedByOther

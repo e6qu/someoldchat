@@ -435,7 +435,7 @@ CREATE INDEX IF NOT EXISTS bookmarks_conversation_rank ON bookmarks(workspace_id
 CREATE TABLE IF NOT EXISTS reminders (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), creator_id TEXT NOT NULL REFERENCES users(id),
  user_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, due_at INTEGER NOT NULL, complete_at INTEGER NOT NULL DEFAULT 0,
- recurring INTEGER NOT NULL DEFAULT 0
+ recurring INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT '', time_zone TEXT NOT NULL DEFAULT 'UTC', recurrence_anchor INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS reminders_user_due ON reminders(workspace_id, user_id, due_at, id);
 CREATE TABLE IF NOT EXISTS later_reminders (
@@ -574,7 +574,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 180
+const schemaVersion = 181
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3470,6 +3470,27 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 181 {
+		// reminders.add accepts "every Thursday" and "every day at 9am". A
+		// recurring reminder needs its cadence, the zone its wall-clock time is
+		// in, and the anchor its month-end clamping is computed from; the
+		// recurring flag alone could not say when it next came due.
+		columns, err := s.tableColumns(ctx, db, "reminders")
+		if err != nil {
+			return err
+		}
+		for _, column := range []struct{ name, definition string }{
+			{"recurrence", "TEXT NOT NULL DEFAULT ''"},
+			{"time_zone", "TEXT NOT NULL DEFAULT 'UTC'"},
+			{"recurrence_anchor", "INTEGER NOT NULL DEFAULT 0"},
+		} {
+			if !columns[column.name] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE reminders ADD COLUMN `+column.name+` `+column.definition); err != nil {
+					return fmt.Errorf("migrate reminder %s: %w", column.name, err)
+				}
+			}
 		}
 	}
 	if version < 180 {
@@ -16966,7 +16987,7 @@ func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, ev
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO reminders(id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, reminder.ID, reminder.WorkspaceID, reminder.Creator, reminder.User, reminder.Text, reminder.Time.Unix(), unixSeconds(reminder.CompleteAt), boolInt(reminder.Recurring)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO reminders(id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring, recurrence, time_zone, recurrence_anchor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, reminder.ID, reminder.WorkspaceID, reminder.Creator, reminder.User, reminder.Text, reminder.Time.Unix(), unixSeconds(reminder.CompleteAt), boolInt(reminder.Recurring), string(reminder.Recurrence), reminderTimeZone(reminder.TimeZone), unixSeconds(reminder.RecurrenceAnchor)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -16975,14 +16996,14 @@ func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, ev
 	return tx.Commit()
 }
 
-func (s *Store) GetReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ReminderID) (domain.Reminder, error) {
+// reminderColumns is the one column list every reminder read uses.
+const reminderColumns = `id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring, recurrence, time_zone, recurrence_anchor`
+
+func scanReminder(row rowScanner) (domain.Reminder, error) {
 	var reminder domain.Reminder
-	var due, complete, recurring int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring FROM reminders WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspace, user).Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.Reminder{}, store.ErrNotFound
-	}
-	if err != nil {
+	var due, complete, recurring, anchor int64
+	var recurrence string
+	if err := row.Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring, &recurrence, &reminder.TimeZone, &anchor); err != nil {
 		return domain.Reminder{}, err
 	}
 	reminder.Time = time.Unix(due, 0).UTC()
@@ -16990,25 +17011,34 @@ func (s *Store) GetReminder(ctx context.Context, workspace domain.WorkspaceID, u
 		reminder.CompleteAt = time.Unix(complete, 0).UTC()
 	}
 	reminder.Recurring = recurring != 0
+	reminder.Recurrence = domain.ReminderRecurrence(recurrence)
+	if anchor != 0 {
+		reminder.RecurrenceAnchor = time.Unix(anchor, 0).UTC()
+	}
 	return reminder, nil
 }
 
-func (s *Store) ReminderInWorkspace(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID) (domain.Reminder, error) {
-	var reminder domain.Reminder
-	var due, complete, recurring int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring FROM reminders WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring)
+func reminderTimeZone(value string) string {
+	if value == "" {
+		return "UTC"
+	}
+	return value
+}
+
+func (s *Store) GetReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ReminderID) (domain.Reminder, error) {
+	reminder, err := scanReminder(s.db.QueryRowContext(ctx, `SELECT `+reminderColumns+` FROM reminders WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspace, user))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Reminder{}, store.ErrNotFound
 	}
-	if err != nil {
-		return domain.Reminder{}, err
+	return reminder, err
+}
+
+func (s *Store) ReminderInWorkspace(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID) (domain.Reminder, error) {
+	reminder, err := scanReminder(s.db.QueryRowContext(ctx, `SELECT `+reminderColumns+` FROM reminders WHERE id = ? AND workspace_id = ?`, id, workspace))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Reminder{}, store.ErrNotFound
 	}
-	reminder.Time = time.Unix(due, 0).UTC()
-	if complete != 0 {
-		reminder.CompleteAt = time.Unix(complete, 0).UTC()
-	}
-	reminder.Recurring = recurring != 0
-	return reminder, nil
+	return reminder, err
 }
 
 func (s *Store) ListReminders(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.ReminderPage, error) {
@@ -17019,23 +17049,19 @@ func (s *Store) ListReminders(ctx context.Context, workspace domain.WorkspaceID,
 	if err != nil {
 		return domain.ReminderPage{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring FROM reminders WHERE workspace_id = ? AND user_id = ? AND id > ? ORDER BY id LIMIT ?`, workspace, user, after, request.Limit+1)
+	// The member's own reminders and the ones they set for someone else, as
+	// Slack's reminders.list returns; the second half used to be missing.
+	rows, err := s.db.QueryContext(ctx, `SELECT `+reminderColumns+` FROM reminders WHERE workspace_id = ? AND (user_id = ? OR creator_id = ?) AND id > ? ORDER BY id LIMIT ?`, workspace, user, user, after, request.Limit+1)
 	if err != nil {
 		return domain.ReminderPage{}, err
 	}
 	defer rows.Close()
 	values := make([]domain.Reminder, 0, request.Limit+1)
 	for rows.Next() {
-		var reminder domain.Reminder
-		var due, complete, recurring int64
-		if err := rows.Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring); err != nil {
+		reminder, err := scanReminder(rows)
+		if err != nil {
 			return domain.ReminderPage{}, err
 		}
-		reminder.Time = time.Unix(due, 0).UTC()
-		if complete != 0 {
-			reminder.CompleteAt = time.Unix(complete, 0).UTC()
-		}
-		reminder.Recurring = recurring != 0
 		values = append(values, reminder)
 	}
 	if err := rows.Err(); err != nil {
@@ -17144,7 +17170,7 @@ func (s *Store) DueReminders(ctx context.Context, workspace domain.WorkspaceID, 
 	if limit <= 0 || now.IsZero() {
 		return nil, store.InvalidArgument("due reminders need a positive limit and a current time")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring
+	rows, err := s.db.QueryContext(ctx, `SELECT `+reminderColumns+`
 		FROM reminders
 		WHERE (? = '' OR workspace_id = ?) AND delivered_at = 0 AND complete_at = 0 AND due_at <= ?
 		ORDER BY due_at, id LIMIT ?`, workspace, workspace, now.UTC().Unix(), limit)
@@ -17154,23 +17180,16 @@ func (s *Store) DueReminders(ctx context.Context, workspace domain.WorkspaceID, 
 	defer rows.Close()
 	values := make([]domain.Reminder, 0, limit)
 	for rows.Next() {
-		var value domain.Reminder
-		var due, complete int64
-		var recurring int
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Creator, &value.User, &value.Text, &due, &complete, &recurring); err != nil {
+		value, err := scanReminder(rows)
+		if err != nil {
 			return nil, err
 		}
-		value.Time = time.Unix(due, 0).UTC()
-		if complete != 0 {
-			value.CompleteAt = time.Unix(complete, 0).UTC()
-		}
-		value.Recurring = recurring != 0
 		values = append(values, value)
 	}
 	return values, rows.Err()
 }
 
-func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt time.Time, event events.Event) (bool, error) {
+func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt, next time.Time, event events.Event) (bool, error) {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return false, err
@@ -17178,8 +17197,16 @@ func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.Work
 	defer tx.Rollback()
 	// The claim is the update. Two workers reading the same batch both try, and
 	// only the one whose update finds delivered_at still zero writes the notice.
-	result, err := tx.ExecContext(ctx, `UPDATE reminders SET delivered_at = ? WHERE id = ? AND workspace_id = ? AND delivered_at = 0`,
-		deliveredAt.UTC().Unix(), id, workspace)
+	// A recurring reminder is claimed by moving its due time to the next
+	// occurrence, which takes it out of the due set the same way.
+	var result sql.Result
+	if next.IsZero() {
+		result, err = tx.ExecContext(ctx, `UPDATE reminders SET delivered_at = ? WHERE id = ? AND workspace_id = ? AND delivered_at = 0 AND due_at <= ?`,
+			deliveredAt.UTC().Unix(), id, workspace, deliveredAt.UTC().Unix())
+	} else {
+		result, err = tx.ExecContext(ctx, `UPDATE reminders SET due_at = ? WHERE id = ? AND workspace_id = ? AND delivered_at = 0 AND due_at <= ?`,
+			next.UTC().Unix(), id, workspace, deliveredAt.UTC().Unix())
+	}
 	if err != nil {
 		return false, classify(err)
 	}

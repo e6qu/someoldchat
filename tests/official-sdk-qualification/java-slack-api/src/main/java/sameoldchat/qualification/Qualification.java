@@ -747,14 +747,28 @@ public final class Qualification {
                             .text("not another user's reminder").time("300").user("U2").build());
             require(!otherUserReminder.isOk() && "cannot_add_others".equals(otherUserReminder.getError()),
                     "reminders.add accepted another user for a user token");
+            // Slack's documented natural-language forms are read; a recurring
+            // one is reported as recurring, and anything else is cannot_parse.
             com.slack.api.methods.response.reminders.RemindersAddResponse naturalLanguageReminder = reminderMethods.remindersAdd(
                     com.slack.api.methods.request.reminders.RemindersAddRequest.builder()
                             .text("documented natural language").time("in 15 minutes").build());
-            require(!naturalLanguageReminder.isOk() && "cannot_parse".equals(naturalLanguageReminder.getError()),
-                    "known reminders.add natural-language gap was not reported");
+            require(naturalLanguageReminder.isOk() && naturalLanguageReminder.getReminder() != null
+                            && naturalLanguageReminder.getReminder().getTime() > System.currentTimeMillis() / 1000 + 14 * 60,
+                    "reminders.add in 15 minutes failed: " + naturalLanguageReminder.getError());
+            com.slack.api.methods.response.reminders.RemindersAddResponse recurringReminder = reminderMethods.remindersAdd(
+                    com.slack.api.methods.request.reminders.RemindersAddRequest.builder()
+                            .text("weekly sync").time("every Thursday at 9am").build());
+            require(recurringReminder.isOk() && recurringReminder.getReminder() != null
+                            && recurringReminder.getReminder().isRecurring(),
+                    "reminders.add every Thursday failed: " + recurringReminder.getError());
+            com.slack.api.methods.response.reminders.RemindersAddResponse unparseableReminder = reminderMethods.remindersAdd(
+                    com.slack.api.methods.request.reminders.RemindersAddRequest.builder()
+                            .text("undocumented phrasing").time("whenever").build());
+            require(!unparseableReminder.isOk() && "cannot_parse".equals(unparseableReminder.getError()),
+                    "reminders.add accepted a phrase it cannot read");
             com.slack.api.methods.response.reminders.RemindersListResponse reminders = reminderMethods.remindersList(
                     com.slack.api.methods.request.reminders.RemindersListRequest.builder().build());
-            require(reminders.isOk() && reminders.getReminders() != null && reminders.getReminders().size() == 1,
+            require(reminders.isOk() && reminders.getReminders() != null && reminders.getReminders().size() == 3,
                     "reminders.list failed: " + reminders.getError());
             com.slack.api.methods.response.reminders.RemindersInfoResponse reminderInfo = reminderMethods.remindersInfo(
                     com.slack.api.methods.request.reminders.RemindersInfoRequest.builder().reminder(reminderId).build());

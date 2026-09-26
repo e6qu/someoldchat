@@ -8033,7 +8033,8 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "cannot_parse")
 		return
 	}
-	when, err := reminderTime(fields["time"], time.Now().UTC())
+	location := h.memberLocation(r.Context(), principal)
+	schedule, err := reminderSchedule(fields["time"], time.Now().UTC(), location)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -8047,7 +8048,11 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "cannot_add_others")
 		return
 	}
-	reminder, err := h.Messages.AddReminder(r.Context(), principal.WorkspaceID, principal.UserID, targetID, textValue, when)
+	if targetID != "" && targetID != principal.UserID && schedule.Recurrence != domain.ReminderOnce {
+		writeError(w, "cannot_add_others_recurring")
+		return
+	}
+	reminder, err := h.Messages.AddReminder(r.Context(), principal.WorkspaceID, principal.UserID, targetID, textValue, schedule)
 	if err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
@@ -12703,6 +12708,41 @@ func parseSlackTimestamp(raw string) (int64, bool) {
 // relative form used to be read as an absolute epoch, so `time=300` created a
 // reminder dated 1970-01-01T00:05:00Z, and a natural-language value was reported
 // as a generic argument error rather than the enumerated `cannot_parse`.
+// memberLocation is the zone a member's day is reckoned in: their
+// notification schedule's, the only zone this product records for a member,
+// and UTC when they have none (service.Messages.MemberLocation is the same
+// rule on the far side of the seam).
+func (h Handler) memberLocation(ctx context.Context, principal auth.Principal) *time.Location {
+	preferences, err := h.Messages.WorkspaceNotificationPreferences(ctx, principal.WorkspaceID, principal.UserID)
+	if err == nil && preferences.Schedule.TimeZone != "" {
+		if location, loadErr := time.LoadLocation(preferences.Schedule.TimeZone); loadErr == nil {
+			return location
+		}
+	}
+	return time.UTC
+}
+
+// reminderSchedule reads reminders.add's `time`: a Unix timestamp, a number of
+// seconds from now (under a day), or one of the phrases Slack documents - "in
+// 15 minutes", "tomorrow at 9am", "every Thursday", "every day at 9am" - read
+// in the member's zone. Anything else is cannot_parse, as it was for every
+// phrase before.
+func reminderSchedule(raw string, now time.Time, location *time.Location) (domain.ReminderSchedule, error) {
+	raw = strings.TrimSpace(raw)
+	if _, err := strconv.ParseInt(raw, 10, 64); err != nil {
+		due, recurrence, parseErr := service.ParseReminderTime(raw, now, location)
+		if parseErr != nil || !due.After(now) || due.After(now.AddDate(5, 0, 0)) {
+			return domain.ReminderSchedule{}, decodeFailure("cannot_parse", "time is not a timestamp, a number of seconds, or a reminder phrase")
+		}
+		return domain.ReminderSchedule{Due: due, Recurrence: recurrence, TimeZone: location.String()}, nil
+	}
+	due, err := reminderTime(raw, now)
+	if err != nil {
+		return domain.ReminderSchedule{}, err
+	}
+	return domain.ReminderSchedule{Due: due, TimeZone: location.String()}, nil
+}
+
 func reminderTime(raw string, now time.Time) (time.Time, error) {
 	raw = strings.TrimSpace(raw)
 	seconds, err := strconv.ParseInt(raw, 10, 64)

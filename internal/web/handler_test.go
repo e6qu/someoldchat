@@ -2874,7 +2874,7 @@ func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *tes
 		{expression: "stand-up at 7am", wantError: service.ErrReminderTimeInPast},
 	} {
 		t.Run(testCase.expression, func(t *testing.T) {
-			text, due, recurrence, err := parseChannelReminderExpression(testCase.expression, now, time.UTC)
+			text, due, recurrence, err := service.ParseReminderExpression(testCase.expression, now, time.UTC)
 			if testCase.wantError != nil {
 				if !errors.Is(err, testCase.wantError) {
 					t.Fatalf("error=%v want=%v", err, testCase.wantError)
@@ -5820,7 +5820,7 @@ func TestADeliveredReminderIsVisibleWithItsText(t *testing.T) {
 	now := time.Now().UTC()
 
 	messages := service.Messages{Store: store}
-	reminder, err := messages.AddReminder(ctx, "T1", "U1", "U1", "call the dentist", now.Add(-time.Minute))
+	reminder, err := messages.AddReminder(ctx, "T1", "U1", "U1", "call the dentist", domain.ReminderSchedule{Due: now.Add(-time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}

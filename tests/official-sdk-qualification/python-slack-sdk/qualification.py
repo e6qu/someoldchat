@@ -663,14 +663,22 @@ try:
     raise AssertionError("reminders.add accepted another user for a user token")
 except SlackApiError as error:
     assert error.response["error"] == "cannot_add_others"
+# Slack's documented natural-language forms are read; a recurring one is
+# reported as recurring, and an undocumented phrasing is cannot_parse.
+phrased = reminder_client.reminders_add(text="documented natural language", time="in 15 minutes")
+assert phrased["ok"] is True
+assert phrased["reminder"]["time"] > time.time() + 14 * 60
+recurring_reminder = reminder_client.reminders_add(text="weekly sync", time="every Thursday at 9am")
+assert recurring_reminder["ok"] is True
+assert recurring_reminder["reminder"]["recurring"] is True
 try:
-    reminder_client.reminders_add(text="documented natural language", time="in 15 minutes")
-    raise AssertionError("known natural-language reminder gap unexpectedly disappeared")
+    reminder_client.reminders_add(text="undocumented phrasing", time="whenever")
+    raise AssertionError("reminders.add accepted a phrase it cannot read")
 except SlackApiError as error:
     assert error.response["error"] == "cannot_parse"
 reminders = reminder_client.reminders_list()
 assert reminders["ok"] is True
-assert len(reminders["reminders"]) == 1
+assert len(reminders["reminders"]) == 3
 reminder_info = reminder_client.reminders_info(reminder=reminder["reminder"]["id"])
 assert reminder_info["ok"] is True
 assert reminder_info["reminder"]["id"] == reminder["reminder"]["id"]

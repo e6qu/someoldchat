@@ -15,6 +15,9 @@ message Reminder {
   int64 time = 6;
   int64 complete_ts = 7;
   bool recurring = 8;
+  string recurrence = 9;
+  string time_zone = 10;
+  int64 recurrence_anchor = 11;
 }
 
 message AddReminderRequest {
@@ -23,6 +26,8 @@ message AddReminderRequest {
   string target_user_id = 3;
   string text = 4;
   int64 time = 5;
+  string recurrence = 6;
+  string time_zone = 7;
 }
 
 message ReminderRequest {

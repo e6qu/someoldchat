@@ -9107,6 +9107,11 @@ func (s *Store) CreateReminder(_ context.Context, reminder domain.Reminder, even
 	if _, exists := s.reminders[reminder.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	// The SQL column defaults to UTC; a reminder written without a zone reads
+	// back the same on both profiles.
+	if reminder.TimeZone == "" {
+		reminder.TimeZone = "UTC"
+	}
 	s.reminders[reminder.ID] = reminder
 	s.outbox = append(s.outbox, event)
 	return nil
@@ -9144,7 +9149,7 @@ func (s *Store) ListReminders(_ context.Context, workspace domain.WorkspaceID, u
 	defer s.mu.RUnlock()
 	values := make([]domain.Reminder, 0, request.Limit+1)
 	for _, reminder := range s.reminders {
-		if reminder.WorkspaceID != workspace || reminder.User != user || string(reminder.ID) <= after {
+		if reminder.WorkspaceID != workspace || (reminder.User != user && reminder.Creator != user) || string(reminder.ID) <= after {
 			continue
 		}
 		values = appendSorted(values, reminder, request.Limit+1, func(left, right domain.Reminder) bool { return left.ID < right.ID })
@@ -9211,17 +9216,24 @@ func (s *Store) DueReminders(_ context.Context, workspace domain.WorkspaceID, no
 	return values, nil
 }
 
-func (s *Store) MarkReminderDelivered(_ context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt time.Time, event events.Event) (bool, error) {
+func (s *Store) MarkReminderDelivered(_ context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt, next time.Time, event events.Event) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Losing the claim and never having existed are the same answer here: the
 	// worker only claims what it has just read as due, and either way it must
 	// not deliver. Telling them apart would cost a read no caller wants.
 	reminder, exists := s.reminders[id]
-	if !exists || reminder.WorkspaceID != workspace || !s.reminderDelivery[id].IsZero() {
+	if !exists || reminder.WorkspaceID != workspace || !s.reminderDelivery[id].IsZero() || reminder.Time.After(deliveredAt) {
 		return false, nil
 	}
-	s.reminderDelivery[id] = deliveredAt.UTC()
+	if next.IsZero() {
+		s.reminderDelivery[id] = deliveredAt.UTC()
+	} else {
+		// A recurring reminder moves to its next occurrence; the claim is the
+		// move, as the SQL store's is.
+		reminder.Time = next.UTC().Truncate(time.Second)
+		s.reminders[id] = reminder
+	}
 	// The notice and the Activity row are written with the claim, so a member
 	// cannot be marked reminded without being shown the reminder.
 	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, reminder.User)

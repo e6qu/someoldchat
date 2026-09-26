@@ -1032,6 +1032,8 @@ type Store interface {
 	// another member apart from one that does not exist. A reminder in a different
 	// workspace stays invisible (ErrNotFound), preserving tenant isolation.
 	ReminderInWorkspace(context.Context, domain.WorkspaceID, domain.ReminderID) (domain.Reminder, error)
+	// ListReminders lists the reminders for the member and those the member
+	// created for someone else.
 	ListReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
 	CompleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, time.Time, events.Event) error
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, events.Event) error
@@ -1044,7 +1046,9 @@ type Store interface {
 	// both somebody else winning it and the reminder not being there: the
 	// worker only claims what it has just read as due, and either way it must
 	// not deliver.
-	MarkReminderDelivered(context.Context, domain.WorkspaceID, domain.ReminderID, time.Time, events.Event) (bool, error)
+	// A recurring reminder is not retired by delivery: given its next
+	// occurrence, the claim moves its due time there instead.
+	MarkReminderDelivered(context.Context, domain.WorkspaceID, domain.ReminderID, time.Time, time.Time, events.Event) (bool, error)
 	// EarliestReminder is the next instant a reminder comes due, so a workspace
 	// that is asleep knows when to wake.
 	EarliestReminder(context.Context, domain.WorkspaceID) (time.Time, error)

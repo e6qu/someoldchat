@@ -1152,8 +1152,10 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/scheduler:TestRecurringReminderMovesToItsNextOccurrence
+      - go-test:internal/api/slack:TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse
     deviations:
-      - Natural-language time descriptions and the recurrence object are not implemented.
+      - Natural-language times cover the phrases the first-party /remind command reads (in N minutes/hours/days/weeks/months/years, tomorrow, on a date, weekday or month and day, at a time, every day/week/month/year or weekday) in the zone of the member's notification schedule (UTC otherwise); other phrasings answer cannot_parse, and the recurrence object in responses is only the recurring flag.
       - Delivery shows the reminder in the member's Activity at the due instant; Slack posts it as a Slackbot direct message.
       - The current token-type-dependent rules for setting another user's reminder have not been differentially qualified.
     audit:
@@ -1171,9 +1173,10 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/service:TestCompleteReminderDistinguishesOthersAndRecurring
     audit:
       downgraded_from: behavior-compatible
-      reason: The recurring and ownership error contract is implemented — cannot_complete_recurring for a recurring reminder and cannot_complete_others for another member's — and covered by service, Slack-handler, and differential-seam tests, but no official SDK exercises reminders.complete's error paths, so the method stays sdk-compatible rather than behavior-compatible.
+      reason: The recurring and ownership error contract is implemented — cannot_complete_recurring for a recurring reminder, cannot_complete_others for one the caller set for another member, and not_found for one the caller neither set nor receives — and covered by service, Slack-handler, and differential-seam tests, but no official SDK exercises reminders.complete's error paths, so the method stays sdk-compatible rather than behavior-compatible.
       evidence:
         - journey:specs/journeys/06-later-and-reminders.md
         - source:internal/service/messages.go
@@ -1204,7 +1207,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
-      - Recurring reminders and current retirement behavior are not represented.
+      - Current retirement behavior is not represented.
     audit:
       downgraded_from: behavior-compatible
       reason: The response is SDK-decodable but the only locally creatable reminder shape is non-recurring and has not been compared with Slack.
@@ -1219,6 +1222,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/service:TestCompleteReminderDistinguishesOthersAndRecurring
     deviations:
       - Recurring reminder projection, retirement behavior, and live list inclusion rules have not been differentially qualified.
     audit:

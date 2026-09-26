@@ -1706,7 +1706,7 @@ func parityCases() []parityCase {
 			name: "a reminder is read, completed, and deleted identically",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				due := time.Unix(1_900_000_000, 0).UTC()
-				created, err := chat.AddReminder(ctx, "T1", "U1", "U1", "water the plants", due)
+				created, err := chat.AddReminder(ctx, "T1", "U1", "U1", "water the plants", domain.ReminderSchedule{Due: due})
 				if err != nil {
 					return nil, err
 				}
@@ -1720,7 +1720,7 @@ func parityCases() []parityCase {
 				// refused as cannot_complete_others in both compositions, and the
 				// sentinel has to survive the seam as itself rather than collapsing
 				// to a generic not_found.
-				forOther, err := chat.AddReminder(ctx, "T1", "U1", "U2", "call the vet", due)
+				forOther, err := chat.AddReminder(ctx, "T1", "U1", "U2", "call the vet", domain.ReminderSchedule{Due: due})
 				if err != nil {
 					return nil, err
 				}
@@ -6008,7 +6008,7 @@ func parityCases() []parityCase {
 		{
 			name: "reminders and scheduled messages",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				reminder, err := chat.AddReminder(ctx, "T1", "U1", "", "water the plants", time.Now().UTC().Add(time.Hour))
+				reminder, err := chat.AddReminder(ctx, "T1", "U1", "", "water the plants", domain.ReminderSchedule{Due: time.Now().UTC().Add(time.Hour)})
 				if err != nil {
 					return nil, err
 				}
