@@ -1197,7 +1197,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	if err != nil || stillGroup.Kind != domain.ConversationTypeMPIM || stillGroup.Name != "direct" {
 		t.Fatalf("conflicting conversion partially changed conversation=%+v err=%v", stillGroup, err)
 	}
-	beforeSuccess, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
+	beforeSuccess, err := s.ListMessages(ctx, "D2", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(beforeSuccess.Messages) != 2 {
 		t.Fatalf("conflicting conversion left a notice: history=%+v err=%v", beforeSuccess, err)
 	}
@@ -1221,7 +1221,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	if err != nil || converted.Name != "project-room-2" || converted.Kind != domain.ConversationTypePrivate {
 		t.Fatalf("reopened conversion=%+v err=%v", converted, err)
 	}
-	history, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "D2", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 3 || history.Messages[0].Text != original.Text || len(history.Messages[0].Files) != 1 {
 		t.Fatalf("reopened history=%+v err=%v", history, err)
 	}
@@ -1324,7 +1324,7 @@ func TestSQLiteStarsAreDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := time.Unix(300, 0).UTC()
-	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section"}]`, CreatedAt: created}
+	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section","block_id":"b1"}]`, CreatedAt: created}
 	if err := s.CreateMessage(ctx, message, events.Event{ID: "message-1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -1791,7 +1791,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err := s.CreateMessage(context.Background(), want, events.Event{ID: "evt_1", WorkspaceID: "T1", Topic: "message.created", Payload: string(want.ID), CreatedAt: want.CreatedAt}, ""); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.ListMessages(context.Background(), "C1", domain.PageRequest{Limit: 10})
+	got, err := s.ListMessages(context.Background(), "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(got.Messages) != 1 {
 		t.Fatalf("got = %+v, err = %v", got, err)
 	}
@@ -1804,7 +1804,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err := s.CreateMessage(context.Background(), reply, events.Event{ID: "evt_reply", WorkspaceID: "T1", Topic: "message.created", Payload: string(reply.ID), CreatedAt: reply.CreatedAt}, ""); err != nil {
 		t.Fatal(err)
 	}
-	replies, err := s.ListThreadMessages(context.Background(), "C1", domain.NewMessageTimestamp(want.CreatedAt), domain.PageRequest{Limit: 10})
+	replies, err := s.ListThreadMessages(context.Background(), "C1", domain.NewMessageTimestamp(want.CreatedAt), domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(replies.Messages) != 2 || replies.Messages[0].ID != want.ID || replies.Messages[1].ID != reply.ID {
 		t.Fatalf("replies = %+v, err = %v", replies, err)
 	}
@@ -2088,7 +2088,7 @@ func TestSQLiteMessageUnfurlsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	value := domain.Message{ID: "msg_unfurl", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "link", Blocks: `[{"type":"section","text":{"type":"plain_text","text":"hello"}}]`, CreatedAt: now, Unfurls: map[string]string{"https://example.com": `{"title":"Example"}`}}
+	value := domain.Message{ID: "msg_unfurl", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "link", Blocks: `[{"type":"section","block_id":"b1","text":{"type":"plain_text","text":"hello"}}]`, CreatedAt: now, Unfurls: map[string]string{"https://example.com": `{"title":"Example"}`}}
 	if err := s.CreateMessage(ctx, value, events.Event{ID: "evt_unfurl", WorkspaceID: "T1", Topic: "message.created", Payload: string(value.ID), CreatedAt: now}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -2204,7 +2204,7 @@ func TestSQLiteCommittedStateSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
-	page, err := second.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	page, err := second.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "durable" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
@@ -2354,13 +2354,16 @@ func TestSQLiteOutboxLeaseAndAck(t *testing.T) {
 	if renewed, err := s.ClaimEvents(ctx, "T1", "worker-2", 10, time.Minute); err != nil || len(renewed) != 0 {
 		t.Fatalf("renewed event was reclaimed=%v err=%v", renewed, err)
 	}
-	if err := s.ReleaseEvents(ctx, "worker-1", []uint64{claimed[0].Sequence}, time.Now().UTC().Add(5*time.Millisecond)); err != nil {
+	// The retry delay is generous so a loaded machine cannot pass it between
+	// the release and the claim that must still see the event withheld.
+	retryAt := time.Now().UTC().Add(500 * time.Millisecond)
+	if err := s.ReleaseEvents(ctx, "worker-1", []uint64{claimed[0].Sequence}, retryAt); err != nil {
 		t.Fatal(err)
 	}
 	if remaining, err := s.ClaimEvents(ctx, "T1", "worker-2", 10, time.Minute); err != nil || len(remaining) != 0 {
 		t.Fatalf("remaining=%v err=%v", remaining, err)
 	}
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(time.Until(retryAt) + 10*time.Millisecond)
 	reclaimed, err := s.ClaimEvents(ctx, "T1", "worker-2", 10, time.Minute)
 	if err != nil || len(reclaimed) != 1 {
 		t.Fatalf("reclaimed=%v err=%v", reclaimed, err)

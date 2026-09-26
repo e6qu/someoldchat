@@ -21,11 +21,11 @@ func seedBarrieredWorld(t *testing.T) (context.Context, Messages) {
 	if err := s.SeedConversationMember("C1", "U2"); err != nil {
 		t.Fatal(err)
 	}
-	primary, err := messages.CreateUserGroup(ctx, "T1", "U1", "Bankers", "bankers", "")
+	primary, err := messages.CreateUserGroup(ctx, "T1", "U1", "Bankers", "bankers", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondary, err := messages.CreateUserGroup(ctx, "T1", "U1", "Traders", "traders", "")
+	secondary, err := messages.CreateUserGroup(ctx, "T1", "U1", "Traders", "traders", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

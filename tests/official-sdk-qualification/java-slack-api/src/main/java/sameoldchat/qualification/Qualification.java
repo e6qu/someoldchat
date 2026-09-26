@@ -472,9 +472,18 @@ public final class Qualification {
             ConversationsInfoResponse conversation = methods.conversationsInfo(
                     com.slack.api.methods.request.conversations.ConversationsInfoRequest.builder()
                             .channel("C1")
+                            .includeNumMembers(true)
                             .build());
             require(conversation.isOk() && conversation.getChannel() != null
                             && "C1".equals(conversation.getChannel().getId()), "conversations.info failed");
+            // The typed model reads the reader-relative and required fields;
+            // a missing one decodes as null rather than failing, so each is
+            // checked by value.
+            require(conversation.getChannel().isMember() && conversation.getChannel().isGeneral()
+                            && conversation.getChannel().getNumOfMembers() != null
+                            && conversation.getChannel().getTopic() != null
+                            && conversation.getChannel().getTopic().getCreator() != null,
+                    "conversations.info did not decode into the typed conversation model");
             ConversationsMembersResponse members = methods.conversationsMembers(
                     com.slack.api.methods.request.conversations.ConversationsMembersRequest.builder()
                             .channel("C1")
@@ -500,10 +509,13 @@ public final class Qualification {
                     com.slack.api.methods.request.conversations.ConversationsInviteRequest.builder()
                             .channel("C1").users(java.util.List.of("U-missing", "U3")).force(true).build());
             require(forceInvited.isOk(), "forced conversations.invite failed: " + forceInvited.getError());
-            com.slack.api.methods.response.conversations.ConversationsKickResponse kicked = methods.conversationsKick(
+            // C1 is the workspace's required channel (set above), which nobody
+            // can be removed from, exactly as Slack refuses a kick from #general.
+            com.slack.api.methods.response.conversations.ConversationsKickResponse generalKick = methods.conversationsKick(
                     com.slack.api.methods.request.conversations.ConversationsKickRequest.builder()
                             .channel("C1").user("U2").build());
-            require(kicked.isOk(), "conversations.kick failed: " + kicked.getError());
+            require(!generalKick.isOk() && "cant_kick_from_general".equals(generalKick.getError()),
+                    "conversations.kick removed a member from the required channel: " + generalKick.getError());
             ConversationsCreateResponse privateInvitationChannel = methods.conversationsCreate(
                     com.slack.api.methods.request.conversations.ConversationsCreateRequest.builder()
                             .name("sdk-private-invitation")
@@ -518,6 +530,10 @@ public final class Qualification {
                                     .users(java.util.List.of("U2"))
                                     .build());
             require(privateInvited.isOk(), "private conversations.invite failed: " + privateInvited.getError());
+            com.slack.api.methods.response.conversations.ConversationsKickResponse kicked = methods.conversationsKick(
+                    com.slack.api.methods.request.conversations.ConversationsKickRequest.builder()
+                            .channel(privateInvitationChannel.getChannel().getId()).user("U2").build());
+            require(kicked.isOk(), "conversations.kick failed: " + kicked.getError());
             com.slack.api.methods.response.conversations.ConversationsLeaveResponse left = methods.conversationsLeave(
                     com.slack.api.methods.request.conversations.ConversationsLeaveRequest.builder().channel("C2").build());
             require(left.isOk(), "conversations.leave failed: " + left.getError());
@@ -799,6 +815,10 @@ public final class Qualification {
             UsersInfoResponse user = methods.usersInfo(
                     com.slack.api.methods.request.users.UsersInfoRequest.builder().user("U1").build());
             require(user.isOk() && user.getUser() != null && "U1".equals(user.getUser().getId()), "users.info failed");
+            require(user.getUser().getUpdated() != null && user.getUser().getTz() != null
+                            && user.getUser().getProfile().getImage48() != null
+                            && user.getUser().getProfile().getImage48().startsWith("http"),
+                    "users.info did not decode into the typed user model");
             UsersProfileGetResponse profile = methods.usersProfileGet(
                     com.slack.api.methods.request.users.profile.UsersProfileGetRequest.builder().user("U1").build());
             require(profile.isOk() && profile.getProfile() != null
@@ -926,7 +946,11 @@ public final class Qualification {
             require(lifecycleInfo.isOk() && lifecycleInfo.getChannel() != null
                             && "qualification-renamed".equals(lifecycleInfo.getChannel().getName())
                             && "qualification topic".equals(lifecycleInfo.getChannel().getTopic().getValue())
-                            && "qualification purpose".equals(lifecycleInfo.getChannel().getPurpose().getValue()),
+                            && "qualification purpose".equals(lifecycleInfo.getChannel().getPurpose().getValue())
+                            && "U1".equals(lifecycleInfo.getChannel().getCreator())
+                            && lifecycleInfo.getChannel().getCreated() != null && lifecycleInfo.getChannel().getCreated() > 0
+                            && "U1".equals(lifecycleInfo.getChannel().getTopic().getCreator())
+                            && lifecycleInfo.getChannel().getTopic().getLastSet() != null && lifecycleInfo.getChannel().getTopic().getLastSet() > 0,
                     "conversation lifecycle state mismatch");
 
             ChatMeMessageResponse meMessage = methods.chatMeMessage(
@@ -965,6 +989,9 @@ public final class Qualification {
             TeamInfoResponse team = methods.teamInfo(
                     com.slack.api.methods.request.team.TeamInfoRequest.builder().build());
             require(team.isOk() && team.getTeam() != null && "T1".equals(team.getTeam().getId()), "team.info failed");
+            require(team.getTeam().getDomain() != null && !team.getTeam().getDomain().isEmpty()
+                            && team.getTeam().getIcon() != null && team.getTeam().getIcon().getImage34() != null,
+                    "team.info did not decode into the typed team model");
             com.slack.api.methods.response.team.profile.TeamProfileGetResponse teamProfile = methods.teamProfileGet(
                     com.slack.api.methods.request.team.profile.TeamProfileGetRequest.builder().build());
             require(teamProfile.isOk() && teamProfile.getProfile() != null

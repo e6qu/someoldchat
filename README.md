@@ -73,7 +73,7 @@ make browser-qualification
 SHAUTH_SOURCE_DIR=/path/to/shauth make shauth-sso-qualification
 make build
 make build-static
-make run                    # explicitly selects local composition, memory, and dev credentials
+make run                    # local composition, memory store, dev credentials, and a .cache/dev-blobs file store
 ./bin/sameoldchat -chat-mode local -store sqlite -db 'file:sameoldchat.db' \
   -api-token "$SAMEOLDCHAT_API_TOKEN" -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 ```

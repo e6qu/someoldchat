@@ -228,22 +228,34 @@ func TestSQLiteAppInteractionCapabilitiesAreOneUseAndBounded(t *testing.T) {
 			t.Fatalf("response use remaining=%d value=%+v err=%v", remaining, got, err)
 		}
 	}
-	if _, err := s.UseAppResponseURL(ctx, response.TokenHash); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.UseAppResponseURL(ctx, response.TokenHash); !errors.Is(err, store.ErrCapabilityExhausted) || !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("exhausted response error=%v, want %v", err, store.ErrNotFound)
 	}
-	expired := trigger
-	expired.TokenHash = "expired-trigger"
-	expired.CreatedAt = now.Add(-time.Minute)
-	expired.ExpiresAt = now.Add(-time.Second)
+	// Slack tells an app whether its response_url expired or was used up, so
+	// the SQL profile distinguishes them exactly as the memory profile does.
+	expiredTrigger := trigger
+	expiredTrigger.TokenHash = "expired-trigger"
+	expiredTrigger.CreatedAt = now.Add(-time.Minute)
+	expiredTrigger.ExpiresAt = now.Add(-time.Second)
 	expiredResponse := response
 	expiredResponse.TokenHash = "expired-response"
-	if err := s.CreateAppInteractionCapabilities(ctx, expired, expiredResponse); err != nil {
+	expiredResponse.CreatedAt = expiredTrigger.CreatedAt
+	expiredResponse.ExpiresAt = expiredTrigger.ExpiresAt
+	if err := s.CreateAppInteractionCapabilities(ctx, expiredTrigger, expiredResponse); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ConsumeAppTrigger(ctx, expired.TokenHash, "A1"); !errors.Is(err, store.ErrTriggerExpired) {
+	if _, err := s.UseAppResponseURL(ctx, expiredResponse.TokenHash); !errors.Is(err, store.ErrCapabilityExpired) {
+		t.Fatalf("expired response error=%v, want %v", err, store.ErrCapabilityExpired)
+	}
+	if _, err := s.UseAppResponseURL(ctx, "never-issued"); !errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrCapabilityExpired) || errors.Is(err, store.ErrCapabilityExhausted) {
+		t.Fatalf("unknown response error=%v, want a bare %v", err, store.ErrNotFound)
+	}
+	// Slack names a reused and an expired trigger separately from an unknown
+	// one, so the SQL profile distinguishes all three as the memory profile does.
+	if _, err := s.ConsumeAppTrigger(ctx, expiredTrigger.TokenHash, "A1"); !errors.Is(err, store.ErrTriggerExpired) {
 		t.Fatalf("expired trigger error=%v, want %v", err, store.ErrTriggerExpired)
 	}
-	if _, err := s.ConsumeAppTrigger(ctx, "unknown-trigger", "A1"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.ConsumeAppTrigger(ctx, "unknown-trigger", "A1"); !errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrTriggerExpired) {
 		t.Fatalf("unknown trigger error=%v, want %v", err, store.ErrNotFound)
 	}
 }

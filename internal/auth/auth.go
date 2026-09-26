@@ -17,23 +17,40 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/bearer"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 type Scope string
 
+// ScopeChatWritePublic lets a bot post to a public channel it has not joined.
+// chat:write does not grant it, and it never reaches a private channel or a
+// direct conversation.
+const ScopeChatWritePublic Scope = "chat:write.public"
+
 const (
-	ScopeChatWrite               Scope = "chat:write"
-	ScopeChatWriteCustomize      Scope = "chat:write.customize"
-	ScopeIncomingWebhook         Scope = "incoming-webhook"
-	ScopeChannelsHistory         Scope = "channels:history"
-	ScopeUsersRead               Scope = "users:read"
-	ScopeUsersReadEmail          Scope = "users:read.email"
-	ScopeUsersWrite              Scope = "users:write"
-	ScopeUsersProfileRead        Scope = "users.profile:read"
-	ScopeUsersProfileWrite       Scope = "users.profile:write"
-	ScopeChannelsRead            Scope = "channels:read"
+	ScopeChatWrite          Scope = "chat:write"
+	ScopeChatWriteCustomize Scope = "chat:write.customize"
+	ScopeIncomingWebhook    Scope = "incoming-webhook"
+	ScopeChannelsHistory    Scope = "channels:history"
+	// Slack grants reading a conversation per conversation type: the history
+	// of a private channel, a direct message and a group direct message each
+	// needs its own scope, and channels:history reaches public channels only.
+	ScopeGroupsHistory     Scope = "groups:history"
+	ScopeIMHistory         Scope = "im:history"
+	ScopeMPIMHistory       Scope = "mpim:history"
+	ScopeUsersRead         Scope = "users:read"
+	ScopeUsersReadEmail    Scope = "users:read.email"
+	ScopeUsersWrite        Scope = "users:write"
+	ScopeUsersProfileRead  Scope = "users.profile:read"
+	ScopeUsersProfileWrite Scope = "users.profile:write"
+	ScopeChannelsRead      Scope = "channels:read"
+	// The per-type counterparts of channels:read for conversation metadata,
+	// membership and listing.
+	ScopeGroupsRead              Scope = "groups:read"
+	ScopeIMRead                  Scope = "im:read"
+	ScopeMPIMRead                Scope = "mpim:read"
 	ScopeChannelsJoin            Scope = "channels:join"
 	ScopeChannelsWrite           Scope = "channels:write"
 	ScopeChannelsManage          Scope = "channels:manage"
@@ -449,7 +466,7 @@ func multipartBoundary(r *http.Request) string {
 // therefore scanned through a bounded, replayable prefix so the body the
 // handler sees is byte-for-byte the body that arrived.
 func requestToken(r *http.Request) string {
-	if token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")); token != "" {
+	if token, ok := bearer.Token(r.Header.Get("Authorization")); ok {
 		return token
 	}
 	if boundary := multipartBoundary(r); boundary != "" && r.Body != nil && r.MultipartForm == nil {
@@ -507,14 +524,21 @@ var allScopes = []Scope{
 	ScopeConversationsConnectManage,
 	ScopeChatWrite,
 	ScopeChatWriteCustomize,
+	ScopeChatWritePublic,
 	ScopeIncomingWebhook,
 	ScopeChannelsHistory,
+	ScopeGroupsHistory,
+	ScopeIMHistory,
+	ScopeMPIMHistory,
 	ScopeUsersRead,
 	ScopeUsersReadEmail,
 	ScopeUsersWrite,
 	ScopeUsersProfileRead,
 	ScopeUsersProfileWrite,
 	ScopeChannelsRead,
+	ScopeGroupsRead,
+	ScopeIMRead,
+	ScopeMPIMRead,
 	ScopeChannelsJoin,
 	ScopeChannelsWrite,
 	ScopeChannelsManage,

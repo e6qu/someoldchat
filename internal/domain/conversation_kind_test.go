@@ -55,3 +55,16 @@ func TestConversationKindForDecidesEveryCombination(t *testing.T) {
 		})
 	}
 }
+
+// The Events API names conversations in Slack's legacy vocabulary, and an
+// unset kind is a public channel everywhere else in the domain.
+func TestSlackChannelTypeUsesTheEventsAPIVocabulary(t *testing.T) {
+	for kind, want := range map[ConversationType]string{
+		"": "channel", ConversationTypePublic: "channel", ConversationTypePrivate: "group",
+		ConversationTypeIM: "im", ConversationTypeMPIM: "mpim",
+	} {
+		if got := (Conversation{Kind: kind}).SlackChannelType(); got != want {
+			t.Errorf("kind %q channel_type=%q, want %q", kind, got, want)
+		}
+	}
+}

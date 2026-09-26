@@ -125,7 +125,7 @@ func TestPromotedProducerPayloadsTranslateEndToEnd(t *testing.T) {
 
 	// User groups: creation snapshots the subteam object, membership changes
 	// speak in deltas.
-	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "oncall", "", "Handles incidents")
+	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "oncall", "", "Handles incidents", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,8 @@ func TestUninstallAnnouncementReachesTheOpenSocket(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		record, _, _, claimed, err := messages.ClaimAppEvent(ctx, "A1", "socket", "conn-1", time.Minute)
+		recordClaim, claimed, err := messages.ClaimAppEvent(ctx, "A1", "socket", "conn-1", time.Minute)
+		record := recordClaim.Record
 		if err != nil {
 			t.Fatal(err)
 		}

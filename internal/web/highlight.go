@@ -3,6 +3,7 @@ package web
 import (
 	"html"
 	"strings"
+	"unicode"
 )
 
 // Marking what matched.
@@ -27,15 +28,7 @@ func markTerms(text string, terms []string) string {
 	if len(terms) == 0 || text == "" {
 		return html.EscapeString(text)
 	}
-	lowered := strings.ToLower(text)
-	// A fold that changes the byte length destroys the mapping from a match in
-	// the folded string back to a span of the original, and the Unicode cases
-	// where it happens (U+0130 folds to two runes) are exactly the ones where a
-	// wrong span would corrupt a character rather than merely misplace an
-	// emphasis. Marking is decoration; the text is not. Skip the decoration.
-	if len(lowered) != len(text) {
-		return html.EscapeString(text)
-	}
+	lowered, origins := foldWithOrigins(text)
 	spans := matchedSpans(lowered, terms)
 	if len(spans) == 0 {
 		return html.EscapeString(text)
@@ -43,14 +36,41 @@ func markTerms(text string, terms []string) string {
 	var output strings.Builder
 	cursor := 0
 	for _, span := range spans {
-		output.WriteString(html.EscapeString(text[cursor:span.start]))
+		// Each span is mapped back through the rune it came from, never used
+		// as an offset into text directly: folding changes the byte length of
+		// some runes (U+0130 shrinks, U+023A grows), so a folded offset is not
+		// an original one even when the two strings happen to be the same
+		// length overall — the case the old length check let through, which
+		// cut a character in half.
+		start, end := origins[span.start], origins[span.end]
+		output.WriteString(html.EscapeString(text[cursor:start]))
 		output.WriteString("<mark>")
-		output.WriteString(html.EscapeString(text[span.start:span.end]))
+		output.WriteString(html.EscapeString(text[start:end]))
 		output.WriteString("</mark>")
-		cursor = span.end
+		cursor = end
 	}
 	output.WriteString(html.EscapeString(text[cursor:]))
 	return output.String()
+}
+
+// foldWithOrigins lowercases text exactly as strings.ToLower does — one rune
+// at a time through unicode.ToLower — and records, for every byte of the folded
+// string and for its end, the byte offset in text of the rune that produced it.
+// A match in the folded string starts and ends on rune boundaries, so origins
+// maps both ends to rune boundaries of the original.
+func foldWithOrigins(text string) (string, []int) {
+	var folded strings.Builder
+	folded.Grow(len(text))
+	origins := make([]int, 0, len(text)+1)
+	for offset, r := range text {
+		before := folded.Len()
+		folded.WriteRune(unicode.ToLower(r))
+		for range folded.Len() - before {
+			origins = append(origins, offset)
+		}
+	}
+	origins = append(origins, len(text))
+	return folded.String(), origins
 }
 
 type textSpan struct{ start, end int }

@@ -32,6 +32,14 @@ message User {
   string presence = 7;
   bool deleted = 8;
   int64 last_active_at_unix_nano = 9;
+  // Unix nanoseconds; zero when unrecorded.
+  int64 updated_unix_nano = 10;
+  // Derived for the reader from the member's bot and workspace membership.
+  string bot_id = 11;
+  string app_id = 12;
+  string role = 13;
+  bool restricted = 14;
+  bool ultra_restricted = 15;
 }
 
 message SetUserPresenceRequest {

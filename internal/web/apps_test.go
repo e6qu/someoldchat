@@ -230,11 +230,12 @@ func TestDeveloperAppDeliveryHealthShowsDurableRetryWithoutExposingPayload(t *te
 	}); err != nil {
 		t.Fatal(err)
 	}
-	claimed, _, _, found, err := repository.ClaimAppEvent(ctx, "Aevents", "socket", "test-worker", time.Minute)
+	claimedClaim, found, err := repository.ClaimAppEvent(ctx, "Aevents", "socket", "test-worker", time.Minute)
+	claimed := claimedClaim.Record
 	if err != nil || !found {
 		t.Fatalf("claim=%+v found=%v err=%v", claimed, found, err)
 	}
-	if err := repository.ReleaseAppEvent(ctx, "Aevents", "socket", "test-worker", claimed.Sequence, "connection_closed", now.Add(time.Minute)); err != nil {
+	if err := repository.ReleaseAppEvent(ctx, "Aevents", "socket", "test-worker", claimed.Sequence, events.AppEventRelease{Reason: "connection_closed", RetryAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 

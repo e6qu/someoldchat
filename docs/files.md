@@ -33,6 +33,47 @@ so a CDN, WAF, or access-log configuration in front of the application must trea
 the whole path as a secret and must not log it. The server-minted upload target
 `POST /internal/files/external/{upload}` is the same class of URL.
 
+The upload URL answers with a plain HTTP status, as Slack's does, because the
+official SDKs judge the upload by the status alone: 200 when the bytes are
+stored, 400 when the body is malformed or its length disagrees with the
+ticket, 404 when the ticket is unknown, expired, or already used, and 503 when
+the blob store is unavailable. Completing a ticket whose bytes never arrived
+is `file_not_found`. When the caller names no `mime_type`, the media type is
+inferred from the file name's extension (a fixed table in
+`internal/domain/filetype.go`, not the host's MIME database), and `filetype`
+and `pretty_type` are derived from the same table.
+
+## Absolute URLs
+
+Every URL a file object carries — `url_private`, `url_private_download`,
+`permalink`, `permalink_public` — and the `upload_url` of
+`files.getUploadURLExternal` is absolute, because SDKs and apps fetch them
+verbatim. The origin is the configured `-auth-public-url` when one is set;
+otherwise it is the request's own: `https` for a TLS connection or an
+`X-Forwarded-Proto` of exactly `http` or `https` (any other value is ignored),
+and the `Host` header. A deployment behind a proxy should set the public URL.
+The one place that decides this is `internal/api/slack/origin.go`.
+
+The file objects inside Events API and Socket Mode message payloads are built
+by delivery workers that know no public origin, so their `url_private` values
+are still origin-relative; a consumer resolves them against the API base URL
+or reads the file through `files.info`.
+
+## Shares
+
+`files.info` reports `shares` as Slack does — `{"public"|"private": {channel:
+[{ts, thread_ts?, channel_name, team_id, share_user_id}]}}` — one entry per
+live message that carries the file, limited to public channels and the
+conversations the reader belongs to. Other file objects carry only `channels`,
+so a list read does not pay a message join per file.
+
+## Listing and deletion
+
+`files.list` returns files newest first (`created` descending, then id), so a
+page is the same page on every storage profile. `files.delete` leaves a
+tombstone — `{"id": "F…", "mode": "tombstone"}` — in every message that shared
+the file and announces the deletion as `file_deleted` in the same commit.
+
 `files.completeUploadExternal` accepts either a single `upload_id` or a `files`
 array of several completions in one request. A completion can include channel
 identifiers, an initial comment, Block Kit blocks, and a `thread_ts`. The channel

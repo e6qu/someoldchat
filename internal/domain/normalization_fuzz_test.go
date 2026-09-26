@@ -8,8 +8,9 @@ import (
 )
 
 func TestNormalizeBlocksCompactsObjectsAndRejectsScalars(t *testing.T) {
-	got, err := NormalizeBlocks([]byte(` [ { "type": "section", "text": {"type":"plain_text","text":"hello"} } ] `))
-	if err != nil || got != `[{"type":"section","text":{"type":"plain_text","text":"hello"}}]` {
+	// A block that already carries its identifiers keeps its exact encoding.
+	got, err := NormalizeBlocks([]byte(` [ { "type": "section", "block_id": "b1", "text": {"type":"plain_text","text":"hello"} } ] `))
+	if err != nil || got != `[{"type":"section","block_id":"b1","text":{"type":"plain_text","text":"hello"}}]` {
 		t.Fatalf("blocks=%q err=%v", got, err)
 	}
 	for _, raw := range []string{`{}`, `null`, `["not an object"]`} {

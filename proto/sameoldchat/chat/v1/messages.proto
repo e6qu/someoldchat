@@ -28,6 +28,8 @@ message Message {
   string edited_at = 16;
   string edited_by = 17;
   string subtype = 18;
+  // reply_broadcast marks a thread reply that was also sent to the channel.
+  bool reply_broadcast = 19;
 }
 
 message PostRequest {
@@ -62,6 +64,12 @@ message PostWithBlocksRequest {
   string username = 20;
   string icon_emoji = 21;
   string icon_url = 22;
+  // bot_id is the posting token's bot identity; write_public is the
+  // chat:write.public grant that lets it post to a public channel it has not
+  // joined; subtype is the workspace-generated message vocabulary (me_message).
+  string bot_id = 23;
+  bool write_public = 24;
+  string subtype = 25;
 }
 
 message ShareFileRequest {
@@ -97,6 +105,7 @@ message EphemeralMessage {
   string id = 9;
   string app_id = 10;
   string created_at = 11;
+  string thread_timestamp = 12;
 }
 
 message PostEphemeralRequest {
@@ -108,6 +117,7 @@ message PostEphemeralRequest {
   string blocks = 6;
   string attachments = 7;
   string app_id = 8;
+  string thread_timestamp = 9;
 }
 
 message EphemeralMessagesRequest {
@@ -218,6 +228,16 @@ message HistoryRequest {
   int32 limit = 4;
   string cursor = 5;
   bool descending = 6;
+  MessageWindow window = 7;
+  bool roots_only = 8;
+}
+
+// MessageWindow is Slack's oldest/latest/inclusive window. An empty bound is
+// unbounded; a set one is RFC 3339 with nanoseconds.
+message MessageWindow {
+  string oldest = 1;
+  string latest = 2;
+  bool inclusive = 3;
 }
 
 message RepliesRequest {
@@ -227,6 +247,7 @@ message RepliesRequest {
   string timestamp = 4;
   int32 limit = 5;
   string cursor = 6;
+  MessageWindow window = 7;
 }
 
 message SearchRequest {

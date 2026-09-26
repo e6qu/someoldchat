@@ -85,7 +85,10 @@ backend only; selecting it for a multi-replica deployment is invalid.
 Direct and multi-person conversations use durable participant sets and a
 unique participant-set key, so concurrent `conversations.open` calls from
 different replicas converge on one conversation rather than creating
-replica-local duplicates.
+replica-local duplicates. A participant set of one is the caller's self-DM.
+New one-to-one conversations receive Slack's D-prefixed identifiers; group
+DMs and channels keep the C prefix, and conversations created before that
+change keep the identifier every stored reference already names.
 
 Named channels likewise use a durable workspace-and-name unique index. The
 service normalizes the human input once and every storage profile enforces the
@@ -168,6 +171,7 @@ internal/
   app/localchat/  explicit local storage and blob composition
   web/            page and HTMX fragment handlers
   auth/           browser sessions, bearer tokens, scopes
+  bearer/         the shared case-insensitive Authorization: Bearer parser
   domain/         entities and domain invariants
   service/        transactions and application use cases
   store/          persistence ports
@@ -235,6 +239,15 @@ Browsers reconnect with `Last-Event-ID`, and a replica reads missed events from
 the journal before subscribing to best-effort live notification. Replica-local
 fan-out is an optimization only.
 
+Both live streams — SSE and RTM — read the journal only through the per-user
+projection (`ListUserEventsAfter`): records about conversations the reader is
+not a member of are withheld, and content-bearing records are hydrated only
+after membership is proven. `realtime.NewHandler` and `NewRTMHandler` accept
+nothing else, so a stream cannot be wired to the raw workspace journal. Each
+projected page reports the last sequence it examined, visible or not, and a
+stream resumes after that sequence, so withheld records are read once rather
+than on every poll.
+
 Journal records written before the typed payload contract cannot be delivered
 and cannot be repaired. The upgrade quarantines them once — marked
 `undeliverable`, excluded from every consumer read, each recorded in
@@ -254,6 +267,18 @@ web replicas may stop.
 - Message timestamps are stored in an exact sortable representation, never as
   floating point.
 - Ordering that must be global is allocated within the database transaction.
+- The journal (outbox) sequence is allocated in commit order on every profile,
+  because every reader resumes with `sequence > cursor` and a record that
+  became visible below a cursor would never be delivered. SQLite allocates it
+  under its database write lock and dqlite applies one transaction at a time.
+  PostgreSQL allocates an identity at insert time, so there a row is inserted
+  with a provisional negative sequence and a deferred constraint trigger gives
+  it its final sequence at commit, under a transaction-scoped advisory lock
+  held until the commit is visible. The cost is that event-producing commits
+  on PostgreSQL are serialized and forgo group commit: on a local PostgreSQL
+  16, sixteen concurrent writers doing nothing but appending events went from
+  roughly 4,300–6,500 to 1,600–2,500 appends a second. Writes that produce no
+  event, and everything a transaction does before its commit, are unaffected.
 - Every lifecycle and writer lease includes a fencing generation so a process
   from a previous activation cannot write after hibernation begins.
 
@@ -276,10 +301,11 @@ them.
 | `POST /auth/oidc/backchannel-logout`, `GET /auth/shauth/logout/complete` | provider-initiated logout |
 | `GET /events` | server-sent event stream, 16 KiB message ceiling |
 | `GET /rtm` | Real Time Messaging WebSocket |
-| `/socket-mode` | Socket Mode WebSocket, registered only when a connection store exists |
+| `/socket-mode` | Socket Mode WebSocket, mounted with the Web API and RTM by `slack.Mount` in every composition |
 | `POST /services/{workspace}/{app}/{secret}` | incoming webhook delivery; see [incoming webhooks](incoming-webhooks.md) |
 | `POST /internal/admin/incoming-webhooks/create`, `/enable` | webhook administration |
 | `GET /internal/slack-lists/download.csv` | `slackLists` CSV export |
+| `GET /avatars/{workspace}/{user}/{size}.png` | generated default avatar at one of the profile image sizes; unauthenticated, and it discloses only the member color every user object already carries |
 
 Three routes are **unauthenticated token-bearing capability URLs**: possession of
 the path is the authorization.

@@ -42,6 +42,13 @@ stop_fixture() {
 
 start_fixture() {
 	stop_fixture
+	# A fixture left running by another run would answer the readiness probe
+	# below, and the suites would then qualify that process instead of this
+	# build. Refuse rather than race it for the port.
+	if curl -fsS "http://127.0.0.1:18080/qualification/ready" >/dev/null 2>&1; then
+		echo "127.0.0.1:18080 already serves a fixture; stop it before qualifying" >&2
+		exit 1
+	fi
 	"$work/fixture" &
 	fixture_pid=$!
 	ready=0
@@ -78,7 +85,10 @@ start_fixture
 
 npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/web-api@8.0.0')
 require_hash "$work/npm/$npm_tarball" 6044ac0b7bae06bce3c4d10a124f4f51bb72b9afa2c0f655e46f9433e9efa054
-npm install --prefix "$work/node-web" --no-save --ignore-scripts "$work/npm/$npm_tarball"
+# The same suite installs an app through @slack/oauth's InstallProvider.
+oauth_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/oauth@4.0.0')
+require_hash "$work/npm/$oauth_tarball" 4cfc0b04698885a41a50e902cc57e0fa3cb08fa96b8a13d7d9e5f1d7c024abc4
+npm install --prefix "$work/node-web" --no-save --ignore-scripts "$work/npm/$npm_tarball" "$work/npm/$oauth_tarball"
 cp "$root/tests/official-sdk-qualification/node-web-api/qualification.mjs" "$work/node-web/qualification.mjs"
 (cd "$work/node-web" && SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ node qualification.mjs)
 stop_fixture

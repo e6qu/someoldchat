@@ -176,7 +176,7 @@ func TestRemotePostsScheduledFilesAtomicallyAndIdempotently(t *testing.T) {
 	if err != nil || upload.Status != domain.ExternalUploadCompleted {
 		t.Fatalf("completed upload=%+v err=%v", upload, err)
 	}
-	history, err := target.ListMessages(context.Background(), "C1", domain.PageRequest{Limit: 10})
+	history, err := target.ListMessages(context.Background(), "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || history.Messages[0].ID != first.ID {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
@@ -427,7 +427,7 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	if err != nil || second.ID != file.ID {
 		t.Fatalf("second completion file=%+v err=%v", second, err)
 	}
-	page, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err := remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks != "" {
 		t.Fatalf("published messages=%+v err=%v", page.Messages, err)
 	}
@@ -449,7 +449,7 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	if err != nil || len(batch) != 2 || batch[0].Title != "First batch" || batch[1].Title != "Second batch" {
 		t.Fatalf("batch=%+v err=%v", batch, err)
 	}
-	page, err = remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err = remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 2 || page.Messages[1].Text != "Batch" {
 		t.Fatalf("batch messages=%+v err=%v", page.Messages, err)
 	}
@@ -765,11 +765,13 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := remote.DeleteScheduledMessage(ctx, "T1", "U1", "C1", scheduled.ID); err != nil {
 		t.Fatalf("delete scheduled message: %v", err)
 	}
-	direct, err := remote.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	directOpening, err := remote.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	direct := directOpening.Conversation
 	if err != nil || !direct.IsDirectOrGroup() {
 		t.Fatalf("direct=%+v err=%v", direct, err)
 	}
-	reused, err := remote.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	reusedOpening, err := remote.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	reused := reusedOpening.Conversation
 	if err != nil || reused.ID != direct.ID {
 		t.Fatalf("reused=%+v direct=%+v err=%v", reused, direct, err)
 	}
@@ -819,12 +821,31 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := remote.RemoveReaction(ctx, "T1", "U1", "C1", timestamp, "thumbsup"); err != nil {
 		t.Fatal(err)
 	}
+	// The message above has been deleted, and a deleted message is not
+	// listed as pinned: the pin's item is the message itself, and a soft
+	// delete retains the text it must not disclose.
 	if err := remote.AddPin(ctx, "T1", "U1", "C1", timestamp); err != nil {
 		t.Fatal(err)
 	}
+	if hidden, _, _, err := remote.Pins(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10}); err != nil || len(hidden) != 0 {
+		t.Fatalf("a deleted message was listed as pinned: %+v err=%v", hidden, err)
+	}
+	live, err := remote.Post(ctx, "T1", "U1", "C1", "pin me", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.AddPin(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(live.CreatedAt)); err != nil {
+		t.Fatal(err)
+	}
 	pins, _, more, err := remote.Pins(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
-	if err != nil || more || len(pins) != 1 || pins[0].Message != message.ID {
+	if err != nil || more || len(pins) != 1 || pins[0].Message != live.ID || pins[0].Item.Text != "pin me" {
 		t.Fatalf("pins=%+v more=%t err=%v", pins, more, err)
+	}
+	if err := remote.RemovePin(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(live.CreatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remote.Delete(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(live.CreatedAt)); err != nil {
+		t.Fatal(err)
 	}
 	if err := remote.RemovePin(ctx, "T1", "U1", "C1", timestamp); err != nil {
 		t.Fatal(err)
@@ -844,7 +865,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	// channel_purpose messages, which are ordinary durable messages with a
 	// subtype. The two composed messages must still be there, in order, and
 	// every notice must name its subtype.
-	page, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err := remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) < 2 || page.Messages[0].ID != retried.ID || page.Messages[1].ID != keyed.ID {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
@@ -860,7 +881,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 			t.Fatalf("history is missing the %s notice: %+v", want, page.Messages)
 		}
 	}
-	replies, err := remote.Replies(ctx, "T1", "U1", "C1", timestamp, domain.PageRequest{Limit: 10})
+	replies, err := remote.Replies(ctx, "T1", "U1", "C1", timestamp, domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(replies.Messages) != 0 {
 		t.Fatalf("replies=%+v err=%v", replies, err)
 	}
@@ -933,7 +954,7 @@ func TestRemoteConcurrentPostsPreserveEveryCall(t *testing.T) {
 	seen := make(map[domain.MessageID]struct{}, expected)
 	var cursor domain.Cursor
 	for len(seen) < expected {
-		page, err := remote.History(ctx, "T-load", "U-load", "C-load", domain.PageRequest{Limit: 100, Cursor: cursor})
+		page, err := remote.History(ctx, "T-load", "U-load", "C-load", domain.HistoryRequest{Page: domain.PageRequest{Limit: 100, Cursor: cursor}})
 		if err != nil {
 			t.Fatalf("history: %v", err)
 		}

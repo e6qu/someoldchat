@@ -270,10 +270,12 @@ func (x *UserReactionPage) GetHasMore() bool {
 }
 
 type Pin struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	CreatedAt     string                 `protobuf:"bytes,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	MessageId string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	UserId    string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	CreatedAt string                 `protobuf:"bytes,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// item is the pinned message as it reads now.
+	Item          *Message `protobuf:"bytes,4,opt,name=item,proto3" json:"item,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -327,6 +329,13 @@ func (x *Pin) GetCreatedAt() string {
 		return x.CreatedAt
 	}
 	return ""
+}
+
+func (x *Pin) GetItem() *Message {
+	if x != nil {
+		return x.Item
+	}
+	return nil
 }
 
 type PinPage struct {
@@ -990,13 +999,14 @@ const file_sameoldchat_chat_v1_reactions_proto_rawDesc = "" +
 	"\x05items\x18\x01 \x03(\v2!.sameoldchat.chat.v1.UserReactionR\x05items\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\\\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x8e\x01\n" +
 	"\x03Pin\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
-	"created_at\x18\x03 \x01(\tR\tcreatedAt\"s\n" +
+	"created_at\x18\x03 \x01(\tR\tcreatedAt\x120\n" +
+	"\x04item\x18\x04 \x01(\v2\x1c.sameoldchat.chat.v1.MessageR\x04item\"s\n" +
 	"\aPinPage\x12,\n" +
 	"\x04pins\x18\x01 \x03(\v2\x18.sameoldchat.chat.v1.PinR\x04pins\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -1099,34 +1109,35 @@ var file_sameoldchat_chat_v1_reactions_proto_depIdxs = []int32{
 	14, // 1: sameoldchat.chat.v1.UserReaction.message:type_name -> sameoldchat.chat.v1.Message
 	0,  // 2: sameoldchat.chat.v1.UserReaction.reaction:type_name -> sameoldchat.chat.v1.Reaction
 	2,  // 3: sameoldchat.chat.v1.UserReactionPage.items:type_name -> sameoldchat.chat.v1.UserReaction
-	4,  // 4: sameoldchat.chat.v1.PinPage.pins:type_name -> sameoldchat.chat.v1.Pin
-	14, // 5: sameoldchat.chat.v1.Star.message:type_name -> sameoldchat.chat.v1.Message
-	11, // 6: sameoldchat.chat.v1.StarPage.stars:type_name -> sameoldchat.chat.v1.Star
-	6,  // 7: sameoldchat.chat.v1.ReactionsService.AddReaction:input_type -> sameoldchat.chat.v1.ReactionRequest
-	6,  // 8: sameoldchat.chat.v1.ReactionsService.RemoveReaction:input_type -> sameoldchat.chat.v1.ReactionRequest
-	7,  // 9: sameoldchat.chat.v1.ReactionsService.Reactions:input_type -> sameoldchat.chat.v1.ReactionPageRequest
-	8,  // 10: sameoldchat.chat.v1.ReactionsService.UserReactions:input_type -> sameoldchat.chat.v1.UserReactionsRequest
-	9,  // 11: sameoldchat.chat.v1.ReactionsService.AddPin:input_type -> sameoldchat.chat.v1.PinRequest
-	9,  // 12: sameoldchat.chat.v1.ReactionsService.RemovePin:input_type -> sameoldchat.chat.v1.PinRequest
-	10, // 13: sameoldchat.chat.v1.ReactionsService.Pins:input_type -> sameoldchat.chat.v1.PinsRequest
-	9,  // 14: sameoldchat.chat.v1.ReactionsService.AddStar:input_type -> sameoldchat.chat.v1.PinRequest
-	9,  // 15: sameoldchat.chat.v1.ReactionsService.RemoveStar:input_type -> sameoldchat.chat.v1.PinRequest
-	12, // 16: sameoldchat.chat.v1.ReactionsService.Stars:input_type -> sameoldchat.chat.v1.StarsRequest
-	15, // 17: sameoldchat.chat.v1.ReactionsService.AddReaction:output_type -> sameoldchat.chat.v1.MutationResponse
-	15, // 18: sameoldchat.chat.v1.ReactionsService.RemoveReaction:output_type -> sameoldchat.chat.v1.MutationResponse
-	1,  // 19: sameoldchat.chat.v1.ReactionsService.Reactions:output_type -> sameoldchat.chat.v1.ReactionPage
-	3,  // 20: sameoldchat.chat.v1.ReactionsService.UserReactions:output_type -> sameoldchat.chat.v1.UserReactionPage
-	15, // 21: sameoldchat.chat.v1.ReactionsService.AddPin:output_type -> sameoldchat.chat.v1.MutationResponse
-	15, // 22: sameoldchat.chat.v1.ReactionsService.RemovePin:output_type -> sameoldchat.chat.v1.MutationResponse
-	5,  // 23: sameoldchat.chat.v1.ReactionsService.Pins:output_type -> sameoldchat.chat.v1.PinPage
-	15, // 24: sameoldchat.chat.v1.ReactionsService.AddStar:output_type -> sameoldchat.chat.v1.MutationResponse
-	15, // 25: sameoldchat.chat.v1.ReactionsService.RemoveStar:output_type -> sameoldchat.chat.v1.MutationResponse
-	13, // 26: sameoldchat.chat.v1.ReactionsService.Stars:output_type -> sameoldchat.chat.v1.StarPage
-	17, // [17:27] is the sub-list for method output_type
-	7,  // [7:17] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	14, // 4: sameoldchat.chat.v1.Pin.item:type_name -> sameoldchat.chat.v1.Message
+	4,  // 5: sameoldchat.chat.v1.PinPage.pins:type_name -> sameoldchat.chat.v1.Pin
+	14, // 6: sameoldchat.chat.v1.Star.message:type_name -> sameoldchat.chat.v1.Message
+	11, // 7: sameoldchat.chat.v1.StarPage.stars:type_name -> sameoldchat.chat.v1.Star
+	6,  // 8: sameoldchat.chat.v1.ReactionsService.AddReaction:input_type -> sameoldchat.chat.v1.ReactionRequest
+	6,  // 9: sameoldchat.chat.v1.ReactionsService.RemoveReaction:input_type -> sameoldchat.chat.v1.ReactionRequest
+	7,  // 10: sameoldchat.chat.v1.ReactionsService.Reactions:input_type -> sameoldchat.chat.v1.ReactionPageRequest
+	8,  // 11: sameoldchat.chat.v1.ReactionsService.UserReactions:input_type -> sameoldchat.chat.v1.UserReactionsRequest
+	9,  // 12: sameoldchat.chat.v1.ReactionsService.AddPin:input_type -> sameoldchat.chat.v1.PinRequest
+	9,  // 13: sameoldchat.chat.v1.ReactionsService.RemovePin:input_type -> sameoldchat.chat.v1.PinRequest
+	10, // 14: sameoldchat.chat.v1.ReactionsService.Pins:input_type -> sameoldchat.chat.v1.PinsRequest
+	9,  // 15: sameoldchat.chat.v1.ReactionsService.AddStar:input_type -> sameoldchat.chat.v1.PinRequest
+	9,  // 16: sameoldchat.chat.v1.ReactionsService.RemoveStar:input_type -> sameoldchat.chat.v1.PinRequest
+	12, // 17: sameoldchat.chat.v1.ReactionsService.Stars:input_type -> sameoldchat.chat.v1.StarsRequest
+	15, // 18: sameoldchat.chat.v1.ReactionsService.AddReaction:output_type -> sameoldchat.chat.v1.MutationResponse
+	15, // 19: sameoldchat.chat.v1.ReactionsService.RemoveReaction:output_type -> sameoldchat.chat.v1.MutationResponse
+	1,  // 20: sameoldchat.chat.v1.ReactionsService.Reactions:output_type -> sameoldchat.chat.v1.ReactionPage
+	3,  // 21: sameoldchat.chat.v1.ReactionsService.UserReactions:output_type -> sameoldchat.chat.v1.UserReactionPage
+	15, // 22: sameoldchat.chat.v1.ReactionsService.AddPin:output_type -> sameoldchat.chat.v1.MutationResponse
+	15, // 23: sameoldchat.chat.v1.ReactionsService.RemovePin:output_type -> sameoldchat.chat.v1.MutationResponse
+	5,  // 24: sameoldchat.chat.v1.ReactionsService.Pins:output_type -> sameoldchat.chat.v1.PinPage
+	15, // 25: sameoldchat.chat.v1.ReactionsService.AddStar:output_type -> sameoldchat.chat.v1.MutationResponse
+	15, // 26: sameoldchat.chat.v1.ReactionsService.RemoveStar:output_type -> sameoldchat.chat.v1.MutationResponse
+	13, // 27: sameoldchat.chat.v1.ReactionsService.Stars:output_type -> sameoldchat.chat.v1.StarPage
+	18, // [18:28] is the sub-list for method output_type
+	8,  // [8:18] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_reactions_proto_init() }

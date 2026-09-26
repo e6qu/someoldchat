@@ -143,7 +143,7 @@ func TestConcurrentExternalUploadCompletionPostsOneComment(t *testing.T) {
 			t.Fatalf("attempt %d failed: %v", attempt, err)
 		}
 	}
-	history, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: attempts + 1})
+	history, err := messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: attempts + 1}})
 	if err != nil {
 		t.Fatal(err)
 	}

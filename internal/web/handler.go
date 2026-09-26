@@ -5098,7 +5098,7 @@ func (h Handler) forwardMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := h.newUserNames(r.Context(), principal)
-	permalink := "/archives/" + url.PathEscape(string(channel)) + "/p" + strings.ReplaceAll(string(timestamp), ".", "")
+	permalink := domain.MessagePermalinkPath(channel, timestamp, original.ThreadTimestamp)
 	quoted := map[string]any{
 		"author_name": names.name(original.AuthorID),
 		"text":        original.Text,
@@ -5588,7 +5588,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			h.writePageError(w, http.StatusBadRequest, "That thread link is not valid", "The link you followed does not identify a message in this conversation.")
 			return
 		}
-		replies, repliesErr := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.PageRequest{Limit: timelineWindow})
+		replies, repliesErr := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.ThreadRequest{Page: domain.PageRequest{Limit: timelineWindow}})
 		if repliesErr != nil {
 			h.writeStoreError(w, repliesErr, "The thread is temporarily unavailable.")
 			return
@@ -5967,7 +5967,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "that thread link is not valid", http.StatusBadRequest)
 			return
 		}
-		replies, repliesErr := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.PageRequest{Limit: timelineWindow})
+		replies, repliesErr := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.ThreadRequest{Page: domain.PageRequest{Limit: timelineWindow}})
 		if repliesErr != nil {
 			h.writeFragmentError(w, repliesErr, "the thread is temporarily unavailable")
 			return
@@ -6019,11 +6019,11 @@ func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, ch
 	if start != "" {
 		return h.historyWindowForward(ctx, principal, channel, start)
 	}
-	page, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{
+	page, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.HistoryRequest{Page: domain.PageRequest{
 		Limit:      timelineWindow,
 		Cursor:     end,
 		Descending: true,
-	})
+	}, RootsOnly: true})
 	if err != nil {
 		return historyView{}, err
 	}
@@ -6061,11 +6061,11 @@ func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, ch
 // ascending, for the "show newer messages" pager. Reaching the end makes the
 // window the latest one, so it goes live again.
 func (h Handler) historyWindowForward(ctx context.Context, principal auth.Principal, channel domain.ConversationID, start domain.Cursor) (historyView, error) {
-	page, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{
+	page, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.HistoryRequest{Page: domain.PageRequest{
 		Limit:      timelineWindow,
 		Cursor:     start,
 		Descending: false,
-	})
+	}, RootsOnly: true})
 	if err != nil {
 		return historyView{}, err
 	}
@@ -6144,21 +6144,6 @@ func (h Handler) timelineChrome(ctx context.Context, principal auth.Principal, c
 		return summaries, ""
 	}
 	return summaries, cursor.LastRead
-}
-
-// decodeMessageBroadcast reports whether a threaded reply was also sent to
-// the channel. The flag lives in the durable stream state, which the API
-// projects as subtype thread_broadcast; MSG-01 requires the two to be
-// distinguishable in the client too.
-func decodeMessageBroadcast(streamState string) bool {
-	if strings.TrimSpace(streamState) == "" {
-		return false
-	}
-	var state domain.MessageStreamState
-	if json.Unmarshal([]byte(streamState), &state) != nil {
-		return false
-	}
-	return state.ReplyBroadcast
 }
 
 // threadReplySummary is the sentence under a parent message: how many replies
@@ -6444,7 +6429,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			Ephemeral:   ephemeral,
 			Subtype:     string(message.Subtype),
 			System:      message.Subtype.System(),
-			Broadcast:   decodeMessageBroadcast(message.StreamState),
+			Broadcast:   message.ReplyBroadcast,
 		}
 		// A human posting as themselves carries their current status beside their
 		// name; an app message or one wearing a custom username is not a person.
@@ -6461,7 +6446,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 		if !ephemeral {
 			// Slack's permalink, and the two actions that need one.
-			view.Permalink = "/archives/" + url.PathEscape(channel) + "/p" + strings.ReplaceAll(timestamp, ".", "")
+			view.Permalink = domain.MessagePermalinkPath(message.Conversation, domain.MessageTimestamp(timestamp), message.ThreadTimestamp)
 			view.CopyLinkURL = view.Permalink
 			view.ForwardURL = mutationURL("/app/message/forward", channel, timestamp, threadTimestamp, before)
 			if request.Member {
@@ -10502,7 +10487,7 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		item := conversationView{ID: string(conversation.ID), Name: name, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.Kind == domain.ConversationTypeMPIM, OpenUsers: strings.Join(ids, ",")}
-		if history, historyErr := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: 1, Descending: true}); historyErr == nil && len(history.Messages) == 1 {
+		if history, historyErr := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 1, Descending: true}}); historyErr == nil && len(history.Messages) == 1 {
 			item.RecentAt = history.Messages[0].CreatedAt
 		}
 		recent = append(recent, item)
@@ -12227,18 +12212,55 @@ func (h Handler) appResponse(w http.ResponseWriter, r *http.Request) {
 	secureHeaders(w, workspaceContentSecurityPolicy)
 	body, err := io.ReadAll(io.LimitReader(r.Body, service.MaxMessageBodyBytes+1))
 	if err != nil || len(body) > service.MaxMessageBodyBytes {
-		http.Error(w, "invalid response payload", http.StatusBadRequest)
+		writeAppResponseError(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
 	if err := h.Messages.HandleAppResponse(r.Context(), r.PathValue("token"), string(body)); err != nil {
-		if errors.Is(err, service.ErrInvalidAppResponse) {
-			http.Error(w, "response URL is invalid, expired, or exhausted", http.StatusNotFound)
-			return
-		}
-		http.Error(w, "response could not be applied", http.StatusServiceUnavailable)
+		status, reason := appResponseFailure(err)
+		writeAppResponseError(w, status, reason)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// appResponseFailure maps a refused response_url POST to the status and
+// plain-text reason Slack answers with. Every handled refusal is a 4xx: a body
+// that can never be applied is 400, a URL or destination that is gone is 404.
+// Only a transient failure asks the app to retry (503), and only an error
+// nothing classified is a 500.
+func appResponseFailure(err error) (int, string) {
+	switch {
+	case errors.Is(err, service.ErrAppResponseNoText):
+		return http.StatusBadRequest, "no_text"
+	case errors.Is(err, service.ErrAppResponsePayloadInvalid):
+		return http.StatusBadRequest, "invalid_payload"
+	case errors.Is(err, service.ErrAppResponseURLUsed):
+		return http.StatusNotFound, "used_url"
+	case errors.Is(err, service.ErrAppResponseURLExpired):
+		return http.StatusNotFound, "expired_url"
+	case errors.Is(err, service.ErrConversationAlreadyArchived):
+		return http.StatusGone, "channel_is_archived"
+	case errors.Is(err, service.ErrConversationPostingRestricted):
+		return http.StatusForbidden, "restricted_action"
+	case errors.Is(err, service.ErrMessageAlreadyDeleted):
+		return http.StatusNotFound, "message_not_found"
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, service.ErrNotInConversation):
+		// The capability was valid; what it points at — the channel, the
+		// original message, the app's bot — no longer exists.
+		return http.StatusNotFound, "channel_not_found"
+	case errors.Is(err, service.ErrInvalidAppResponse), errors.Is(err, store.ErrInvalidArgument), errors.Is(err, service.ErrInvalidMessage):
+		return http.StatusBadRequest, "invalid_payload"
+	case errors.Is(err, store.ErrTransient), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return http.StatusServiceUnavailable, "service_unavailable"
+	}
+	return http.StatusInternalServerError, "internal_error"
+}
+
+func writeAppResponseError(w http.ResponseWriter, status int, reason string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, reason)
 }
 
 func (h Handler) responseBaseURL(r *http.Request) string {
@@ -12714,7 +12736,8 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That conversation has no members", "A direct conversation needs at least one member. Nothing was changed.")
 		return
 	}
-	conversation, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+	opening, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+	conversation := opening.Conversation
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		reason := "The conversation could not be opened because the workspace store is temporarily unavailable."
@@ -12723,7 +12746,7 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 			reason = "That set of members cannot be opened as a conversation."
 		}
 		heading := "The conversation was not opened"
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrUserNotFound) {
 			status = http.StatusNotFound
 			heading = "That member is no longer here"
 			reason = "One of those members is no longer in the workspace."
@@ -13073,8 +13096,10 @@ func (h Handler) setConversationText(w http.ResponseWriter, r *http.Request, fie
 	}
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidConversation):
-			h.writeMutationError(w, r, http.StatusBadRequest, "That channel "+field+" is too long", "Use at most 250 characters.")
+		case errors.Is(err, service.ErrConversationTextTooLong):
+			h.writeMutationError(w, r, http.StatusBadRequest, "That channel "+field+" is too long", fmt.Sprintf("Use at most %d characters.", service.MaxConversationTextLength))
+		case errors.Is(err, service.ErrConversationArchived):
+			h.writeMutationError(w, r, http.StatusConflict, "This channel is archived", "Unarchive it before changing its "+field+". Nothing was changed.")
 		case errors.Is(err, service.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this conversation", "Only a conversation member can change its "+field+".")
 		case errors.Is(err, store.ErrNotFound):
@@ -13140,6 +13165,8 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 			h.redirectMutation(w, r, "/app/dms")
 		case errors.Is(err, service.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusConflict, "You have already left this conversation", "No membership was changed.")
+		case errors.Is(err, service.ErrConversationArchived):
+			h.writeMutationError(w, r, http.StatusConflict, "This conversation is archived", "An archived conversation cannot be left. Nothing was changed.")
 		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, service.ErrCannotLeaveDefault):
 			h.writeMutationError(w, r, http.StatusBadRequest, "This conversation cannot be left", "Required workspace channels cannot be left.")
 		case errors.Is(err, store.ErrNotFound):

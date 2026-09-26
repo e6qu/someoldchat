@@ -75,6 +75,7 @@ operations:
     status: behavior-compatible
     evidence:
       - go-test:internal/api/slack:TestAPITestEchoesTheSameErrorForJSONAndForm
+      - go-test:internal/api/slack:TestAPITestEchoesItsArguments
   - method: bookmarks.add
     status: behavior-compatible
     provenance: slack-reference
@@ -105,6 +106,9 @@ operations:
     reference: https://docs.slack.dev/reference/methods/apps.connections.open/
     evidence:
       - go-test:internal/api/slack:TestAppsConnectionsOpenUsesAppTokenAndCreatesSingleUseConnection
+      - go-test:internal/api/slack:TestAppsConnectionsOpenFollowsTheRequestOrigin
+      - go-test:internal/api/slack:TestAppsConnectionsOpenAtTheLimitIsRetryable
+      - go-test:cmd/server:TestProductionCompositionServesSocketModeAndRTM
   - method: apps.manifest.create
     status: behavior-compatible
     provenance: slack-reference
@@ -145,12 +149,20 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAuthTestIncludesContractIdentityFields
+      - go-test:internal/api/slack:TestURLsHandedToClientsAreAbsolute
+      - go-test:internal/api/slack:TestConfiguredPublicURLWinsOverTheRequestHost
+      - go-test:internal/api/slack:TestTeamInfoReportsDomainAndFetchableIcons
   - method: chat.postMessage
     status: schema-compatible
     provenance: slack-api-specs-openapi
     reference: https://docs.slack.dev/reference/methods/chat.postMessage/
     evidence:
       - go-test:internal/api/slack:TestPostMessageForm
+      - go-test:internal/api/slack:TestBotTokenMessagesCarryBotIdentity
+      - go-test:internal/api/slack:TestPostMessageResolvesNamesAndUsers
+      - go-test:internal/api/slack:TestChatWritePublicPostsWithoutJoining
+      - go-test:internal/api/slack:TestAsUserIsAcceptedFromAUserToken
+      - go-test:internal/api/slack:TestReplyingToAReplyJoinsTheRootThread
     deviations:
       - >-
         The full current payload is validated and persisted, but link-name
@@ -176,11 +188,14 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUpdateAndDeleteMessage
+      - go-test:internal/api/slack:TestChatUpdateKeepsWhatItWasNotGiven
+      - go-test:internal/api/slack:TestEditingSomebodyElsesMessageUsesSlacksCodes
   - method: chat.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUpdateAndDeleteMessage
+      - go-test:internal/api/slack:TestEditingSomebodyElsesMessageUsesSlacksCodes
   - method: canvases.access.delete
     status: behavior-compatible
     provenance: slack-reference
@@ -222,21 +237,35 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestGetPermalink
+      - go-test:internal/api/slack:TestURLsHandedToClientsAreAbsolute
   - method: conversations.history
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestHistoryPostForm
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestHistoryListsRootsAndBroadcastRepliesOnly
+      - go-test:internal/api/slack:TestHistoryWindowIsPartOfTheRead
+      - go-test:internal/api/slack:TestThreadParentsCarryTheirSummary
+      - go-test:internal/api/slack:TestMessagesCarryReactionsAndPins
+      - go-test:internal/api/slack:TestBotTokenMessagesCarryBotIdentity
+      - go-test:internal/api/slack:TestLimitZeroIsTheDefault
+      - go-test:internal/api/slack:TestChannelNoticesCarryTheirSlackFieldsInHistory
   - method: conversations.replies
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationRepliesReturnsRootAndThread
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestReplyingToAReplyJoinsTheRootThread
+      - go-test:internal/api/slack:TestThreadParentsCarryTheirSummary
+      - go-test:internal/api/slack:TestHistoryWindowIsPartOfTheRead
   - method: reactions.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddGetAndRemoveReaction
+      - go-test:internal/api/slack:TestTimestampArgumentsUseTheirOperationsCodes
   - method: reactions.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -247,11 +276,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddGetAndRemoveReaction
+      - go-test:internal/api/slack:TestReactionsGetAndListReturnWholeItems
   - method: reactions.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddGetAndRemoveReaction
+      - go-test:internal/api/slack:TestReactionsGetAndListReturnWholeItems
   - method: pins.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -267,6 +298,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddListAndRemovePin
+      - go-test:internal/api/slack:TestPinsListCarriesTheMessage
   - method: search.messages
     status: sdk-compatible
     provenance: slack-api-specs-openapi
@@ -290,31 +322,48 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationAndUserInfo
+      - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
+    deviations:
+      - Nothing records a member's time zone, so every member reports tz UTC with a zero offset.
+      - A workspace has owners but no distinguished primary owner, so every owner reports is_primary_owner.
+      - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: conversations.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationAndUserInfo
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestConversationObjectReportsProvenanceAndTheGeneralChannel
+    deviations:
+      - created and creator are recorded from schema 180 onward; a conversation created earlier reports created 0 and an empty creator, as does a topic or purpose last set before then.
   - method: conversations.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestConversationListingNarrowsToTheTypesTheTokenMayRead
+      - go-test:internal/api/slack:TestLimitZeroIsTheDefault
+      - go-test:internal/api/slack:TestUsersConversationsListsOnlyTheMembersConversations
   - method: users.conversations
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestConversationListingNarrowsToTheTypesTheTokenMayRead
+      - go-test:internal/api/slack:TestUsersConversationsListsOnlyTheMembersConversations
   - method: conversations.members
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationMembers
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestLimitZeroIsTheDefault
   - method: team.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestTeamInfo
+      - go-test:internal/api/slack:TestTeamInfoReportsDomainAndFetchableIcons
   - method: team.profile.get
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -349,6 +398,8 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCreatePrivateConversation
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestConversationObjectReportsProvenanceAndTheGeneralChannel
   - method: conversations.join
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -380,31 +431,40 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestLeavePublicConversation
+      - go-test:internal/api/slack:TestConversationObjectReportsProvenanceAndTheGeneralChannel
   - method: conversations.kick
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestConversationsKickFollowsItsPinnedErrors
   - method: conversations.rename
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.setTopic
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestSetTopicAndPurposeFollowTheirPinnedErrors
   - method: conversations.setPurpose
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestSetTopicAndPurposeFollowTheirPinnedErrors
   - method: conversations.archive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.unarchive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -420,26 +480,45 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationsOpenReusesDirectConversation
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestConversationsOpenNamesUsersAndSelfAndGroupDMs
   - method: conversations.mark
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestMarkConversation
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestTimestampArgumentsUseTheirOperationsCodes
   - method: files.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestFileMetadataEndpoints
+      - go-test:internal/api/slack:TestDeletedFileIsATombstoneAndIsAnnounced
+      - go-test:internal/events:TestPromotedTopicsTranslateFromTheirProducerPayloads
   - method: files.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestFileMetadataEndpoints
+      - go-test:internal/api/slack:TestFileURLsAreAbsoluteOnTheConfiguredPublicURL
+      - go-test:internal/api/slack:TestFilesInfoCarriesTheRequiredCommentsArray
+      - go-test:internal/api/slack:TestFilesInfoReportsItsSharesByVisibility
+      - persistence:tests/persistence-qualification/files_oauth_test.go
+    deviations:
+      - >-
+        The file object carries no thumb_* URLs: no token-authenticated
+        thumbnail route exists on the Web API surface. A shares entry carries
+        ts, thread_ts, channel_name, team_id and share_user_id but not the
+        reply_count/reply_users thread summary, and shares appear on
+        files.info only, not on list or message file objects.
   - method: files.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestFilesListNamesAMissingUser
+      - go-test:internal/api/slack:TestFilesListIsNewestFirstAndPagesStably
+      - persistence:tests/persistence-qualification/files_oauth_test.go
   - method: files.upload
     status: schema-compatible
     provenance: slack-api-specs-openapi
@@ -474,17 +553,28 @@ operations:
     reference: https://docs.slack.dev/reference/methods/files.getUploadURLExternal/
     evidence:
       - go-test:internal/api/slack:TestExternalUploadHTTPBatchCompletion
+      - go-test:internal/api/slack:TestFileURLsFollowTheRequestOriginAndRejectForgedSchemes
+      - go-test:internal/api/slack:TestExternalUploadURLRefusesWithHTTPStatus
+      - go-test:internal/api/slack:TestUploadsInferTheirMediaTypeFromTheName
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: files.completeUploadExternal
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/files.completeUploadExternal/
     evidence:
       - go-test:internal/api/slack:TestExternalUploadHTTPBatchCompletion
+      - go-test:internal/api/slack:TestCompleteUploadExternalBeforeUploadIsFileNotFound
   - method: users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestLimitZeroIsTheDefault
+      - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
+    deviations:
+      - Nothing records a member's time zone, so every member reports tz UTC with a zero offset.
+      - A workspace has owners but no distinguished primary owner, so every owner reports is_primary_owner.
+      - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: users.lookupByEmail
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -501,7 +591,8 @@ operations:
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
       - Automatic presence follows Slack's ten-minute inactivity rule against the member's last observed activity; websocket connectivity does not feed it.
-      - The optional presence detail fields and current rate-limit behavior have not been qualified against Slack.
+      - The caller's own presence carries online, auto_away, manual_away, connection_count and last_activity. Client connections are not tracked, so online and connection_count (0 or 1) follow observed activity rather than open connections.
+      - Current rate-limit behavior has not been qualified against Slack.
     audit:
       downgraded_from: behavior-compatible
       reason: The previous claim proved response decoding but treated automatic mode as effective active presence without live activity evidence.
@@ -946,6 +1037,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestPostEphemeralReturnsMessageTimestamp
+      - go-test:internal/api/slack:TestPostEphemeralContract
   - method: chat.scheduleMessage
     status: behavior-compatible
     provenance: slack-reference
@@ -961,8 +1053,9 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/api/slack:TestPostMessageResolvesNamesAndUsers
     deviations:
-      - markdown_text, metadata, as_user, reply_broadcast, parse, link_names, and unfurl controls are not implemented
+      - markdown_text, metadata, reply_broadcast, parse, link_names, and unfurl controls are not implemented (as_user is read and ignored, as chat.postMessage does; a user token posts as its user, a bot token as its bot)
       - Web API rate limiting now answers 429 with Retry-After and rate_limited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
       - schedules created before schema 102 lack reconstructable app and token attribution
   - method: chat.scheduledMessages.list
@@ -1077,6 +1170,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestFileMetadataEndpoints
+      - go-test:internal/api/slack:TestFileURLsAreAbsoluteOnTheConfiguredPublicURL
   - method: migration.exchange
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1087,6 +1181,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestOAuthAccessAndTokenHTTPExchangeCodes
+      - go-test:internal/api/slack:TestOAuthV2AccessInstallsAndReinstallsTheSameBot
   - method: oauth.token
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1097,12 +1192,19 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestOAuthV2AccessHTTPExchangesCode
+      - go-test:internal/api/slack:TestOAuthV2AccessInstallsAndReinstallsTheSameBot
+      - go-test:internal/api/slack:TestOAuthV2AccessRedeemsAUserScopeOnlyInstall
+      - go-test:internal/api/slack:TestOAuthV2AccessNamesEachFailure
+      - persistence:tests/persistence-qualification/files_oauth_test.go
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: oauth.v2.exchange
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.exchange/
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestOAuthV2ExchangeReportsTheInstaller
       - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
     deviations:
       - Enterprise organization installs, GovSlack hosts, Slack's production rate limits, and controlled live-Slack rotation outcomes remain unqualified.
@@ -1204,6 +1306,8 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRTMConnectReturnsDurableEventStreamURL
+      - go-test:internal/api/slack:TestRTMConnectFollowsTheForwardedScheme
+      - go-test:cmd/server:TestProductionCompositionServesSocketModeAndRTM
   - method: stars.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1239,11 +1343,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.disable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.enable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1254,11 +1360,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupListBooleansAcceptEveryDocumentedForm
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1610,7 +1718,7 @@ operations:
       - go-test:internal/api/slack:TestAdminConversationAdministration
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
-      - go-test:internal/service:TestThreadSummariesRespectAIExclusion
+      - go-test:internal/service:TestThreadSummariesAreNotGovernedByTheAIExclusion
       - go-test:internal/service:TestAssistantSearchContextRespectsAIExclusion
   - method: admin.conversations.convertToPublic
     status: behavior-compatible
@@ -1967,8 +2075,10 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:internal/service:TestAssistantWritesTouchOneFieldEach
+      - go-test:internal/api/slack:TestAssistantThreadWritesAcceptTheSDKsJSONArrays
     deviations:
       - The transient status an assistant shows while it works. Clearing it is an empty status, which is why an empty value is accepted here and refused for a title.
+      - loading_messages is accepted in every encoding (python-slack-sdk sends it as a JSON array) and validated — a list of at most ten strings, otherwise invalid_arguments — but it is not stored or rendered; the thread shows the status alone. Carrying it needs an assistant_threads column (a schema migration), a SetAssistantThreadRequest/AssistantThread wire field and a rotating renderer in the web client.
       - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.threads.setStatus/
@@ -1977,6 +2087,7 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:internal/service:TestAssistantWritesTouchOneFieldEach
+      - go-test:internal/api/slack:TestAssistantThreadWritesAcceptTheSDKsJSONArrays
     deviations:
       - Prompts offered before anyone has typed. Bounded at eight, which Slack does not document; the pane is short and an unbounded list would be a different surface.
       - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
@@ -2376,7 +2487,25 @@ decisions:
       apps.connections.open.
   - method: apps.connections.open
     evidence: https://docs.slack.dev/reference/methods/apps.connections.open/
-    decision: The current official method reference defines this Socket Mode method, while the pinned Web API OpenAPI snapshot does not contain it. Track the method against the official reference and the repository Socket Mode qualification.
+    decision: >-
+      The current official method reference defines this Socket Mode method,
+      while the pinned Web API OpenAPI snapshot does not contain it. Track the
+      method against the official reference and the repository Socket Mode
+      qualification. The returned URL follows the origin the client called
+      (X-Forwarded-Proto included) unless -socket-host overrides it. Slack
+      documents no error code for an app already holding its ten connections;
+      this server answers HTTP 429 with Retry-After and rate_limited, the one
+      failure every official Web API client retries on its own, rather than a
+      code an SDK treats as permanent. On the socket, envelopes carry
+      retry_attempt and retry_reason; an unacknowledged envelope is retried
+      three times on Slack's Events API schedule (immediately, after one
+      minute, after five minutes) and then dropped; interactions are delivered
+      concurrently. Event delivery state is per record, so a record waiting
+      for its retry does not hold back later ones and an app's connections
+      lease different records at once, but each connection holds one event
+      record in flight at a time — Slack delivers events concurrently on a
+      connection, and that limit is a recorded deviation. A fanned-out record
+      is retried only for the envelopes the app did not acknowledge.
   - method: functions.completeSuccess
     evidence: https://docs.slack.dev/reference/methods/functions.completeSuccess/
     decision: The current official method reference defines this POST method, but the pinned OpenAPI snapshot does not contain it. Track it as a supplemental Slack method until the vendored snapshot is refreshed.

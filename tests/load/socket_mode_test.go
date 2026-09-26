@@ -49,7 +49,7 @@ func TestSocketModeReconnectStormRespectsTheActiveLimit(t *testing.T) {
 		go func(index int) {
 			defer group.Done()
 			<-start
-			result, err := service.Open(ctx, "A1")
+			result, err := service.Open(ctx, "A1", "")
 			if err != nil {
 				atomic.AddInt64(&refused, 1)
 				return
@@ -114,7 +114,7 @@ func TestSocketModeConnectionIsSingleUseUnderARace(t *testing.T) {
 
 	identifiers := make([]string, 0, connections)
 	for index := 0; index < connections; index++ {
-		result, err := service.Open(ctx, "A1")
+		result, err := service.Open(ctx, "A1", "")
 		if err != nil {
 			t.Fatal(err)
 		}

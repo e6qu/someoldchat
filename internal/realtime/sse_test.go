@@ -38,10 +38,20 @@ func producedRecord(sequence uint64, id domain.EventID, topic string, fields ...
 	return events.Record{Sequence: sequence, Event: event}
 }
 
+// userPage is the page a projection returns when every record it examined was
+// visible: Through is the last of them, or the cursor when there were none.
+func userPage(after uint64, records []events.Record) events.UserEventPage {
+	through := after
+	for _, record := range records {
+		through = max(through, record.Sequence)
+	}
+	return events.UserEventPage{Records: records, Through: through}
+}
+
 type emptyEventSource struct{}
 
-func (emptyEventSource) ListEventsAfter(context.Context, domain.WorkspaceID, uint64, int) ([]events.Record, error) {
-	return nil, nil
+func (emptyEventSource) ListUserEventsAfter(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, after uint64, _ int) (events.UserEventPage, error) {
+	return userPage(after, nil), nil
 }
 
 type testRTMMessageService struct {
@@ -69,14 +79,14 @@ func (s testRTMConnectionSource) ConsumeRTMConnection(context.Context, string) (
 	return s.connection, nil
 }
 
-func (s *testSource) ListEventsAfter(_ context.Context, _ domain.WorkspaceID, after uint64, _ int) ([]events.Record, error) {
+func (s *testSource) ListUserEventsAfter(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, after uint64, _ int) (events.UserEventPage, error) {
 	s.calls++
 	s.after = append(s.after, after)
 	if s.calls == 1 {
-		return []events.Record{producedRecord(7, "evt_7", "message.created", events.String("message_id", "M7"), events.String("channel_id", "C1"))}, nil
+		return userPage(after, []events.Record{producedRecord(7, "evt_7", "message.created", events.String("message_id", "M7"), events.String("channel_id", "C1"))}), nil
 	}
 	s.cancel()
-	return nil, nil
+	return userPage(after, nil), nil
 }
 
 func TestSSEReplaysFromDurableSequence(t *testing.T) {
@@ -484,10 +494,10 @@ type scriptedSource struct {
 	served  bool
 }
 
-func (s *scriptedSource) ListEventsAfter(_ context.Context, _ domain.WorkspaceID, after uint64, _ int) ([]events.Record, error) {
+func (s *scriptedSource) ListUserEventsAfter(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, after uint64, _ int) (events.UserEventPage, error) {
 	if s.served {
 		s.cancel()
-		return nil, nil
+		return userPage(after, nil), nil
 	}
 	s.served = true
 	result := make([]events.Record, 0, len(s.records))
@@ -496,16 +506,16 @@ func (s *scriptedSource) ListEventsAfter(_ context.Context, _ domain.WorkspaceID
 			result = append(result, record)
 		}
 	}
-	return result, nil
+	return userPage(after, result), nil
 }
 
 type countingSource struct {
 	calls int
 }
 
-func (s *countingSource) ListEventsAfter(context.Context, domain.WorkspaceID, uint64, int) ([]events.Record, error) {
+func (s *countingSource) ListUserEventsAfter(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, after uint64, _ int) (events.UserEventPage, error) {
 	s.calls++
-	return nil, nil
+	return userPage(after, nil), nil
 }
 
 // cancellingRecorder ends the request as soon as the stream writes the text the
@@ -772,8 +782,8 @@ func TestRTMMessageLimitMatchesSlackProtocol(t *testing.T) {
 // server-side condition that ends an RTM stream intentionally.
 type failingEventSource struct{}
 
-func (failingEventSource) ListEventsAfter(context.Context, domain.WorkspaceID, uint64, int) ([]events.Record, error) {
-	return nil, errors.New("event source is unavailable")
+func (failingEventSource) ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) (events.UserEventPage, error) {
+	return events.UserEventPage{}, errors.New("event source is unavailable")
 }
 
 // An intentional end of an RTM stream is announced with Slack's goodbye
@@ -821,7 +831,7 @@ type recordingEventSource struct {
 	records []events.Record
 }
 
-func (s *recordingEventSource) ListEventsAfter(_ context.Context, _ domain.WorkspaceID, after uint64, _ int) ([]events.Record, error) {
+func (s *recordingEventSource) ListUserEventsAfter(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, after uint64, _ int) (events.UserEventPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.after = append(s.after, after)
@@ -832,7 +842,7 @@ func (s *recordingEventSource) ListEventsAfter(_ context.Context, _ domain.Works
 		}
 	}
 	s.records = nil
-	return delivered, nil
+	return userPage(after, delivered), nil
 }
 
 func (s *recordingEventSource) firstCursor() uint64 {

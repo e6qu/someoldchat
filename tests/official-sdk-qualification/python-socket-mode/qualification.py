@@ -8,6 +8,18 @@ from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web import WebClient
 
+# The fixture enforces Slack's rate-limiting contract, as production does, so
+# these clients retry a 429 after its Retry-After the way a real app is
+# configured to. Without the handler the pinned client surfaces the first 429.
+from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
+from slack_sdk.http_retry import default_retry_handlers
+
+
+class WebClient(WebClient):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("retry_handlers", default_retry_handlers() + [RateLimitErrorRetryHandler(max_retry_count=10)])
+        super().__init__(*args, **kwargs)
+
 
 api_url = os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/")
 qualification_url = os.environ.get("SAMEOLDCHAT_QUALIFICATION_URL", "http://127.0.0.1:18080")
@@ -34,6 +46,9 @@ def handle_request(client, request):
         expected = {
             "type": "message",
             "channel": "C1",
+            # Slack names the conversation's type on every message event;
+            # Bolt's Assistant and channel_type filters key on it.
+            "channel_type": "channel",
             "user": "U1",
             "text": "socket qualification event",
             "ts": event["ts"],

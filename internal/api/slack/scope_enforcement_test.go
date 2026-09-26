@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -25,11 +26,13 @@ import (
 //
 //   - chat.* uses chat:write where the snapshot says chat:write:bot /
 //     chat:write:user, which Slack replaced with the single chat:write;
-//   - most conversations.* mutators use channels:manage where the snapshot says
-//     channels:write / groups:write / im:write / mpim:write. Current
-//     conversations.join and conversations.invite are exceptions with
-//     token- and channel-type-specific scope matrices covered by dedicated
-//     tests below;
+//   - conversations.* reads and writes take the scope their conversation's
+//     type needs, from the snapshot's channels:/groups:/im:/mpim: family (see
+//     scopeFamilies). The table names the public-channel member; public-channel
+//     writes take channels:manage for the bot token this fixture holds, where a
+//     user token takes channels:write. conversations.join and
+//     conversations.invite have token- and channel-type-specific matrices
+//     covered by dedicated tests below;
 //   - files.* writes use files:write where the snapshot says files:write:user;
 //
 // Routes this repository adds and the snapshot does not describe at all
@@ -38,6 +41,36 @@ type scopedRoute struct {
 	method string
 	path   string
 	scope  auth.Scope
+}
+
+var (
+	conversationHistoryFamily  = []auth.Scope{auth.ScopeChannelsHistory, auth.ScopeGroupsHistory, auth.ScopeIMHistory, auth.ScopeMPIMHistory}
+	conversationReadFamily     = []auth.Scope{auth.ScopeChannelsRead, auth.ScopeGroupsRead, auth.ScopeIMRead, auth.ScopeMPIMRead}
+	botConversationWriteFamily = []auth.Scope{auth.ScopeChannelsManage, auth.ScopeGroupsWrite, auth.ScopeIMWrite, auth.ScopeMPIMWrite}
+)
+
+// scopeFamilies names, for a route that accepts any one of several scopes
+// before it knows the conversation's type, every scope it accepts. A token
+// holding none of them is refused before anything is read, with `needed`
+// naming the whole family — Slack's own answer — so the rejection test
+// withholds the family and expects it. The route's scopedRoutes entry is the
+// public-channel member of its family.
+var scopeFamilies = map[string][]auth.Scope{
+	"/api/conversations.history":    conversationHistoryFamily,
+	"/api/conversations.replies":    conversationHistoryFamily,
+	"/api/conversations.info":       conversationReadFamily,
+	"/api/conversations.members":    conversationReadFamily,
+	"/api/conversations.leave":      botConversationWriteFamily,
+	"/api/conversations.kick":       botConversationWriteFamily,
+	"/api/conversations.rename":     botConversationWriteFamily,
+	"/api/conversations.setTopic":   botConversationWriteFamily,
+	"/api/conversations.setPurpose": botConversationWriteFamily,
+	"/api/conversations.archive":    botConversationWriteFamily,
+	"/api/conversations.unarchive":  botConversationWriteFamily,
+	"/api/conversations.close":      botConversationWriteFamily,
+	"/api/conversations.mark":       botConversationWriteFamily,
+	"/api/conversations.create":     {auth.ScopeChannelsManage, auth.ScopeGroupsWrite},
+	"/api/conversations.open":       {auth.ScopeIMWrite, auth.ScopeMPIMWrite},
 }
 
 // scopedRoutes covers every registered Slack method that enforces a scope. It is
@@ -260,7 +293,7 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/conversations.archive", auth.ScopeChannelsManage},
 		{http.MethodPost, "/api/conversations.unarchive", auth.ScopeChannelsManage},
 		{http.MethodPost, "/api/conversations.close", auth.ScopeChannelsManage},
-		{http.MethodPost, "/api/conversations.open", auth.ScopeChannelsManage},
+		{http.MethodPost, "/api/conversations.open", auth.ScopeIMWrite},
 		{http.MethodPost, "/api/conversations.mark", auth.ScopeChannelsManage},
 		{http.MethodPost, "/api/reactions.add", auth.ScopeReactionsWrite},
 		{http.MethodPost, "/api/reactions.remove", auth.ScopeReactionsWrite},
@@ -381,9 +414,13 @@ func TestEveryScopedMethodRejectsATokenMissingItsScope(t *testing.T) {
 		if _, ok := separateAuthenticator[route.path]; ok {
 			continue
 		}
+		withheld, family := scopeFamilies[route.path]
+		if !family {
+			withheld = []auth.Scope{route.scope}
+		}
 		granted := make([]auth.Scope, 0, len(defaultTestScopes()))
 		for _, scope := range defaultTestScopes() {
-			if scope != route.scope {
+			if !slices.Contains(withheld, scope) {
 				granted = append(granted, scope)
 			}
 		}
@@ -410,12 +447,16 @@ func TestEveryScopedMethodRejectsATokenMissingItsScope(t *testing.T) {
 			t.Errorf("%s %s: body=%+v, want ok=false error=missing_scope", route.method, route.path, body)
 			continue
 		}
-		if body.Needed != string(route.scope) {
-			t.Errorf("%s %s: needed=%q, want %q", route.method, route.path, body.Needed, route.scope)
+		needed := make([]string, 0, len(withheld))
+		for _, scope := range withheld {
+			needed = append(needed, string(scope))
+		}
+		if body.Needed != strings.Join(needed, ",") {
+			t.Errorf("%s %s: needed=%q, want %q", route.method, route.path, body.Needed, strings.Join(needed, ","))
 		}
 		for _, provided := range strings.Split(body.Provided, ",") {
-			if provided == string(route.scope) {
-				t.Errorf("%s %s: provided still lists the withheld scope %s", route.method, route.path, route.scope)
+			if slices.Contains(withheld, auth.Scope(provided)) {
+				t.Errorf("%s %s: provided still lists the withheld scope %s", route.method, route.path, provided)
 			}
 		}
 	}
@@ -429,10 +470,10 @@ func TestNarrowScopeTokenCannotReadConversationsOrUsers(t *testing.T) {
 	handler, _ := testHandlerWithScopes(auth.ScopeChatWrite)
 	cases := []struct {
 		path   string
-		needed auth.Scope
+		needed string
 	}{
-		{"/api/conversations.info?channel=C1", auth.ScopeChannelsRead},
-		{"/api/users.info?user=U1", auth.ScopeUsersRead},
+		{"/api/conversations.info?channel=C1", "channels:read,groups:read,im:read,mpim:read"},
+		{"/api/users.info?user=U1", string(auth.ScopeUsersRead)},
 	}
 	for _, testCase := range cases {
 		request := httptest.NewRequest(http.MethodGet, testCase.path, nil)
@@ -450,7 +491,7 @@ func TestNarrowScopeTokenCannotReadConversationsOrUsers(t *testing.T) {
 		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.OK || body.Error != "missing_scope" || body.Needed != string(testCase.needed) {
+		if body.OK || body.Error != "missing_scope" || body.Needed != testCase.needed {
 			t.Fatalf("%s: body=%+v", testCase.path, body)
 		}
 	}

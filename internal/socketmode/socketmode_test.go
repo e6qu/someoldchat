@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -103,7 +104,7 @@ func translatedRecord(t *testing.T, sequence uint64, id domain.EventID) events.R
 func dialHandler(t *testing.T, handler Handler, connections *memory.Store) *websocket.Conn {
 	t.Helper()
 	service := Service{Store: connections, Host: "example.test"}
-	result, err := service.Open(context.Background(), "A123")
+	result, err := service.Open(context.Background(), "A123", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,19 +133,50 @@ func dialHandler(t *testing.T, handler Handler, connections *memory.Store) *webs
 
 func TestOpenRequiresExplicitAppAndHost(t *testing.T) {
 	service := Service{Store: memory.New(), Host: "example.test"}
-	if _, err := service.Open(context.Background(), ""); err != ErrInvalidAppID {
+	if _, err := service.Open(context.Background(), "", ""); err != ErrInvalidAppID {
 		t.Fatalf("Open empty app ID error=%v, want %v", err, ErrInvalidAppID)
 	}
 	service.Host = ""
-	if _, err := service.Open(context.Background(), "A123"); err == nil {
-		t.Fatal("Open without public host succeeded")
+	if _, err := service.Open(context.Background(), "A123", ""); err == nil {
+		t.Fatal("Open without public host or request origin succeeded")
+	}
+}
+
+// The connection URL follows the origin the client called
+// apps.connections.open on, so an SDK behind a TLS-terminating proxy is handed
+// wss:// on the proxy's host. It used to be fixed at startup from -socket-host
+// and -socket-tls, and a deployment that set neither handed out
+// ws://localhost:8080. A configured host remains an explicit override.
+func TestOpenFollowsTheRequestOriginUnlessAHostIsConfigured(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		service Service
+		origin  string
+		want    string
+	}{
+		{"plain origin", Service{}, "http://127.0.0.1:18080", "ws://127.0.0.1:18080/socket-mode"},
+		{"TLS origin", Service{}, "https://chat.example.com", "wss://chat.example.com/socket-mode"},
+		{"forced TLS", Service{TLS: true}, "http://chat.example.com", "wss://chat.example.com/socket-mode"},
+		{"configured host", Service{Host: "sockets.example.com:8443", TLS: true}, "http://internal:8080", "wss://sockets.example.com:8443/socket-mode"},
+		{"configured plain host", Service{Host: "sockets.example.com"}, "https://chat.example.com", "ws://sockets.example.com/socket-mode"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			test.service.Store = memory.New()
+			result, err := test.service.Open(context.Background(), "A123", test.origin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(result.URL, test.want+"?connection_id=") {
+				t.Fatalf("url=%q, want prefix %q", result.URL, test.want)
+			}
+		})
 	}
 }
 
 func TestConnectionIsSingleUseAndExpires(t *testing.T) {
 	connections := memory.New()
 	service := Service{Store: connections, Host: "example.test", TLS: true}
-	result, err := service.Open(context.Background(), "A123")
+	result, err := service.Open(context.Background(), "A123", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +201,7 @@ func TestConnectionLimitAllowsReplacementAfterRelease(t *testing.T) {
 	service := Service{Store: connections, Host: "example.test"}
 	ids := make([]string, 0, domain.SocketModeConnectionLimit)
 	for range domain.SocketModeConnectionLimit {
-		result, err := service.Open(context.Background(), "A123")
+		result, err := service.Open(context.Background(), "A123", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -186,7 +218,7 @@ func TestConnectionLimitAllowsReplacementAfterRelease(t *testing.T) {
 	if count, err := connections.CountSocketModeConnections(context.Background(), "A123"); err != nil || count != domain.SocketModeConnectionLimit {
 		t.Fatalf("active connection count=%d error=%v", count, err)
 	}
-	if _, err := service.Open(context.Background(), "A123"); err != ErrConnectionLimit {
+	if _, err := service.Open(context.Background(), "A123", ""); err != ErrConnectionLimit {
 		t.Fatalf("connection beyond limit error=%v, want %v", err, ErrConnectionLimit)
 	}
 	if err := connections.RenewSocketModeConnection(context.Background(), ids[0], time.Now().UTC().Add(time.Minute)); err != nil {
@@ -198,7 +230,7 @@ func TestConnectionLimitAllowsReplacementAfterRelease(t *testing.T) {
 	if count, err := connections.CountSocketModeConnections(context.Background(), "A123"); err != nil || count != domain.SocketModeConnectionLimit-1 {
 		t.Fatalf("active count after release=%d error=%v", count, err)
 	}
-	if _, err := service.Open(context.Background(), "A123"); err != nil {
+	if _, err := service.Open(context.Background(), "A123", ""); err != nil {
 		t.Fatalf("replacement connection error=%v", err)
 	}
 }
@@ -206,7 +238,7 @@ func TestConnectionLimitAllowsReplacementAfterRelease(t *testing.T) {
 func TestHandlerSendsHelloAndAcknowledgesEnvelope(t *testing.T) {
 	connections := memory.New()
 	service := Service{Store: connections, Host: "example.test"}
-	result, err := service.Open(context.Background(), "A123")
+	result, err := service.Open(context.Background(), "A123", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +284,7 @@ func TestHandlerSendsHelloAndAcknowledgesEnvelope(t *testing.T) {
 func TestHandlerRejectsEnvelopeWithoutID(t *testing.T) {
 	connections := memory.New()
 	service := Service{Store: connections, Host: "example.test"}
-	result, err := service.Open(context.Background(), "A123")
+	result, err := service.Open(context.Background(), "A123", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +316,7 @@ func TestHandlerRejectsEnvelopeWithoutID(t *testing.T) {
 func TestHandlerDeliversEventAndAdvancesOnlyAfterAcknowledgement(t *testing.T) {
 	connections := memory.New()
 	service := Service{Store: connections, Host: "example.test"}
-	result, err := service.Open(context.Background(), "A123")
+	result, err := service.Open(context.Background(), "A123", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,15 +594,14 @@ func TestConcurrentConnectionsDeliverAnEnvelopeExactlyOnce(t *testing.T) {
 // Losing a race for an envelope is not a server fault. Closing with an internal
 // error sends an SDK looking for a failure that did not happen, and #86 made
 // exactly that reachable by writing the shared position from every connection.
-func TestLosingAnEnvelopeRaceClosesBenignly(t *testing.T) {
-	if code, _ := deliveryCloseCode(store.ErrConflict); code != websocket.CloseTryAgainLater {
-		t.Fatalf("a conflicting position write closed with %d, want %d", code, websocket.CloseTryAgainLater)
+func TestLosingAnEnvelopeRaceIsNotAServerFault(t *testing.T) {
+	for _, err := range []error{store.ErrConflict, store.ErrLeaseConflict, store.ErrNotFound} {
+		if !leaseLost(err) {
+			t.Fatalf("%v was classified as a store failure, want a lost lease", err)
+		}
 	}
-	if code, _ := deliveryCloseCode(store.ErrLeaseConflict); code != websocket.CloseTryAgainLater {
-		t.Fatalf("a lost envelope lease closed with %d, want %d", code, websocket.CloseTryAgainLater)
-	}
-	if code, _ := deliveryCloseCode(errors.New("connection refused")); code != websocket.CloseInternalServerErr {
-		t.Fatalf("an unavailable store closed with %d, want %d", code, websocket.CloseInternalServerErr)
+	if leaseLost(errors.New("connection refused")) {
+		t.Fatal("an unavailable store was classified as a lost lease")
 	}
 }
 
@@ -599,7 +630,7 @@ func quietLogger() *slog.Logger {
 func TestHandlerDoesNotLeakTheReaderOnPipelinedFrames(t *testing.T) {
 	connections := memory.New()
 	service := Service{Store: connections, Host: "example.test"}
-	result, err := service.Open(context.Background(), "A123")
+	result, err := service.Open(context.Background(), "A123", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,13 +673,6 @@ func TestHandlerDoesNotLeakTheReaderOnPipelinedFrames(t *testing.T) {
 			t.Fatalf("goroutines=%d, want no more than %d: the reader goroutine leaked", count, baseline)
 		}
 		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-func TestResponseRecorderRequiresDurableStore(t *testing.T) {
-	recorder := ResponseRecorder{}
-	if err := recorder.HandleSocketModeResponse(context.Background(), "A123", "env-1", []byte(`{"ok":true}`)); err == nil {
-		t.Fatal("response recorder without a store succeeded")
 	}
 }
 
@@ -740,5 +764,260 @@ func TestHandlerAnnouncesRefreshRequestedDisconnectAtTheRefreshHorizon(t *testin
 	}
 	if _, _, err := client.ReadMessage(); err == nil {
 		t.Fatal("connection stayed open after refresh_requested")
+	}
+}
+
+func readFrame(t *testing.T, client *websocket.Conn) map[string]any {
+	t.Helper()
+	if err := client.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var frame map[string]any
+	if err := client.ReadJSON(&frame); err != nil {
+		t.Fatal(err)
+	}
+	return frame
+}
+
+func openTicket(t *testing.T, connections *memory.Store) string {
+	t.Helper()
+	result, err := Service{Store: connections, Host: "example.test"}.Open(context.Background(), "A123", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(result.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed.Query().Get("connection_id")
+}
+
+// Slack's hello frame names the app the connection serves and carries the
+// build and approximate connection lifetime in debug_info; SDK diagnostics
+// read all three.
+func TestHandlerHelloDescribesTheConnection(t *testing.T) {
+	connections := memory.New()
+	server := httptest.NewServer(Handler{Store: connections, RefreshAge: 90 * time.Second})
+	t.Cleanup(server.Close)
+	client, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/socket-mode?connection_id="+openTicket(t, connections), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	hello := readFrame(t, client)
+	info, _ := hello["connection_info"].(map[string]any)
+	debug, _ := hello["debug_info"].(map[string]any)
+	if hello["type"] != "hello" || hello["num_connections"] != float64(1) || info["app_id"] != "A123" {
+		t.Fatalf("hello=%v", hello)
+	}
+	if debug["build_number"] == nil || debug["approximate_connection_time"] != float64(90) || debug["host"] == "" {
+		t.Fatalf("hello debug_info=%v", debug)
+	}
+}
+
+// The ticket is the credential, so the browser same-origin rule protects
+// nothing here; the default check answered 403 to official SDK clients behind
+// any proxy that rewrites Host. And a request that cannot be upgraded must not
+// spend the single-use ticket.
+func TestHandlerAcceptsAnyOriginAndKeepsTheTicketForAFailedHandshake(t *testing.T) {
+	connections := memory.New()
+	server := httptest.NewServer(Handler{Store: connections})
+	t.Cleanup(server.Close)
+	ticket := openTicket(t, connections)
+	response, err := http.Get(server.URL + "/socket-mode?connection_id=" + ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("plain GET status=%d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+	header := http.Header{"Origin": []string{"https://proxy.example.com"}}
+	client, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/socket-mode?connection_id="+ticket, header)
+	if err != nil {
+		t.Fatalf("a cross-origin upgrade with an unspent ticket failed: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if hello := readFrame(t, client); hello["type"] != "hello" {
+		t.Fatalf("hello=%v", hello)
+	}
+}
+
+// Slack ignores an acknowledgement for an envelope it is no longer waiting
+// for. Closing the connection over one turned a late or duplicate
+// acknowledgement into a reconnect.
+func TestHandlerIgnoresAcknowledgementsForEnvelopesItDoesNotHold(t *testing.T) {
+	connections := memory.New()
+	installAppEvents(t, connections, translatedRecord(t, 1, "event-1"), translatedRecord(t, 2, "event-2"))
+	queue := &observedQueue{Store: connections}
+	client := dialHandler(t, Handler{Store: connections, Queue: queue, Responses: new(testResponseSink)}, connections)
+	first := readFrame(t, client)
+	if first["envelope_id"] != "event-1" {
+		t.Fatalf("first=%v", first)
+	}
+	for _, ack := range []map[string]any{
+		{"envelope_id": "unknown-envelope"},
+		{"envelope_id": "event-1", "payload": nil},
+		{"envelope_id": "event-1"},
+	} {
+		if err := client.WriteJSON(ack); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := readFrame(t, client)
+	if second["envelope_id"] != "event-2" {
+		t.Fatalf("second=%v", second)
+	}
+	if !queue.acknowledged(1) {
+		t.Fatal("event-1 was not acknowledged")
+	}
+}
+
+// An envelope the app does not acknowledge goes back to the queue and is sent
+// again on the same connection, carrying retry_attempt and retry_reason the
+// way Slack's are. The connection used to be torn down on every timeout.
+func TestHandlerRedeliversAnUnacknowledgedEventWithRetryMetadata(t *testing.T) {
+	connections := memory.New()
+	installAppEvents(t, connections, translatedRecord(t, 1, "event-1"))
+	queue := &observedQueue{Store: connections}
+	client := dialHandler(t, Handler{Store: connections, Queue: queue, Responses: new(testResponseSink), EnvelopeTimeout: 100 * time.Millisecond, Logger: quietLogger()}, connections)
+	first := readFrame(t, client)
+	if first["envelope_id"] != "event-1" || first["retry_attempt"] != float64(0) || first["retry_reason"] != "" {
+		t.Fatalf("first delivery=%v", first)
+	}
+	retried := readFrame(t, client)
+	if retried["envelope_id"] != "event-1" || retried["retry_attempt"] != float64(1) || retried["retry_reason"] != "timeout" {
+		t.Fatalf("redelivery=%v, want retry_attempt 1 and retry_reason timeout", retried)
+	}
+	if err := client.WriteJSON(map[string]any{"envelope_id": "event-1", "payload": map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !queue.acknowledged(1) {
+		if time.Now().After(deadline) {
+			t.Fatal("the redelivered envelope was not acknowledged on the same connection")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A fanned-out record the app acknowledged only in part is retried only for
+// the envelopes it did not acknowledge; the store keeps the accepted ones with
+// the record's own delivery state. Resending all of them delivered the same
+// event to a listener that had already handled it.
+func TestHandlerRetriesOnlyTheUnacknowledgedFanOutEnvelopes(t *testing.T) {
+	connections := memory.New()
+	record := producedRecord(t, 4, "event-4", "conversation.members_invited",
+		events.String("channel_id", "C1"),
+		events.Strings("user_ids", []string{"U2", "U3"}),
+	)
+	installAppEvents(t, connections, record)
+	queue := &observedQueue{Store: connections}
+	client := dialHandler(t, Handler{Store: connections, Queue: queue, Responses: new(testResponseSink), EnvelopeTimeout: 100 * time.Millisecond, Logger: quietLogger()}, connections)
+	first, second := readFrame(t, client), readFrame(t, client)
+	if first["envelope_id"] != "event-4#0" || second["envelope_id"] != "event-4#1" {
+		t.Fatalf("fan-out envelopes=%v %v", first["envelope_id"], second["envelope_id"])
+	}
+	if err := client.WriteJSON(map[string]any{"envelope_id": "event-4#0"}); err != nil {
+		t.Fatal(err)
+	}
+	retried := readFrame(t, client)
+	if retried["envelope_id"] != "event-4#1" || retried["retry_attempt"] != float64(1) {
+		t.Fatalf("retry=%v, want only the unacknowledged envelope event-4#1", retried)
+	}
+	if err := client.WriteJSON(map[string]any{"envelope_id": "event-4#1"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !queue.acknowledged(1) {
+		if time.Now().After(deadline) {
+			t.Fatal("the record was not consumed once its last envelope was acknowledged")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Slack gives up on an event after three retries. Retrying for ever pinned an
+// app's whole event stream behind one envelope it would never acknowledge.
+func TestHandlerDropsAnEventWhoseRetriesAreSpent(t *testing.T) {
+	connections := memory.New()
+	installAppEvents(t, connections, translatedRecord(t, 1, "event-1"), translatedRecord(t, 2, "event-2"))
+	ctx := context.Background()
+	for range maxDeliveryRetries {
+		claim, found, err := connections.ClaimAppEvent(ctx, "A123", "socket", "earlier-connection", time.Minute)
+		if err != nil || !found || claim.Record.Event.ID != "event-1" {
+			t.Fatalf("claim=%+v found=%v err=%v", claim, found, err)
+		}
+		if err := connections.ReleaseAppEvent(ctx, "A123", "socket", "earlier-connection", claim.Record.Sequence, events.AppEventRelease{Reason: "ack_timeout", RetryAt: time.Now().Add(-time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client := dialHandler(t, Handler{Store: connections, Queue: connections, Responses: new(testResponseSink), EnvelopeTimeout: 100 * time.Millisecond, Logger: quietLogger()}, connections)
+	last := readFrame(t, client)
+	if last["envelope_id"] != "event-1" || last["retry_attempt"] != float64(maxDeliveryRetries) {
+		t.Fatalf("final attempt=%v", last)
+	}
+	next := readFrame(t, client)
+	if next["envelope_id"] != "event-2" || next["retry_attempt"] != float64(0) {
+		t.Fatalf("after the final unacknowledged attempt=%v, want event-2", next)
+	}
+}
+
+// Every acknowledgement claims the next envelope at once. Delivery used to
+// take one record per 100 ms poll, capping an app at ten events a second.
+func TestHandlerIsNotPacedByThePollInterval(t *testing.T) {
+	connections := memory.New()
+	const count = 60
+	records := make([]events.Record, 0, count)
+	for index := range count {
+		records = append(records, translatedRecord(t, uint64(index+1), domain.EventID("event-"+strconv.Itoa(index+1))))
+	}
+	installAppEvents(t, connections, records...)
+	client := dialHandler(t, Handler{Store: connections, Queue: connections, Responses: new(testResponseSink)}, connections)
+	started := time.Now()
+	for index := range count {
+		frame := readFrame(t, client)
+		if frame["envelope_id"] != "event-"+strconv.Itoa(index+1) {
+			t.Fatalf("frame %d=%v", index, frame)
+		}
+		if err := client.WriteJSON(map[string]any{"envelope_id": frame["envelope_id"]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if elapsed := time.Since(started); elapsed > count*pollInterval/2 {
+		t.Fatalf("%d acknowledged envelopes took %v, want well under one poll interval each", count, elapsed)
+	}
+}
+
+// Slack delivers envelopes concurrently: an interaction the app has not
+// answered yet does not hold back the next one.
+func TestHandlerKeepsSeveralInteractionsInFlight(t *testing.T) {
+	connections := memory.New()
+	now := time.Now().UTC()
+	response := domain.AppResponseURL{
+		TokenHash: "response-hash", AppID: "A123", WorkspaceID: "T1", UserID: "U1",
+		ConversationID: "C1", CreatedAt: now, ExpiresAt: now.Add(time.Minute), UsesRemaining: 5,
+	}
+	if err := connections.CreateAppInteractionCapabilities(context.Background(), domain.AppTrigger{
+		TokenHash: "trigger-hash", AppID: "A123", WorkspaceID: "T1", UserID: "U1",
+		CreatedAt: now, ExpiresAt: now.Add(time.Minute),
+	}, response); err != nil {
+		t.Fatal(err)
+	}
+	for index := range 3 {
+		if err := connections.CreateSocketModeInteraction(context.Background(), domain.SocketModeInteraction{
+			EnvelopeID: "interaction-" + strconv.Itoa(index), AppID: "A123", WorkspaceID: "T1", UserID: "U1",
+			Type: "slash_commands", Payload: `{"command":"/deploy"}`, Response: response, CreatedAt: now.Add(time.Duration(index) * time.Millisecond),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client := dialHandler(t, Handler{Store: connections, Interactions: connections, Responses: new(testResponseSink)}, connections)
+	seen := make(map[any]bool)
+	for range 3 {
+		seen[readFrame(t, client)["envelope_id"]] = true
+	}
+	if len(seen) != 3 {
+		t.Fatalf("interactions delivered before any acknowledgement=%v, want all three", seen)
 	}
 }

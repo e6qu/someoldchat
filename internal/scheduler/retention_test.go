@@ -51,7 +51,7 @@ func TestRetentionWorkerDeletesNothingWithoutAPolicy(t *testing.T) {
 	if _, err := worker.RunOnceAt(ctx, "T1", now); err != nil {
 		t.Fatal(err)
 	}
-	page, err := store.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	page, err := store.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 {
 		t.Fatalf("messages=%d err=%v, want the unconfigured workspace to keep everything", len(page.Messages), err)
 	}
@@ -85,7 +85,7 @@ func TestRetentionWorkerDeletesExpiredContentAndAnnouncesItOnce(t *testing.T) {
 	if err != nil || completed != 1 {
 		t.Fatalf("completed=%d err=%v, want the one conversation swept", completed, err)
 	}
-	page, err := store.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	page, err := store.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 {
 		t.Fatalf("messages=%+v err=%v, want only the one inside the horizon", page.Messages, err)
 	}
@@ -174,7 +174,7 @@ func TestRetentionWorkerHonoursAConversationOverride(t *testing.T) {
 	if _, err := worker.RunOnceAt(ctx, "T1", now); err != nil {
 		t.Fatal(err)
 	}
-	page, err := store.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	page, err := store.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 0 {
 		t.Fatalf("messages=%+v err=%v, want the channel's stricter override to have applied", page.Messages, err)
 	}

@@ -23,11 +23,9 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
-	"github.com/sameoldchat/sameoldchat/internal/realtime"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/slackapp"
-	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	storepkg "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
@@ -148,6 +146,24 @@ func main() {
 		panic(err)
 	}
 	if err := store.CreateBot(context.Background(), domain.Bot{ID: "B2", WorkspaceID: "T1", AppID: "A2", UserID: "U1", Name: "interaction-bot", UpdatedAt: now}); err != nil {
+		panic(err)
+	}
+	// An app the OAuth walks install from nothing: no bot, no installation,
+	// one redirect URL, so an install may name it or leave it implied.
+	installSigningCiphertext, err := secretbox.Seal(appCredentialKey, "app:A4:signing-secret", "install-signing")
+	if err != nil {
+		panic(err)
+	}
+	installVerificationCiphertext, err := secretbox.Seal(appCredentialKey, "app:A4:verification-token", "install-verification")
+	if err != nil {
+		panic(err)
+	}
+	installManifest := `{"display_information":{"name":"Install Qualification"},"oauth_config":{"redirect_urls":["https://example.com/install"],"scopes":{"bot":["chat:write"],"user":["search:read"]}}}`
+	if err := store.CreateApp(context.Background(),
+		domain.App{ID: "A4", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Install Qualification", ClientID: "install-client", SigningSecretHash: domain.HashToken("install-signing"), SigningSecretCiphertext: installSigningCiphertext, VerificationTokenHash: domain.HashToken("install-verification"), VerificationTokenCiphertext: installVerificationCiphertext, ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now},
+		domain.AppManifestRevision{AppID: "A4", Version: 1, Manifest: installManifest, CreatedBy: "U1", CreatedAt: now},
+		domain.OAuthClient{ID: "install-client", SecretHash: domain.HashToken("install-secret"), AppID: "A4"},
+	); err != nil {
 		panic(err)
 	}
 	for _, code := range []string{"qualification-code", "qualification-v2-code", "qualification-v2-user-code", "qualification-token-code", "qualification-openid-code"} {
@@ -338,20 +354,62 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	handler, err := slack.NewHandler(messages, authenticator)
-	if err != nil {
-		panic(err)
-	}
-	responses := &qualificationResponseSink{store: store, messages: messages, values: make(map[string]string)}
+	responses := &qualificationResponseSink{messages: messages, values: make(map[string]string)}
 	appAuthenticator, err := auth.NewAppStored(store)
 	if err != nil {
 		panic(err)
 	}
-	handler.ConfigureSocketMode(socketmode.Service{Store: store, Host: "127.0.0.1:18080"}, appAuthenticator)
 	mux := http.NewServeMux()
-	handler.Register(mux)
+	// The Slack surface — Web API, Socket Mode and RTM — is mounted by the
+	// same composition cmd/server uses, so what qualifies here is the
+	// production wiring. No Socket Mode host is configured: connection URLs
+	// follow the origin each SDK called apps.connections.open on, exactly as
+	// they do in a deployment that sets none. The rate limiter is mounted as
+	// in production: registering without one once hid that the limited
+	// registration left every route outside /api/ — the files_upload_v2
+	// upload URL among them — answering 404 by default.
+	if err := slack.Mount(mux, slack.Surface{
+		Messages: messages, Authenticator: authenticator, AppAuthenticator: appAuthenticator, Responses: responses,
+		Limiter: slack.NewRateLimiter(),
+	}); err != nil {
+		panic(err)
+	}
 	mux.HandleFunc("GET /qualification/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
+	})
+	// The consent stand-in for the OAuth walks. The browser consent page is
+	// qualified by the browser suite; this answers the authorize URL an SDK
+	// generates by approving it as U1 through the same service call the
+	// page's approval makes, and redirects the way the page does.
+	mux.HandleFunc("GET /qualification/authorize", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		split := func(value string) []string {
+			var scopes []string
+			for _, scope := range strings.Split(value, ",") {
+				if scope = strings.TrimSpace(scope); scope != "" {
+					scopes = append(scopes, scope)
+				}
+			}
+			return scopes
+		}
+		authorization, err := messages.AuthorizeOAuth(r.Context(), domain.OAuthAuthorizationRequest{
+			ClientID: query.Get("client_id"), WorkspaceID: "T1", UserID: "U1", RedirectURI: query.Get("redirect_uri"),
+			BotScopes: split(query.Get("scope")), UserScopes: split(query.Get("user_scope")), State: query.Get("state"),
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		target, err := url.Parse(authorization.RedirectURI)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		values := target.Query()
+		values.Set("code", authorization.Code)
+		values.Set("state", authorization.State)
+		target.RawQuery = values.Encode()
+		http.Redirect(w, r, target.String(), http.StatusFound)
 	})
 	mux.HandleFunc("GET /qualification/event-context", func(w http.ResponseWriter, r *http.Request) {
 		records, err := messages.ListAppEventsAfter(r.Context(), "A1", 0, 1)
@@ -359,7 +417,7 @@ func main() {
 			http.Error(w, "qualification event is unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		value, err := events.EventContext("A1", records[0])
+		value, err := events.EventContext("A1", records[0], records[0].Event.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -367,12 +425,6 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, value)
 	})
-	mux.Handle("/socket-mode", socketmode.Handler{Store: store, Queue: messages, Interactions: messages, Responses: responses})
-	rtmHandler, err := realtime.NewRTMHandler(messages, messages, messages, messages)
-	if err != nil {
-		panic(err)
-	}
-	rtmHandler.RegisterRTM(mux)
 	mux.HandleFunc("GET /qualification/socket-mode-response", func(w http.ResponseWriter, r *http.Request) {
 		envelopeID := r.URL.Query().Get("envelope_id")
 		payload, ok := responses.get(envelopeID)
@@ -572,7 +624,6 @@ func (r *sdkMethodRecorder) ServeHTTP(w http.ResponseWriter, request *http.Reque
 }
 
 type qualificationResponseSink struct {
-	store    *memory.Store
 	messages service.Messages
 	mu       sync.RWMutex
 	values   map[string]string

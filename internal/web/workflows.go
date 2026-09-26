@@ -838,7 +838,9 @@ func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 					h.writeStoreError(w, err, "The webhook URL is temporarily unavailable.")
 					return
 				}
-				view.WebhookURL = invokeURL
+				// The service knows the path; only the HTTP boundary knows the
+				// public origin an external system has to post to.
+				view.WebhookURL = h.responseBaseURL(r) + invokeURL
 			}
 		}
 		triggerViews = append(triggerViews, view)

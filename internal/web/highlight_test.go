@@ -1,8 +1,10 @@
 package web
 
 import (
+	"html"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // The property that matters most: marking never produces markup the text did
@@ -47,18 +49,35 @@ func TestMarkingIsCaseInsensitiveAndSkipsAbsentTerms(t *testing.T) {
 	}
 }
 
-// A fold that changes the byte length destroys the mapping from a match back to
-// a span of the original, and the characters where that happens are ones a
-// mis-placed span would corrupt rather than merely misplace. Marking is
-// decoration and the text is not, so the decoration is dropped.
-func TestMarkingIsSkippedWhenFoldingChangesLength(t *testing.T) {
-	text := "İstanbul"
-	marked := markTerms(text, []string{"stanbul"})
-	if strings.Contains(marked, "<mark>") {
-		t.Fatalf("marked = %q, want no marking where the fold changes length", marked)
-	}
-	if marked != text {
-		t.Fatalf("marked = %q, want the text intact", marked)
+// Folding changes the byte length of some characters: U+0130 (İ) is two bytes
+// and folds to the one-byte "i", U+023A (Ⱥ) is two and folds to three. A match
+// found in the folded text is therefore mapped back rune by rune. Marking used
+// to be dropped whenever the total length changed, and applied with raw folded
+// offsets when a shrink and a grow cancelled out — which cut "é" in half.
+func TestMarkingMapsMatchesBackThroughFoldingThatChangesLength(t *testing.T) {
+	for _, tc := range []struct {
+		text  string
+		terms []string
+		want  string
+	}{
+		{"İstanbul", []string{"stanbul"}, "İ<mark>stanbul</mark>"},
+		{"İstanbul", []string{"istanbul"}, "<mark>İstanbul</mark>"},
+		{"İstanbul café", []string{"café"}, "İstanbul <mark>café</mark>"},
+		// The lengths cancel overall, and "é" sits after the grow and before
+		// the shrink, where a folded offset lands one byte into the character.
+		{"Ⱥé İ", []string{"é"}, "Ⱥ<mark>é</mark> İ"},
+		{"Ⱥé İ", []string{"ⱥ", "i"}, "<mark>Ⱥ</mark>é <mark>İ</mark>"},
+		// U+212A (Kelvin) shrinks from three bytes to one and two U+023A grow
+		// by one each, so the lengths cancel and the old offsets marked "Ⱥa".
+		{"ȺȺab\u212a", []string{"ab"}, "ȺȺ<mark>ab</mark>\u212a"},
+	} {
+		marked := markTerms(tc.text, tc.terms)
+		if marked != tc.want {
+			t.Errorf("markTerms(%q, %q) = %q, want %q", tc.text, tc.terms, marked, tc.want)
+		}
+		if !utf8.ValidString(marked) {
+			t.Errorf("markTerms(%q, %q) produced invalid UTF-8: %q", tc.text, tc.terms, marked)
+		}
 	}
 }
 
@@ -90,4 +109,25 @@ func TestATermSplitByFormattingIsLeftUnmarked(t *testing.T) {
 	if !strings.Contains(rendered, "<strong>bold</strong>est") {
 		t.Fatalf("rendered = %q, want the formatting intact", rendered)
 	}
+}
+
+// Whatever the text and terms, marking only adds <mark> elements: removing them
+// and unescaping gives back the original text, byte for byte.
+func FuzzMarkingPreservesTheText(f *testing.F) {
+	for _, seed := range [][2]string{{"Ⱥé İ", "é"}, {"İstanbul", "stanbul"}, {"\u2126mega \u212a", "k"}, {"a & <b>", "&"}, {"ǅungla", "ǆ"}} {
+		f.Add(seed[0], seed[1])
+	}
+	f.Fuzz(func(t *testing.T, text, term string) {
+		if !utf8.ValidString(text) {
+			t.Skip("message text is valid UTF-8 by the time it is rendered")
+		}
+		marked := markTerms(text, []string{term})
+		if !utf8.ValidString(marked) {
+			t.Fatalf("markTerms(%q, %q) produced invalid UTF-8: %q", text, term, marked)
+		}
+		stripped := strings.NewReplacer("<mark>", "", "</mark>", "").Replace(marked)
+		if restored := html.UnescapeString(stripped); restored != text {
+			t.Fatalf("markTerms(%q, %q) = %q, which does not restore the text (got %q)", text, term, marked, restored)
+		}
+	})
 }

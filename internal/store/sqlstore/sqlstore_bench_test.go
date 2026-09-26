@@ -115,7 +115,7 @@ func BenchmarkListMessages(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for index := 0; index < b.N; index++ {
-		if _, err := store.ListMessages(ctx, "C1", domain.PageRequest{Limit: 50}); err != nil {
+		if _, err := store.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 50}}); err != nil {
 			b.Fatal(err)
 		}
 	}

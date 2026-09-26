@@ -1647,7 +1647,7 @@ func parityCases() []parityCase {
 			name: "a user group is updated, scoped, and disabled identically",
 			seed: seedUserGroupParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				updated, err := chat.UpdateUserGroup(ctx, "T1", "UA", "S1", "Traders desk", "traders-desk", "Front office")
+				updated, err := chat.UpdateUserGroup(ctx, "T1", "UA", "S1", "Traders desk", "traders-desk", "Front office", nil)
 				if err != nil {
 					return nil, err
 				}
@@ -2909,7 +2909,8 @@ func parityCases() []parityCase {
 				requireSeed(t, target.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", Email: "carol@example.com"}))
 			},
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				source, err := chat.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+				sourceOpening, err := chat.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+				source := sourceOpening.Conversation
 				if err != nil {
 					return nil, err
 				}
@@ -2924,7 +2925,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				history, err := chat.History(ctx, "T1", "U1", converted.ID, domain.PageRequest{Limit: 10})
+				history, err := chat.History(ctx, "T1", "U1", converted.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 				if err != nil {
 					return nil, err
 				}
@@ -3078,7 +3079,7 @@ func parityCases() []parityCase {
 				if _, err := chat.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", "", `[{"type":"divider"}]`); err != nil {
 					return nil, err
 				}
-				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1"); err != nil {
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1", ""); err != nil {
 					return nil, err
 				}
 				values, err := chat.ListEphemeralMessages(ctx, "T1", "U2", "C1", 10)
@@ -3154,7 +3155,7 @@ func parityCases() []parityCase {
 			name:         "history rejects an undecodable cursor",
 			wantSentinel: domain.ErrInvalidCursor,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10, Cursor: "not-a-cursor"})
+				_, err := chat.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10, Cursor: "not-a-cursor"}})
 				return nil, err
 			},
 		},
@@ -3429,7 +3430,7 @@ func parityCases() []parityCase {
 				if _, err := chat.Post(ctx, "T1", "U1", "C1", "paged", "", ""); err != nil {
 					return nil, err
 				}
-				history, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 201})
+				history, err := chat.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 201}})
 				if err != nil {
 					return nil, err
 				}
@@ -3460,7 +3461,7 @@ func parityCases() []parityCase {
 			name:         "a page limit of zero",
 			wantSentinel: storepkg.ErrInvalidArgument,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 0})
+				_, err := chat.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 0}})
 				return nil, err
 			},
 		},
@@ -3541,7 +3542,7 @@ func parityCases() []parityCase {
 				if _, err := chat.Post(ctx, "T1", "U1", "C1", "second", "", "key-1"); err != nil {
 					return nil, err
 				}
-				page, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+				page, err := chat.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 				if err != nil {
 					return nil, err
 				}
@@ -3606,7 +3607,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				thread, err := chat.Replies(ctx, "T1", "U1", "C1", rootTimestamp, domain.PageRequest{Limit: 10})
+				thread, err := chat.Replies(ctx, "T1", "U1", "C1", rootTimestamp, domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
 				if err != nil {
 					return nil, err
 				}
@@ -3837,7 +3838,7 @@ func parityCases() []parityCase {
 				}
 				return []any{
 					topics(whole), ascending, topics(rest), len(whole) == len(rest)+1,
-					topics(limited), topics(userScoped), topics(appScoped),
+					topics(limited), topics(userScoped.Records), userScoped.Through, topics(appScoped),
 				}, nil
 			},
 		},
@@ -4673,7 +4674,11 @@ func parityCases() []parityCase {
 				// the app over HTTP where this case cannot read it.
 				responseErr := chat.HandleAppResponse(ctx, "response_dispatch", `{"text":"from the app"}`)
 				spentErr := chat.HandleAppResponse(ctx, "response-absent", `{"text":"nobody"}`)
-				page, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 20})
+				// Each response_url refusal keeps its identity across the
+				// seam, because the HTTP boundary answers each differently.
+				malformedErr := chat.HandleAppResponse(ctx, "response_dispatch", `not json`)
+				emptyErr := chat.HandleAppResponse(ctx, "response_dispatch", `{}`)
+				page, err := chat.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 				if err != nil {
 					return nil, err
 				}
@@ -4688,7 +4693,9 @@ func parityCases() []parityCase {
 					actionErr == nil, viewActionErr == nil,
 					optionsErr == nil, loaded,
 					responseErr == nil, spentErr != nil,
-					errors.Is(spentErr, service.ErrInvalidAppResponse), texts,
+					errors.Is(spentErr, service.ErrAppResponseURLExpired),
+					errors.Is(malformedErr, service.ErrAppResponsePayloadInvalid), errors.Is(emptyErr, service.ErrAppResponseNoText),
+					texts,
 				}, nil
 			},
 		},
@@ -4871,7 +4878,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				history, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+				history, err := chat.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 				if err != nil {
 					return nil, err
 				}
@@ -5911,6 +5918,19 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				summary := summaries[timestampOf(message)]
+				// A history page carries each message's reactions and pin
+				// state from one batched read.
+				if err := chat.AddReaction(ctx, "T1", "U2", "C1", timestampOf(message), "eyes"); err != nil {
+					return nil, err
+				}
+				if err := chat.AddPin(ctx, "T1", "U1", "C1", timestampOf(message)); err != nil {
+					return nil, err
+				}
+				annotations, err := chat.MessageAnnotations(ctx, "T1", "U1", "C1", []domain.MessageID{message.ID, "M-absent"})
+				if err != nil {
+					return nil, err
+				}
+				annotation := annotations[message.ID]
 				// The permalink route resolves a message by its public
 				// timestamp, which is the identifier every Slack link and
 				// action names it by.
@@ -5923,6 +5943,7 @@ func parityCases() []parityCase {
 					readBack.Conversation, readBack.LastRead == cursor.LastRead,
 					summary.ReplyCount, summary.Participants, !summary.LastReplyAt.IsZero(),
 					resolved.ID == message.ID, resolved.Text, memberCount,
+					len(annotations), annotation.Reactions, annotation.Pinned,
 				}, nil
 			},
 		},
@@ -6151,7 +6172,7 @@ func parityCases() []parityCase {
 			// compositions.
 			name: "user groups",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				group, err := chat.CreateUserGroup(ctx, "T1", "UA", "Engineers", "engineers", "builds things")
+				group, err := chat.CreateUserGroup(ctx, "T1", "UA", "Engineers", "engineers", "builds things", nil)
 				if err != nil {
 					return nil, err
 				}
@@ -6170,7 +6191,7 @@ func parityCases() []parityCase {
 			name:         "a member cannot create a user group",
 			wantSentinel: service.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.CreateUserGroup(ctx, "T1", "U1", "Engineers", "engineers", "builds things")
+				_, err := chat.CreateUserGroup(ctx, "T1", "U1", "Engineers", "engineers", "builds things", nil)
 				return nil, err
 			},
 		},
@@ -6388,7 +6409,9 @@ func parityCases() []parityCase {
 				requireSeed(t, target.AppendEvent(context.Background(), event))
 			},
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				first, firstAttempt, firstReason, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-1", time.Minute)
+				firstClaim, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-1", time.Minute)
+				first := firstClaim.Record
+				firstAttempt, firstReason := firstClaim.Attempt, firstClaim.RetryReason
 				if err != nil {
 					return nil, err
 				}
@@ -6399,14 +6422,16 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.ReleaseAppEvent(ctx, "A1", "socket", "connection-1", first.Sequence, "connection_closed", time.Now().UTC().Add(-time.Second)); err != nil {
+				if err := chat.ReleaseAppEvent(ctx, "A1", "socket", "connection-1", first.Sequence, events.AppEventRelease{Reason: "connection_closed", RetryAt: time.Now().UTC().Add(-time.Second)}); err != nil {
 					return nil, err
 				}
 				health, err := chat.GetDeveloperAppDeliveryHealth(ctx, "T1", "U1", "A1")
 				if err != nil {
 					return nil, err
 				}
-				second, secondAttempt, secondReason, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-2", time.Minute)
+				secondClaim, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-2", time.Minute)
+				second := secondClaim.Record
+				secondAttempt, secondReason := secondClaim.Attempt, secondClaim.RetryReason
 				if err != nil {
 					return nil, err
 				}
