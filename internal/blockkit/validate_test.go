@@ -2,6 +2,7 @@ package blockkit
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,34 @@ func TestValidateBlocksMatchesCurrentDocumentedResponseExample(t *testing.T) {
 	}
 	if problems[0].Pointer != "/0/text/type" || problems[0].Code != "failed_constraint" {
 		t.Fatalf("problem=%+v", problems[0])
+	}
+}
+
+// The validator runs on every message write, so it must accept every block
+// Slack accepts: an image named by slack_file, a call block, and a section
+// with fields and an accessory. It refuses what Slack refuses about them.
+func TestValidateBlocksCoversSlackFileImagesCallsAndSectionFields(t *testing.T) {
+	valid := json.RawMessage(`[
+		{"type":"image","slack_file":{"url":"https://files.slack.com/x.png"},"alt_text":"a","title":{"type":"plain_text","text":"T"}},
+		{"type":"image","image_url":"https://example.com/x.png","alt_text":"a"},
+		{"type":"call","call_id":"R123"},
+		{"type":"section","fields":[{"type":"mrkdwn","text":"*a*"},{"type":"plain_text","text":"b"}],"accessory":{"type":"image","image_url":"https://example.com/y.png","alt_text":"y"}}
+	]`)
+	if problems, err := ValidateBlocks(valid, "", 50); err != nil || len(problems) != 0 {
+		t.Fatalf("valid problems=%+v err=%v", problems, err)
+	}
+	fields := `{"type":"mrkdwn","text":"f"}`
+	for name, raw := range map[string]string{
+		"image with both sources": `[{"type":"image","image_url":"https://example.com/x.png","slack_file":{"id":"F1"},"alt_text":"a"}]`,
+		"empty slack_file":        `[{"type":"image","slack_file":{},"alt_text":"a"}]`,
+		"call without id":         `[{"type":"call"}]`,
+		"eleven fields":           `[{"type":"section","fields":[` + fields + `,` + fields + `,` + fields + `,` + fields + `,` + fields + `,` + fields + `,` + fields + `,` + fields + `,` + fields + `,` + fields + `,` + fields + `]}]`,
+		"long field":              `[{"type":"section","fields":[{"type":"mrkdwn","text":"` + strings.Repeat("x", 2001) + `"}]}]`,
+		"accessory not an object": `[{"type":"section","text":{"type":"mrkdwn","text":"t"},"accessory":"button"}]`,
+	} {
+		if problems, err := ValidateBlocks(json.RawMessage(raw), "", 50); err != nil || len(problems) == 0 {
+			t.Fatalf("%s accepted: problems=%+v err=%v", name, problems, err)
+		}
 	}
 }
 

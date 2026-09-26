@@ -16,8 +16,10 @@ type Error struct {
 	Constraint map[string]any `json:"constraint"`
 }
 
+// blockTypes includes "call": Slack's Calls API documents a message block
+// {"type":"call","call_id":…} that renders a call registered with calls.add.
 var blockTypes = []string{
-	"actions", "alert", "card", "carousel", "container", "context_actions",
+	"actions", "alert", "call", "card", "carousel", "container", "context_actions",
 	"context", "data_table", "data_visualization", "divider", "file", "header",
 	"image", "input", "markdown", "plan", "rich_text", "section", "table",
 	"task_card", "video",
@@ -115,6 +117,27 @@ func validateKnownBlock(block map[string]any, kind, pointer string) []Error {
 				problems = append(problems, *problem)
 			}
 		}
+		if hasFields {
+			// Slack: at most 10 fields, each a text object of at most 2000
+			// characters.
+			fields, ok := block["fields"].([]any)
+			if !ok || len(fields) < 1 || len(fields) > 10 {
+				problems = append(problems, failed(pointer+"/fields", "section fields must hold 1 to 10 text objects", map[string]any{"type": "array", "minItems": 1, "maxItems": 10}))
+			} else {
+				for index, field := range fields {
+					if problem := validateTextObject(field, fmt.Sprintf("%s/fields/%d", pointer, index), "plain_text|mrkdwn", 2000); problem != nil {
+						problems = append(problems, *problem)
+					}
+				}
+			}
+		}
+		if accessory, exists := block["accessory"]; exists {
+			if _, ok := accessory.(map[string]any); !ok {
+				problems = append(problems, failed(pointer+"/accessory", "accessory must be an element object", map[string]any{"type": "object"}))
+			}
+		}
+	case "call":
+		problems = append(problems, requiredString(block, "call_id", pointer, 255)...)
 	case "header":
 		if problem := validateTextObject(block["text"], pointer+"/text", "plain_text", 150); problem != nil {
 			problems = append(problems, *problem)
@@ -131,8 +154,26 @@ func validateKnownBlock(block map[string]any, kind, pointer string) []Error {
 			problems = append(problems, failed(pointer+"/element", "element must be an object", map[string]any{"type": "object"}))
 		}
 	case "image":
-		problems = append(problems, requiredString(block, "image_url", pointer, 3000)...)
+		// An image names its source with image_url or, for a file uploaded to
+		// Slack, a slack_file object ({url} or {id}); exactly one is required.
+		slackFile, hasSlackFile := block["slack_file"].(map[string]any)
+		_, hasURL := block["image_url"]
+		switch {
+		case hasURL && hasSlackFile:
+			problems = append(problems, failed(pointer, "image takes image_url or slack_file, not both", map[string]any{"type": "oneOf", "expected": []string{"image_url", "slack_file"}}))
+		case hasSlackFile:
+			if stringValue(slackFile["url"]) == "" && stringValue(slackFile["id"]) == "" {
+				problems = append(problems, failed(pointer+"/slack_file", "slack_file requires url or id", map[string]any{"type": "required", "expected": []string{"url", "id"}}))
+			}
+		default:
+			problems = append(problems, requiredString(block, "image_url", pointer, 3000)...)
+		}
 		problems = append(problems, requiredString(block, "alt_text", pointer, 2000)...)
+		if block["title"] != nil {
+			if problem := validateTextObject(block["title"], pointer+"/title", "plain_text", 2000); problem != nil {
+				problems = append(problems, *problem)
+			}
+		}
 	case "markdown":
 		problems = append(problems, requiredString(block, "text", pointer, 12000)...)
 	case "rich_text":

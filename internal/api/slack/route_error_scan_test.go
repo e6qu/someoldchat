@@ -615,6 +615,7 @@ func sentinelDrivenCodes() map[string]string {
 		"channel_type_not_supported": "mutationErrorCode's name for service.ErrRetentionNotSupported: the conversation is real and the request well formed, but its type carries no retention policy",
 		"already_resolved":           "mutationErrorCode's name for service.ErrSharedInviteSettled: the caller did nothing wrong, somebody else decided first, and retrying cannot help",
 		"too_many_teams":             "mutationErrorCode's name for service.ErrSlackConnectFull: the documented capacity is reached, which is a refusal rather than a temporary failure",
+		"invalid_blocks":             "service.ErrInvalidBlocks, classified by sentinel: blocks an app wrote into a message that are not valid Block Kit (Slack message limit 50)",
 		"not_allowed":                "mutationErrorCode's name for service.ErrHuddleNotOwned: ending a huddle removes everyone else from it, so it is an authorization answer rather than a malformed request",
 	}
 }

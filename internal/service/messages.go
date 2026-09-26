@@ -9837,6 +9837,9 @@ func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.Work
 	if err != nil || attachmentErr != nil || (text == "" && normalizedBlocks == "" && normalizedAttachments == "" && len(fileAttachments) == 0) || messageTextTooLong(text) || request.PostAt.IsZero() {
 		return domain.ScheduledMessage{}, ErrInvalidMessage
 	}
+	if err := validateMessageBlocks(normalizedBlocks); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
 	metadata := ""
 	if strings.TrimSpace(request.Metadata) != "" {
 		if request.AppID == "" {
@@ -10005,6 +10008,9 @@ func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 	if conversation == "" || recipientID == "" || (text == "" && domain.NoStructuredContent(normalizedBlocks) && domain.NoStructuredContent(normalizedAttachments)) || messageTextTooLong(text) || err != nil || attachmentErr != nil {
 		return domain.EphemeralMessage{}, ErrInvalidEphemeral
 	}
+	if err := validateMessageBlocks(normalizedBlocks); err != nil {
+		return domain.EphemeralMessage{}, err
+	}
 	// Slack names one outcome for a recipient who cannot see the message —
 	// user_not_in_channel — whether they are outside the channel or not a
 	// member of the workspace at all. Reporting store.ErrNotFound sent the
@@ -10115,14 +10121,20 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		return domain.Message{}, ErrInvalidMessage
 	}
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(request.Blocks))
+	if err != nil {
+		return domain.Message{}, ErrInvalidBlocks
+	}
 	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(request.Attachments))
-	if err != nil || attachmentErr != nil || strings.TrimSpace(string(request.Conversation)) == "" ||
+	if attachmentErr != nil || strings.TrimSpace(string(request.Conversation)) == "" ||
 		(strings.TrimSpace(request.Text) == "" && domain.NoStructuredContent(normalizedBlocks) && domain.NoStructuredContent(normalizedAttachments)) ||
 		messageTextTooLong(request.Text) || (request.MarkdownText && utf8.RuneCountInString(request.Text) > 12000) ||
 		(request.Parse != "" && request.Parse != "none" && request.Parse != "full") ||
 		(request.ReplyBroadcast && request.ThreadTimestamp == "") ||
 		!request.Subtype.Valid() {
 		return domain.Message{}, ErrInvalidMessage
+	}
+	if err := validateMessageBlocks(normalizedBlocks); err != nil {
+		return domain.Message{}, err
 	}
 	metadata := ""
 	if strings.TrimSpace(request.Metadata) != "" {
@@ -10296,7 +10308,7 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 	if patch.Blocks != nil {
 		message.Blocks, err = domain.NormalizeBlocks([]byte(*patch.Blocks))
 		if err != nil {
-			return domain.Message{}, ErrInvalidMessage
+			return domain.Message{}, ErrInvalidBlocks
 		}
 	}
 	if patch.Attachments != nil {
@@ -10309,6 +10321,11 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 		messageTextTooLong(message.Text) ||
 		(strings.TrimSpace(message.Text) == "" && domain.NoStructuredContent(message.Blocks) && domain.NoStructuredContent(message.Attachments)) {
 		return domain.Message{}, ErrInvalidMessage
+	}
+	if patch.Blocks != nil {
+		if err := validateMessageBlocks(message.Blocks); err != nil {
+			return domain.Message{}, err
+		}
 	}
 	// The edit is recorded on the message itself, not only on the event it
 	// emits. Slack's message object carries an `edited` sub-object, and every
@@ -10475,6 +10492,9 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
 	if err != nil {
 		return nil, ErrInvalidExternalUpload
+	}
+	if err := validateMessageBlocks(normalizedBlocks); err != nil {
+		return nil, err
 	}
 	values := make([]domain.ExternalUpload, len(completions))
 	for index, completion := range completions {

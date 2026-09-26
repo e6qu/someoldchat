@@ -10085,7 +10085,10 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 	case strings.TrimSpace(fields["user"]) == "":
 		writeError(w, "user_not_in_channel")
 		return
-	case blockErr != nil || attachmentErr != nil:
+	case blockErr != nil:
+		writeError(w, "invalid_blocks")
+		return
+	case attachmentErr != nil:
 		writeError(w, "invalid_arg_name")
 		return
 	case strings.TrimSpace(fields["text"]) == "" && domain.NoStructuredContent(blocks) && domain.NoStructuredContent(attachments):
@@ -10234,7 +10237,7 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 	}
 	blocks, err := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	if err != nil {
-		return domain.Message{}, service.ErrInvalidMessage
+		return domain.Message{}, service.ErrInvalidBlocks
 	}
 	attachments, err := domain.NormalizeAttachments([]byte(fields["attachments"]))
 	if err != nil {
@@ -10294,6 +10297,9 @@ func postMessageError(err error) string {
 	if errors.Is(err, service.ErrInvalidMessage) {
 		return "no_text"
 	}
+	if errors.Is(err, service.ErrInvalidBlocks) {
+		return "invalid_blocks"
+	}
 	if errors.Is(err, service.ErrThreadNotFound) {
 		return "thread_not_found"
 	}
@@ -10321,7 +10327,11 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 	rawAttachments, hasAttachments := fields["attachments"]
 	blocks, blockErr := domain.NormalizeBlocks([]byte(rawBlocks))
 	attachments, attachmentErr := domain.NormalizeAttachments([]byte(rawAttachments))
-	if conversation == "" || timestamp == "" || blockErr != nil || attachmentErr != nil {
+	if blockErr != nil {
+		writeError(w, "invalid_blocks")
+		return
+	}
+	if conversation == "" || timestamp == "" || attachmentErr != nil {
 		writeError(w, "invalid_arg_name")
 		return
 	}
@@ -10601,7 +10611,11 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	unfurlLinks, unfurlLinksOK := optionalBoolean("unfurl_links")
 	unfurlMedia, unfurlMediaOK := optionalBoolean("unfurl_media")
 	parse := strings.TrimSpace(fields["parse"])
-	if channel == "" || (textValue == "" && domain.NoStructuredContent(blocks) && domain.NoStructuredContent(attachments)) || blockErr != nil || attachmentErr != nil || err != nil || postAt <= 0 ||
+	if blockErr != nil {
+		writeError(w, "invalid_blocks")
+		return
+	}
+	if channel == "" || (textValue == "" && domain.NoStructuredContent(blocks) && domain.NoStructuredContent(attachments)) || attachmentErr != nil || err != nil || postAt <= 0 ||
 		!replyBroadcastOK || !asUserOK || !linkNamesOK || !unfurlLinksOK || !unfurlMediaOK ||
 		(parse != "" && parse != "none" && parse != "full") {
 		writeError(w, "invalid_arguments")
@@ -11603,6 +11617,9 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	}
 	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, service.ErrScheduledStatusLimit) {
 		return "restricted_too_many"
+	}
+	if errors.Is(err, service.ErrInvalidBlocks) {
+		return "invalid_blocks"
 	}
 	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidProfileField) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrBadOAuthClientSecret) || errors.Is(err, store.ErrOAuthRedirectMismatch) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidListTemplate) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrInvalidActivitySavedView) || errors.Is(err, service.ErrInvalidSidebarSection) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrTriggerExchanged) || errors.Is(err, service.ErrTriggerExpired) || errors.Is(err, store.ErrTriggerExchanged) || errors.Is(err, store.ErrTriggerExpired) || errors.Is(err, service.ErrViewPushLimit) || errors.Is(err, service.ErrSlashCommandInThread) || errors.Is(err, service.ErrInvalidAssistantThread) || errors.Is(err, service.ErrAppNotDistributable) || errors.Is(err, service.ErrInvalidExternalAuthProvider) || errors.Is(err, service.ErrExternalAuthConnection) {
 		return invalidReason
@@ -13249,7 +13266,7 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	blocks, err := domain.NormalizeBlocks(payload.Blocks)
 	if err != nil {
-		writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_payload")
+		writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_blocks")
 		return
 	}
 	attachments, err := domain.NormalizeAttachments(payload.Attachments)
@@ -13266,6 +13283,10 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 		// caller by design, so all of them answer 404 `no_team`.
 		if errors.Is(err, service.ErrConversationAlreadyArchived) {
 			writeIncomingWebhookError(w, http.StatusGone, "channel_is_archived")
+			return
+		}
+		if errors.Is(err, service.ErrInvalidBlocks) {
+			writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_blocks")
 			return
 		}
 		reason := mapServiceError(err, "no_team")

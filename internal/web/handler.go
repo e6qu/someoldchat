@@ -12244,6 +12244,8 @@ func appResponseFailure(err error) (int, string) {
 		return http.StatusBadRequest, "no_text"
 	case errors.Is(err, service.ErrAppResponsePayloadInvalid):
 		return http.StatusBadRequest, "invalid_payload"
+	case errors.Is(err, service.ErrInvalidBlocks):
+		return http.StatusBadRequest, "invalid_blocks"
 	case errors.Is(err, service.ErrAppResponseURLUsed):
 		return http.StatusNotFound, "used_url"
 	case errors.Is(err, service.ErrAppResponseURLExpired):

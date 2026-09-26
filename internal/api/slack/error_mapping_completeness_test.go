@@ -235,6 +235,7 @@ func recordedNonPinnedCodes() map[string]string {
 		"app_not_found":                  "admin.apps.* declares no error enum",
 		"usergroup_not_found":            "no pinned enum declares a subteam-not-found code, not even no_such_subteam",
 		"invalid_view":                   "views.* declares no error enum",
+		"invalid_blocks":                 "current chat.postMessage, chat.postEphemeral, chat.update, chat.scheduleMessage, and incoming-webhook references name it for blocks that are not valid Block Kit; absent from the legacy method enums",
 		"hash_conflict":                  "views.* declares no error enum",
 		"invalid_trigger_id":             "views.* declares no error enum; current views.open and views.push references name it for an unknown trigger",
 		"exchanged_trigger_id":           "views.* declares no error enum; current views.open and views.push references name it for a trigger already used",

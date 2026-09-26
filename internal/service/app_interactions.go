@@ -1639,6 +1639,9 @@ func parseAppResponse(body []byte, strict bool) (parsedAppResponse, error) {
 	if parsed.blocks, err = domain.NormalizeBlocks(parsed.Blocks); err != nil {
 		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
 	}
+	if err := validateMessageBlocks(parsed.blocks); err != nil {
+		return parsedAppResponse{}, err
+	}
 	if parsed.attachments, err = domain.NormalizeAttachments(parsed.Attachments); err != nil {
 		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
 	}

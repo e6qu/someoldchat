@@ -54,6 +54,7 @@ service.invalid_app_approval
 service.invalid_app_manifest
 service.invalid_app_response
 service.invalid_assistant_thread
+service.invalid_blocks
 service.invalid_bookmark
 service.invalid_bot
 service.invalid_call

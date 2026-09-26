@@ -153,6 +153,7 @@ var errorClasses = []errorClass{
 	// The response_url refusals. The two URL states are NotFound, as the HTTP
 	// boundary answers them 404.
 	{key: "service.app_response_payload_invalid", code: codes.InvalidArgument, sentinel: service.ErrAppResponsePayloadInvalid},
+	{key: "service.invalid_blocks", code: codes.InvalidArgument, sentinel: service.ErrInvalidBlocks},
 	{key: "service.app_response_no_text", code: codes.InvalidArgument, sentinel: service.ErrAppResponseNoText},
 	{key: "service.app_response_url_used", code: codes.NotFound, sentinel: service.ErrAppResponseURLUsed},
 	{key: "service.app_response_url_expired", code: codes.NotFound, sentinel: service.ErrAppResponseURLExpired},

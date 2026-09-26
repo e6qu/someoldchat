@@ -1582,11 +1582,11 @@ func TestPostWithBlocksPersistsNormalizedPayload(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("C1", "U1")
-	message, err := (Messages{Store: s}).PostWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [ { "type": "section", "block_id": "b1" } ] `, "", "")
+	message, err := (Messages{Store: s}).PostWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [ { "type": "section", "block_id": "b1", "text": { "type": "mrkdwn", "text": "hi" } } ] `, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if message.Text != "" || message.Blocks != `[{"type":"section","block_id":"b1"}]` {
+	if message.Text != "" || message.Blocks != `[{"type":"section","block_id":"b1","text":{"type":"mrkdwn","text":"hi"}}]` {
 		t.Fatalf("unexpected message: %+v", message)
 	}
 	updated, err := (Messages{Store: s}).UpdateWithBlocks(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), "updated", `[{"type":"divider","block_id":"b2"}]`)
