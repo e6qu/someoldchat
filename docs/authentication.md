@@ -14,6 +14,31 @@ It rejects unknown source names, incomplete GitHub email configuration, empty
 scope entries, and duplicate source names during startup. It does not select a
 different source when the selected source is unavailable.
 
+## Web API tokens and scopes
+
+A Web API token is presented as `Authorization: Bearer <token>` (the scheme is
+case-insensitive) or, for the methods Slack allows it on, as a `token` form
+field. Every authenticated response carries `X-OAuth-Scopes`, the scopes the
+token holds, and `X-Accepted-OAuth-Scopes`, the scopes the method accepts.
+
+Conversation methods take the scope matching the conversation's type, as in
+Slack: `channels:*` for public channels, `groups:*` for private channels,
+`im:*` for direct messages and `mpim:*` for group direct messages, with
+`*:history` for `conversations.history`/`replies`, `*:read` for
+`conversations.info`/`members`/`list` and `users.conversations`, and the
+write scopes for the mutators (a bot token manages public channels with
+`channels:manage`, a user token with `channels:write`). A token holding none of
+a method's family is refused with `missing_scope` naming the whole family;
+`conversations.list` narrows its listing to the requested types the token can
+read. Upgrading changes what an existing grant reaches: a stored token whose
+grant names only the `channels:` scopes used to read private channels and
+direct messages and now reaches public channels only, so an app that needs the
+others must request the per-type scopes and be reinstalled. The seeded
+`-api-token` is created with the member role's scopes, which include them, but
+seeding never rewrites an existing token, so a durable development database
+seeded before the upgrade keeps the old grant until the token is rotated (a
+new `-api-token` value) or the database is recreated.
+
 ## Configuration
 
 The server command accepts these credentials and settings:

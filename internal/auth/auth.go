@@ -25,16 +25,27 @@ import (
 type Scope string
 
 const (
-	ScopeChatWrite               Scope = "chat:write"
-	ScopeChatWriteCustomize      Scope = "chat:write.customize"
-	ScopeIncomingWebhook         Scope = "incoming-webhook"
-	ScopeChannelsHistory         Scope = "channels:history"
-	ScopeUsersRead               Scope = "users:read"
-	ScopeUsersReadEmail          Scope = "users:read.email"
-	ScopeUsersWrite              Scope = "users:write"
-	ScopeUsersProfileRead        Scope = "users.profile:read"
-	ScopeUsersProfileWrite       Scope = "users.profile:write"
-	ScopeChannelsRead            Scope = "channels:read"
+	ScopeChatWrite          Scope = "chat:write"
+	ScopeChatWriteCustomize Scope = "chat:write.customize"
+	ScopeIncomingWebhook    Scope = "incoming-webhook"
+	ScopeChannelsHistory    Scope = "channels:history"
+	// Slack grants reading a conversation per conversation type: the history
+	// of a private channel, a direct message and a group direct message each
+	// needs its own scope, and channels:history reaches public channels only.
+	ScopeGroupsHistory     Scope = "groups:history"
+	ScopeIMHistory         Scope = "im:history"
+	ScopeMPIMHistory       Scope = "mpim:history"
+	ScopeUsersRead         Scope = "users:read"
+	ScopeUsersReadEmail    Scope = "users:read.email"
+	ScopeUsersWrite        Scope = "users:write"
+	ScopeUsersProfileRead  Scope = "users.profile:read"
+	ScopeUsersProfileWrite Scope = "users.profile:write"
+	ScopeChannelsRead      Scope = "channels:read"
+	// The per-type counterparts of channels:read for conversation metadata,
+	// membership and listing.
+	ScopeGroupsRead              Scope = "groups:read"
+	ScopeIMRead                  Scope = "im:read"
+	ScopeMPIMRead                Scope = "mpim:read"
 	ScopeChannelsJoin            Scope = "channels:join"
 	ScopeChannelsWrite           Scope = "channels:write"
 	ScopeChannelsManage          Scope = "channels:manage"
@@ -510,12 +521,18 @@ var allScopes = []Scope{
 	ScopeChatWriteCustomize,
 	ScopeIncomingWebhook,
 	ScopeChannelsHistory,
+	ScopeGroupsHistory,
+	ScopeIMHistory,
+	ScopeMPIMHistory,
 	ScopeUsersRead,
 	ScopeUsersReadEmail,
 	ScopeUsersWrite,
 	ScopeUsersProfileRead,
 	ScopeUsersProfileWrite,
 	ScopeChannelsRead,
+	ScopeGroupsRead,
+	ScopeIMRead,
+	ScopeMPIMRead,
 	ScopeChannelsJoin,
 	ScopeChannelsWrite,
 	ScopeChannelsManage,

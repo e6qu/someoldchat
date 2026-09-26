@@ -307,8 +307,50 @@ var scopeArguments = map[string][]int{
 	"authenticate":                 {1},
 	"authenticateApp":              {1},
 	"authenticateConversationJoin": {1, 2},
+	"authenticateConversation":     {1},
+	"requireAnyScope":              {2, 3, 4, 5, 6, 7, 8, 9},
 	"listEmoji":                    {2},
 	"deleteListItemsWithScope":     {2},
+}
+
+// scopeGrants reads the package-level conversationGrant values: a handler that
+// enforces a grant by name (authenticateConversation(r, conversationHistoryGrant))
+// enforces every scope the grant's literal names.
+func scopeGrants(parsed []*ast.File) map[string][]string {
+	grants := make(map[string][]string)
+	for _, file := range parsed {
+		for _, declaration := range file.Decls {
+			general, ok := declaration.(*ast.GenDecl)
+			if !ok || general.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range general.Specs {
+				value, ok := spec.(*ast.ValueSpec)
+				if !ok || len(value.Names) != len(value.Values) {
+					continue
+				}
+				for index, expression := range value.Values {
+					composite, ok := expression.(*ast.CompositeLit)
+					if !ok {
+						continue
+					}
+					if identifier, ok := composite.Type.(*ast.Ident); !ok || identifier.Name != "conversationGrant" {
+						continue
+					}
+					for _, element := range composite.Elts {
+						pair, ok := element.(*ast.KeyValueExpr)
+						if !ok {
+							continue
+						}
+						if scope, ok := scopeSelector(pair.Value); ok {
+							grants[value.Names[index].Name] = append(grants[value.Names[index].Name], scope)
+						}
+					}
+				}
+			}
+		}
+	}
+	return grants
 }
 
 // codeReturningFunctions return a code rather than writing one, so every string
@@ -323,6 +365,10 @@ func handlerFacts(t *testing.T) map[string]functionFacts {
 	t.Helper()
 	_, parsed := parseHandlerSource(t)
 	arguments := codeArguments(t)
+	grants := scopeGrants(parsed)
+	if len(grants) == 0 {
+		t.Fatal("no conversationGrant values discovered; the grant scan is broken")
+	}
 	facts := make(map[string]functionFacts)
 	for _, file := range parsed {
 		for _, declaration := range file.Decls {
@@ -330,13 +376,13 @@ func handlerFacts(t *testing.T) map[string]functionFacts {
 			if !ok || function.Body == nil {
 				continue
 			}
-			collectFunctionFacts(function, arguments, facts)
+			collectFunctionFacts(function, arguments, grants, facts)
 		}
 	}
 	return facts
 }
 
-func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, facts map[string]functionFacts) {
+func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, grants map[string][]string, facts map[string]functionFacts) {
 	{
 		name := function.Name.Name
 		entry, exists := facts[name]
@@ -362,9 +408,24 @@ func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, fa
 				// position of a call that refuses the request without it.
 				for _, index := range scopeArguments[callee] {
 					if index < len(value.Args) {
-						if scope, ok := scopeSelector(value.Args[index]); ok {
-							entry.scopes[scope] = struct{}{}
-						}
+						// The whole argument expression is the enforced value,
+						// so a scope or grant anywhere inside it — an append
+						// of a grant's family and an invite scope — counts.
+						ast.Inspect(value.Args[index], func(argument ast.Node) bool {
+							expression, ok := argument.(ast.Expr)
+							if !ok {
+								return true
+							}
+							if scope, ok := scopeSelector(expression); ok {
+								entry.scopes[scope] = struct{}{}
+							}
+							if identifier, ok := expression.(*ast.Ident); ok {
+								for _, scope := range grants[identifier.Name] {
+									entry.scopes[scope] = struct{}{}
+								}
+							}
+							return true
+						})
 					}
 				}
 
@@ -373,13 +434,6 @@ func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, fa
 				// inline or assembled in a local first.
 				for _, code := range envelopeCodes(value) {
 					entry.codes[code] = struct{}{}
-				}
-				// A route may also enforce a scope without authenticate: reading
-				// the principal from another authenticator and refusing with
-				// missingScopeError is how /apps.connections.open does it. The
-				// refusal is the enforcement, so the scope is recorded from it.
-				if scope, ok := missingScopeLiteral(value); ok {
-					entry.scopes[scope] = struct{}{}
 				}
 			case *ast.ReturnStmt:
 				if !returnsCode {
@@ -407,26 +461,6 @@ func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, fa
 		})
 		facts[name] = entry
 	}
-}
-
-// missingScopeLiteral reads `missingScopeError{needed: auth.Scope…}`.
-func missingScopeLiteral(composite *ast.CompositeLit) (string, bool) {
-	identifier, ok := composite.Type.(*ast.Ident)
-	if !ok || identifier.Name != "missingScopeError" {
-		return "", false
-	}
-	for _, element := range composite.Elts {
-		pair, ok := element.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		key, ok := pair.Key.(*ast.Ident)
-		if !ok || key.Name != "needed" {
-			continue
-		}
-		return scopeSelector(pair.Value)
-	}
-	return "", false
 }
 
 // scopeSelector reads an `auth.Scope…` argument.
@@ -648,7 +682,7 @@ func (h Handler) mentionsWithoutEnforcing(w http.ResponseWriter, r *http.Request
 		if !ok || function.Body == nil {
 			continue
 		}
-		collectFunctionFacts(function, codeWriters, facts)
+		collectFunctionFacts(function, codeWriters, nil, facts)
 	}
 	scopes := sortedKeys(facts["mentionsWithoutEnforcing"].scopes)
 	if len(scopes) != 1 || scopes[0] != "ScopeUsersRead" {

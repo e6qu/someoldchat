@@ -12,7 +12,10 @@ var scopeDescriptions = map[Scope]string{
 	ScopeChatWrite:          "Send messages",
 	ScopeChatWriteCustomize: "Send messages with a customized name and icon",
 	ScopeIncomingWebhook:    "Post messages to a specific channel through an incoming webhook",
-	ScopeChannelsHistory:    "View messages and content in conversations it has been added to",
+	ScopeChannelsHistory:    "View messages and other content in public channels",
+	ScopeGroupsHistory:      "View messages and other content in private channels",
+	ScopeIMHistory:          "View messages and other content in direct messages",
+	ScopeMPIMHistory:        "View messages and other content in group direct messages",
 
 	ScopeUsersRead:         "View people in the workspace",
 	ScopeUsersReadEmail:    "View the email addresses of people in the workspace",
@@ -21,6 +24,9 @@ var scopeDescriptions = map[Scope]string{
 	ScopeUsersProfileWrite: "Edit profile information and status",
 
 	ScopeChannelsRead:         "View basic information about public channels",
+	ScopeGroupsRead:           "View basic information about private channels",
+	ScopeIMRead:               "View basic information about direct messages",
+	ScopeMPIMRead:             "View basic information about group direct messages",
 	ScopeChannelsJoin:         "Join public channels",
 	ScopeChannelsWrite:        "Rename public channels and edit their settings",
 	ScopeChannelsManage:       "Create, archive, and manage channels",

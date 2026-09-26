@@ -228,11 +228,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestHistoryPostForm
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
   - method: conversations.replies
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationRepliesReturnsRootAndThread
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
   - method: reactions.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -296,21 +298,25 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationAndUserInfo
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
   - method: conversations.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestConversationListingNarrowsToTheTypesTheTokenMayRead
   - method: users.conversations
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
+      - go-test:internal/api/slack:TestConversationListingNarrowsToTheTypesTheTokenMayRead
   - method: conversations.members
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationMembers
+      - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
   - method: team.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -350,6 +356,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCreatePrivateConversation
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.join
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -386,26 +393,31 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.rename
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.setTopic
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.setPurpose
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.archive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.unarchive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -421,11 +433,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationsOpenReusesDirectConversation
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: conversations.mark
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestMarkConversation
+      - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
   - method: files.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi

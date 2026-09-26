@@ -175,17 +175,16 @@ func TestRegisterKeepsEveryRouteReachableBehindTheLimiter(t *testing.T) {
 		}
 		target := wildcard.ReplaceAllString(route.path, "x")
 		request := httptest.NewRequest(route.method, target, nil)
-		_, unlimitedPattern := unlimited.Handler(request)
-		_, limitedPattern := limited.Handler(request)
-		if unlimitedPattern != route.method+" "+route.path {
-			t.Fatalf("%s %s resolves to %q without a limiter; the probe is wrong", route.method, target, unlimitedPattern)
-		}
-		want := unlimitedPattern
+		// The Web API is one fronted /api/ route on the outer mux, with or
+		// without a limiter; everything else is its own route there.
+		want := route.method + " " + route.path
 		if strings.HasPrefix(route.path, "/api/") {
 			want = "/api/"
 		}
-		if limitedPattern != want {
-			t.Errorf("%s %s resolves to %q behind the limiter, want %q", route.method, target, limitedPattern, want)
+		for name, mux := range map[string]*http.ServeMux{"without a limiter": unlimited, "behind the limiter": limited} {
+			if _, pattern := mux.Handler(request); pattern != want {
+				t.Errorf("%s %s resolves to %q %s, want %q", route.method, target, pattern, name, want)
+			}
 		}
 		checked++
 	}

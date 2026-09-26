@@ -62,19 +62,21 @@ func NewHandler(messages chatapi.Service, authenticator auth.Authenticator) (Han
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
-	api := mux
-	if h.Limiter != nil {
-		// The Web API registers on an inner mux fronted by the limiter, so a
-		// limited request is answered before any route handler — including the
-		// unknown-method catch-all — runs. Only /api/ is delegated: the surfaces
-		// outside it (incoming webhooks, external upload URLs, public file and
-		// photo URLs) register on the outer mux below. Registering them on the
-		// inner mux, as this once did, left every one of them answering 404 in
-		// the default rate-limited production configuration.
-		api = http.NewServeMux()
-		mux.Handle("/api/", h.Limiter.Middleware(api))
-	}
+	// The Web API registers on an inner mux that one /api/ route fronts: the
+	// OAuth scope headers wrap every method, and the limiter, when set, answers
+	// a limited request before any route handler — including the
+	// unknown-method catch-all — runs. Only /api/ is delegated: the surfaces
+	// outside it (incoming webhooks, external upload URLs, public file and photo
+	// URLs) register on the outer mux. Registering them on the inner mux, as
+	// this once did, left every one of them answering 404 in the default
+	// rate-limited production configuration.
+	api := http.NewServeMux()
 	h.registerWebAPI(api)
+	var front http.Handler = api
+	if h.Limiter != nil {
+		front = h.Limiter.Middleware(front)
+	}
+	mux.Handle("/api/", withOAuthScopeHeaders(front))
 	h.registerSurfaces(mux)
 }
 
@@ -843,8 +845,9 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if !principal.HasScope(auth.ScopeConnectionsWrite) {
-		writeAuthError(w, missingScopeError{needed: auth.ScopeConnectionsWrite, provided: permissionScopes(principal)})
+	recordGrantedScopes(r, principal)
+	if err := requireAnyScope(r, principal, auth.ScopeConnectionsWrite); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	if principal.AppID == "" {
@@ -1179,7 +1182,7 @@ func (h Handler) apiTest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) history(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	principal, err := h.authenticateConversation(r, conversationHistoryGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -1192,6 +1195,9 @@ func (h Handler) history(w http.ResponseWriter, r *http.Request) {
 	request, err := normalizeHistoryRequest(fields, "invalid_ts_oldest", "invalid_ts_latest")
 	if err != nil {
 		writeDecodeError(w, err)
+		return
+	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationHistoryGrant, request.Channel, "channel_not_found"); !ok {
 		return
 	}
 	// Slack history is newest-first. Reading the store in that direction also
@@ -1208,7 +1214,7 @@ func (h Handler) history(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) replies(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	principal, err := h.authenticateConversation(r, conversationHistoryGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -1226,6 +1232,9 @@ func (h Handler) replies(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(fields["ts"]) == "" {
 		// /conversations.replies enumerates thread_not_found, not invalid_arguments.
 		writeError(w, "thread_not_found")
+		return
+	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationHistoryGrant, request.Channel, "channel_not_found"); !ok {
 		return
 	}
 	page, err := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, request.Channel, domain.MessageTimestamp(strings.TrimSpace(fields["ts"])), request.Page)
@@ -2435,10 +2444,12 @@ func (h Handler) authRevoke(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "not_authed")
 		return
 	}
-	if _, err := h.Authenticator.Authenticate(r); err != nil {
+	principal, err := h.Authenticator.Authenticate(r)
+	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
+	recordGrantedScopes(r, principal)
 	test, err := parseBoolField(fields["test"])
 	if err != nil {
 		writeError(w, "invalid_arg_name")
@@ -6144,10 +6155,10 @@ func (h Handler) adminEmojiFields(w http.ResponseWriter, r *http.Request) (auth.
 }
 
 func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
-	// Pinned /conversations.info token parameter: "Requires scope:
-	// `conversations:read`". Enforcing no scope let a chat:write-only token read
-	// every channel's topic, purpose and privacy.
-	principal, err := h.authenticate(r, auth.ScopeChannelsRead)
+	// Pinned /conversations.info: channels:read, groups:read, im:read or
+	// mpim:read by the conversation's type. Enforcing no scope let a
+	// chat:write-only token read every channel's topic, purpose and privacy.
+	principal, err := h.authenticateConversation(r, conversationReadGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6162,9 +6173,8 @@ func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversationID))
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	conversation, ok := h.authorizedConversation(w, r, principal, conversationReadGrant, domain.ConversationID(conversationID), "channel_not_found")
+	if !ok {
 		return
 	}
 	response := conversationResponse(conversation)
@@ -6828,7 +6838,7 @@ func (h Handler) usersConversations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allowMember bool) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsRead)
+	principal, err := h.authenticateConversation(r, conversationReadGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6843,6 +6853,30 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	if len(request.Types) == 0 {
+		// Both methods default `types` to public_channel. An absent argument
+		// used to list every type, so a caller that named none received its
+		// private channels and DMs as well.
+		request.Types = []domain.ConversationType{domain.ConversationTypePublic}
+	}
+	// The listing is narrowed to the requested types the token may read, as
+	// Slack does: a token holding channels:read and asking for public and
+	// private channels gets the public ones. Only a request none of whose
+	// types the token can read is refused, naming the scopes that would do.
+	permitted := make([]domain.ConversationType, 0, len(request.Types))
+	for _, kind := range request.Types {
+		if conversationReadGrant.permits(principal, kind) {
+			permitted = append(permitted, kind)
+		}
+	}
+	if len(permitted) == 0 {
+		if err := requireAnyScope(r, principal, conversationReadGrant.scopes(principal, request.Types...)...); err != nil {
+			writeAuthError(w, err)
+			return
+		}
+	}
+	recordAcceptedScopes(r, conversationReadGrant.scopes(principal, request.Types...)...)
+	request.Types = permitted
 	if allowMember {
 		request.MemberUserID = domain.UserID(strings.TrimSpace(fields["user"]))
 	}
@@ -6859,7 +6893,7 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 }
 
 func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsRead)
+	principal, err := h.authenticateConversation(r, conversationReadGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6879,6 +6913,9 @@ func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationReadGrant, channel, "channel_not_found"); !ok {
+		return
+	}
 	page, err := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, request)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -6892,7 +6929,7 @@ func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant, domain.ConversationTypePublic, domain.ConversationTypePrivate)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6910,6 +6947,14 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 	private, err := parseBoolField(fields["is_private"])
 	if err != nil {
 		writeError(w, "invalid_arg_name")
+		return
+	}
+	kind := domain.ConversationTypePublic
+	if private {
+		kind = domain.ConversationTypePrivate
+	}
+	if err := requireAnyScope(r, principal, conversationWriteGrant.scope(principal, kind)); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
@@ -6956,11 +7001,11 @@ func (h Handler) authenticateConversationJoin(r *http.Request, botScope, userSco
 	// other conversation mutators and requiring channels:manage made an
 	// official bot installation unable to join any public channel.
 	needed := userScope
-	if principal.TokenType.IsBot() || principal.BotID != "" {
+	if isBotPrincipal(principal) {
 		needed = botScope
 	}
-	if !principal.HasScope(needed) {
-		return auth.Principal{}, missingScopeError{needed: needed, provided: permissionScopes(principal)}
+	if err := requireAnyScope(r, principal, needed); err != nil {
+		return auth.Principal{}, err
 	}
 	return principal, nil
 }
@@ -6971,12 +7016,10 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	allInviteScopes := []auth.Scope{
-		auth.ScopeChannelsManage, auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites,
-		auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite,
-	}
-	if !principalHasAnyScope(principal, allInviteScopes...) {
-		writeAuthError(w, missingScopeError{needed: auth.ScopeChannelsManage, provided: permissionScopes(principal)})
+	// Every conversation type's write scope, plus the invite-only grants
+	// Slack accepts for channels, is the family a token must hold one of.
+	if err := requireAnyScope(r, principal, append(conversationWriteGrant.scopes(principal), auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWriteInvites)...); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -6994,21 +7037,8 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	required := []auth.Scope{auth.ScopeChannelsWrite}
-	switch {
-	case conversation.Kind == domain.ConversationTypeIM:
-		required = []auth.Scope{auth.ScopeIMWrite}
-	case conversation.Kind == domain.ConversationTypeMPIM:
-		required = []auth.Scope{auth.ScopeMPIMWrite}
-	case conversation.Kind == domain.ConversationTypePrivate:
-		required = []auth.Scope{auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites}
-	case principal.TokenType.IsBot() || principal.BotID != "":
-		required = []auth.Scope{auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites}
-	default:
-		required = []auth.Scope{auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites}
-	}
-	if !principalHasAnyScope(principal, required...) {
-		writeAuthError(w, missingScopeError{needed: required[0], provided: permissionScopes(principal)})
+	if err := requireAnyScope(r, principal, inviteScopes(principal, conversation.Kind.OrPublic())...); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	if conversation.Archived {
@@ -7121,6 +7151,20 @@ func (h Handler) conversationInviteCandidates(r *http.Request, principal auth.Pr
 	return valid, failures, nil
 }
 
+// inviteScopes is what conversations.invite accepts for a conversation of
+// kind: the conversation write grant, or for a channel the narrower
+// invite-only scope.
+func inviteScopes(principal auth.Principal, kind domain.ConversationType) []auth.Scope {
+	scopes := []auth.Scope{conversationWriteGrant.scope(principal, kind)}
+	switch kind.OrPublic() {
+	case domain.ConversationTypePublic:
+		scopes = append(scopes, auth.ScopeChannelsWriteInvites)
+	case domain.ConversationTypePrivate:
+		scopes = append(scopes, auth.ScopeGroupsWriteInvites)
+	}
+	return scopes
+}
+
 func principalHasAnyScope(principal auth.Principal, scopes ...auth.Scope) bool {
 	for _, scope := range scopes {
 		if principal.HasScope(scope) {
@@ -7131,7 +7175,7 @@ func principalHasAnyScope(principal auth.Principal, scopes ...auth.Scope) bool {
 }
 
 func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7146,9 +7190,8 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conversation := domain.ConversationID(strings.TrimSpace(fields["channel"]))
-	info, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, conversation)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	info, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, conversation, "channel_not_found")
+	if !ok {
 		return
 	}
 	if info.IsDirectOrGroup() {
@@ -7171,7 +7214,7 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7191,6 +7234,9 @@ func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "user_not_found")
 		return
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
+		return
+	}
 	if err := h.Messages.KickConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel, target); err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
@@ -7199,7 +7245,7 @@ func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7219,9 +7265,8 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_name_required")
 		return
 	}
-	info, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	info, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found")
+	if !ok {
 		return
 	}
 	if info.IsDirectOrGroup() {
@@ -7237,7 +7282,7 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7256,6 +7301,9 @@ func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
+		return
+	}
 	conversation, err := h.Messages.SetConversationTopic(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["topic"])
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -7265,7 +7313,7 @@ func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7282,6 +7330,9 @@ func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) 
 	}
 	if _, present := fields["purpose"]; !present {
 		writeError(w, "invalid_arg_name")
+		return
+	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
 		return
 	}
 	conversation, err := h.Messages.SetConversationPurpose(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["purpose"])
@@ -7329,7 +7380,7 @@ func (h Handler) unarchiveConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7344,9 +7395,8 @@ func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "channel_not_found")
 		return
 	}
-	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	conversation, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found")
+	if !ok {
 		return
 	}
 	if !conversation.IsDirectOrGroup() {
@@ -7365,7 +7415,7 @@ func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) changeConversationArchived(w http.ResponseWriter, r *http.Request, archived bool) (bool, error) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return false, nil
@@ -7380,12 +7430,15 @@ func (h Handler) changeConversationArchived(w http.ResponseWriter, r *http.Reque
 		writeError(w, "channel_not_found")
 		return false, nil
 	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, channel, "channel_not_found"); !ok {
+		return false, nil
+	}
 	_, err = h.Messages.SetConversationArchived(r.Context(), principal.WorkspaceID, principal.UserID, channel, archived)
 	return true, err
 }
 
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversation(r, conversationWriteGrant, domain.ConversationTypeIM, domain.ConversationTypeMPIM)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7414,6 +7467,22 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		seen[user] = struct{}{}
 		users = append(users, user)
 	}
+	// One other person is a direct message and more is a group direct
+	// message; each takes its own write scope.
+	kind := domain.ConversationTypeIM
+	others := 0
+	for _, user := range users {
+		if user != principal.UserID {
+			others++
+		}
+	}
+	if others > 1 {
+		kind = domain.ConversationTypeMPIM
+	}
+	if err := requireAnyScope(r, principal, conversationWriteGrant.scope(principal, kind)); err != nil {
+		writeAuthError(w, err)
+		return
+	}
 	conversation, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -7423,9 +7492,10 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) markConversation(w http.ResponseWriter, r *http.Request) {
-	// conversations.mark moves the caller's read cursor, so the pinned token
-	// parameter requires `conversations:write`, not a history read scope.
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	// conversations.mark moves the caller's read cursor, so it takes the
+	// conversation write grant for the conversation's type, not a history
+	// read scope.
+	principal, err := h.authenticateConversation(r, conversationWriteGrant)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -7443,6 +7513,9 @@ func (h Handler) markConversation(w http.ResponseWriter, r *http.Request) {
 	if timestamp == "" {
 		// /conversations.mark enumerates invalid_timestamp.
 		writeError(w, "invalid_timestamp")
+		return
+	}
+	if _, ok := h.authorizedConversation(w, r, principal, conversationWriteGrant, domain.ConversationID(channel), "channel_not_found"); !ok {
 		return
 	}
 	cursor, err := h.Messages.MarkRead(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(channel), domain.MessageTimestamp(timestamp))
@@ -11962,13 +12035,43 @@ func slackTimestamp(value time.Time) string {
 // token actually holds. The pinned `default` response schema declares `needed`
 // and `provided` next to `error` precisely so a client can repair the grant, so
 // dropping them would leave `missing_scope` unactionable.
+//
+// `needed` lists every scope the operation would accept, any one of which
+// suffices — Slack's own answer for conversations.history without a history
+// scope names all four — and a single scope when there is only one.
 type missingScopeError struct {
-	needed   auth.Scope
+	needed   []auth.Scope
 	provided []string
 }
 
 func (e missingScopeError) Error() string {
-	return fmt.Sprintf("missing scope %s", e.needed)
+	return fmt.Sprintf("missing scope %s", e.neededValue())
+}
+
+func (e missingScopeError) neededValue() string {
+	values := make([]string, 0, len(e.needed))
+	for _, scope := range e.needed {
+		values = append(values, string(scope))
+	}
+	return strings.Join(values, ",")
+}
+
+// requireAnyScope refuses a principal that holds none of scopes, any one of
+// which the operation accepts, and records them as the method's accepted
+// scopes for X-Accepted-OAuth-Scopes. Empty names are ignored; with none left
+// the operation needs nothing beyond authentication.
+func requireAnyScope(r *http.Request, principal auth.Principal, scopes ...auth.Scope) error {
+	accepted := make([]auth.Scope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope != "" {
+			accepted = append(accepted, scope)
+		}
+	}
+	recordAcceptedScopes(r, accepted...)
+	if len(accepted) == 0 || principalHasAnyScope(principal, accepted...) {
+		return nil
+	}
+	return missingScopeError{needed: accepted, provided: permissionScopes(principal)}
 }
 
 func (e missingScopeError) Unwrap() error { return auth.ErrMissingScope }
@@ -11995,8 +12098,9 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 	if err != nil {
 		return auth.Principal{}, err
 	}
-	if scope != "" && !principal.HasScope(scope) {
-		return auth.Principal{}, missingScopeError{needed: scope, provided: permissionScopes(principal)}
+	recordGrantedScopes(r, principal)
+	if err := requireAnyScope(r, principal, scope); err != nil {
+		return auth.Principal{}, err
 	}
 	if err := h.Messages.RecordAccess(r.Context(), principal.WorkspaceID, principal.UserID, truncate(r.RemoteAddr, maxAccessLogIP), truncate(r.UserAgent(), maxAccessLogUserAgent)); err != nil {
 		return auth.Principal{}, fmt.Errorf("%w: %v", errAccessLogging, err)
@@ -12015,8 +12119,9 @@ func (h Handler) authenticateApp(r *http.Request, scope auth.Scope) (auth.Princi
 	if principal.AppID == "" {
 		return auth.Principal{}, auth.ErrInvalidToken
 	}
-	if scope != "" && !principal.HasScope(scope) {
-		return auth.Principal{}, missingScopeError{needed: scope, provided: permissionScopes(principal)}
+	recordGrantedScopes(r, principal)
+	if err := requireAnyScope(r, principal, scope); err != nil {
+		return auth.Principal{}, err
 	}
 	return principal, nil
 }
@@ -12037,7 +12142,7 @@ func writeAuthError(w http.ResponseWriter, err error) {
 	}
 	var missing missingScopeError
 	if errors.As(err, &missing) {
-		body := map[string]any{"ok": false, "error": "missing_scope", "needed": string(missing.needed)}
+		body := map[string]any{"ok": false, "error": "missing_scope", "needed": missing.neededValue()}
 		body["provided"] = strings.Join(missing.provided, ",")
 		writeJSON(w, http.StatusOK, body)
 		return
