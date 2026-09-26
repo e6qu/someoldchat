@@ -958,7 +958,6 @@ const uploadedFileMetadata = uploadedFile.files[0].files[0];
 assert.equal(typeof uploadedFileMetadata.id, "string");
 // A file's URLs are fetched verbatim, so they must be absolute on the origin
 // the client reached, and url_private must serve the bytes to the bearer.
-const apiOrigin = new URL(apiUrl).origin;
 for (const field of ["url_private", "url_private_download", "permalink"]) {
 	assert.equal(uploadedFileMetadata[field].startsWith(`${apiOrigin}/`), true, `${field}=${uploadedFileMetadata[field]}`);
 }

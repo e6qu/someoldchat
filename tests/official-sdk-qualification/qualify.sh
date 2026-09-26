@@ -42,6 +42,13 @@ stop_fixture() {
 
 start_fixture() {
 	stop_fixture
+	# A fixture left running by another run would answer the readiness probe
+	# below, and the suites would then qualify that process instead of this
+	# build. Refuse rather than race it for the port.
+	if curl -fsS "http://127.0.0.1:18080/qualification/ready" >/dev/null 2>&1; then
+		echo "127.0.0.1:18080 already serves a fixture; stop it before qualifying" >&2
+		exit 1
+	fi
 	"$work/fixture" &
 	fixture_pid=$!
 	ready=0
