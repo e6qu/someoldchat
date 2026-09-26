@@ -16,13 +16,20 @@ import (
 	"unicode"
 )
 
+// directKeySeparator joins the parts of a direct conversation key. It is the
+// ASCII unit separator rather than NUL: PostgreSQL text rejects a NUL byte, so
+// a NUL-joined key made every direct message fail to open on that profile.
+const directKeySeparator = "\x1f"
+
+// DirectConversationKey is the canonical identity of a direct conversation:
+// its workspace and its exact, order-independent member set.
 func DirectConversationKey(workspaceID WorkspaceID, members []UserID) string {
 	values := make([]string, 0, len(members))
 	for _, member := range members {
 		values = append(values, string(member))
 	}
 	sort.Strings(values)
-	return string(workspaceID) + "\x00" + strings.Join(values, "\x00")
+	return string(workspaceID) + directKeySeparator + strings.Join(values, directKeySeparator)
 }
 
 type Workspace struct {

@@ -578,7 +578,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 181
+const schemaVersion = 182
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3409,6 +3409,20 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 182 {
+		// Direct conversation keys were joined with NUL, which PostgreSQL text
+		// refuses, so no direct message could be opened there; SQLite and
+		// dqlite stored them. Rewrite those to the unit separator the key now
+		// uses, or an existing DM would no longer be found and reopening it
+		// would create a duplicate.
+		// SQLite's string functions stop at an embedded NUL, so the rewrite
+		// is done here rather than with replace().
+		if s.sqliteDialect {
+			if err := rewriteNULDirectKeys(ctx, db); err != nil {
+				return fmt.Errorf("migrate direct conversation keys: %w", err)
+			}
 		}
 	}
 	if version < 181 {
@@ -22051,4 +22065,34 @@ func (s *Store) completeExternalUploads(ctx context.Context, scheduledID domain.
 		}
 	}
 	return tx.Commit()
+}
+
+func rewriteNULDirectKeys(ctx context.Context, db queryExecutor) error {
+	rows, err := db.QueryContext(ctx, `SELECT id, direct_key FROM conversations WHERE direct_key IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	rewrites := map[string]string{}
+	for rows.Next() {
+		var id, key string
+		if err := rows.Scan(&id, &key); err != nil {
+			rows.Close()
+			return err
+		}
+		if strings.Contains(key, "\x00") {
+			rewrites[id] = strings.ReplaceAll(key, "\x00", "\x1f")
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for id, key := range rewrites {
+		if _, err := db.ExecContext(ctx, `UPDATE conversations SET direct_key = ? WHERE id = ?`, key, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
