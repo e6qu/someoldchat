@@ -85,7 +85,10 @@ backend only; selecting it for a multi-replica deployment is invalid.
 Direct and multi-person conversations use durable participant sets and a
 unique participant-set key, so concurrent `conversations.open` calls from
 different replicas converge on one conversation rather than creating
-replica-local duplicates.
+replica-local duplicates. A participant set of one is the caller's self-DM.
+New one-to-one conversations receive Slack's D-prefixed identifiers; group
+DMs and channels keep the C prefix, and conversations created before that
+change keep the identifier every stored reference already names.
 
 Named channels likewise use a durable workspace-and-name unique index. The
 service normalizes the human input once and every storage profile enforces the
@@ -302,6 +305,7 @@ them.
 | `POST /services/{workspace}/{app}/{secret}` | incoming webhook delivery; see [incoming webhooks](incoming-webhooks.md) |
 | `POST /internal/admin/incoming-webhooks/create`, `/enable` | webhook administration |
 | `GET /internal/slack-lists/download.csv` | `slackLists` CSV export |
+| `GET /avatars/{workspace}/{user}/{size}.png` | generated default avatar at one of the profile image sizes; unauthenticated, and it discloses only the member color every user object already carries |
 
 Three routes are **unauthenticated token-bearing capability URLs**: possession of
 the path is the authorization.

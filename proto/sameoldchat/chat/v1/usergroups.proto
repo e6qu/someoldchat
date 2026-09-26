@@ -42,6 +42,8 @@ message CreateUserGroupRequest {
   string name = 3;
   string handle = 4;
   string description = 5;
+  // The group's default channels.
+  repeated string channels = 6;
 }
 
 message UpdateUserGroupRequest {
@@ -51,6 +53,8 @@ message UpdateUserGroupRequest {
   string name = 4;
   string handle = 5;
   string description = 6;
+  // Replaces the group's default channels; empty leaves them unchanged.
+  repeated string channels = 7;
 }
 
 message UserGroupUsersRequest {

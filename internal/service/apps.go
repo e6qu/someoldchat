@@ -540,10 +540,11 @@ func (m Messages) OpenAppHome(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil || app.BotUserID == "" {
 		return app, view, err
 	}
-	conversation, err := m.OpenConversation(ctx, workspaceID, userID, []domain.UserID{app.BotUserID})
+	opening, err := m.OpenConversation(ctx, workspaceID, userID, []domain.UserID{app.BotUserID})
 	if err != nil {
 		return domain.InstalledApp{}, domain.View{}, err
 	}
+	conversation := opening.Conversation
 	fields := []events.Field{
 		events.String("target_app_id", string(app.ID)),
 		events.String("user_id", string(userID)),
@@ -867,7 +868,7 @@ func (m Messages) AuthorizeOAuth(ctx context.Context, request domain.OAuthAuthor
 			return domain.OAuthAuthorization{}, err
 		}
 		now := time.Now().UTC()
-		botUser = domain.User{ID: botUserID, WorkspaceID: authorization.WorkspaceID, Name: authorization.AppName, RealName: authorization.AppName, Presence: domain.PresenceAuto}
+		botUser = domain.User{ID: botUserID, WorkspaceID: authorization.WorkspaceID, Name: authorization.AppName, RealName: authorization.AppName, Presence: domain.PresenceAuto, Updated: now}
 		bot = domain.Bot{ID: botID, WorkspaceID: authorization.WorkspaceID, AppID: authorization.AppID, UserID: botUserID, Name: authorization.AppName, UpdatedAt: now}
 		authorization.BotID = botID
 		authorization.BotUserID = botUserID

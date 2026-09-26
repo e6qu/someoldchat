@@ -151,6 +151,7 @@ operations:
       - go-test:internal/api/slack:TestAuthTestIncludesContractIdentityFields
       - go-test:internal/api/slack:TestURLsHandedToClientsAreAbsolute
       - go-test:internal/api/slack:TestConfiguredPublicURLWinsOverTheRequestHost
+      - go-test:internal/api/slack:TestTeamInfoReportsDomainAndFetchableIcons
   - method: chat.postMessage
     status: schema-compatible
     provenance: slack-api-specs-openapi
@@ -249,6 +250,7 @@ operations:
       - go-test:internal/api/slack:TestMessagesCarryReactionsAndPins
       - go-test:internal/api/slack:TestBotTokenMessagesCarryBotIdentity
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
+      - go-test:internal/api/slack:TestChannelNoticesCarryTheirSlackFieldsInHistory
   - method: conversations.replies
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -320,12 +322,20 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationAndUserInfo
+      - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
+    deviations:
+      - Nothing records a member's time zone, so every member reports tz UTC with a zero offset.
+      - A workspace has owners but no distinguished primary owner, so every owner reports is_primary_owner.
+      - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: conversations.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestConversationAndUserInfo
       - go-test:internal/api/slack:TestConversationReadsRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestConversationObjectReportsProvenanceAndTheGeneralChannel
+    deviations:
+      - created and creator are recorded from schema 180 onward; a conversation created earlier reports created 0 and an empty creator, as does a topic or purpose last set before then.
   - method: conversations.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -333,12 +343,14 @@ operations:
       - go-test:internal/api/slack:TestUsersAndConversationsList
       - go-test:internal/api/slack:TestConversationListingNarrowsToTheTypesTheTokenMayRead
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
+      - go-test:internal/api/slack:TestUsersConversationsListsOnlyTheMembersConversations
   - method: users.conversations
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
       - go-test:internal/api/slack:TestConversationListingNarrowsToTheTypesTheTokenMayRead
+      - go-test:internal/api/slack:TestUsersConversationsListsOnlyTheMembersConversations
   - method: conversations.members
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -351,6 +363,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestTeamInfo
+      - go-test:internal/api/slack:TestTeamInfoReportsDomainAndFetchableIcons
   - method: team.profile.get
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -386,6 +399,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestCreatePrivateConversation
       - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestConversationObjectReportsProvenanceAndTheGeneralChannel
   - method: conversations.join
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -417,12 +431,14 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestLeavePublicConversation
+      - go-test:internal/api/slack:TestConversationObjectReportsProvenanceAndTheGeneralChannel
   - method: conversations.kick
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
       - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestConversationsKickFollowsItsPinnedErrors
   - method: conversations.rename
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -435,12 +451,14 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
       - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestSetTopicAndPurposeFollowTheirPinnedErrors
   - method: conversations.setPurpose
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRenameConversationNormalizesAndPersists
       - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestSetTopicAndPurposeFollowTheirPinnedErrors
   - method: conversations.archive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -463,6 +481,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestConversationsOpenReusesDirectConversation
       - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
+      - go-test:internal/api/slack:TestConversationsOpenNamesUsersAndSelfAndGroupDMs
   - method: conversations.mark
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -551,6 +570,11 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestUsersAndConversationsList
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
+      - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
+    deviations:
+      - Nothing records a member's time zone, so every member reports tz UTC with a zero offset.
+      - A workspace has owners but no distinguished primary owner, so every owner reports is_primary_owner.
+      - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: users.lookupByEmail
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -567,7 +591,8 @@ operations:
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
       - Automatic presence follows Slack's ten-minute inactivity rule against the member's last observed activity; websocket connectivity does not feed it.
-      - The optional presence detail fields and current rate-limit behavior have not been qualified against Slack.
+      - The caller's own presence carries online, auto_away, manual_away, connection_count and last_activity. Client connections are not tracked, so online and connection_count (0 or 1) follow observed activity rather than open connections.
+      - Current rate-limit behavior has not been qualified against Slack.
     audit:
       downgraded_from: behavior-compatible
       reason: The previous claim proved response decoding but treated automatic mode as effective active presence without live activity evidence.
@@ -1317,11 +1342,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.disable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.enable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1332,11 +1359,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupListBooleansAcceptEveryDocumentedForm
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
+      - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
   - method: usergroups.users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi

@@ -66,13 +66,13 @@ func TestEventStreamWithholdsConversationsTheReaderIsNotIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	whisper, err := messages.Post(ctx, "T1", "U1", direct.ID, "just between us", "", "")
+	whisper, err := messages.Post(ctx, "T1", "U1", direct.Conversation.ID, "just between us", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	outsider := streamAs(t, messages, "U3", "0")
-	for _, leaked := range []string{"acquisition-of-acme", string(private.ID), string(secret.ID), "top secret", string(direct.ID), string(whisper.ID), "just between us"} {
+	for _, leaked := range []string{"acquisition-of-acme", string(private.ID), string(secret.ID), "top secret", string(direct.Conversation.ID), string(whisper.ID), "just between us"} {
 		if strings.Contains(outsider, leaked) {
 			t.Errorf("a non-member's stream carried %q:\n%s", leaked, outsider)
 		}
@@ -80,7 +80,7 @@ func TestEventStreamWithholdsConversationsTheReaderIsNotIn(t *testing.T) {
 	// The member's stream is the control: the filter withholds by membership,
 	// not by withholding everything.
 	member := streamAs(t, messages, "U1", "0")
-	for _, expected := range []string{"acquisition-of-acme", "top secret", string(direct.ID), "just between us"} {
+	for _, expected := range []string{"acquisition-of-acme", "top secret", string(direct.Conversation.ID), "just between us"} {
 		if !strings.Contains(member, expected) {
 			t.Errorf("a member's stream is missing %q:\n%s", expected, member)
 		}

@@ -791,6 +791,8 @@ func (h Handler) registerSurfaces(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/exports/workflow-step-responses.csv", h.downloadWorkflowStepResponsesCSV)
 	mux.HandleFunc("GET /files/public/{token}", h.downloadPublicFile)
 	mux.HandleFunc("GET /users/{workspace}/{user}/photo/{token}", h.downloadUserPhoto)
+	mux.HandleFunc("GET /avatars/{workspace}/{user}/{file}", h.defaultAvatar)
+	mux.HandleFunc("GET /team-icons/{workspace}/{file}", h.defaultTeamIcon)
 	mux.HandleFunc("POST /services/{workspace}/{app}/{secret}", h.limitedIncomingWebhook)
 	mux.HandleFunc("POST /services/triggers/{workspace}/{trigger}/{secret}", h.workflowTriggerWebhook)
 	mux.HandleFunc("POST /internal/admin/incoming-webhooks/create", h.adminIncomingWebhookCreate)
@@ -2994,8 +2996,7 @@ func (h Handler) teamInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
-	domainName := team.Domain
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": map[string]any{"id": team.ID, "name": team.Name, "domain": domainName}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": teamResponse(h.origin(r), team)})
 }
 
 // teamPreferencesList exposes the workspace policies SameOldChat actually
@@ -3132,7 +3133,7 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "fatal_error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": streamURL, "team": map[string]any{"id": team.ID, "name": team.Name, "domain": team.Domain}, "self": map[string]any{"id": user.ID, "name": user.Name}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": streamURL, "team": map[string]any{"id": team.ID, "name": team.Name, "domain": team.SlackDomain()}, "self": map[string]any{"id": user.ID, "name": user.Name}})
 }
 
 func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
@@ -3319,7 +3320,7 @@ func (h Handler) adminUsersList(w http.ResponseWriter, r *http.Request) {
 	}
 	users := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		users = append(users, adminUserResponse(user))
+		users = append(users, adminUserResponse(h.origin(r), user))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "users": users, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
@@ -6220,11 +6221,22 @@ func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	options, err := parseBoolFields(fields, "include_num_members", "include_locale")
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	conversation, ok := h.authorizedConversation(w, r, principal, conversationReadGrant, domain.ConversationID(conversationID), "channel_not_found")
 	if !ok {
 		return
 	}
 	response := conversationResponse(conversation)
+	if options[0] && conversation.Kind != domain.ConversationTypeIM {
+		response["num_members"] = conversation.NumMembers
+	}
+	if options[1] {
+		response["locale"] = workspaceLocale
+	}
 	canvas, canvasErr := h.Messages.ConversationCanvas(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID)
 	if canvasErr == nil {
 		var document struct {
@@ -6248,12 +6260,15 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// `user` is required. Slack answers its absence user_not_found; reading
+	// it as the caller answered a question nobody asked.
 	requested := domain.UserID(strings.TrimSpace(fields["user"]))
 	if requested == "" {
-		requested = principal.UserID
-	}
-	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeError(w, "user_not_found")
 		return
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, requested)
@@ -6261,7 +6276,7 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user, principal.HasScope(auth.ScopeUsersReadEmail))})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))})
 }
 
 func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
@@ -6303,7 +6318,7 @@ func (h Handler) lookupUserByEmail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "users_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user, true)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(h.origin(r), user, true)})
 }
 
 func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
@@ -6335,7 +6350,7 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 	}
 	members := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		members = append(members, userResponse(user, principal.HasScope(auth.ScopeUsersReadEmail)))
+		members = append(members, userResponse(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "members": members, "cache_ts": time.Now().Unix(), "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -6387,7 +6402,7 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	profile := profileResponse(user)
+	profile := profileResponse(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(profile, "email")
 	}
@@ -6440,7 +6455,26 @@ func (h Handler) getPresence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "presence": user.Presence.CurrentAt(user.LastActiveAt, time.Now().UTC())})
+	now := time.Now().UTC()
+	presence := user.Presence.CurrentAt(user.LastActiveAt, now)
+	response := map[string]any{"ok": true, "presence": presence}
+	// Slack reports the detail only for the caller's own presence: why they
+	// are away, and when they were last active. Client connections are not
+	// tracked here, so online and connection_count follow observed activity,
+	// the same signal automatic presence resolves against.
+	if user.ID == principal.UserID {
+		online := presence == "active"
+		connections := 0
+		if online {
+			connections = 1
+		}
+		response["online"] = online
+		response["manual_away"] = user.Presence == domain.PresenceAway
+		response["auto_away"] = user.Presence != domain.PresenceAway && presence == "away"
+		response["connection_count"] = connections
+		response["last_activity"] = unixSeconds(user.LastActiveAt)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
@@ -6728,7 +6762,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	responseProfile := profileResponse(user)
+	responseProfile := profileResponse(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(responseProfile, "email")
 	}
@@ -6818,7 +6852,7 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(user)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(h.origin(r), user)})
 }
 
 // users.setActive is deprecated and non-functional in Slack. Preserve that
@@ -6831,49 +6865,15 @@ func (h Handler) usersSetActive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// adminUserResponse renders the admin projection of a user. The pinned
-// admin.users.list 200 example carries the role and restriction flags below; the
-// plain userResponse omits all of them.
-func adminUserResponse(value domain.AdminUser) map[string]any {
-	result := userResponse(value.User, true)
-	result["is_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
-	result["is_primary_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
-	result["is_admin"] = value.Membership.Role == domain.WorkspaceRoleAdmin || value.Membership.Role == domain.WorkspaceRoleOwner
-	result["is_restricted"] = value.Membership.Restricted
-	result["is_ultra_restricted"] = value.Membership.UltraRestricted
-	result["is_bot"] = false
+// adminUserResponse renders the admin projection of a user: the user object,
+// with the role and guest tier from the membership the admin listing already
+// read, and whether the membership is active.
+func adminUserResponse(origin string, value domain.AdminUser) map[string]any {
+	user := value.User
+	user.Role, user.Restricted, user.UltraRestricted = value.Membership.Role, value.Membership.Restricted, value.Membership.UltraRestricted
+	result := userResponse(origin, user, true)
 	result["is_active"] = value.Membership.Active
 	return result
-}
-
-func userResponse(user domain.User, includeEmail bool) map[string]any {
-	profile := profileResponse(user)
-	if !includeEmail {
-		delete(profile, "email")
-	}
-	return map[string]any{
-		"id": user.ID, "team_id": user.WorkspaceID, "name": user.Name, "real_name": user.RealName, "deleted": user.Deleted, "profile": profile,
-	}
-}
-
-func profileResponse(user domain.User) map[string]any {
-	return map[string]any{
-		"display_name": user.Profile.DisplayName, "display_name_normalized": user.Profile.DisplayName, "email": user.Email,
-		"real_name": user.RealName, "real_name_normalized": user.RealName,
-		"status_text": user.Profile.StatusText, "status_emoji": user.Profile.StatusEmoji, "status_expiration": unixSeconds(user.Profile.StatusExpiration),
-		"image_24": user.Profile.Image24, "image_32": user.Profile.Image32, "image_48": user.Profile.Image48, "image_72": user.Profile.Image72,
-		"image_192": user.Profile.Image192, "image_512": user.Profile.Image512, "image_1024": user.Profile.Image1024,
-		"team": user.WorkspaceID, "user_id": user.ID,
-	}
-}
-
-func conversationResponse(conversation domain.Conversation) map[string]any {
-	return map[string]any{"id": conversation.ID, "name": conversation.Name, "topic": map[string]any{"value": conversation.Topic}, "purpose": map[string]any{"value": conversation.Purpose}, "is_archived": conversation.Archived, "is_private": conversation.PrivateFlag(), "is_channel": conversation.Kind.OrPublic() == domain.ConversationTypePublic, "is_im": conversation.Kind == domain.ConversationTypeIM, "is_mpim": conversation.Kind == domain.ConversationTypeMPIM, "is_member": true, "team_id": conversation.WorkspaceID,
-		// The Slack Connect identity. Pending and shared are different facts —
-		// an outstanding invitation is not a connection — and a client renders
-		// each differently, so neither is derived from the other.
-		"is_ext_shared": conversation.IsExtShared, "is_pending_ext_shared": conversation.IsPendingExtShared,
-		"is_shared": conversation.IsExtShared}
 }
 
 func (h Handler) conversationsList(w http.ResponseWriter, r *http.Request) {
@@ -6924,8 +6924,14 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 	}
 	recordAcceptedScopes(r, conversationReadGrant.scopes(principal, request.Types...)...)
 	request.Types = permitted
+	// users.conversations lists the conversations one person belongs to, the
+	// caller unless `user` names someone else. Leaving MemberUserID empty for
+	// the caller listed every public channel in the workspace instead.
 	if allowMember {
 		request.MemberUserID = domain.UserID(strings.TrimSpace(fields["user"]))
+		if request.MemberUserID == "" {
+			request.MemberUserID = principal.UserID
+		}
 	}
 	page, err := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, request)
 	if err != nil {
@@ -6934,7 +6940,16 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 	}
 	channels := make([]map[string]any, 0, len(page.Conversations))
 	for _, conversation := range page.Conversations {
-		channels = append(channels, conversationResponse(conversation))
+		channel := conversationResponse(conversation)
+		// conversations.list reports each channel's size; the pinned
+		// users.conversations schema says its objects carry neither
+		// num_members nor is_member.
+		if allowMember {
+			delete(channel, "is_member")
+		} else if !conversation.IsDirectOrGroup() {
+			channel["num_members"] = conversation.NumMembers
+		}
+		channels = append(channels, channel)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channels": channels, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -7246,18 +7261,21 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, conversation); err != nil {
-		if errors.Is(err, service.ErrCannotLeaveDefault) {
+		switch {
+		case errors.Is(err, service.ErrCannotLeaveDefault):
 			writeError(w, "cant_leave_general")
-			return
-		}
-		if errors.Is(err, service.ErrInvalidConversation) {
+		case errors.Is(err, service.ErrConversationArchived):
 			writeError(w, "is_archived")
-			return
+		case errors.Is(err, service.ErrNotInConversation):
+			// The pinned success schema: leaving a channel you are not in
+			// succeeds and says so, rather than failing.
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "not_in_channel": true})
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
 		}
-		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversation})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
@@ -7285,10 +7303,19 @@ func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.KickConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel, target); err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		switch {
+		case errors.Is(err, service.ErrCannotKickSelf):
+			writeError(w, "cant_kick_self")
+		case errors.Is(err, service.ErrCannotKickFromDefault):
+			writeError(w, "cant_kick_from_general")
+		case errors.Is(err, service.ErrInvalidConversation):
+			writeError(w, "method_not_supported_for_channel_type")
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
+		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": channel})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
@@ -7353,7 +7380,14 @@ func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
 	}
 	conversation, err := h.Messages.SetConversationTopic(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["topic"])
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		switch {
+		case errors.Is(err, service.ErrConversationArchived):
+			writeError(w, "is_archived")
+		case errors.Is(err, service.ErrConversationTextTooLong):
+			writeError(w, "too_long")
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -7384,7 +7418,14 @@ func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) 
 	}
 	conversation, err := h.Messages.SetConversationPurpose(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["purpose"])
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		switch {
+		case errors.Is(err, service.ErrConversationArchived):
+			writeError(w, "is_archived")
+		case errors.Is(err, service.ErrConversationTextTooLong):
+			writeError(w, "too_long")
+		default:
+			writeError(w, mapServiceError(err, "channel_not_found"))
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -7530,12 +7571,31 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	conversation, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+	returnIM, err := parseBoolField(fields["return_im"])
 	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	opening, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidConversation) && len(users) > 8 {
+			writeError(w, "too_many_users")
+			return
+		}
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+	// Slack answers a one-to-one open with the IM's identifier alone unless
+	// return_im asks for the full object; a group DM is always described.
+	channel := conversationResponse(opening.Conversation)
+	if opening.Conversation.Kind == domain.ConversationTypeIM && !returnIM {
+		channel = map[string]any{"id": opening.Conversation.ID}
+	}
+	response := map[string]any{"ok": true, "channel": channel}
+	if opening.AlreadyOpen {
+		response["no_op"], response["already_open"] = true, true
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) markConversation(w http.ResponseWriter, r *http.Request) {
@@ -10675,9 +10735,21 @@ func userGroupResponse(value domain.UserGroup, includeUsers bool) map[string]any
 	for _, user := range value.Users {
 		users = append(users, string(user))
 	}
-	result := map[string]any{"id": value.ID, "team_id": value.WorkspaceID, "is_usergroup": true, "is_subteam": true, "name": value.Name, "description": value.Description, "handle": value.Handle, "is_external": false, "date_create": value.CreatedAt.Unix(), "date_update": value.UpdatedAt.Unix(), "date_delete": int64(0), "auto_provision": false, "enterprise_subteam_id": "", "created_by": value.Creator, "updated_by": value.UpdatedBy, "user_count": len(users)}
+	channels := make([]string, 0, len(value.Channels))
+	for _, channel := range value.Channels {
+		channels = append(channels, string(channel))
+	}
+	// The pinned objs_subteam requires prefs, auto_type and deleted_by, which
+	// were absent. Nothing here provisions a group automatically, so auto_type
+	// is null; a group's default channels are all reported under channels,
+	// because no conversation here has a legacy G-prefixed group identifier.
+	result := map[string]any{"id": value.ID, "team_id": value.WorkspaceID, "is_usergroup": true, "is_subteam": true, "name": value.Name, "description": value.Description, "handle": value.Handle, "is_external": false, "date_create": value.CreatedAt.Unix(), "date_update": value.UpdatedAt.Unix(), "date_delete": int64(0), "auto_provision": false, "enterprise_subteam_id": "", "created_by": value.Creator, "updated_by": value.UpdatedBy, "user_count": len(users),
+		"auto_type": nil, "deleted_by": nil, "channel_count": len(channels), "prefs": map[string]any{"channels": channels, "groups": []string{}}}
 	if !value.DeletedAt.IsZero() {
 		result["date_delete"] = value.DeletedAt.Unix()
+		// Disabling is the only change that sets date_delete, and it records
+		// who made it as the group's last updater.
+		result["deleted_by"] = value.UpdatedBy
 	}
 	if includeUsers {
 		result["users"] = users
@@ -10687,12 +10759,12 @@ func userGroupResponse(value domain.UserGroup, includeUsers bool) map[string]any
 
 func (h Handler) createUserGroup(w http.ResponseWriter, r *http.Request) {
 	h.mutateUserGroup(w, r, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
-		return h.Messages.CreateUserGroup(r.Context(), p.WorkspaceID, p.UserID, f["name"], f["handle"], f["description"])
+		return h.Messages.CreateUserGroup(r.Context(), p.WorkspaceID, p.UserID, f["name"], f["handle"], f["description"], parseIDList[domain.ConversationID](f["channels"]))
 	})
 }
 func (h Handler) updateUserGroup(w http.ResponseWriter, r *http.Request) {
 	h.mutateUserGroup(w, r, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
-		return h.Messages.UpdateUserGroup(r.Context(), p.WorkspaceID, p.UserID, domain.UserGroupID(strings.TrimSpace(f["usergroup"])), f["name"], f["handle"], f["description"])
+		return h.Messages.UpdateUserGroup(r.Context(), p.WorkspaceID, p.UserID, domain.UserGroupID(strings.TrimSpace(f["usergroup"])), f["name"], f["handle"], f["description"], parseIDList[domain.ConversationID](f["channels"]))
 	})
 }
 func (h Handler) enableUserGroup(w http.ResponseWriter, r *http.Request) {
@@ -11371,6 +11443,9 @@ func (h Handler) getPermalink(w http.ResponseWriter, r *http.Request) {
 
 func messageResponse(origin string, message domain.Message) map[string]any {
 	result := map[string]any{"type": "message", "user": message.AuthorID, "text": message.Text, "ts": slackTimestamp(message.CreatedAt)}
+	for field, value := range domain.ChannelNoticeFields(message) {
+		result[field] = value
+	}
 	// Slack's message object reports an edit through `edited`, and clients
 	// render "(edited)" from it. It was absent from every method that returns
 	// a message, so no caller could tell an edited message from an untouched
@@ -11504,6 +11579,12 @@ func mapServiceErrorExists(err error, notFoundReason, existsReason string) strin
 func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason string) string {
 	if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrSlashCommandNotFound) || errors.Is(err, service.ErrWebhookTriggerSecret) || errors.Is(err, service.ErrAssistantThreadNotFound) {
 		return notFoundReason
+	}
+	// The person an operation names is missing, as distinct from the
+	// conversation it acts on: every enum that can say so declares
+	// user_not_found.
+	if errors.Is(err, service.ErrUserNotFound) {
+		return "user_not_found"
 	}
 	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, service.ErrScheduledStatusLimit) {
 		return "restricted_too_many"
@@ -13462,15 +13543,13 @@ func (h Handler) resolvePostChannel(ctx context.Context, principal auth.Principa
 	case raw == "":
 		return "", decodeFailure("channel_not_found", "channel is required")
 	case looksLikeUserID(raw):
-		if domain.UserID(raw) == principal.UserID {
-			// A self-DM is not a conversation this deployment models.
-			return "", decodeFailure("channel_not_found", "no direct conversation with oneself")
-		}
+		// The caller's own ID names their self-DM, which conversations.open
+		// opens the same way.
 		direct, err := h.Messages.OpenConversation(ctx, principal.WorkspaceID, principal.UserID, []domain.UserID{domain.UserID(raw)})
 		if err != nil {
 			return "", err
 		}
-		return direct.ID, nil
+		return direct.Conversation.ID, nil
 	case strings.HasPrefix(raw, "#") || !looksLikeConversationID(raw):
 		return h.conversationNamed(ctx, principal, strings.TrimPrefix(raw, "#"))
 	default:

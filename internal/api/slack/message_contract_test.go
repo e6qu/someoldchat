@@ -289,6 +289,16 @@ func TestPostMessageResolvesNamesAndUsers(t *testing.T) {
 	if direct["channel"] == "U2" || direct["channel"] != again["channel"] {
 		t.Fatalf("a user ID did not post to one direct conversation: %v, %v", direct["channel"], again["channel"])
 	}
+	// Direct conversations take Slack's D-prefixed identifiers, and the
+	// caller's own ID names their self-DM.
+	if channel, _ := direct["channel"].(string); !strings.HasPrefix(channel, "D") {
+		t.Fatalf("direct conversation ID = %q, want a D identifier", channel)
+	}
+	self := slackCall(t, handler, "token", "chat.postMessage", url.Values{"channel": {"U1"}, "text": {"note to self"}})
+	requireOK(t, "chat.postMessage", self)
+	if channel, _ := self["channel"].(string); !strings.HasPrefix(channel, "D") || channel == direct["channel"] {
+		t.Fatalf("self-DM post channel = %v", self["channel"])
+	}
 	requireError(t, "chat.postMessage", slackCall(t, handler, "token", "chat.postMessage", url.Values{"channel": {"#no-such-channel"}, "text": {"x"}}), "channel_not_found")
 	scheduled := slackCall(t, handler, "token", "chat.scheduleMessage", url.Values{"channel": {"#general"}, "text": {"later"}, "post_at": {strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)}})
 	if scheduled["ok"] != true || scheduled["channel"] != "C1" {

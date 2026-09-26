@@ -117,7 +117,7 @@ func (m Messages) OpenIDConnectUserInfo(ctx context.Context, token string) (doma
 	if err != nil {
 		return domain.OpenIDUserInfo{}, err
 	}
-	return domain.OpenIDUserInfo{Subject: user.ID, UserID: user.ID, WorkspaceID: workspace.ID, Email: user.Email, EmailVerified: user.Email != "", Name: user.Name, TeamName: workspace.Name, TeamDomain: workspace.Domain, UserImages: map[string]string{"24": user.Profile.Image24, "32": user.Profile.Image32, "48": user.Profile.Image48, "72": user.Profile.Image72, "192": user.Profile.Image192, "512": user.Profile.Image512}, TeamImages: map[string]string{}, TeamImageDefault: workspace.IconURL == ""}, nil
+	return domain.OpenIDUserInfo{Subject: user.ID, UserID: user.ID, WorkspaceID: workspace.ID, Email: user.Email, EmailVerified: user.Email != "", Name: user.Name, TeamName: workspace.Name, TeamDomain: workspace.SlackDomain(), UserImages: map[string]string{"24": user.Profile.Image24, "32": user.Profile.Image32, "48": user.Profile.Image48, "72": user.Profile.Image72, "192": user.Profile.Image192, "512": user.Profile.Image512}, TeamImages: map[string]string{}, TeamImageDefault: workspace.IconURL == ""}, nil
 }
 
 func containsScope(scopes []string, wanted string) bool {

@@ -501,9 +501,13 @@ assert removed_attachments["message"].get("attachments", []) == []
 assert removed_attachments["message"]["text"] == "python rich update fallback"
 assert client.chat_delete(channel="C1", ts=rich_for_update["ts"])["ok"] is True
 
-conversation = client.conversations_info(channel="C1")
+conversation = client.conversations_info(channel="C1", include_num_members=True)
 assert conversation["ok"] is True
 assert conversation["channel"]["id"] == "C1"
+assert conversation["channel"]["is_member"] is True
+assert conversation["channel"]["is_general"] is True
+assert isinstance(conversation["channel"]["num_members"], int)
+assert isinstance(conversation["channel"]["topic"]["last_set"], int)
 members = client.conversations_members(channel="C1", limit=1)
 assert members["ok"] is True
 assert members["members"] == ["U1"]
@@ -517,12 +521,19 @@ invited = client.conversations_invite(channel="C1", users="U2")
 assert invited["ok"] is True
 force_invited = client.conversations_invite(channel="C1", users="U-missing,U3", force=True)
 assert force_invited["ok"] is True
-kicked = client.conversations_kick(channel="C1", user="U2")
-assert kicked["ok"] is True
+# C1 is the workspace's required channel (set above), which nobody can be
+# removed from, exactly as Slack refuses a kick from #general.
+try:
+    client.conversations_kick(channel="C1", user="U2")
+    raise AssertionError("a member was removed from the required channel")
+except SlackApiError as error:
+    assert error.response["error"] == "cant_kick_from_general"
 private_invitation_channel = client.conversations_create(name="sdk-private-invitation", is_private=True)
 assert private_invitation_channel["ok"] is True
 private_invited = client.conversations_invite(channel=private_invitation_channel["channel"]["id"], users="U2")
 assert private_invited["ok"] is True
+kicked = client.conversations_kick(channel=private_invitation_channel["channel"]["id"], user="U2")
+assert kicked["ok"] is True
 left = client.conversations_leave(channel="C2")
 assert left["ok"] is True
 assert client.admin_conversations_convertToPrivate(channel_id="C2")["ok"] is True
@@ -723,8 +734,9 @@ assert admin_usergroup_channels["ok"] is True
 assert len(admin_usergroup_channels["channels"]) == 1
 assert admin_usergroup_channels["channels"][0]["id"] == "C1"
 assert client.admin_usergroups_removeChannels(usergroup_id=usergroup_id, channel_ids=["C1"])["ok"] is True
-updated_usergroup = client.usergroups_update(usergroup=usergroup_id, name="Updated qualification group")
+updated_usergroup = client.usergroups_update(usergroup=usergroup_id, name="Updated qualification group", channels="C1")
 assert updated_usergroup["ok"] is True
+assert updated_usergroup["usergroup"]["prefs"]["channels"] == ["C1"]
 updated_usergroup_users = client.usergroups_users_update(usergroup=usergroup_id, users="U1")
 assert updated_usergroup_users["ok"] is True
 usergroup_users = client.usergroups_users_list(usergroup=usergroup_id)
@@ -741,6 +753,8 @@ assert enabled_usergroup["ok"] is True
 user = client.users_info(user="U1")
 assert user["ok"] is True
 assert user["user"]["id"] == "U1"
+assert isinstance(user["user"]["is_bot"], bool)
+assert user["user"]["profile"]["image_48"].startswith("http://127.0.0.1:18080/")
 profile = client.users_profile_get(user="U1")
 assert profile["ok"] is True
 assert profile["profile"]["display_name"] == "alice"
@@ -800,6 +814,10 @@ assert lifecycle_info["ok"] is True
 assert lifecycle_info["channel"]["name"] == "qualification-renamed"
 assert lifecycle_info["channel"]["topic"]["value"] == "qualification topic"
 assert lifecycle_info["channel"]["purpose"]["value"] == "qualification purpose"
+assert lifecycle_info["channel"]["creator"] == "U1"
+assert lifecycle_info["channel"]["created"] > 0
+assert lifecycle_info["channel"]["topic"]["creator"] == "U1"
+assert lifecycle_info["channel"]["topic"]["last_set"] > 0
 
 me_message = client.chat_meMessage(channel="C1", text="qualification me message")
 assert me_message["ok"] is True
@@ -821,6 +839,8 @@ assert user_reactions["ok"] is True
 team = client.team_info()
 assert team["ok"] is True
 assert team["team"]["id"] == "T1"
+assert team["team"]["domain"] != ""
+assert team["team"]["icon"]["image_34"].startswith("http")
 team_profile = client.team_profile_get()
 assert team_profile["ok"] is True
 assert team_profile["profile"]["fields"] == []
@@ -836,6 +856,7 @@ assert by_email["ok"] is True
 assert by_email["user"]["id"] == "U1"
 presence = client.users_getPresence(user="U1")
 assert presence["ok"] is True
+assert isinstance(presence["manual_away"], bool)
 set_presence = client.users_setPresence(presence="away")
 assert set_presence["ok"] is True
 profile_set = client.users_profile_set(profile={"status_text": "qualification", "status_emoji": ":wave:", "status_expiration": 4102444800})
@@ -856,6 +877,10 @@ assert already_closed["already_closed"] is True
 reopened_direct = client.conversations_open(users="U2")
 assert reopened_direct["ok"] is True
 assert reopened_direct["channel"]["id"] == direct["channel"]["id"]
+assert direct["channel"]["id"].startswith("D")
+already_open_direct = client.conversations_open(users="U2", return_im=True)
+assert already_open_direct["already_open"] is True
+assert already_open_direct["channel"]["user"] == "U2"
 group_direct = client.conversations_open(users="U2,U3")
 assert group_direct["ok"] is True
 canonical_group_direct = client.conversations_open(users="U3,U2")

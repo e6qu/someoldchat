@@ -70,8 +70,11 @@ Deleting a field removes it and every member's value for it.
    member. Selecting **Active (automatic)** stores `auto`; it does not permanently
    store `active`, because Slack's `users.setPresence` accepts only `auto` and
    `away`.
-3. `users.getPresence` returns the effective `active` or `away` value, while
-   `users.setPresence` changes only the calling user and returns `{ok:true}`.
+3. `users.getPresence` returns the effective `active` or `away` value, and for
+   the caller's own presence also `manual_away`, `auto_away`, `online`,
+   `connection_count` and `last_activity`; with no connection tracking, `online`
+   and `connection_count` follow observed activity. `users.setPresence` changes
+   only the calling user and returns `{ok:true}`.
    Invalid values return `invalid_presence`. The durable manual value and its
    change event remain workspace/member isolated across memory, SQL, and gRPC.
 4. Automatic presence may report active only when the service has truthful

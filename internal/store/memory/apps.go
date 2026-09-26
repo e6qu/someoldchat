@@ -54,6 +54,7 @@ func (s *Store) CreateOAuthAuthorization(_ context.Context, botUser domain.User,
 				return domain.OAuthCode{}, store.ErrAlreadyExists
 			}
 			botUser.Presence = domain.PresenceAuto
+			botUser.Updated = secondsInstant(botUser.Updated)
 			s.users[botUser.ID] = botUser
 			s.members[string(code.WorkspaceID)+"\x00"+string(botUser.ID)] = domain.WorkspaceMembership{WorkspaceID: code.WorkspaceID, UserID: botUser.ID, Role: domain.WorkspaceRoleMember, Active: true}
 			s.bots[bot.ID] = bot

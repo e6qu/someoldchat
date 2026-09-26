@@ -136,16 +136,16 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 	}, nil
 }
 
-func (r Remote) CreateUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, handle, description string) (domain.UserGroup, error) {
-	out, err := r.usergroups.CreateUserGroup(ctx, &chatv1.CreateUserGroupRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, Handle: handle, Description: description})
+func (r Remote) CreateUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, handle, description string, channels []domain.ConversationID) (domain.UserGroup, error) {
+	out, err := r.usergroups.CreateUserGroup(ctx, &chatv1.CreateUserGroupRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, Handle: handle, Description: description, Channels: conversationStrings(channels)})
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
 	return decodeProtoUserGroup(out)
 }
 
-func (r Remote) UpdateUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.UserGroupID, name, handle, description string) (domain.UserGroup, error) {
-	out, err := r.usergroups.UpdateUserGroup(ctx, &chatv1.UpdateUserGroupRequest{WorkspaceId: string(workspaceID), UserId: string(userID), UserGroupId: string(id), Name: name, Handle: handle, Description: description})
+func (r Remote) UpdateUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.UserGroupID, name, handle, description string, channels []domain.ConversationID) (domain.UserGroup, error) {
+	out, err := r.usergroups.UpdateUserGroup(ctx, &chatv1.UpdateUserGroupRequest{WorkspaceId: string(workspaceID), UserId: string(userID), UserGroupId: string(id), Name: name, Handle: handle, Description: description, Channels: conversationStrings(channels)})
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
@@ -4439,13 +4439,13 @@ func (r Remote) Conversations(ctx context.Context, workspaceID domain.WorkspaceI
 	return decodeProtoConversationPage(out)
 }
 
-func (r Remote) OpenConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, users []domain.UserID) (domain.Conversation, error) {
+func (r Remote) OpenConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, users []domain.UserID) (domain.DirectOpening, error) {
 	in := &chatv1.OpenConversationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Users: stringIDs(users)}
 	out, err := r.mutations.OpenConversation(ctx, in)
 	if err != nil {
-		return domain.Conversation{}, err
+		return domain.DirectOpening{}, err
 	}
-	return decodeProtoConversation(out)
+	return decodeProtoDirectOpening(out)
 }
 
 func (r Remote) AddPeopleToDirectConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, users []domain.UserID, history domain.DirectHistorySelection) (domain.Conversation, error) {
@@ -6266,14 +6266,14 @@ func (s *Server) postProto(ctx context.Context, input *chatv1.PostRequest) (*cha
 }
 
 func (s *Server) CreateUserGroup(ctx context.Context, input *chatv1.CreateUserGroupRequest) (*chatv1.UserGroup, error) {
-	value, err := s.implementation.CreateUserGroup(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetHandle(), input.GetDescription())
+	value, err := s.implementation.CreateUserGroup(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetHandle(), input.GetDescription(), conversationIDs(input.GetChannels()))
 	if err != nil {
 		return nil, mapError(err)
 	}
 	return encodeProtoUserGroup(value), nil
 }
 func (s *Server) UpdateUserGroup(ctx context.Context, input *chatv1.UpdateUserGroupRequest) (*chatv1.UserGroup, error) {
-	value, err := s.implementation.UpdateUserGroup(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserGroupID(input.GetUserGroupId()), input.GetName(), input.GetHandle(), input.GetDescription())
+	value, err := s.implementation.UpdateUserGroup(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserGroupID(input.GetUserGroupId()), input.GetName(), input.GetHandle(), input.GetDescription(), conversationIDs(input.GetChannels()))
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -10615,11 +10615,11 @@ func protoConversationListRequest(input *chatv1.ConversationsRequest) (domain.Co
 
 func (s *Server) openConversationProto(ctx context.Context, input *chatv1.OpenConversationRequest) (*chatv1.Conversation, error) {
 	users := protoUserIDs(input.GetUsers())
-	conversation, err := s.implementation.OpenConversation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), users)
+	opening, err := s.implementation.OpenConversation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), users)
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return encodeProtoConversation(conversation), nil
+	return encodeProtoDirectOpening(opening), nil
 }
 
 func (s *Server) createConversationProto(ctx context.Context, input *chatv1.CreateConversationRequest) (*chatv1.Conversation, error) {
@@ -11048,6 +11048,12 @@ func encodeProtoUser(value domain.User) *chatv1.User {
 		// 1754 — so a member who had never been seen would come back from the
 		// remote composition as having been seen, three centuries ago.
 		LastActiveAtUnixNano: unixNanoOrZero(value.LastActiveAt),
+		UpdatedUnixNano:      unixNanoOrZero(value.Updated),
+		BotId:                string(value.BotID),
+		AppId:                string(value.AppID),
+		Role:                 string(value.Role),
+		Restricted:           value.Restricted,
+		UltraRestricted:      value.UltraRestricted,
 	}
 }
 
@@ -11713,6 +11719,11 @@ func encodeProtoConversation(value domain.Conversation) *chatv1.Conversation {
 		IsPrivate: value.PrivateFlag(), IsDirect: value.Kind == domain.ConversationTypeIM, IsGroupDirect: value.Kind == domain.ConversationTypeMPIM,
 		UnreadCount: int64(value.UnreadCount),
 		IsExtShared: value.IsExtShared, IsPendingExtShared: value.IsPendingExtShared,
+		Created: optionalUnixNano(value.Created), CreatorId: string(value.CreatorID),
+		TopicSetBy: string(value.TopicSetBy), TopicSetAt: optionalUnixNano(value.TopicSetAt),
+		PurposeSetBy: string(value.PurposeSetBy), PurposeSetAt: optionalUnixNano(value.PurposeSetAt),
+		IsMember: value.IsMember, IsGeneral: value.IsGeneral, NumMembers: int64(value.NumMembers),
+		DirectUserId: string(value.DirectUserID), DirectUserDeleted: value.DirectUserDeleted, GroupDirectHandle: value.GroupDirectHandle,
 	}
 }
 
@@ -11725,13 +11736,37 @@ func decodeProtoConversation(value *chatv1.Conversation) (domain.Conversation, e
 	if value.GetUnreadCount() < 0 || value.GetUnreadCount() > int64(^uint(0)>>1) {
 		return domain.Conversation{}, errors.New("typed unread_count is outside platform integer range")
 	}
+	if value.GetNumMembers() < 0 || value.GetNumMembers() > int64(^uint(0)>>1) {
+		return domain.Conversation{}, errors.New("typed num_members is outside platform integer range")
+	}
 	return domain.Conversation{
 		ID: domain.ConversationID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Name: value.GetName(),
 		Topic: value.GetTopic(), Purpose: value.GetPurpose(), Archived: value.GetArchived(),
 		Kind:        domain.ConversationKindFor(value.GetIsPrivate(), value.GetIsDirect(), value.GetIsGroupDirect()),
 		UnreadCount: int(value.GetUnreadCount()),
 		IsExtShared: value.GetIsExtShared(), IsPendingExtShared: value.GetIsPendingExtShared(),
+		Created: optionalTimeFromUnixNano(value.GetCreated()), CreatorID: domain.UserID(value.GetCreatorId()),
+		TopicSetBy: domain.UserID(value.GetTopicSetBy()), TopicSetAt: optionalTimeFromUnixNano(value.GetTopicSetAt()),
+		PurposeSetBy: domain.UserID(value.GetPurposeSetBy()), PurposeSetAt: optionalTimeFromUnixNano(value.GetPurposeSetAt()),
+		IsMember: value.GetIsMember(), IsGeneral: value.GetIsGeneral(), NumMembers: int(value.GetNumMembers()),
+		DirectUserID: domain.UserID(value.GetDirectUserId()), DirectUserDeleted: value.GetDirectUserDeleted(), GroupDirectHandle: value.GetGroupDirectHandle(),
 	}, nil
+}
+
+// encodeProtoDirectOpening carries an opening as the conversation it opened;
+// already_open is the one field only this answer sets.
+func encodeProtoDirectOpening(value domain.DirectOpening) *chatv1.Conversation {
+	encoded := encodeProtoConversation(value.Conversation)
+	encoded.AlreadyOpen = value.AlreadyOpen
+	return encoded
+}
+
+func decodeProtoDirectOpening(value *chatv1.Conversation) (domain.DirectOpening, error) {
+	conversation, err := decodeProtoConversation(value)
+	if err != nil {
+		return domain.DirectOpening{}, err
+	}
+	return domain.DirectOpening{Conversation: conversation, AlreadyOpen: value.GetAlreadyOpen()}, nil
 }
 
 func encodeProtoConversationPage(page domain.ConversationPage) *chatv1.ConversationPage {
@@ -12838,8 +12873,14 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 			Image1024:               profile.GetImage_1024(),
 			ActiveScheduledStatusID: domain.ScheduledStatusID(profile.GetActiveScheduledStatusId()),
 		},
-		Presence: presence,
-		Deleted:  value.GetDeleted(),
+		Presence:        presence,
+		Deleted:         value.GetDeleted(),
+		Updated:         optionalTimeFromUnixNano(value.GetUpdatedUnixNano()),
+		BotID:           domain.BotID(value.GetBotId()),
+		AppID:           domain.AppID(value.GetAppId()),
+		Role:            domain.WorkspaceRole(value.GetRole()),
+		Restricted:      value.GetRestricted(),
+		UltraRestricted: value.GetUltraRestricted(),
 	}
 	if profile.GetStatusExpiration() != 0 {
 		result.Profile.StatusExpiration = time.Unix(profile.GetStatusExpiration(), 0).UTC()

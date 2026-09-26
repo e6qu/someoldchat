@@ -35,8 +35,25 @@ type Conversation struct {
 	UnreadCount        int64                  `protobuf:"varint,10,opt,name=unread_count,json=unreadCount,proto3" json:"unread_count,omitempty"`
 	IsExtShared        bool                   `protobuf:"varint,11,opt,name=is_ext_shared,json=isExtShared,proto3" json:"is_ext_shared,omitempty"`
 	IsPendingExtShared bool                   `protobuf:"varint,12,opt,name=is_pending_ext_shared,json=isPendingExtShared,proto3" json:"is_pending_ext_shared,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Unix nanoseconds; zero when unrecorded.
+	Created      int64  `protobuf:"varint,13,opt,name=created,proto3" json:"created,omitempty"`
+	CreatorId    string `protobuf:"bytes,14,opt,name=creator_id,json=creatorId,proto3" json:"creator_id,omitempty"`
+	TopicSetBy   string `protobuf:"bytes,15,opt,name=topic_set_by,json=topicSetBy,proto3" json:"topic_set_by,omitempty"`
+	TopicSetAt   int64  `protobuf:"varint,16,opt,name=topic_set_at,json=topicSetAt,proto3" json:"topic_set_at,omitempty"`
+	PurposeSetBy string `protobuf:"bytes,17,opt,name=purpose_set_by,json=purposeSetBy,proto3" json:"purpose_set_by,omitempty"`
+	PurposeSetAt int64  `protobuf:"varint,18,opt,name=purpose_set_at,json=purposeSetAt,proto3" json:"purpose_set_at,omitempty"`
+	// Facts derived for the reader the conversation was returned to.
+	IsMember          bool   `protobuf:"varint,19,opt,name=is_member,json=isMember,proto3" json:"is_member,omitempty"`
+	IsGeneral         bool   `protobuf:"varint,20,opt,name=is_general,json=isGeneral,proto3" json:"is_general,omitempty"`
+	NumMembers        int64  `protobuf:"varint,21,opt,name=num_members,json=numMembers,proto3" json:"num_members,omitempty"`
+	DirectUserId      string `protobuf:"bytes,22,opt,name=direct_user_id,json=directUserId,proto3" json:"direct_user_id,omitempty"`
+	DirectUserDeleted bool   `protobuf:"varint,23,opt,name=direct_user_deleted,json=directUserDeleted,proto3" json:"direct_user_deleted,omitempty"`
+	GroupDirectHandle string `protobuf:"bytes,24,opt,name=group_direct_handle,json=groupDirectHandle,proto3" json:"group_direct_handle,omitempty"`
+	// Set only on the answer to OpenConversation: the conversation was already
+	// open for the caller before the request.
+	AlreadyOpen   bool `protobuf:"varint,25,opt,name=already_open,json=alreadyOpen,proto3" json:"already_open,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Conversation) Reset() {
@@ -149,6 +166,97 @@ func (x *Conversation) GetIsExtShared() bool {
 func (x *Conversation) GetIsPendingExtShared() bool {
 	if x != nil {
 		return x.IsPendingExtShared
+	}
+	return false
+}
+
+func (x *Conversation) GetCreated() int64 {
+	if x != nil {
+		return x.Created
+	}
+	return 0
+}
+
+func (x *Conversation) GetCreatorId() string {
+	if x != nil {
+		return x.CreatorId
+	}
+	return ""
+}
+
+func (x *Conversation) GetTopicSetBy() string {
+	if x != nil {
+		return x.TopicSetBy
+	}
+	return ""
+}
+
+func (x *Conversation) GetTopicSetAt() int64 {
+	if x != nil {
+		return x.TopicSetAt
+	}
+	return 0
+}
+
+func (x *Conversation) GetPurposeSetBy() string {
+	if x != nil {
+		return x.PurposeSetBy
+	}
+	return ""
+}
+
+func (x *Conversation) GetPurposeSetAt() int64 {
+	if x != nil {
+		return x.PurposeSetAt
+	}
+	return 0
+}
+
+func (x *Conversation) GetIsMember() bool {
+	if x != nil {
+		return x.IsMember
+	}
+	return false
+}
+
+func (x *Conversation) GetIsGeneral() bool {
+	if x != nil {
+		return x.IsGeneral
+	}
+	return false
+}
+
+func (x *Conversation) GetNumMembers() int64 {
+	if x != nil {
+		return x.NumMembers
+	}
+	return 0
+}
+
+func (x *Conversation) GetDirectUserId() string {
+	if x != nil {
+		return x.DirectUserId
+	}
+	return ""
+}
+
+func (x *Conversation) GetDirectUserDeleted() bool {
+	if x != nil {
+		return x.DirectUserDeleted
+	}
+	return false
+}
+
+func (x *Conversation) GetGroupDirectHandle() string {
+	if x != nil {
+		return x.GroupDirectHandle
+	}
+	return ""
+}
+
+func (x *Conversation) GetAlreadyOpen() bool {
+	if x != nil {
+		return x.AlreadyOpen
 	}
 	return false
 }
@@ -1583,7 +1691,7 @@ var File_sameoldchat_chat_v1_conversations_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\n" +
-	"'sameoldchat/chat/v1/conversations.proto\x12\x13sameoldchat.chat.v1\"\xff\x02\n" +
+	"'sameoldchat/chat/v1/conversations.proto\x12\x13sameoldchat.chat.v1\"\xce\x06\n" +
 	"\fConversation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x12\n" +
@@ -1598,7 +1706,25 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\funread_count\x18\n" +
 	" \x01(\x03R\vunreadCount\x12\"\n" +
 	"\ris_ext_shared\x18\v \x01(\bR\visExtShared\x121\n" +
-	"\x15is_pending_ext_shared\x18\f \x01(\bR\x12isPendingExtShared\"\x97\x01\n" +
+	"\x15is_pending_ext_shared\x18\f \x01(\bR\x12isPendingExtShared\x12\x18\n" +
+	"\acreated\x18\r \x01(\x03R\acreated\x12\x1d\n" +
+	"\n" +
+	"creator_id\x18\x0e \x01(\tR\tcreatorId\x12 \n" +
+	"\ftopic_set_by\x18\x0f \x01(\tR\n" +
+	"topicSetBy\x12 \n" +
+	"\ftopic_set_at\x18\x10 \x01(\x03R\n" +
+	"topicSetAt\x12$\n" +
+	"\x0epurpose_set_by\x18\x11 \x01(\tR\fpurposeSetBy\x12$\n" +
+	"\x0epurpose_set_at\x18\x12 \x01(\x03R\fpurposeSetAt\x12\x1b\n" +
+	"\tis_member\x18\x13 \x01(\bR\bisMember\x12\x1d\n" +
+	"\n" +
+	"is_general\x18\x14 \x01(\bR\tisGeneral\x12\x1f\n" +
+	"\vnum_members\x18\x15 \x01(\x03R\n" +
+	"numMembers\x12$\n" +
+	"\x0edirect_user_id\x18\x16 \x01(\tR\fdirectUserId\x12.\n" +
+	"\x13direct_user_deleted\x18\x17 \x01(\bR\x11directUserDeleted\x12.\n" +
+	"\x13group_direct_handle\x18\x18 \x01(\tR\x11groupDirectHandle\x12!\n" +
+	"\falready_open\x18\x19 \x01(\bR\valreadyOpen\"\x97\x01\n" +
 	"\x10ConversationPage\x12G\n" +
 	"\rconversations\x18\x01 \x03(\v2!.sameoldchat.chat.v1.ConversationR\rconversations\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +

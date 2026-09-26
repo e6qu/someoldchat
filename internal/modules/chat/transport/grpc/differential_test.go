@@ -1647,7 +1647,7 @@ func parityCases() []parityCase {
 			name: "a user group is updated, scoped, and disabled identically",
 			seed: seedUserGroupParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				updated, err := chat.UpdateUserGroup(ctx, "T1", "UA", "S1", "Traders desk", "traders-desk", "Front office")
+				updated, err := chat.UpdateUserGroup(ctx, "T1", "UA", "S1", "Traders desk", "traders-desk", "Front office", nil)
 				if err != nil {
 					return nil, err
 				}
@@ -2909,7 +2909,8 @@ func parityCases() []parityCase {
 				requireSeed(t, target.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", Email: "carol@example.com"}))
 			},
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				source, err := chat.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+				sourceOpening, err := chat.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+				source := sourceOpening.Conversation
 				if err != nil {
 					return nil, err
 				}
@@ -6171,7 +6172,7 @@ func parityCases() []parityCase {
 			// compositions.
 			name: "user groups",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				group, err := chat.CreateUserGroup(ctx, "T1", "UA", "Engineers", "engineers", "builds things")
+				group, err := chat.CreateUserGroup(ctx, "T1", "UA", "Engineers", "engineers", "builds things", nil)
 				if err != nil {
 					return nil, err
 				}
@@ -6190,7 +6191,7 @@ func parityCases() []parityCase {
 			name:         "a member cannot create a user group",
 			wantSentinel: service.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.CreateUserGroup(ctx, "T1", "U1", "Engineers", "engineers", "builds things")
+				_, err := chat.CreateUserGroup(ctx, "T1", "U1", "Engineers", "engineers", "builds things", nil)
 				return nil, err
 			},
 		},

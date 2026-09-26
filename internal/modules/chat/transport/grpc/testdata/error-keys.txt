@@ -33,10 +33,14 @@ service.barriered_from_member
 service.blob_unavailable
 service.cannot_archive_default
 service.cannot_invite_self
+service.cannot_kick_from_default
+service.cannot_kick_self
 service.cannot_leave_default
 service.conversation_already_archived
+service.conversation_archived
 service.conversation_not_archived
 service.conversation_posting_restricted
+service.conversation_text_too_long
 service.emoji_already_exists
 service.external_auth_connection
 service.external_invite_not_permitted
@@ -123,6 +127,7 @@ service.thread_not_found
 service.trigger_type_restricted
 service.user_is_restricted
 service.user_is_ultra_restricted
+service.user_not_found
 service.webhook_trigger_secret
 service.workflow_function_not_found
 service.workflow_permission_denied

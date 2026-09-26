@@ -520,8 +520,8 @@ type Store interface {
 	SetDirectConversationOpen(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, bool, events.Event) (bool, error)
 	CreateConversation(context.Context, domain.Conversation, domain.UserID, events.Event) error
 	RenameConversation(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
-	SetConversationTopic(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
-	SetConversationPurpose(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
+	SetConversationTopic(context.Context, domain.ConversationID, domain.ConversationText, events.Event, ...domain.Message) (domain.Conversation, error)
+	SetConversationPurpose(context.Context, domain.ConversationID, domain.ConversationText, events.Event, ...domain.Message) (domain.Conversation, error)
 	SetConversationArchived(context.Context, domain.ConversationID, bool, events.Event) (domain.Conversation, error)
 	DeleteConversation(context.Context, domain.WorkspaceID, domain.ConversationID, events.Event) error
 	SetConversationAccessGroups(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.UserGroupID, events.Event) error
@@ -925,9 +925,21 @@ type Store interface {
 	// deleted. One number, so the header does not page an entire channel to
 	// print it.
 	CountConversationMembers(context.Context, domain.ConversationID) (int, error)
+	// ListConversations pages the conversations the reader may see. A request
+	// naming MemberUserID keeps only conversations that user belongs to, public
+	// channels included. Each conversation carries the reader's IsMember and its
+	// NumMembers, which a listing has to compute per row anyway and which would
+	// otherwise cost two more round trips per row.
 	ListConversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
 	SearchConversations(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.ConversationPage, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
+	// DirectParticipants lists everyone in a direct conversation, deactivated
+	// accounts included, in identifier order. ListConversationMembers leaves a
+	// deactivated account out, which is right for a member list and wrong for
+	// naming the person a DM is with: a DM whose partner left still is one.
+	// A conversation that is not direct has no participants in this sense and
+	// yields store.ErrNotFound.
+	DirectParticipants(context.Context, domain.ConversationID) ([]domain.UserID, error)
 	ListEventsAfter(context.Context, domain.WorkspaceID, uint64, int) ([]events.Record, error)
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
 	ListInstalledApps(context.Context) ([]domain.AppManifestSnapshot, error)
@@ -936,6 +948,10 @@ type Store interface {
 	ConsumeAppTrigger(context.Context, string, domain.AppID) (domain.AppTrigger, error)
 	UseAppResponseURL(context.Context, string) (domain.AppResponseURL, error)
 	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
+	// GetBotByUser returns the bot a bot user belongs to, including one whose
+	// app has since been uninstalled: the account is still a bot's, and its
+	// messages still are. A person has no bot and yields store.ErrNotFound.
+	GetBotByUser(context.Context, domain.WorkspaceID, domain.UserID) (domain.Bot, error)
 	// ClaimAppEvent leases the next record due for delivery to an app on one
 	// surface: a released record whose retry is due, else the next journal
 	// record after the app's position, which it advances. Each claimed record

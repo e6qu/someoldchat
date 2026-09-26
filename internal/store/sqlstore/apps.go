@@ -74,7 +74,7 @@ func (s *Store) CreateOAuthAuthorization(ctx context.Context, botUser domain.Use
 			case !errors.Is(err, store.ErrNotFound):
 				return err
 			default:
-				if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, name, real_name, deleted, presence) VALUES (?, ?, ?, ?, 0, 'auto')`, botUser.ID, botUser.WorkspaceID, botUser.Name, botUser.RealName); err != nil {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, name, real_name, deleted, presence, updated_at) VALUES (?, ?, ?, ?, 0, 'auto', ?)`, botUser.ID, botUser.WorkspaceID, botUser.Name, botUser.RealName, unixSeconds(botUser.Updated)); err != nil {
 					return classify(err)
 				}
 				if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id, user_id, role, active) VALUES (?, ?, 'member', 1)`, botUser.WorkspaceID, botUser.ID); err != nil {
@@ -525,7 +525,10 @@ func (s *Store) DeleteApp(ctx context.Context, appID domain.AppID, ownerID domai
 		} {
 			var execErr error
 			if strings.Contains(statement, "updated_at") {
-				_, execErr = tx.ExecContext(ctx, statement, deletedAt.UTC().UnixNano(), appID)
+				// bots.updated_at holds Unix seconds, as every other writer and
+				// both readers use; nanoseconds here read back as a date some
+				// fifty billion years away.
+				_, execErr = tx.ExecContext(ctx, statement, deletedAt.UTC().Unix(), appID)
 			} else {
 				_, execErr = tx.ExecContext(ctx, statement, appID)
 			}

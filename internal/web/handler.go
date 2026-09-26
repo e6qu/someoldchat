@@ -12736,7 +12736,8 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That conversation has no members", "A direct conversation needs at least one member. Nothing was changed.")
 		return
 	}
-	conversation, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+	opening, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+	conversation := opening.Conversation
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		reason := "The conversation could not be opened because the workspace store is temporarily unavailable."
@@ -12745,7 +12746,7 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 			reason = "That set of members cannot be opened as a conversation."
 		}
 		heading := "The conversation was not opened"
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrUserNotFound) {
 			status = http.StatusNotFound
 			heading = "That member is no longer here"
 			reason = "One of those members is no longer in the workspace."
@@ -13095,8 +13096,10 @@ func (h Handler) setConversationText(w http.ResponseWriter, r *http.Request, fie
 	}
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidConversation):
-			h.writeMutationError(w, r, http.StatusBadRequest, "That channel "+field+" is too long", "Use at most 250 characters.")
+		case errors.Is(err, service.ErrConversationTextTooLong):
+			h.writeMutationError(w, r, http.StatusBadRequest, "That channel "+field+" is too long", fmt.Sprintf("Use at most %d characters.", service.MaxConversationTextLength))
+		case errors.Is(err, service.ErrConversationArchived):
+			h.writeMutationError(w, r, http.StatusConflict, "This channel is archived", "Unarchive it before changing its "+field+". Nothing was changed.")
 		case errors.Is(err, service.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this conversation", "Only a conversation member can change its "+field+".")
 		case errors.Is(err, store.ErrNotFound):
@@ -13162,6 +13165,8 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 			h.redirectMutation(w, r, "/app/dms")
 		case errors.Is(err, service.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusConflict, "You have already left this conversation", "No membership was changed.")
+		case errors.Is(err, service.ErrConversationArchived):
+			h.writeMutationError(w, r, http.StatusConflict, "This conversation is archived", "An archived conversation cannot be left. Nothing was changed.")
 		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, service.ErrCannotLeaveDefault):
 			h.writeMutationError(w, r, http.StatusBadRequest, "This conversation cannot be left", "Required workspace channels cannot be left.")
 		case errors.Is(err, store.ErrNotFound):

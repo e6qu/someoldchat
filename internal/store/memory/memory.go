@@ -1197,6 +1197,15 @@ func (s *Store) SeedWorkspace(workspace domain.Workspace) error {
 // second seed with Deleted: false undid an administrative deactivation. Only an
 // e-mail that is still unset is filled in, because no other writer can attach an
 // address to an already seeded identity.
+// secondsInstant is the resolution a user's Updated instant is kept at: the SQL
+// repositories store Unix seconds, so this one must not remember more.
+func secondsInstant(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Time{}
+	}
+	return value.UTC().Truncate(time.Second)
+}
+
 func (s *Store) SeedUser(user domain.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1230,6 +1239,7 @@ func (s *Store) SeedUser(user domain.User) error {
 			s.users[user.ID] = existing
 		}
 	} else {
+		user.Updated = secondsInstant(user.Updated)
 		s.users[user.ID] = user
 	}
 	key := string(user.WorkspaceID) + "\x00" + string(user.ID)
@@ -1858,6 +1868,7 @@ func (s *Store) createUserLocked(user domain.User, membership domain.WorkspaceMe
 	if user.Presence == "" {
 		user.Presence = domain.PresenceAuto
 	}
+	user.Updated = secondsInstant(user.Updated)
 	s.users[user.ID] = user
 	s.members[string(user.WorkspaceID)+"\x00"+string(user.ID)] = membership
 	if event != nil {
@@ -1904,6 +1915,7 @@ func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.Workspac
 		profile.ActiveScheduledStatusID = ""
 	}
 	user.Profile = profile
+	user.Updated = secondsInstant(changes[0].CreatedAt)
 	s.users[userID] = user
 	s.outbox = append(s.outbox, changes...)
 	return user, nil
@@ -1968,6 +1980,7 @@ func (s *Store) ExpireUserStatus(_ context.Context, workspaceID domain.Workspace
 	user.Profile.StatusEmoji = ""
 	user.Profile.StatusExpiration = time.Time{}
 	user.Profile.ActiveScheduledStatusID = ""
+	user.Updated = secondsInstant(now)
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return true, nil
@@ -2110,6 +2123,7 @@ func (s *Store) ActivateScheduledStatus(_ context.Context, workspaceID domain.Wo
 		user.Profile.StatusEmoji = value.StatusEmoji
 		user.Profile.StatusExpiration = value.EndsAt
 		user.Profile.ActiveScheduledStatusID = value.ID
+		user.Updated = secondsInstant(now)
 		s.users[userID] = user
 	}
 	s.outbox = append(s.outbox, event)
@@ -3070,6 +3084,7 @@ func (s *Store) ExpireUserAccount(_ context.Context, workspaceID domain.Workspac
 		return false, nil
 	}
 	user.Deleted = true
+	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
 	key := string(workspaceID) + "\x00" + string(userID)
 	if membership, exists := s.members[key]; exists {
@@ -3102,6 +3117,7 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 		return store.ErrNotFound
 	}
 	user.Deleted = deleted
+	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
 	key := string(workspaceID) + "\x00" + string(userID)
 	membership, exists := s.members[key]
@@ -3145,6 +3161,7 @@ func (s *Store) AssignUser(_ context.Context, workspaceID domain.WorkspaceID, us
 		}
 	}
 	user.Deleted = false
+	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
 	membership.Active = true
 	s.members[key] = membership
@@ -3440,7 +3457,7 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 	if _, exists := s.conversations[conversation.ID]; exists {
 		return store.ErrAlreadyExists
 	}
-	if !conversation.IsDirectOrGroup() || len(members) < 2 {
+	if !domain.ValidDirectMemberCount(conversation.Kind, len(members)) {
 		return store.InvalidArgument("invalid direct conversation")
 	}
 	wantedKey := domain.DirectConversationKey(conversation.WorkspaceID, members)
@@ -3750,28 +3767,28 @@ func (s *Store) RenameConversation(_ context.Context, conversation domain.Conver
 	return value, nil
 }
 
-func (s *Store) SetConversationTopic(_ context.Context, conversation domain.ConversationID, topic string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
+func (s *Store) SetConversationTopic(_ context.Context, conversation domain.ConversationID, topic domain.ConversationText, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	value.Topic = topic
+	value.Topic, value.TopicSetBy, value.TopicSetAt = topic.Value, topic.SetBy, topic.SetAt
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
 	s.appendConversationNotices(notices)
 	return value, nil
 }
 
-func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.ConversationID, purpose string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
+func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.ConversationID, purpose domain.ConversationText, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	value.Purpose = purpose
+	value.Purpose, value.PurposeSetBy, value.PurposeSetAt = purpose.Value, purpose.SetBy, purpose.SetAt
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
 	s.appendConversationNotices(notices)
@@ -5388,6 +5405,26 @@ func (s *Store) appBotLocked(workspace domain.WorkspaceID, appID domain.AppID) (
 		}
 	}
 	return chosen, found
+}
+
+func (s *Store) GetBotByUser(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.Bot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var found domain.Bot
+	for _, value := range s.bots {
+		if value.WorkspaceID != workspace || value.UserID != user {
+			continue
+		}
+		// The same order the SQL repositories use: a live bot before a
+		// deleted one, then by identifier.
+		if found.ID == "" || (!value.Deleted && found.Deleted) || (value.Deleted == found.Deleted && value.ID < found.ID) {
+			found = value
+		}
+	}
+	if found.ID == "" {
+		return domain.Bot{}, store.ErrNotFound
+	}
+	return found, nil
 }
 
 func migrationKey(workspace domain.WorkspaceID, id domain.UserID) string {
@@ -8012,9 +8049,22 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				continue
 			}
 		}
+		_, viewerMember := s.memberships[conversation.ID][user]
+		_, subjectMember := s.memberships[conversation.ID][memberUser]
+		// Naming a member narrows every type, public channels included:
+		// users.conversations lists what someone belongs to, not what they
+		// could read.
+		if request.MemberUserID != "" && !subjectMember {
+			continue
+		}
+		conversation.IsMember = viewerMember
+		conversation.NumMembers = 0
+		for member := range s.memberships[conversation.ID] {
+			if account, exists := s.users[member]; exists && !account.Deleted {
+				conversation.NumMembers++
+			}
+		}
 		if conversation.Kind.OrPublic() != domain.ConversationTypePublic {
-			_, viewerMember := s.memberships[conversation.ID][user]
-			_, subjectMember := s.memberships[conversation.ID][memberUser]
 			if !viewerMember || !subjectMember {
 				continue
 			}
@@ -8104,6 +8154,21 @@ func (s *Store) IsConversationMember(_ context.Context, conversation domain.Conv
 	defer s.mu.RUnlock()
 	_, ok := s.memberships[conversation][user]
 	return ok, nil
+}
+
+func (s *Store) DirectParticipants(_ context.Context, conversation domain.ConversationID) ([]domain.UserID, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.conversations[conversation]
+	if !ok || !value.IsDirectOrGroup() {
+		return nil, store.ErrNotFound
+	}
+	participants := make([]domain.UserID, 0, len(s.memberships[conversation]))
+	for member := range s.memberships[conversation] {
+		participants = append(participants, member)
+	}
+	slices.Sort(participants)
+	return participants, nil
 }
 
 // CreateMessage applies the same normalization and referential checks the SQL
@@ -10096,8 +10161,23 @@ func (s *Store) CreateUserGroup(_ context.Context, value domain.UserGroup, event
 	if s.userGroupHandleTakenLocked(value.WorkspaceID, value.Handle, value.ID) {
 		return store.ErrAlreadyExists
 	}
+	if err := s.userGroupChannelsBelongLocked(value.WorkspaceID, value.Channels); err != nil {
+		return err
+	}
 	s.userGroups[value.ID] = cloneUserGroup(value)
 	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+// userGroupChannelsBelongLocked is the check the SQL repositories make before
+// writing a group's default channels: each is a conversation of the workspace.
+func (s *Store) userGroupChannelsBelongLocked(workspace domain.WorkspaceID, channels []domain.ConversationID) error {
+	for _, channel := range channels {
+		conversation, exists := s.conversations[channel]
+		if !exists || conversation.WorkspaceID != workspace {
+			return store.ErrNotFound
+		}
+	}
 	return nil
 }
 
@@ -10159,8 +10239,10 @@ func (s *Store) UpdateUserGroup(_ context.Context, value domain.UserGroup, event
 	if s.userGroupHandleTakenLocked(value.WorkspaceID, value.Handle, value.ID) {
 		return store.ErrAlreadyExists
 	}
+	if err := s.userGroupChannelsBelongLocked(value.WorkspaceID, value.Channels); err != nil {
+		return err
+	}
 	value.Users = append([]domain.UserID(nil), current.Users...)
-	value.Channels = append([]domain.ConversationID(nil), current.Channels...)
 	s.userGroups[value.ID] = cloneUserGroup(value)
 	s.outbox = append(s.outbox, event)
 	return nil
@@ -10208,11 +10290,8 @@ func (s *Store) SetUserGroupChannels(_ context.Context, workspace domain.Workspa
 	if !ok || value.WorkspaceID != workspace {
 		return store.ErrNotFound
 	}
-	for _, channel := range channels {
-		conversation, exists := s.conversations[channel]
-		if !exists || conversation.WorkspaceID != workspace {
-			return store.ErrNotFound
-		}
+	if err := s.userGroupChannelsBelongLocked(workspace, channels); err != nil {
+		return err
 	}
 	value.Channels = append([]domain.ConversationID(nil), channels...)
 	value.UpdatedBy = actor

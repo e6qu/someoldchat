@@ -765,11 +765,13 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := remote.DeleteScheduledMessage(ctx, "T1", "U1", "C1", scheduled.ID); err != nil {
 		t.Fatalf("delete scheduled message: %v", err)
 	}
-	direct, err := remote.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	directOpening, err := remote.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	direct := directOpening.Conversation
 	if err != nil || !direct.IsDirectOrGroup() {
 		t.Fatalf("direct=%+v err=%v", direct, err)
 	}
-	reused, err := remote.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	reusedOpening, err := remote.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	reused := reusedOpening.Conversation
 	if err != nil || reused.ID != direct.ID {
 		t.Fatalf("reused=%+v direct=%+v err=%v", reused, direct, err)
 	}

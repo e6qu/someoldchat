@@ -76,6 +76,7 @@ var errorClasses = []errorClass{
 	{key: "service.missing_stream_recipient_user", code: codes.InvalidArgument, sentinel: service.ErrMissingStreamRecipientUser},
 	{key: "service.invalid_timestamp", code: codes.InvalidArgument, sentinel: service.ErrInvalidTimestamp},
 	{key: "service.invalid_conversation", code: codes.InvalidArgument, sentinel: service.ErrInvalidConversation},
+	{key: "service.conversation_text_too_long", code: codes.InvalidArgument, sentinel: service.ErrConversationTextTooLong},
 	{key: "service.invalid_workspace", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkspace},
 	{key: "service.invalid_conversation_prefs", code: codes.InvalidArgument, sentinel: service.ErrInvalidConversationPrefs},
 	{key: "service.invalid_reaction", code: codes.InvalidArgument, sentinel: service.ErrInvalidReaction},
@@ -239,6 +240,9 @@ var errorClasses = []errorClass{
 	{key: "service.conversation_not_archived", code: codes.FailedPrecondition, sentinel: service.ErrConversationNotArchived},
 	{key: "service.cannot_archive_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotArchiveDefault},
 	{key: "service.cannot_leave_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotLeaveDefault},
+	{key: "service.cannot_kick_from_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotKickFromDefault},
+	{key: "service.cannot_kick_self", code: codes.FailedPrecondition, sentinel: service.ErrCannotKickSelf},
+	{key: "service.conversation_archived", code: codes.FailedPrecondition, sentinel: service.ErrConversationArchived},
 	// Not being in the conversation is the refusal behind not_in_channel: the
 	// caller is a workspace member and the conversation exists, so it is neither
 	// an absence nor a permission failure.
@@ -269,6 +273,7 @@ var errorClasses = []errorClass{
 	// codes.Unavailable in the other.
 	{key: "blob.not_found", code: codes.NotFound, sentinel: blob.ErrNotFound},
 	{key: "service.automation_user_not_found", code: codes.NotFound, sentinel: service.ErrAutomationUserNotFound},
+	{key: "service.user_not_found", code: codes.NotFound, sentinel: service.ErrUserNotFound},
 	{key: "service.automation_channel_not_found", code: codes.NotFound, sentinel: service.ErrAutomationChannelNotFound},
 	{key: "service.automation_team_not_found", code: codes.NotFound, sentinel: service.ErrAutomationTeamNotFound},
 	{key: "service.automation_org_not_found", code: codes.NotFound, sentinel: service.ErrAutomationOrgNotFound},

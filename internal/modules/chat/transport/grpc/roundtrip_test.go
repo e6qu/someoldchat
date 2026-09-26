@@ -296,6 +296,13 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoConversation, decodeProtoConversation),
 		},
+		"DirectOpening": {
+			sample: &domain.DirectOpening{},
+			prepare: func(filled any) {
+				filled.(*domain.DirectOpening).Conversation.Kind = domain.ConversationTypeIM
+			},
+			through: through(encodeProtoDirectOpening, decodeProtoDirectOpening),
+		},
 		"ConversationPage": {
 			sample: &domain.ConversationPage{},
 			prepare: func(filled any) {
