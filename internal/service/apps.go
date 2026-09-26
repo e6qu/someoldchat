@@ -868,7 +868,7 @@ func (m Messages) AuthorizeOAuth(ctx context.Context, request domain.OAuthAuthor
 			return domain.OAuthAuthorization{}, err
 		}
 		now := time.Now().UTC()
-		botUser = domain.User{ID: botUserID, WorkspaceID: authorization.WorkspaceID, Name: authorization.AppName, RealName: authorization.AppName, Presence: domain.PresenceAuto}
+		botUser = domain.User{ID: botUserID, WorkspaceID: authorization.WorkspaceID, Name: authorization.AppName, RealName: authorization.AppName, Presence: domain.PresenceAuto, Updated: now}
 		bot = domain.Bot{ID: botID, WorkspaceID: authorization.WorkspaceID, AppID: authorization.AppID, UserID: botUserID, Name: authorization.AppName, UpdatedAt: now}
 		authorization.BotID = botID
 		authorization.BotUserID = botUserID

@@ -10964,6 +10964,12 @@ func encodeProtoUser(value domain.User) *chatv1.User {
 		// 1754 — so a member who had never been seen would come back from the
 		// remote composition as having been seen, three centuries ago.
 		LastActiveAtUnixNano: unixNanoOrZero(value.LastActiveAt),
+		UpdatedUnixNano:      unixNanoOrZero(value.Updated),
+		BotId:                string(value.BotID),
+		AppId:                string(value.AppID),
+		Role:                 string(value.Role),
+		Restricted:           value.Restricted,
+		UltraRestricted:      value.UltraRestricted,
 	}
 }
 
@@ -12722,8 +12728,14 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 			Image1024:               profile.GetImage_1024(),
 			ActiveScheduledStatusID: domain.ScheduledStatusID(profile.GetActiveScheduledStatusId()),
 		},
-		Presence: presence,
-		Deleted:  value.GetDeleted(),
+		Presence:        presence,
+		Deleted:         value.GetDeleted(),
+		Updated:         optionalTimeFromUnixNano(value.GetUpdatedUnixNano()),
+		BotID:           domain.BotID(value.GetBotId()),
+		AppID:           domain.AppID(value.GetAppId()),
+		Role:            domain.WorkspaceRole(value.GetRole()),
+		Restricted:      value.GetRestricted(),
+		UltraRestricted: value.GetUltraRestricted(),
 	}
 	if profile.GetStatusExpiration() != 0 {
 		result.Profile.StatusExpiration = time.Unix(profile.GetStatusExpiration(), 0).UTC()

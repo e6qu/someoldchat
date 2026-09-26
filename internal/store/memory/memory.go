@@ -1181,6 +1181,15 @@ func (s *Store) SeedWorkspace(workspace domain.Workspace) error {
 // second seed with Deleted: false undid an administrative deactivation. Only an
 // e-mail that is still unset is filled in, because no other writer can attach an
 // address to an already seeded identity.
+// secondsInstant is the resolution a user's Updated instant is kept at: the SQL
+// repositories store Unix seconds, so this one must not remember more.
+func secondsInstant(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Time{}
+	}
+	return value.UTC().Truncate(time.Second)
+}
+
 func (s *Store) SeedUser(user domain.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1214,6 +1223,7 @@ func (s *Store) SeedUser(user domain.User) error {
 			s.users[user.ID] = existing
 		}
 	} else {
+		user.Updated = secondsInstant(user.Updated)
 		s.users[user.ID] = user
 	}
 	key := string(user.WorkspaceID) + "\x00" + string(user.ID)
@@ -1842,6 +1852,7 @@ func (s *Store) createUserLocked(user domain.User, membership domain.WorkspaceMe
 	if user.Presence == "" {
 		user.Presence = domain.PresenceAuto
 	}
+	user.Updated = secondsInstant(user.Updated)
 	s.users[user.ID] = user
 	s.members[string(user.WorkspaceID)+"\x00"+string(user.ID)] = membership
 	if event != nil {
@@ -1888,6 +1899,7 @@ func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.Workspac
 		profile.ActiveScheduledStatusID = ""
 	}
 	user.Profile = profile
+	user.Updated = secondsInstant(changes[0].CreatedAt)
 	s.users[userID] = user
 	s.outbox = append(s.outbox, changes...)
 	return user, nil
@@ -1952,6 +1964,7 @@ func (s *Store) ExpireUserStatus(_ context.Context, workspaceID domain.Workspace
 	user.Profile.StatusEmoji = ""
 	user.Profile.StatusExpiration = time.Time{}
 	user.Profile.ActiveScheduledStatusID = ""
+	user.Updated = secondsInstant(now)
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return true, nil
@@ -2094,6 +2107,7 @@ func (s *Store) ActivateScheduledStatus(_ context.Context, workspaceID domain.Wo
 		user.Profile.StatusEmoji = value.StatusEmoji
 		user.Profile.StatusExpiration = value.EndsAt
 		user.Profile.ActiveScheduledStatusID = value.ID
+		user.Updated = secondsInstant(now)
 		s.users[userID] = user
 	}
 	s.outbox = append(s.outbox, event)
@@ -3054,6 +3068,7 @@ func (s *Store) ExpireUserAccount(_ context.Context, workspaceID domain.Workspac
 		return false, nil
 	}
 	user.Deleted = true
+	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
 	key := string(workspaceID) + "\x00" + string(userID)
 	if membership, exists := s.members[key]; exists {
@@ -3086,6 +3101,7 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 		return store.ErrNotFound
 	}
 	user.Deleted = deleted
+	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
 	key := string(workspaceID) + "\x00" + string(userID)
 	membership, exists := s.members[key]
@@ -3129,6 +3145,7 @@ func (s *Store) AssignUser(_ context.Context, workspaceID domain.WorkspaceID, us
 		}
 	}
 	user.Deleted = false
+	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
 	membership.Active = true
 	s.members[key] = membership
@@ -5360,6 +5377,26 @@ func (s *Store) GetBotByApp(_ context.Context, workspace domain.WorkspaceID, app
 		}
 	}
 	return domain.Bot{}, store.ErrNotFound
+}
+
+func (s *Store) GetBotByUser(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.Bot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var found domain.Bot
+	for _, value := range s.bots {
+		if value.WorkspaceID != workspace || value.UserID != user {
+			continue
+		}
+		// The same order the SQL repositories use: a live bot before a
+		// deleted one, then by identifier.
+		if found.ID == "" || (!value.Deleted && found.Deleted) || (value.Deleted == found.Deleted && value.ID < found.ID) {
+			found = value
+		}
+	}
+	if found.ID == "" {
+		return domain.Bot{}, store.ErrNotFound
+	}
+	return found, nil
 }
 
 func migrationKey(workspace domain.WorkspaceID, id domain.UserID) string {

@@ -195,6 +195,29 @@ type User struct {
 	// login record and carries no session identity.
 	LastActiveAt time.Time
 	Deleted      bool
+	// Updated is when the member's record — identity, profile, status, or
+	// activation — last changed. It is zero for a record last written before
+	// schema 177, which kept no such instant.
+	Updated time.Time
+
+	// The fields below are not stored with the user. The service derives them
+	// from the member's workspace membership and from the bot, if any, the
+	// account belongs to, because Slack's user object reports both.
+
+	// BotID and AppID name the bot and app a bot user belongs to; both are
+	// empty for a person.
+	BotID BotID
+	AppID AppID
+	// Role, Restricted and UltraRestricted are the member's workspace role and
+	// guest tier.
+	Role            WorkspaceRole
+	Restricted      bool
+	UltraRestricted bool
+}
+
+// IsBot reports whether the account is an app's bot user rather than a person.
+func (u User) IsBot() bool {
+	return u.BotID != ""
 }
 
 type AdminUser struct {

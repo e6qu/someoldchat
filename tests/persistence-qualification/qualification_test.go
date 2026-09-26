@@ -84,6 +84,7 @@ func runQualification(t *testing.T, open opener) {
 		{"conversation search treats metacharacters literally", conversationSearchTreatsMetacharactersLiterally},
 		{"search folds Unicode identically", searchFoldsUnicodeIdentically},
 		{"conversation provenance and membership agree", conversationProvenanceAndMembershipAgree},
+		{"user records report when they changed and whose bot they are", userRecordsReportWhenTheyChangedAndWhoseBotTheyAre},
 		{"recent searches are private ordered and deduplicated", recentSearchesArePrivateOrderedAndDeduplicated},
 		{"user group mentions create visibility safe activity", userGroupMentionsCreateVisibilitySafeActivity},
 		{"messages page in both directions", messagesPageInBothDirections},

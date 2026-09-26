@@ -923,6 +923,10 @@ type Store interface {
 	ConsumeAppTrigger(context.Context, string, domain.AppID) (domain.AppTrigger, error)
 	UseAppResponseURL(context.Context, string) (domain.AppResponseURL, error)
 	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
+	// GetBotByUser returns the bot a bot user belongs to, including one whose
+	// app has since been uninstalled: the account is still a bot's, and its
+	// messages still are. A person has no bot and yields store.ErrNotFound.
+	GetBotByUser(context.Context, domain.WorkspaceID, domain.UserID) (domain.Bot, error)
 	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
 	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
 	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error

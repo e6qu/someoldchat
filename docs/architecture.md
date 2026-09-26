@@ -283,6 +283,7 @@ them.
 | `POST /services/{workspace}/{app}/{secret}` | incoming webhook delivery; see [incoming webhooks](incoming-webhooks.md) |
 | `POST /internal/admin/incoming-webhooks/create`, `/enable` | webhook administration |
 | `GET /internal/slack-lists/download.csv` | `slackLists` CSV export |
+| `GET /avatars/{workspace}/{user}/{size}.png` | generated default avatar at one of the profile image sizes; unauthenticated, and it discloses only the member color every user object already carries |
 
 Three routes are **unauthenticated token-bearing capability URLs**: possession of
 the path is the authorization.

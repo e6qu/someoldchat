@@ -1586,7 +1586,7 @@ func (m Messages) UserInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
 		return domain.User{}, store.ErrNotFound
 	}
-	return user, nil
+	return m.describeUser(ctx, user)
 }
 
 func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) error {
@@ -2062,7 +2062,7 @@ func (m Messages) AcceptInvitationForEmail(ctx context.Context, workspaceID doma
 	if err != nil {
 		return domain.User{}, err
 	}
-	user := domain.User{ID: id, WorkspaceID: workspaceID, Email: email, Name: name, RealName: name, Presence: domain.PresenceAuto}
+	user := domain.User{ID: id, WorkspaceID: workspaceID, Email: email, Name: name, RealName: name, Presence: domain.PresenceAuto, Updated: now}
 	membership := domain.WorkspaceMembership{
 		WorkspaceID: workspaceID, UserID: id, Role: domain.WorkspaceRoleMember, Active: true,
 		Restricted: request.Restricted, UltraRestricted: request.UltraRestricted,
@@ -2181,7 +2181,7 @@ func (m Messages) createWorkspaceUser(ctx context.Context, workspaceID domain.Wo
 		return domain.User{}, err
 	}
 	now := time.Now().UTC()
-	user := domain.User{ID: id, WorkspaceID: workspaceID, Email: email, Name: realName, RealName: realName, Presence: domain.PresenceAuto}
+	user := domain.User{ID: id, WorkspaceID: workspaceID, Email: email, Name: realName, RealName: realName, Presence: domain.PresenceAuto, Updated: now}
 	payload, err := events.UserChangePayload("user.created", user, false, false, now)
 	if err != nil {
 		return domain.User{}, err
@@ -3215,7 +3215,7 @@ func (m Messages) UserByEmail(ctx context.Context, workspaceID domain.WorkspaceI
 	if email == "" || len(email) > 320 {
 		return domain.User{}, store.ErrNotFound
 	}
-	return m.Store.FindUserByEmail(ctx, workspaceID, email)
+	return m.describedUser(ctx)(m.Store.FindUserByEmail(ctx, workspaceID, email))
 }
 
 func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, profile domain.UserProfile) (domain.User, error) {
@@ -3694,7 +3694,8 @@ func (m Messages) Users(ctx context.Context, workspaceID domain.WorkspaceID, use
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.UserPage{}, err
 	}
-	return m.Store.ListUsers(ctx, workspaceID, request)
+	page, err := m.Store.ListUsers(ctx, workspaceID, request)
+	return m.describeUsers(ctx, page, err)
 }
 
 // SearchPeople answers the People search tab. The client used to load every

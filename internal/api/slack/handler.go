@@ -514,6 +514,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/files/{file}", h.downloadFile)
 	mux.HandleFunc("GET /files/public/{token}", h.downloadPublicFile)
 	mux.HandleFunc("GET /users/{workspace}/{user}/photo/{token}", h.downloadUserPhoto)
+	mux.HandleFunc("GET /avatars/{workspace}/{user}/{file}", h.defaultAvatar)
 	mux.HandleFunc("GET /api/openid.connect.token", h.openIDConnectToken)
 	mux.HandleFunc("POST /api/openid.connect.token", h.openIDConnectToken)
 	mux.HandleFunc("GET /api/openid.connect.userInfo", h.openIDConnectUserInfo)
@@ -3015,7 +3016,7 @@ func (h Handler) adminUsersList(w http.ResponseWriter, r *http.Request) {
 	}
 	users := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		users = append(users, adminUserResponse(user))
+		users = append(users, adminUserResponse(user, requestOrigin(r)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "users": users, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
@@ -5956,12 +5957,15 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// `user` is required. Slack answers its absence user_not_found; reading
+	// it as the caller answered a question nobody asked.
 	requested := domain.UserID(strings.TrimSpace(fields["user"]))
 	if requested == "" {
-		requested = principal.UserID
-	}
-	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeError(w, "user_not_found")
 		return
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, requested)
@@ -5969,7 +5973,7 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user, principal.HasScope(auth.ScopeUsersReadEmail))})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user, principal.HasScope(auth.ScopeUsersReadEmail), requestOrigin(r))})
 }
 
 func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
@@ -6011,7 +6015,7 @@ func (h Handler) lookupUserByEmail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "users_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user, true)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user, true, requestOrigin(r))})
 }
 
 func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
@@ -6043,7 +6047,7 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 	}
 	members := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		members = append(members, userResponse(user, principal.HasScope(auth.ScopeUsersReadEmail)))
+		members = append(members, userResponse(user, principal.HasScope(auth.ScopeUsersReadEmail), requestOrigin(r)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "members": members, "cache_ts": time.Now().Unix(), "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -6095,7 +6099,7 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	profile := profileResponse(user)
+	profile := profileResponse(user, requestOrigin(r))
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(profile, "email")
 	}
@@ -6436,7 +6440,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	responseProfile := profileResponse(user)
+	responseProfile := profileResponse(user, requestOrigin(r))
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(responseProfile, "email")
 	}
@@ -6526,7 +6530,7 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(user)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(user, requestOrigin(r))})
 }
 
 // users.setActive is deprecated and non-functional in Slack. Preserve that
@@ -6539,40 +6543,15 @@ func (h Handler) usersSetActive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// adminUserResponse renders the admin projection of a user. The pinned
-// admin.users.list 200 example carries the role and restriction flags below; the
-// plain userResponse omits all of them.
-func adminUserResponse(value domain.AdminUser) map[string]any {
-	result := userResponse(value.User, true)
-	result["is_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
-	result["is_primary_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
-	result["is_admin"] = value.Membership.Role == domain.WorkspaceRoleAdmin || value.Membership.Role == domain.WorkspaceRoleOwner
-	result["is_restricted"] = value.Membership.Restricted
-	result["is_ultra_restricted"] = value.Membership.UltraRestricted
-	result["is_bot"] = false
+// adminUserResponse renders the admin projection of a user: the user object,
+// with the role and guest tier from the membership the admin listing already
+// read, and whether the membership is active.
+func adminUserResponse(value domain.AdminUser, origin string) map[string]any {
+	user := value.User
+	user.Role, user.Restricted, user.UltraRestricted = value.Membership.Role, value.Membership.Restricted, value.Membership.UltraRestricted
+	result := userResponse(user, true, origin)
 	result["is_active"] = value.Membership.Active
 	return result
-}
-
-func userResponse(user domain.User, includeEmail bool) map[string]any {
-	profile := profileResponse(user)
-	if !includeEmail {
-		delete(profile, "email")
-	}
-	return map[string]any{
-		"id": user.ID, "team_id": user.WorkspaceID, "name": user.Name, "real_name": user.RealName, "deleted": user.Deleted, "profile": profile,
-	}
-}
-
-func profileResponse(user domain.User) map[string]any {
-	return map[string]any{
-		"display_name": user.Profile.DisplayName, "display_name_normalized": user.Profile.DisplayName, "email": user.Email,
-		"real_name": user.RealName, "real_name_normalized": user.RealName,
-		"status_text": user.Profile.StatusText, "status_emoji": user.Profile.StatusEmoji, "status_expiration": unixSeconds(user.Profile.StatusExpiration),
-		"image_24": user.Profile.Image24, "image_32": user.Profile.Image32, "image_48": user.Profile.Image48, "image_72": user.Profile.Image72,
-		"image_192": user.Profile.Image192, "image_512": user.Profile.Image512, "image_1024": user.Profile.Image1024,
-		"team": user.WorkspaceID, "user_id": user.ID,
-	}
 }
 
 func (h Handler) conversationsList(w http.ResponseWriter, r *http.Request) {
@@ -12892,9 +12871,5 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 }
 
 func externalUploadURL(r *http.Request, id domain.ExternalUploadID) string {
-	scheme := strings.TrimSpace(strings.SplitN(r.Header.Get("X-Forwarded-Proto"), ",", 2)[0])
-	if scheme == "" {
-		scheme = "http"
-	}
-	return scheme + "://" + r.Host + "/internal/files/external/" + url.PathEscape(string(id))
+	return requestOrigin(r) + "/internal/files/external/" + url.PathEscape(string(id))
 }
