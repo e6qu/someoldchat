@@ -5315,6 +5315,16 @@ func TestScheduledMessageAPIIsScopedToTheSchedulingIdentity(t *testing.T) {
 	if items, _ := ownerPage["scheduled_messages"].([]any); ownerPage["ok"] != true || len(items) != 1 {
 		t.Fatalf("creating token could not list its schedule: %v", ownerPage)
 	}
+	// A filter naming no visible channel is invalid_channel, and a post_at
+	// that is not a whole Unix time is invalid_time.
+	if unknown := call("token", "/api/chat.scheduledMessages.list", "channel=CNOPE"); unknown["error"] != "invalid_channel" {
+		t.Fatalf("unknown channel filter=%v", unknown)
+	}
+	for _, bad := range []string{"soon", "1700000000.5", "-5"} {
+		if rejected := call("token", "/api/chat.scheduleMessage", url.Values{"channel": {"C1"}, "text": {"x"}, "post_at": {bad}}.Encode()); rejected["error"] != "invalid_time" {
+			t.Fatalf("post_at=%q answered %v", bad, rejected)
+		}
+	}
 	// A rotated token of the same bot still owns the schedule: Slack scopes
 	// it to the bot, and a token hash lost it on every rotation.
 	rotatedPage := call("rotated-token", "/api/chat.scheduledMessages.list", "")

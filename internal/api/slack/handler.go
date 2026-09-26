@@ -10121,7 +10121,8 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
-	postAt, err := strconv.ParseInt(strings.TrimSpace(fields["post_at"]), 10, 64)
+	rawPostAt := strings.TrimSpace(fields["post_at"])
+	postAt, postAtErr := strconv.ParseInt(rawPostAt, 10, 64)
 	optionalBoolean := func(name string) (*bool, bool) {
 		raw := strings.TrimSpace(fields[name])
 		if raw == "" {
@@ -10136,7 +10137,13 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	unfurlLinks, unfurlLinksOK := optionalBoolean("unfurl_links")
 	unfurlMedia, unfurlMediaOK := optionalBoolean("unfurl_media")
 	parse := strings.TrimSpace(fields["parse"])
-	if channel == "" || (textValue == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil || err != nil || postAt <= 0 ||
+	// A post_at that is present but not a positive whole Unix time is the
+	// pinned invalid_time, not a generic argument error.
+	if rawPostAt != "" && (postAtErr != nil || postAt <= 0) {
+		writeError(w, "invalid_time")
+		return
+	}
+	if channel == "" || (textValue == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil || rawPostAt == "" ||
 		!replyBroadcastOK || !asUserOK || !linkNamesOK || !unfurlLinksOK || !unfurlMediaOK ||
 		(parse != "" && parse != "none" && parse != "full") || (asUser != nil && *asUser) {
 		writeError(w, "invalid_arguments")
@@ -10234,7 +10241,9 @@ func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
 		Page:           domain.PageRequest{Limit: limit, Cursor: cursor},
 	})
 	if err != nil {
-		writeError(w, mapServiceError(err, "fatal_error"))
+		// A channel filter naming no channel the caller can see is the
+		// pinned invalid_channel; it used to be reported as fatal_error.
+		writeError(w, mapServiceError(err, "invalid_channel"))
 		return
 	}
 	items := make([]map[string]any, 0, len(page.Items))
