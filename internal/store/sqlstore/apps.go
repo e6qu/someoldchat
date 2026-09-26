@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -10,33 +11,35 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
-func (s *Store) CreateOAuthAuthorization(ctx context.Context, botUser domain.User, bot domain.Bot, code domain.OAuthCode) error {
+func (s *Store) CreateOAuthAuthorization(ctx context.Context, botUser domain.User, bot domain.Bot, code domain.OAuthCode) (domain.OAuthCode, error) {
 	if code.Code == "" || code.ClientID == "" || code.WorkspaceID == "" || code.UserID == "" {
-		return store.InvalidArgument("invalid oauth authorization")
+		return domain.OAuthCode{}, store.InvalidArgument("invalid oauth authorization")
 	}
 	code.BotScopes = domain.NormalizeScopes(code.BotScopes)
 	code.UserScopes = domain.NormalizeScopes(code.UserScopes)
 	code.Scopes = domain.NormalizeScopes(code.Scopes)
 	withBot := len(code.BotScopes) != 0
 	if withBot && (botUser.ID == "" || botUser.WorkspaceID != code.WorkspaceID || bot.ID == "" || bot.WorkspaceID != code.WorkspaceID || bot.UserID != botUser.ID || bot.UpdatedAt.IsZero() || strings.TrimSpace(bot.Name) == "") {
-		return store.InvalidArgument("invalid oauth bot authorization")
+		return domain.OAuthCode{}, store.InvalidArgument("invalid oauth bot authorization")
 	}
 	if !withBot && (botUser.ID != "" || bot.ID != "" || code.BotID != "" || code.BotUserID != "") {
-		return store.InvalidArgument("unexpected oauth bot authorization")
+		return domain.OAuthCode{}, store.InvalidArgument("unexpected oauth bot authorization")
 	}
 	scopes, err := json.Marshal(code.Scopes)
 	if err != nil {
-		return err
+		return domain.OAuthCode{}, err
 	}
 	botScopes, err := json.Marshal(code.BotScopes)
 	if err != nil {
-		return err
+		return domain.OAuthCode{}, err
 	}
 	userScopes, err := json.Marshal(code.UserScopes)
 	if err != nil {
-		return err
+		return domain.OAuthCode{}, err
 	}
-	return underContention(ctx, func() error {
+	requested := code
+	err = underContention(ctx, func() error {
+		code = requested
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -57,21 +60,43 @@ func (s *Store) CreateOAuthAuthorization(ctx context.Context, botUser domain.Use
 			if bot.AppID != appID || code.BotID != bot.ID || code.BotUserID != botUser.ID {
 				return store.InvalidArgument("oauth bot does not match client")
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, name, real_name, deleted, presence) VALUES (?, ?, ?, ?, 0, 'auto')`, botUser.ID, botUser.WorkspaceID, botUser.Name, botUser.RealName); err != nil {
-				return classify(err)
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id, user_id, role, active) VALUES (?, ?, 'member', 1)`, botUser.WorkspaceID, botUser.ID); err != nil {
-				return classify(err)
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO bots(id, workspace_id, app_id, user_id, name, image_36, image_48, image_72, deleted, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, bot.ID, bot.WorkspaceID, bot.AppID, bot.UserID, bot.Name, bot.Image36, bot.Image48, bot.Image72, bot.UpdatedAt.UTC().Unix()); err != nil {
-				return classify(err)
+			// An app has one bot per workspace. A reinstall, or a second
+			// authorization before the first is redeemed, grants to the bot
+			// the app already has there; only a first install creates one.
+			// The lowest id is the answer where a database written before
+			// this rule holds several, matching GetBotByApp.
+			var existingBot domain.BotID
+			var existingUser domain.UserID
+			err := tx.QueryRowContext(ctx, `SELECT id, user_id FROM bots WHERE workspace_id = ? AND app_id = ? AND deleted = 0 ORDER BY id LIMIT 1`, code.WorkspaceID, appID).Scan(&existingBot, &existingUser)
+			switch err := translateNotFound(err); {
+			case err == nil:
+				code.BotID, code.BotUserID = existingBot, existingUser
+			case !errors.Is(err, store.ErrNotFound):
+				return err
+			default:
+				if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, name, real_name, deleted, presence) VALUES (?, ?, ?, ?, 0, 'auto')`, botUser.ID, botUser.WorkspaceID, botUser.Name, botUser.RealName); err != nil {
+					return classify(err)
+				}
+				if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id, user_id, role, active) VALUES (?, ?, 'member', 1)`, botUser.WorkspaceID, botUser.ID); err != nil {
+					return classify(err)
+				}
+				if _, err := tx.ExecContext(ctx, `INSERT INTO bots(id, workspace_id, app_id, user_id, name, image_36, image_48, image_72, deleted, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, bot.ID, bot.WorkspaceID, bot.AppID, bot.UserID, bot.Name, bot.Image36, bot.Image48, bot.Image72, bot.UpdatedAt.UTC().Unix()); err != nil {
+					return classify(err)
+				}
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, code_challenge, code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, domain.HashToken(code.Code), code.ClientID, code.WorkspaceID, code.UserID, string(scopes), code.BotID, code.BotUserID, string(botScopes), string(userScopes), code.RedirectURI, code.CodeChallenge, code.CodeChallengeMethod, time.Now().UTC().Add(store.OAuthCodeLifetime).UnixNano()); err != nil {
+		// incoming_webhook_channel was missing here, so on the SQL profiles an
+		// install that chose a webhook channel lost it before redemption while
+		// the memory profile kept it.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, incoming_webhook_channel, code_challenge, code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, domain.HashToken(code.Code), code.ClientID, code.WorkspaceID, code.UserID, string(scopes), code.BotID, code.BotUserID, string(botScopes), string(userScopes), code.RedirectURI, code.IncomingWebhookChannel, code.CodeChallenge, code.CodeChallengeMethod, time.Now().UTC().Add(store.OAuthCodeLifetime).UnixNano()); err != nil {
 			return classify(err)
 		}
 		return tx.Commit()
 	})
+	if err != nil {
+		return domain.OAuthCode{}, err
+	}
+	return code, nil
 }
 
 func (s *Store) CreateAppConfigurationToken(ctx context.Context, accessToken, refreshToken string, value domain.AppConfigurationToken) error {

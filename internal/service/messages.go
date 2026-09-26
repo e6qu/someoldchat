@@ -102,21 +102,25 @@ var (
 	// ErrTriggerTypeRestricted refuses a builder who creates a trigger of a type
 	// an administrator has restricted. Same restricted_action shape as a function
 	// restriction: the actor may build in general, but not with this trigger type.
-	ErrTriggerTypeRestricted       = errors.New("this trigger type is restricted from you")
-	ErrWorkflowPermissionDenied    = errors.New("workflow trigger is not available to this actor")
-	ErrFunctionAccessDenied        = errors.New("actor does not have access to this function execution")
-	ErrFunctionNotRunning          = errors.New("function execution is not running")
-	ErrAutomationUserNotFound      = errors.New("automation permission user was not found")
-	ErrAutomationChannelNotFound   = errors.New("automation permission channel was not found")
-	ErrAutomationTeamNotFound      = errors.New("automation permission workspace was not found")
-	ErrAutomationOrgNotFound       = errors.New("automation permission organization was not found")
-	ErrAutomationEntitiesEmpty     = errors.New("automation named entities cannot be empty")
-	ErrWorkflowFunctionNotFound    = errors.New("workflow function was not found")
-	ErrInvalidDialog               = errors.New("dialog payload is invalid")
-	ErrInvalidBot                  = errors.New("bot identifier is required")
-	ErrInvalidMigration            = errors.New("migration user identifiers are invalid")
-	ErrInvalidOAuth                = errors.New("oauth authorization is invalid")
-	ErrInvalidOAuthClient          = errors.New("oauth client is invalid")
+	ErrTriggerTypeRestricted     = errors.New("this trigger type is restricted from you")
+	ErrWorkflowPermissionDenied  = errors.New("workflow trigger is not available to this actor")
+	ErrFunctionAccessDenied      = errors.New("actor does not have access to this function execution")
+	ErrFunctionNotRunning        = errors.New("function execution is not running")
+	ErrAutomationUserNotFound    = errors.New("automation permission user was not found")
+	ErrAutomationChannelNotFound = errors.New("automation permission channel was not found")
+	ErrAutomationTeamNotFound    = errors.New("automation permission workspace was not found")
+	ErrAutomationOrgNotFound     = errors.New("automation permission organization was not found")
+	ErrAutomationEntitiesEmpty   = errors.New("automation named entities cannot be empty")
+	ErrWorkflowFunctionNotFound  = errors.New("workflow function was not found")
+	ErrInvalidDialog             = errors.New("dialog payload is invalid")
+	ErrInvalidBot                = errors.New("bot identifier is required")
+	ErrInvalidMigration          = errors.New("migration user identifiers are invalid")
+	ErrInvalidOAuth              = errors.New("oauth authorization is invalid")
+	ErrInvalidOAuthClient        = errors.New("oauth client is invalid")
+	// ErrBadOAuthClientSecret is a known client presenting the wrong secret.
+	// Slack reports it as bad_client_secret, distinct from an unknown
+	// client's invalid_client_id.
+	ErrBadOAuthClientSecret        = errors.New("oauth client secret is wrong")
 	ErrOAuthAppMismatch            = errors.New("oauth client and token app do not match")
 	ErrInvalidIntegrationLogs      = errors.New("integration log arguments are invalid")
 	ErrInvalidBookmark             = errors.New("bookmark title, type, and link are invalid")
@@ -238,11 +242,14 @@ func (m Messages) ListAppAuthorizations(ctx context.Context, appID domain.AppID,
 
 func (m Messages) UninstallApp(ctx context.Context, clientID, clientSecret string, workspaceID domain.WorkspaceID, appID domain.AppID) error {
 	client, err := m.Store.GetOAuthClient(ctx, strings.TrimSpace(clientID))
-	if err != nil || !secretDigestsEqual(client.SecretHash, domain.HashToken(strings.TrimSpace(clientSecret))) {
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return err
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return ErrInvalidOAuthClient
 		}
-		return ErrInvalidOAuthClient
+		return err
+	}
+	if !secretDigestsEqual(client.SecretHash, domain.HashToken(strings.TrimSpace(clientSecret))) {
+		return ErrBadOAuthClientSecret
 	}
 	if client.AppID != appID {
 		return ErrOAuthAppMismatch
@@ -2947,7 +2954,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 		return domain.OAuthToken{}, err
 	}
 	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
-		return domain.OAuthToken{}, ErrInvalidOAuthClient
+		return domain.OAuthToken{}, ErrBadOAuthClientSecret
 	}
 	rotating := false
 	if rotationAllowed {
@@ -2996,7 +3003,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 			exchange.AuthedUserExpiresAt = exchange.ExpiresAt
 		}
 	}
-	token, err := m.Store.ExchangeOAuthCode(ctx, clientID, clientSecret, code, redirectURI, accessToken, exchange)
+	token, err := m.Store.ExchangeOAuthCode(ctx, clientID, clientSecret, code, strings.TrimSpace(redirectURI), accessToken, exchange)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return domain.OAuthToken{}, ErrInvalidOAuth
@@ -3004,9 +3011,10 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 		return domain.OAuthToken{}, err
 	}
 	token.AppID = client.AppID
-	token.TokenType = tokenType
-	if tokenType == domain.TokenBot {
-		if err := m.recordAppBotToken(ctx, token.AppID, token.WorkspaceID, accessToken, token.InstallerID); err != nil {
+	// The store decides the issued type: a user-scope-only grant redeems for
+	// the installer's user token even when a bot token was asked for.
+	if token.TokenType.IsBot() {
+		if err := m.recordAppBotToken(ctx, token.AppID, token.WorkspaceID, token.AccessToken, token.InstallerID); err != nil {
 			return domain.OAuthToken{}, err
 		}
 	}
@@ -3065,7 +3073,7 @@ func (m Messages) OAuthV2Refresh(ctx context.Context, clientID, clientSecret, re
 		return domain.OAuthToken{}, err
 	}
 	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
-		return domain.OAuthToken{}, ErrInvalidOAuthClient
+		return domain.OAuthToken{}, ErrBadOAuthClientSecret
 	}
 	app, _, err := m.Store.GetApp(ctx, client.AppID)
 	if err != nil {
@@ -3123,7 +3131,7 @@ func (m Messages) OAuthV2ExchangeToken(ctx context.Context, clientID, clientSecr
 		return domain.OAuthToken{}, err
 	}
 	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
-		return domain.OAuthToken{}, ErrInvalidOAuthClient
+		return domain.OAuthToken{}, ErrBadOAuthClientSecret
 	}
 	app, _, err := m.Store.GetApp(ctx, client.AppID)
 	if err != nil || !app.TokenRotationEnabled {

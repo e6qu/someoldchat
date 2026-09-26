@@ -35,6 +35,7 @@ message OAuthToken {
   string incoming_webhook_id = 18;
   string incoming_webhook_url = 19;
   string incoming_webhook_config_url = 20;
+  string workspace_name = 21;
 }
 
 message OpenIDConnectTokenRequest {

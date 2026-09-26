@@ -2168,6 +2168,8 @@ func (h Handler) appsUninstall(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Messages.UninstallApp(r.Context(), clientID, clientSecret, principal.WorkspaceID, principal.AppID); err != nil {
 		switch {
+		case errors.Is(err, service.ErrBadOAuthClientSecret):
+			writeError(w, "bad_client_secret")
 		case errors.Is(err, service.ErrInvalidOAuthClient):
 			writeError(w, "invalid_client_id")
 		case errors.Is(err, service.ErrOAuthAppMismatch):
@@ -2245,11 +2247,7 @@ func (h Handler) oauthV2ExchangeToken(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := h.Messages.OAuthV2ExchangeToken(r.Context(), clientID, clientSecret, fields["token"])
 	if err != nil {
-		reason := "invalid_auth"
-		if errors.Is(err, service.ErrInvalidOAuthClient) {
-			reason = "invalid_client_id"
-		}
-		writeError(w, reason)
+		writeError(w, oauthExchangeFailure(err, "invalid_auth"))
 		return
 	}
 	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, false))
@@ -2543,23 +2541,42 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2, userO
 		if refreshing {
 			reason = "invalid_refresh_token"
 		}
-		if errors.Is(err, service.ErrInvalidOAuthClient) {
-			reason = "invalid_client_id"
-		}
-		writeError(w, reason)
+		writeError(w, oauthExchangeFailure(err, reason))
 		return
 	}
 	if !v2 {
-		response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "team_id": token.WorkspaceID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType}
-		response["team_name"] = ""
-		writeJSON(w, http.StatusOK, response)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "team_id": token.WorkspaceID, "team_name": token.WorkspaceName, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType})
 		return
 	}
-	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, userOnly))
+	// A code redeemed for a user token — a user-scope-only install — is
+	// answered the way oauth.v2.user.access answers: the credential under
+	// authed_user and no bot fields at the top level.
+	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, userOnly || !refreshing && !token.TokenType.IsBot()))
+}
+
+// oauthExchangeFailure names a failed code or token exchange. The client and
+// redirect failures have their own codes in Slack's contract; a code or token
+// that is simply not redeemable is the caller's notFound; everything else is
+// classified like any other service failure rather than flattened into
+// invalid_code, which told a caller whose request never reached the code that
+// the code was bad.
+func oauthExchangeFailure(err error, notFound string) string {
+	switch {
+	case errors.Is(err, service.ErrBadOAuthClientSecret):
+		return "bad_client_secret"
+	case errors.Is(err, service.ErrInvalidOAuthClient):
+		return "invalid_client_id"
+	case errors.Is(err, store.ErrOAuthRedirectMismatch):
+		return "bad_redirect_uri"
+	case errors.Is(err, service.ErrInvalidOAuth):
+		return notFound
+	default:
+		return mapServiceError(err, notFound)
+	}
 }
 
 func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any {
-	response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType, "team": map[string]any{"id": token.WorkspaceID}, "enterprise": nil, "is_enterprise_install": false}
+	response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType, "team": map[string]any{"id": token.WorkspaceID, "name": token.WorkspaceName}, "enterprise": nil, "is_enterprise_install": false}
 	if token.RefreshToken != "" {
 		response["refresh_token"] = token.RefreshToken
 		response["expires_in"] = int64(oauthTokenLifetime / time.Second)
@@ -10971,7 +10988,7 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, service.ErrScheduledStatusLimit) {
 		return "restricted_too_many"
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidProfileField) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidListTemplate) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrInvalidActivitySavedView) || errors.Is(err, service.ErrInvalidSidebarSection) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) || errors.Is(err, service.ErrInvalidAssistantThread) || errors.Is(err, service.ErrAppNotDistributable) || errors.Is(err, service.ErrInvalidExternalAuthProvider) || errors.Is(err, service.ErrExternalAuthConnection) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidProfileField) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrBadOAuthClientSecret) || errors.Is(err, store.ErrOAuthRedirectMismatch) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidListTemplate) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrInvalidActivitySavedView) || errors.Is(err, service.ErrInvalidSidebarSection) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) || errors.Is(err, service.ErrInvalidAssistantThread) || errors.Is(err, service.ErrAppNotDistributable) || errors.Is(err, service.ErrInvalidExternalAuthProvider) || errors.Is(err, service.ErrExternalAuthConnection) {
 		return invalidReason
 	}
 	if errors.Is(err, service.ErrAppInteractionUnavailable) {

@@ -176,15 +176,18 @@ func accessEntityRank(entityType domain.GrantEntity) int {
 }
 
 var (
-	ErrNotFound                  = errors.New("not found")
-	ErrLeaseConflict             = errors.New("outbox lease conflict")
-	ErrIdempotencyConflict       = errors.New("idempotency key already committed")
-	ErrAlreadyExists             = errors.New("already exists")
-	ErrInvalidArgument           = errors.New("invalid argument")
-	ErrInvalidConversationType   = errors.New("invalid conversation type")
-	ErrInvalidInviteRequest      = errors.New("invalid invite request")
-	ErrInvalidAppApproval        = errors.New("invalid app approval")
-	ErrConflict                  = errors.New("state conflict")
+	ErrNotFound                = errors.New("not found")
+	ErrLeaseConflict           = errors.New("outbox lease conflict")
+	ErrIdempotencyConflict     = errors.New("idempotency key already committed")
+	ErrAlreadyExists           = errors.New("already exists")
+	ErrInvalidArgument         = errors.New("invalid argument")
+	ErrInvalidConversationType = errors.New("invalid conversation type")
+	ErrInvalidInviteRequest    = errors.New("invalid invite request")
+	ErrInvalidAppApproval      = errors.New("invalid app approval")
+	ErrConflict                = errors.New("state conflict")
+	// ErrOAuthRedirectMismatch is a live authorization code redeemed with a
+	// redirect_uri other than the one its authorization named.
+	ErrOAuthRedirectMismatch     = errors.New("oauth redirect_uri does not match the authorization")
 	ErrBookmarkLimit             = errors.New("bookmark limit reached")
 	ErrScheduledMessageLimit     = errors.New("scheduled message channel window limit reached")
 	ErrScheduledStatusLimit      = errors.New("scheduled status limit reached")
@@ -694,7 +697,11 @@ type Store interface {
 	CreateOAuthClient(context.Context, domain.OAuthClient) error
 	GetOAuthClient(context.Context, string) (domain.OAuthClient, error)
 	CreateOAuthCode(context.Context, domain.OAuthCode) error
-	CreateOAuthAuthorization(context.Context, domain.User, domain.Bot, domain.OAuthCode) error
+	// CreateOAuthAuthorization stores a consented grant. When the grant has
+	// bot scopes and the app already has a live bot in the workspace, the grant
+	// names that bot and the candidate bot user and bot are not created; the
+	// returned grant carries the bot the code will redeem for.
+	CreateOAuthAuthorization(context.Context, domain.User, domain.Bot, domain.OAuthCode) (domain.OAuthCode, error)
 	ExchangeOAuthCode(context.Context, string, string, string, string, string, domain.OAuthToken) (domain.OAuthToken, error)
 	LookupOAuthRefreshToken(context.Context, string, string) (domain.OAuthRefreshGrant, error)
 	ExchangeOAuthRefreshToken(context.Context, string, string, string, string, string, time.Time) (domain.OAuthToken, error)

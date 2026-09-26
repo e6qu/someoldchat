@@ -35,11 +35,15 @@ type Store struct {
 	externalInvitePermissions map[domain.ConversationID]map[domain.WorkspaceID]bool
 	sharedInvites             map[domain.SharedInviteID]domain.SharedInvite
 
-	conversationOrg               map[domain.ConversationID]bool
-	closedDirects                 map[string]struct{}
-	inviteRequests                map[domain.InviteRequestID]domain.InviteRequest
-	appApprovals                  map[domain.AppID]domain.AppApproval
-	appInstallations              map[string]domain.AppInstallation
+	conversationOrg  map[domain.ConversationID]bool
+	closedDirects    map[string]struct{}
+	inviteRequests   map[domain.InviteRequestID]domain.InviteRequest
+	appApprovals     map[domain.AppID]domain.AppApproval
+	appInstallations map[string]domain.AppInstallation
+	// appInstallers is the member whose code redemption last installed each
+	// app, keyed like appInstallations; the SQL profile keeps it in
+	// app_installations.installer_id.
+	appInstallers                 map[string]domain.UserID
 	appBotTokens                  map[string]string
 	apps                          map[domain.AppID]domain.App
 	appManifestRevisions          map[domain.AppID][]domain.AppManifestRevision
@@ -258,6 +262,7 @@ func New() *Store {
 		incomingWebhooks:              make(map[domain.IncomingWebhookID]domain.IncomingWebhook),
 		appDatastoreItems:             make(map[string]domain.AppDatastoreItem),
 		appInstallations:              make(map[string]domain.AppInstallation),
+		appInstallers:                 make(map[string]domain.UserID),
 		apps:                          make(map[domain.AppID]domain.App),
 		appManifestRevisions:          make(map[domain.AppID][]domain.AppManifestRevision),
 		appTriggers:                   make(map[string]domain.AppTrigger),
@@ -5354,12 +5359,24 @@ func (s *Store) GetBot(_ context.Context, workspace domain.WorkspaceID, id domai
 func (s *Store) GetBotByApp(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID) (domain.Bot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, value := range s.bots {
-		if value.WorkspaceID == workspace && value.AppID == appID && !value.Deleted {
-			return value, nil
-		}
+	if value, found := s.appBotLocked(workspace, appID); found {
+		return value, nil
 	}
 	return domain.Bot{}, store.ErrNotFound
+}
+
+// appBotLocked is the app's live bot in a workspace. Databases written before
+// installs reused their bot can hold several; the lowest id is the answer on
+// every profile (the SQL one orders by id), not whichever the map yields.
+func (s *Store) appBotLocked(workspace domain.WorkspaceID, appID domain.AppID) (domain.Bot, bool) {
+	var chosen domain.Bot
+	found := false
+	for _, value := range s.bots {
+		if value.WorkspaceID == workspace && value.AppID == appID && !value.Deleted && (!found || value.ID < chosen.ID) {
+			chosen, found = value, true
+		}
+	}
+	return chosen, found
 }
 
 func migrationKey(workspace domain.WorkspaceID, id domain.UserID) string {
@@ -5856,8 +5873,11 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	codeHash := domain.HashToken(code)
 	stored, exists := s.oauthCodes[codeHash]
 	grant := stored.grant
-	if !exists || !stored.expiresAt.After(now) || grant.ClientID != clientID || grant.RedirectURI != redirect {
+	if !exists || !stored.expiresAt.After(now) || grant.ClientID != clientID {
 		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	if !store.OAuthRedirectMatches(grant.RedirectURI, redirect) {
+		return domain.OAuthToken{}, store.ErrOAuthRedirectMismatch
 	}
 	if !domain.VerifyPKCE(grant.CodeChallenge, grant.CodeChallengeMethod, token.CodeVerifier) {
 		return domain.OAuthToken{}, store.ErrNotFound
@@ -5865,6 +5885,10 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	tokenType := domain.TokenType(strings.TrimSpace(string(token.TokenType)))
 	if tokenType == "" {
 		tokenType = domain.TokenUser
+	}
+	tokenType, accessToken, token, err := store.OAuthGrantIssue(grant, tokenType, accessToken, token)
+	if err != nil {
+		return domain.OAuthToken{}, err
 	}
 	subjectID := grant.UserID
 	var tokenBotID domain.BotID
@@ -5921,6 +5945,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	}
 	installation.Enabled = true
 	s.appInstallations[installationKey] = installation
+	s.appInstallers[installationKey] = grant.UserID
 	delete(s.oauthCodes, codeHash)
 	s.tokens[accessHash] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: subjectID, AppID: client.AppID, BotID: tokenBotID, Scopes: append([]string(nil), tokenScopes...), TokenType: tokenType, ExpiresAt: token.ExpiresAt}
 	if rotating {
@@ -5943,6 +5968,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	token.AppID = client.AppID
 	token.ClientID = clientID
 	token.WorkspaceID = grant.WorkspaceID
+	token.WorkspaceName = s.workspaces[grant.WorkspaceID].Name
 	token.UserID = subjectID
 	token.InstallerID = grant.UserID
 	token.BotID = tokenBotID
@@ -5988,7 +6014,7 @@ func (s *Store) ExchangeOAuthRefreshToken(_ context.Context, clientID, secret, o
 	s.oauthRefreshGrants[nextRefreshHash] = next
 	s.tokens[nextAccessHash] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, AppID: grant.AppID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType, ExpiresAt: expiresAt}
 	s.enforceOAuthActiveTokenLimit(next)
-	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt, ClientID: clientID, AppID: grant.AppID, WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, InstallerID: grant.InstallerID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType}, nil
+	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt, ClientID: clientID, AppID: grant.AppID, WorkspaceID: grant.WorkspaceID, WorkspaceName: s.workspaces[grant.WorkspaceID].Name, UserID: grant.UserID, InstallerID: grant.InstallerID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType}, nil
 }
 
 func (s *Store) LookupOAuthRefreshToken(_ context.Context, clientID, refreshToken string) (domain.OAuthRefreshGrant, error) {
@@ -6029,7 +6055,11 @@ func (s *Store) ExchangeOAuthAccessToken(_ context.Context, clientID, secret, ol
 		return domain.OAuthToken{}, store.ErrAlreadyExists
 	}
 	legacyKey := "legacy:" + oldAccessHash
-	legacy := domain.OAuthRefreshGrant{TokenHash: legacyKey, AccessTokenHash: oldAccessHash, ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, UserID: record.UserID, InstallerID: record.UserID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType, CreatedAt: now.Add(-time.Nanosecond), Revoked: true}
+	installer := record.UserID
+	if record.TokenType.IsBot() {
+		installer = s.appInstallers[appInstallationKey(record.AppID, record.WorkspaceID)]
+	}
+	legacy := domain.OAuthRefreshGrant{TokenHash: legacyKey, AccessTokenHash: oldAccessHash, ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, UserID: record.UserID, InstallerID: installer, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType, CreatedAt: now.Add(-time.Nanosecond), Revoked: true}
 	next := legacy
 	next.TokenHash = nextRefreshHash
 	next.AccessTokenHash = nextAccessHash
@@ -6039,7 +6069,7 @@ func (s *Store) ExchangeOAuthAccessToken(_ context.Context, clientID, secret, ol
 	s.oauthRefreshGrants[legacyKey] = legacy
 	s.oauthRefreshGrants[nextRefreshHash] = next
 	s.tokens[nextAccessHash] = domain.TokenRecord{WorkspaceID: record.WorkspaceID, UserID: record.UserID, AppID: record.AppID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType, ExpiresAt: expiresAt}
-	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt, ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, UserID: record.UserID, InstallerID: record.UserID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType}, nil
+	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt, ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, WorkspaceName: s.workspaces[record.WorkspaceID].Name, UserID: record.UserID, InstallerID: installer, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType}, nil
 }
 
 func (s *Store) enforceOAuthActiveTokenLimit(current domain.OAuthRefreshGrant) {

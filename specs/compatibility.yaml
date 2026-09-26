@@ -1102,6 +1102,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestOAuthAccessAndTokenHTTPExchangeCodes
+      - go-test:internal/api/slack:TestOAuthV2AccessInstallsAndReinstallsTheSameBot
   - method: oauth.token
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1112,12 +1113,17 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestOAuthV2AccessHTTPExchangesCode
+      - go-test:internal/api/slack:TestOAuthV2AccessInstallsAndReinstallsTheSameBot
+      - go-test:internal/api/slack:TestOAuthV2AccessRedeemsAUserScopeOnlyInstall
+      - go-test:internal/api/slack:TestOAuthV2AccessNamesEachFailure
+      - persistence:tests/persistence-qualification/files_oauth_test.go
   - method: oauth.v2.exchange
     status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.exchange/
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestOAuthV2ExchangeReportsTheInstaller
       - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
     deviations:
       - Enterprise organization installs, GovSlack hosts, Slack's production rate limits, and controlled live-Slack rotation outcomes remain unqualified.

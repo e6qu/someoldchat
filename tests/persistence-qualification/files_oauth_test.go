@@ -2,10 +2,12 @@ package qualification
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 // visibleFilesAreNewestFirst pins the order files.list pages in: created_at
@@ -56,5 +58,101 @@ func visibleFilesAreNewestFirst(t *testing.T, open opener) {
 		if got[index] != want[index] {
 			t.Fatalf("files=%v, want %v", got, want)
 		}
+	}
+}
+
+// oauthInstallsReuseTheirBotAndRedeemEveryGrantShape pins the install rules of
+// every profile: a reinstall grants to the bot the app already has in the
+// workspace, a user-scope-only grant redeems for the installer's user token, a
+// redirect_uri is required at redemption only when the authorization named
+// one, and a bot token's installer survives oauth.v2.exchange.
+func oauthInstallsReuseTheirBotAndRedeemEveryGrantShape(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	appID := domain.AppID("A-install-" + f.suffix)
+	clientID := "client-install-" + f.suffix
+	app := domain.App{
+		ID: appID, DevelopmentWorkspaceID: f.workspaceID, OwnerID: f.userID, Name: "Installer",
+		ClientID: clientID, SigningSecretHash: "hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}
+	revision := domain.AppManifestRevision{AppID: appID, Version: 1, Manifest: `{"display_information":{"name":"Installer"}}`, CreatedBy: f.userID, CreatedAt: now}
+	if err := f.repository.CreateApp(ctx, app, revision, domain.OAuthClient{ID: clientID, SecretHash: domain.HashToken("secret"), AppID: appID}); err != nil {
+		t.Fatal(err)
+	}
+	authorize := func(name, redirect string, botScopes, userScopes []string) domain.OAuthCode {
+		t.Helper()
+		botUser := domain.User{}
+		bot := domain.Bot{}
+		grant := domain.OAuthCode{
+			Code: "code-" + name + "-" + f.suffix, ClientID: clientID, WorkspaceID: f.workspaceID, UserID: f.userID,
+			Scopes: append(append([]string(nil), botScopes...), userScopes...), BotScopes: botScopes, UserScopes: userScopes, RedirectURI: redirect,
+		}
+		if len(botScopes) != 0 {
+			botUser = domain.User{ID: domain.UserID("UB-" + name + "-" + f.suffix), WorkspaceID: f.workspaceID, Name: "installer", RealName: "Installer"}
+			bot = domain.Bot{ID: domain.BotID("B-" + name + "-" + f.suffix), WorkspaceID: f.workspaceID, AppID: appID, UserID: botUser.ID, Name: "Installer", UpdatedAt: now}
+			grant.BotID, grant.BotUserID = bot.ID, botUser.ID
+		}
+		granted, err := f.repository.CreateOAuthAuthorization(ctx, botUser, bot, grant)
+		if err != nil {
+			t.Fatalf("authorize %s: %v", name, err)
+		}
+		return granted
+	}
+
+	first := authorize("first", "", []string{"chat:write"}, nil)
+	second := authorize("second", "https://app.example/callback", []string{"chat:write"}, []string{"search:read"})
+	if second.BotID != first.BotID || second.BotUserID != first.BotUserID {
+		t.Fatalf("reinstall bot=%s/%s, want the first install's %s/%s", second.BotID, second.BotUserID, first.BotID, first.BotUserID)
+	}
+	if _, err := f.repository.GetBot(ctx, f.workspaceID, domain.BotID("B-second-"+f.suffix)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a reinstall created a second bot: err=%v", err)
+	}
+
+	// An authorization that named no redirect_uri redeems without one.
+	token, err := f.repository.ExchangeOAuthCode(ctx, clientID, "secret", first.Code, "", "xoxb-first-"+f.suffix, domain.OAuthToken{TokenType: domain.TokenBot})
+	if err != nil {
+		t.Fatalf("undirected redemption: %v", err)
+	}
+	if token.BotID != first.BotID || token.UserID != first.BotUserID || token.InstallerID != f.userID || token.WorkspaceName != "Divergence" {
+		t.Fatalf("undirected token=%+v", token)
+	}
+	// One that named it must name it again, and a mismatch spends nothing.
+	directed := domain.OAuthToken{TokenType: domain.TokenBot, AuthedUserAccessToken: "xoxp-second-" + f.suffix}
+	if _, err := f.repository.ExchangeOAuthCode(ctx, clientID, "secret", second.Code, "https://elsewhere.example/", "xoxb-second-"+f.suffix, directed); !errors.Is(err, store.ErrOAuthRedirectMismatch) {
+		t.Fatalf("wrong redirect err=%v, want ErrOAuthRedirectMismatch", err)
+	}
+	if _, err := f.repository.ExchangeOAuthCode(ctx, clientID, "secret", second.Code, "https://app.example/callback", "xoxb-second-"+f.suffix, directed); err != nil {
+		t.Fatalf("directed redemption: %v", err)
+	}
+
+	// A user-scope-only grant redeems for the installer's user token.
+	userOnly := authorize("user", "", nil, []string{"search:read"})
+	issued, err := f.repository.ExchangeOAuthCode(ctx, clientID, "secret", userOnly.Code, "", "xoxb-user-"+f.suffix, domain.OAuthToken{TokenType: domain.TokenBot, AuthedUserAccessToken: "xoxp-user-" + f.suffix})
+	if err != nil {
+		t.Fatalf("user-only redemption: %v", err)
+	}
+	if issued.TokenType != domain.TokenUser || issued.AccessToken != "xoxp-user-"+f.suffix || issued.UserID != f.userID || issued.BotID != "" || issued.AuthedUserAccessToken != "" {
+		t.Fatalf("user-only token=%+v", issued)
+	}
+	record, err := f.repository.LookupToken(ctx, "xoxp-user-"+f.suffix)
+	if err != nil || record.TokenType != domain.TokenUser || record.UserID != f.userID {
+		t.Fatalf("user-only record=%+v err=%v", record, err)
+	}
+	if _, err := f.repository.LookupToken(ctx, "xoxb-user-"+f.suffix); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a user-only grant minted a bot token: err=%v", err)
+	}
+
+	// oauth.v2.exchange keeps the member who installed the bot.
+	exchanged, err := f.repository.ExchangeOAuthAccessToken(ctx, clientID, "secret", "xoxb-first-"+f.suffix, "xoxe.xoxb-next-"+f.suffix, "xoxe-refresh-"+f.suffix, time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exchanged.InstallerID != f.userID || exchanged.UserID != first.BotUserID || exchanged.WorkspaceName != "Divergence" {
+		t.Fatalf("exchanged token=%+v", exchanged)
 	}
 }

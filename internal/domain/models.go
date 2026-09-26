@@ -592,10 +592,13 @@ type OAuthCode struct {
 }
 
 type OAuthToken struct {
-	AccessToken            string
-	ClientID               string
-	AppID                  AppID
-	WorkspaceID            WorkspaceID
+	AccessToken string
+	ClientID    string
+	AppID       AppID
+	WorkspaceID WorkspaceID
+	// WorkspaceName is the installing workspace's name, which oauth.v2.access
+	// reports as team.name and oauth.access as team_name.
+	WorkspaceName          string
 	UserID                 UserID
 	InstallerID            UserID
 	BotID                  BotID
