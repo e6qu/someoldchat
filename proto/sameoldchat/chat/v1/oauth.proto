@@ -33,6 +33,9 @@ message OAuthToken {
   string incoming_webhook_channel = 16;
   string incoming_webhook_channel_name = 17;
   string incoming_webhook_id = 18;
+  // Despite the historical field names, both carry paths relative to the
+  // deployment's public base URL; the HTTP boundary makes them absolute. An
+  // older chat process may still send an absolute URL, which passes through.
   string incoming_webhook_url = 19;
   string incoming_webhook_config_url = 20;
 }

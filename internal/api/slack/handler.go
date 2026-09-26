@@ -39,6 +39,9 @@ type Handler struct {
 	Authenticator auth.Authenticator
 	SocketMode    socketmode.Service
 	SocketAuth    auth.Authenticator
+	// PublicURL is the absolute base URL apps reach this deployment at; see
+	// SetPublicURL. Empty means the request's own origin.
+	PublicURL string
 	// Limiter enforces the Web API rate-limiting contract over every /api/
 	// route when set. Production wiring sets it; a zero Handler serves
 	// unlimited, which is what the package's own request-shaped tests and the
@@ -2247,7 +2250,7 @@ func (h Handler) oauthV2ExchangeToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, reason)
 		return
 	}
-	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, false))
+	writeJSON(w, http.StatusOK, oauthV2TokenResponse(h.publicBaseURL(r), token, false))
 }
 
 func (h Handler) appsManifestValidate(w http.ResponseWriter, r *http.Request) {
@@ -2315,7 +2318,7 @@ func (h Handler) appsManifestCreate(w http.ResponseWriter, r *http.Request) {
 			"verification_token": credentials.VerificationToken,
 			"signing_secret":     credentials.SigningSecret,
 		},
-		"oauth_authorize_url": requestOrigin(r) + "/oauth/v2/authorize?" + query.Encode(),
+		"oauth_authorize_url": h.publicBaseURL(r) + "/oauth/v2/authorize?" + query.Encode(),
 	})
 }
 
@@ -2476,6 +2479,41 @@ func writeAppManifestValidation(w http.ResponseWriter, problems []appmanifest.Er
 	writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "invalid_manifest", "errors": problems})
 }
 
+// SetPublicURL fixes the absolute base URL this deployment is reachable at,
+// the same coordinate the web handler uses for response URLs. URLs this
+// handler gives to apps (incoming webhooks, OAuth authorization) are built from
+// it, so an app configured with only this deployment's base URL is never sent
+// to Slack's own hosts or to whatever Host header a request arrived with.
+func (h *Handler) SetPublicURL(value string) error {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("Slack API public URL must be an absolute HTTP(S) URL without a query or fragment")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	h.PublicURL = parsed.String()
+	return nil
+}
+
+// publicBaseURL is the configured public URL or, when none is configured, the
+// origin the request reached, which is what a development deployment is known
+// by. It mirrors the web handler's responseBaseURL.
+func (h Handler) publicBaseURL(r *http.Request) string {
+	if h.PublicURL != "" {
+		return h.PublicURL
+	}
+	return requestOrigin(r)
+}
+
+// publicURL resolves a service-minted path against the public base URL. A
+// value that is already absolute is returned unchanged: a chat process from
+// before paths were minted may still answer during a rolling deploy.
+func publicURL(baseURL, path string) string {
+	if !strings.HasPrefix(path, "/") {
+		return path
+	}
+	return strings.TrimRight(baseURL, "/") + path
+}
+
 func requestOrigin(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {
@@ -2561,10 +2599,10 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2, userO
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
-	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, userOnly))
+	writeJSON(w, http.StatusOK, oauthV2TokenResponse(h.publicBaseURL(r), token, userOnly))
 }
 
-func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any {
+func oauthV2TokenResponse(baseURL string, token domain.OAuthToken, userOnly bool) map[string]any {
 	response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType, "team": map[string]any{"id": token.WorkspaceID}, "enterprise": nil, "is_enterprise_install": false}
 	if token.RefreshToken != "" {
 		response["refresh_token"] = token.RefreshToken
@@ -2602,12 +2640,12 @@ func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any
 	}
 	// An install that requested the incoming-webhook scope and chose a channel
 	// gets the minted hook back here, the one time the app ever sees its URL.
-	if token.IncomingWebhookURL != "" {
+	if token.IncomingWebhookPath != "" {
 		response["incoming_webhook"] = map[string]any{
 			"channel":           "#" + token.IncomingWebhookChannelName,
 			"channel_id":        token.IncomingWebhookChannel,
-			"url":               token.IncomingWebhookURL,
-			"configuration_url": token.IncomingWebhookConfigURL,
+			"url":               publicURL(baseURL, token.IncomingWebhookPath),
+			"configuration_url": publicURL(baseURL, token.IncomingWebhookConfigPath),
 		}
 	}
 	return response
@@ -12645,7 +12683,7 @@ func (h Handler) adminIncomingWebhookCreate(w http.ResponseWriter, r *http.Reque
 		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "incoming_webhook": map[string]any{"id": webhook.ID, "channel_id": webhook.ConversationID, "url": "https://hooks.slack.com/services/" + string(webhook.WorkspaceID) + "/" + string(webhook.AppID) + "/" + secret}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "incoming_webhook": map[string]any{"id": webhook.ID, "channel_id": webhook.ConversationID, "url": publicURL(h.publicBaseURL(r), service.IncomingWebhookPath(webhook.WorkspaceID, webhook.AppID, secret))}})
 }
 
 func (h Handler) adminIncomingWebhookEnable(w http.ResponseWriter, r *http.Request) {

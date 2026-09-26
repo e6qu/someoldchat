@@ -528,20 +528,48 @@ func TestOAuthV2ResponseIncludesIncomingWebhook(t *testing.T) {
 		AccessToken: "xoxb-1", AppID: "A1", WorkspaceID: "T1", UserID: "Ubot", InstallerID: "U1",
 		TokenType: domain.TokenBot, Scopes: []string{"incoming-webhook"},
 		IncomingWebhookChannel: "C1", IncomingWebhookChannelName: "general", IncomingWebhookID: "WH1",
-		IncomingWebhookURL:       "https://hooks.slack.com/services/T1/A1/whsec_abc",
-		IncomingWebhookConfigURL: "https://hooks.slack.com/services/T1/A1",
+		IncomingWebhookPath:       "/services/T1/A1/whsec_abc",
+		IncomingWebhookConfigPath: "/app/apps/A1",
 	}
-	hook, ok := oauthV2TokenResponse(token, false)["incoming_webhook"].(map[string]any)
+	// The coordinates are this deployment's: an app configured with only a
+	// base URL must never be handed Slack's own hooks host.
+	hook, ok := oauthV2TokenResponse("https://chat.example/base", token, false)["incoming_webhook"].(map[string]any)
 	if !ok {
 		t.Fatal("bot install with a webhook carried no incoming_webhook")
 	}
 	if hook["channel"] != "#general" || hook["channel_id"] != domain.ConversationID("C1") ||
-		hook["url"] != "https://hooks.slack.com/services/T1/A1/whsec_abc" ||
-		hook["configuration_url"] != "https://hooks.slack.com/services/T1/A1" {
+		hook["url"] != "https://chat.example/base/services/T1/A1/whsec_abc" ||
+		hook["configuration_url"] != "https://chat.example/base/app/apps/A1" {
 		t.Fatalf("incoming_webhook = %+v", hook)
 	}
-	if _, present := oauthV2TokenResponse(domain.OAuthToken{TokenType: domain.TokenBot}, false)["incoming_webhook"]; present {
+	if _, present := oauthV2TokenResponse("https://chat.example", domain.OAuthToken{TokenType: domain.TokenBot}, false)["incoming_webhook"]; present {
 		t.Fatal("a token with no webhook still carried an incoming_webhook")
+	}
+}
+
+// The configured public URL wins over the request's Host header, which a
+// proxy may rewrite and a client may forge, and an already-absolute value from
+// an older chat process passes through unchanged during a rolling deploy.
+func TestPublicBaseURLPrefersTheConfiguredURL(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/oauth.v2.access", nil)
+	request.Host = "internal:8080"
+	var handler Handler
+	if got := handler.publicBaseURL(request); got != "http://internal:8080" {
+		t.Fatalf("unconfigured base URL=%q", got)
+	}
+	if err := handler.SetPublicURL("https://chat.example/"); err != nil {
+		t.Fatal(err)
+	}
+	if got := handler.publicBaseURL(request); got != "https://chat.example" {
+		t.Fatalf("configured base URL=%q", got)
+	}
+	for _, invalid := range []string{"", "chat.example", "ftp://chat.example", "https://chat.example/?q=1"} {
+		if err := (&Handler{}).SetPublicURL(invalid); err == nil {
+			t.Errorf("SetPublicURL(%q) accepted", invalid)
+		}
+	}
+	if got := publicURL("https://chat.example", "https://legacy.example/services/T1/A1/s"); got != "https://legacy.example/services/T1/A1/s" {
+		t.Fatalf("absolute value rewritten to %q", got)
 	}
 }
 

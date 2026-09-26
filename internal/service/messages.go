@@ -8821,11 +8821,20 @@ func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID do
 	return value, secret, nil
 }
 
-// incomingWebhookURL is the address an app posts to trigger its webhook. It
-// matches the shape admin incoming-webhook creation returns, so an app sees one
-// URL scheme however the hook was minted.
-func incomingWebhookURL(workspaceID domain.WorkspaceID, appID domain.AppID, secret string) string {
-	return "https://hooks.slack.com/services/" + string(workspaceID) + "/" + string(appID) + "/" + secret
+// IncomingWebhookPath is the path, under the deployment's public base URL, an
+// app posts to trigger its webhook: the route the Slack API handler serves at
+// POST /services/{workspace}/{app}/{secret}. Install and admin creation both
+// use it, so an app sees one URL shape however the hook was minted. It is a
+// path because the host is the deployment's, never Slack's.
+func IncomingWebhookPath(workspaceID domain.WorkspaceID, appID domain.AppID, secret string) string {
+	return "/services/" + url.PathEscape(string(workspaceID)) + "/" + url.PathEscape(string(appID)) + "/" + url.PathEscape(secret)
+}
+
+// IncomingWebhookConfigurationPath is the page where a workspace member
+// manages the app that owns a webhook, which is what Slack's
+// configuration_url links to.
+func IncomingWebhookConfigurationPath(appID domain.AppID) string {
+	return "/app/apps/" + url.PathEscape(string(appID))
 }
 
 // createInstallIncomingWebhook mints the incoming webhook an install asked for,
@@ -8878,8 +8887,8 @@ func (m Messages) createInstallIncomingWebhook(ctx context.Context, token domain
 	}
 	token.IncomingWebhookID = id
 	token.IncomingWebhookChannelName = conversation.Name
-	token.IncomingWebhookURL = incomingWebhookURL(token.WorkspaceID, token.AppID, secret)
-	token.IncomingWebhookConfigURL = "https://hooks.slack.com/services/" + string(token.WorkspaceID) + "/" + string(token.AppID)
+	token.IncomingWebhookPath = IncomingWebhookPath(token.WorkspaceID, token.AppID, secret)
+	token.IncomingWebhookConfigPath = IncomingWebhookConfigurationPath(token.AppID)
 	return token
 }
 

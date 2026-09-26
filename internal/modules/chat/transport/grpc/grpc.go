@@ -4403,8 +4403,8 @@ func decodeOAuthToken(value *chatv1.OAuthToken) domain.OAuthToken {
 		IncomingWebhookChannel:     domain.ConversationID(value.GetIncomingWebhookChannel()),
 		IncomingWebhookChannelName: value.GetIncomingWebhookChannelName(),
 		IncomingWebhookID:          domain.IncomingWebhookID(value.GetIncomingWebhookId()),
-		IncomingWebhookURL:         value.GetIncomingWebhookUrl(),
-		IncomingWebhookConfigURL:   value.GetIncomingWebhookConfigUrl(),
+		IncomingWebhookPath:        value.GetIncomingWebhookUrl(),
+		IncomingWebhookConfigPath:  value.GetIncomingWebhookConfigUrl(),
 	}
 	if value.GetExpiresAtUnixNano() != 0 {
 		token.ExpiresAt = time.Unix(0, value.GetExpiresAtUnixNano()).UTC()
@@ -8379,8 +8379,8 @@ func encodeOAuthToken(value domain.OAuthToken) *chatv1.OAuthToken {
 		IncomingWebhookChannel:     string(value.IncomingWebhookChannel),
 		IncomingWebhookChannelName: value.IncomingWebhookChannelName,
 		IncomingWebhookId:          string(value.IncomingWebhookID),
-		IncomingWebhookUrl:         value.IncomingWebhookURL,
-		IncomingWebhookConfigUrl:   value.IncomingWebhookConfigURL,
+		IncomingWebhookUrl:         value.IncomingWebhookPath,
+		IncomingWebhookConfigUrl:   value.IncomingWebhookConfigPath,
 	}
 	if !value.ExpiresAt.IsZero() {
 		token.ExpiresAtUnixNano = value.ExpiresAt.UTC().UnixNano()

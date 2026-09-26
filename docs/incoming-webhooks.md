@@ -8,8 +8,16 @@ Someoldchat implements Slack Incoming Webhook delivery through the
 the plain-text body `ok`.
 
 Each webhook belongs to one workspace, application, and conversation. The
-endpoint does not accept a channel override. The secret is returned once by
-the internal administrative API and stored only as a SHA-256 hash.
+endpoint does not accept a channel override. The secret is returned once — by
+the internal administrative API, or in the `incoming_webhook` object of the
+`oauth.v2.access` response when an install requested the `incoming-webhook`
+scope — and stored only as a SHA-256 hash.
+
+The returned `url` is absolute and names this deployment, never
+`hooks.slack.com`: it is built from `-auth-public-url` when that is configured
+and from the origin the request reached otherwise, the same rule the web
+handler uses for interaction `response_url`s. The install response's
+`configuration_url` is the installed app's page, `/app/apps/{app_id}`.
 
 Administrators create a webhook with
 `/internal/admin/incoming-webhooks/create`, providing `app_id`, `channel_id`,

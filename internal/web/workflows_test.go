@@ -289,7 +289,7 @@ func TestWorkflowBuilderConfiguresScheduledWebhookAndEventTriggers(t *testing.T)
 		t.Fatalf("webhook trigger=%d: %s", hooked.Code, hooked.Body)
 	}
 	page = get(t, mux, hooked.Header().Get("Location"))
-	requireContains(t, "webhook trigger", page.Body.String(), "Deploy hook", "Webhook URL", "/services/triggers/T1/")
+	requireContains(t, "webhook trigger", page.Body.String(), "Deploy hook", "Webhook URL", "http://example.com/services/triggers/T1/")
 	invokePath := regexp.MustCompile(`(/services/triggers/T1/Ft[0-9a-f]+/[0-9a-f]+)`).FindString(page.Body.String())
 	if invokePath == "" {
 		t.Fatalf("webhook URL not rendered: %s", page.Body)

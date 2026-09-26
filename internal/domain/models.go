@@ -613,11 +613,16 @@ type OAuthToken struct {
 	// webhook and the oauth.v2.access response hands its coordinates back, the
 	// one time the app ever sees the URL. IncomingWebhookChannel travels from the
 	// consumed code; the rest are the freshly created hook.
+	//
+	// The two paths are relative to the deployment's public base URL, which only
+	// the HTTP boundary knows; it makes them absolute for the response. Minting
+	// an absolute URL here used to hard-code Slack's own host, so an app posted
+	// its webhook to hooks.slack.com instead of this deployment.
 	IncomingWebhookChannel     ConversationID
 	IncomingWebhookChannelName string
 	IncomingWebhookID          IncomingWebhookID
-	IncomingWebhookURL         string
-	IncomingWebhookConfigURL   string
+	IncomingWebhookPath        string
+	IncomingWebhookConfigPath  string
 }
 
 // OAuthRefreshGrant is the durable, one-time capability behind a rotating

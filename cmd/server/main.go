@@ -367,6 +367,15 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	if *apiRateLimit {
 		slackHandler.Limiter = slack.NewRateLimiter()
 	}
+	// The Slack API hands apps absolute URLs (incoming webhooks, OAuth
+	// authorization) and must build them from the same public coordinate the
+	// web handler uses, not from a request's Host header.
+	if strings.TrimSpace(settings.authPublicURL) != "" {
+		if publicErr := slackHandler.SetPublicURL(settings.authPublicURL); publicErr != nil {
+			logger.Error("configure Slack API public URL", "error", publicErr)
+			return exitConfiguration
+		}
+	}
 	slackHandler.Register(mux)
 	if socketModeStore != nil {
 		slackHandler.ConfigureSocketMode(socketmode.Service{Store: socketModeStore, Host: resolved.socketHost, TLS: *socketTLS}, socketModeAuth)
