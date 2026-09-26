@@ -561,7 +561,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 175
+const schemaVersion = 176
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -626,6 +626,65 @@ func insertOutbox(ctx context.Context, tx txRunner, event events.Event) error {
 func insertOutboxForConversation(ctx context.Context, tx txRunner, event events.Event, conversation domain.ConversationID) error {
 	_, err := tx.ExecContext(ctx, insertOutboxForConversationStatement, event.ID, event.ActorID, event.Topic, event.Payload, event.PrivatePayload, domain.NewStoredTime(event.CreatedAt), conversation)
 	return err
+}
+
+// outboxCommitOrderStatements make an outbox sequence's order its commit order
+// on PostgreSQL.
+//
+// Every journal reader resumes with "sequence > cursor". That is only sound if
+// no record can become visible below a sequence a reader has already passed.
+// A PostgreSQL identity is allocated when the row is inserted, not when its
+// transaction commits, so two writers could commit out of order: B inserted
+// after A, committed first, a reader advanced past B, and A — committed a
+// moment later below the reader's cursor — was never delivered to any stream,
+// app or worker that reads by cursor.
+//
+// The row is inserted with a provisional, negative identity, which no reader
+// can pass: every cursor is non-negative, and the row is invisible to other
+// transactions until it commits anyway. A deferred constraint trigger runs at
+// commit time, after every other statement of the transaction, takes a
+// transaction-scoped advisory lock and only then gives the row its final
+// sequence from sameoldchat_outbox_committed. The lock is released after the
+// commit is visible, so the next committer's sequence is higher than every
+// sequence already visible: allocation order is commit order. Because the lock
+// is taken only in the commit phase, after the transaction's own row locks are
+// all held, it cannot form a deadlock with them, which taking it at insert time
+// would.
+//
+// What it costs: event-producing commits are serialized with one another —
+// other writes, and everything before the commit, still run concurrently — and
+// each outbox row is written twice. The committed sequence stays dense apart
+// from rolled-back transactions, as it was.
+//
+// SQLite and dqlite need none of this: SQLite allocates AUTOINCREMENT under the
+// database write lock, which is held until commit, and dqlite applies one
+// transaction at a time through its Raft leader, so on both a later sequence is
+// always a later commit.
+var outboxCommitOrderStatements = []string{
+	// The ALTER comes first because it holds the table exclusively until the
+	// migration commits, so no writer can take a sequence between the counter
+	// being positioned and the provisional range taking over.
+	`ALTER TABLE outbox ALTER COLUMN sequence SET INCREMENT BY -1 SET MINVALUE -9223372036854775808 SET MAXVALUE -1 SET START WITH -1 RESTART WITH -1`,
+	`CREATE SEQUENCE IF NOT EXISTS sameoldchat_outbox_committed AS BIGINT`,
+	`SELECT setval('sameoldchat_outbox_committed', COALESCE(MAX(sequence), 0) + 1, false) FROM outbox`,
+	`CREATE OR REPLACE FUNCTION sameoldchat_outbox_commit_order() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	PERFORM pg_advisory_xact_lock(hashtext(current_database() || '.' || current_schema()), hashtext('sameoldchat-outbox-commit-order'));
+	UPDATE outbox SET sequence = nextval('sameoldchat_outbox_committed') WHERE id = NEW.id;
+	RETURN NULL;
+END
+$$`,
+	`DROP TRIGGER IF EXISTS sameoldchat_outbox_commit_order ON outbox`,
+	`CREATE CONSTRAINT TRIGGER sameoldchat_outbox_commit_order AFTER INSERT ON outbox DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION sameoldchat_outbox_commit_order()`,
+}
+
+func installOutboxCommitOrder(ctx context.Context, db queryExecutor) error {
+	for _, statement := range outboxCommitOrderStatements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("install outbox commit order: %w", err)
+		}
+	}
+	return nil
 }
 
 type Store struct {
@@ -3333,6 +3392,11 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 		)`); err != nil {
 			return fmt.Errorf("migrate assistant threads: %w", err)
+		}
+	}
+	if version < 176 && !s.sqliteDialect {
+		if err := installOutboxCommitOrder(ctx, db); err != nil {
+			return err
 		}
 	}
 	if version < 175 {
