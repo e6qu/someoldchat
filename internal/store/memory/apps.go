@@ -274,8 +274,14 @@ func (s *Store) ConsumeAppTrigger(_ context.Context, tokenHash string, appID dom
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, exists := s.appTriggers[tokenHash]
-	if !exists || value.AppID != appID || !value.ExpiresAt.After(now) || !value.ConsumedAt.IsZero() {
+	if !exists || value.AppID != appID {
 		return domain.AppTrigger{}, store.ErrNotFound
+	}
+	if !value.ConsumedAt.IsZero() {
+		return domain.AppTrigger{}, store.ErrTriggerExchanged
+	}
+	if !value.ExpiresAt.After(now) {
+		return domain.AppTrigger{}, store.ErrTriggerExpired
 	}
 	value.ConsumedAt = now
 	s.appTriggers[tokenHash] = value

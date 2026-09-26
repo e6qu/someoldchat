@@ -992,6 +992,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestDialogOpenHTTP
+      - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
   - method: dnd.endDnd
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1283,21 +1284,26 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
+      - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
   - method: views.publish
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
+      - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
   - method: views.push
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
+      - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
   - method: views.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
+      - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
+      - go-test:internal/api/slack:TestViewsUpdatePreservesEnteredState
   - method: workflows.stepCompleted
     status: behavior-compatible
     provenance: slack-api-specs-openapi

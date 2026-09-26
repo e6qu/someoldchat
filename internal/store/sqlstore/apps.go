@@ -345,8 +345,11 @@ func (s *Store) ConsumeAppTrigger(ctx context.Context, tokenHash string, appID d
 			return translateNotFound(err)
 		}
 		now := time.Now().UTC()
-		if consumedAt != 0 || expiresAt <= now.UnixNano() {
-			return store.ErrNotFound
+		if consumedAt != 0 {
+			return store.ErrTriggerExchanged
+		}
+		if expiresAt <= now.UnixNano() {
+			return store.ErrTriggerExpired
 		}
 		result, err := tx.ExecContext(ctx, `UPDATE app_triggers SET consumed_at = ? WHERE token_hash = ? AND app_id = ? AND consumed_at = 0 AND expires_at > ?`, now.UnixNano(), tokenHash, appID, now.UnixNano())
 		if err != nil {
@@ -357,7 +360,8 @@ func (s *Store) ConsumeAppTrigger(ctx context.Context, tokenHash string, appID d
 			return err
 		}
 		if changed != 1 {
-			return store.ErrNotFound
+			// A concurrent consumer won the conditional update.
+			return store.ErrTriggerExchanged
 		}
 		value.CreatedAt = time.Unix(0, createdAt).UTC()
 		value.ExpiresAt = time.Unix(0, expiresAt).UTC()

@@ -206,6 +206,13 @@ var (
 	// classified error — AGENTS.md: handled errors must not become HTTP 500 —
 	// instead of as raw driver text.
 	ErrTransient = errors.New("transient storage failure")
+	// ErrTriggerExchanged and ErrTriggerExpired distinguish the two ways an
+	// existing interaction trigger stops being usable. Slack reports them as
+	// exchanged_trigger_id / expired_trigger_id (views.*) and
+	// trigger_exchanged / trigger_expired (dialog.open) rather than as an
+	// unknown trigger, which stays ErrNotFound.
+	ErrTriggerExchanged = errors.New("trigger already exchanged")
+	ErrTriggerExpired   = errors.New("trigger expired")
 )
 
 // InvalidArgument classifies a malformed request as a caller mistake.

@@ -286,7 +286,7 @@ var scopeArguments = map[string][]int{
 // literal they return is a code they can emit.
 var codeReturningFunctions = map[string]struct{}{
 	"mapServiceErrorNamed": {}, "mapAdminError": {}, "postMessageError": {},
-	"decodeErrorCode": {},
+	"decodeErrorCode": {}, "viewMethodError": {},
 }
 
 // handlerFacts reads every function declared in this package's source.

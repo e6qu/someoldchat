@@ -1375,11 +1375,7 @@ func (h Handler) viewsOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.OpenView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["trigger_id"]), fields["view"])
 	if err != nil {
-		reason := mapServiceError(err, "invalid_arguments")
-		if errors.Is(err, service.ErrInvalidTrigger) {
-			reason = "invalid_trigger"
-		}
-		writeError(w, reason)
+		writeError(w, viewMethodError(err))
 		return
 	}
 	writeViewResponse(w, value)
@@ -1407,7 +1403,7 @@ func (h Handler) viewsPublish(w http.ResponseWriter, r *http.Request) {
 			writeError(w, "not_enabled")
 			return
 		}
-		writeError(w, mapServiceError(err, "view_not_found"))
+		writeError(w, viewMethodError(err))
 		return
 	}
 	writeViewResponse(w, value)
@@ -1426,11 +1422,7 @@ func (h Handler) viewsPush(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.PushView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["trigger_id"]), fields["view"])
 	if err != nil {
-		reason := mapServiceError(err, "invalid_arguments")
-		if errors.Is(err, service.ErrInvalidTrigger) {
-			reason = "invalid_trigger"
-		}
-		writeError(w, reason)
+		writeError(w, viewMethodError(err))
 		return
 	}
 	writeViewResponse(w, value)
@@ -1449,10 +1441,28 @@ func (h Handler) viewsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.UpdateView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["view_id"]), strings.TrimSpace(fields["external_id"]), fields["view"], strings.TrimSpace(fields["hash"]))
 	if err != nil {
-		writeError(w, mapServiceError(err, "view_not_found"))
+		writeError(w, viewMethodError(err))
 		return
 	}
 	writeViewResponse(w, value)
+}
+
+// viewMethodError names a views.* failure with the codes Slack's method
+// references document. The legacy OpenAPI snapshot declares no enum for
+// views.*, so each non-pinned name is recorded in
+// error_mapping_completeness_test.go.
+func viewMethodError(err error) string {
+	switch {
+	case errors.Is(err, service.ErrTriggerExchanged):
+		return "exchanged_trigger_id"
+	case errors.Is(err, service.ErrTriggerExpired):
+		return "expired_trigger_id"
+	case errors.Is(err, service.ErrInvalidTrigger):
+		return "invalid_trigger_id"
+	case errors.Is(err, service.ErrViewPushLimit):
+		return "push_limit_reached"
+	}
+	return mapServiceErrorNamed(err, "not_found", "invalid_arguments", "duplicate_external_id")
 }
 
 // viewResponse renders a stored view. It used to panic when the stored payload was
@@ -2118,7 +2128,12 @@ func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Messages.OpenDialog(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["trigger_id"]), fields["dialog"]); err != nil {
 		reason := mapServiceError(err, "validation_errors")
-		if errors.Is(err, service.ErrInvalidTrigger) {
+		switch {
+		case errors.Is(err, service.ErrTriggerExchanged):
+			reason = "trigger_exchanged"
+		case errors.Is(err, service.ErrTriggerExpired):
+			reason = "trigger_expired"
+		case errors.Is(err, service.ErrInvalidTrigger):
 			reason = "invalid_trigger"
 		}
 		writeError(w, reason)
@@ -10974,7 +10989,7 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, service.ErrScheduledStatusLimit) {
 		return "restricted_too_many"
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidProfileField) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidListTemplate) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrInvalidActivitySavedView) || errors.Is(err, service.ErrInvalidSidebarSection) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) || errors.Is(err, service.ErrInvalidAssistantThread) || errors.Is(err, service.ErrAppNotDistributable) || errors.Is(err, service.ErrInvalidExternalAuthProvider) || errors.Is(err, service.ErrExternalAuthConnection) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidProfileField) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidListTemplate) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrInvalidActivitySavedView) || errors.Is(err, service.ErrInvalidSidebarSection) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrTriggerExchanged) || errors.Is(err, service.ErrTriggerExpired) || errors.Is(err, store.ErrTriggerExchanged) || errors.Is(err, store.ErrTriggerExpired) || errors.Is(err, service.ErrViewPushLimit) || errors.Is(err, service.ErrSlashCommandInThread) || errors.Is(err, service.ErrInvalidAssistantThread) || errors.Is(err, service.ErrAppNotDistributable) || errors.Is(err, service.ErrInvalidExternalAuthProvider) || errors.Is(err, service.ErrExternalAuthConnection) {
 		return invalidReason
 	}
 	if errors.Is(err, service.ErrAppInteractionUnavailable) {

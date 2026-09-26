@@ -34,7 +34,15 @@ var (
 	ErrSlashCommandNotFound      = errors.New("slash command was not found")
 	ErrSlashCommandInThread      = errors.New("slash commands cannot be invoked in threads")
 	ErrInvalidAppResponse        = errors.New("application response is invalid")
-	ErrInvalidTrigger            = errors.New("trigger_id is invalid or expired")
+	ErrInvalidTrigger            = errors.New("trigger_id is invalid")
+	// ErrTriggerExchanged and ErrTriggerExpired name a trigger that existed
+	// but was already used or outlived its three seconds; Slack reports each
+	// outcome separately from an unknown trigger (ErrInvalidTrigger).
+	ErrTriggerExchanged = errors.New("trigger_id was already exchanged")
+	ErrTriggerExpired   = errors.New("trigger_id expired")
+	// ErrViewPushLimit reports a push onto a modal stack that already holds
+	// Slack's maximum of three views.
+	ErrViewPushLimit = errors.New("modal view stack is full")
 )
 
 func (m Messages) consumeAppTrigger(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, triggerID string) (domain.AppTrigger, error) {
@@ -42,6 +50,12 @@ func (m Messages) consumeAppTrigger(ctx context.Context, workspaceID domain.Work
 		return domain.AppTrigger{}, ErrInvalidTrigger
 	}
 	trigger, err := m.Store.ConsumeAppTrigger(ctx, domain.HashToken(strings.TrimSpace(triggerID)), appID)
+	if errors.Is(err, store.ErrTriggerExchanged) {
+		return domain.AppTrigger{}, ErrTriggerExchanged
+	}
+	if errors.Is(err, store.ErrTriggerExpired) {
+		return domain.AppTrigger{}, ErrTriggerExpired
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return domain.AppTrigger{}, ErrInvalidTrigger
 	}
@@ -553,7 +567,6 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.ViewInteractionResult{}, err
 	}
-	view["state"] = state
 	_, _, capability, err := m.createInteractionCapabilities(ctx, current.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
 	if err != nil {
 		return domain.ViewInteractionResult{}, err
@@ -585,49 +598,75 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 	return m.applyViewSubmissionResponse(ctx, current, userID, body, "")
 }
 
+// CloseView dismisses a modal its owner is looking at. Closing is a client
+// action in Slack: it succeeds even after the owning app was uninstalled or
+// its interactivity was disabled. Authorization therefore rests on view
+// ownership alone, the view is deleted first, and view_closed is delivered
+// only when the view asked for it and the app can still receive it. A
+// delivery failure is returned after the close so the client can say so.
 func (m Messages) CloseView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, viewID domain.ViewID, clear bool, responseBaseURL string) error {
-	current, snapshot, parsed, workspace, user, err := m.viewInteractionContext(ctx, workspaceID, userID, conversationID, viewID, "modal")
-	if err != nil {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
+	}
+	current, err := m.Store.GetView(ctx, workspaceID, viewID)
+	if err != nil || current.UserID != userID || current.Type != "modal" {
+		return store.ErrNotFound
 	}
 	var envelope struct {
 		NotifyOnClose bool `json:"notify_on_close"`
 	}
 	_ = json.Unmarshal([]byte(current.Payload), &envelope)
-	var notifyErr error
-	if envelope.NotifyOnClose {
-		view, renderErr := appInteractionView(current)
-		if renderErr != nil {
-			return renderErr
-		}
-		_, _, capability, capabilityErr := m.createInteractionCapabilities(ctx, current.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
-		if capabilityErr != nil {
-			return capabilityErr
-		}
-		verificationToken, tokenErr := m.openAppVerificationToken(snapshot.App)
-		if tokenErr != nil {
-			return tokenErr
-		}
-		payload := map[string]any{
-			"type": "view_closed", "api_app_id": current.AppID, "token": verificationToken, "is_cleared": clear,
-			"team": map[string]any{"id": workspace.ID, "domain": workspace.Domain},
-			"user": map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
-			"view": view,
-		}
-		if parsed.SocketModeEnabled {
-			notifyErr = m.enqueueSocketModeInteraction(ctx, current.AppID, workspaceID, userID, "interactive", payload, capability)
-		} else {
-			encoded, encodeErr := json.Marshal(payload)
-			if encodeErr != nil {
-				return encodeErr
-			}
-			_, notifyErr = m.postSignedAppForm(ctx, parsed.InteractivityRequestURL, snapshot.App, url.Values{"payload": {string(encoded)}})
-		}
-	}
+	view, renderErr := appInteractionView(current)
 	if err := m.deleteView(ctx, workspaceID, userID, current, clear, "view.closed"); err != nil {
 		return err
 	}
-	return notifyErr
+	if !envelope.NotifyOnClose || renderErr != nil {
+		return nil
+	}
+	snapshot, parsed, err := m.installedApp(ctx, workspaceID, current.AppID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.InteractivityRequestURL == "") {
+		return nil
+	}
+	if m.requireConversationMembership(ctx, workspaceID, userID, conversationID) != nil {
+		conversationID = ""
+	}
+	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	user, err := m.Store.GetUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	_, _, capability, err := m.createInteractionCapabilities(ctx, current.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
+	if err != nil {
+		return err
+	}
+	verificationToken, err := m.openAppVerificationToken(snapshot.App)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"type": "view_closed", "api_app_id": current.AppID, "token": verificationToken, "is_cleared": clear,
+		"team": map[string]any{"id": workspace.ID, "domain": workspace.Domain},
+		"user": map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
+		"view": view,
+	}
+	if parsed.SocketModeEnabled {
+		return m.enqueueSocketModeInteraction(ctx, current.AppID, workspaceID, userID, "interactive", payload, capability)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = m.postSignedAppForm(ctx, parsed.InteractivityRequestURL, snapshot.App, url.Values{"payload": {string(encoded)}})
+	return err
 }
 
 func (m Messages) viewInteractionContext(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, viewID domain.ViewID, requiredType string) (domain.View, domain.AppManifestSnapshot, appmanifest.Parsed, domain.Workspace, domain.User, error) {
@@ -679,6 +718,15 @@ func appInteractionView(value domain.View) (map[string]any, error) {
 	result["root_view_id"] = value.RootViewID
 	result["previous_view_id"] = value.PreviousViewID
 	result["external_id"] = value.ExternalID
+	// Slack includes the view's current input state on every view carried in
+	// an interaction payload; Bolt reads view.state.values unconditionally.
+	state := any(map[string]any{"values": map[string]any{}})
+	if strings.TrimSpace(value.State) != "" {
+		if json.Unmarshal([]byte(value.State), &state) != nil {
+			return nil, ErrInvalidAppResponse
+		}
+	}
+	result["state"] = state
 	return result, nil
 }
 
