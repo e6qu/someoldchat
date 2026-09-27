@@ -770,7 +770,7 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
     buffer: Buffer.from('browser file contents'),
   });
   await expect(page.locator('#live-status')).toContainText('saved with this draft');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send now', exact: true }).click();
 
   await expect(page).toHaveURL(/\/app\?channel=Cdev/);
   const card = page.locator('.message-file', { hasText: title }).last();
@@ -827,7 +827,7 @@ test('[FILE-01] staged attachments can be reordered before sending', async ({ pa
   await expectNoSeriousAccessibilityViolations(page);
 
   // Sending honours the new order: the message's files read bravo then alpha.
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send now', exact: true }).click();
   const files = page.locator('.message').last().locator('.message-file');
   await expect(files).toHaveCount(2);
   await expect(files.nth(0)).toContainText('bravo.txt');
@@ -848,7 +848,7 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
     buffer: Buffer.from(`file contents for ${needle}`),
   });
   await expect(page.locator('#live-status')).toContainText('saved with this draft');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send now', exact: true }).click();
   await expect(page.locator('.message-file', { hasText: fileTitle })).toBeVisible();
 
   const { primary } = await slackModifiers(page);
@@ -1544,6 +1544,265 @@ test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions ho
   // The earlier messages are intentionally referenced so the journey proves
   // arrow navigation follows chronology rather than a coincidental last row.
   expect(first.ts).not.toBe(second.ts);
+});
+
+// The composer's own chrome, as the audit found it: a raw file input showed
+// above it because a display rule beat [hidden], suggestion lists were placed
+// against the page rather than the composer, Escape left its menus open,
+// Enter on an empty composer raised the browser's "Please fill out this
+// field", and a long message was cut at 40,000 characters without a word.
+test('[COMP-01 COMP-02 COMP-03 A11Y-01] the composer draws Slack\'s controls, anchors its suggestions and refuses nothing silently', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const form = page.locator('#composer');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
+  await expect(composer).toBeFocused();
+  await expect(page.locator('#upload-file')).toBeHidden();
+  await expect(composerValue).toBeHidden();
+
+  // Slack's order: the formatting bar above the text, then the bottom row.
+  const formatting = await form.getByRole('toolbar', { name: 'Formatting' }).getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label')));
+  expect(formatting).toEqual(['Bold', 'Italic', 'Strikethrough', 'Link', 'Ordered list', 'Bulleted list', 'Blockquote', 'Code', 'Code block']);
+  const actions = await form.getByRole('toolbar', { name: 'Composer actions' }).locator('summary,button').evaluateAll((controls) => controls.filter((control) => !control.closest('[role=menu]') && !control.hidden).map((control) => control.getAttribute('aria-label')));
+  expect(actions).toEqual(['Attach', 'Hide formatting', 'Emoji', 'Mention someone', 'Record video clip', 'Record audio clip', 'Shortcuts']);
+  await expect(form.getByRole('button', { name: 'Send now' })).toBeVisible();
+  await expect(form.getByRole('button', { name: 'Schedule for later' })).toBeVisible();
+
+  // Aa hides and shows the formatting bar, and says which it will do.
+  await form.getByRole('button', { name: 'Hide formatting' }).click();
+  await expect(form.getByRole('toolbar', { name: 'Formatting' })).toBeHidden();
+  await form.getByRole('button', { name: 'Show formatting' }).click();
+  await expect(form.getByRole('toolbar', { name: 'Formatting' })).toBeVisible();
+
+  // Escape closes the + and schedule menus and returns to their control.
+  const attach = form.getByRole('button', { name: 'Attach' });
+  await attach.click();
+  await expect(page.getByRole('menuitem', { name: 'Upload from your computer' })).toBeFocused();
+  await expect(page.getByRole('menu', { name: 'Attach' }).getByRole('menuitem')).toHaveText(['Upload from your computer', 'Canvas', 'List', 'Workflow', 'Text snippet', 'Shortcuts']);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'Attach' })).toBeHidden();
+  await expect(attach).toBeFocused();
+  const schedule = form.getByRole('button', { name: 'Schedule for later' });
+  await schedule.click();
+  await expect(page.getByRole('menu', { name: 'Schedule message' }).getByRole('menuitem')).toHaveText([/^Tomorrow at 9:00\sAM$/, /^Monday at 9:00\sAM$/, 'Custom time']);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'Schedule message' })).toBeHidden();
+
+  // Enter on an empty composer does nothing: no request and no validation bubble.
+  let posts = 0;
+  page.on('request', (request) => { if (request.method() === 'POST' && request.url().includes('/app/message')) posts += 1; });
+  await composer.focus();
+  await composer.press('Enter');
+  await expect(page.locator('#composer-error')).toBeHidden();
+  expect(posts).toBe(0);
+
+  // The suggestion list opens above this composer, not at the page's corner.
+  await composer.pressSequentially('@');
+  const suggestions = page.getByRole('listbox', { name: 'Mention suggestions' });
+  await expect(suggestions).toBeVisible();
+  await expect(composer).toHaveAttribute('aria-expanded', 'true');
+  const listBox = await suggestions.boundingBox();
+  const formBox = await form.boundingBox();
+  expect(listBox.y + listBox.height).toBeLessThanOrEqual(formBox.y + 1);
+  expect(listBox.x).toBeGreaterThanOrEqual(formBox.x - 1);
+  expect(listBox.x + listBox.width).toBeLessThanOrEqual(formBox.x + formBox.width + 1);
+  await expect(suggestions.getByRole('option', { name: /@here.*Notify everyone online in this channel/ })).toBeVisible();
+  await expect(suggestions.getByRole('option', { name: /@channel.*Notify everyone in this channel/ })).toBeVisible();
+  await composer.press('Escape');
+  await expect(suggestions).toBeHidden();
+  await expect(composer).toHaveAttribute('aria-expanded', 'false');
+  await expect(composerValue).toHaveValue('@');
+
+  // Emoji suggestions wait for two characters after the colon, as in Slack.
+  await composer.fill('');
+  await composer.pressSequentially('see you :s');
+  await expect(page.getByRole('listbox', { name: 'Emoji suggestions' })).toBeHidden();
+
+  // An over-limit message says by how much and is not sent or cut.
+  await composer.fill('');
+  await composer.evaluate((node) => { node.focus(); document.execCommand('insertText', false, 'x'.repeat(40005)); });
+  await expect(page.locator('#composer-count')).toHaveText('-5');
+  await composer.press('Enter');
+  await expect(page.locator('#composer-error')).toHaveText('Your message is too long. Shorten it by 5 characters to send it.');
+  expect((await composerValue.inputValue()).length).toBe(40005);
+  expect(posts).toBe(0);
+  await composer.fill('');
+
+  // Command/Control+U attaches from anywhere in the composer.
+  const { primary } = await slackModifiers(page);
+  await composer.focus();
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press(`${primary}+u`)]);
+  expect(chooser).toBeTruthy();
+  await expectNoSeriousAccessibilityViolations(page, '.channel-composer-wrap');
+});
+
+test('[COMP-02] formatting shortcuts write Slack markup, toggle off, and link the selection', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const { primary } = await slackModifiers(page);
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
+  const selectAll = () => composer.press(`${primary}+a`);
+
+  await composer.fill('word');
+  await selectAll();
+  await composer.press(`${primary}+b`);
+  await expect(composerValue).toHaveValue('*word*');
+  await expect(page.getByRole('button', { name: 'Bold' })).toHaveAttribute('aria-pressed', 'true');
+  await composer.press(`${primary}+b`);
+  await expect(composerValue).toHaveValue('word');
+
+  await selectAll();
+  await composer.press(`${primary}+Shift+c`);
+  await expect(composerValue).toHaveValue('`word`');
+  await composer.fill('first line');
+  await selectAll();
+  await composer.press(`${primary}+Alt+Shift+c`);
+  await expect(composerValue).toHaveValue('```first line```');
+
+  await composer.fill('one');
+  await composer.press(`${primary}+Shift+8`);
+  await composer.press('Shift+Enter');
+  await composer.pressSequentially('two');
+  await expect(composerValue).toHaveValue('• one\n• two');
+  await composer.press(`${primary}+Shift+8`);
+  await composer.press(`${primary}+Shift+7`);
+  await expect(composerValue).toHaveValue('one\n1. two');
+
+  await composer.fill('quoted');
+  await composer.press(`${primary}+Shift+9`);
+  await expect(composerValue).toHaveValue('&gt; quoted');
+  await composer.press('Enter');
+  await expect(page.locator('.message').last().locator('blockquote')).toHaveText('quoted');
+
+  // Typing Slack's markup formats it as you go.
+  await composer.pressSequentially('*done* and ');
+  await expect(composer.locator('b')).toHaveText('done');
+  await expect(composerValue).toHaveValue('*done* and ');
+
+  // Link keeps the selected text as the link's text.
+  await composer.fill('read the docs');
+  await composer.press('End');
+  for (let index = 0; index < 4; index += 1) await composer.press('Shift+ArrowLeft');
+  await composer.press(`${primary}+Shift+u`);
+  const dialog = page.getByRole('dialog', { name: 'Add link' });
+  await expect(dialog.getByLabel('Text')).toHaveValue('docs');
+  await dialog.getByLabel('Link').fill('example.org/docs');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(composerValue).toHaveValue('read the <https://example.org/docs|docs> ');
+  await expect(composer).toBeFocused();
+  await expect(page.locator('#composer').getByRole('button', { name: 'Link' })).toHaveAttribute('aria-keyshortcuts', /Shift\+U/);
+});
+
+test('[COMP-01 THREAD-01 THREAD-02 DRAFT-01] a thread keeps the conversation composer beside its own reply composer', async ({ page, context, request }) => {
+  await signIn(context);
+  const root = await postThroughTheAPI(request, `two composers ${Date.now()}`);
+  await page.goto(`/app?channel=${CHANNEL}&thread=${encodeURIComponent(root.ts)}`);
+  const channelComposer = composerEditor(page);
+  const replyComposer = composerEditor(page, 'thread-');
+  await expect(channelComposer).toBeVisible();
+  await expect(replyComposer).toBeVisible();
+  await expect(replyComposer).toBeFocused();
+  await expect(page.getByRole('checkbox', { name: 'Also send to #general' })).not.toBeChecked();
+
+  // Each keeps its own draft.
+  const channelDraft = `channel draft ${Date.now()}`;
+  const replyDraft = `reply draft ${Date.now()}`;
+  const saved = (text) => page.waitForResponse((response) => response.url().includes('/app/draft?') && new URLSearchParams(response.request().postData() || '').get('text') === text);
+  await Promise.all([saved(replyDraft), replyComposer.fill(replyDraft)]);
+  await Promise.all([saved(channelDraft), channelComposer.fill(channelDraft)]);
+  await page.reload();
+  await expect(composerField(page)).toHaveValue(channelDraft);
+  await expect(composerField(page, 'thread-')).toHaveValue(replyDraft);
+
+  // Also send to #general broadcasts the reply into the channel.
+  const reply = `broadcast reply ${Date.now()}`;
+  await replyComposer.fill(reply);
+  await page.getByRole('checkbox', { name: 'Also send to #general' }).check();
+  await replyComposer.press('Enter');
+  await expect(page.locator('#thread-messages .message-text').last()).toHaveText(reply);
+  await expect(composerField(page, 'thread-')).toHaveValue('');
+  await expect(composerField(page)).toHaveValue(channelDraft);
+  const history = await request.post('/api/conversations.replies', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL, ts: root.ts },
+  });
+  const replies = (await history.json()).messages;
+  expect(replies.find((message) => message.text === reply).subtype).toBe('thread_broadcast');
+
+  // The conversation composer still posts to the channel and keeps the thread open.
+  await channelComposer.fill(`to the channel ${Date.now()}`);
+  await channelComposer.press('Enter');
+  await expect(page.locator('#timeline .message-text').last()).toContainText('to the channel');
+  await expect(page).toHaveURL(/thread=/);
+  await expectNoSeriousAccessibilityViolations(page, '.thread');
+});
+
+test('[COMP-01 COMP-02] Preferences choose what Enter does and whether to write markup', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app/notifications');
+  await page.getByRole('radio', { name: /Start a new line/ }).check();
+  await page.goto('/app');
+  const { primary } = await slackModifiers(page);
+  const composer = composerEditor(page);
+  await composer.pressSequentially('line one');
+  await expect(page.locator('#composer-hint')).toContainText('to send');
+  await composer.press('Enter');
+  await composer.pressSequentially('line two');
+  await expect(composerField(page)).toHaveValue('line one\nline two');
+  await composer.press(`${primary}+Enter`);
+  await expect(page.locator('.message').last().locator('.message-text')).toContainText('line two');
+
+  await page.goto('/app/notifications');
+  await page.getByRole('radio', { name: 'Send the message' }).check();
+  await page.getByRole('checkbox', { name: 'Format messages with markup' }).check();
+  await page.goto('/app');
+  const markup = composerField(page);
+  await expect(markup).toBeVisible();
+  await expect(composerEditor(page)).toBeHidden();
+  await expect(page.locator('#composer-hint')).toContainText('to add a new line');
+  await markup.fill('plain');
+  await markup.evaluate((field) => field.setSelectionRange(0, field.value.length));
+  await markup.press(`${primary}+b`);
+  await expect(markup).toHaveValue('*plain*');
+  await markup.press(`${primary}+b`);
+  await expect(markup).toHaveValue('plain');
+});
+
+test('[SCHED-01] the schedule menu offers Slack\'s suggested times in the member\'s zone', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const message = `suggested time ${Date.now()}`;
+  await composerEditor(page).fill(message);
+  await page.getByRole('button', { name: 'Schedule for later' }).click();
+  await Promise.all([
+    page.waitForURL(/\/app\/drafts\?.*scheduled=1/),
+    page.getByRole('menuitem', { name: /^Tomorrow at 9:00/ }).click(),
+  ]);
+  const scheduled = page.locator('.scheduled-item', { hasText: message });
+  await expect(scheduled).toBeVisible();
+  await expect(scheduled).toContainText(/9:00/);
+  await scheduled.getByRole('button', { name: /Cancel scheduled message/ }).click();
+});
+
+test('[COMP-01 RESPONSIVE-01] the composer fits a narrow screen', async ({ page, context }) => {
+  await signIn(context);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/app');
+  const form = page.locator('#composer');
+  const box = await form.boundingBox();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(390);
+  for (const name of ['Attach', 'Emoji', 'Send now', 'Schedule for later']) {
+    const control = await form.getByRole('button', { name }).boundingBox();
+    expect(control.x + control.width, `${name} is inside the screen`).toBeLessThanOrEqual(390);
+    expect(control.height, `${name} is a usable target`).toBeGreaterThanOrEqual(24);
+  }
+  await form.getByRole('button', { name: 'Schedule for later' }).click();
+  const menu = await page.getByRole('menu', { name: 'Schedule message' }).boundingBox();
+  expect(menu.x).toBeGreaterThanOrEqual(0);
+  expect(menu.x + menu.width).toBeLessThanOrEqual(390);
 });
 
 // Public channels are intentionally readable before joining, but that does not
@@ -3290,7 +3549,7 @@ test('[FILE-01 A11Y-01 A11Y-02] an uploaded image is shown and its uploader can 
     buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'),
   });
   await expect(page.locator('#live-status')).toContainText('saved with this draft');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send now', exact: true }).click();
   await expect(page).toHaveURL(/\/app\?channel=Cdev/);
 
   const card = page.locator('.message-file', { hasText: title });
@@ -4332,6 +4591,46 @@ test('[APP-03 APP-08 A11Y-01] App Home is published on open and re-rendered live
   } finally {
     socket.close();
   }
+});
+
+test('[COMP-03] a mention reaches the whole workspace and offers to add someone outside the channel', async ({ page, context, request }) => {
+  await signIn(context);
+  const redirectURI = 'https://client.example/mention-callback';
+  const name = `Mention bot ${Date.now()}`;
+  const bot = await createAndInstallApp(page, request, {
+    display_information: { name },
+    oauth_config: { redirect_urls: [redirectURI], scopes: { bot: ['chat:write'] } },
+  }, redirectURI);
+  // A channel of its own, so adding the app changes no other journey's
+  // membership. Installing it adds a workspace member, which is why this
+  // journey runs after every journey that counts members, and before
+  // signing out, which must stay last.
+  const created = await request.post('/api/conversations.create', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { name: `mentions-${Date.now()}` },
+  });
+  const channel = (await created.json()).channel;
+  await page.goto(`/app?channel=${channel.id}`);
+  const composer = composerEditor(page);
+  await composer.pressSequentially('hello @Mention bot');
+  const suggestions = page.getByRole('listbox', { name: 'Mention suggestions' });
+  const option = suggestions.getByRole('option', { name: new RegExp(name) });
+  await expect(option).toContainText('Not in channel');
+  await expect(option).toContainText('App');
+  await option.click();
+  await expect(composerField(page)).toHaveValue(`hello <@${bot.botUserID}> `);
+  await expect(composer.locator('.composer-pill')).toHaveText(`@${name}`);
+  await composer.press('Enter');
+  const prompt = page.getByRole('group', { name: 'Mentioned people are not in this channel' });
+  await expect(prompt).toContainText(`@${name} isn’t in #${channel.name}.`);
+  await prompt.getByRole('button', { name: 'Add them' }).click();
+  await expect(prompt).toHaveCount(0);
+  await expect(page.locator('#live-status')).toHaveText(`Added @${name} to #${channel.name}.`);
+  const members = await request.post('/api/conversations.members', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: channel.id },
+  });
+  expect((await members.json()).members).toContain(bot.botUserID);
 });
 
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {

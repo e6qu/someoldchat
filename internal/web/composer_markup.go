@@ -165,6 +165,7 @@ const composerPartial = `{{define "composer"}}  {{if .CanUpload}}<form class="up
   <label><input type="radio" name="composer-enter" value="send" data-composer-preference="enter" checked> Send the message</label>
   <label><input type="radio" name="composer-enter" value="newline" data-composer-preference="enter"> Start a new line (use <kbd data-keyboard-apple>⌘</kbd><kbd data-keyboard-other>Ctrl</kbd> + <kbd>Enter</kbd> to send)</label>
   <label class="composer-preferences-markup"><input type="checkbox" data-composer-preference="markup"> Format messages with markup</label>
+  <p class="muted" data-composer-preference-status aria-live="polite">These preferences are saved in this browser and apply as soon as you choose them.</p>
 </fieldset>{{end}}`
 
 // composerStyle is the composer's presentation. The popovers are anchored to
@@ -173,7 +174,9 @@ const composerPartial = `{{define "composer"}}  {{if .CanUpload}}<form class="up
 // asked for it.
 const composerStyle = `<style>
 .composer-wrap{grid-area:composer;padding:6px 20px 4px;background:var(--panel-strong);min-width:0}
-.thread-composer-wrap{grid-area:auto;position:sticky;bottom:0;padding:8px 0 0;background:var(--panel);margin-top:8px}
+.thread:has(.thread-composer-wrap){display:flex;flex-direction:column;overflow:hidden}
+.thread:has(.thread-composer-wrap)>#thread-messages{flex:1 1 auto;min-height:0;overflow:auto}
+.thread-composer-wrap{grid-area:auto;flex:0 0 auto;padding:8px 0 0;background:var(--panel)}
 .composer{position:relative;border:1px solid var(--field-line);border-radius:9px;background:var(--panel-strong);padding:0;min-width:0}
 .composer:focus-within{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
 .composer.is-error{border-color:var(--danger)}
@@ -202,6 +205,8 @@ const composerStyle = `<style>
 .composer-tool[aria-pressed=true]{background:color-mix(in srgb,var(--action) 18%,transparent);color:var(--text)}
 .composer-plus-button{border-radius:50%;background:var(--hover)}
 .composer-separator{width:1px;height:18px;margin:0 4px;background:var(--line)}
+.send-actions [data-tip]:hover::after,.send-actions [data-tip]:focus-visible::after{left:auto;right:0;transform:none}
+.thread-composer-wrap .composer-tool{width:28px}.thread-composer-wrap .composer-separator{margin:0 2px}
 [data-tip]:hover::after,[data-tip]:focus-visible::after{content:attr(data-tip);position:absolute;z-index:20;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);padding:4px 8px;border-radius:5px;background:var(--text);color:var(--bg);font-size:12px;font-weight:700;white-space:nowrap;pointer-events:none}
 .composer-menu{position:relative}
 .composer-menu>summary{list-style:none}

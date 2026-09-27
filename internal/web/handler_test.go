@@ -3095,7 +3095,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 // which is precisely the failure no unit test would otherwise see.
 func TestTheDocumentAndItsContentSecurityPolicyAgree(t *testing.T) {
 	_, mux := browserWorkspace(t, auth.AllScopes())
-	for _, target := range []string{"/app?channel=Cdev", "/app/members", "/app/search?q=hello", "/app/activity?channel=Cdev", "/app/drafts?channel=Cdev"} {
+	for _, target := range []string{"/app?channel=Cdev", "/app/members", "/app/search?q=hello", "/app/activity?channel=Cdev", "/app/drafts?channel=Cdev", "/app/notifications?channel=Cdev"} {
 		response := get(t, mux, target)
 		policy := response.Header().Get("Content-Security-Policy")
 		if policy == "" {

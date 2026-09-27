@@ -294,7 +294,9 @@ func renderSlackInlineMarking(text string, customEmoji map[string]string, terms 
 	for offset := 0; offset < len(text); {
 		switch text[offset] {
 		case '\n':
-			output.WriteString("<br>\n")
+			// A bare <br>: message text is laid out with white-space:pre-wrap,
+			// where a newline after the tag drew every line break twice.
+			output.WriteString("<br>")
 			offset++
 		case '\\':
 			if offset+1 < len(text) && strings.ContainsRune(`\*_~`+"`", rune(text[offset+1])) {
