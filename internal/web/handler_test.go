@@ -1923,7 +1923,8 @@ func TestSidebarSeparatesDirectMessagesAndClearsTheOpenChannelBadge(t *testing.T
 	s.SeedConversationMember("Cdm", "U1")
 	s.SeedConversationMember("Cdm", "U2")
 	seedMessage(t, s, "M1", "hello", time.Unix(1700000000, 0).UTC())
-	other := domain.Message{ID: "M2", WorkspaceID: "T1", Conversation: "Cother", AuthorID: "U1", Text: "unread one", CreatedAt: time.Unix(1700000100, 0).UTC()}
+	// Another member's message: a member's own post is never unread to them.
+	other := domain.Message{ID: "M2", WorkspaceID: "T1", Conversation: "Cother", AuthorID: "U2", Text: "unread one", CreatedAt: time.Unix(1700000100, 0).UTC()}
 	if err := s.CreateMessage(context.Background(), other, events.Event{ID: "E2", WorkspaceID: "T1", Topic: "message.created", Payload: "M2", CreatedAt: other.CreatedAt}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -3338,7 +3339,14 @@ func TestPostMessageNeverRendersHistoryItCannotRead(t *testing.T) {
 func TestReadingIsSafeAndMarkingReadIsAMutation(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	created := time.Unix(1700000000, 0).UTC()
-	seedMessage(t, s, "M1", "hello", created)
+	// Another member's message, so there is something unread to mark: a
+	// member's own post reads the conversation for them.
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMessage(context.Background(), domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U2", Text: "hello", CreatedAt: created}, events.Event{ID: "EM1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
+		t.Fatal(err)
+	}
 
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); err == nil {
@@ -3765,6 +3773,9 @@ func TestHTMXPostMessage(t *testing.T) {
 	if !strings.Contains(res.Body.String(), "hello") {
 		t.Fatalf("body = %s", res.Body)
 	}
+	// Posting read the conversation for its author up to the post; the GET
+	// below must leave that cursor exactly where the post put it.
+	postedCursor, _ := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev")
 	indexResult := get(t, mux, "/app")
 	body := indexResult.Body.String()
 	if indexResult.Code != http.StatusOK {
@@ -3786,7 +3797,7 @@ func TestHTMXPostMessage(t *testing.T) {
 	requireMissing(t, "index", body, `href="/me"`, `<label class="search"`)
 	// Reading is a safe method and does not write; the read cursor is advanced
 	// by the explicit, CSRF-checked POST the page carries a form for.
-	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); err == nil {
+	if after, _ := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); after != postedCursor {
 		t.Fatal("GET /app advanced the read cursor")
 	}
 	page, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})

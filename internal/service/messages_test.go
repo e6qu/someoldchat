@@ -3314,3 +3314,27 @@ func TestListingTeamUsersRefusesAnUnsupportedRoleAsAWorkspaceError(t *testing.T)
 		}
 	}
 }
+
+// TestSetUserProfileStoresTitlePronounsAndAKnownTimezone pins PROFILE-01's
+// stored identity: title and pronouns are kept trimmed, a time zone must be one
+// the host can resolve (so a profile's local time is never silently wrong),
+// and an unknown zone is refused rather than stored.
+func TestSetUserProfileStoresTitlePronounsAndAKnownTimezone(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	messages := Messages{Store: s}
+	user, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{Title: " Staff Engineer ", Pronouns: " they/them ", Timezone: "America/New_York"})
+	if err != nil || user.Profile.Title != "Staff Engineer" || user.Profile.Pronouns != "they/them" || user.Profile.Timezone != "America/New_York" {
+		t.Fatalf("user=%+v err=%v", user.Profile, err)
+	}
+	for _, zone := range []string{"Mars/Olympus_Mons", "Local"} {
+		if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{Timezone: zone}); !errors.Is(err, ErrInvalidProfile) {
+			t.Fatalf("zone %q err=%v, want ErrInvalidProfile", zone, err)
+		}
+	}
+	stored, err := s.GetUser(context.Background(), "U1")
+	if err != nil || stored.Profile.Timezone != "America/New_York" {
+		t.Fatalf("a refused zone replaced the stored one: %+v err=%v", stored.Profile, err)
+	}
+}

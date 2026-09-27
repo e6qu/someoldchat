@@ -317,7 +317,7 @@ operations:
     deviations:
       - Relevance scoring is deterministic but has not been compared with Slack's ranking model.
       - Highlight markers wrap case-insensitive occurrences of each free-text term in message text only; attachment and block text are not marked.
-      - Relative dates resolve in the zone of the searcher's notification schedule, the only member time zone this product records, and in UTC when there is none.
+      - Relative dates resolve in the searcher's profile time zone (reported by their browser), else the zone of their notification schedule, and in UTC when there is neither.
       - Every reaction-specific modifier and live indexing-delay behavior remain unqualified.
     audit:
       downgraded_from: behavior-compatible
@@ -333,7 +333,7 @@ operations:
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
       - go-test:internal/api/slack:TestAdminUsersRemoveDeactivatesUser
     deviations:
-      - Nothing records a member's time zone, so every member reports tz UTC with a zero offset.
+      - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's abbreviation (for example EDT) rather than Slack's long name.
       - A workspace has owners but no distinguished primary owner, so every owner reports is_primary_owner.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: conversations.info
@@ -585,7 +585,7 @@ operations:
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
     deviations:
-      - Nothing records a member's time zone, so every member reports tz UTC with a zero offset.
+      - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's abbreviation (for example EDT) rather than Slack's long name.
       - A workspace has owners but no distinguished primary owner, so every owner reports is_primary_owner.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: users.lookupByEmail
@@ -670,7 +670,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
-      - Display name, status, expiration, image URL, and workspace-defined custom fields are settable, both through the profile object's fields map and through the single-field name/value form (a standard field or a custom field id), each validated against its field's declared type. Standard Slack profile fields this deployment does not store (first/last/real name, phone, title, pronouns) are refused rather than silently dropped.
+      - Display name, status, expiration, image URL, and workspace-defined custom fields are settable, both through the profile object's fields map and through the single-field name/value form (a standard field or a custom field id), each validated against its field's declared type. Title and pronouns are stored and settable through both forms. Standard Slack profile fields this deployment does not store (first/last/real name, phone, skype, start date, email) are refused rather than silently dropped.
       - Admin editing of another user, paid-plan restrictions, method-specific rate limits, and all token-type rules remain unqualified.
     audit:
       downgraded_from: behavior-compatible

@@ -7322,7 +7322,7 @@ func (s *Store) ListFollowedThreads(_ context.Context, workspace domain.Workspac
 			if message.CreatedAt.After(thread.LastReplyAt) {
 				thread.LastReplyAt = message.CreatedAt
 			}
-			if message.CreatedAt.After(readAt) {
+			if message.CreatedAt.After(readAt) && message.AuthorID != user {
 				thread.UnreadReplies++
 			}
 		}
@@ -7760,6 +7760,39 @@ func (s *Store) setReadCursorLocked(cursor domain.ReadCursor, readAt time.Time, 
 		}
 	}
 	s.outbox = append(s.outbox, event)
+}
+
+// advanceAuthorReadCursorLocked is the memory twin of the SQL profiles'
+// advanceAuthorReadCursorTx: posting into a conversation reads it up to the
+// posted message, as Slack does. See the SQL note for why a thread reply does
+// not move the cursor and why no second event is journalled.
+func (s *Store) advanceAuthorReadCursorLocked(message domain.Message) {
+	if !authorPostAdvancesReadCursor(message) {
+		return
+	}
+	key := readCursorKey(message.WorkspaceID, message.AuthorID, message.Conversation)
+	if current, ok := s.readCursors[key]; ok {
+		if readAt, err := domain.ParseMessageTimestamp(current.LastRead); err == nil && !message.CreatedAt.Truncate(time.Microsecond).After(readAt.Truncate(time.Microsecond)) {
+			return
+		}
+	}
+	cursor := domain.ReadCursor{WorkspaceID: message.WorkspaceID, UserID: message.AuthorID, Conversation: message.Conversation, LastRead: domain.NewMessageTimestamp(message.CreatedAt), UpdatedAt: message.CreatedAt.UTC()}
+	s.readCursors[key] = cursor
+	for id, item := range s.activityItems {
+		if item.WorkspaceID == cursor.WorkspaceID && item.UserID == cursor.UserID && item.Conversation == cursor.Conversation && item.ReadAt.IsZero() && !item.OccurredAt.After(message.CreatedAt) {
+			item.ReadAt = cursor.UpdatedAt
+			s.activityItems[id] = item
+		}
+	}
+}
+
+// authorPostAdvancesReadCursor is the rule both profiles share: a message the
+// conversation shows at top level (a root, or a reply also sent to the
+// channel) reads the conversation for its author. A plain thread reply does
+// not, because replying in a thread says nothing about the channel messages
+// posted since the member last looked at it.
+func authorPostAdvancesReadCursor(message domain.Message) bool {
+	return message.AuthorID != "" && (message.ThreadTimestamp == "" || message.ReplyBroadcast)
 }
 
 // LatestMessageTimestamps reports the newest undeleted message in each named
@@ -8311,13 +8344,13 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				// monotonic and breaks for imported pre-2001 timestamps. Both sides are
 				// truncated to the microsecond the wire format carries so the SQL
 				// repositories and this one count the same messages.
-				if !message.Deleted && message.CreatedAt.Truncate(time.Microsecond).After(lastRead.Truncate(time.Microsecond)) {
+				if !message.Deleted && message.AuthorID != user && message.CreatedAt.Truncate(time.Microsecond).After(lastRead.Truncate(time.Microsecond)) {
 					conversation.UnreadCount++
 				}
 			}
 		} else {
 			for _, message := range s.messages[conversation.ID] {
-				if !message.Deleted {
+				if !message.Deleted && message.AuthorID != user {
 					conversation.UnreadCount++
 				}
 			}
@@ -8523,6 +8556,7 @@ func (s *Store) commitMessageLocked(message domain.Message, event events.Event, 
 		}
 	}
 	s.createMessageActivityLocked(message)
+	s.advanceAuthorReadCursorLocked(message)
 	s.outbox = append(s.outbox, event)
 	if idempotencyKey != "" {
 		key := idempotencyKeyFor(message.WorkspaceID, message.AuthorID, idempotencyKey)

@@ -2005,8 +2005,12 @@ func TestSQLiteConversationUnreadCountFollowsReadCursor(t *testing.T) {
 	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
 		t.Fatal(err)
 	}
+	// Another member's message: a member's own posts are never unread to them.
+	if err := s.SeedUser(ctx, domain.User{ID: "U2", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
 	created := time.Now().UTC()
-	if err := s.CreateMessage(ctx, domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "unread", CreatedAt: created}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
+	if err := s.CreateMessage(ctx, domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U2", Text: "unread", CreatedAt: created}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
 	page, err := s.ListConversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 10})

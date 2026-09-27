@@ -10668,7 +10668,8 @@ func (s *Server) setUserProfileProto(ctx context.Context, input *chatv1.SetUserP
 	// path accepts it and clears the fields.
 	p := input.GetProfile()
 	profile := domain.UserProfile{
-		DisplayName: p.GetDisplayName(), StatusText: p.GetStatusText(), StatusEmoji: p.GetStatusEmoji(),
+		DisplayName: p.GetDisplayName(), Title: p.GetTitle(), Pronouns: p.GetPronouns(), Timezone: p.GetTimezone(),
+		StatusText: p.GetStatusText(), StatusEmoji: p.GetStatusEmoji(),
 		Image24: p.GetImage_24(), Image32: p.GetImage_32(), Image48: p.GetImage_48(), Image72: p.GetImage_72(),
 		Image192: p.GetImage_192(), Image512: p.GetImage_512(), Image1024: p.GetImage_1024(),
 	}
@@ -11278,6 +11279,9 @@ func decodeProtoInviteRequest(value *chatv1.InviteRequest) domain.InviteRequest 
 func encodeProtoProfile(value domain.UserProfile) *chatv1.UserProfile {
 	result := &chatv1.UserProfile{
 		DisplayName: value.DisplayName,
+		Title:       value.Title,
+		Pronouns:    value.Pronouns,
+		Timezone:    value.Timezone,
 		StatusText:  value.StatusText,
 		StatusEmoji: value.StatusEmoji,
 		Image_24:    value.Image24,
@@ -13025,6 +13029,9 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 		RealName:    value.GetRealName(),
 		Profile: domain.UserProfile{
 			DisplayName:             profile.GetDisplayName(),
+			Title:                   profile.GetTitle(),
+			Pronouns:                profile.GetPronouns(),
+			Timezone:                profile.GetTimezone(),
 			StatusText:              profile.GetStatusText(),
 			StatusEmoji:             profile.GetStatusEmoji(),
 			Image24:                 profile.GetImage_24(),

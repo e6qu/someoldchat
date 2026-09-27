@@ -36,8 +36,12 @@ type UserProfile struct {
 	StatusExpiration int64                  `protobuf:"varint,11,opt,name=status_expiration,json=statusExpiration,proto3" json:"status_expiration,omitempty"`
 	// Internal lifecycle fence; never projected by the Slack Web API.
 	ActiveScheduledStatusId string `protobuf:"bytes,12,opt,name=active_scheduled_status_id,json=activeScheduledStatusId,proto3" json:"active_scheduled_status_id,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	Title                   string `protobuf:"bytes,13,opt,name=title,proto3" json:"title,omitempty"`
+	Pronouns                string `protobuf:"bytes,14,opt,name=pronouns,proto3" json:"pronouns,omitempty"`
+	// IANA zone name; empty when the member's client never reported one.
+	Timezone      string `protobuf:"bytes,15,opt,name=timezone,proto3" json:"timezone,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UserProfile) Reset() {
@@ -150,6 +154,27 @@ func (x *UserProfile) GetStatusExpiration() int64 {
 func (x *UserProfile) GetActiveScheduledStatusId() string {
 	if x != nil {
 		return x.ActiveScheduledStatusId
+	}
+	return ""
+}
+
+func (x *UserProfile) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *UserProfile) GetPronouns() string {
+	if x != nil {
+		return x.Pronouns
+	}
+	return ""
+}
+
+func (x *UserProfile) GetTimezone() string {
+	if x != nil {
+		return x.Timezone
 	}
 	return ""
 }
@@ -1756,7 +1781,7 @@ var File_sameoldchat_chat_v1_presence_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/presence.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xa3\x03\n" +
+	"\"sameoldchat/chat/v1/presence.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xf1\x03\n" +
 	"\vUserProfile\x12!\n" +
 	"\fdisplay_name\x18\x01 \x01(\tR\vdisplayName\x12\x1f\n" +
 	"\vstatus_text\x18\x02 \x01(\tR\n" +
@@ -1772,7 +1797,10 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"image_1024\x18\n" +
 	" \x01(\tR\timage1024\x12+\n" +
 	"\x11status_expiration\x18\v \x01(\x03R\x10statusExpiration\x12;\n" +
-	"\x1aactive_scheduled_status_id\x18\f \x01(\tR\x17activeScheduledStatusId\"\xe3\x03\n" +
+	"\x1aactive_scheduled_status_id\x18\f \x01(\tR\x17activeScheduledStatusId\x12\x14\n" +
+	"\x05title\x18\r \x01(\tR\x05title\x12\x1a\n" +
+	"\bpronouns\x18\x0e \x01(\tR\bpronouns\x12\x1a\n" +
+	"\btimezone\x18\x0f \x01(\tR\btimezone\"\xe3\x03\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x14\n" +

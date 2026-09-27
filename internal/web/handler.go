@@ -4699,6 +4699,7 @@ if(document.hidden||now-lastBeat<120000)return;
 lastBeat=now;
 var body=new URLSearchParams();
 body.set('_csrf',activityCsrf.value);
+body.set('timezone',browserTimezone);
 fetch('/app/active',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()}).catch(function(){});
 };
 beat();
@@ -5534,7 +5535,8 @@ func (h Handler) recordActivity(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(jsonAuthStatus(err))
 		return
 	}
-	if _, err := decodeFormFields(w, r); err != nil {
+	fields, err := decodeFormFields(w, r)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -5542,6 +5544,7 @@ func (h Handler) recordActivity(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
+	h.recordTimezone(r, principal, fields["timezone"])
 	if err := h.Messages.RecordActivity(r.Context(), principal.WorkspaceID, principal.UserID); err != nil {
 		// A missed heartbeat costs a member nothing but an early "away", so it
 		// is not worth an error page.
@@ -5549,6 +5552,28 @@ func (h Handler) recordActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// recordTimezone keeps the member's profile time zone in step with the zone
+// their browser reports, which is how Slack sets a member's time zone by
+// default. It writes only when the zone changed, so a steady heartbeat costs
+// one read. A zone the service refuses, or a store that is briefly
+// unavailable, leaves the previous zone in place: the heartbeat's job is
+// presence, and the next beat tries again.
+func (h Handler) recordTimezone(r *http.Request, principal auth.Principal, zone string) {
+	zone = strings.TrimSpace(zone)
+	if zone == "" || !principal.HasScope(auth.ScopeUsersWrite) {
+		return
+	}
+	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	if err != nil || current.Profile.Timezone == zone {
+		return
+	}
+	profile := current.Profile
+	profile.Timezone = zone
+	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
+		log.Printf("web: the time zone of %s was not recorded: %v", principal.UserID, err)
+	}
 }
 
 // signInTarget starts the exact provider the deployment can complete. A
@@ -10738,6 +10763,14 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	profile := current.Profile
 	profile.DisplayName = fields["display_name"]
+	// Title and pronouns are optional on the form: a form that does not carry
+	// them (an older page still open) leaves the stored values alone.
+	if value, present := fields["title"]; present {
+		profile.Title = value
+	}
+	if value, present := fields["pronouns"]; present {
+		profile.Pronouns = value
+	}
 	profile.StatusText = fields["status_text"]
 	profile.StatusEmoji = fields["status_emoji"]
 	if fields["clear_status"] != "" {
@@ -10771,7 +10804,7 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 		// A rejected save keeps every submitted value and says which limit it
 		// crossed, instead of answering with a bare status line.
 		if errors.Is(err, service.ErrInvalidProfile) {
-			h.renderMembers(w, r, principal, &profile, nil, "Your profile was not saved. A display name is at most 80 characters, a status at most 100, the status emoji must be a workspace emoji of at most 64 characters, and the profile photo URL at most 2048.", http.StatusBadRequest)
+			h.renderMembers(w, r, principal, &profile, nil, "Your profile was not saved. A display name is at most 80 characters, a title at most 150, pronouns at most 40, a status at most 100, the status emoji must be a workspace emoji of at most 64 characters, and the profile photo URL at most 2048.", http.StatusBadRequest)
 			return
 		}
 		h.renderMembers(w, r, principal, &profile, nil, "Your profile could not be saved because the workspace store is temporarily unavailable. Try again.", http.StatusServiceUnavailable)
