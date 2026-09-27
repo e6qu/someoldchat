@@ -62,7 +62,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
           {{else if eq $row.Kind "group"}}<span class="side-avatar" aria-hidden="true">{{$row.OthersCount}}</span>
           {{else}}<span class="side-icon" aria-hidden="true">{{if $row.IsPrivate}}{{icon "lock"}}{{else}}{{icon "hash"}}{{end}}</span>{{end}}
           <span class="side-text">{{$row.Name}}</span>
-          {{if $row.HasDraft}}<span class="draft-badge" aria-hidden="true">{{icon "compose"}}</span>{{else if $row.MentionCount}}<span class="badge" aria-hidden="true">{{$row.MentionCount}}</span>{{else if $row.Muted}}<span class="side-icon" aria-hidden="true">{{icon "mute"}}</span>{{end}}
+          {{if $row.HasDraft}}<span class="draft-badge" aria-hidden="true">{{icon "compose"}}</span>{{end}}{{if $row.MentionCount}}<span class="badge" aria-hidden="true">{{$row.MentionCount}}</span>{{else if $row.Muted}}<span class="side-icon" aria-hidden="true">{{icon "mute"}}</span>{{end}}
         </a>
         <details class="menu row-menu channel-menu" data-menu>
           <summary role="button" aria-haspopup="menu" aria-expanded="false" aria-label="Options for {{$row.Name}}">{{icon "kebab"}}</summary>

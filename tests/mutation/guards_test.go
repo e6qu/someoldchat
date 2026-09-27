@@ -14,6 +14,10 @@
 // check-full includes that, and CI gives it a job of its own — putting it in the
 // job that already spends most of its twenty minutes on the race suite would
 // cancel a healthy gate rather than report one.
+//
+// SAMEOLDCHAT_MUTATION_ONLY=OpenAppMessages,ownedDialog (comma-separated
+// operation names, as the survivor report prints them) judges only those
+// operations and reports each one's verdict instead of applying the ceiling.
 package mutation
 
 import (
@@ -246,6 +250,7 @@ func TestEveryAuthorizationGuardIsLoadBearing(t *testing.T) {
 	}
 	sites := groupByOperation(found)
 	t.Logf("%d guards across %d operations; %d guard calls are not if-init form and are not mutated", len(found), len(sites), unmutatable)
+	sites, filtered := onlyNamedOperations(t, sites, os.Getenv("SAMEOLDCHAT_MUTATION_ONLY"))
 
 	type outcome struct {
 		site    operation
@@ -310,6 +315,23 @@ func TestEveryAuthorizationGuardIsLoadBearing(t *testing.T) {
 	if len(unbuildable) > 0 {
 		t.Logf("%d mutants did not compile and decide nothing:\n  %s", len(unbuildable), strings.Join(unbuildable, "\n  "))
 	}
+	// A filtered run judges the operations it was asked about and nothing else.
+	// The ceiling counts the whole service, so it cannot be applied to a subset:
+	// every named survivor fails the run instead, which is the question a subset
+	// is run to answer.
+	if filtered {
+		t.Logf("%d of %d named operations killed", len(sites)-len(survivors)-len(unbuildable), len(sites))
+		for _, result := range results {
+			if result.verdict == killed {
+				t.Logf("killed: %s", result.site)
+			}
+		}
+		if len(survivors) > 0 {
+			t.Fatalf("%d named operations can lose every guard in front of them with the suite still green:\n  %s",
+				len(survivors), strings.Join(survivors, "\n  "))
+		}
+		return
+	}
 	if len(survivors) > survivingGuardCeiling {
 		t.Fatalf("%d operations can lose every guard in front of them with the suite still green, above the ceiling of %d. Each is an operation whose authorization no test asserts:\n  %s",
 			len(survivors), survivingGuardCeiling, strings.Join(survivors, "\n  "))
@@ -318,6 +340,40 @@ func TestEveryAuthorizationGuardIsLoadBearing(t *testing.T) {
 		t.Fatalf("only %d operations survive losing every guard now: lower survivingGuardCeiling to %d, so the ground gained is kept",
 			len(survivors), len(survivors))
 	}
+}
+
+// onlyNamedOperations narrows the sweep to the operations named in
+// SAMEOLDCHAT_MUTATION_ONLY, a comma-separated list of the enclosing function
+// names the report prints (OpenAppMessages, ownedDialog, ...). It exists so a
+// change that closes a few survivors can prove it without paying for the whole
+// sweep. A name that matches no guarded operation fails the run rather than
+// being dropped: a typo would otherwise report "every named operation killed"
+// about nothing.
+func onlyNamedOperations(t *testing.T, sites []operation, only string) ([]operation, bool) {
+	t.Helper()
+	if strings.TrimSpace(only) == "" {
+		return sites, false
+	}
+	wanted := map[string]bool{}
+	for _, name := range strings.Split(only, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			wanted[name] = false
+		}
+	}
+	var chosen []operation
+	for _, candidate := range sites {
+		if _, ok := wanted[candidate.name]; ok {
+			wanted[candidate.name] = true
+			chosen = append(chosen, candidate)
+		}
+	}
+	for name, matched := range wanted {
+		if !matched {
+			t.Fatalf("SAMEOLDCHAT_MUTATION_ONLY names %s, which is not a guarded operation in internal/service", name)
+		}
+	}
+	t.Logf("SAMEOLDCHAT_MUTATION_ONLY: judging %d named operations; the survivor ceiling is not applied to a subset", len(chosen))
+	return chosen, true
 }
 
 // runMutant strips every guard from one operation and reports whether anything

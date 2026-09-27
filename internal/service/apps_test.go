@@ -448,3 +448,56 @@ func TestAnAppCanBeRestrictedBeforeItIsInstalled(t *testing.T) {
 		t.Fatalf("restrict an uninstalled app: %v", err)
 	}
 }
+
+// OpenAppMessages decides who is asking before it examines the app. A caller who
+// does not work in the workspace is answered "not found" whatever state the app
+// is in; examining the app first would tell them it is installed and that its
+// manifest is broken, which is what the member who may open it is told.
+func TestOpeningAnAppsMessagesTabRefusesAnOutsiderBeforeExaminingTheApp(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T2", Name: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range []domain.User{{ID: "U1", WorkspaceID: "T1"}, {ID: "U2", WorkspaceID: "T2"}} {
+		if err := s.SeedUser(user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	// Installed in T1 with a manifest that no longer parses — a name is
+	// required — so only a caller the operation lets past its front door can
+	// learn that from the answer.
+	if err := s.CreateApp(ctx, domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Broken", ClientID: "client-A1",
+		SigningSecretHash: "signing", SigningSecretCiphertext: "signing-cipher",
+		VerificationTokenHash: "verification", VerificationTokenCiphertext: "verification-cipher",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "A1", Version: 1, CreatedBy: "U1", CreatedAt: now,
+		Manifest: `{"display_information":{"name":""},"features":{"app_home":{"messages_tab_enabled":true}}}`,
+	}, domain.OAuthClient{ID: "client-A1", SecretHash: "client-secret", AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s}
+
+	// The positive control: a member is let through and told about the app.
+	if _, err := messages.OpenAppMessages(ctx, "T1", "U1", "A1"); !errors.Is(err, ErrAppInteractionUnavailable) {
+		t.Fatalf("member opening a broken app's Messages tab: err=%v, want %v", err, ErrAppInteractionUnavailable)
+	}
+	for _, outsider := range []domain.UserID{"U2", "U-nobody"} {
+		installed, err := messages.OpenAppMessages(ctx, "T1", outsider, "A1")
+		if !errors.Is(err, store.ErrNotFound) || installed.ID != "" {
+			t.Fatalf("%s opening an installed app's Messages tab: conversation=%+v err=%v, want not found", outsider, installed, err)
+		}
+		if _, missing := messages.OpenAppMessages(ctx, "T1", outsider, "A-missing"); missing == nil || missing.Error() != err.Error() {
+			t.Fatalf("%s is told %v about an installed app and %v about a missing one, so the answer discloses the app", outsider, err, missing)
+		}
+	}
+}

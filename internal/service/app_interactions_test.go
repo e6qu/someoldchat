@@ -347,6 +347,26 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 		suggestionPayload.Container.ChannelID != "C1" || suggestionPayload.Message["blocks"] == nil {
 		t.Fatalf("block suggestion payload=%s", optionsRequest.form.Get("payload"))
 	}
+	// A workspace member outside the channel may not load the options: the
+	// member above is answered for the very same message, so this refusal is
+	// about who is asking, and the app must not be asked on their behalf.
+	if err := repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "outsider"}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	requestsBefore := len(requests)
+	mu.Unlock()
+	if _, err := messages.LoadAppOptions(ctx, "T1", "U2", "C1", domain.AppOptionQuery{
+		AppID: "A1", MessageID: externalMessage.ID, BlockID: "project", ActionID: "project_select", Value: "prod",
+	}, "https://chat.example.test"); !errors.Is(err, ErrNotInConversation) {
+		t.Fatalf("a non-member loading a channel message's external options: err=%v, want %v", err, ErrNotInConversation)
+	}
+	mu.Lock()
+	requestsAfter := len(requests)
+	mu.Unlock()
+	if requestsAfter != requestsBefore {
+		t.Fatalf("a refused non-member's option load still reached the app: %d requests, want %d", requestsAfter, requestsBefore)
+	}
 
 	feedbackBlocks := `[{"type":"context_actions","block_id":"answer-feedback","elements":[{"type":"feedback_buttons","action_id":"feedback","positive_button":{"text":{"type":"plain_text","text":"Good"},"value":"positive"},"negative_button":{"text":{"type":"plain_text","text":"Bad"},"value":"negative"}}]}]`
 	feedbackMessage, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "UBOT", "C1", "Answer", feedbackBlocks, "", "", "", "A1")

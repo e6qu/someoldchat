@@ -340,8 +340,8 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-advanced" aria-labelledby="pref-tab-advanced" tabindex="0" hidden>
       <h3>Advanced</h3>
-      <div data-preferences-slot="composer"></div>
-      <p class="dialog-note">Preferences on this page other than notifications are kept in this browser: they follow you across pages and reloads here, but not to another browser or device.</p>
+      {{template "composer-preferences"}}
+      <p class="dialog-note">Preferences here other than notifications are kept in this browser: they follow you across pages and reloads here, but not to another browser or device.</p>
     </section>
   </div>
 </div>{{end}}`

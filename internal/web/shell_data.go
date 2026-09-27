@@ -1,9 +1,11 @@
 package web
 
 import (
+	"context"
 	"strings"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
@@ -128,14 +130,23 @@ func (c conversationView) AccessibleName() string {
 	return strings.Join(parts, ", ")
 }
 
-// faceInitials is up to three initials for the header's member face pile.
-func faceInitials(members []memberView) []string {
-	initials := make([]string, 0, 3)
-	for _, member := range members {
+// faceInitials is up to three members' initials for the header's face pile. A
+// DM's header is the person, so it has none; a failed read shows no faces
+// rather than failing the page for a decoration.
+func (h Handler) faceInitials(ctx context.Context, principal auth.Principal, conversation domain.Conversation) []string {
+	if conversation.Kind == domain.ConversationTypeIM {
+		return nil
+	}
+	page, err := h.Messages.ConversationMembers(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: 3})
+	if err != nil {
+		return nil
+	}
+	initials := make([]string, 0, len(page.Users))
+	for _, user := range page.Users {
 		if len(initials) == 3 {
 			break
 		}
-		initials = append(initials, member.AuthorInitial)
+		initials = append(initials, initial(displayName(user)))
 	}
 	return initials
 }
