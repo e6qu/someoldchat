@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -1414,7 +1415,15 @@ var templateFunctions = template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts}
 
 var layoutTemplate = template.Must(template.New("layout").Funcs(templateFunctions).Parse(layoutMarkup))
 
+// pageMarkups is every document mustPage has built a template from. The
+// workspace policy is derived from it (workspaceContentSecurityPolicy()), so a
+// page cannot be added without its inline scripts being allowed: the policy
+// used to be a hand-kept list of script constants, and a page that was left off
+// it (the notification preferences) had its only script blocked by the browser.
+var pageMarkups []string
+
 func mustPage(markup string) *template.Template {
+	pageMarkups = append(pageMarkups, markup)
 	return template.Must(template.Must(layoutTemplate.Clone()).Parse(markup))
 }
 
@@ -5005,7 +5014,7 @@ func (h Handler) acceptCSRFResult(w http.ResponseWriter, r *http.Request, err er
 func (h Handler) writeMutationError(w http.ResponseWriter, r *http.Request, status int, heading, message string) {
 	w.Header().Set("Vary", "HX-Request")
 	if r.Header.Get("HX-Request") == "true" {
-		secureHeaders(w, workspaceContentSecurityPolicy)
+		secureHeaders(w, workspaceContentSecurityPolicy())
 		http.Error(w, message, status)
 		return
 	}
@@ -5444,7 +5453,7 @@ func redirectOAuthAuthorization(w http.ResponseWriter, r *http.Request, rawRedir
 		query.Set("state", state)
 	}
 	target.RawQuery = query.Encode()
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	http.Redirect(w, r, target.String(), http.StatusFound)
 }
 
@@ -6036,7 +6045,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 	var messages []domain.Message
 	if threadTimestamp != "" {
 		if _, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(threadTimestamp)); parseErr != nil {
-			secureHeaders(w, workspaceContentSecurityPolicy)
+			secureHeaders(w, workspaceContentSecurityPolicy())
 			http.Error(w, "that thread link is not valid", http.StatusBadRequest)
 			return
 		}
@@ -6050,7 +6059,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		history, historyErr := h.historyWindow(r.Context(), principal, channel, before, after)
 		if historyErr != nil {
 			if errors.Is(historyErr, domain.ErrInvalidCursor) {
-				secureHeaders(w, workspaceContentSecurityPolicy)
+				secureHeaders(w, workspaceContentSecurityPolicy())
 				http.Error(w, "that history link is not valid", http.StatusBadRequest)
 				return
 			}
@@ -8961,7 +8970,7 @@ func (h Handler) emojiOptions(w http.ResponseWriter, r *http.Request) {
 	for _, value := range slackemoji.Categories() {
 		categories = append(categories, value.Name)
 	}
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_ = json.NewEncoder(w).Encode(map[string]any{"options": options, "count": len(options), "categories": categories})
@@ -11211,7 +11220,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("HX-Request") == "true" {
 			// The composer renders this text next to the field and keeps the
 			// draft, so a failure is never silent and never loses the message.
-			secureHeaders(w, workspaceContentSecurityPolicy)
+			secureHeaders(w, workspaceContentSecurityPolicy())
 			http.Error(w, reason, status)
 			return
 		}
@@ -11402,7 +11411,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 func (h Handler) writeScheduleMessageError(w http.ResponseWriter, r *http.Request, principal auth.Principal, draft string, attachments []domain.DraftAttachment, scheduleAt string, status int, reason string) {
 	w.Header().Set("Vary", "HX-Request")
 	if r.Header.Get("HX-Request") == "true" {
-		secureHeaders(w, workspaceContentSecurityPolicy)
+		secureHeaders(w, workspaceContentSecurityPolicy())
 		http.Error(w, reason, status)
 		return
 	}
@@ -12139,7 +12148,7 @@ func (h Handler) decodeAppInteractionMutation(w http.ResponseWriter, r *http.Req
 }
 
 func (h Handler) appResponse(w http.ResponseWriter, r *http.Request) {
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	body, err := io.ReadAll(io.LimitReader(r.Body, service.MaxMessageBodyBytes+1))
 	if err != nil || len(body) > service.MaxMessageBodyBytes {
 		writeAppResponseError(w, http.StatusBadRequest, "invalid_payload")
@@ -13183,9 +13192,19 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // directive would leave global sign-out working in one browser and broken in
 // another. The administration page keeps it, because every form there redirects
 // to itself.
-var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
-	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+//
+// The hashes come from every page template the package builds (pageMarkups)
+// plus the layout they all share. Every page is a first-party constant served
+// from this one origin, so allowing one page's script on another grants nothing
+// an attacker controls, while a page whose script is missing from the policy is
+// silently broken. The value is computed once, on first use, because the page
+// templates are package variables whose initialisation order Go does not tie to
+// this one.
+var workspaceContentSecurityPolicy = sync.OnceValue(func() string {
+	documents := append([]string{layoutMarkup}, pageMarkups...)
+	return "default-src 'none'; script-src " + strings.Join(inlineScriptHashes(documents...), " ") +
+		"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+})
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:
 // /login and /signed-out. Both are static documents with one inline stylesheet
@@ -13316,13 +13335,13 @@ func (h Handler) readLiveHead(ctx context.Context, principal auth.Principal) (li
 const liveStreamOpen = `new EventSource('/events'+(/^[0-9]+$/.test(document.body.getAttribute('data-event-head')||'')?'?last_event_id='+document.body.getAttribute('data-event-head'):''))`
 
 func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data any, status int, unavailable string) {
-	h.writeHTMLWithPolicy(w, page, data, status, unavailable, workspaceContentSecurityPolicy)
+	h.writeHTMLWithPolicy(w, page, data, status, unavailable, workspaceContentSecurityPolicy())
 }
 
 // writeLivePage serves a workspace page whose script opens the live event
 // stream from head.
 func (h Handler) writeLivePage(w http.ResponseWriter, head liveHead, page *template.Template, data any, status int, unavailable string) {
-	h.writeRendered(w, page, data, head, status, unavailable, workspaceContentSecurityPolicy)
+	h.writeRendered(w, page, data, head, status, unavailable, workspaceContentSecurityPolicy())
 }
 
 // writeHTMLWithPolicy serves a page under a policy of its own. A page outside
@@ -13356,11 +13375,11 @@ func (h Handler) writeFragment(w http.ResponseWriter, list messageList) {
 func (h Handler) writePartial(w http.ResponseWriter, name string, data any, unavailable string) {
 	var output bytes.Buffer
 	if err := pageTemplate.ExecuteTemplate(&output, name, data); err != nil {
-		secureHeaders(w, workspaceContentSecurityPolicy)
+		secureHeaders(w, workspaceContentSecurityPolicy())
 		http.Error(w, unavailable, http.StatusServiceUnavailable)
 		return
 	}
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(output.Bytes())
 }
@@ -13368,11 +13387,11 @@ func (h Handler) writePartial(w http.ResponseWriter, name string, data any, unav
 func (h Handler) writePageError(w http.ResponseWriter, status int, heading, message string) {
 	var output bytes.Buffer
 	if err := renderPage(&output, errorTemplate, errorData{Heading: heading, Message: message}, liveHead{}); err != nil {
-		secureHeaders(w, workspaceContentSecurityPolicy)
+		secureHeaders(w, workspaceContentSecurityPolicy())
 		http.Error(w, heading, status)
 		return
 	}
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(output.Bytes())
@@ -13396,7 +13415,7 @@ func (h Handler) writeStoreError(w http.ResponseWriter, err error, unavailable s
 // browser, while the test that checks the header set only ever visited a
 // successful page and a 404.
 func (h Handler) writeFragmentError(w http.ResponseWriter, err error, unavailable string) {
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "that conversation is not available", http.StatusNotFound)
 		return
@@ -13416,7 +13435,7 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 }
 
 func (h Handler) writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	// A credential store that did not answer is server trouble, not an
 	// authentication outcome: nothing is known about the session, so neither a
 	// 401 nor a login redirect is honest, and both push a signed-in person

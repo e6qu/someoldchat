@@ -166,7 +166,7 @@ func TestAppHomeRefreshesLiveWhenTheAppPublishes(t *testing.T) {
 	if !strings.Contains(appHomeLiveScript, "'view.published','view.updated'") || !strings.Contains(appHomeLiveScript, "getElementById('app-home-region')") {
 		t.Fatal("the Home live script does not listen for the publish topics or target the Home region")
 	}
-	if !strings.Contains(workspaceContentSecurityPolicy, inlineScriptHashes(appHomeLiveScript)[0]) {
+	if !strings.Contains(workspaceContentSecurityPolicy(), inlineScriptHashes(appHomeLiveScript)[0]) {
 		t.Fatal("the Home live script is not permitted by the workspace policy")
 	}
 }

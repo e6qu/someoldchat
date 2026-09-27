@@ -438,7 +438,7 @@ func TestMessageRichTextInputDispatchesRichText(t *testing.T) {
 // does not reload the page for a record that only saved what the viewer
 // entered (a reload would discard focus and newer typing).
 func TestViewInputScriptIsPermittedAndStateSavesDoNotReload(t *testing.T) {
-	if !strings.Contains(workspaceContentSecurityPolicy, inlineScriptHashes(viewInputScript)[0]) {
+	if !strings.Contains(workspaceContentSecurityPolicy(), inlineScriptHashes(viewInputScript)[0]) {
 		t.Fatal("the view input script is not permitted by the workspace policy")
 	}
 	if !strings.Contains(progressiveEnhancementScript, "viewFrame.state_only)return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload()") {

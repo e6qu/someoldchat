@@ -36,7 +36,7 @@ document.addEventListener('keydown',function(event){if(event.key==='Enter'&&even
 })();</script>`
 
 func (h Handler) appOptions(w http.ResponseWriter, r *http.Request) {
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
 		h.writeOptionsError(w, http.StatusUnauthorized, "Sign in again to load app options.")
