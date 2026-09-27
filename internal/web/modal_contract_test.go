@@ -358,6 +358,12 @@ func TestLegacyDialogRendersSubmitsAndCancels(t *testing.T) {
 		!strings.Contains(response.Body.String(), "Enter between 3 and 150 characters.") || !strings.Contains(response.Body.String(), ">Build host</option>") {
 		t.Fatalf("short summary status=%d (the loaded choice must survive the re-render)", response.Code)
 	}
+	// The re-rendered page answers a POST, so it moves its history entry to
+	// the conversation: a live reload or a refresh must not submit again.
+	if response := submit(url.Values{"input_0": {"ab"}, "input_2": {"high"}}); !strings.Contains(response.Body.String(), `data-canonical-url="/app?channel=Cdev"`) {
+		t.Fatalf("a POST-rendered page names no canonical URL")
+	}
+	requireMissing(t, "a GET page", get(t, mux, "/app?channel=Cdev").Body.String(), `data-canonical-url="`)
 	if response := submit(url.Values{"input_0": {"Broken build"}, "input_2": {"high"}, "input_4": {remote}}); response.Code != http.StatusAccepted {
 		t.Fatalf("submit status=%d body=%s", response.Code, response.Body)
 	}
@@ -435,7 +441,7 @@ func TestViewInputScriptIsPermittedAndStateSavesDoNotReload(t *testing.T) {
 	if !strings.Contains(workspaceContentSecurityPolicy, inlineScriptHashes(viewInputScript)[0]) {
 		t.Fatal("the view input script is not permitted by the workspace policy")
 	}
-	if !strings.Contains(progressiveEnhancementScript, "viewFrame.state_only)return;window.location.reload()") {
+	if !strings.Contains(progressiveEnhancementScript, "viewFrame.state_only)return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload()") {
 		t.Fatal("a state-only view record still reloads the workspace page")
 	}
 	s, mux := browserWorkspace(t, auth.AllScopes())

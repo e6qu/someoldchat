@@ -420,20 +420,25 @@ type pageData struct {
 	// browser's permission — only the client can see.
 	BrowserNotifications bool
 	NotificationsPaused  bool
-	Workspaces           []workspaceChoice
-	Huddle               huddleView
-	HuddleURL            string
-	Timeline             messageList
-	Thread               messageList
-	ThreadTimestamp      string
-	Channels             []conversationView
-	SidebarSections      []sidebarSectionView
-	SectionOptions       []sidebarSectionOption
-	Directs              []conversationView
-	MoreChannelsURL      string
-	Channel              string
-	ChannelName          string
-	ChannelPrefix        string
+	// CanonicalURL is set when the page answers a POST (a modal or dialog
+	// submitted with errors or still pending): the page replaces its history
+	// entry with it, so a live reload or the member's own refresh reads the
+	// conversation instead of submitting the form again.
+	CanonicalURL    string
+	Workspaces      []workspaceChoice
+	Huddle          huddleView
+	HuddleURL       string
+	Timeline        messageList
+	Thread          messageList
+	ThreadTimestamp string
+	Channels        []conversationView
+	SidebarSections []sidebarSectionView
+	SectionOptions  []sidebarSectionOption
+	Directs         []conversationView
+	MoreChannelsURL string
+	Channel         string
+	ChannelName     string
+	ChannelPrefix   string
 	// ChannelStatusDisplay is the other person's current status emoji resolved
 	// to a glyph, shown beside a one-to-one DM's title the way it is shown beside
 	// their name everywhere else. Empty for a channel or a group DM, which are
@@ -2117,7 +2122,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
 {{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
-<div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}">
+<div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}"{{if .CanonicalURL}} data-canonical-url="{{.CanonicalURL}}"{{end}}>
   <header class="topbar">
     <button class="nav-toggle" id="nav-toggle" type="button" aria-controls="workspace-sidebar" aria-expanded="false" aria-label="Open navigation"><span aria-hidden="true">☰</span></button>
     <span class="brand">{{.WorkspaceName}}</span>
@@ -3530,6 +3535,14 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // elides comments in script context, and an elided comment makes the served
 // document disagree with the hash that permits it. There is deliberately not one
 // comment inside the script for that reason.
+// progressiveEnhancementScript's patchDialogErrors applies the errors an app
+// answered a dialog submission with to the dialog on screen, as Slack's client
+// does. A dialog keeps what the member entered only in the page (the server
+// stores a view's state, not a dialog's), so reloading for dialog.updated
+// emptied every field the app had just asked the member to correct. It
+// reports false, and the caller reloads, when the open dialog is not the one
+// the event names. (Comments cannot live inside the script: html/template
+// strips them, and the policy hashes the bytes as written.)
 var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
 var composer=document.getElementById('composer');
@@ -4595,12 +4608,34 @@ window.location.assign(href);
 if(navToggle)navToggle.addEventListener('click',function(){setNav(!nav.classList.contains('is-open'),true)});
 if(navScrim)navScrim.addEventListener('click',function(){setNav(false,false);if(navToggle)navToggle.focus()});
 if(narrow){if(typeof narrow.addEventListener==='function')narrow.addEventListener('change',function(){setNav(false,false)});setNav(false,false)}
+var canonicalShell=document.querySelector('[data-canonical-url]');
+if(canonicalShell&&window.history&&typeof window.history.replaceState==='function'){try{window.history.replaceState(null,'',canonicalShell.getAttribute('data-canonical-url'))}catch(error){}}
+function patchDialogErrors(dialogID){
+var current=document.querySelector('.app-modal');var field=current&&current.querySelector('.modal-form input[name="dialog_id"]');
+if(!field||!dialogID||field.value!==dialogID)return false;
+fetch(window.location.pathname+window.location.search,{credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error();return response.text()}).then(function(html){
+var fresh=new DOMParser().parseFromString(html,'text/html').querySelector('.app-modal');var freshField=fresh&&fresh.querySelector('.modal-form input[name="dialog_id"]');
+var freshBlocks=fresh?fresh.querySelectorAll('.modal-input'):[];var blocks=current.querySelectorAll('.modal-input');
+if(!freshField||freshField.value!==dialogID||freshBlocks.length!==blocks.length){window.location.reload();return}
+var formError=current.querySelector('.modal-body > .form-error');if(formError)formError.remove();
+var freshFormError=fresh.querySelector('.modal-body > .form-error');if(freshFormError)current.querySelector('.modal-body').prepend(document.importNode(freshFormError,true));
+var first=null;
+Array.prototype.forEach.call(blocks,function(block,index){
+var old=block.querySelector('.modal-error');if(old)old.remove();
+var control=block.querySelector('[name^="input_"]');var error=freshBlocks[index].querySelector('.modal-error');
+if(!control)return;
+if(error){block.appendChild(document.importNode(error,true));control.setAttribute('aria-invalid','true');control.setAttribute('aria-describedby',error.id);if(!first)first=control}else{control.removeAttribute('aria-invalid');control.removeAttribute('aria-describedby')}
+});
+if(first)first.focus();
+}).catch(function(){window.location.reload()});
+return true;
+}
 if(window.EventSource){
 var stream=` + liveStreamOpen + `;
 var deliver=function(event){
 try{document.dispatchEvent(new CustomEvent('sameoldchat:event',{detail:{type:event.type,data:event.data}}))}catch(error){}
 if(event.type==='huddle.signal'||event.type==='huddle.reaction')return;
-if(event.type.indexOf('view.')===0||event.type.indexOf('dialog.')===0){var viewFrame=null;try{viewFrame=JSON.parse(event.data)}catch(error){}if(viewFrame&&viewFrame.state_only)return;window.location.reload();return}
+if(event.type.indexOf('view.')===0||event.type.indexOf('dialog.')===0){var viewFrame=null;try{viewFrame=JSON.parse(event.data)}catch(error){}if(viewFrame&&viewFrame.state_only)return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload();return}
 var live=regions(false);
 if(!live.length){announce('New activity is available in this conversation.');return}
 scheduleRefresh();
@@ -5847,6 +5882,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	draftJSON, _ := json.Marshal(draftAttachments)
 
 	data := pageData{
+		CanonicalURL:         canonicalPageURL(r, appURL(string(channel), threadTimestamp, "", "", "")),
 		Timeline:             timeline,
 		Thread:               thread,
 		ThreadTimestamp:      threadTimestamp,
@@ -13788,6 +13824,15 @@ func appAfterURL(channel, thread, after string) string {
 		query.Set("after", after)
 	}
 	return "/app?" + query.Encode()
+}
+
+// canonicalPageURL is the address a page answering a POST should stand at in
+// history; a GET page already stands at its own.
+func canonicalPageURL(r *http.Request, canonical string) string {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return ""
+	}
+	return canonical
 }
 
 func appURL(channel, thread, before, anchor, conversations string) string {
