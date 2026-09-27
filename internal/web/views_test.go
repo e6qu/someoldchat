@@ -255,3 +255,24 @@ func TestDirectMessagesListShowsFacesPreviewAndUnread(t *testing.T) {
 		t.Fatalf("unread rows = %d, want only the group DM (own messages are never unread)", unread)
 	}
 }
+
+// TestHuddleInADirectMessageIsNamedForThePerson covers the huddle window's
+// title: a DM's huddle is "with" the other person, never the conversation ID.
+func TestHuddleInADirectMessageIsNamedForThePerson(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "ana", RealName: "Ana Lima"}); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := service.Messages{Store: s}.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel := string(opened.Conversation.ID)
+	if response := postForm(t, mux, "/app/huddle/start?channel="+channel, url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false); response.Code != http.StatusSeeOther {
+		t.Fatalf("start=%d: %s", response.Code, response.Body)
+	}
+	body := get(t, mux, "/app/huddle?channel="+channel).Body.String()
+	requireContains(t, "DM huddle", body, "Huddle with Ana Lima")
+	requireMissing(t, "DM huddle", body, "Huddle in "+channel, "Huddle in #")
+}

@@ -2877,8 +2877,23 @@ test('[HUDDLE-01] a huddle runs its lifecycle and offers the media it promises',
   await expect(page.getByRole('button', { name: 'Mute microphone' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Share screen' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Leave huddle' })).toBeVisible();
+  // The joined huddle is its own small window, named for the conversation.
+  const huddleWindow = page.getByRole('region', { name: 'Huddle in #general' });
+  await expect(huddleWindow).toBeVisible();
+  await expect(huddleWindow.getByRole('toolbar', { name: 'Huddle controls' })).toBeVisible();
+  // Minimising keeps the controls and hides the tiles; it survives the live
+  // refresh of the huddle fragment because the window remembers it.
+  await huddleWindow.getByRole('button', { name: 'Minimise huddle' }).click();
+  await expect(huddleWindow.getByRole('button', { name: 'Minimise huddle' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-huddle-tiles]')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Leave huddle' })).toBeVisible();
+  await huddleWindow.getByRole('button', { name: 'Minimise huddle' }).click();
+  await expect(page.locator('[data-huddle-tiles]')).toBeAttached();
   // The person who started it can end it for everyone; that is the whole
-  // difference between leaving and ending.
+  // difference between leaving and ending. Like Slack, ending is behind the
+  // More menu rather than a second button beside Leave.
+  await expect(page.getByRole('button', { name: 'End for everyone' })).toBeHidden();
+  await page.getByRole('button', { name: 'More huddle options' }).click();
   await expect(page.getByRole('button', { name: 'End for everyone' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start a huddle' })).toHaveCount(0);
 
@@ -4318,6 +4333,7 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   // fade display rides the live stream, whose timing is not asserted here; that
   // the control renders and the send is accepted is the deterministic half.
   const reaction = page.locator('[data-huddle-react-name="tada"]');
+  await page.getByRole('button', { name: 'Reactions' }).click();
   await expect(reaction).toBeVisible();
   const reacted = page.waitForResponse((response) => response.url().endsWith('/app/huddle/react') && response.request().method() === 'POST');
   await reaction.click();

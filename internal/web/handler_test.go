@@ -5715,7 +5715,11 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 	}
 	active := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "active huddle bar", active,
-		"Huddle in", "Leave huddle", "End for everyone",
+		"Huddle in #general", "Leave huddle", "End for everyone",
+		// The joined huddle is a window of its own with icon controls, a
+		// minimise toggle, and ending for everyone behind the More menu.
+		`class="huddle-window huddle-media-session"`, `role="toolbar" aria-label="Huddle controls"`,
+		`data-huddle-toggle="minimised"`, `aria-label="More huddle options"`,
 		// The member who started the huddle is in it, so the media session and
 		// its controls are present rather than a note explaining their absence.
 		"data-huddle-call=", "huddle-tiles",
@@ -5745,7 +5749,7 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 		t.Fatal(err)
 	}
 	fragment := get(t, mux, "/app/huddle?channel=Cdev").Body.String()
-	requireContains(t, "huddle fragment", fragment, "Second Person")
+	requireContains(t, "huddle fragment", fragment, "Second Person", "2 people: ")
 	requireMissing(t, "huddle fragment", fragment, "<html", "<body")
 
 	left := postForm(t, mux, "/app/huddle/leave?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)

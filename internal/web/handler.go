@@ -1744,9 +1744,9 @@ const workspaceRefinements = `<style>
    what pressing it does, and a control that silently connected nothing is the
    promise the universal contract forbids. What changes is its weight — it is
    secondary information, not a panel competing with the first message. */
-.huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:5px 26px;border-bottom:1px solid var(--line);background:transparent;color:var(--muted);font-size:12px}
+.huddle-bar{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:4px 26px;border-bottom:1px solid var(--line);background:transparent;color:var(--muted);font-size:12px}
 .huddle-bar .huddle-media{color:var(--muted)}
-.huddle-bar button{min-height:26px;padding:3px 10px;font-size:12px}
+.huddle-bar form{margin:0}
 .add-column{margin:0 0 14px}
 .add-column form{display:flex;flex-direction:column;gap:6px;max-width:420px;margin-top:8px}
 .list-columns{margin:0 0 10px;font-size:12px}
@@ -1782,34 +1782,90 @@ const workspaceRefinements = `<style>
 .typing-dots i:nth-child(3){animation-delay:.4s}
 @keyframes typing-pulse{0%,60%,100%{opacity:.25}30%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.typing-dots i{animation:none;opacity:.6}}
+/* The huddle, like Slack's: idle and not-joined states are one quiet line
+   above the timeline; once joined the call is a small window of its own that
+   floats over the bottom of the sidebar on a wide screen and sits in the
+   page on a narrow one, so it never covers the timeline or the composer. Its
+   controls are icon buttons whose names live in aria-label, and ending the
+   huddle for everyone sits behind the More menu instead of beside Leave. */
+.huddle-bar svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
 .huddle-bar.active{background:var(--hover)}
-.huddle-state{display:grid;gap:2px;min-width:0}
-.huddle-people{color:var(--text)}
-.huddle-media{color:var(--muted)}
-.huddle-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-left:auto}
-.huddle-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
-.huddle-actions button:hover{background:var(--hover)}
-.huddle-actions .huddle-end{color:var(--danger);border-color:var(--danger)}
-.huddle-media-session{position:relative}
-.huddle-reactions-bar{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
-.huddle-react{border:1px solid var(--field-line);border-radius:16px;background:var(--panel-strong);padding:2px 9px;font-size:16px;line-height:1.4;cursor:pointer}
+.huddle-bar.joined{padding:0;border:0}
+.huddle-bar.joined>.huddle-window{flex:1 1 100%}
+.huddle-glyph{color:var(--muted)}
+.huddle-state{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.huddle-state strong{color:var(--text)}
+.huddle-people{color:var(--muted)}
+.huddle-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.huddle-start,.huddle-end{min-height:24px;border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:2px 10px;font:inherit;font-weight:700;cursor:pointer}
+.huddle-start:hover{background:var(--hover)}
+.huddle-end{border-color:transparent;background:transparent;color:var(--danger);font-weight:600}
+.huddle-end:hover{background:var(--danger-bg,var(--hover))}
+.huddle-pill{display:inline-flex;align-items:center;gap:5px;min-height:28px;border:0;border-radius:14px;padding:3px 10px;font:inherit;font-weight:700;cursor:pointer;background:var(--ok,#1c7c54);color:#fff}
+.huddle-pill.leave{background:#b3213a;color:#fff}
+.huddle-pill:hover{filter:brightness(1.08)}
+.huddle-faces{display:inline-flex;align-items:center;flex:0 0 auto}
+.huddle-faces>img,.huddle-faces>span{width:22px;height:22px;border-radius:6px;border:2px solid var(--panel-strong);margin-left:-6px;object-fit:cover;display:grid;place-items:center;background:var(--accent);color:#fff;font-size:11px;font-weight:800}
+.huddle-faces>:first-child{margin-left:0}
+.huddle-faces>.more{background:var(--hover);color:var(--text)}
+.huddle-window{position:relative;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:6px;margin:6px 16px;padding:8px 10px;border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);font-size:13px;container-type:inline-size}
+.huddle-window-head{display:flex;align-items:center;gap:6px;min-width:0}
+.huddle-live{width:8px;height:8px;border-radius:50%;background:var(--ok,#1c7c54);flex:0 0 auto;box-shadow:0 0 0 3px color-mix(in srgb,var(--ok,#1c7c54) 25%,transparent)}
+.huddle-window-name{min-width:0;flex:1 1 auto;display:grid}
+.huddle-window-name h2{margin:0;font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.huddle-window-name .huddle-people{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.huddle-icon{display:grid;place-items:center;width:26px;height:26px;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;flex:0 0 auto}
+.huddle-icon:hover,.huddle-icon[aria-pressed="true"]{background:var(--hover);color:var(--text)}
+.huddle-window-body{position:relative;display:grid;gap:4px;min-height:0}
+.huddle-window-body .huddle-media{margin:0;font-size:12px;color:var(--muted)}
+.huddle-toolbar{display:flex;align-items:center;gap:3px}
+.huddle-tool{display:grid;place-items:center;width:30px;height:30px;border:1px solid var(--field-line);border-radius:50%;background:var(--panel-strong);color:var(--text);cursor:pointer;list-style:none}
+.huddle-tool::-webkit-details-marker{display:none}
+.huddle-tool:hover{background:var(--hover)}
+.huddle-tool[aria-pressed="true"]{background:var(--text);color:var(--panel-strong);border-color:var(--text)}
+.huddle-tool .off{display:none}
+.huddle-tool[data-huddle-control="microphone"][aria-pressed="true"]{background:#b3213a;border-color:#b3213a;color:#fff}
+.huddle-tool[data-huddle-control="microphone"][aria-pressed="true"] .off{display:inline}
+.huddle-leave{margin:0 0 0 auto}
+@container (max-width:260px){.huddle-pill.leave{padding:3px 9px}.huddle-pill.leave span{display:none}}
+.huddle-pop{position:static}
+.huddle-pop>summary{list-style:none}
+.huddle-pop-panel{position:absolute;bottom:46px;left:8px;max-width:calc(100% - 16px);box-sizing:border-box;z-index:30;display:grid;gap:6px;min-width:190px;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.huddle-reactions-bar{display:flex;flex-wrap:wrap;min-width:0}
+.huddle-invite-form label{display:grid;gap:4px;font-weight:700}
+.huddle-invite-form select{min-height:30px}
+.huddle-pop-panel .huddle-end{width:100%;text-align:left;padding:6px 8px}
+.huddle-pop-panel hr{width:100%;margin:2px 0;border:0;border-top:1px solid var(--line)}
+.huddle-pop-panel form{margin:0;display:grid;gap:6px}
+.huddle-react{border:1px solid var(--field-line);border-radius:16px;background:var(--panel-strong);padding:2px 7px;font-size:18px;line-height:1.4;cursor:pointer}
 .huddle-react:hover{background:var(--hover)}
-.huddle-canvas-link{display:inline-block;margin:2px 0;font-size:13px;font-weight:600}
+.huddle-window[data-huddle-minimised="true"] .huddle-window-body{display:none}
 .huddle-reactions{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .huddle-reaction-bubble{position:absolute;bottom:8px;font-size:26px;line-height:1;animation:huddle-float 2.6s ease-out forwards}
 @keyframes huddle-float{0%{opacity:0;transform:translateY(0) scale(.6)}15%{opacity:1;transform:translateY(-12px) scale(1)}100%{opacity:0;transform:translateY(-120px) scale(1)}}
 @media (prefers-reduced-motion:reduce){.huddle-reaction-bubble{animation:huddle-fade 2.6s linear forwards}@keyframes huddle-fade{0%{opacity:1}100%{opacity:0}}}
-.huddle-tiles{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
-.huddle-tiles [data-huddle-tile]{position:relative;margin:0;border:2px solid transparent;border-radius:10px;overflow:hidden;background:#111;aspect-ratio:16/9}
-.huddle-tiles [data-huddle-tile] video{width:100%;height:100%;object-fit:cover;display:block;background:#111}
-.huddle-tile-label{position:absolute;left:6px;bottom:6px;padding:1px 8px;border-radius:10px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:700;max-width:calc(100% - 44px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.huddle-tile-badge{position:absolute;right:6px;top:6px;display:flex;gap:4px;font-size:15px;line-height:1}
+.huddle-tiles{list-style:none;margin:0;padding:0;display:grid;gap:6px;grid-auto-flow:column;grid-auto-columns:128px;overflow-x:auto;overscroll-behavior:contain}
+.huddle-tiles [data-huddle-tile]{position:relative;margin:0;border:2px solid transparent;border-radius:10px;overflow:hidden;background:#1d1c1f;aspect-ratio:16/10}
+.huddle-tiles [data-huddle-tile] video{width:100%;height:100%;object-fit:cover;display:block;background:#1d1c1f}
+.huddle-tile-face{position:absolute;inset:0;margin:auto;width:40px;height:40px;border-radius:9px;display:grid;place-items:center;background:var(--accent);color:#fff;font-size:18px;font-weight:800}
+.huddle-tiles [data-huddle-tile][data-huddle-camera="true"] .huddle-tile-face,.huddle-tiles [data-huddle-tile][data-huddle-screen] .huddle-tile-face{display:none}
+.huddle-tile-label{position:absolute;left:5px;bottom:5px;padding:1px 7px;border-radius:10px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:700;max-width:calc(100% - 40px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.huddle-tile-badge{position:absolute;right:5px;top:5px;display:flex;gap:4px;font-size:13px;line-height:1}
 [data-huddle-tile][data-huddle-muted="true"] .huddle-tile-badge::before{content:"\1F507"}
-[data-huddle-tile][data-huddle-camera="false"] .huddle-tile-badge::after{content:"\1F4F7";opacity:.55}
 .huddle-tiles [data-huddle-tile][data-huddle-speaking="true"]{border-color:var(--ok,#2bac76)}
 .huddle-tiles [data-huddle-tile][data-huddle-screen] video{object-fit:contain;background:#000}
-.huddle-tiles[data-huddle-presenter]{grid-template-columns:repeat(auto-fill,minmax(110px,1fr))}
-.huddle-tiles[data-huddle-presenter] [data-huddle-tile][data-huddle-presenting="true"]{grid-column:1/-1;aspect-ratio:16/8}
+.huddle-tiles[data-huddle-presenter] [data-huddle-tile][data-huddle-presenting="true"]{grid-column:span 2}
+@media(min-width:801px){
+.huddle-window{position:fixed;left:4px;bottom:6px;z-index:20;width:252px;padding:8px;max-height:calc(100vh - 120px);margin:0}
+.huddle-tiles{grid-auto-flow:row;grid-auto-columns:auto;grid-template-columns:repeat(2,minmax(0,1fr));max-height:40vh;overflow-y:auto}
+.huddle-tiles[data-huddle-presenter] [data-huddle-tile][data-huddle-presenting="true"]{grid-column:1/-1}
+.huddle-window[data-huddle-expanded="true"]{width:min(720px,calc(100vw - 32px))}
+.huddle-window[data-huddle-expanded="true"] .huddle-tiles{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));max-height:60vh}
+}
+@media(max-width:800px){
+.huddle-window{margin:6px 10px}
+.huddle-window [data-huddle-toggle="expanded"]{display:none}
+}
 .channel-actions button:hover{background:var(--hover)}
 .channel-actions a{color:var(--muted);text-decoration:none;font-weight:600;font-size:13px}
 .channel-actions a:hover{color:var(--text);text-decoration:underline}
@@ -2648,42 +2704,54 @@ var pageTemplate = mustPage(pageMarkup)
 // other people join and leave, and the existing data-fragment/data-live
 // refresh already reacts to the durable event stream, so this needs no new
 // transport.
-const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{{if .Active}} active{{end}}">
-{{if .Active}}
-<div class="huddle-state" role="status">
-  <strong>Huddle in {{.ChannelName}}</strong>
-  <span class="huddle-people">{{if .Participants}}{{range $index, $name := .Participants}}{{if $index}}, {{end}}{{$name}}{{end}}{{else}}nobody yet{{end}}</span>
-  <span class="huddle-media" data-huddle-status>{{if .Joined}}Connecting your microphone…{{else}}Join to connect your microphone and camera.{{end}}</span>
-</div>
-<div class="huddle-actions">
-  {{if .Joined}}<form method="post" action="{{.LeaveURL}}" hx-post="{{.LeaveURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Leave huddle</button></form>
-  {{else}}<form method="post" action="{{.JoinURL}}" hx-post="{{.JoinURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Join huddle</button></form>{{end}}
-  {{if .CanEnd}}<form method="post" action="{{.EndURL}}" hx-post="{{.EndURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="huddle-end" type="submit">End for everyone</button></form>{{end}}
-  {{if and .Joined .Invitable}}<details class="huddle-invite"><summary role="button" aria-label="Invite someone to the huddle">Invite</summary>
-    <form class="huddle-invite-form" method="post" action="{{.InviteURL}}" hx-post="{{.InviteURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-      <label for="huddle-invitee">Invite to the huddle<select id="huddle-invitee" name="invitee" required>{{range .Invitable}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
-      <button type="submit">Invite</button>
-    </form>
-  </details>{{end}}
-</div>
-{{if .Joined}}<div class="huddle-media-session" data-huddle-call="{{.CallID}}" data-huddle-self="{{.SelfID}}" data-huddle-sfu="{{.SFUURL}}" data-huddle-sfu-signal="{{.SFUSignalURL}}" data-huddle-presence="{{.PresenceURL}}" data-huddle-names="{{.Names}}" data-huddle-ice="{{.ICEServers}}" data-huddle-react="{{.ReactURL}}" data-huddle-csrf="{{.CSRFToken}}">
-  <div class="huddle-controls">
-    <button type="button" data-huddle-control="microphone" aria-pressed="false">Mute microphone</button>
-    <button type="button" data-huddle-control="camera" aria-pressed="false">Turn on camera</button>
-    <button type="button" data-huddle-control="screen" aria-pressed="false">Share screen</button>
+const huddlePartial = `{{define "huddle-faces"}}<span class="huddle-faces" aria-hidden="true">{{range $index, $person := .}}{{if lt $index 3}}{{if $person.AvatarURL}}<img src="{{$person.AvatarURL}}" alt="">{{else}}<span>{{$person.Initial}}</span>{{end}}{{end}}{{end}}{{if gt (len .) 3}}<span class="more">+{{len (slice . 3)}}</span>{{end}}</span>{{end}}
+{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{{if .Active}} active{{end}}{{if .Joined}} joined{{end}}">
+{{if .Joined}}
+<section class="huddle-window huddle-media-session" aria-labelledby="huddle-window-title" data-huddle-window data-huddle-call="{{.CallID}}" data-huddle-self="{{.SelfID}}" data-huddle-sfu="{{.SFUURL}}" data-huddle-sfu-signal="{{.SFUSignalURL}}" data-huddle-presence="{{.PresenceURL}}" data-huddle-names="{{.Names}}" data-huddle-ice="{{.ICEServers}}" data-huddle-react="{{.ReactURL}}" data-huddle-csrf="{{.CSRFToken}}">
+  <header class="huddle-window-head">
+    <span class="huddle-live" aria-hidden="true"></span>
+    <div class="huddle-window-name"><h2 id="huddle-window-title">{{.Title}}</h2><span class="huddle-people">{{len .Participants}} {{if eq (len .Participants) 1}}person{{else}}people{{end}}: {{range $index, $person := .Participants}}{{if $index}}, {{end}}{{$person.Name}}{{end}}</span></div>
+    {{if .CanvasURL}}<a class="huddle-icon" href="{{.CanvasURL}}" aria-label="Open the huddle canvas" title="Open the huddle canvas"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z M12 2.5V6h3.5 M7.5 10h5 M7.5 13h5"/></svg></a>{{end}}
+    <button type="button" class="huddle-icon" data-huddle-toggle="expanded" aria-pressed="false" aria-label="Expand huddle" title="Expand huddle"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 3.5h5v5 M16.5 3.5l-5.5 5.5 M8.5 16.5h-5v-5 M3.5 16.5L9 11"/></svg></button>
+    <button type="button" class="huddle-icon" data-huddle-toggle="minimised" aria-pressed="false" aria-label="Minimise huddle" title="Minimise huddle"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 14.5h11"/></svg></button>
+  </header>
+  <div class="huddle-window-body">
+    <p class="huddle-media" role="status" data-huddle-status>Connecting your microphone…</p>
+    <ul class="huddle-tiles" data-huddle-tiles aria-label="People in this huddle"></ul>
+    <div class="huddle-reactions" data-huddle-reactions aria-hidden="true"></div>
   </div>
-  {{if .Reactions}}<div class="huddle-reactions-bar" role="group" aria-label="Send a reaction">
-    {{range .Reactions}}<button type="button" class="huddle-react" data-huddle-react-name="{{.Name}}" aria-label="React with :{{.Name}}:">{{.Glyph}}</button>{{end}}
-  </div>{{end}}
-  {{if .CanvasURL}}<a class="huddle-canvas-link" href="{{.CanvasURL}}">Open the huddle canvas</a>{{end}}
-  <ul class="huddle-tiles" data-huddle-tiles aria-label="People in this huddle"></ul>
-  <div class="huddle-reactions" data-huddle-reactions aria-hidden="true"></div>
-</div>{{end}}
-{{else}}
+  <div class="huddle-toolbar" role="toolbar" aria-label="Huddle controls">
+    <button type="button" class="huddle-tool" data-huddle-control="microphone" aria-pressed="false" aria-label="Mute microphone" title="Mute microphone"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0V5A2.5 2.5 0 0 1 10 2.5z M5 9.5a5 5 0 0 0 10 0 M10 14.5v3"/><path class="off" d="M3.5 3.5l13 13"/></svg></button>
+    <button type="button" class="huddle-tool" data-huddle-control="camera" aria-pressed="false" aria-label="Turn on camera" title="Turn on camera"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 6h10v8h-10z M12.5 9l5-3v8l-5-3"/></svg></button>
+    <button type="button" class="huddle-tool" data-huddle-control="screen" aria-pressed="false" aria-label="Share screen" title="Share screen"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 3.5h15v10h-15z M7 17h6 M10 13.5V17 M10 11V6.5 M7.5 9L10 6.5 12.5 9"/></svg></button>
+    {{if .Reactions}}<details class="huddle-pop v-menu"><summary class="huddle-tool" role="button" aria-label="Reactions" title="Reactions"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15z M7 12a3.5 3.5 0 0 0 6 0 M7.5 8h.01 M12.5 8h.01"/></svg></summary>
+      <div class="huddle-pop-panel huddle-reactions-bar" role="group" aria-label="Send a reaction">{{range .Reactions}}<button type="button" class="huddle-react" data-huddle-react-name="{{.Name}}" aria-label="React with :{{.Name}}:">{{.Glyph}}</button>{{end}}</div>
+    </details>{{end}}
+    {{if or .Invitable .CanEnd}}<details class="huddle-pop v-menu"><summary class="huddle-tool" role="button" aria-label="More huddle options" title="More huddle options"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.5h.01 M10 10h.01 M10 15.5h.01"/></svg></summary>
+      <div class="huddle-pop-panel">
+        {{if .Invitable}}<form class="huddle-invite-form" method="post" action="{{.InviteURL}}" hx-post="{{.InviteURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+          <label for="huddle-invitee">Invite to the huddle<select id="huddle-invitee" name="invitee" required>{{range .Invitable}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+          <button class="huddle-pill" type="submit">Invite</button>
+        </form>{{end}}
+        {{if .CanEnd}}{{if .Invitable}}<hr>{{end}}<form method="post" action="{{.EndURL}}" hx-post="{{.EndURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="huddle-end" type="submit">End for everyone</button></form>{{end}}
+      </div>
+    </details>{{end}}
+    <form class="huddle-leave" method="post" action="{{.LeaveURL}}" hx-post="{{.LeaveURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="huddle-pill leave" type="submit" aria-label="Leave huddle"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 11.5c4.5-4 10.5-4 15 0l-2 2.5-3-1.5v-2c-1.8-.6-3.2-.6-5 0v2l-3 1.5z"/></svg><span aria-hidden="true">Leave</span></button></form>
+  </div>
+</section>
+{{else if .Active}}
+<svg class="huddle-glyph" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 13v-3a6.5 6.5 0 0 1 13 0v3 M3.5 12h2.5v4.5H3.5z M14 12h2.5v4.5H14z"/></svg>
+<div class="huddle-state" role="status"><strong>{{.Title}}</strong> <span class="huddle-people">{{if .Participants}}{{range $index, $person := .Participants}}{{if $index}}, {{end}}{{$person.Name}}{{end}}{{else}}nobody yet{{end}}</span></div>
+{{template "huddle-faces" .Participants}}
 <div class="huddle-actions">
-  <form method="post" action="{{.StartURL}}" hx-post="{{.StartURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Start a huddle</button></form>
-  <span class="huddle-media">Starting a huddle opens a call: your browser connects to each person who joins.</span>
+  <form method="post" action="{{.JoinURL}}" hx-post="{{.JoinURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="huddle-pill join" type="submit">Join huddle</button></form>
+  {{if .CanEnd}}<form method="post" action="{{.EndURL}}" hx-post="{{.EndURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="huddle-end" type="submit">End for everyone</button></form>{{end}}
 </div>
+<span class="huddle-media">Join to connect your microphone and camera.</span>
+{{else}}
+<svg class="huddle-glyph" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 13v-3a6.5 6.5 0 0 1 13 0v3 M3.5 12h2.5v4.5H3.5z M14 12h2.5v4.5H14z"/></svg>
+<form method="post" action="{{.StartURL}}" hx-post="{{.StartURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="huddle-start" type="submit">Start a huddle</button></form>
+<span class="huddle-media">Starting a huddle opens a call: your browser connects to each person who joins.</span>
 {{end}}
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 </div>{{end}}{{end}}`

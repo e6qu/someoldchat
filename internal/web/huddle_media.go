@@ -119,6 +119,11 @@ media.autoplay=true;
 media.playsInline=true;
 if(id===selfID)media.muted=true;
 item.appendChild(media);
+var face=document.createElement('span');
+face.className='huddle-tile-face';
+face.setAttribute('aria-hidden','true');
+face.textContent=(names[id]||nameOf(id)||'?').charAt(0).toUpperCase();
+item.appendChild(face);
 var label=document.createElement('span');
 label.className='huddle-tile-label';
 label.textContent=nameOf(id);
@@ -283,6 +288,7 @@ if(!decoded||decoded.call_id!==callID||!decoded.user_id)return;
 applyPresence(decoded.user_id,decoded.muted==='true',decoded.camera==='true',decoded.presenting==='true');
 });
 var control=function(name){return session.querySelector('[data-huddle-control="'+name+'"]')};
+var relabel=function(button,text){button.setAttribute('aria-label',text);button.setAttribute('title',text)};
 var microphone=control('microphone');
 if(microphone)microphone.addEventListener('click',function(){
 if(!local)return;
@@ -291,7 +297,7 @@ if(!track)return;
 track.enabled=!track.enabled;
 selfMuted=!track.enabled;
 microphone.setAttribute('aria-pressed',track.enabled?'false':'true');
-microphone.textContent=track.enabled?'Mute microphone':'Unmute microphone';
+relabel(microphone,track.enabled?'Mute microphone':'Unmute microphone');
 session.setAttribute('data-huddle-microphone',track.enabled?'on':'off');
 applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
 broadcastPresence();
@@ -308,7 +314,7 @@ videoSender.replaceTrack(null);
 showSelf(null);
 selfCamera=false;
 camera.setAttribute('aria-pressed','false');
-camera.textContent='Turn on camera';
+relabel(camera,'Turn on camera');
 session.setAttribute('data-huddle-camera','off');
 applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
 broadcastPresence();
@@ -321,7 +327,7 @@ videoSender.replaceTrack(cameraTrack);
 showSelf(cameraTrack);
 selfCamera=true;
 camera.setAttribute('aria-pressed','true');
-camera.textContent='Turn off camera';
+relabel(camera,'Turn off camera');
 session.setAttribute('data-huddle-camera','on');
 applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
 broadcastPresence();
@@ -338,7 +344,7 @@ toServer('screen_off');
 detachScreen(selfID);
 selfPresenting=false;
 screen.setAttribute('aria-pressed','false');
-screen.textContent='Share screen';
+relabel(screen,'Share screen');
 session.setAttribute('data-huddle-screen','off');
 applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
 broadcastPresence();
@@ -355,7 +361,7 @@ toServer('screen_on');
 attachScreen(selfID,stream);
 selfPresenting=true;
 screen.setAttribute('aria-pressed','true');
-screen.textContent='Stop sharing';
+relabel(screen,'Stop sharing');
 session.setAttribute('data-huddle-screen','on');
 applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
 broadcastPresence();
@@ -382,8 +388,34 @@ if(screenStream)screenStream.getTracks().forEach(function(track){track.stop()});
 if(audioContext){try{audioContext.close()}catch(error){}}
 });
 };
+var windowView=function(panel,name,on){
+panel.setAttribute('data-huddle-'+name,on?'true':'false');
+var toggle=panel.querySelector('[data-huddle-toggle="'+name+'"]');
+if(toggle)toggle.setAttribute('aria-pressed',on?'true':'false');
+};
+var restoreWindow=function(){
+var panel=document.querySelector('[data-huddle-window]');
+if(!panel||panel.getAttribute('data-huddle-restored')==='true')return;
+panel.setAttribute('data-huddle-restored','true');
+['minimised','expanded'].forEach(function(name){
+var saved='';
+try{saved=window.sessionStorage.getItem('sameoldchat-huddle-'+name)||''}catch(error){saved=''}
+if(saved==='true')windowView(panel,name,true);
+});
+};
+document.addEventListener('click',function(event){
+var toggle=event.target&&event.target.closest?event.target.closest('[data-huddle-toggle]'):null;
+if(!toggle)return;
+var panel=toggle.closest('[data-huddle-window]');
+if(!panel)return;
+var name=toggle.getAttribute('data-huddle-toggle');
+var on=toggle.getAttribute('aria-pressed')!=='true';
+windowView(panel,name,on);
+try{window.sessionStorage.setItem('sameoldchat-huddle-'+name,on?'true':'false')}catch(error){}
+});
 start(document.querySelector('[data-huddle-call]'));
+restoreWindow();
 if(window.MutationObserver){
-new MutationObserver(function(){start(document.querySelector('[data-huddle-call]'))}).observe(document.body,{childList:true,subtree:true});
+new MutationObserver(function(){start(document.querySelector('[data-huddle-call]'));restoreWindow()}).observe(document.body,{childList:true,subtree:true});
 }
 })();</script>`
