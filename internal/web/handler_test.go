@@ -1019,12 +1019,22 @@ func TestThreadViewRendersTheThreadAndItsComposer(t *testing.T) {
 		`<h2 id="thread-heading">Thread</h2>`,
 		`id="thread-messages"`,
 		`name="thread_ts" value="`+timestamp+`"`,
-		`<button class="send" type="submit">Send</button>`,
+		`aria-label="Send now"`,
 		"thread root",
 	)
 	// The reply composer has to post into the thread pane, not the channel
 	// timeline, or a reply never appears where it was written.
-	requireContains(t, "thread composer", body, `hx-target="#thread-messages"`)
+	requireContains(t, "thread composer", body, `id="thread-composer" data-composer="thread"`, `hx-target="#thread-messages"`, `placeholder="Reply…"`,
+		`name="reply_broadcast" value="true"`, "Also send to #general")
+	// The conversation composer stays in the main pane while a thread is open,
+	// posting to the channel and keeping the thread open when it navigates.
+	// They were one form that became the reply box, so a member reading a
+	// thread could not post to the channel at all.
+	requireContains(t, "conversation composer beside the thread", body, `id="composer" data-composer="channel"`, `hx-target="#timeline"`,
+		`placeholder="Message #general"`, `name="view_thread" value="`+timestamp+`"`)
+	if strings.Count(body, `id="text"`) != 1 || strings.Count(body, `id="thread-text"`) != 1 {
+		t.Fatal("the two composers must carry distinct field identifiers")
+	}
 	// The pane repeats a message the timeline already shows, so the document must
 	// not carry the same identifier twice.
 	requireContains(t, "thread pane", body, `id="thread-message-M1"`)
@@ -1097,23 +1107,23 @@ func TestComposerStagesPastedAndDroppedFilesIntoOneAtomicMessage(t *testing.T) {
 	requireContains(t, "composer file staging", page.Body.String(),
 		`id="upload-form"`,
 		`id="upload-comment"`,
-		`id="upload-clear"`,
 		`name="file" multiple`,
 		`id="clip-recorder"`,
 		`data-record-clip="audio"`,
 		`data-record-clip="video"`,
-		"You can also paste or drop files into the composer.",
+		`data-composer-action="upload"`,
+		">Upload from your computer<",
 	)
-	requireContains(t, "composer paste and drop behavior", progressiveEnhancementScript,
-		"text.addEventListener('paste'",
-		"composer.addEventListener('drop'",
-		"existing.concat(Array.prototype.slice.call(fileList)).slice(0,10)",
-		"stageSelectedFiles()",
-		"body.set('draft_attachments',JSON.stringify(draftAttachments))",
+	requireContains(t, "composer paste and drop behavior", composerScript,
+		"field.addEventListener('paste'",
+		"editor.addEventListener('paste'",
+		"form.addEventListener('drop'",
+		"attachments.length+pendingUploads.length+files.length>10",
+		"body.set('draft_attachments',JSON.stringify(attachments))",
 		"navigator.mediaDevices.getUserMedia",
 		"clipRecorder.start(1000)",
 		"},300000)",
-		"stageFiles([file])",
+		"clipOwner.stageFiles([file])",
 	)
 
 	var body bytes.Buffer
@@ -1338,10 +1348,10 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 		`<h1 class="channel-title"># general</h1>`,
 		"<title>#general · SameOldChat</title>",
 		`placeholder="Message #general"`,
-		`role="toolbar" aria-label="Message formatting and insertions"`,
-		`aria-label="Mention a person or user group"`,
-		`data-mention-user="U1"`,
-		`You can also paste or drop files into the composer.`,
+		`role="toolbar" aria-label="Formatting"`,
+		`role="toolbar" aria-label="Composer actions"`,
+		`aria-label="Mention someone"`,
+		`data-kind="person" data-id="U1" data-name="Ada Developer"`,
 		`<span class="author">Ada Developer</span>`,
 		`<div class="avatar" aria-hidden="true">A</div>`,
 		`<span class="signed-in-avatar" aria-hidden="true">A</span>`,
@@ -2020,14 +2030,13 @@ func TestComposerUserGroupMentionRendersAndNotifiesEligibleMembers(t *testing.T)
 		t.Fatalf("status=%d body=%s", page.Code, page.Body)
 	}
 	requireContains(t, "user group composer option", page.Body.String(),
-		`data-mention-group="SSUPPORT"`,
-		`data-mention-name="support"`,
-		"Support rotation · 1 members",
-		`aria-label="Mention a person or user group"`,
+		`data-kind="group" data-id="SSUPPORT" data-name="support" data-real="Support rotation"`,
+		`data-count="1"`,
+		`aria-label="Mention someone"`,
 	)
-	requireContains(t, "user group transport selection", progressiveEnhancementScript,
-		"'<!subteam^'+group+'>'",
-		"[data-mention-user],[data-mention-group]",
+	requireContains(t, "user group transport selection", composerScript,
+		"'<!subteam^'+group.id+'>'",
+		"directory.groups.filter(",
 	)
 
 	result := postForm(t, mux, "/app/message?channel=Cdev", url.Values{
@@ -2074,8 +2083,7 @@ func TestComposerUserGroupSuggestionsPageThroughTheWorkspaceCatalog(t *testing.T
 		t.Fatalf("status=%d body=%s", page.Code, page.Body)
 	}
 	requireContains(t, "user groups beyond the first store page", page.Body.String(),
-		`data-mention-group="S100"`,
-		`data-mention-name="group-100"`,
+		`data-kind="group" data-id="S100" data-name="group-100"`,
 	)
 }
 
@@ -2406,8 +2414,7 @@ func TestComposerAndMessagesUseWorkspaceEmojiAndVisibleChannelReferences(t *test
 		`id="emoji-picker-dialog"`,
 		`id="emoji-picker-category"`,
 		`id="emoji-picker-tone"`,
-		`data-channel-id="Cdev"`,
-		`data-channel-name="general"`,
+		`data-kind="channel" data-id="Cdev" data-name="general"`,
 		`class="custom-emoji" src="https://cdn.example/party.png" alt=":party_parrot:"`,
 		`aria-label=":tada:"`,
 		`class="slack-mention">#general</span>`,
@@ -3601,7 +3608,7 @@ func TestActionSurfacesMeetContrastInBothThemes(t *testing.T) {
 			background string
 			minimum    float64
 		}{
-			{what: "Send button label", foreground: resolve(declaration(t, pageStyle, ".send", "color")), background: resolve(declaration(t, pageStyle, ".send", "background")), minimum: 4.5},
+			{what: "Send button label", foreground: resolve(declaration(t, composerStyle, ".send", "color")), background: resolve(declaration(t, composerStyle, ".send", "background")), minimum: 4.5},
 			{what: "Sign out button label", foreground: resolve(declaration(t, identityMarkup, ".button", "color")), background: resolve(declaration(t, identityMarkup, ".button", "background")), minimum: 4.5},
 			{what: "focus ring on the chrome", foreground: token("focus-chrome"), background: token("accent"), minimum: 3},
 			{what: "focus ring on the page", foreground: token("focus"), background: token("bg"), minimum: 3},
@@ -3811,11 +3818,17 @@ func TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly(t *tes
 		t.Fatalf("workspace status=%d body=%s", workspace.Code, workspace.Body)
 	}
 	requireContains(t, "SCHED-01 composer", workspace.Body.String(),
-		`aria-label="Schedule message"`,
+		`aria-label="Schedule for later"`,
+		`>Schedule message</h3>`,
+		`name="schedule_preset" value="tomorrow" data-schedule-preset="tomorrow">Tomorrow at 9:00 AM<`,
+		`name="schedule_preset" value="monday" data-schedule-preset="monday">Monday at 9:00 AM<`,
+		`>Custom time</summary>`,
 		`type="datetime-local" name="schedule_at"`,
 		`formaction="/app/message/schedule?channel=Cdev&amp;thread=`+string(thread)+`"`,
 		`href="/app/drafts?channel=Cdev&amp;tab=scheduled"`,
-		`body.set('post_at',String(Math.floor(scheduleMillis/1000)))`,
+	)
+	requireContains(t, "SCHED-01 composer client", composerScript,
+		`body.set('post_at',String(Math.floor(when.getTime()/1000)))`,
 	)
 
 	postAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
@@ -4572,14 +4585,15 @@ func TestWorkspaceDiscoversAndDispatchesInstalledAppShortcuts(t *testing.T) {
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "app shortcuts", body,
 		"Shortcuts", "Create ticket", "Create a ticket", "More actions", "Attach ticket", "Attach this message",
-		`aria-label="Shortcuts and slash commands"`, `data-slash-command="/ticket"`, "summary", "Tickets",
-		`data-slash-command="/shrug"`,
-		`id="shortcut-browser"`, `id="shortcut-browser-query"`, `aria-label="Browse shortcuts"`,
+		`data-kind="command" data-name="/ticket"`, "summary", "Tickets",
+		`data-kind="command" data-name="/shrug"`,
+		`id="shortcut-browser"`, `id="shortcut-browser-query"`, `data-composer-action="shortcuts"`, `aria-label="Shortcuts"`,
 		`data-browser-command="/ticket"`, `data-browser-command="/shrug"`,
 		`action="/app/shortcut"`, `name="app_id" value="A1"`, `name="callback_id" value="create_ticket"`,
 	)
-	requireContains(t, "shortcut browser behavior", progressiveEnhancementScript,
-		"shortcutBrowser.showModal()", "filterShortcuts()", "replaceComposerRange(start,end,command+' '",
+	requireContains(t, "shortcut browser behavior", composerScript,
+		"shortcutBrowser.showModal()", "filterShortcuts()", "owner.insertCommand(choice.getAttribute('data-browser-command'))",
+		"showOptions('Shortcuts and slash commands',nodes)",
 	)
 
 	builtIn := postForm(t, mux, "/app/message?channel=Cdev", url.Values{
@@ -4788,11 +4802,14 @@ func TestProgressiveEnhancementHandlesRedirectResponses(t *testing.T) {
 	if !strings.Contains(progressiveEnhancementScript, "if(response.status===204)return ''") {
 		t.Fatal("progressive enhancement does not handle empty 204 responses")
 	}
-	if !strings.Contains(progressiveEnhancementScript, "form===composer?errorBox:actionBox") {
+	// A composer's failures belong to that composer: its script handles its
+	// own submissions and never lets them reach the generic handler, whose
+	// failures go to the page's action feedback instead of a composer.
+	if !strings.Contains(progressiveEnhancementScript, "function showError(message){var box=actionBox;") {
 		t.Fatal("unrelated mutation failures are still rendered as composer errors")
 	}
-	if !strings.Contains(progressiveEnhancementScript, "clearError(form)") {
-		t.Fatal("one mutation can still clear another control's error")
+	if !strings.Contains(composerScript, "form.addEventListener('submit',function(event){\nevent.preventDefault();event.stopPropagation();") {
+		t.Fatal("a composer submission can still reach the generic form handler, which would post it twice or show its error elsewhere")
 	}
 	if !strings.Contains(progressiveEnhancementScript, "setNav(false,false)") || !strings.Contains(progressiveEnhancementScript, "navToggle.focus()") {
 		t.Fatal("the narrow navigation does not close on Escape and restore focus")

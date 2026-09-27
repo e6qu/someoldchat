@@ -23,6 +23,35 @@ async function slackModifiers(page) {
   };
 }
 
+// The composer is a rich editor in front of the form field. A journey types
+// into the editor, as a person does, and reads what will be sent from the
+// field, which carries Slack's markup: *bold*, <@U…> and so on.
+function composerEditor(page, prefix = '') {
+  return page.locator(`#${prefix}text-editor`);
+}
+
+function composerField(page, prefix = '') {
+  return page.locator(`#${prefix}text`);
+}
+
+// The custom-time dialog behind the send button's schedule menu.
+async function scheduleAt(page, hoursAhead, scope = page) {
+  await scope.getByRole('button', { name: 'Schedule for later' }).click();
+  await scope.getByRole('menuitem', { name: 'Custom time' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Schedule message' });
+  const future = await page.evaluate((hours) => {
+    const value = new Date(Date.now() + hours * 60 * 60 * 1000);
+    const pad = (part) => String(part).padStart(2, '0');
+    return { date: `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`, time: `${pad(value.getHours())}:${pad(value.getMinutes())}` };
+  }, hoursAhead);
+  await dialog.getByLabel('Date').fill(future.date);
+  await dialog.getByLabel('Time').fill(future.time);
+  await Promise.all([
+    page.waitForURL(/\/app\/drafts\?.*scheduled=1/),
+    dialog.getByRole('button', { name: 'Schedule message' }).click(),
+  ]);
+}
+
 // A test can leave the shared development channel, so restore the membership
 // precondition before every journey. Joining is idempotent.
 test.beforeEach(async ({ request }) => {
@@ -166,23 +195,24 @@ test('[AUTH-01 MSG-01 COMP-01 SEARCH-01] workspace supports the core browser jou
   await expect(page.locator('.channel-title')).toHaveText('# general');
   await expect(page).toHaveTitle(/#general/);
 
-  const composer = page.locator('form.composer textarea[name="text"]');
-  await expect(composer).toHaveAttribute('placeholder', /general/);
-  await expect(composer).toHaveAttribute('maxlength', '40000');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
+  await expect(composer).toHaveAttribute('data-placeholder', /general/);
+  await expect(composer).toHaveAccessibleName('Message #general');
 
   const message = `browser qualification ${Date.now()}`;
   await composer.fill(message);
   const postMessage = page.waitForResponse((response) =>
     response.url().includes('/app/message') && response.request().method() === 'POST',
   );
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send now' }).click();
   const postResponse = await postMessage;
   expect(postResponse.status(), await postResponse.text()).toBe(200);
   await expect(page.locator('.message-text').last()).toHaveText(message);
 
   // The composer is cleared after a successful send. It kept its text before,
   // so pressing Send twice posted the same message twice.
-  await expect(composer).toHaveValue('');
+  await expect(composerValue).toHaveValue('');
 
   // Authors and avatars carry names and initials, not raw user identifiers.
   await expect(page.locator('.message').last().locator('.author')).not.toHaveText(/^U[A-Za-z0-9]+$/);
@@ -244,7 +274,8 @@ test('[DM-03 DM-05 A11Y-01] adding people reviews history and group DMs convert 
     await expect(page).toHaveURL(/\/app\?channel=/);
 
     const retained = `history retained in expanded DM ${Date.now()}`;
-    const composer = page.locator('form.composer textarea[name="text"]');
+    const composer = composerEditor(page);
+  const composerValue = composerField(page);
     await composer.fill(retained);
     await composer.press('Enter');
     await expect(page.locator('.message-text', { hasText: retained })).toBeVisible();
@@ -343,7 +374,7 @@ test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app m
     await expect(page.getByText('1 selected')).toBeVisible();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/thread=/);
-    await expect(page.locator('form.composer textarea[name="text"]')).toHaveAttribute('placeholder', 'Reply in the thread');
+    await expect(composerEditor(page, 'thread-')).toHaveAttribute('data-placeholder', 'Reply…');
 
     await page.goBack();
     rows = page.locator('[data-activity-row]');
@@ -445,20 +476,10 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled work can be edited, sent now, and ca
   await page.goto('/app');
 
   const message = `scheduled browser qualification ${Date.now()}`;
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   await composer.fill(message);
-  await page.getByRole('button', { name: 'Schedule message' }).click();
-  const localFuture = await page.evaluate(() => {
-    const value = new Date(Date.now() + 2 * 60 * 60 * 1000);
-    const pad = (part) => String(part).padStart(2, '0');
-    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
-  });
-  await page.getByLabel('Send date and time').fill(localFuture);
-
-  await Promise.all([
-    page.waitForURL(/\/app\/drafts\?.*scheduled=1/),
-    page.locator('button[formaction^="/app/message/schedule"]').click(),
-  ]);
+  await scheduleAt(page, 2);
   await expect(page.getByRole('status')).toHaveText('Message scheduled.');
   const scheduled = page.locator('.scheduled-item', { hasText: message });
   await expect(scheduled).toBeVisible();
@@ -467,7 +488,7 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled work can be edited, sent now, and ca
 
   await page.getByRole('link', { name: 'Back to chat' }).click();
   await expect(page.locator('.message-text', { hasText: message })).toHaveCount(0);
-  await expect(composer).toHaveValue('');
+  await expect(composerValue).toHaveValue('');
   await page.getByRole('link', { name: 'Drafts and sent' }).click();
   await page.getByRole('link', { name: 'Scheduled', exact: true }).click();
   await expect(scheduled).toBeVisible();
@@ -493,12 +514,7 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled work can be edited, sent now, and ca
   await page.getByRole('link', { name: 'Back to chat' }).click();
   await expect(page.locator('.message-text', { hasText: edited })).toBeVisible();
   await composer.fill(`${message} cancel`);
-  await page.getByRole('button', { name: 'Schedule message' }).click();
-  await page.getByLabel('Send date and time').fill(localFuture);
-  await Promise.all([
-    page.waitForURL(/\/app\/drafts\?.*scheduled=1/),
-    page.locator('button[formaction^="/app/message/schedule"]').click(),
-  ]);
+  await scheduleAt(page, 2);
   const cancellable = page.locator('.scheduled-item', { hasText: `${message} cancel` });
   await cancellable.getByRole('button', { name: /Cancel scheduled message/ }).click();
   await expect(page.getByRole('status')).toHaveText('Scheduled message cancelled.');
@@ -517,10 +533,10 @@ test('[SCHED-01 SCHED-02 FILE-01 A11Y-01] a staged file remains private until on
   // directly; this one proves the control that opens it exists and works.
   // Through the plus menu, which is where Slack keeps uploading and shortcuts
   // together rather than as two identical glyphs in the toolbar.
-  await page.locator('.composer-plus > summary').click();
+  await page.locator('#composer').getByRole('button', { name: 'Attach' }).click();
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser'),
-    page.getByRole('button', { name: 'Upload from computer' }).click(),
+    page.getByRole('menuitem', { name: 'Upload from your computer' }).click(),
   ]);
   await chooser.setFiles({
     name: `scheduled-${stamp}.txt`,
@@ -528,17 +544,7 @@ test('[SCHED-01 SCHED-02 FILE-01 A11Y-01] a staged file remains private until on
     buffer: Buffer.from('scheduled browser file contents'),
   });
   await expect(page.locator('#live-status')).toContainText('saved with this draft');
-  await page.getByRole('button', { name: 'Schedule message' }).click();
-  const localFuture = await page.evaluate(() => {
-    const value = new Date(Date.now() + 2 * 60 * 60 * 1000);
-    const pad = (part) => String(part).padStart(2, '0');
-    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
-  });
-  await page.getByLabel('Send date and time').fill(localFuture);
-  await Promise.all([
-    page.waitForURL(/\/app\/drafts\?.*scheduled=1/),
-    page.locator('button[formaction^="/app/message/schedule"]').click(),
-  ]);
+  await scheduleAt(page, 2);
   await expect(page.getByRole('status')).toHaveText('Message scheduled.');
   const scheduled = page.locator('.scheduled-item', { hasText: 'File attachment' });
   await expect(scheduled).toContainText('1 attachment');
@@ -558,7 +564,8 @@ test('[SCHED-01 SCHED-02 FILE-01 A11Y-01] a staged file remains private until on
 test('[DRAFT-01 DRAFT-02 A11Y-01] drafts persist on the server and Drafts & sent exposes all tabs', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   const draft = `server draft qualification ${Date.now()}`;
   await Promise.all([
     // Any page load or navigation also POSTs /app/draft (init persist and
@@ -578,14 +585,14 @@ test('[DRAFT-01 DRAFT-02 A11Y-01] drafts persist on the server and Drafts & sent
   ]);
   await page.evaluate(() => localStorage.clear());
   await page.reload();
-  await expect(composer).toHaveValue(draft);
+  await expect(composerValue).toHaveValue(draft);
 
   await page.getByRole('link', { name: 'Drafts and sent' }).click();
   await expect(page.getByRole('link', { name: 'Drafts', exact: true })).toHaveAttribute('aria-current', 'page');
   const item = page.locator('.work-item', { hasText: draft });
   await expect(item).toBeVisible();
   await item.getByRole('link', { name: 'Continue' }).click();
-  await expect(composer).toHaveValue(draft);
+  await expect(composerValue).toHaveValue(draft);
 
   await page.getByRole('link', { name: 'Drafts and sent' }).click();
   await item.getByRole('button', { name: /Delete draft/ }).click();
@@ -704,9 +711,10 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await page.getByRole('link', { name: 'Back to chat' }).click();
   await expect(page).toHaveURL(/\/app(\?|$)/);
   const channelReminder = `channel reminder ${Date.now()}`;
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   await composer.fill(`/remind #general ${channelReminder} every Thursday at 9am`);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send now' }).click();
   await expect(page).toHaveURL(/\/app\/later\?.*filter=channel-reminders/);
   const channelItem = page.locator('.later-item', { hasText: channelReminder });
   await expect(channelItem.getByRole('link', { name: '#general' })).toBeVisible();
@@ -719,7 +727,7 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(page).toHaveURL(/\/app(\?|$)/);
   await expect(page.locator('.message-text', { hasText: channelReminder })).toHaveCount(0);
   await composer.fill('/remind list');
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send now' }).click();
   await expect(page).toHaveURL(/\/app\/later\?.*filter=channel-reminders/);
   await expect(page.locator('.later-item', { hasText: channelReminder })).toBeVisible();
 });
@@ -742,7 +750,7 @@ test('[A11Y-01 A11Y-02 A11Y-03] workspace and command discovery pass WCAG AA aut
   expect(faded, 'a message must not be faded: opacity multiplies against every contrast inside it').toEqual([]);
 
   const { primary } = await slackModifiers(page);
-  await page.locator('form.composer textarea[name="text"]').press(`${primary}+k`);
+  await composerEditor(page).press(`${primary}+k`);
   await expect(page.getByRole('dialog', { name: 'Jump to a conversation' })).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 
@@ -844,7 +852,8 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   await expect(page.locator('.message-file', { hasText: fileTitle })).toBeVisible();
 
   const { primary } = await slackModifiers(page);
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   await composer.fill('draft survives current-conversation search');
   await composer.press(`${primary}+f`);
   await expect(page).toHaveURL(/\/app\/search\?.*scope=channel/);
@@ -856,7 +865,7 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   await expect(page.locator('.result', { hasText: message })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Search the whole workspace' })).toBeVisible();
   await page.getByRole('link', { name: 'Back to chat' }).click();
-  await expect(composer).toHaveValue('draft survives current-conversation search');
+  await expect(composerValue).toHaveValue('draft survives current-conversation search');
   await page.goBack();
   await expect(page.locator('.result', { hasText: message })).toBeVisible();
 
@@ -1235,13 +1244,16 @@ test('[THREAD-01 THREAD-02] opening a thread renders the thread and its composer
 
   // The reply composer must carry the CSRF field whose absence caused the
   // original failure, and a reply must actually post.
-  const threadComposer = page.locator('form.composer textarea[name="text"]');
-  await expect(page.locator('form.composer input[name="_csrf"]')).toHaveCount(1);
-  await expect(page.locator('form.composer input[name="thread_ts"]')).toHaveValue(root.ts);
+  const threadComposer = composerEditor(page, 'thread-');
+  const threadForm = page.locator('#thread-composer');
+  await expect(threadForm.locator('input[name="_csrf"]')).toHaveCount(1);
+  await expect(threadForm.locator('input[name="thread_ts"]')).toHaveValue(root.ts);
+  await expect(threadComposer).toBeFocused();
+  await expect(threadComposer).toHaveAccessibleName('Reply…');
 
   const replyText = `thread reply ${Date.now()}`;
   await threadComposer.fill(replyText);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await threadForm.getByRole('button', { name: 'Send now' }).click();
   await expect(thread.locator('.message-text').last()).toHaveText(replyText);
 
   // A11Y-01, measured rather than inferred. The action toolbar used to be an
@@ -1284,20 +1296,21 @@ test('[COMP-01 NAV-02 NAV-03 APP-05] the composer and workspace honour Slack web
   await signIn(context);
   await page.goto('/app');
 
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   const { primary, activity } = await slackModifiers(page);
   const continued = `first line ${Date.now()}`;
   await composer.fill(continued);
   await composer.press('Shift+Enter');
   await composer.pressSequentially('second line');
-  await expect(composer).toHaveValue(`${continued}\nsecond line`);
+  await expect(composerValue).toHaveValue(`${continued}\nsecond line`);
 
   await composer.fill('');
   const sent = `enter to send ${Date.now()}`;
   await composer.fill(sent);
   await composer.press('Enter');
   await expect(page.locator('.message-text').last()).toHaveText(sent);
-  await expect(composer).toHaveValue('');
+  await expect(composerValue).toHaveValue('');
 
   // APP-05: slash opens installed/built-in command discovery in the composer;
   // choosing /shrug invokes the built-in instead of posting the raw command.
@@ -1306,7 +1319,7 @@ test('[COMP-01 NAV-02 NAV-03 APP-05] the composer and workspace honour Slack web
   await expect(commandList).toBeVisible();
   await expect(commandList.getByRole('option', { name: /\/shrug/ })).toBeVisible();
   await composer.press('Enter');
-  await expect(composer).toHaveValue('/shrug ');
+  await expect(composerValue).toHaveValue('/shrug ');
   await composer.pressSequentially('release day');
   await composer.press('Enter');
   await expect(page.locator('.message-text').last()).toContainText('release day ¯\\_(ツ)_/¯');
@@ -1319,7 +1332,7 @@ test('[COMP-01 NAV-02 NAV-03 APP-05] the composer and workspace honour Slack web
   await expect(search).toBeFocused();
   await search.press('Escape');
   await expect(composer).toBeFocused();
-  await expect(composer).toHaveValue('draft survives search');
+  await expect(composerValue).toHaveValue('draft survives search');
 
   // NAV-03: Control/Command+K is the conversation switcher, not search.
   await composer.press(`${primary}+k`);
@@ -1328,7 +1341,7 @@ test('[COMP-01 NAV-02 NAV-03 APP-05] the composer and workspace honour Slack web
   await expect(switcher.getByPlaceholder('Jump to a conversation')).toBeFocused();
   await switcher.getByRole('button', { name: 'Close conversation switcher' }).click();
   await expect(composer).toBeFocused();
-  await expect(composer).toHaveValue('draft survives search');
+  await expect(composerValue).toHaveValue('draft survives search');
 
   // Slack's dedicated Activity chord is desktop-only. Slack web uses the
   // navigation-tab shortcut (Activity is the default third tab).
@@ -1357,22 +1370,23 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   expect(groupUsersPayload.ok, JSON.stringify(groupUsersPayload)).toBe(true);
   await page.goto('/app');
 
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   const { primary } = await slackModifiers(page);
   await composer.fill('format me');
-  await composer.evaluate((field) => field.setSelectionRange(0, field.value.length));
+  await composer.press(`${primary}+a`);
   await composer.press(`${primary}+b`);
-  await expect(composer).toHaveValue('*format me*');
+  await expect(composerValue).toHaveValue('*format me*');
 
-  await composer.evaluate((field) => field.setSelectionRange(field.value.length, field.value.length));
-  await page.getByRole('button', { name: 'Choose an emoji' }).click();
+  await composer.press('End');
+  await page.locator('#composer').getByRole('button', { name: 'Emoji' }).click();
   const emojiPicker = page.getByRole('dialog', { name: 'Emoji' });
   await expect(emojiPicker).toBeVisible();
   const emojiSearch = emojiPicker.getByPlaceholder('Search emoji');
   await expect(emojiSearch).toBeFocused();
   await emojiSearch.fill('tada');
   await emojiPicker.getByRole('option', { name: ':tada:' }).click();
-  await expect(composer).toHaveValue('*format me*:tada:');
+  await expect(composerValue).toHaveValue('*format me*:tada:');
   await composer.press('Enter');
   const formatted = page.locator('.message').last();
   await expect(formatted.locator('strong')).toHaveText('format me');
@@ -1382,12 +1396,12 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   const suggestions = page.getByRole('listbox', { name: 'Mention suggestions' });
   await expect(suggestions).toBeVisible();
   await composer.press('Enter');
-  await expect(composer).toHaveValue(/^<@U[^>]+> $/);
+  await expect(composerValue).toHaveValue(/^<@U[^>]+> $/);
 
   await composer.fill(`@${groupHandle}`);
   await expect(suggestions.getByRole('option', { name: new RegExp(`@${groupHandle}.*Support rotation`) })).toBeVisible();
   await composer.press('Enter');
-  await expect(composer).toHaveValue(`<!subteam^${groupID}> `);
+  await expect(composerValue).toHaveValue(`<!subteam^${groupID}> `);
   await composer.pressSequentially('please review');
   await composer.press('Enter');
   const groupMessage = page.locator('.message').last();
@@ -1398,7 +1412,7 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   const channels = page.getByRole('listbox', { name: 'Channel suggestions' });
   await expect(channels).toBeVisible();
   await composer.press('Tab');
-  await expect(composer).toHaveValue('<#Cdev> ');
+  await expect(composerValue).toHaveValue('<#Cdev> ');
   await composer.pressSequentially('channel reference');
   await composer.press('Enter');
   const channelMessage = page.locator('.message').last();
@@ -1409,7 +1423,7 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   const emojiSuggestions = page.getByRole('listbox', { name: 'Emoji suggestions' });
   await expect(emojiSuggestions.getByRole('option', { name: ':tada:' })).toBeVisible();
   await composer.press('Enter');
-  await expect(composer).toHaveValue(':tada: ');
+  await expect(composerValue).toHaveValue(':tada: ');
 
   const draft = `durable draft ${Date.now()}`;
   await Promise.all([
@@ -1429,7 +1443,7 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
     composer.fill(draft),
   ]);
   await page.reload();
-  await expect(composer).toHaveValue(draft);
+  await expect(composerValue).toHaveValue(draft);
 
   // Scoped to the composer's own control: the shortcuts dialog names the same
   // action, because it is the same action.
@@ -1442,7 +1456,7 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   await expect(page.locator('#upload-preview')).toContainText('12 B');
   await expect(page.locator('#live-status')).toContainText('saved with this draft');
   await page.reload();
-  await expect(composer).toHaveValue(draft);
+  await expect(composerValue).toHaveValue(draft);
   await expect(page.locator('#upload-preview')).toContainText('preview.txt');
   await expect(page.locator('.side-link[aria-label*="has a draft"]').first()).toBeVisible();
 
@@ -1450,9 +1464,9 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   await composer.fill(sent);
   await composer.press('Enter');
   await expect(page.locator('.message-text').last()).toHaveText(sent);
-  await expect(composer).toHaveValue('');
+  await expect(composerValue).toHaveValue('');
   await page.reload();
-  await expect(composer).toHaveValue('');
+  await expect(composerValue).toHaveValue('');
 });
 
 test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions honour Slack keyboard navigation', async ({ page, context, request }) => {
@@ -1465,11 +1479,20 @@ test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions ho
   const last = await postThroughTheAPI(request, lastText);
   await page.goto('/app');
 
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   await composer.fill('');
   await composer.press('ArrowUp');
   const lastMessage = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: lastText }) });
   const secondMessage = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: secondText }) });
+  // Up in an empty composer edits your own last message, as in Slack. These
+  // messages are the member's own, so the editor opens on the newest.
+  const lastEditor = lastMessage.getByRole('textbox', { name: 'Edit your message' });
+  await expect(lastEditor).toBeFocused();
+  await lastEditor.evaluate((node) => {
+    for (let details = node.closest('details'); details; details = details.parentElement && details.parentElement.closest('details')) details.open = false;
+    node.closest('.message').focus();
+  });
   await expect(lastMessage).toBeFocused();
 
   await page.keyboard.press('ArrowUp');
@@ -1543,7 +1566,8 @@ test('[CONV-01 COMP-01] a public-channel preview can be joined and posted to', a
 
   await page.getByRole('button', { name: 'Join channel' }).click();
   await expect(page).toHaveURL(/\/app\?channel=Cdev/);
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   await expect(composer).toBeVisible();
   await expect(page.getByText('Joined', { exact: true })).toBeVisible();
 
@@ -1602,10 +1626,11 @@ test('[RESILIENCE-01] live delivery keeps reaching the timeline after posting', 
 
   // Post from the interface first: this is the submit that used to close the
   // stream permanently.
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   const own = `own message ${Date.now()}`;
   await composer.fill(own);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send now' }).click();
   await expect(page.locator('.message-text').last()).toHaveText(own);
 
   // Now originate an event elsewhere. It must arrive without a reload, and the
@@ -1616,7 +1641,7 @@ test('[RESILIENCE-01] live delivery keeps reaching the timeline after posting', 
   await postThroughTheAPI(request, elsewhere);
 
   await expect(page.locator('.message-text').last()).toHaveText(elsewhere, { timeout: 15_000 });
-  await expect(composer).toHaveValue(draft);
+  await expect(composerValue).toHaveValue(draft);
 });
 
 // Reactions and pins persisted but were never rendered, and every mutation
@@ -1682,7 +1707,8 @@ test('[MSG-03 MSG-04] a member can edit and delete their own message in place', 
   await signIn(context);
   await page.goto('/app');
 
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   const original = `edit target ${Date.now()}`;
   await composer.fill(original);
   await composer.press('Enter');
@@ -1804,39 +1830,58 @@ test('[NAV-06] theme choice persists across workspace pages', async ({ page, con
 });
 
 // A failed post added a class no stylesheet defined, so the failure was
-// invisible and the typed message was lost with no explanation.
-test('[COMP-01 RESILIENCE-04] a rejected post explains itself and keeps the draft', async ({ page, context }) => {
+// invisible and the typed message was lost with no explanation. Slack keeps a
+// message whose send failed in the conversation as "not sent" with Retry and
+// Delete; a refusal the member can act on keeps the text in the composer.
+test('[COMP-01 RESILIENCE-04] a failed send is kept as not sent and a refused one keeps the draft', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
+  const send = page.locator('#composer').getByRole('button', { name: 'Send now' });
 
-  // Make the next mutation fail at the transport, which is the case that was
-  // silent: the server never sees a valid request.
+  // A transport failure: the server never sees the request.
   await page.route('**/app/message*', (route) => route.abort());
-
-  const composer = page.locator('form.composer textarea[name="text"]');
   const doomed = `never delivered ${Date.now()}`;
   await composer.fill(doomed);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await send.click();
+  const unsent = page.getByRole('group', { name: 'Message not sent' });
+  await expect(unsent).toContainText(doomed);
+  await expect(unsent).toContainText('Not sent');
+  await expect(page.locator('#live-status')).toContainText('not sent');
+  await expect(composerValue).toHaveValue('');
 
-  const error = page.locator('#composer-error');
-  await expect(error).toBeVisible();
-  await expect(error).toHaveAttribute('role', 'alert');
-  await expect(error).not.toBeEmpty();
-  await expect(composer).toHaveValue(doomed);
-
-  // An unrelated action failure gets its own alert and cannot erase or replace
-  // the send failure while the unsent draft is still present.
-  const sendError = await error.textContent();
-  await page.unroute('**/app/message*');
+  // An unrelated action failure gets its own alert and leaves the unsent
+  // message where it is.
   const target = page.locator('.message').last();
   await page.route('**/app/pin*', (route) => route.abort());
   await openMessageMenu(target);
   await target.getByRole('button', { name: 'Pin' }).click();
   const actionError = page.locator('#action-feedback');
   await expect(actionError).toBeVisible();
-  await expect(actionError).not.toContainText('message was kept');
-  await expect(error).toHaveText(sendError);
-  await expect(composer).toHaveValue(doomed);
+  await expect(unsent).toContainText(doomed);
+  await page.unroute('**/app/pin*');
+
+  // Retry sends the same message once, with the same client id, so a send
+  // that committed before its response was lost cannot post twice.
+  await page.unroute('**/app/message*');
+  await unsent.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.locator('.message-text', { hasText: doomed })).toHaveCount(1);
+  await expect(unsent).toHaveCount(0);
+
+  // A refusal is not transient: the text stays in the composer and the
+  // composer says why, instead of a generic outage message.
+  await page.route('**/app/message*', (route) => route.fulfill({ status: 403, contentType: 'text/plain', body: 'Posting in this channel is restricted, so the message was not sent.' }));
+  const refused = `refused ${Date.now()}`;
+  await composer.fill(refused);
+  await composer.press('Enter');
+  const error = page.locator('#composer-error');
+  await expect(error).toBeVisible();
+  await expect(error).toHaveAttribute('role', 'alert');
+  await expect(error).toHaveText('Posting in this channel is restricted, so the message was not sent.');
+  await expect(composerValue).toHaveValue(refused);
+  await expect(page.getByRole('group', { name: 'Message not sent' })).toHaveCount(0);
+  await page.unroute('**/app/message*');
 });
 
 // The old 64px rail gave every channel the same # glyph and every DM the same @
@@ -1950,10 +1995,11 @@ test('[AUTH-01] the workspace is protected and its own scripts run under its pol
 
   // The client runs: the composer submits through fetch rather than navigating,
   // which is only true if the inline script was allowed to execute.
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   const sent = `policy check ${Date.now()}`;
   await composer.fill(sent);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send now' }).click();
   await expect(page.locator('.message-text').last()).toHaveText(sent);
   await expect(page).toHaveURL(/\/app$/);
   expect(violations, violations.join('\n')).toHaveLength(0);
@@ -1971,19 +2017,20 @@ test('[RESILIENCE-02 COMP-01] a second submit while the first is in flight posts
     await route.continue();
   });
 
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   const once = `posted once ${Date.now()}`;
   await composer.fill(once);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send now' }).click();
   await composer.press('Enter');
-  await page.getByRole('button', { name: 'Send' }).click({ force: true });
+  await page.getByRole('button', { name: 'Send now' }).click({ force: true });
 
   await expect(page.locator('.message-text', { hasText: once })).toHaveCount(1);
   await page.unroute('**/app/message*');
   // The lock is released: the composer still works afterwards.
   const after = `still working ${Date.now()}`;
   await composer.fill(after);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send now' }).click();
   await expect(page.locator('.message-text').last()).toHaveText(after);
 });
 
@@ -2000,10 +2047,11 @@ test('[MSG-01 RESILIENCE-01] a message sent while reading older history is not l
   await page.getByRole('link', { name: 'Show older messages' }).click();
   await expect(page.locator('#timeline')).toHaveAttribute('data-live', 'false');
 
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   const sent = `sent from history ${Date.now()}`;
   await composer.fill(sent);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send now' }).click();
 
   // The reader is taken to the window the message is actually in.
   await expect(page.locator('#timeline')).toHaveAttribute('data-live', 'true');
@@ -2646,13 +2694,14 @@ test('[NAV-02 NAV-04] section movement, unread movement, and mark-all-read work 
   // NAV-02 has required F6 section movement since the journey was written and
   // nothing implemented it. A browser reserves bare F6, so the primary
   // modifier joins it — which the dialog says out loud.
-  const composer = page.locator('form.composer textarea[name="text"]');
+  const composer = composerEditor(page);
+  const composerValue = composerField(page);
   await composer.click();
   await page.keyboard.press(`${primary}+F6`);
   await expect(composer).not.toBeFocused();
   const landed = await page.evaluate(() => {
     const active = document.activeElement;
-    const section = active && active.closest('#workspace-sidebar,#timeline,#thread-messages,#composer');
+    const section = active && active.closest('#workspace-sidebar,#timeline,#thread-messages,#thread-composer,#composer');
     return section ? section.id : (active && active.id) || '';
   });
   expect(landed, 'the primary modifier with F6 moved focus into a different major section').not.toBe('composer');
@@ -2677,7 +2726,7 @@ test('[NAV-02 NAV-04] section movement, unread movement, and mark-all-read work 
   await page.goto('/app');
   // Deliberately from the composer, which is where focus lands on load: Shift
   // means nothing else to a text field, so the chord has to reach here.
-  await page.locator('form.composer textarea[name="text"]').focus();
+  await composerEditor(page).focus();
   await page.keyboard.press('Shift+Escape');
   // A full navigation, not a background fetch: the sidebar badges are
   // server-rendered, so a member who cleared everything has to be shown a
@@ -4086,8 +4135,8 @@ async function installInteractiveApp(page, request) {
 async function runGlobalShortcut(page, app, name) {
   await page.goto(`/app?channel=${CHANNEL}`);
   // Shortcuts are one level down, in the composer's ＋ menu, as in Slack.
-  await page.getByRole('button', { name: 'Attach a file or browse shortcuts' }).click();
-  await page.getByRole('button', { name: 'Browse shortcuts', exact: true }).click();
+  await page.locator('#composer').getByRole('button', { name: 'Attach' }).click();
+  await page.getByRole('menuitem', { name: 'Shortcuts', exact: true }).click();
   const browser = page.getByRole('dialog', { name: 'Shortcuts' });
   await expect(browser).toBeVisible();
   // Every journey installs its own app, so the shortcut is picked by its app.

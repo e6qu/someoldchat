@@ -223,7 +223,50 @@ func renderSlackMrkdwnWithEmoji(text string, customEmoji map[string]string) temp
 // already-escaped text.
 func renderSlackMrkdwnMarking(text string, customEmoji map[string]string, terms []string) template.HTML {
 	text = decodeSlackEntities(text)
-	return template.HTML(renderSlackInlineMarking(text, customEmoji, terms)) // #nosec G203 -- the renderer escapes every literal and validates every URL.
+	return template.HTML(renderSlackQuotes(text, customEmoji, terms)) // #nosec G203 -- the renderer escapes every literal and validates every URL.
+}
+
+// renderSlackQuotes renders mrkdwn's one line-level construct: a line that
+// starts with ">" outside a code fence is a block quote, and consecutive quote
+// lines form one quote. The composer's Blockquote control writes exactly this,
+// and it used to arrive as a literal ">". Everything else, including the text
+// inside the quote, goes through the inline renderer unchanged.
+func renderSlackQuotes(text string, customEmoji map[string]string, terms []string) string {
+	lines := strings.Split(text, "\n")
+	quoted := make([]bool, len(lines))
+	any, fenced := false, false
+	for index, line := range lines {
+		if !fenced && strings.HasPrefix(line, ">") {
+			quoted[index], any = true, true
+		}
+		if strings.Count(line, "```")%2 == 1 {
+			fenced = !fenced
+		}
+	}
+	if !any {
+		return renderSlackInlineMarking(text, customEmoji, terms)
+	}
+	var output strings.Builder
+	for start := 0; start < len(lines); {
+		end := start
+		for end < len(lines) && quoted[end] == quoted[start] {
+			end++
+		}
+		if quoted[start] {
+			body := make([]string, 0, end-start)
+			for _, line := range lines[start:end] {
+				body = append(body, strings.TrimPrefix(strings.TrimPrefix(line, ">"), " "))
+			}
+			output.WriteString(`<blockquote class="message-quote">`)
+			output.WriteString(renderSlackInlineMarking(strings.Join(body, "\n"), customEmoji, terms))
+			output.WriteString("</blockquote>")
+		} else {
+			segment := strings.Join(lines[start:end], "\n")
+			output.WriteString(renderSlackInlineMarking(segment, customEmoji, terms))
+		}
+		start = end
+	}
+	return output.String()
 }
 
 func decodeSlackEntities(text string) string {
