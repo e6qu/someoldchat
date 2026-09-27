@@ -13,6 +13,33 @@ Deleted, redacted, retained, imported, system, bot, app, ephemeral, scheduled,
 thread-broadcast, and file-share messages MUST be distinguishable where Slack
 distinguishes them. Message markup and app-provided content are safe.
 
+Slack's timeline presentation that the target includes:
+
+- consecutive messages from one author within a few minutes form one group:
+  the name and avatar are shown once, and each later message shows its time
+  in the avatar gutter on hover. A day divider, the unread line, a workspace
+  notice, a thread broadcast, or a different app name or icon starts a group;
+- the header time is the clock time ("10:19 AM") in the member's time zone and
+  locale, with the full date and time ("Saturday, September 27th at 10:19:05
+  AM") as its tooltip; day dividers read "Today", "Yesterday" or "Friday,
+  September 26th" for the member's calendar day and stay pinned at the top of
+  the list while their day scrolls;
+- mrkdwn renders one line break per newline, `>` and `>>>` quotes with a left
+  bar, fenced code blocks as their own block, inline code, and the bullet and
+  numbered lines Slack writes for lists; a message that is only a few emoji is
+  shown enlarged;
+- mentions of the member (and `@here`, `@channel`, `@everyone`) are
+  highlighted, as is the message row; `@person` and `#channel` references
+  open the person or channel;
+- a workspace notice is one compact line beside a small avatar ("Ada joined
+  #general."); a pinned message carries "Pinned by …" and a tint; a thread
+  reply also sent to the channel reads "replied to a thread: …" with the root
+  linking to the thread;
+- a message with replies shows the repliers' avatars, "N replies" and "Last
+  reply … ago", becoming "View thread" on hover;
+- an image opens in a viewer (Escape closes it) with download; a file card
+  offers its actions on hover.
+
 ## MSG-02 — Navigate and mark unread/read
 
 Opening a conversation positions the first unread message according to Slack's
@@ -25,7 +52,10 @@ behavior.
 ## MSG-03 — Edit a message
 
 An eligible author opens Edit from the message menu or Slack's `E` shortcut,
-changes the content in place, and saves or cancels. Validation preserves the
+changes the content in place, and saves or cancels. The editor replaces the
+message body with Cancel and Save; Enter saves, Shift+Enter adds a line,
+Escape cancels, and focus returns to the message. Saving an emptied message
+offers deletion instead. Validation preserves the
 edit. A successful edit keeps message identity/thread/reactions, shows Slack's
 edited marker, updates API history, and emits the correct change event.
 Concurrent edit/delete, retention locks, time/role policy, app-authored
@@ -34,7 +64,9 @@ messages, and lost access have explicit outcomes.
 ## MSG-04 — Delete a message
 
 An eligible author opens Delete from the menu or Slack's documented shortcut
-and receives Slack's applicable confirmation. Success removes or tombstones the
+and receives Slack's applicable confirmation: a "Delete message" dialog
+reading "Are you sure you want to delete this message? This cannot be
+undone.", quoting the message, with Cancel and Delete. Success removes or tombstones the
 message consistently across timeline, thread, search, Activity, Later, pins,
 files, API history, and events. It does not delete an entire thread or shared
 file unless Slack does. Already-deleted, retained, legal-hold, unauthorized,
@@ -44,7 +76,12 @@ and concurrent cases are handled.
 
 Reply in thread opens Slack's secondary thread view, identifies the root and
 conversation, loads replies in order, and moves focus to a useful thread
-heading or composer. The thread can be deep-linked and closed without losing
+heading or composer. The pane is headed "Thread" with the conversation name
+and a close control (Escape also closes it), divides the root from its
+replies with "N replies", and keeps "Get notified about new replies" /
+"Turn off notifications for replies" in the root's menu. The Threads view
+lists the member's threads — messages with replies — with the conversation,
+the root, its latest replies and a place to reply. The thread can be deep-linked and closed without losing
 the parent reading position. Deleted/inaccessible roots and paginated replies
 remain intelligible.
 
@@ -77,6 +114,17 @@ The corresponding documented one-key shortcuts (`E`, `Delete`/`Backspace`,
 `T`, `F`, `P`, `A`, `U`, `M`, `R`) apply only when a message has keyboard
 focus. They MUST not fire while editing text.
 
+The hover toolbar leads with one-click reactions from the member's recent
+emoji, then Add reaction, Reply in thread, Forward message, Save for later and
+More actions. More actions lists, with separators and key hints: the thread
+notification toggle; Mark unread (`U`); Remind me about this, a submenu of In
+20 minutes, In 1 hour, In 3 hours, Tomorrow, Next week and Custom…; Copy link;
+Pin to channel / Un-pin from channel (`P`); Edit message (`E`); Delete
+message… (`delete`); then app message shortcuts. Right-clicking a message
+opens the same menu at the pointer. Menus close on Escape or an outside click,
+move with the arrow keys, and stay on screen at phone width. A reminder,
+forward, mark-unread or follow change completes where the member is.
+
 ## ACT-02 — React to a message
 
 The emoji reaction picker exposes standard and custom emoji, recent choices,
@@ -87,7 +135,12 @@ authorization changes, and concurrent toggles reconcile correctly.
 
 The picker opens from the message action or focused-message `R`, places focus
 in search, supports arrow/Enter selection, and returns focus to the originating
-message action after dismissal. Selection submits the canonical colon-code
+message action after dismissal. It is a popover anchored to its trigger with a
+category row (Frequently used first), a skin-tone control, the whole catalog
+browsable by category, a hover preview, and "Add emoji" for members allowed to
+add one. Reaction pills keep the order emoji were first used, name who reacted
+("Ada, Grace and you reacted with :eyes:"), and are followed by an add-reaction
+control. Selection submits the canonical colon-code
 name, never arbitrary free text. Standard aliases and outer colons normalize
 before storage; a new reaction MUST match Slack's standard catalog or a durable
 workspace custom emoji/alias. Existing reactions remain removable after a
@@ -101,7 +154,9 @@ membership independently of the visual.
 Pinning follows conversation permissions and produces Slack's channel-visible
 effect and system/event projection. Forward/share identifies destination and
 optional message, prevents unauthorized destination disclosure, and preserves
-the original attribution/link. Copy-link yields a durable authorized permalink;
+the original attribution/link. Slack's "Forward message" dialog searches
+channels, direct messages and people, previews the message, and offers Copy
+link beside Forward. Copy-link yields a durable authorized permalink;
 copy-text contains the message content Slack exposes rather than hidden HTML.
 
 ## Evidence
