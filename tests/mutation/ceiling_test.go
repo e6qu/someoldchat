@@ -56,4 +56,11 @@ package mutation
 // 76 to 75: giving the fixture list a column and the workspace a group direct
 // message made RemoveListColumn and ConvertGroupDirectToPrivate reach their front
 // doors, so one more guard is caught where it used to run on to not-found.
+//
+// Held at 75: six operations added since (a message's external-select options,
+// the app Messages tab, three dialog operations, and starring a channel) took
+// it to 81 and are now load-bearing. The matrix hands the deactivated tier its
+// own dialog and drives AddStar in its channel form; service tests refuse a
+// non-member the options load, an outsider the Messages tab before the app is
+// examined, and a non-member a private channel's star.
 const survivingGuardCeiling = 75
