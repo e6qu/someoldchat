@@ -205,9 +205,10 @@ const profilePanelStyle = `.profile-panel{position:fixed;z-index:60;top:0;right:
 // profilePanelScript opens a member's profile in the side panel. It is the
 // single entry point every surface uses: window.sameoldchatOpenProfile(id,
 // opener) from script, or any element carrying data-profile-user (an author
-// name, a mention, a People card, a search hit) from a click. The element's
-// own href stays a full-page fallback, /app/members?user=<id>, so the profile
-// is reachable without script and from a new tab.
+// name, a People card, a search hit) from a click, as well as a rendered
+// member mention (a.slack-mention with data-user-id). The element's own href
+// stays a full-page fallback to People, so the profile is reachable without
+// script and from a new tab.
 //
 // The panel is a complementary landmark, not a modal: Slack keeps the
 // conversation usable while a profile is open. Focus moves to the panel's
@@ -229,9 +230,9 @@ var copy=event.target.closest('[data-copy-text]');
 if(copy){event.preventDefault();var text=copy.getAttribute('data-copy-text');var done=copy.getAttribute('data-copy-done')||'Copied.';var status=document.querySelector('[data-profile-status]')||document.getElementById('view-status');var report=function(message){if(status)status.textContent=message};var menu=copy.closest('details');if(menu)menu.open=false;if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){report(done)},function(){report('Copy it by hand: '+text)})}else{report('Copy it by hand: '+text)}return}
 if(event.target.closest('[data-profile-close]')){event.preventDefault();close();return}
 if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
-var trigger=event.target.closest('[data-profile-user]');
+var trigger=event.target.closest('[data-profile-user],a.slack-mention[data-user-id]');
 if(!trigger)return;
-event.preventDefault();event.stopPropagation();open(trigger.getAttribute('data-profile-user'),trigger);
+event.preventDefault();event.stopPropagation();open(trigger.getAttribute('data-profile-user')||trigger.getAttribute('data-user-id'),trigger);
 },true);
 document.addEventListener('keydown',function(event){if(event.key==='Escape'&&host&&!host.hidden&&(host.contains(document.activeElement)||document.activeElement===document.body)){var menu=host.querySelector('details[open]');if(menu){menu.open=false;menu.querySelector('summary').focus();return}event.preventDefault();close()}});
 var initial=document.getElementById('profile-panel');if(initial&&!initial.hidden){host=initial;tick();clock=window.setInterval(tick,30000)}
