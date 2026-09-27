@@ -136,7 +136,7 @@ const conversationShellStyle = `<style>
 .conversation-member:hover .member-menu>summary,.conversation-member:focus-within .member-menu>summary,.member-menu[open]>summary{opacity:1}
 @media(hover:none){.bookmarks-bar button,.member-menu>summary{opacity:1}}
 .details-apps{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
-.details-edit-dialog textarea,.details-edit textarea{min-height:90px;resize:vertical}
+.details-edit textarea{min-height:90px;resize:vertical}
 @media(max-width:800px){
 .channel-header-row{padding:4px 8px 2px 12px;min-height:44px}
 .shell .channel-meta,.facepile .faces{display:none}

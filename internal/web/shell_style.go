@@ -112,7 +112,6 @@ details[open]>.menu-list{display:grid}
 .side-avatar img{width:100%;height:100%;border-radius:inherit;object-fit:cover}
 .side-avatar .presence-dot{width:9px;height:9px;right:-3px;bottom:-3px;border-color:var(--chrome)}
 .side-avatar .presence-dot.auto{display:none}
-.side-count{margin-left:auto;color:inherit;font-size:12px;font-weight:600;opacity:.85}
 .shell .badge{margin-left:auto;display:inline-grid;place-items:center;min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:#c81e4f;color:#fff;font-size:12px;font-weight:800}
 .shell .draft-badge{margin-left:auto;display:inline-grid;place-items:center;color:inherit}
 .shell .draft-badge .icon{width:15px;height:15px}
