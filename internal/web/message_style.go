@@ -255,4 +255,9 @@ html[data-theme=dark] .toast{background:#e9e7ea;color:#1a1d21}
 .content:has(>.thread) .timeline-wrap{display:none}
 .emoji-picker{left:8px !important;right:8px;width:auto;bottom:8px;top:auto !important;height:min(420px,70vh)}
 }
+/* A closed disclosure hides its content in every engine. The menus' own
+   display rules (a grid submenu, flex items) otherwise win over WebKit's
+   closed-details hiding and leave a closed submenu's items rendered, so this
+   comes last. */
+.menu-submenu:not([open])>:not(summary),.reminder-custom:not([open])>:not(summary),details[data-message-menu]:not([open])>:not(summary),.file-more:not([open])>:not(summary){display:none}
 </style>`
