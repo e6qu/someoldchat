@@ -28,10 +28,10 @@ type huddleView struct {
 	// Visible is false when the reader cannot be in this conversation's
 	// huddle at all, so the bar is absent rather than showing a control that
 	// would be refused.
-	Visible      bool
-	Active       bool
-	Joined       bool
-	CanEnd       bool
+	Visible bool
+	Active  bool
+	Joined  bool
+	CanEnd  bool
 	// Title names the huddle the way Slack's window does: "Huddle in #name"
 	// for a channel, "Huddle with <people>" for a DM.
 	Title        string

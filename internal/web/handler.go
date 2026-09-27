@@ -1337,13 +1337,13 @@ type laterItemView struct {
 	ID string
 	// Text is the saved message as the timeline renders it; AuthorID,
 	// AvatarURL and Initial are its author's face and profile.
-	Text            template.HTML
-	AuthorID        string
-	AvatarURL       string
-	Initial         string
-	ChannelPrivate  bool
-	RemindURL       string
-	MarkUnreadURL   string
+	Text           template.HTML
+	AuthorID       string
+	AvatarURL      string
+	Initial        string
+	ChannelPrivate bool
+	RemindURL      string
+	MarkUnreadURL  string
 	// Reminder is the reminder set on this saved message, shown as a due
 	// chip on the item rather than as a second card for the same message.
 	Reminder        *laterReminderView
