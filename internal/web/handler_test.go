@@ -1976,10 +1976,13 @@ func TestActivityShowsDurableMentionWithFiltersAndTriage(t *testing.T) {
 	requireContains(t, "activity page", activity.Body.String(),
 		"<title>Activity · SameOldChat</title>",
 		`aria-label="Activity filters"`,
-		">Unread</a>",
-		">Cleared</a>",
-		">Detailed</button>",
+		`role="switch" aria-checked="false"><span>Unreads</span>`,
+		">View cleared activity</a>",
+		">✓ Detailed</button>",
 		">Dense</button>",
+		`value="read_all">Mark all as read</button>`,
+		"Mention in #general",
+		"<strong>Bob Builder</strong> mentioned you",
 		"#general",
 		"Mentions",
 		"Invitations",
@@ -2216,7 +2219,7 @@ func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {
 		t.Fatalf("layout redirect lost Activity filters: %q", location)
 	}
 	dense := get(t, mux, "/app/activity?channel=Cdev&kind=mention&unread=1")
-	requireContains(t, "dense layout persisted", dense.Body.String(), `class="activity-list dense"`, `value="dense"><button type="submit" aria-pressed="true"`)
+	requireContains(t, "dense layout persisted", dense.Body.String(), `class="v-list activity-list dense"`, `value="dense"><button type="submit" aria-pressed="true"`)
 	requireContains(t, "Activity keyboard contract", activityMarkup,
 		"event.key==='ArrowDown'", "event.key==='ArrowUp'", "event.key==='Enter'",
 		"event.key==='x'", "event.key==='c'", "event.key==='r'",

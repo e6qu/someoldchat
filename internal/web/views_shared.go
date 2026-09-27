@@ -81,9 +81,9 @@ const viewStyle = `<style>
 .v-row-text.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .v-row-time{color:var(--muted);font-size:12px;white-space:nowrap}
 .v-row-side{display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-height:32px}
-.v-hover-actions{display:flex;gap:2px;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);opacity:0;pointer-events:none}
-.v-row:hover .v-hover-actions,.v-row:focus-within .v-hover-actions,.v-hover-actions:has(details[open]){opacity:1;pointer-events:auto}
-@media(hover:none){.v-hover-actions{opacity:1;pointer-events:auto;box-shadow:none}}
+.v-hover-actions{display:flex;gap:2px;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);opacity:0}
+.v-row:hover .v-hover-actions,.v-row:focus-within .v-hover-actions,.v-hover-actions:has(details[open]){opacity:1}
+@media(hover:none){.v-hover-actions{opacity:1;box-shadow:none}}
 .v-hover-actions form{margin:0}
 .v-avatar{position:relative;display:grid;place-items:center;width:36px;height:36px;flex:0 0 auto;overflow:hidden;border-radius:6px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;font-size:15px;font-weight:800;text-transform:uppercase}
 .v-avatar img{width:100%;height:100%;object-fit:cover}
@@ -122,7 +122,15 @@ const viewStyle = `<style>
 // address, which is how Slack's list rows behave. The row's own primary link
 // stays the keyboard and assistive-technology path; a click on any control
 // inside the row, a modified click, or a text selection is left alone.
+//
+// It also gives every .v-menu (a details disclosure) the behaviour of a
+// menu: Escape closes the open one and returns focus to its button, a click
+// elsewhere closes it, and opening one closes any other.
 const rowLinkScript = `<script>(function(){
+function openMenus(){return Array.prototype.slice.call(document.querySelectorAll('details.v-menu[open]'))}
+document.addEventListener('keydown',function(event){if(event.key!=='Escape')return;var menus=openMenus();if(!menus.length)return;var menu=menus[menus.length-1];menu.open=false;var summary=menu.querySelector('summary');if(summary)summary.focus();event.stopPropagation()},true);
+document.addEventListener('click',function(event){openMenus().forEach(function(menu){if(!menu.contains(event.target))menu.open=false})});
+document.addEventListener('toggle',function(event){var menu=event.target;if(!menu.matches||!menu.matches('details.v-menu')||!menu.open)return;openMenus().forEach(function(other){if(other!==menu&&!other.contains(menu))other.open=false});var first=menu.querySelector('.v-menu-list a,.v-menu-list button,.v-menu-list input');if(first&&menu.querySelector('summary')===document.activeElement&&!first.matches('input'))first.focus()},true);
 document.addEventListener('click',function(event){
 if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
 var row=event.target.closest('[data-row-href]');
@@ -282,7 +290,7 @@ const profilePanelPartial = `{{define "profile-panel"}}<div class="pp-head"><h2 
 {{if .IsSelf}}{{if .CanEdit}}<a class="v-btn" href="/app/members#profile-heading">Edit profile</a>{{end}}
 {{else}}{{if .CanMessage}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button class="v-btn primary" type="submit" aria-label="Message {{.Name}}">Message</button></form>
 {{if not .IsBot}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><input type="hidden" name="huddle" value="1"><button class="v-btn" type="submit" aria-label="Start a huddle with {{.Name}}"><span aria-hidden="true">🎧</span> Huddle</button></form>{{end}}{{end}}{{end}}
-<details class="v-menu"><summary class="v-btn" aria-label="More actions for {{.Name}}"><span aria-hidden="true">⋮</span></summary><div class="v-menu-list">
+<details class="v-menu"><summary class="v-btn" role="button" aria-label="More actions for {{.Name}}"><span aria-hidden="true">⋮</span></summary><div class="v-menu-list">
 <button type="button" data-copy-text="{{.ID}}" data-copy-done="Member ID copied.">Copy member ID</button>
 <a href="{{.FilesURL}}">View files</a>
 <a href="{{.SearchURL}}">Search messages from {{.Name}}</a>

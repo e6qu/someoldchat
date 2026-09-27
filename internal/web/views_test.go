@@ -11,6 +11,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/service"
 )
 
 func getFragment(t *testing.T, mux *http.ServeMux, target string) *httptest.ResponseRecorder {
@@ -127,4 +128,43 @@ func TestHeartbeatRecordsTheBrowserTimezone(t *testing.T) {
 	if user, _ := s.GetUser(context.Background(), "U1"); user.Profile.Timezone != "Asia/Tokyo" {
 		t.Fatalf("a bad zone replaced the stored one: %q", user.Profile.Timezone)
 	}
+}
+
+// TestActivityGroupsReactionsAndKeepsTheReactor covers the Activity rows Slack
+// shows for reactions: the reactor (not the message's author) is named, the
+// emoji is a glyph, several reactions with the same emoji on one message are
+// one row naming everyone, and Mark all as read clears every unread item.
+func TestActivityGroupsReactionsAndKeepsTheReactor(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	for _, user := range []domain.User{{ID: "U2", WorkspaceID: "T1", Name: "ana", RealName: "Ana Lima"}, {ID: "U3", WorkspaceID: "T1", Name: "dana", RealName: "Dana Park"}} {
+		if err := s.SeedUser(user); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SeedConversationMember("Cdev", user.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	message := seedMessage(t, s, "M1", "Proposal: new onboarding flow", time.Unix(1700000000, 0).UTC())
+	messages := service.Messages{Store: s}
+	for _, reactor := range []domain.UserID{"U2", "U3"} {
+		if err := messages.AddReaction(context.Background(), "T1", reactor, "Cdev", domain.NewMessageTimestamp(message.CreatedAt), "tada"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := get(t, mux, "/app/activity?channel=Cdev&kind=reaction").Body.String()
+	requireContains(t, "grouped reaction row", body,
+		"Reaction in #general",
+		"<strong>Dana Park</strong> and <strong>Ana Lima</strong> reacted",
+		`aria-label=":tada:">🎉</span> to your message`)
+	requireMissing(t, "grouped reaction row", body, "REACTION :TADA:", "Reaction :tada:", "<strong>Ada Developer</strong> reacted")
+	if rows := strings.Count(body, "data-activity-row data-activity-id"); rows != 1 {
+		t.Fatalf("reaction rows = %d, want the two reactions folded into one", rows)
+	}
+
+	marked := postForm(t, mux, "/app/activity/mutate?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}, "mutation": {"read_all"}}.Encode(), false)
+	if marked.Code != http.StatusSeeOther {
+		t.Fatalf("mark all read status=%d body=%s", marked.Code, marked.Body)
+	}
+	unread := get(t, mux, "/app/activity?channel=Cdev&unread=1").Body.String()
+	requireContains(t, "after mark all read", unread, "You’re all caught up.")
 }

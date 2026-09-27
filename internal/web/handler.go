@@ -1097,6 +1097,9 @@ type activityData struct {
 	ActiveURL   string
 	MoreURL     string
 	Notice      string
+	// MoreFilters are the filters Slack keeps out of the tab row (channels
+	// set to all new posts, and reminders), offered from a More menu.
+	MoreFilters []activityFilterView
 }
 
 type activityFilterView struct {
@@ -1120,9 +1123,31 @@ type activityKindOption struct {
 }
 
 type activityItemView struct {
-	ID          string
-	KindLabel   string
+	ID string
+	// IDs is every Activity item the row stands for, space-separated: Slack
+	// folds several reactions with the same emoji on the same message into
+	// one row ("Ana Lima and Dana Park reacted 🎉"), and marking that row read
+	// or clearing it acts on all of them.
+	IDs       string
+	KindLabel string
+	// Context is the small line above the headline ("Mention in #design"),
+	// Headline the sentence naming who did what, and Label the plain-text
+	// accessible name of the whole row.
+	Context  string
+	Headline template.HTML
+	Label    string
+	// AvatarURL/Initial are the actor's face; Glyph replaces it for rows no
+	// member caused (a reminder), and Badge is the reaction emoji shown on the
+	// avatar's corner.
+	AvatarURL   string
+	Initial     string
+	Glyph       template.HTML
+	Badge       template.HTML
 	ActorName   string
+	actors      []string
+	kind        domain.ActivityKind
+	reaction    string
+	groupKey    string
 	ChannelName string
 	Text        template.HTML
 	MachineTime string
@@ -2137,7 +2162,7 @@ const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox
 var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
 {{define "styles"}}` + pageStyle + workspaceRefinements + `<style>` + profilePanelStyle + `
 .message-head a.author{color:var(--text);text-decoration:none}.message-head a.author:hover{text-decoration:underline}</style>{{end}}
-{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + profilePanelScript + `{{end}}
+{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + rowLinkScript + profilePanelScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
 <div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}"{{if .CanonicalURL}} data-canonical-url="{{.CanonicalURL}}"{{end}}>
@@ -2844,7 +2869,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
     </section>
   </div>
 </main>{{end}}
-` + profilePanelPartial + `{{define "scripts"}}` + localTimeScript + liveFilterScript + profilePanelScript + `<script>(function(){
+` + profilePanelPartial + `{{define "scripts"}}` + localTimeScript + liveFilterScript + rowLinkScript + profilePanelScript + `<script>(function(){
 var hidden=document.querySelector('[data-status-expiration]');
 var local=document.querySelector('[data-status-expiration-local]');
 function localValue(date){var offset=date.getTimezoneOffset()*60000;return new Date(date.getTime()-offset).toISOString().slice(0,16)}
@@ -3015,25 +3040,56 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 var searchTemplate = mustPage(searchMarkup)
 
 var activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
-{{define "styles"}}<style>
+{{define "styles"}}` + viewStyle + `<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
-.layout{width:min(980px,calc(100% - 28px));margin:22px auto 48px}.activity-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}.activity-heading h2{margin:0 auto 0 0;font-size:25px}.layout-forms{display:flex;gap:4px}.layout-forms form{margin:0}.layout-forms button,.bulk-actions button,.item-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:7px 10px;font-weight:800}.layout-forms button[aria-pressed=true]{background:var(--action);color:var(--on-strong)}
-.activity-tabs{display:flex;gap:3px;overflow-x:auto;border-bottom:1px solid var(--line);margin-bottom:10px}.activity-tabs a{white-space:nowrap;padding:9px 11px;color:var(--muted);font-weight:800;text-decoration:none;border-bottom:3px solid transparent}.activity-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}.activity-options{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.activity-options a{border:1px solid var(--field-line);border-radius:18px;padding:5px 10px;color:var(--text);text-decoration:none;font-weight:700}.activity-options a[aria-current=page]{background:var(--hover);border-color:var(--action)}
-.saved-views{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;margin:0 0 10px}.saved-view-delete button,.saved-view-create summary{border:1px solid var(--field-line);border-radius:18px;padding:5px 10px;background:var(--bg);color:var(--text);font-weight:700;cursor:pointer;list-style:none}.saved-view-create[open] summary{background:var(--hover);border-color:var(--action)}.saved-view-create form{margin-top:8px;display:grid;gap:8px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--panel);max-width:320px}.saved-view-name{display:grid;gap:4px;font-weight:700}.saved-view-name input{padding:7px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.saved-view-kinds{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;border:1px solid var(--line);border-radius:6px;margin:0;padding:8px}.saved-view-kinds legend{font-weight:700;color:var(--muted);padding:0 4px}.saved-view-kinds label{display:flex;align-items:center;gap:6px;font-weight:400}.saved-view-create button[type=submit]{justify-self:start;border:0;border-radius:6px;padding:8px 12px;background:var(--action);color:var(--on-strong);font-weight:800}
-.bulk-actions{min-height:39px;display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid var(--line);border-radius:8px 8px 0 0;background:var(--panel)}.bulk-actions span{margin-right:auto;color:var(--muted);font-size:13px}.activity-list{margin:0;padding:0;list-style:none;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;overflow:hidden}.activity-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;padding:14px;background:var(--panel);border-top:1px solid var(--line);outline:none}.activity-row:first-child{border-top:0}.activity-row:hover,.activity-row:focus{background:var(--hover)}.activity-row.unread{box-shadow:inset 3px 0 var(--action)}.activity-select{margin-top:3px}.activity-main{min-width:0}.activity-head{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.activity-kind{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;color:var(--action)}.activity-author{font-weight:800}.activity-meta{color:var(--muted);font-size:12px}.activity-text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.activity-source{color:inherit;text-decoration:none}.activity-source:focus-visible{text-decoration:underline}.item-actions{display:flex;gap:4px;align-items:start}.item-actions button{padding:5px 8px}.unavailable{color:var(--muted);font-style:italic}.empty{margin:0;padding:34px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}.pager{text-align:center;margin-top:16px}
-.activity-list.dense .activity-row{padding:8px 12px}.activity-list.dense .activity-text{display:inline;margin-left:5px}.activity-list.dense .activity-head{display:inline-flex}
+.activity-head-actions{display:flex;align-items:center;gap:6px}
+.activity-head-actions form{margin:0}
+.activity-tabbar{display:flex;align-items:flex-end;gap:4px;margin:0 0 12px;border-bottom:1px solid var(--line)}
+.activity-tabbar .v-tabs{flex:1 1 auto;min-width:0;margin:0;border-bottom:0}
+.activity-tabbar>.v-menu{flex:0 0 auto;margin-bottom:4px}
+.saved-view-form{display:grid;gap:8px;min-width:260px;padding:6px}
+.saved-view-form label{display:grid;gap:4px;font-size:13px;font-weight:700}
+.saved-view-form fieldset{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin:0;padding:8px;border:1px solid var(--line);border-radius:6px}
+.saved-view-form fieldset label{display:flex;align-items:center;gap:6px;font-weight:400}
+.saved-view-form legend{padding:0 4px;color:var(--muted);font-size:12px;font-weight:700}
+.bulk-actions{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.bulk-actions[hidden]{display:none}
+.bulk-actions span{margin-right:auto;color:var(--muted);font-size:13px;font-weight:700}
+.activity-row{outline:none}
+.activity-row:focus{box-shadow:inset 0 0 0 2px var(--focus)}
+.activity-headline{margin:1px 0 0;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.activity-headline a{color:var(--text);text-decoration:none}
+.activity-headline a:hover{text-decoration:underline}
+.activity-headline strong{font-weight:800}
+.activity-headline .standard-emoji,.activity-headline .custom-emoji{display:inline-block;width:18px;height:18px;font-size:16px;line-height:18px;vertical-align:-3px}
+.activity-headline img.custom-emoji{object-fit:contain}
+.activity-row .v-row-text{color:var(--muted)}
+.activity-row.unread .v-row-text{color:var(--text)}
+.activity-select{width:16px;height:16px;margin:8px;accent-color:var(--action)}
+.v-hover-actions:has(input:checked){opacity:1;pointer-events:auto}
+.unavailable{color:var(--muted);font-style:italic}
+.activity-list.dense .activity-row{padding:7px 12px;align-items:center}
+.activity-list.dense .v-avatar,.activity-list.dense .v-avatar-wrap{width:24px;height:24px;font-size:11px}
+.activity-list.dense .v-row-meta{display:none}
+.activity-list.dense .activity-headline{display:inline}
+.activity-list.dense .v-row-text{display:inline;margin-left:6px;-webkit-line-clamp:1}
 .activity-reaction-dialog{width:min(520px,calc(100% - 24px));border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);padding:0;box-shadow:0 18px 55px #0005}.activity-reaction-dialog::backdrop{background:#0007}.activity-reaction-shell{padding:16px}.activity-reaction-head{display:flex;align-items:center;gap:10px}.activity-reaction-head h3{margin:0 auto 0 0}.activity-reaction-head button{border:0;background:transparent;color:var(--text);font-size:22px}.activity-reaction-controls{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;margin:13px 0}.activity-reaction-controls input,.activity-reaction-controls select{min-width:0;padding:8px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.activity-reaction-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:5px;margin:0;padding:0;list-style:none;max-height:310px;overflow:auto}.activity-reaction-results button{width:100%;min-height:58px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text);display:grid;place-items:center;padding:4px}.activity-reaction-results button:hover,.activity-reaction-results button:focus{background:var(--hover);border-color:var(--action)}.activity-reaction-results img{width:24px;height:24px;object-fit:contain}.activity-reaction-results small{max-width:100%;overflow:hidden;text-overflow:ellipsis}.activity-reaction-status{min-height:20px;color:var(--muted);font-size:13px}
-@media(max-width:650px){.bar{padding:0 12px}.layout{width:min(100% - 16px,980px);margin-top:14px}.activity-row{grid-template-columns:auto minmax(0,1fr)}.item-actions{grid-column:2}.bulk-actions{overflow-x:auto}.activity-list.dense .activity-text{display:block;margin:4px 0 0}}
+@media(max-width:650px){.bar{padding:0 12px}.activity-list.dense .v-row-text{display:block;margin:2px 0 0}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `<script>(function(){
+{{define "scripts"}}` + localTimeScript + rowLinkScript + profilePanelScript + `<script>(function(){
 var activityTopics=` + liveEventTopicsLiteral() + `.concat(['later_reminder.delivered','later_reminder.failed']);
 var feed=document.getElementById('activity-feed');var liveStatus=document.getElementById('activity-live-status');var rows=[];var current=0;var refreshing=false;var refreshQueued=false;var refreshTimer=0;
 function syncRows(preferredID){rows=Array.prototype.slice.call(document.querySelectorAll('[data-activity-row]'));current=0;if(preferredID){var preferred=rows.findIndex(function(row){return row.getAttribute('data-activity-id')===preferredID});if(preferred>=0)current=preferred}rows.forEach(function(row,index){row.tabIndex=index===current?0:-1})}
 syncRows('');
 function focusRow(index){if(!rows.length)return;rows[current].tabIndex=-1;current=(index+rows.length)%rows.length;rows[current].tabIndex=0;rows[current].focus()}
 document.addEventListener('keydown',function(event){if(event.altKey||event.ctrlKey||event.metaKey||event.target.matches('input,textarea,select'))return;var row=event.target.closest('[data-activity-row]');if(row)current=rows.indexOf(row);
-if(event.key==='ArrowDown'){event.preventDefault();focusRow(current+1)}else if(event.key==='ArrowUp'){event.preventDefault();focusRow(current-1)}else if(event.key==='Enter'&&row){var reply=row.querySelector('[data-activity-reply]');if(reply){event.preventDefault();reply.click()}}else if((event.key==='x'||event.key==='X')&&row){event.preventDefault();var box=row.querySelector('input[type=checkbox]');box.checked=!box.checked;box.dispatchEvent(new Event('change',{bubbles:true}))}else if((event.key==='c'||event.key==='C')&&row){event.preventDefault();row.querySelector('[data-clear-button]').click()}else if((event.key==='r'||event.key==='R')&&row){var read=row.querySelector('[data-read-button]');if(read){event.preventDefault();read.click()}}});
-var count=document.getElementById('selection-count');document.addEventListener('change',function(){if(!count)return;var selected=document.querySelectorAll('input[name=activity_id]:checked').length;count.textContent=selected?selected+' selected':'Select items with X or the checkboxes'});
+if(event.key==='ArrowDown'){event.preventDefault();focusRow(current+1)}else if(event.key==='ArrowUp'){event.preventDefault();focusRow(current-1)}else if(event.key==='Enter'&&row&&event.target===row){var reply=row.querySelector('[data-activity-reply]')||row.querySelector('[data-activity-source]');if(reply){event.preventDefault();openActivity(row);reply.click()}}else if((event.key==='x'||event.key==='X')&&row){event.preventDefault();var box=row.querySelector('input[type=checkbox]');box.checked=!box.checked;box.dispatchEvent(new Event('change',{bubbles:true}))}else if((event.key==='c'||event.key==='C')&&row){event.preventDefault();row.querySelector('[data-clear-button]').click()}else if((event.key==='r'||event.key==='R')&&row){var read=row.querySelector('[data-read-button]');if(read){event.preventDefault();read.click()}}});
+function syncSelection(){var count=document.getElementById('selection-count');var bar=document.getElementById('activity-bulk');var selected=document.querySelectorAll('input[name=activity_id]:checked').length;if(count)count.textContent=selected?selected+' selected':'Select items with X or the checkboxes';if(bar)bar.hidden=!selected;if(feed)feed.classList.toggle('selecting',selected>0)}
+syncSelection();document.addEventListener('change',function(event){if(event.target.matches&&event.target.matches('input[name=activity_id]'))syncSelection()});
+var positionKey='sameoldchat-activity-position:'+window.location.pathname+window.location.search;
+try{var saved=JSON.parse(sessionStorage.getItem(positionKey)||'null');if(saved){sessionStorage.removeItem(positionKey);window.scrollTo(0,saved.y||0);syncRows(saved.id||'');var back=saved.id?document.querySelector('[data-activity-id="'+saved.id+'"]'):null;if(back)back.focus({preventScroll:true})}}catch(error){}
+function openActivity(row){if(!row)return;try{sessionStorage.setItem(positionKey,JSON.stringify({y:window.scrollY,id:row.getAttribute('data-activity-id')}))}catch(error){}if(!row.classList.contains('unread'))return;var csrf=document.querySelector('#activity-feed input[name=_csrf]');if(!csrf||!window.fetch)return;var body=new URLSearchParams();body.set('_csrf',csrf.value);body.set('single_id',row.getAttribute('data-activity-ids')||row.getAttribute('data-activity-id'));body.set('mutation','read');fetch('/app/activity/mutate',{method:'POST',credentials:'same-origin',keepalive:true,headers:{'content-type':'application/x-www-form-urlencoded','HX-Request':'true'},body:body.toString()}).catch(function(){})}
+document.addEventListener('click',function(event){var row=event.target.closest('[data-activity-row]');if(!row)return;var link=event.target.closest('a[href]');if(link&&!link.hasAttribute('data-activity-source')&&!link.hasAttribute('data-activity-reply'))return;if(!link&&(event.target.closest('button,input,summary,label,details')||!row.hasAttribute('data-row-href')))return;openActivity(row)},true);
 var dialog=document.getElementById('activity-reaction-dialog');var form=document.getElementById('activity-reaction-form');var search=document.getElementById('activity-reaction-search');var category=document.getElementById('activity-reaction-category');var tone=document.getElementById('activity-reaction-tone');var results=document.getElementById('activity-reaction-results');var status=document.getElementById('activity-reaction-status');var returnFocus=null;var request=null;var timer=0;
 function recentEmoji(){try{var value=JSON.parse(localStorage.getItem('sameoldchat-recent-emoji')||'[]');return Array.isArray(value)?value:[]}catch(error){return[]}}
 function rememberEmoji(name){var values=recentEmoji().filter(function(value){return value!==name});values.unshift(name);try{localStorage.setItem('sameoldchat-recent-emoji',JSON.stringify(values.slice(0,24)))}catch(error){}}
@@ -3047,26 +3103,45 @@ if(dialog)dialog.addEventListener('click',function(event){if(event.target===dial
 function refreshActivity(){
 if(!feed)return;if(refreshing){refreshQueued=true;return}refreshing=true;
 var active=document.activeElement;var focusedRow=active&&active.closest?active.closest('[data-activity-row]'):null;var focusedID=focusedRow?focusedRow.getAttribute('data-activity-id'):'';var focusedLabel=active&&active.getAttribute?active.getAttribute('aria-label')||'':'';var selected={};Array.prototype.forEach.call(feed.querySelectorAll('input[name=activity_id]:checked'),function(input){selected[input.value]=true});var scrollX=window.scrollX;var scrollY=window.scrollY;
-fetch(window.location.pathname+window.location.search,{headers:{'X-SameOldChat-Activity-Refresh':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error();return response.text()}).then(function(html){var parsed=new DOMParser().parseFromString(html,'text/html');var replacement=parsed.getElementById('activity-feed');if(!replacement)throw new Error();feed.replaceWith(replacement);feed=replacement;Object.keys(selected).forEach(function(id){Array.prototype.forEach.call(feed.querySelectorAll('input[name=activity_id]'),function(input){if(input.value===id)input.checked=true})});syncRows(focusedID);if(focusedID){var row=rows[current];var target=row;if(focusedLabel){Array.prototype.some.call(row.querySelectorAll('[aria-label]'),function(candidate){if(candidate.getAttribute('aria-label')===focusedLabel){target=candidate;return true}return false})}target.focus({preventScroll:true});window.scrollTo(scrollX,scrollY)}if(liveStatus)liveStatus.textContent='Activity updated.'}).catch(function(){if(liveStatus)liveStatus.textContent='New activity is available. Reload to update the list.'}).finally(function(){refreshing=false;if(refreshQueued){refreshQueued=false;refreshActivity()}});
+fetch(window.location.pathname+window.location.search,{headers:{'X-SameOldChat-Activity-Refresh':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error();return response.text()}).then(function(html){var parsed=new DOMParser().parseFromString(html,'text/html');var replacement=parsed.getElementById('activity-feed');if(!replacement)throw new Error();feed.replaceWith(replacement);feed=replacement;Object.keys(selected).forEach(function(id){Array.prototype.forEach.call(feed.querySelectorAll('input[name=activity_id]'),function(input){if(input.value===id)input.checked=true})});syncRows(focusedID);syncSelection();if(focusedID){var row=rows[current];var target=row;if(focusedLabel){Array.prototype.some.call(row.querySelectorAll('[aria-label]'),function(candidate){if(candidate.getAttribute('aria-label')===focusedLabel){target=candidate;return true}return false})}target.focus({preventScroll:true});window.scrollTo(scrollX,scrollY)}if(liveStatus)liveStatus.textContent='Activity updated.'}).catch(function(){if(liveStatus)liveStatus.textContent='New activity is available. Reload to update the list.'}).finally(function(){refreshing=false;if(refreshQueued){refreshQueued=false;refreshActivity()}});
 }
 function scheduleActivityRefresh(){window.clearTimeout(refreshTimer);refreshTimer=window.setTimeout(refreshActivity,180)}
 if(window.EventSource){var stream=` + liveStreamOpen + `;activityTopics.forEach(function(topic){stream.addEventListener(topic,scheduleActivityRefresh)});stream.onerror=function(){if(liveStatus)liveStatus.textContent='Reconnecting to live Activity…'};stream.onopen=function(){if(liveStatus&&liveStatus.textContent==='Reconnecting to live Activity…')liveStatus.textContent='Live Activity resumed.'}}
 })();</script>{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
+{{template "activity-view" .}}{{end}}
+{{define "activity-view"}}<main class="v-page activity-page">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-<div class="activity-heading"><h2>Activity</h2><span class="visually-hidden" id="activity-live-status" role="status" aria-live="polite"></span><div class="layout-forms" aria-label="Activity layout"><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">Detailed</button></form><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">Dense</button></form></div></div>
-<nav class="activity-tabs" aria-label="Activity filters">{{range .Filters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}{{range .SavedViews}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</nav>
-<div class="activity-options"><a href="{{.UnreadURL}}"{{if .UnreadOnly}} aria-current="page"{{end}}>Unread</a>{{if .ClearedOnly}}<a href="{{.ActiveURL}}">Back to activity</a>{{else}}<a href="{{.ClearedURL}}">Cleared</a>{{end}}</div>
-<div class="saved-views">{{if .View}}<form class="saved-view-delete" method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.View}}"><button type="submit">Delete this view</button></form>{{end}}<details class="saved-view-create"><summary>New saved view</summary><form method="post" action="{{.CreateURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="saved-view-name">Name<input name="name" maxlength="80" placeholder="Important" required></label><fieldset class="saved-view-kinds"><legend>Kinds</legend>{{range .KindOptions}}<label><input type="checkbox" name="kind" value="{{.Value}}">{{.Label}}</label>{{end}}</fieldset><button type="submit">Save view</button></form></details></div>
+<div class="v-head"><h2>Activity</h2><span class="visually-hidden" id="activity-live-status" role="status" aria-live="polite"></span>
+<div class="activity-head-actions">
+{{if not .ClearedOnly}}<form method="get" action="/app/activity"><input type="hidden" name="channel" value="{{.Channel}}">{{if .Kind}}<input type="hidden" name="kind" value="{{.Kind}}">{{end}}{{if .View}}<input type="hidden" name="view" value="{{.View}}">{{end}}{{if not .UnreadOnly}}<input type="hidden" name="unread" value="1">{{end}}<button class="v-toggle v-btn quiet" type="submit" role="switch" aria-checked="{{if .UnreadOnly}}true{{else}}false{{end}}"><span>Unreads</span><span class="v-switch" aria-hidden="true"></span></button></form>{{end}}
+<details class="v-menu"><summary class="v-icon" role="button" aria-label="Activity options"><span aria-hidden="true">⋮</span></summary><div class="v-menu-list">
+{{if not .ClearedOnly}}<form method="post" action="/app/activity/mutate?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><button type="submit" name="mutation" value="read_all">Mark all as read</button></form><hr>{{end}}
+<span class="v-menu-label">View</span>
+<form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">{{if eq .Layout "detailed"}}✓ {{end}}Detailed</button></form>
+<form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">{{if eq .Layout "dense"}}✓ {{end}}Dense</button></form>
+<hr>{{if .ClearedOnly}}<a href="{{.ActiveURL}}">Back to activity</a>{{else}}<a href="{{.ClearedURL}}">View cleared activity</a>{{end}}
+{{if .View}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.View}}"><button class="danger" type="submit">Delete this view</button></form>{{end}}
+</div></details>
+</div></div>
+<div class="activity-tabbar">
+<nav class="v-tabs" aria-label="Activity filters">{{range .Filters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}{{range .SavedViews}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</nav>
+{{if .MoreFilters}}<details class="v-menu"><summary class="v-btn quiet" role="button" aria-label="More filters">More<span aria-hidden="true"> ▾</span></summary><div class="v-menu-list">{{range .MoreFilters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</div></details>{{end}}
+<details class="v-menu"><summary class="v-icon" role="button" aria-label="New saved view"><span aria-hidden="true">＋</span></summary><div class="v-menu-list"><form class="saved-view-form" method="post" action="{{.CreateURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Name<input class="v-input" name="name" maxlength="80" placeholder="Important" required></label><fieldset><legend>Kinds</legend>{{range .KindOptions}}<label><input type="checkbox" name="kind" value="{{.Value}}">{{.Label}}</label>{{end}}</fieldset><button class="v-btn primary" type="submit">Save view</button></form></div></details>
+</div>
 <div id="activity-feed">
 <form method="post" action="/app/activity/mutate?channel={{.Channel}}">
 <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}">
-<div class="bulk-actions"><span id="selection-count" aria-live="polite">Select items with X or the checkboxes</span>{{if .ClearedOnly}}<button type="submit" name="mutation" value="restore">Restore selected</button>{{else}}<button type="submit" name="mutation" value="read">Mark selected read</button><button type="submit" name="mutation" value="unread">Mark selected unread</button><button type="submit" name="mutation" value="clear">Clear selected</button>{{end}}</div>
-{{if .Items}}<ul class="activity-list {{.Layout}}" aria-label="Activity feed">{{range .Items}}<li class="activity-row{{if .Unread}} unread{{end}}" data-activity-row data-activity-id="{{.ID}}" tabindex="-1">
-<input class="activity-select" type="checkbox" name="activity_id" value="{{.ID}}" aria-label="Select activity from {{.ActorName}}">
-<div class="activity-main">{{if .ReplyURL}}<a class="visually-hidden" data-activity-reply href="{{.ReplyURL}}">Reply to this activity</a>{{end}}{{if .SourceURL}}<a class="activity-source" data-activity-source href="{{.SourceURL}}">{{end}}<span class="activity-head"><span class="activity-kind">{{.KindLabel}}</span>{{if .ActorName}}<span class="activity-author">{{.ActorName}}</span>{{end}}<time class="activity-meta" datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{if .ChannelName}}<span class="activity-meta">{{.ChannelName}}</span>{{end}}</span><span class="activity-text{{if .Unavailable}} unavailable{{end}}">{{.Text}}</span>{{if .SourceURL}}</a>{{end}}</div>
-<div class="item-actions">{{if .ReactionURL}}<button type="button" data-activity-react="{{.ReactionURL}}" aria-label="Add a reaction to this message">React</button>{{end}}{{if $.ClearedOnly}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=restore" data-clear-button aria-label="Restore this activity">Restore</button>{{else}}{{if .Unread}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=read" data-read-button aria-label="Mark this activity read">Read</button>{{else}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=unread" aria-label="Mark this activity unread">Unread</button>{{end}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=clear" data-clear-button aria-label="Clear this activity">Clear</button>{{end}}</div>
-</li>{{end}}</ul>{{else}}<p class="empty">{{if .ClearedOnly}}No cleared activity.{{else if .UnreadOnly}}You’re all caught up.{{else}}No activity yet. New DMs, mentions, thread replies, reactions, invitations, app messages, and delivered reminders will appear here.{{end}}</p>{{end}}
+<div class="bulk-actions" id="activity-bulk"><span id="selection-count" aria-live="polite">Select items with X or the checkboxes</span>{{if .ClearedOnly}}<button class="v-btn" type="submit" name="mutation" value="restore">Restore selected</button>{{else}}<button class="v-btn" type="submit" name="mutation" value="read">Mark selected read</button><button class="v-btn" type="submit" name="mutation" value="unread">Mark selected unread</button><button class="v-btn" type="submit" name="mutation" value="clear">Clear selected</button>{{end}}</div>
+{{if .Items}}<ul class="v-list activity-list {{.Layout}}" aria-label="Activity feed">{{range .Items}}<li class="v-row activity-row{{if .Unread}} unread{{end}}" data-activity-row data-activity-id="{{.ID}}" data-activity-ids="{{.IDs}}"{{if .SourceURL}} data-row-href="{{.SourceURL}}"{{end}} tabindex="-1" aria-label="{{if .Unread}}Unread: {{end}}{{.Label}}">
+<span class="v-avatar-wrap">{{if .Glyph}}<span class="v-avatar glyph" aria-hidden="true">{{.Glyph}}</span>{{else}}<span class="v-avatar" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.Initial}}{{end}}</span>{{end}}{{if .Badge}}<span class="v-avatar-badge" aria-hidden="true">{{.Badge}}</span>{{end}}</span>
+<div class="v-row-main">{{if .ReplyURL}}<a class="visually-hidden" data-activity-reply href="{{.ReplyURL}}">Reply to this activity</a>{{end}}
+<div class="v-row-meta"><span>{{.Context}}</span></div>
+<p class="activity-headline">{{if .SourceURL}}<a class="activity-source" data-activity-source href="{{.SourceURL}}">{{.Headline}}</a>{{else}}{{.Headline}}{{end}}</p>
+{{if .Text}}<div class="v-row-text v-text clamp{{if .Unavailable}} unavailable{{end}}">{{.Text}}</div>{{end}}</div>
+<div class="v-row-side"><time class="v-row-time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time>
+<div class="v-hover-actions"><input class="activity-select" type="checkbox" name="activity_id" value="{{.IDs}}" aria-label="Select activity from {{.ActorName}}">{{if .ReactionURL}}<button class="v-icon" type="button" data-activity-react="{{.ReactionURL}}" aria-label="Add a reaction to this message" title="Add reaction"><span aria-hidden="true">☺</span></button>{{end}}{{if $.ClearedOnly}}<button class="v-icon" type="submit" name="single_id" value="{{.IDs}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=restore" data-clear-button aria-label="Restore this activity" title="Restore"><span aria-hidden="true">↺</span></button>{{else}}{{if .Unread}}<button class="v-icon" type="submit" name="single_id" value="{{.IDs}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=read" data-read-button aria-label="Mark this activity read" title="Mark as read"><span aria-hidden="true">✓</span></button>{{else}}<button class="v-icon" type="submit" name="single_id" value="{{.IDs}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=unread" aria-label="Mark this activity unread" title="Mark as unread"><span aria-hidden="true">●</span></button>{{end}}<button class="v-icon" type="submit" name="single_id" value="{{.IDs}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=clear" data-clear-button aria-label="Clear this activity" title="Clear"><span aria-hidden="true">✕</span></button>{{end}}</div></div>
+</li>{{end}}</ul>{{else}}<p class="v-empty">{{if .ClearedOnly}}No cleared activity.{{else if .UnreadOnly}}<strong>You’re all caught up.</strong>New activity will appear here.{{else}}<strong>No activity yet</strong>New DMs, mentions, thread replies, reactions, invitations, app messages, and delivered reminders will appear here.{{end}}</p>{{end}}
 </form>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more activity</a></p>{{end}}</div>
 <dialog class="activity-reaction-dialog" id="activity-reaction-dialog" aria-labelledby="activity-reaction-heading"><div class="activity-reaction-shell"><div class="activity-reaction-head"><h3 id="activity-reaction-heading">Add reaction</h3><button id="activity-reaction-close" type="button" aria-label="Close reaction picker">×</button></div><form id="activity-reaction-form" method="post"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><div class="activity-reaction-controls"><label class="visually-hidden" for="activity-reaction-search">Search emoji</label><input id="activity-reaction-search" type="search" autocomplete="off" placeholder="Search emoji"><label class="visually-hidden" for="activity-reaction-category">Category</label><select id="activity-reaction-category"><option value="">All categories</option></select><label class="visually-hidden" for="activity-reaction-tone">Skin tone</label><select id="activity-reaction-tone"><option value="">Default tone</option><option value="2">Skin tone 2</option><option value="3">Skin tone 3</option><option value="4">Skin tone 4</option><option value="5">Skin tone 5</option><option value="6">Skin tone 6</option></select></div><p class="activity-reaction-status" id="activity-reaction-status" role="status"></p><ul class="activity-reaction-results" id="activity-reaction-results" aria-label="Emoji results"></ul><noscript><p>Open the message to add a reaction.</p></noscript></form></div></dialog>
 </main>{{end}}`
@@ -7657,35 +7732,18 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	}
 	kindValue := strings.TrimSpace(r.URL.Query().Get("kind"))
 	viewValue := strings.TrimSpace(r.URL.Query().Get("view"))
-	kindByValue := map[string]domain.ActivityKind{
-		"dm": domain.ActivityDM, "mention": domain.ActivityMention, "thread": domain.ActivityThread,
-		"channel": domain.ActivityChannel, "reaction": domain.ActivityReaction, "invitation": domain.ActivityInvitation,
-		"app": domain.ActivityApp, "reminder": domain.ActivityReminder,
+	kinds, filterProblem := activityFilterKinds(preferences, kindValue, viewValue)
+	switch filterProblem {
+	case "view":
+		h.writePageError(w, http.StatusBadRequest, "That saved view is not available", "Open Activity again and choose one of your views.")
+		return
+	case "kind":
+		h.writePageError(w, http.StatusBadRequest, "That Activity filter is not valid", "Open Activity again and choose one of the available filters.")
+		return
 	}
-	var kinds []domain.ActivityKind
-	switch {
-	case viewValue != "":
+	if viewValue != "" {
 		// A saved view names its own kinds; it and a single filter do not combine.
-		found := false
-		for _, view := range preferences.SavedViews {
-			if string(view.ID) == viewValue {
-				kinds = view.Kinds
-				found = true
-				break
-			}
-		}
-		if !found {
-			h.writePageError(w, http.StatusBadRequest, "That saved view is not available", "Open Activity again and choose one of your views.")
-			return
-		}
 		kindValue = ""
-	case kindValue != "":
-		kind, ok := kindByValue[kindValue]
-		if !ok {
-			h.writePageError(w, http.StatusBadRequest, "That Activity filter is not valid", "Open Activity again and choose one of the available filters.")
-			return
-		}
-		kinds = []domain.ActivityKind{kind}
 	}
 	unreadOnly := r.URL.Query().Get("unread") == "1"
 	clearedOnly := r.URL.Query().Get("cleared") == "1"
@@ -7711,14 +7769,30 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 		data.CSRFToken = auth.CSRFToken(sessionCookie.Value)
 	}
 	names := h.newUserNames(r.Context(), principal)
+	emojiImages := map[string]string{}
+	if customEmoji, emojiErr := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID); emojiErr == nil {
+		emojiImages = customEmojiImages(customEmoji)
+	}
 	for _, item := range page.Items {
+		actorID := item.ActorID
+		if actorID == "" && item.Message.ID != "" {
+			actorID = item.Message.AuthorID
+		}
 		view := activityItemView{
-			ID: string(item.ID), KindLabel: activityKindLabel(item), ActorName: names.name(item.ActorID),
+			ID: string(item.ID), IDs: string(item.ID), KindLabel: activityKindLabel(item), ActorName: names.name(actorID),
 			MachineTime: item.OccurredAt.UTC().Format(time.RFC3339Nano), DisplayTime: formatTime(item.OccurredAt),
 			Unread: item.ReadAt.IsZero(), Cleared: !item.ClearedAt.IsZero(),
+			AvatarURL: names.avatarURL(actorID), kind: primaryActivityKind(item.Kinds), reaction: item.ReactionName,
+		}
+		if view.kind == domain.ActivityReaction && item.ReactionName != "" {
+			view.Badge = renderReactionEmoji(item.ReactionName, emojiImages)
+			if item.MessageID != "" {
+				view.groupKey = string(item.MessageID) + "\x00" + item.ReactionName
+			}
 		}
 		if item.ReminderID != "" {
 			view.ActorName = "Reminder"
+			view.Glyph = "⏰"
 			if item.Reminder.ID != "" {
 				view.Text = template.HTML(template.HTMLEscapeString(item.Reminder.Text))
 				view.SourceURL = "/app/later?channel=" + url.QueryEscape(channel) + "&state=completed"
@@ -7729,6 +7803,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 		// nowhere rather than to a message that does not exist.
 		if item.AppReminderID != "" {
 			view.ActorName = "Reminder"
+			view.Glyph = "⏰"
 			if item.AppReminder.ID != "" {
 				view.Text = template.HTML(template.HTMLEscapeString(item.AppReminder.Text))
 			}
@@ -7756,7 +7831,10 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 						"",
 					)
 				}
-				if item.ReminderID == "" {
+				// The actor is who caused the item — the reactor of a reaction,
+				// the inviter of an invitation — and only falls back to the
+				// message's author when the item names nobody.
+				if item.ReminderID == "" && item.ActorID == "" {
 					view.ActorName = message.AuthorName
 				}
 			}
@@ -7829,18 +7907,36 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 			view.Text = "This activity’s source is no longer available."
 			view.Unavailable = true
 			view.SourceURL = ""
+			view.groupKey = ""
 		}
+		view.actors = []string{view.ActorName}
 		data.Items = append(data.Items, view)
 	}
-	filterDefinitions := []struct{ value, label string }{
-		{"", "All"}, {"dm", "DMs"}, {"mention", "Mentions"}, {"thread", "Threads"},
-		{"channel", "Channels"}, {"reaction", "Reactions"}, {"invitation", "Invitations"}, {"app", "Apps"}, {"reminder", "Reminders"},
+	data.Items = groupActivityRows(data.Items)
+	for index := range data.Items {
+		describeActivityRow(&data.Items[index])
+	}
+	// Slack's tab row is All, DMs, Mentions, Threads, Reactions, Invitations
+	// and Apps; channels set to all new posts and reminders are filed under
+	// More rather than given tabs of their own.
+	filterDefinitions := []struct {
+		value, label string
+		more         bool
+	}{
+		{"", "All", false}, {"dm", "DMs", false}, {"mention", "Mentions", false}, {"thread", "Threads", false},
+		{"reaction", "Reactions", false}, {"invitation", "Invitations", false}, {"app", "Apps", false},
+		{"channel", "Channels", true}, {"reminder", "Reminders", true},
 	}
 	for _, filter := range filterDefinitions {
-		data.Filters = append(data.Filters, activityFilterView{
+		filterView := activityFilterView{
 			Label: filter.label, Current: viewValue == "" && kindValue == filter.value,
 			URL: activityPageURL(channel, filter.value, "", unreadOnly, clearedOnly, ""),
-		})
+		}
+		if filter.more && !filterView.Current {
+			data.MoreFilters = append(data.MoreFilters, filterView)
+		} else {
+			data.Filters = append(data.Filters, filterView)
+		}
 		if filter.value != "" {
 			data.KindOptions = append(data.KindOptions, activityKindOption{Value: filter.value, Label: filter.label})
 		}
@@ -7858,6 +7954,142 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 		data.MoreURL = activityPageURL(channel, kindValue, viewValue, unreadOnly, clearedOnly, page.NextCursor)
 	}
 	h.writeLivePage(w, head, activityTemplate, data, http.StatusOK, "activity rendering unavailable")
+}
+
+// primaryActivityKind is the kind a row is described by when an item carries
+// several (a mention in a thread is both): the most specific news first, the
+// order Slack's own row copy follows.
+func primaryActivityKind(kinds []domain.ActivityKind) domain.ActivityKind {
+	for _, preferred := range []domain.ActivityKind{domain.ActivityMention, domain.ActivityReaction, domain.ActivityInvitation, domain.ActivityThread, domain.ActivityKeyword, domain.ActivityDM, domain.ActivityApp, domain.ActivityChannel, domain.ActivityReminder} {
+		if slices.Contains(kinds, preferred) {
+			return preferred
+		}
+	}
+	if len(kinds) > 0 {
+		return kinds[0]
+	}
+	return ""
+}
+
+// groupActivityRows folds reactions with the same emoji on the same message
+// into the first (newest) row for them, keeping every reactor and every item
+// ID, so one message with three 🎉 is one row, not three.
+func groupActivityRows(items []activityItemView) []activityItemView {
+	grouped := make([]activityItemView, 0, len(items))
+	index := map[string]int{}
+	for _, item := range items {
+		if item.groupKey == "" {
+			grouped = append(grouped, item)
+			continue
+		}
+		at, seen := index[item.groupKey]
+		if !seen {
+			index[item.groupKey] = len(grouped)
+			grouped = append(grouped, item)
+			continue
+		}
+		row := &grouped[at]
+		row.IDs += " " + item.ID
+		row.Unread = row.Unread || item.Unread
+		if !slices.Contains(row.actors, item.ActorName) {
+			row.actors = append(row.actors, item.ActorName)
+		}
+	}
+	return grouped
+}
+
+// describeActivityRow writes a row's context line, headline and accessible
+// name in Slack's words: "Reaction in #design", "Ana Lima and Dana Park
+// reacted 🎉 to your message".
+func describeActivityRow(row *activityItemView) {
+	actors := joinActivityActors(row.actors)
+	where := row.ChannelName
+	in := func(label string) string {
+		if where == "" {
+			return label
+		}
+		return label + " in " + where
+	}
+	var sentence template.HTML
+	plain := ""
+	switch row.kind {
+	case domain.ActivityReaction:
+		row.Context = in("Reaction")
+		sentence = actors.html + " reacted " + row.Badge + " to your message"
+		plain = actors.text + " reacted :" + row.reaction + ": to your message"
+	case domain.ActivityMention:
+		row.Context = in("Mention")
+		sentence = actors.html + " mentioned you"
+		plain = actors.text + " mentioned you"
+	case domain.ActivityThread:
+		row.Context = in("Thread")
+		sentence = actors.html + " replied to a thread"
+		plain = actors.text + " replied to a thread"
+	case domain.ActivityKeyword:
+		row.Context = in("Keyword")
+		sentence = actors.html + " used one of your keywords"
+		plain = actors.text + " used one of your keywords"
+	case domain.ActivityDM:
+		row.Context = "Direct message"
+		if where != "" {
+			row.Context = "Direct message · " + where
+		}
+		sentence, plain = actors.html, actors.text
+	case domain.ActivityChannel:
+		row.Context = in("New post")
+		sentence, plain = actors.html, actors.text
+	case domain.ActivityApp:
+		row.Context = in("App")
+		sentence, plain = actors.html, actors.text
+	case domain.ActivityInvitation:
+		row.Context = "Invitation"
+		sentence, plain = actors.html, actors.text
+	case domain.ActivityReminder:
+		row.Context = "Reminder"
+		sentence, plain = "Reminder", "Reminder"
+	default:
+		row.Context = in(row.KindLabel)
+		sentence, plain = actors.html, actors.text
+	}
+	if row.Glyph != "" {
+		sentence, plain = "Reminder", "Reminder"
+		row.Context = "Reminder"
+	}
+	row.Headline = sentence
+	row.Label = row.Context + ": " + plain
+	row.Initial = initial(firstActor(row.actors))
+}
+
+type activityActors struct {
+	html template.HTML
+	text string
+}
+
+func firstActor(actors []string) string {
+	if len(actors) == 0 {
+		return ""
+	}
+	return actors[0]
+}
+
+// joinActivityActors names one, two or three actors in full and folds the
+// rest into "and N others", as Slack's grouped rows do.
+func joinActivityActors(actors []string) activityActors {
+	strong := func(name string) template.HTML {
+		return template.HTML("<strong>" + template.HTMLEscapeString(name) + "</strong>") // #nosec G203 -- the name is escaped.
+	}
+	switch len(actors) {
+	case 0:
+		return activityActors{}
+	case 1:
+		return activityActors{strong(actors[0]), actors[0]}
+	case 2:
+		return activityActors{strong(actors[0]) + " and " + strong(actors[1]), actors[0] + " and " + actors[1]}
+	case 3:
+		return activityActors{strong(actors[0]) + ", " + strong(actors[1]) + " and " + strong(actors[2]), actors[0] + ", " + actors[1] + " and " + actors[2]}
+	}
+	others := strconv.Itoa(len(actors)-2) + " others"
+	return activityActors{strong(actors[0]) + ", " + strong(actors[1]) + " and " + template.HTML(others), actors[0] + ", " + actors[1] + " and " + others}
 }
 
 func activityKindLabel(item domain.ActivityItem) string {
@@ -7930,6 +8162,14 @@ func (h Handler) mutateActivity(w http.ResponseWriter, r *http.Request) {
 	if mutationValue == "" {
 		mutationValue = strings.TrimSpace(r.FormValue("mutation"))
 	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	if mutationValue == "read_all" {
+		h.markAllActivityRead(w, r, principal, channel)
+		return
+	}
 	mutation := domain.ActivityMutation(mutationValue)
 	if !mutation.Valid() {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That Activity action is not valid", "Choose Mark read, Mark unread, Clear, or Restore and try again.")
@@ -7939,16 +8179,16 @@ func (h Handler) mutateActivity(w http.ResponseWriter, r *http.Request) {
 	if single := strings.TrimSpace(r.FormValue("single_id")); single != "" {
 		idValues = []string{single}
 	}
+	// A grouped row carries every item it stands for, space-separated.
 	ids := make([]domain.ActivityID, 0, len(idValues))
 	seen := make(map[domain.ActivityID]struct{}, len(idValues))
 	for _, value := range idValues {
-		id := domain.ActivityID(strings.TrimSpace(value))
-		if id == "" {
-			continue
-		}
-		if _, duplicate := seen[id]; !duplicate {
-			seen[id] = struct{}{}
-			ids = append(ids, id)
+		for _, field := range strings.Fields(value) {
+			id := domain.ActivityID(field)
+			if _, duplicate := seen[id]; !duplicate {
+				seen[id] = struct{}{}
+				ids = append(ids, id)
+			}
 		}
 	}
 	if len(ids) == 0 {
@@ -7963,14 +8203,77 @@ func (h Handler) mutateActivity(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusServiceUnavailable, "Activity is temporarily unavailable", "No Activity item was changed.")
 		return
 	}
-	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
-	if channel == "" {
-		channel = string(h.Channel)
-	}
 	h.redirectMutation(w, r, activityPageURL(
 		channel, strings.TrimSpace(r.FormValue("kind")), strings.TrimSpace(r.FormValue("view")),
 		r.FormValue("unread") == "1", r.FormValue("cleared") == "1", "",
 	))
+}
+
+// activityFilterKinds resolves Activity's filter — a saved view or a single
+// kind — to the kinds it shows. The second result names what was invalid
+// ("view" or "kind"), so each caller can explain it in its own context.
+func activityFilterKinds(preferences domain.ActivityPreferences, kindValue, viewValue string) ([]domain.ActivityKind, string) {
+	if viewValue != "" {
+		for _, view := range preferences.SavedViews {
+			if string(view.ID) == viewValue {
+				return view.Kinds, ""
+			}
+		}
+		return nil, "view"
+	}
+	if kindValue == "" {
+		return nil, ""
+	}
+	kind, ok := map[string]domain.ActivityKind{
+		"dm": domain.ActivityDM, "mention": domain.ActivityMention, "thread": domain.ActivityThread,
+		"channel": domain.ActivityChannel, "reaction": domain.ActivityReaction, "invitation": domain.ActivityInvitation,
+		"app": domain.ActivityApp, "reminder": domain.ActivityReminder,
+	}[kindValue]
+	if !ok {
+		return nil, "kind"
+	}
+	return []domain.ActivityKind{kind}, ""
+}
+
+// markAllActivityRead is Activity's "Mark all as read": every unread item the
+// current filter shows, not only the page on screen. It walks the unread
+// items a bounded number of pages at a time, so a very large backlog is
+// cleared in one action without one unbounded write.
+func (h Handler) markAllActivityRead(w http.ResponseWriter, r *http.Request, principal auth.Principal, channel string) {
+	kindValue := strings.TrimSpace(r.FormValue("kind"))
+	viewValue := strings.TrimSpace(r.FormValue("view"))
+	preferences, err := h.Messages.ActivityPreferences(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "Activity is temporarily unavailable", "Nothing was marked read.")
+		return
+	}
+	kinds, problem := activityFilterKinds(preferences, kindValue, viewValue)
+	if problem != "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That Activity filter is not valid", "Open Activity again and choose one of the available filters. Nothing was marked read.")
+		return
+	}
+	for pages := 0; pages < 40; pages++ {
+		page, err := h.Messages.Activity(r.Context(), principal.WorkspaceID, principal.UserID, domain.ActivityQuery{Kinds: kinds, UnreadOnly: true, Page: domain.PageRequest{Limit: 200}})
+		if err != nil {
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "Activity is temporarily unavailable", "Some Activity may still be unread. Try again.")
+			return
+		}
+		if len(page.Items) == 0 {
+			break
+		}
+		ids := make([]domain.ActivityID, 0, len(page.Items))
+		for _, item := range page.Items {
+			ids = append(ids, item.ID)
+		}
+		if err := h.Messages.MutateActivity(r.Context(), principal.WorkspaceID, principal.UserID, ids, domain.ActivityMarkRead); err != nil && !errors.Is(err, store.ErrNotFound) {
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "Activity is temporarily unavailable", "Some Activity may still be unread. Try again.")
+			return
+		}
+		if !page.HasMore {
+			break
+		}
+	}
+	h.redirectMutation(w, r, activityPageURL(channel, kindValue, viewValue, r.FormValue("unread") == "1", false, ""))
 }
 
 func (h Handler) setActivityPreferences(w http.ResponseWriter, r *http.Request) {

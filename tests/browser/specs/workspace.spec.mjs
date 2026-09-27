@@ -327,11 +327,16 @@ test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app m
     await expect(page.locator('[data-activity-row]', { hasText: first })).toBeVisible();
     await expect(page.locator('[data-activity-row]', { hasText: second })).toBeVisible();
 
+    // Layout lives in the Activity options menu, as Slack's view settings do.
+    await page.getByRole('button', { name: 'Activity options' }).click();
     await page.getByRole('button', { name: 'Dense' }).click();
     await expect(page.locator('.activity-list')).toHaveClass(/dense/);
+    await page.getByRole('button', { name: 'Activity options' }).click();
     await expect(page.getByRole('button', { name: 'Dense' })).toHaveAttribute('aria-pressed', 'true');
     await page.reload();
+    await page.getByRole('button', { name: 'Activity options' }).click();
     await expect(page.getByRole('button', { name: 'Dense' })).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Escape');
 
     let rows = page.locator('[data-activity-row]');
     await expect(rows).toHaveCount(2);
@@ -367,12 +372,13 @@ test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app m
     await page.keyboard.press('r');
     await expect(liveRow).not.toHaveClass(/unread/);
 
-    await page.getByRole('link', { name: 'Unread' }).click();
-    await expect(page.getByRole('link', { name: 'Unread' })).toHaveAttribute('aria-current', 'page');
+    await page.getByRole('switch', { name: 'Unreads' }).click();
+    await expect(page.getByRole('switch', { name: 'Unreads' })).toHaveAttribute('aria-checked', 'true');
     // Opening the source thread advances the conversation read cursor, so the
     // sibling notification is no longer allowed to stay unread.
     await expect(page.getByText('You’re all caught up.')).toBeVisible();
-    await page.getByRole('link', { name: 'Cleared' }).click();
+    await page.getByRole('button', { name: 'Activity options' }).click();
+    await page.getByRole('link', { name: 'View cleared activity' }).click();
     await expect(page.locator('[data-activity-row]')).toHaveCount(1);
     await page.getByRole('button', { name: 'Restore this activity' }).click();
     await expect(page.getByText('No cleared activity.')).toBeVisible();
