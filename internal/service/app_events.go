@@ -30,6 +30,9 @@ type AppEventProjectionStore interface {
 	// GetAppBotTokenCiphertext returns the sealed bot access token a
 	// function_executed dispatch includes for the receiving app.
 	GetAppBotTokenCiphertext(context.Context, domain.AppID, domain.WorkspaceID) (string, error)
+	// GetApp reads the receiving app's current manifest: a link.shared record
+	// reaches the app only for the links its unfurl domains claim.
+	GetApp(context.Context, domain.AppID) (domain.App, domain.AppManifestRevision, error)
 }
 
 type UserEventProjectionStore interface {
@@ -295,6 +298,8 @@ func prepareAppEvent(ctx context.Context, state AppEventProjectionStore, credent
 		return prepareAppFileEvent(ctx, state, origin, authorizations, record)
 	case "function_executed":
 		return prepareFunctionExecutedEvent(ctx, state, credentialKey, appID, authorizations, record)
+	case linkSharedTopic:
+		return prepareAppLinkSharedEvent(ctx, state, appID, authorizations, record)
 	default:
 		if channelID, scoped := eventChannelID(record.Event); scoped && !publicConversationLifecycleEvent(record.Event) {
 			authorizations, err = visibleAppAuthorizations(ctx, state, authorizations, channelID)

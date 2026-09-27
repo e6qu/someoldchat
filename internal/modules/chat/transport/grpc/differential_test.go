@@ -691,6 +691,48 @@ func parityCases() []parityCase {
 	}
 	return []parityCase{
 		{
+			// The calling token's app travels with chat.unfurl: an app whose
+			// bot has not joined a public channel may still unfurl the links
+			// on its own unfurl domains there, and no others.
+			name: "an app unfurls its own domain's link in a channel it has not joined",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				now := time.Unix(1_700_000_000, 0).UTC()
+				requireSeed(t, target.CreateApp(context.Background(), domain.App{
+					ID: "AL", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Links", ClientID: "links-client",
+					SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
+					VerificationTokenHash: "verification-hash", VerificationTokenCiphertext: "ciphertext",
+					ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+				}, domain.AppManifestRevision{
+					AppID: "AL", Version: 1, CreatedBy: "U1", CreatedAt: now,
+					Manifest: `{"display_information":{"name":"Links"},"features":{"unfurl_domains":["example.test"]}}`,
+				}, domain.OAuthClient{ID: "links-client", SecretHash: "client-hash", AppID: "AL"}))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				posted, err := chat.Post(ctx, "T1", "U1", "C1", "see https://docs.example.test/page and https://elsewhere.test/", "", "")
+				if err != nil {
+					return nil, err
+				}
+				timestamp := domain.NewMessageTimestamp(posted.CreatedAt)
+				unfurled, err := chat.Unfurl(ctx, "T1", "UA", "AL", "C1", timestamp, map[string]string{
+					"https://docs.example.test/page": `{"title":"A page"}`,
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, foreign := chat.Unfurl(ctx, "T1", "UA", "AL", "C1", timestamp, map[string]string{
+					"https://elsewhere.test/": `{"title":"Elsewhere"}`,
+				})
+				_, appless := chat.Unfurl(ctx, "T1", "UA", "", "C1", timestamp, map[string]string{
+					"https://docs.example.test/page": `{"title":"A page"}`,
+				})
+				return []any{
+					unfurled.Unfurls["https://docs.example.test/page"],
+					errors.Is(foreign, service.ErrCannotUnfurlURL), errors.Is(appless, service.ErrNotInConversation),
+				}, nil
+			},
+		},
+		{
 			name: "workflow managers manage across the composition seam",
 			seed: seedWorkflowParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
@@ -4561,7 +4603,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				timestamp := domain.NewMessageTimestamp(posted.CreatedAt)
-				unfurled, err := chat.Unfurl(ctx, "T1", "U1", "C1", timestamp, map[string]string{
+				unfurled, err := chat.Unfurl(ctx, "T1", "U1", "", "C1", timestamp, map[string]string{
 					"https://example.test/page": `{"title":"A page","text":"Preview"}`,
 				})
 				if err != nil {

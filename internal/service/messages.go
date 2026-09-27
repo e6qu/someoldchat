@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/blockkit"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -9580,14 +9581,19 @@ func (m Messages) PostIncomingWebhook(ctx context.Context, workspaceID domain.Wo
 // An app unfurls links in other people's messages, so the authority is
 // membership of the conversation (with links:write, which the transport
 // checks), not authorship: requiring the author refused every unfurl an app
-// was asked to make. Each key must be a URL the message actually contains -
-// Slack answers cannot_unfurl_url otherwise - and a call adds or replaces
-// previews per URL, leaving the previews of other URLs in place.
-func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, unfurls map[string]string) (domain.Message, error) {
+// was asked to make. Slack also hands an app a link_shared event for a public
+// channel its bot has not joined - is_bot_user_member says so - and the app
+// answers it with chat.unfurl, so an app that is not a member may unfurl in a
+// public channel the links on its own registered unfurl domains, and no
+// others. Each key must be a URL the message actually contains - Slack
+// answers cannot_unfurl_url otherwise - and a call adds or replaces previews
+// per URL, leaving the previews of other URLs in place.
+func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, unfurls map[string]string) (domain.Message, error) {
 	if strings.TrimSpace(string(conversation)) == "" {
 		return domain.Message{}, ErrInvalidMessage
 	}
-	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversation); err != nil {
+	claimedDomains, err := m.unfurlAuthority(ctx, workspaceID, userID, appID, conversation)
+	if err != nil {
 		return domain.Message{}, err
 	}
 	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversation, timestamp)
@@ -9596,6 +9602,13 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 	}
 	if message.Deleted {
 		return domain.Message{}, ErrMessageAlreadyDeleted
+	}
+	if claimedDomains != nil {
+		for link := range unfurls {
+			if _, claimed := domain.MatchUnfurlDomain(claimedDomains, strings.TrimSpace(link)); !claimed {
+				return domain.Message{}, ErrCannotUnfurlURL
+			}
+		}
 	}
 	if messageUnfurlsTooLong(unfurls) {
 		return domain.Message{}, ErrInvalidMessage
@@ -9628,6 +9641,49 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 		return domain.Message{}, err
 	}
 	return message, nil
+}
+
+// unfurlAuthority decides whether a caller may unfurl links in a
+// conversation. A member may unfurl any link the message contains, and the
+// result is nil. An app that is not a member may unfurl in a public channel
+// only the links on its registered unfurl domains, which are returned; every
+// other caller is refused as a non-member.
+func (m Messages) unfurlAuthority(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, conversation domain.ConversationID) ([]string, error) {
+	refusal := m.requireConversationMembership(ctx, workspaceID, userID, conversation)
+	if refusal == nil || !errors.Is(refusal, ErrNotInConversation) || appID == "" {
+		return nil, refusal
+	}
+	target, err := m.Store.GetConversation(ctx, conversation)
+	if err != nil {
+		return nil, err
+	}
+	if target.Kind.OrPublic() != domain.ConversationTypePublic {
+		return nil, refusal
+	}
+	domains, err := m.appUnfurlDomains(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	if len(domains) == 0 {
+		return nil, refusal
+	}
+	return domains, nil
+}
+
+// appUnfurlDomains reads the unfurl domains of an app's current manifest.
+func (m Messages) appUnfurlDomains(ctx context.Context, appID domain.AppID) ([]string, error) {
+	_, revision, err := m.Store.GetApp(ctx, appID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	parsed, problems := appmanifest.Parse(revision.Manifest)
+	if len(problems) != 0 {
+		return nil, ErrAppInteractionUnavailable
+	}
+	return parsed.UnfurlDomains, nil
 }
 
 // messageContainsLink reports whether a URL appears in a message's text,
@@ -10652,10 +10708,14 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		if err != nil {
 			return domain.Message{}, err
 		}
+		shared, err := linkSharedEvents(workspaceID, message, nil, message.CreatedAt)
+		if err != nil {
+			return domain.Message{}, err
+		}
 		if scheduledID == "" {
-			err = m.Store.CreateMessage(ctx, message, event, request.IdempotencyKey)
+			err = m.Store.CreateMessage(ctx, message, event, request.IdempotencyKey, shared...)
 		} else {
-			err = m.Store.CreateScheduledMessagePost(ctx, scheduledID, message, event)
+			err = m.Store.CreateScheduledMessagePost(ctx, scheduledID, message, event, shared...)
 		}
 		if errors.Is(err, store.ErrMessageTimestampTaken) {
 			message.CreatedAt = message.CreatedAt.Add(time.Microsecond)
@@ -10753,7 +10813,13 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 	if err != nil {
 		return domain.Message{}, err
 	}
-	if err := m.Store.UpdateMessage(ctx, message, event); err != nil {
+	// Slack unfurls a link an edit adds, so the edit shares it as a new
+	// message would; the links the message already shared are not repeated.
+	shared, err := linkSharedEvents(workspaceID, message, &previous, event.CreatedAt)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if err := m.Store.UpdateMessage(ctx, message, event, shared...); err != nil {
 		return domain.Message{}, err
 	}
 	return message, nil

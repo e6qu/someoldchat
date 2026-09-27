@@ -2939,7 +2939,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	if _, err := chat.Update(ctx, "T1", "U1", "Cdev", timestamp, "hello again https://example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := chat.Unfurl(ctx, "T1", "U1", "Cdev", timestamp, map[string]string{"https://example.test": `{"title":"x"}`}); err != nil {
+	if _, err := chat.Unfurl(ctx, "T1", "U1", "", "Cdev", timestamp, map[string]string{"https://example.test": `{"title":"x"}`}); err != nil {
 		t.Fatal(err)
 	}
 	if err := chat.AddReaction(ctx, "T1", "U1", "Cdev", timestamp, ":wave:"); err != nil {

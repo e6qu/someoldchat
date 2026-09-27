@@ -999,7 +999,12 @@ type Store interface {
 	ReleaseEvents(context.Context, string, []uint64, time.Time) error
 	GetMessageByCreatedAt(context.Context, domain.ConversationID, time.Time) (domain.Message, error)
 	GetIdempotentMessage(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.Message, error)
-	UpdateMessage(context.Context, domain.Message, events.Event) error
+	// UpdateMessage stores a changed message and journals the event announcing
+	// it, followed by any companion events, in one transaction. A companion is
+	// a second fact the same change establishes - link_shared for the links an
+	// edit adds - so it can neither be lost nor journalled for a change that
+	// did not commit.
+	UpdateMessage(context.Context, domain.Message, events.Event, ...events.Event) error
 	// DeleteMessage marks one message deleted and retracts the file shares that
 	// message was carrying. A file is visible to whoever can see a conversation
 	// it is shared into, and the share is a row of its own: without this, the
@@ -1033,8 +1038,11 @@ type Store interface {
 	// the event from the instant it retries with, and no API surface can observe
 	// the sentinel. A fixture that hands the repository two colliding instants is
 	// in the same position as one that hands it two identical identifiers.
-	CreateMessage(context.Context, domain.Message, events.Event, string) error
-	CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event) error
+	//
+	// Companion events follow the announcement in the same transaction, as
+	// UpdateMessage's do: link_shared for the links the new message shares.
+	CreateMessage(context.Context, domain.Message, events.Event, string, ...events.Event) error
+	CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event, ...events.Event) error
 	CreateEphemeralMessage(context.Context, domain.EphemeralMessage, events.Event) error
 	GetEphemeralMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.EphemeralMessage, error)
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)

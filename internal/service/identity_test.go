@@ -27,13 +27,13 @@ type contestedInstantStore struct {
 	events   []events.Event
 }
 
-func (s *contestedInstantStore) CreateMessage(ctx context.Context, message domain.Message, event events.Event, key string) error {
+func (s *contestedInstantStore) CreateMessage(ctx context.Context, message domain.Message, event events.Event, key string, companions ...events.Event) error {
 	s.instants = append(s.instants, message.CreatedAt)
 	s.events = append(s.events, event)
 	if len(s.instants) <= s.refusals {
 		return store.ErrMessageTimestampTaken
 	}
-	return s.Store.CreateMessage(ctx, message, event, key)
+	return s.Store.CreateMessage(ctx, message, event, key, companions...)
 }
 
 // TestPostAdvancesToAFreeMicrosecondWhenOneIsTaken is the write half of "a

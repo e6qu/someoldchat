@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -10380,7 +10381,7 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	if _, err := h.Messages.Unfurl(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp, unfurls); err != nil {
+	if _, err := h.Messages.Unfurl(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, channel, timestamp, unfurls); err != nil {
 		// /chat.unfurl declares cannot_unfurl_url; message_not_found and
 		// not_in_channel are not in its enum.
 		if errors.Is(err, service.ErrNotInConversation) || errors.Is(err, service.ErrMessageAlreadyDeleted) {
@@ -11951,20 +11952,70 @@ func messageResponse(origin string, message domain.Message) map[string]any {
 	if message.Blocks != "" {
 		result["blocks"] = json.RawMessage(message.Blocks)
 	}
-	if len(message.Unfurls) > 0 {
-		unfurls := make(map[string]json.RawMessage, len(message.Unfurls))
-		for key, raw := range message.Unfurls {
-			unfurls[key] = json.RawMessage(raw)
-		}
-		result["unfurls"] = unfurls
-	}
-	if !domain.NoStructuredContent(message.Attachments) {
-		result["attachments"] = json.RawMessage(message.Attachments)
+	if attachments := messageAttachmentsWithUnfurls(message); attachments != nil {
+		result["attachments"] = attachments
 	}
 	if message.Metadata != "" {
 		result["metadata"] = json.RawMessage(message.Metadata)
 	}
 	return result
+}
+
+// messageAttachmentsWithUnfurls is the message's attachments array as Slack
+// returns it: the attachments the poster supplied, then one attachment per
+// app unfurl, marked is_app_unfurl and naming the link it previews in
+// app_unfurl_url. Slack has no separate unfurls member on a message - this
+// used to answer one, which no client reads - so an app unfurl was invisible
+// to every API reader. Unfurls follow the order their links appear in the
+// message.
+func messageAttachmentsWithUnfurls(message domain.Message) json.RawMessage {
+	if len(message.Unfurls) == 0 {
+		if domain.NoStructuredContent(message.Attachments) {
+			return nil
+		}
+		return json.RawMessage(message.Attachments)
+	}
+	var attachments []map[string]json.RawMessage
+	if !domain.NoStructuredContent(message.Attachments) && json.Unmarshal([]byte(message.Attachments), &attachments) != nil {
+		return json.RawMessage(message.Attachments)
+	}
+	position := make(map[string]int)
+	for index, link := range domain.LinksInMessage(message.Text, message.Blocks) {
+		position[link] = index
+	}
+	links := make([]string, 0, len(message.Unfurls))
+	for link := range message.Unfurls {
+		links = append(links, link)
+	}
+	slices.SortFunc(links, func(left, right string) int {
+		leftAt, leftFound := position[left]
+		rightAt, rightFound := position[right]
+		switch {
+		case leftFound && rightFound && leftAt != rightAt:
+			return leftAt - rightAt
+		case leftFound != rightFound:
+			if leftFound {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(left, right)
+	})
+	for _, link := range links {
+		var unfurl map[string]json.RawMessage
+		if json.Unmarshal([]byte(message.Unfurls[link]), &unfurl) != nil || unfurl == nil {
+			continue
+		}
+		encodedLink, _ := json.Marshal(link)
+		unfurl["app_unfurl_url"] = encodedLink
+		unfurl["is_app_unfurl"] = json.RawMessage("true")
+		attachments = append(attachments, unfurl)
+	}
+	encoded, err := json.Marshal(attachments)
+	if err != nil {
+		return json.RawMessage(message.Attachments)
+	}
+	return encoded
 }
 
 // mapServiceError names a handled service failure with an error code the

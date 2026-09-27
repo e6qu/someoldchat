@@ -1132,6 +1132,18 @@ func projectedMessage(delivered Delivered, surface Surface) ([]Inner, error) {
 	return inners, nil
 }
 
+// projectedLinkShared carries the per-app link_shared projection through to
+// the surface. The body is written by service.PrepareAppEvent after the app's
+// unfurl domains, scope and conversation visibility were applied; a record
+// that was not projected names no links for this app and is withheld.
+func projectedLinkShared(delivered Delivered, _ Surface) ([]Inner, error) {
+	inner, ok := slackShaped("link.shared", delivered)
+	if !ok || inner.Type() != "link_shared" {
+		return nil, nil
+	}
+	return []Inner{inner}, nil
+}
+
 // appLifecycleEvent renders the app lifecycle frames, whose meaning lives in
 // the envelope identity rather than in inner fields.
 func appLifecycleEvent(eventType string) builder {

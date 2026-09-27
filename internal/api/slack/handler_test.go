@@ -3542,7 +3542,26 @@ func TestChatUnfurlPersistsMetadata(t *testing.T) {
 	history.Header.Set("Authorization", "Bearer token")
 	read := httptest.NewRecorder()
 	handler.ServeHTTP(read, history)
-	if !strings.Contains(read.Body.String(), `"title":"Example"`) || !strings.Contains(read.Body.String(), `"title":"B"`) {
+	// Slack returns an app unfurl as an attachment of the message, marked
+	// is_app_unfurl and naming its link, in the order the links appear; a
+	// message object has no unfurls member.
+	var page struct {
+		Messages []struct {
+			Attachments []struct {
+				Title        string `json:"title"`
+				AppUnfurlURL string `json:"app_unfurl_url"`
+				IsAppUnfurl  bool   `json:"is_app_unfurl"`
+			} `json:"attachments"`
+			Unfurls json.RawMessage `json:"unfurls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(read.Body.Bytes(), &page); err != nil || len(page.Messages) != 1 {
+		t.Fatalf("history=%s err=%v", read.Body, err)
+	}
+	unfurled := page.Messages[0]
+	if unfurled.Unfurls != nil || len(unfurled.Attachments) != 2 ||
+		unfurled.Attachments[0].Title != "Example" || unfurled.Attachments[0].AppUnfurlURL != "https://example.com" || !unfurled.Attachments[0].IsAppUnfurl ||
+		unfurled.Attachments[1].Title != "B" || unfurled.Attachments[1].AppUnfurlURL != "https://example.org/b?x=1&y=2" || !unfurled.Attachments[1].IsAppUnfurl {
 		t.Fatalf("history after two unfurls=%s", read.Body)
 	}
 	// A URL the message does not contain cannot be unfurled, and neither can a

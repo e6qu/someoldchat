@@ -20,9 +20,10 @@ retrieved_at: 2026-07-28T00:00:00Z
 # internal/service hydrates and translates after installed-bot visibility is
 # proved; the Node and Python RTM qualifications do the same for the connected
 # user.
-# Bolt callback suites still submit an independently constructed signed event
+# Bolt callback suites mostly submit an independently constructed signed event
 # callback, so they qualify framework decoding and request authentication, not
-# producer translation. Immutable producer snapshots and bot/user perspective
+# producer translation; the Node Bolt link_shared round trip is the exception,
+# produced by a real post and answered with chat.unfurl. Immutable producer snapshots and bot/user perspective
 # filtering now cover message create/change/delete and file create/share;
 # file-unshare production and live-Slack differential outcomes remain outside
 # the qualified slice. See the events-api decision in specs/compatibility.yaml.
@@ -76,9 +77,12 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
-      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      Event-surface suite. Both events reach Bolt through the production Events
+      API processor (projection, subscription filter, signing). reaction_added
+      is translated from a record the fixture appends; link_shared is produced
+      by a real chat.postMessage sharing a link on the app's unfurl domain, and
+      the Bolt handler answers it with chat.unfurl by unfurl_id and source,
+      then reads the is_app_unfurl attachment back from conversations.history.
   - id: node-socket-mode
     ecosystem: npm
     package: '@slack/socket-mode'
@@ -221,9 +225,12 @@ bolt:
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
-      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      Event-surface suite. Both events reach Bolt through the production Events
+      API processor (projection, subscription filter, signing). reaction_added
+      is translated from a record the fixture appends; link_shared is produced
+      by a real chat.postMessage sharing a link on the app's unfurl domain, and
+      the Bolt handler answers it with chat.unfurl by unfurl_id and source,
+      then reads the is_app_unfurl attachment back from conversations.history.
   - id: bolt-python
     ecosystem: pypi
     package: slack-bolt

@@ -169,8 +169,8 @@ type lateRenewalFailureSource struct {
 	releaseRenewal  chan struct{}
 }
 
-func (s *lateRenewalFailureSource) CreateScheduledMessagePost(ctx context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event) error {
-	err := s.Store.CreateScheduledMessagePost(ctx, id, message, event)
+func (s *lateRenewalFailureSource) CreateScheduledMessagePost(ctx context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event, companions ...events.Event) error {
+	err := s.Store.CreateScheduledMessagePost(ctx, id, message, event, companions...)
 	<-s.renewStarted
 	close(s.postingReturned)
 	return err
@@ -346,7 +346,7 @@ type failingPostLateRenewalSource struct {
 	releaseRenewal  chan struct{}
 }
 
-func (s *failingPostLateRenewalSource) CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event) error {
+func (s *failingPostLateRenewalSource) CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event, ...events.Event) error {
 	<-s.renewStarted
 	close(s.postingReturned)
 	return errScheduledPostFailed

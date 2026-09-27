@@ -1151,7 +1151,7 @@ func TestUnfurlPersistsNormalizedMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := messages.Unfurl(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), map[string]string{"https://example.com": " {\"title\": \"Example\"} "})
+	updated, err := messages.Unfurl(context.Background(), "T1", "U1", "", "C1", domain.NewMessageTimestamp(message.CreatedAt), map[string]string{"https://example.com": " {\"title\": \"Example\"} "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1170,13 +1170,13 @@ func TestUnfurlPersistsNormalizedMetadata(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1"})
 	s.SeedConversationMember("C1", "U2")
 	timestamp := domain.NewMessageTimestamp(message.CreatedAt)
-	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "C1", timestamp, map[string]string{"https://example.com": `{"title":"Again"}`}); err != nil {
+	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "", "C1", timestamp, map[string]string{"https://example.com": `{"title":"Again"}`}); err != nil {
 		t.Fatalf("member unfurl err=%v", err)
 	}
-	if _, err := messages.Unfurl(context.Background(), "T1", "U3", "C1", timestamp, map[string]string{"https://example.com": `{"title":"X"}`}); !errors.Is(err, ErrNotInConversation) {
+	if _, err := messages.Unfurl(context.Background(), "T1", "U3", "", "C1", timestamp, map[string]string{"https://example.com": `{"title":"X"}`}); !errors.Is(err, ErrNotInConversation) {
 		t.Fatalf("non-member unfurl err=%v", err)
 	}
-	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "C1", timestamp, map[string]string{"https://other.example": `{"title":"X"}`}); !errors.Is(err, ErrCannotUnfurlURL) {
+	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "", "C1", timestamp, map[string]string{"https://other.example": `{"title":"X"}`}); !errors.Is(err, ErrCannotUnfurlURL) {
 		t.Fatalf("foreign URL unfurl err=%v", err)
 	}
 }
@@ -2712,7 +2712,7 @@ func TestEveryMessageWriteUsesOneStructuredBodyLimit(t *testing.T) {
 	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", ""); !errors.Is(err, ErrInvalidEphemeral) {
 		t.Fatalf("ephemeral oversized body err=%v", err)
 	}
-	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{
+	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{
 		"https://example.test": `{"text":"` + strings.Repeat("x", MaxMessageBodyBytes) + `"}`,
 	}); !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("unfurl oversized body err=%v", err)
