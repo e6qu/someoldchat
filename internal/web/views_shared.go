@@ -73,7 +73,7 @@ const viewStyle = `<style>
 .v-row.unread::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:var(--action)}
 .v-row-main{min-width:0}
 .v-row-meta{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;color:var(--muted);font-size:12px;line-height:1.4}
-.v-row-meta a{color:inherit}
+.v-row-meta a{color:inherit;display:inline-block;min-height:24px;line-height:24px}
 .v-row-title{margin:1px 0 0;color:var(--text);font-size:15px;font-weight:600;overflow-wrap:anywhere}
 .v-row-title a{color:inherit;text-decoration:none}
 .v-row-title a:hover{text-decoration:underline}

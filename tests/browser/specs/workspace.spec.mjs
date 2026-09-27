@@ -834,6 +834,77 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
 // Slack lets a member reorder attachments before sending; the files then arrive
 // in that order. Here the order is the staged list's order, so moving one chip
 // reorders the message it becomes.
+// Slack's Files view lists every file the member can see, with whose-files
+// tabs, a type filter and a file page of its own. The page used to exist only
+// as the upload list inside a conversation.
+test('[FILE-04 FILE-05 A11Y-01] the Files browser lists, filters and opens a file', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const title = `files-browser-${Date.now()}.txt`;
+  await page.locator('#upload-file').setInputFiles({ name: title, mimeType: 'text/plain', buffer: Buffer.from('files browser contents') });
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('button', { name: 'Send now', exact: true }).click();
+  await expect(page.locator('.message-file', { hasText: title }).last()).toBeVisible();
+
+  await page.goto('/app/files');
+  await expect(page.getByRole('heading', { name: 'Files', exact: true, level: 2 })).toBeVisible();
+  const files = page.getByRole('list', { name: 'Files' });
+  await expect(files.getByRole('link', { name: title, exact: true })).toBeVisible();
+
+  await page.getByRole('navigation', { name: 'Whose files' }).getByRole('link', { name: 'Created by you' }).click();
+  await expect(page).toHaveURL(/owner=mine/);
+  await expect(files.getByRole('link', { name: title, exact: true })).toBeVisible();
+
+  // The type filter applies as it changes; a text file is not an image.
+  await page.getByLabel('File type').selectOption('images');
+  await expect(page.getByText('No files match')).toBeVisible();
+  await page.getByLabel('File type').selectOption('');
+  await expect(files.getByRole('link', { name: title, exact: true })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await files.getByRole('link', { name: title, exact: true }).click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+  const details = page.getByRole('complementary', { name: 'File details' });
+  await expect(details.getByRole('link', { name: 'Download' })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Copy link' })).toBeVisible();
+  await expect(page.locator('.file-preview pre')).toHaveText('files browser contents');
+  await expect(details.getByRole('link', { name: /general/ })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto('/app/files');
+  const width = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(width).toBeLessThanOrEqual(390);
+});
+
+// A name in the conversation opens the member's profile beside it, as Slack's
+// profile pane does, instead of leaving the conversation for People.
+test('[PROFILE-01 A11Y-01] an author name opens the member profile beside the conversation', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const text = `profile panel ${Date.now()}`;
+  const composer = composerEditor(page);
+  await composer.fill(text);
+  await composer.press('Enter');
+  await expect(page.locator('.message-text', { hasText: text })).toBeVisible();
+
+  const author = page.locator('#timeline [data-profile-user]').last();
+  const name = (await author.innerText()).trim();
+  await author.click();
+  const panel = page.getByRole('complementary', { name: 'Profile' });
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('.pp-name')).toContainText(name);
+  await expect(page).toHaveURL(/\/app(\?|$)/);
+  await expect(panel.getByRole('heading', { name: 'Contact information' })).toBeVisible();
+  await panel.getByRole('button', { name: `More actions for ${name}` }).click();
+  await expect(panel.getByRole('button', { name: 'Copy member ID' })).toBeVisible();
+  await expect(panel.getByRole('link', { name: 'View files' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await panel.getByRole('button', { name: 'Close profile' }).click();
+  await expect(panel).toBeHidden();
+});
+
 test('[FILE-01] staged attachments can be reordered before sending', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app?channel=Cdev');
