@@ -44,18 +44,25 @@ The runtime shapes are explicit:
 
 ```sh
 sameoldchat -chat-mode local -store sqlite -db 'file:sameoldchat.db' \
-  -app-credential-key-hex "$SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX"
+  -app-credential-key-hex "$SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX" \
+  -auth-public-url https://chat.example.com
 
 sameoldchat-chatd -listen :9443 -store sqlite -db 'file:chat.db' \
   -tls-cert chat.crt -tls-key chat.key \
   -tls-client-ca client-ca.crt \
   -app-credential-key-hex "$SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX" \
+  -auth-public-url https://chat.example.com \
   -api-token "$SAMEOLDCHAT_API_TOKEN" -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 sameoldchat -chat-mode grpc -chat-address chatd:9443 \
   -chat-ca server-ca.crt -chat-server-name chatd.internal \
   -chat-client-cert http-client.crt -chat-client-key http-client.key \
+  -auth-public-url https://chat.example.com \
   -api-token "$SAMEOLDCHAT_API_TOKEN" -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 ```
+
+Both processes take the same `-auth-public-url`: the HTTP process builds the
+Web API's URLs on it and chatd builds the event payloads; see
+[Public URL](operations.md#public-url).
 
 The two authorities are deliberately different files, and this example used to
 name one `ca.crt` for both. `-tls-client-ca` answers "who may connect to chatd"

@@ -236,11 +236,14 @@ exactly-once effects where the application controls the destination.
 
 SSE is the default browser transport. Each event has a durable ordered ID.
 Browsers reconnect with `Last-Event-ID`, and a replica reads missed events from
-the journal before subscribing to best-effort live notification. Replica-local
-fan-out is an optimization only.
+the journal before subscribing to best-effort live notification. A stream opened
+with no cursor starts at the journal head (`LatestEventSequence`), as an RTM
+ticket does at `rtm.connect`, rather than replaying the reader's history.
+Replica-local fan-out is an optimization only.
 
 Both live streams — SSE and RTM — read the journal only through the per-user
-projection (`ListUserEventsAfter`): records about conversations the reader is
+projection (`ListUserEventsAfter`); the unfiltered workspace journal is not
+part of the chat service surface or its gRPC boundary. Records about conversations the reader is
 not a member of are withheld, and content-bearing records are hydrated only
 after membership is proven. `realtime.NewHandler` and `NewRTMHandler` accept
 nothing else, so a stream cannot be wired to the raw workspace journal. Each

@@ -281,7 +281,11 @@ type Store interface {
 	// Activity in one write, so the notification and the durable record agree.
 	InviteToHuddle(context.Context, events.Event) error
 	RecordAccess(context.Context, domain.AccessLog) error
-	ListAccessLogs(context.Context, domain.WorkspaceID, time.Time, int, int) ([]domain.AccessLog, bool, error)
+	// RecordAccess counts one access into the row for its member, IP address
+	// and user agent, creating the row on the first access.
+	// ListAccessLogs pages those rows, most recently seen first, keeping only
+	// rows first seen at or before the given instant when it is not zero.
+	ListAccessLogs(context.Context, domain.WorkspaceID, time.Time, int, int) (domain.AccessLogPage, error)
 	LookupToken(context.Context, string) (domain.TokenRecord, error)
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppToken(context.Context, string, domain.AppTokenRecord) error
@@ -813,6 +817,9 @@ type Store interface {
 	AppendRetentionEvents(context.Context, domain.WorkspaceID, []events.Event) error
 	AddEmoji(context.Context, domain.CustomEmoji, events.Event) error
 	ListEmojis(context.Context, domain.WorkspaceID) ([]domain.CustomEmoji, error)
+	// EmojiRevision is when the workspace's custom emoji set last changed, or
+	// the zero time when it never has.
+	EmojiRevision(context.Context, domain.WorkspaceID) (time.Time, error)
 	RemoveEmoji(context.Context, domain.WorkspaceID, string, events.Event) error
 	RenameEmoji(context.Context, domain.WorkspaceID, string, string, events.Event) error
 	// AddConversationMember and its siblings accept the notice message the
@@ -1081,7 +1088,9 @@ type Store interface {
 	ListPins(context.Context, domain.ConversationID, domain.PageRequest) ([]domain.Pin, domain.Cursor, bool, error)
 	AddStar(context.Context, domain.Star, events.Event) error
 	RemoveStar(context.Context, domain.Star, events.Event) error
-	ListStars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
+	// ListStars pages a member's message and channel stars together, oldest
+	// first, with the total across both.
+	ListStars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.StarPage, error)
 	CreateSavedItem(context.Context, domain.SavedItem, events.Event) (domain.SavedItem, bool, error)
 	GetSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID) (domain.SavedItem, error)
 	GetSavedItemByMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)
@@ -1101,6 +1110,8 @@ type Store interface {
 	// another member apart from one that does not exist. A reminder in a different
 	// workspace stays invisible (ErrNotFound), preserving tenant isolation.
 	ReminderInWorkspace(context.Context, domain.WorkspaceID, domain.ReminderID) (domain.Reminder, error)
+	// ListReminders lists the reminders for the member and those the member
+	// created for someone else.
 	ListReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
 	CompleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, time.Time, events.Event) error
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, events.Event) error
@@ -1113,7 +1124,9 @@ type Store interface {
 	// both somebody else winning it and the reminder not being there: the
 	// worker only claims what it has just read as due, and either way it must
 	// not deliver.
-	MarkReminderDelivered(context.Context, domain.WorkspaceID, domain.ReminderID, time.Time, events.Event) (bool, error)
+	// A recurring reminder is not retired by delivery: given its next
+	// occurrence, the claim moves its due time there instead.
+	MarkReminderDelivered(context.Context, domain.WorkspaceID, domain.ReminderID, time.Time, time.Time, events.Event) (bool, error)
 	// EarliestReminder is the next instant a reminder comes due, so a workspace
 	// that is asleep knows when to wake.
 	EarliestReminder(context.Context, domain.WorkspaceID) (time.Time, error)
@@ -1161,7 +1174,9 @@ type Store interface {
 	GetCall(context.Context, domain.WorkspaceID, domain.CallID) (domain.Call, error)
 	UpdateCall(context.Context, domain.Call, events.Event) error
 	EndCall(context.Context, domain.WorkspaceID, domain.CallID, int64, events.Event) error
-	SetCallParticipants(context.Context, domain.WorkspaceID, domain.CallID, []domain.UserID, events.Event) error
+	// SetCallParticipants replaces an app-registered call's member and
+	// external participants together.
+	SetCallParticipants(context.Context, domain.WorkspaceID, domain.CallID, []domain.UserID, []domain.ExternalCallParticipant, events.Event) error
 	// StartHuddle returns the conversation's active huddle, creating it only if
 	// there is none, and adds the caller to it either way. It is one atomic
 	// upsert because two people pressing start at the same moment must end up

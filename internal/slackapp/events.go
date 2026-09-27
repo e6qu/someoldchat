@@ -20,6 +20,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 )
 
 const eventSurface = "http"
@@ -58,10 +59,14 @@ const internalRetryDelay = 5 * time.Second
 type EventProcessor struct {
 	Store            EventStore
 	AppCredentialKey []byte
-	Owner            string
-	Lease            time.Duration
-	Client           *http.Client
-	Now              func() time.Time
+	// PublicURL is the deployment's public URL (-auth-public-url): every URL
+	// a delivered event carries is built on it. Empty leaves them
+	// origin-relative; see docs/operations.md.
+	PublicURL string
+	Owner     string
+	Lease     time.Duration
+	Client    *http.Client
+	Now       func() time.Time
 	// BatchPerApp, Concurrency and AppBudget override the defaults above when
 	// positive.
 	BatchPerApp int
@@ -177,7 +182,7 @@ func (p EventProcessor) deferRecord(ctx context.Context, appID domain.AppID, cla
 func (p EventProcessor) deliver(ctx context.Context, snapshot domain.AppManifestSnapshot, parsed appmanifest.Parsed, claim events.AppEventClaim) (bool, error) {
 	appID := snapshot.App.ID
 	record := claim.Record
-	prepared, visible, err := service.PrepareAppEvent(ctx, p.Store, p.AppCredentialKey, appID, record)
+	prepared, visible, err := service.PrepareAppEvent(ctx, p.Store, p.AppCredentialKey, slackobject.Origin(p.PublicURL), appID, record)
 	if err != nil {
 		return false, p.deferRecord(ctx, appID, claim, "event_projection_failed", fmt.Errorf("project app %s event %s: %w", appID, record.Event.ID, err))
 	}

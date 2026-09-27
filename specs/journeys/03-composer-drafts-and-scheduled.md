@@ -203,8 +203,9 @@ they do not become successful history.
 
 Before delivery, authorized members can reschedule or cancel the exact pending
 item, and Slack-supported clients can send it now. A cancellation racing
-delivery has one observable outcome. Pagination and ownership are exact-token
-and workspace isolated.
+delivery has one observable outcome. Pagination and ownership follow the
+scheduling identity (the bot, or the member and app) rather than one token, so
+a rotated token keeps its schedules, and are workspace isolated.
 
 Editing a failed item clears its terminal failure only when the replacement
 commits. Send now uses the scheduled item ID as the post idempotency key: a

@@ -94,7 +94,7 @@ type Service interface {
 	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID, domain.MessageTimestamp) (domain.EphemeralMessage, error)
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
 	RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
-	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) ([]domain.AccessLog, bool, error)
+	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) (domain.AccessLogPage, error)
 	WorkspaceAnalytics(context.Context, domain.WorkspaceID, domain.UserID, time.Time) (domain.WorkspaceAnalytics, error)
 	UserWorkspaces(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.WorkspaceMembershipSummary, error)
 	// The Slack Connect invitation lifecycle. Approval and acceptance are
@@ -258,6 +258,7 @@ type Service interface {
 	AdminConversationTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) ([]domain.WorkspaceID, bool, domain.Cursor, error)
 	AdminSetConversationTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.WorkspaceID, bool) error
 	Emojis(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.CustomEmoji, error)
+	EmojiRevision(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)
 	AdminAddEmoji(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	AdminAddEmojiAlias(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	AdminRemoveEmoji(context.Context, domain.WorkspaceID, domain.UserID, string) error
@@ -413,7 +414,7 @@ type Service interface {
 	Pins(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) ([]domain.Pin, domain.Cursor, bool, error)
 	AddStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
 	RemoveStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
-	Stars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
+	Stars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.StarPage, error)
 	SaveForLater(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.SavedItem, error)
 	SavedItemForMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)
 	SavedItemsForMessages(context.Context, domain.WorkspaceID, domain.UserID, []domain.MessageID) ([]domain.SavedItem, error)
@@ -424,7 +425,7 @@ type Service interface {
 	EditBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID, domain.BookmarkUpdate) (domain.Bookmark, error)
 	Bookmarks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.Bookmark, error)
 	RemoveBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID) error
-	AddReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, string, time.Time) (domain.Reminder, error)
+	AddReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, string, domain.ReminderSchedule) (domain.Reminder, error)
 	CompleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) error
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) error
 	ReminderInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) (domain.Reminder, error)
@@ -460,7 +461,7 @@ type Service interface {
 	ListUserGroups(context.Context, domain.WorkspaceID, domain.UserID, bool, domain.PageRequest) (domain.UserGroupPage, error)
 	UserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) ([]domain.UserID, error)
 	SetUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserID) (domain.UserGroup, error)
-	AddCall(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string, time.Time, []domain.UserID) (domain.Call, error)
+	AddCall(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string, time.Time, []domain.CallParticipant) (domain.Call, error)
 	// The huddle family takes a conversation rather than a call identifier: a
 	// conversation has at most one running huddle, and naming the conversation
 	// is what lets two concurrent starts converge on one.
@@ -472,8 +473,8 @@ type Service interface {
 	GetCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID) (domain.Call, error)
 	UpdateCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, string, string, string) (domain.Call, error)
 	EndCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, int64) error
-	AddCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.UserID) error
-	RemoveCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.UserID) error
+	AddCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.CallParticipant) error
+	RemoveCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.CallParticipant) error
 	Search(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageSearchRequest) (domain.MessagePage, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearchRequest) (domain.FilePage, error)
@@ -553,5 +554,10 @@ type Service interface {
 	PresentEntityDetails(context.Context, domain.WorkspaceID, domain.UserID, string, string, bool, string, string) error
 	PresentEntityComments(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, bool, string, bool, string, string) error
 	AcknowledgeEntityCommentAction(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) error
-	events.Source
+	// LatestEventSequence is the journal head a new live stream for this
+	// member opens at. The raw workspace journal (events.Source) is
+	// deliberately not part of this surface: it carries records about
+	// conversations a reader is not in. Readers use ListUserEventsAfter or
+	// ListAppEventsAfter, which filter by audience.
+	LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error)
 }

@@ -108,6 +108,18 @@ type Shortcut struct {
 // contract and returns canonical JSON for durable versioning. The API contract
 // accepts a JSON manifest encoded as a string; YAML conversion belongs to the
 // developer UI before this boundary.
+// userTokenOnlyScope reports whether Slack grants a scope to user tokens only.
+// A manifest that asked for one under scopes.bot was accepted, and the
+// installed bot then held a scope no Slack bot can: dnd:write let it snooze
+// its installer, stars:* read their saved items, identity.* sign them in.
+func userTokenOnlyScope(scope string) bool {
+	switch scope {
+	case "dnd:write", "stars:read", "stars:write", "search:read", "users.profile:write":
+		return true
+	}
+	return strings.HasPrefix(scope, "identity.")
+}
+
 func Parse(raw string) (Parsed, []Error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -223,6 +235,11 @@ func Parse(raw string) (Parsed, []Error) {
 	userScopes := normalizedUnique(stringSlice(scopes, "user", "/oauth_config/scopes/user", &problems))
 	if len(botScopes) > 255 {
 		problems = append(problems, Error{Message: "Bot scopes can contain at most 255 scopes", Pointer: "/oauth_config/scopes/bot"})
+	}
+	for _, scope := range botScopes {
+		if userTokenOnlyScope(scope) {
+			problems = append(problems, Error{Message: "Scope " + scope + " is only available to user tokens; request it under oauth_config.scopes.user", Pointer: "/oauth_config/scopes/bot"})
+		}
 	}
 	if len(userScopes) > 255 {
 		problems = append(problems, Error{Message: "User scopes can contain at most 255 scopes", Pointer: "/oauth_config/scopes/user"})

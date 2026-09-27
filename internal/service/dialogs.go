@@ -352,7 +352,7 @@ func (m Messages) dialogPayload(ctx context.Context, current domain.Dialog, defi
 	payload := map[string]any{
 		"type": kind, "token": verificationToken, "api_app_id": current.AppID,
 		"action_ts":    domain.NewMessageTimestamp(time.Now().UTC()),
-		"team":         map[string]any{"id": workspace.ID, "domain": workspace.Domain},
+		"team":         map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
 		"user":         map[string]any{"id": user.ID, "name": user.Name},
 		"callback_id":  definition.CallbackID,
 		"response_url": responseURL,

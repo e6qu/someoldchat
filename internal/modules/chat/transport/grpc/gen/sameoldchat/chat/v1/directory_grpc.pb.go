@@ -55,6 +55,7 @@ const (
 	DirectoryService_UserSessions_FullMethodName                       = "/sameoldchat.chat.v1.DirectoryService/UserSessions"
 	DirectoryService_ResetUserSessionsBulk_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/ResetUserSessionsBulk"
 	DirectoryService_Emojis_FullMethodName                             = "/sameoldchat.chat.v1.DirectoryService/Emojis"
+	DirectoryService_EmojiRevision_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/EmojiRevision"
 	DirectoryService_AddEmoji_FullMethodName                           = "/sameoldchat.chat.v1.DirectoryService/AddEmoji"
 	DirectoryService_AddEmojiAlias_FullMethodName                      = "/sameoldchat.chat.v1.DirectoryService/AddEmojiAlias"
 	DirectoryService_RemoveEmoji_FullMethodName                        = "/sameoldchat.chat.v1.DirectoryService/RemoveEmoji"
@@ -138,6 +139,7 @@ type DirectoryServiceClient interface {
 	UserSessions(ctx context.Context, in *ResetUserSessionsRequest, opts ...grpc.CallOption) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(ctx context.Context, in *ResetUserSessionsBulkRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	Emojis(ctx context.Context, in *EmojiListRequest, opts ...grpc.CallOption) (*EmojiListResponse, error)
+	EmojiRevision(ctx context.Context, in *EmojiListRequest, opts ...grpc.CallOption) (*EmojiRevisionResponse, error)
 	AddEmoji(ctx context.Context, in *EmojiMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AddEmojiAlias(ctx context.Context, in *EmojiMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	RemoveEmoji(ctx context.Context, in *EmojiMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -543,6 +545,16 @@ func (c *directoryServiceClient) Emojis(ctx context.Context, in *EmojiListReques
 	return out, nil
 }
 
+func (c *directoryServiceClient) EmojiRevision(ctx context.Context, in *EmojiListRequest, opts ...grpc.CallOption) (*EmojiRevisionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EmojiRevisionResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_EmojiRevision_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *directoryServiceClient) AddEmoji(ctx context.Context, in *EmojiMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
@@ -939,6 +951,7 @@ type DirectoryServiceServer interface {
 	UserSessions(context.Context, *ResetUserSessionsRequest) (*UserSessionsResponse, error)
 	ResetUserSessionsBulk(context.Context, *ResetUserSessionsBulkRequest) (*MutationResponse, error)
 	Emojis(context.Context, *EmojiListRequest) (*EmojiListResponse, error)
+	EmojiRevision(context.Context, *EmojiListRequest) (*EmojiRevisionResponse, error)
 	AddEmoji(context.Context, *EmojiMutationRequest) (*MutationResponse, error)
 	AddEmojiAlias(context.Context, *EmojiMutationRequest) (*MutationResponse, error)
 	RemoveEmoji(context.Context, *EmojiMutationRequest) (*MutationResponse, error)
@@ -1090,6 +1103,9 @@ func (UnimplementedDirectoryServiceServer) ResetUserSessionsBulk(context.Context
 }
 func (UnimplementedDirectoryServiceServer) Emojis(context.Context, *EmojiListRequest) (*EmojiListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Emojis not implemented")
+}
+func (UnimplementedDirectoryServiceServer) EmojiRevision(context.Context, *EmojiListRequest) (*EmojiRevisionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EmojiRevision not implemented")
 }
 func (UnimplementedDirectoryServiceServer) AddEmoji(context.Context, *EmojiMutationRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddEmoji not implemented")
@@ -1860,6 +1876,24 @@ func _DirectoryService_Emojis_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).Emojis(ctx, req.(*EmojiListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_EmojiRevision_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EmojiListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).EmojiRevision(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_EmojiRevision_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).EmojiRevision(ctx, req.(*EmojiListRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2644,6 +2678,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Emojis",
 			Handler:    _DirectoryService_Emojis_Handler,
+		},
+		{
+			MethodName: "EmojiRevision",
+			Handler:    _DirectoryService_EmojiRevision_Handler,
 		},
 		{
 			MethodName: "AddEmoji",

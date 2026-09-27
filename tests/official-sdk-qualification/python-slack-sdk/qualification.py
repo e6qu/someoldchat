@@ -31,6 +31,8 @@ client = WebClient(
     token=os.environ.get("SAMEOLDCHAT_API_TOKEN", "xoxb-test"),
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
 )
+# The user token: reminders, snooze, identity, photo and stars are methods
+# Slack serves to user tokens only.
 reminder_client = WebClient(
     token="xoxp-reminder-qualification",
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
@@ -468,11 +470,21 @@ added_call = client.calls_add(
     desktop_app_join_url="https://example.com/call-desktop",
     title="Qualification call",
     date_start=int(time.time()),
+    users=[
+        {"slack_id": "U1"},
+        {"external_id": "qualification-guest", "display_name": "Qualification Guest", "avatar_url": "https://example.com/guest.png"},
+    ],
 )
 assert added_call["ok"] is True
 call_id = added_call["call"]["id"]
 call_info = client.calls_info(id=call_id)
 assert call_info["ok"] is True
+assert {"slack_id": "U1"} in call_info["call"]["users"], call_info
+assert {
+    "external_id": "qualification-guest",
+    "display_name": "Qualification Guest",
+    "avatar_url": "https://example.com/guest.png",
+} in call_info["call"]["users"], call_info
 updated_call = client.calls_update(id=call_id, title="Updated qualification call")
 assert updated_call["ok"] is True
 added_call_participant = client.calls_participants_add(id=call_id, users=[{"slack_id": "U2"}])
@@ -671,13 +683,13 @@ assert client.chat_delete(channel="C1", ts=scheduled_root["ts"])["ok"] is True
 dnd_info = client.dnd_info()
 assert dnd_info["ok"] is True
 assert dnd_info["dnd_enabled"] is False
-dnd_snooze = client.dnd_setSnooze(num_minutes=5)
+dnd_snooze = reminder_client.dnd_setSnooze(num_minutes=5)
 assert dnd_snooze["ok"] is True
 assert dnd_snooze["snooze_enabled"] is True
-dnd_end_snooze = client.dnd_endSnooze()
+dnd_end_snooze = reminder_client.dnd_endSnooze()
 assert dnd_end_snooze["ok"] is True
 assert dnd_end_snooze["snooze_enabled"] is False
-dnd_end = client.dnd_endDnd()
+dnd_end = reminder_client.dnd_endDnd()
 assert dnd_end["ok"] is True
 dnd_team = client.dnd_teamInfo(users="U1")
 assert dnd_team["ok"] is True
@@ -698,14 +710,22 @@ try:
     raise AssertionError("reminders.add accepted another user for a user token")
 except SlackApiError as error:
     assert error.response["error"] == "cannot_add_others"
+# Slack's documented natural-language forms are read; a recurring one is
+# reported as recurring, and an undocumented phrasing is cannot_parse.
+phrased = reminder_client.reminders_add(text="documented natural language", time="in 15 minutes")
+assert phrased["ok"] is True
+assert phrased["reminder"]["time"] > time.time() + 14 * 60
+recurring_reminder = reminder_client.reminders_add(text="weekly sync", time="every Thursday at 9am")
+assert recurring_reminder["ok"] is True
+assert recurring_reminder["reminder"]["recurring"] is True
 try:
-    reminder_client.reminders_add(text="documented natural language", time="in 15 minutes")
-    raise AssertionError("known natural-language reminder gap unexpectedly disappeared")
+    reminder_client.reminders_add(text="undocumented phrasing", time="whenever")
+    raise AssertionError("reminders.add accepted a phrase it cannot read")
 except SlackApiError as error:
     assert error.response["error"] == "cannot_parse"
 reminders = reminder_client.reminders_list()
 assert reminders["ok"] is True
-assert len(reminders["reminders"]) == 1
+assert len(reminders["reminders"]) == 3
 reminder_info = reminder_client.reminders_info(reminder=reminder["reminder"]["id"])
 assert reminder_info["ok"] is True
 assert reminder_info["reminder"]["id"] == reminder["reminder"]["id"]
@@ -774,12 +794,12 @@ assert profile["profile"]["display_name"] == "alice"
 # bytes and refuses a stream that is not the image it claims to be.
 image = io.BytesIO(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="))
 image.name = "qualification.png"
-photo = client.users_setPhoto(image=image)
+photo = reminder_client.users_setPhoto(image=image)
 assert photo["ok"] is True
-deleted_photo = client.users_deletePhoto()
+deleted_photo = reminder_client.users_deletePhoto()
 assert deleted_photo["ok"] is True
 
-root = client.chat_postMessage(channel="C1", text="thread root")
+root = client.chat_postMessage(channel="C1", text="thread root <https://example.com/qualification>")
 assert root["ok"] is True
 unfurled = client.chat_unfurl(
     channel="C1",
@@ -836,12 +856,12 @@ assert me_message["ok"] is True
 ephemeral = client.chat_postEphemeral(channel="C1", user="U1", text="ephemeral qualification")
 assert ephemeral["ok"] is True
 assert isinstance(ephemeral["message_ts"], str)
-starred = client.stars_add(channel="C1", timestamp=root["ts"])
+starred = reminder_client.stars_add(channel="C1", timestamp=root["ts"])
 assert starred["ok"] is True
-stars = client.stars_list(limit=10)
+stars = reminder_client.stars_list(limit=10)
 assert stars["ok"] is True
 assert len(stars["items"]) == 1
-unstarred = client.stars_remove(channel="C1", timestamp=root["ts"])
+unstarred = reminder_client.stars_remove(channel="C1", timestamp=root["ts"])
 assert unstarred["ok"] is True
 permalink = client.chat_getPermalink(channel="C1", message_ts=root["ts"])
 assert permalink["ok"] is True
@@ -860,7 +880,7 @@ emoji = client.emoji_list(include_categories=True)
 assert emoji["ok"] is True
 assert emoji["categories_version"] == "097705020bcf82331c9ef10df3425aad15f5043c"
 assert any(category["name"] == "Smileys & Emotion" and "grinning" in category["emoji_names"] for category in emoji["categories"])
-identity_result = client.users_identity()
+identity_result = reminder_client.users_identity()
 assert identity_result["ok"] is True
 assert identity_result["user"]["id"] == "U1"
 by_email = client.users_lookupByEmail(email="alice@example.com")

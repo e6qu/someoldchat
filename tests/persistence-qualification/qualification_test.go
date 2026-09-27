@@ -1134,15 +1134,16 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 	if err := repository.AddStar(ctx, star, event("star", "star.added", string(message.ID))); err != nil {
 		t.Fatal(err)
 	}
-	stars, nextStar, moreStars, err := repository.ListStars(ctx, workspaceID, userID, domain.PageRequest{Limit: 1})
-	if err != nil || len(stars) != 1 || stars[0].Message.ID != message.ID || nextStar != "" || moreStars {
+	starPage, err := repository.ListStars(ctx, workspaceID, userID, domain.PageRequest{Limit: 1})
+	stars, nextStar, moreStars := starPage.Stars, starPage.NextCursor, starPage.HasMore
+	if err != nil || len(stars) != 1 || stars[0].Message.ID != message.ID || nextStar != "" || moreStars || starPage.Total != 1 {
 		t.Fatalf("stars=%+v next=%q more=%v err=%v", stars, nextStar, moreStars, err)
 	}
 	if err := repository.RemoveStar(ctx, star, event("star-remove", "star.removed", string(message.ID))); err != nil {
 		t.Fatal(err)
 	}
-	stars, _, _, err = repository.ListStars(ctx, workspaceID, userID, domain.PageRequest{Limit: 1})
-	if err != nil || len(stars) != 0 {
+	starPage, err = repository.ListStars(ctx, workspaceID, userID, domain.PageRequest{Limit: 1})
+	if stars = starPage.Stars; err != nil || len(stars) != 0 || starPage.Total != 0 {
 		t.Fatalf("stars after remove=%+v err=%v", stars, err)
 	}
 
@@ -1373,23 +1374,44 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 		t.Fatal(err)
 	}
 
-	emoji := domain.CustomEmoji{WorkspaceID: workspaceID, Name: "wave_one", URL: "https://files.example/wave.png"}
+	if revision, err := repository.EmojiRevision(ctx, workspaceID); err != nil || !revision.IsZero() {
+		t.Fatalf("revision before any emoji=%v err=%v", revision, err)
+	}
+	uploaded := time.Unix(1_700_000_000, 0).UTC()
+	emoji := domain.CustomEmoji{WorkspaceID: workspaceID, Name: "wave_one", URL: "https://files.example/wave.png", CreatedAt: uploaded, CreatedBy: userID}
 	if err := repository.AddEmoji(ctx, emoji, event("emoji-add", "emoji.added", emoji.Name)); err != nil {
 		t.Fatal(err)
 	}
+	alias := domain.CustomEmoji{WorkspaceID: workspaceID, Name: "wave_alias", AliasFor: emoji.Name, CreatedAt: uploaded, CreatedBy: userID}
+	if err := repository.AddEmoji(ctx, alias, event("emoji-alias", "emoji.alias_added", alias.Name)); err != nil {
+		t.Fatal(err)
+	}
 	emojis, err := repository.ListEmojis(ctx, workspaceID)
-	if err != nil || len(emojis) != 1 || emojis[0].Name != emoji.Name {
+	if err != nil || len(emojis) != 2 || emojis[1].Name != emoji.Name || !emojis[1].CreatedAt.Equal(uploaded) || emojis[1].CreatedBy != userID {
 		t.Fatalf("emojis=%+v err=%v", emojis, err)
+	}
+	added, err := repository.EmojiRevision(ctx, workspaceID)
+	if err != nil || added.IsZero() {
+		t.Fatalf("revision after add=%v err=%v", added, err)
 	}
 	if err := repository.RenameEmoji(ctx, workspaceID, emoji.Name, "wave_updated", event("emoji-rename", "emoji.renamed", emoji.Name)); err != nil {
 		t.Fatal(err)
 	}
+	// A rename carries the aliases that pointed at the old name along.
+	emojis, err = repository.ListEmojis(ctx, workspaceID)
+	if err != nil || len(emojis) != 2 || emojis[0].AliasFor != "wave_updated" {
+		t.Fatalf("emojis after rename=%+v err=%v", emojis, err)
+	}
 	if err := repository.RemoveEmoji(ctx, workspaceID, "wave_updated", event("emoji-remove", "emoji.removed", "wave_updated")); err != nil {
 		t.Fatal(err)
 	}
+	// A removal takes the aliases with it, and the revision never goes back.
 	emojis, err = repository.ListEmojis(ctx, workspaceID)
 	if err != nil || len(emojis) != 0 {
 		t.Fatalf("emojis after remove=%+v err=%v", emojis, err)
+	}
+	if removed, err := repository.EmojiRevision(ctx, workspaceID); err != nil || removed.Before(added) {
+		t.Fatalf("revision after remove=%v (added %v) err=%v", removed, added, err)
 	}
 }
 
@@ -1621,8 +1643,14 @@ func publishedIntegrationRepositoryContract(t *testing.T, open opener) {
 		if err := repository.UpdateCall(ctx, call, event("call-update", "call.updated", string(call.ID))); err != nil {
 			t.Fatal(err)
 		}
-		if err := repository.SetCallParticipants(ctx, workspaceID, call.ID, []domain.UserID{userID}, event("call-participants", "call.participants_changed", string(call.ID))); err != nil {
+		guest := domain.ExternalCallParticipant{ExternalID: "guest-" + suffix, DisplayName: "Guest", AvatarURL: "https://example.test/guest.png"}
+		if err := repository.SetCallParticipants(ctx, workspaceID, call.ID, []domain.UserID{userID}, []domain.ExternalCallParticipant{guest}, event("call-participants", "call.participants_changed", string(call.ID))); err != nil {
 			t.Fatal(err)
+		}
+		// An external participant keeps the name and avatar the provider gave.
+		loaded, err = repository.GetCall(ctx, workspaceID, call.ID)
+		if err != nil || len(loaded.ExternalParticipants) != 1 || loaded.ExternalParticipants[0] != guest || len(loaded.Participants) != 1 {
+			t.Fatalf("call with an external participant=%+v err=%v", loaded, err)
 		}
 		if err := repository.EndCall(ctx, workspaceID, call.ID, 90, event("call-end", "call.ended", string(call.ID))); err != nil {
 			t.Fatal(err)
@@ -2767,7 +2795,7 @@ func aReminderIsDeliveredOnce(t *testing.T, open opener) {
 		return events.Event{ID: domain.EventID(name + "-" + suffix), WorkspaceID: workspaceID, ActorID: userID,
 			Topic: "reminder.delivered", Payload: "{}", CreatedAt: now}
 	}
-	claimed, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, notice("first"))
+	claimed, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, time.Time{}, notice("first"))
 	if err != nil || !claimed {
 		t.Fatalf("the first claim did not win: claimed=%t err=%v", claimed, err)
 	}
@@ -2787,7 +2815,7 @@ func aReminderIsDeliveredOnce(t *testing.T, open opener) {
 		t.Fatalf("the member was marked reminded and shown %d reminders", reminded)
 	}
 	// The second claim loses rather than delivering again, and writes no notice.
-	second, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, notice("second"))
+	second, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, time.Time{}, notice("second"))
 	if err != nil || second {
 		t.Fatalf("a delivered reminder was claimed twice: claimed=%t err=%v", second, err)
 	}
@@ -2817,9 +2845,44 @@ func aReminderIsDeliveredOnce(t *testing.T, open opener) {
 	// A reminder that is not there loses the claim rather than failing. The
 	// worker only claims what it has just read as due, so losing and never
 	// existing are the same answer to it.
-	absent, err := repository.MarkReminderDelivered(ctx, workspaceID, domain.ReminderID("Rm-absent-"+suffix), now, notice("absent"))
+	absent, err := repository.MarkReminderDelivered(ctx, workspaceID, domain.ReminderID("Rm-absent-"+suffix), now, time.Time{}, notice("absent"))
 	if err != nil || absent {
 		t.Fatalf("claiming a reminder that does not exist: claimed=%t err=%v", absent, err)
+	}
+
+	// A recurring reminder keeps its cadence, zone and anchor, and its claim
+	// moves it to the next occurrence rather than retiring it; a second claim
+	// at the same instant loses.
+	weekly := domain.ReminderID("Rm-weekly-" + suffix)
+	if err := repository.CreateReminder(ctx, domain.Reminder{
+		WorkspaceID: workspaceID, ID: weekly, Creator: userID, User: userID, Text: "weekly", Time: now.Add(-time.Second),
+		Recurring: true, Recurrence: domain.ReminderWeekly, TimeZone: "Europe/Paris", RecurrenceAnchor: now.Add(-time.Second),
+	}, events.Event{ID: domain.EventID("evt-weekly-" + suffix), WorkspaceID: workspaceID, ActorID: userID,
+		Topic: "reminder.created", Payload: string(weekly), CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.GetReminder(ctx, workspaceID, userID, weekly)
+	if err != nil || stored.Recurrence != domain.ReminderWeekly || stored.TimeZone != "Europe/Paris" || !stored.RecurrenceAnchor.Equal(now.Add(-time.Second)) || !stored.Recurring {
+		t.Fatalf("recurring reminder=%+v err=%v", stored, err)
+	}
+	next := now.Add(7*24*time.Hour - time.Second)
+	if claimed, err := repository.MarkReminderDelivered(ctx, workspaceID, weekly, now, next, notice("weekly")); err != nil || !claimed {
+		t.Fatalf("recurring claim=%t err=%v", claimed, err)
+	}
+	if claimed, err := repository.MarkReminderDelivered(ctx, workspaceID, weekly, now, next, notice("weekly-again")); err != nil || claimed {
+		t.Fatalf("a recurring reminder was claimed twice: claimed=%t err=%v", claimed, err)
+	}
+	moved, err := repository.GetReminder(ctx, workspaceID, userID, weekly)
+	if err != nil || !moved.Time.Equal(next) {
+		t.Fatalf("recurring reminder after delivery=%+v err=%v", moved, err)
+	}
+	nextDue, err := repository.DueReminders(ctx, workspaceID, next, 10)
+	if err != nil || len(nextDue) != 2 || nextDue[1].ID != weekly {
+		t.Fatalf("the next occurrence is not due at its time: %+v err=%v", nextDue, err)
+	}
+	// A reminder written with no zone reads back in UTC on every profile.
+	if unzoned, err := repository.ReminderInWorkspace(ctx, workspaceID, future); err != nil || unzoned.TimeZone != "UTC" {
+		t.Fatalf("unzoned reminder=%+v err=%v", unzoned, err)
 	}
 }
 

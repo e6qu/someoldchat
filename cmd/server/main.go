@@ -29,6 +29,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/observability"
 	"github.com/sameoldchat/sameoldchat/internal/realtime"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/web"
 	"google.golang.org/grpc"
@@ -218,7 +219,12 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			logger.Error("parse dqlite cluster", "error", err)
 			return exitConfiguration
 		}
-		runtime, err := localchat.Open(applicationContext, localchat.Config{Backend: localchat.Backend(settings.storeName), DSN: resolved.databaseDSN, DqliteDirectory: settings.dqliteDirectory, DqliteAddress: settings.dqliteAddress, DqliteCluster: cluster, DqliteDatabase: settings.dqliteDatabase, BlobDirectory: settings.blobDirectory, BlobS3Bucket: settings.blobS3Bucket, BlobS3Prefix: settings.blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: settings.bootstrapAdminEmail, AppCredentialKey: resolved.appCredentialKey})
+		if strings.TrimSpace(settings.authPublicURL) == "" {
+			// The Web API falls back to each request's origin; an event has no
+			// request, so its URLs stay origin-relative. See docs/operations.md.
+			logger.Warn("no -auth-public-url: URLs in event payloads are origin-relative")
+		}
+		runtime, err := localchat.Open(applicationContext, localchat.Config{Backend: localchat.Backend(settings.storeName), DSN: resolved.databaseDSN, DqliteDirectory: settings.dqliteDirectory, DqliteAddress: settings.dqliteAddress, DqliteCluster: cluster, DqliteDatabase: settings.dqliteDatabase, BlobDirectory: settings.blobDirectory, BlobS3Bucket: settings.blobS3Bucket, BlobS3Prefix: settings.blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: settings.bootstrapAdminEmail, AppCredentialKey: resolved.appCredentialKey, PublicURL: slackobject.Origin(settings.authPublicURL)})
 		if err != nil {
 			return startupFailure(applicationContext, logger, "open local chat", err)
 		}

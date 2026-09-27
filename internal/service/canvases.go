@@ -461,7 +461,7 @@ func (m Messages) SearchCanvases(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.CanvasPage{}, ErrInvalidSearch
 	}
-	parsed, err := parseSearchQuery(request.Query)
+	parsed, err := parseSearchQuery(request.Query, m.searchClockFor(ctx, workspaceID, userID))
 	if err != nil {
 		return domain.CanvasPage{}, ErrInvalidSearch
 	}

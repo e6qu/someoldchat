@@ -208,6 +208,7 @@ func pinnedErrorCodes(t *testing.T) map[string]struct{} {
 func recordedNonPinnedCodes() map[string]string {
 	return map[string]string{
 		// Surfaces the pinned snapshot does not describe, or that declare no enum.
+		"ratelimited":                    "Slack's 429 code for a method's rate-limit tier, which the pinned snapshot does not enumerate per method; python-slack-sdk retries apps.connections.open and rtm.connect only on it (see rate-limit-codes in specs/compatibility.yaml)",
 		"cant_delete_primary_owner":      "the pinned snapshot declares no owner-protection code for admin.users.*; this names the real cause rather than reporting a permission failure the actor does not have",
 		"canvas_not_found":               "canvases.* is absent from the pinned snapshot",
 		"channel_canvas_already_exists":  "current conversations.canvases.create singular-resource conflict; absent from the legacy OpenAPI snapshot",
@@ -292,6 +293,13 @@ func recordedNonPinnedCodes() map[string]string {
 		"error_invalid_channels":         "current workflows.featured.list method reference",
 		"error_modifying_workflows":      "current workflows.featured.add, remove, and set method references",
 		"unknown_workflow_id":            "current functions.workflows.steps.list method reference",
+		// Slack answers a usergroups.create/update that takes a name or handle
+		// another group already uses with these codes; the pinned snapshot's
+		// enums declare only permission_denied and user_is_restricted, and the
+		// alternative - succeeding with a duplicate - is what this used to do.
+		"name_already_exists":   "usergroups.create and usergroups.update: the name is taken by another group",
+		"handle_already_exists": "usergroups.create and usergroups.update: the handle is taken by another group",
+		"invalid_users":         "usergroups.users.update: a named member is not in the workspace; the snapshot's enum declares no code for it, and usergroup_not_found named the wrong missing thing",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so
@@ -487,6 +495,8 @@ func perOperationExemptions() map[string]map[string]string {
 		"/users.conversations":        {"team_not_found": workspaceUnreadable},
 		"/users.deletePhoto":          {"user_not_found": "the enum declares no missing-user code, though the operation is defined entirely in terms of a user"},
 		"/users.profile.set":          {"user_not_found": "the enum declares reserved_name, invalid_profile and profile_set_failed but no missing-user code"},
+		"/stars.add":                  {"user_is_bot": "stars.* serve user tokens only; stars.list declares user_is_bot for a bot token and the snapshot's stars.add enum omits it"},
+		"/stars.remove":               {"user_is_bot": "stars.* serve user tokens only; stars.list declares user_is_bot for a bot token and the snapshot's stars.remove enum omits it"},
 		"/files.upload":               {"fatal_error": "the enum declares no server-side failure code; /users.setPhoto, which shares this spool, declares fatal_error", "file_not_found": "the enum declares no not-found code for the workspace the upload is written to"},
 		"/admin.conversations.search": {"fatal_error": "this enum is one of the short admin.* lists and declares no server-side failure code"},
 	}

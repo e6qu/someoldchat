@@ -229,6 +229,28 @@ func TestConversationsOpenNamesUsersAndSelfAndGroupDMs(t *testing.T) {
 		t.Fatalf("group DM=%v", group)
 	}
 	requirePinnedFields(t, "group DM", group, pinnedDefinition(t, "objs_conversation", 0))
+
+	// "Resume a conversation by supplying an im or mpim's ID": channel stands
+	// for the users the conversation already has.
+	if resumed := call("conversations.open", url.Values{"channel": {im["id"].(string)}}); resumed["ok"] != true || resumed["already_open"] != true || resumed["channel"].(map[string]any)["id"] != im["id"] {
+		t.Fatalf("resumed self-DM=%v", resumed)
+	}
+	if closed := call("conversations.close", url.Values{"channel": {group["id"].(string)}}); closed["ok"] != true {
+		t.Fatalf("close group DM=%v", closed)
+	}
+	resumedGroup := call("conversations.open", url.Values{"channel": {group["id"].(string)}})
+	if resumedGroup["ok"] != true || resumedGroup["already_open"] != nil || resumedGroup["channel"].(map[string]any)["id"] != group["id"] {
+		t.Fatalf("a closed group DM resumed by ID=%v", resumedGroup)
+	}
+	if channel := call("conversations.open", url.Values{"channel": {"C1"}}); channel["error"] != "method_not_supported_for_channel_type" {
+		t.Fatalf("open of a channel=%v", channel)
+	}
+	if missing := call("conversations.open", url.Values{"channel": {"D404"}}); missing["error"] != "channel_not_found" {
+		t.Fatalf("open of an unknown conversation=%v", missing)
+	}
+	if neither := call("conversations.open", url.Values{}); neither["error"] != "users_list_not_supplied" {
+		t.Fatalf("open with neither=%v", neither)
+	}
 }
 
 func TestChannelNoticesCarryTheirSlackFieldsInHistory(t *testing.T) {

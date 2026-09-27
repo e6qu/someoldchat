@@ -178,7 +178,6 @@ func authorityMatrix() map[string]authority {
 		"JoinConversation":   authorityNotGuest,
 
 		// Available to any active member, both guest tiers included.
-		"ListEventsAfter":                         authorityAnyMember,
 		"AcceptSharedInvite":                      authorityAnyMember,
 		"AcknowledgeEntityCommentAction":          authorityAnyMember,
 		"AcknowledgeLaterReminders":               authorityAnyMember,
@@ -308,6 +307,7 @@ func authorityMatrix() map[string]authority {
 		"EditBookmark":                            authorityAnyMember,
 		"EditCanvas":                              authorityAnyMember,
 		"Emojis":                                  authorityAnyMember,
+		"EmojiRevision":                           authorityAnyMember,
 		"EndCall":                                 authorityAnyMember,
 		"EndDND":                                  authorityAnyMember,
 		"EndSnooze":                               authorityAnyMember,
@@ -345,7 +345,7 @@ func authorityMatrix() map[string]authority {
 		"List":                                    authorityAnyMember,
 		"ListAccess":                              authorityAnyMember,
 		"ListAccessFor":                           authorityAnyMember,
-		"ListAccessLogs":                          authorityAnyMember,
+		"ListAccessLogs":                          authorityAdmin,
 		"ListAppShortcuts":                        authorityAnyMember,
 		"ListDeveloperApps":                       authorityAnyMember,
 		"ListEphemeralMessages":                   authorityAnyMember,
@@ -355,6 +355,7 @@ func authorityMatrix() map[string]authority {
 		"ListItems":                               authorityAnyMember,
 		"ListSharedInvites":                       authorityAnyMember,
 		"ListUserEventsAfter":                     authorityAnyMember,
+		"LatestEventSequence":                     authorityAnyMember,
 		"ListUserGroups":                          authorityAnyMember,
 		"ListWorkflowTriggers":                    authorityAnyMember,
 		"ListWorkflows":                           authorityAnyMember,

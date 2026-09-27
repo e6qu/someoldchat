@@ -86,6 +86,7 @@ message PinsRequest {
   string cursor = 5;
 }
 
+// A star on a channel carries no message_id and no message.
 message Star {
   string message_id = 1;
   string conversation_id = 2;
@@ -105,6 +106,7 @@ message StarPage {
   repeated Star stars = 1;
   string next_cursor = 2;
   bool has_more = 3;
+  int64 total = 4;
 }
 
 service ReactionsService {

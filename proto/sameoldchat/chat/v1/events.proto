@@ -47,6 +47,17 @@ message EventsResponse {
   uint64 scanned_through = 2;
 }
 
+// LatestEventSequenceRequest asks where a new live stream for one member opens:
+// the journal head at this moment.
+message LatestEventSequenceRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message LatestEventSequenceResponse {
+  uint64 sequence = 1;
+}
+
 message AppEventClaimRequest {
   string app_id = 1;
   string surface = 2;
@@ -94,7 +105,11 @@ message AppEventMutationResponse {
 }
 
 service EventsService {
+  // ListEventsAfter reads the journal as one member (user_id) or one app
+  // (app_id) may see it. A request naming neither is refused: the unfiltered
+  // workspace journal is not part of this boundary.
   rpc ListEventsAfter(EventsRequest) returns (EventsResponse);
+  rpc LatestEventSequence(LatestEventSequenceRequest) returns (LatestEventSequenceResponse);
   rpc ClaimAppEvent(AppEventClaimRequest) returns (AppEventLease);
   rpc AckAppEvent(AppEventAckRequest) returns (AppEventMutationResponse);
   rpc ReleaseAppEvent(AppEventReleaseRequest) returns (AppEventMutationResponse);

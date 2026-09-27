@@ -18,6 +18,7 @@ import (
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"io"
@@ -907,8 +908,10 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 		// Holding the maximum number of connections is a temporary condition
 		// that clears when one closes. It used to fall through to fatal_error,
 		// which every official Socket Mode client treats as permanent. Slack
-		// documents no dedicated code for it; 429 with Retry-After is the one
-		// answer every official Web API client retries on its own.
+		// documents no dedicated code for it; 429 with Retry-After and
+		// `ratelimited` is the answer every official client retries on its own —
+		// python-slack-sdk's SocketModeClient retries this method only on that
+		// exact code.
 		writeRateLimited(w, socketmode.ConnectionLimitRetryAfter)
 		return
 	}
@@ -3157,6 +3160,19 @@ func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	arguments, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// visibility filters the definitions: all (the default), visible, or
+	// hidden. It was ignored, so a client asking for the visible fields got
+	// the hidden ones too.
+	visibility := strings.ToLower(strings.TrimSpace(arguments["visibility"]))
+	if visibility != "" && visibility != "all" && visibility != "visible" && visibility != "hidden" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	definitions, err := h.Messages.WorkspaceProfileFields(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
 		writeError(w, mapServiceError(err, "invalid_auth"))
@@ -3164,6 +3180,9 @@ func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := make([]map[string]any, 0, len(definitions))
 	for _, definition := range definitions {
+		if (visibility == "visible" && definition.IsHidden) || (visibility == "hidden" && !definition.IsHidden) {
+			continue
+		}
 		fields = append(fields, profileFieldDefinitionResponse(definition))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": map[string]any{"fields": fields}})
@@ -3239,20 +3258,34 @@ func (h Handler) accessLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		before = time.Unix(seconds, 0).UTC()
 	}
-	values, hasMore, err := h.Messages.ListAccessLogs(r.Context(), principal.WorkspaceID, principal.UserID, before, limit, page)
+	// Slack serves at most 100 pages of access logs and names the refusal.
+	if page > service.MaxAccessLogPages {
+		writeError(w, "over_pagination_limit")
+		return
+	}
+	value, err := h.Messages.ListAccessLogs(r.Context(), principal.WorkspaceID, principal.UserID, before, limit, page)
 	if err != nil {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	logins := make([]map[string]any, 0, len(values))
-	for _, value := range values {
-		logins = append(logins, map[string]any{"count": 1, "country": nil, "date_first": value.CreatedAt.Unix(), "date_last": value.CreatedAt.Unix(), "ip": value.IP, "isp": nil, "region": nil, "user_agent": value.UserAgent, "user_id": value.UserID, "username": value.Username})
+	logins := make([]map[string]any, 0, len(value.Logins))
+	for _, login := range value.Logins {
+		logins = append(logins, map[string]any{"count": login.Count, "country": nil, "date_first": login.FirstAt.Unix(), "date_last": login.CreatedAt.Unix(), "ip": login.IP, "isp": nil, "region": nil, "user_agent": login.UserAgent, "user_id": login.UserID, "username": login.Username})
 	}
-	pages := page
-	if hasMore {
-		pages++
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logins": logins, "paging": legacyPaging(limit, page, value.Total)})
+}
+
+// legacyPaging is the page-numbered `paging` object: count is the page size
+// the caller asked for (Slack's own example answers count 100 for two
+// results), total is the size of the whole collection, and pages is how many
+// pages of that size cover it - never fewer than one. The access log used to
+// answer count and total with the length of the page it returned.
+func legacyPaging(count, page, total int) map[string]any {
+	pages := 1
+	if total > 0 {
+		pages = (total + count - 1) / count
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logins": logins, "paging": map[string]any{"count": len(logins), "page": page, "pages": pages, "total": len(logins)}})
+	return map[string]any{"count": count, "page": page, "pages": pages, "total": total}
 }
 
 func (h Handler) integrationLogs(w http.ResponseWriter, r *http.Request) {
@@ -3295,7 +3328,7 @@ func (h Handler) integrationLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		logs = append(logs, log)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logs": logs, "paging": map[string]any{"count": len(logs), "page": value.Page, "pages": value.Pages, "total": value.Total}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logs": logs, "paging": map[string]any{"count": count, "page": value.Page, "pages": value.Pages, "total": value.Total}})
 }
 
 func (h Handler) adminUsersList(w http.ResponseWriter, r *http.Request) {
@@ -5734,7 +5767,7 @@ func (h Handler) adminConversationInvite(w http.ResponseWriter, r *http.Request)
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	users := parseCallUsers(usersField)
+	users := parseIDList[domain.UserID](usersField)
 	conversation, err := h.Messages.AdminInviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -6090,12 +6123,13 @@ func conversationPrefsResponse(value domain.ConversationPrefs) map[string]any {
 	return map[string]any{"can_thread": map[string]any{"type": value.CanThread.Types, "user": value.CanThread.Users}, "who_can_post": map[string]any{"type": value.WhoCanPost.Types, "user": value.WhoCanPost.Users}}
 }
 
+// emojiList is emoji.list. Its cache_ts is the instant the workspace's custom
+// emoji set last changed, in Slack's "seconds.micros" form, so a client that
+// caches the list by cache_ts refetches after an add, alias, rename or removal.
+// It used to be the built-in catalog's revision hash, which neither had Slack's
+// shape nor moved when the custom set did.
 func (h Handler) emojiList(w http.ResponseWriter, r *http.Request) {
-	h.listEmoji(w, r, auth.ScopeEmojiRead)
-}
-
-func (h Handler) listEmoji(w http.ResponseWriter, r *http.Request, scope auth.Scope) {
-	principal, err := h.authenticate(r, scope)
+	principal, err := h.authenticate(r, auth.ScopeEmojiRead)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -6115,16 +6149,28 @@ func (h Handler) listEmoji(w http.ResponseWriter, r *http.Request, scope auth.Sc
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
+	revision, err := h.Messages.EmojiRevision(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
+		return
+	}
 	response := map[string]any{
 		"ok":       true,
 		"emoji":    emojiResponse(values),
-		"cache_ts": slackemoji.Revision,
+		"cache_ts": emojiCacheTimestamp(revision),
 	}
 	if includeCategories {
 		response["categories_version"] = slackemoji.CategoriesVersion
 		response["categories"] = slackemoji.Categories()
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func emojiCacheTimestamp(revision time.Time) string {
+	if revision.IsZero() {
+		return "0.000000"
+	}
+	return slackTimestamp(revision)
 }
 
 func emojiResponse(values []domain.CustomEmoji) map[string]string {
@@ -6139,12 +6185,69 @@ func emojiResponse(values []domain.CustomEmoji) map[string]string {
 	return result
 }
 
-// adminEmojiList is admin.emoji.list. It differs from emoji.list only in the
-// scope the pinned contract requires: `admin.teams:read` rather than
-// `emoji:read`. Requiring a write scope for a read locked read-only admin tokens
-// out of their own emoji inventory.
+// adminEmojiList is admin.emoji.list. It requires `admin.teams:read` rather
+// than `emoji:read`, and unlike emoji.list it is cursor-paginated and answers
+// each emoji as an object — {"url", "date_created", "uploaded_by"} — which is
+// what the official SDKs model (the Java client's admin Emoji type); the
+// emoji.list string map made strict clients fail to decode the response.
 func (h Handler) adminEmojiList(w http.ResponseWriter, r *http.Request) {
-	h.listEmoji(w, r, auth.ScopeAdminTeamsRead)
+	principal, err := h.authenticate(r, auth.ScopeAdminTeamsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// The pinned parameter documents 1–1000 inclusive.
+	limit, err := clampLimit(fields["limit"], 100, 1000)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	cursor, err := decodeCursor(fields["cursor"], "invalid_cursor")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	after, _ := domain.DecodeListCursor(cursor)
+	values, err := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
+		return
+	}
+	// The service lists by name, so the name is the keyset position.
+	start := sort.Search(len(values), func(index int) bool { return values[index].Name > after })
+	page := values[start:]
+	nextCursor := ""
+	if len(page) > limit {
+		page = page[:limit]
+		next, err := domain.NewListCursor(page[len(page)-1].Name)
+		if err != nil {
+			writeError(w, mapServiceError(err, "fatal_error"))
+			return
+		}
+		nextCursor = string(next)
+	}
+	emoji := make(map[string]any, len(page))
+	for _, value := range page {
+		imageURL := value.URL
+		if value.AliasFor != "" {
+			imageURL = "alias:" + value.AliasFor
+		}
+		var created int64
+		if !value.CreatedAt.IsZero() {
+			created = value.CreatedAt.Unix()
+		}
+		emoji[value.Name] = map[string]any{"url": imageURL, "date_created": created, "uploaded_by": string(value.CreatedBy)}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                true,
+		"emoji":             emoji,
+		"response_metadata": map[string]any{"next_cursor": nextCursor},
+	})
 }
 
 func (h Handler) adminEmojiAdd(w http.ResponseWriter, r *http.Request) {
@@ -6291,13 +6394,16 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": slackobject.User(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))})
 }
 
 func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeIdentityBasic)
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	if refuseBotToken(w, principal) {
 		return
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
@@ -6310,7 +6416,29 @@ func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "invalid_auth"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"id": user.ID, "name": user.Name}, "team": map[string]any{"id": team.ID}})
+	// Sign in with Slack widens the identity with each scope granted:
+	// identity.email adds the address, identity.avatar the photo sizes, and
+	// identity.team the workspace's name and domain. Only the id and name were
+	// ever returned, whatever the grant.
+	identityUser := map[string]any{"id": user.ID, "name": user.Name}
+	if principal.HasScope(auth.ScopeIdentityEmail) {
+		identityUser["email"] = user.Email
+	}
+	if principal.HasScope(auth.ScopeIdentityAvatar) {
+		for size, image := range map[string]string{
+			"image_24": user.Profile.Image24, "image_32": user.Profile.Image32, "image_48": user.Profile.Image48,
+			"image_72": user.Profile.Image72, "image_192": user.Profile.Image192, "image_512": user.Profile.Image512,
+			"image_1024": user.Profile.Image1024,
+		} {
+			identityUser[size] = image
+		}
+	}
+	identityTeam := map[string]any{"id": team.ID}
+	if principal.HasScope(auth.ScopeIdentityTeam) {
+		identityTeam["name"] = team.Name
+		identityTeam["domain"] = team.Domain
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": identityUser, "team": identityTeam})
 }
 
 func (h Handler) lookupUserByEmail(w http.ResponseWriter, r *http.Request) {
@@ -6333,7 +6461,7 @@ func (h Handler) lookupUserByEmail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "users_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(h.origin(r), user, true)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": slackobject.User(h.origin(r), user, true)})
 }
 
 func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
@@ -6365,7 +6493,7 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 	}
 	members := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		members = append(members, userResponse(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail)))
+		members = append(members, slackobject.User(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "members": members, "cache_ts": time.Now().Unix(), "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -6417,7 +6545,7 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	profile := profileResponse(h.origin(r), user)
+	profile := slackobject.Profile(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(profile, "email")
 	}
@@ -6517,11 +6645,19 @@ func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func dndResponse(value domain.DoNotDisturb, now time.Time) map[string]any {
-	return map[string]any{
+// dndResponse renders a member's Do Not Disturb state. The snooze fields are
+// the caller's own: Slack reports another member's schedule but not whether,
+// or until when, they have snoozed notifications.
+func dndResponse(value domain.DoNotDisturb, now time.Time, includeSnooze bool) map[string]any {
+	response := map[string]any{
 		"ok": true, "dnd_enabled": value.Enabled, "next_dnd_start_ts": unixSeconds(value.NextStartAt), "next_dnd_end_ts": unixSeconds(value.NextEndAt),
-		"snooze_enabled": value.SnoozeEnabled(now), "snooze_endtime": unixSeconds(value.SnoozeUntil), "snooze_remaining": value.SnoozeRemaining(now),
 	}
+	if includeSnooze {
+		response["snooze_enabled"] = value.SnoozeEnabled(now)
+		response["snooze_endtime"] = unixSeconds(value.SnoozeUntil)
+		response["snooze_remaining"] = value.SnoozeRemaining(now)
+	}
+	return response
 }
 
 func unixSeconds(value time.Time) int64 {
@@ -6548,13 +6684,16 @@ func (h Handler) dndInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, dndResponse(value, time.Now().UTC()))
+	writeJSON(w, http.StatusOK, dndResponse(value, time.Now().UTC(), requested == "" || requested == principal.UserID))
 }
 
 func (h Handler) dndEnd(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeDNDWrite)
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	if refuseBotToken(w, principal) {
 		return
 	}
 	// /dnd.endDnd declares `unknown_error`; `dnd_not_active` is in no pinned enum.
@@ -6571,19 +6710,25 @@ func (h Handler) dndEndSnooze(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	if refuseBotToken(w, principal) {
+		return
+	}
 	// /dnd.endSnooze declares `snooze_not_active`, which was never emitted.
 	value, err := h.Messages.EndSnooze(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
 		writeError(w, mapServiceError(err, "snooze_not_active"))
 		return
 	}
-	writeJSON(w, http.StatusOK, dndResponse(value, time.Now().UTC()))
+	writeJSON(w, http.StatusOK, dndResponse(value, time.Now().UTC(), true))
 }
 
 func (h Handler) dndSetSnooze(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeDNDWrite)
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	if refuseBotToken(w, principal) {
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -6608,7 +6753,7 @@ func (h Handler) dndSetSnooze(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "snooze_failed"))
 		return
 	}
-	response := dndResponse(value, time.Now().UTC())
+	response := dndResponse(value, time.Now().UTC(), true)
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -6685,7 +6830,7 @@ func (h Handler) dndTeamInfo(w http.ResponseWriter, r *http.Request) {
 			writeError(w, mapServiceError(infoErr, "user_not_found"))
 			return
 		}
-		response := dndResponse(value, now)
+		response := dndResponse(value, now, requestedID == principal.UserID)
 		delete(response, "ok")
 		users[string(requestedID)] = response
 	}
@@ -6777,7 +6922,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	responseProfile := profileResponse(h.origin(r), user)
+	responseProfile := slackobject.Profile(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(responseProfile, "email")
 	}
@@ -6794,6 +6939,9 @@ func (h Handler) deleteUserPhoto(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersProfileWrite)
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	if refuseBotToken(w, principal) {
 		return
 	}
 	if err := h.Messages.DeleteUserPhoto(r.Context(), principal.WorkspaceID, principal.UserID); err != nil {
@@ -6828,19 +6976,22 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if refuseBotToken(w, principal) {
+		return
+	}
 	temporary := spool.file
 	stat, err := temporary.Stat()
 	if err != nil {
 		writeError(w, "fatal_error")
 		return
 	}
-	// slack-api-client 1.49.0 labels this multipart part imageData/*.
-	// Web API 8.0 sends a Buffer as application/octet-stream instead. Preserve
-	// both official client behaviors while still letting the message service
-	// enforce that the detected bytes exactly match an allow-listed image type.
-	if mimeType == "imageData/*" {
-		mimeType = "image/png"
-	} else if mimeType == "application/octet-stream" {
+	// The label on the part is not a reliable image type: slack-api-client
+	// 1.49.0 labels it imageData/*, a wildcard, and Web API 8.0 sends a Buffer
+	// as application/octet-stream. Anything that is not a concrete image/* type
+	// is read from the bytes instead, and the message service still checks
+	// that the bytes match an allow-listed image type. imageData/* used to be
+	// taken for PNG, so a JPEG from the Java client was refused as a mismatch.
+	if !concreteImageType(mimeType) {
 		head := make([]byte, 512)
 		read, readErr := io.ReadFull(temporary, head)
 		if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
@@ -6853,6 +7004,10 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if stat.Size() > service.MaxUserPhotoBytes {
+		writeError(w, "too_large")
+		return
+	}
 	// crop_w/crop_x/crop_y are declared but not implemented. Silently ignoring a
 	// crop would return a differently framed image than the caller asked for while
 	// claiming success, so the request is refused instead.
@@ -6864,10 +7019,27 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.Messages.SetUserPhoto(r.Context(), principal.WorkspaceID, principal.UserID, mimeType, stat.Size(), temporary)
 	if err != nil {
+		// The service refuses bytes that are not an allow-listed image, or
+		// that disagree with their declared type, as an invalid profile; the
+		// pinned enum names that bad_image.
+		if errors.Is(err, service.ErrInvalidProfile) {
+			writeError(w, "bad_image")
+			return
+		}
 		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(h.origin(r), user)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": slackobject.Profile(h.origin(r), user)})
+}
+
+// concreteImageType reports whether a multipart part's label names one image
+// type, as opposed to a wildcard, an absent type or a generic byte stream.
+func concreteImageType(value string) bool {
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(mediaType, "image/") && !strings.Contains(mediaType, "*")
 }
 
 // users.setActive is deprecated and non-functional in Slack. Preserve that
@@ -6886,7 +7058,7 @@ func (h Handler) usersSetActive(w http.ResponseWriter, r *http.Request) {
 func adminUserResponse(origin string, value domain.AdminUser) map[string]any {
 	user := value.User
 	user.Role, user.Restricted, user.UltraRestricted = value.Membership.Role, value.Membership.Restricted, value.Membership.UltraRestricted
-	result := userResponse(origin, user, true)
+	result := slackobject.User(origin, user, true)
 	result["is_active"] = value.Membership.Active
 	return result
 }
@@ -7210,8 +7382,10 @@ func (h Handler) conversationInviteCandidates(r *http.Request, principal auth.Pr
 		case targetID == principal.UserID:
 			reason = "cant_invite_self"
 		default:
-			if _, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
-				if !errors.Is(err, store.ErrNotFound) {
+			if target, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil || target.Deleted {
+				// A deactivated account cannot join a conversation; UserInfo
+				// describes it, so the refusal is made here.
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
 					return nil, nil, err
 				}
 				reason = "user_not_found"
@@ -7540,6 +7714,41 @@ func (h Handler) changeConversationArchived(w http.ResponseWriter, r *http.Reque
 	return true, err
 }
 
+// directConversationUsers names the users a conversations.open of an existing
+// IM or MPIM stands for: its members other than the caller, or the caller
+// alone for a self-DM. A conversation the caller cannot see is
+// channel_not_found; a channel that is not a direct conversation is
+// method_not_supported_for_channel_type, as the pinned enum names it.
+func (h Handler) directConversationUsers(r *http.Request, principal auth.Principal, channelID domain.ConversationID) (string, string) {
+	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channelID)
+	if err != nil {
+		return "", mapServiceError(err, "channel_not_found")
+	}
+	if conversation.Kind != domain.ConversationTypeIM && conversation.Kind != domain.ConversationTypeMPIM {
+		return "", "method_not_supported_for_channel_type"
+	}
+	page, err := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channelID, domain.PageRequest{Limit: 10})
+	if err != nil {
+		return "", mapServiceError(err, "channel_not_found")
+	}
+	others := make([]string, 0, len(page.Users))
+	member := false
+	for _, user := range page.Users {
+		if user.ID == principal.UserID {
+			member = true
+			continue
+		}
+		others = append(others, string(user.ID))
+	}
+	if !member {
+		return "", "channel_not_found"
+	}
+	if len(others) == 0 {
+		others = append(others, string(principal.UserID))
+	}
+	return strings.Join(others, ","), ""
+}
+
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticateConversation(r, conversationWriteGrant, domain.ConversationTypeIM, domain.ConversationTypeMPIM)
 	if err != nil {
@@ -7551,14 +7760,28 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	if strings.TrimSpace(fields["users"]) == "" {
-		// /conversations.open enumerates users_list_not_supplied.
-		writeError(w, "users_list_not_supplied")
-		return
+	rawUsers := strings.TrimSpace(fields["users"])
+	if rawUsers == "" {
+		channelID := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+		if channelID == "" {
+			// /conversations.open enumerates users_list_not_supplied.
+			writeError(w, "users_list_not_supplied")
+			return
+		}
+		// "Resume a conversation by supplying an im or mpim's ID": the
+		// conversation's own members are the users an open names, so the
+		// resume is the same open — it reopens a closed DM and reports
+		// already_open for an open one.
+		resumed, failure := h.directConversationUsers(r, principal, channelID)
+		if failure != "" {
+			writeError(w, failure)
+			return
+		}
+		rawUsers = resumed
 	}
 	users := make([]domain.UserID, 0)
 	seen := make(map[domain.UserID]struct{})
-	for _, raw := range strings.Split(fields["users"], ",") {
+	for _, raw := range strings.Split(rawUsers, ",") {
 		user := domain.UserID(strings.TrimSpace(raw))
 		if user == "" {
 			writeError(w, "invalid_array_arg")
@@ -7759,9 +7982,11 @@ func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	// The store pages reaction rows; Slack lists one item per message, carrying
-	// every reaction on it. Rows of the same message collapse into one item,
-	// and each conversation's messages are projected in one batch.
+	// Slack lists one item per message, carrying every reaction on it. The
+	// store pages by message and returns each message's reaction rows
+	// together (domain.UserReactionPage), so the rows collapse into one item
+	// here and a message never repeats on the next page. Each conversation's
+	// messages are projected in one batch.
 	type reactedMessage struct {
 		conversation domain.ConversationID
 		message      domain.Message
@@ -8008,26 +8233,35 @@ func (h Handler) addStar(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	if refuseBotToken(w, principal) {
+		return
+	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	channel, timestamp, err := normalizeReactionTarget(fields)
-	if err != nil {
-		writeDecodeError(w, err)
-		return
-	}
-	// This system stars messages only. stars.add/remove enumerate file_not_found
-	// and file_comment_not_found for the file forms, so a request naming a file is
-	// rejected with the code for the thing that cannot be found rather than with a
-	// generic argument error.
+	// This system stars messages and channels. stars.add/remove enumerate
+	// file_not_found and file_comment_not_found for the file forms, so a
+	// request naming a file is rejected with the code for the thing that cannot
+	// be found rather than with a generic argument error.
 	if strings.TrimSpace(fields["file"]) != "" {
 		writeError(w, "file_not_found")
 		return
 	}
 	if strings.TrimSpace(fields["file_comment"]) != "" {
 		writeError(w, "file_comment_not_found")
+		return
+	}
+	channel, timestamp, err := normalizeStarTarget(fields)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// A channel nobody can see is channel_not_found; it used to be reported
+	// as message_not_found, naming the wrong missing thing.
+	if _, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	if err := h.Messages.AddStar(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
@@ -8044,20 +8278,18 @@ func (h Handler) removeStar(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	if refuseBotToken(w, principal) {
+		return
+	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	channel, timestamp, err := normalizeReactionTarget(fields)
-	if err != nil {
-		writeDecodeError(w, err)
-		return
-	}
-	// This system stars messages only. stars.add/remove enumerate file_not_found
-	// and file_comment_not_found for the file forms, so a request naming a file is
-	// rejected with the code for the thing that cannot be found rather than with a
-	// generic argument error.
+	// This system stars messages and channels. stars.add/remove enumerate
+	// file_not_found and file_comment_not_found for the file forms, so a
+	// request naming a file is rejected with the code for the thing that cannot
+	// be found rather than with a generic argument error.
 	if strings.TrimSpace(fields["file"]) != "" {
 		writeError(w, "file_not_found")
 		return
@@ -8066,7 +8298,19 @@ func (h Handler) removeStar(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "file_comment_not_found")
 		return
 	}
+	channel, timestamp, err := normalizeStarTarget(fields)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// A channel nobody can see is channel_not_found; it used to be reported
+	// as message_not_found, naming the wrong missing thing.
+	if _, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
 	if err := h.Messages.RemoveStar(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
+		// service.ErrNotStarred is the pinned not_starred.
 		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
@@ -8079,40 +8323,84 @@ func (h Handler) listStars(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	if refuseBotToken(w, principal) {
+		return
+	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	limit, err := clampLimit(fields["limit"], 100, 1000)
+	// stars.list pages two ways: cursor/limit, and the legacy count/page its
+	// paging object describes. A caller naming either cursor argument gets
+	// cursor paging; otherwise count and page choose the page.
+	cursorMode := strings.TrimSpace(fields["cursor"]) != "" || strings.TrimSpace(fields["limit"]) != ""
+	var (
+		limit, count, page int
+		cursor             domain.Cursor
+	)
+	if cursorMode {
+		if limit, err = clampLimit(fields["limit"], 100, 1000); err == nil {
+			cursor, err = decodeCursor(fields["cursor"], "invalid_arg_name")
+		}
+		count, page = limit, 1
+	} else {
+		if count, err = clampLimit(fields["count"], 100, 1000); err == nil {
+			page, err = pageNumber(fields["page"])
+		}
+		limit = count
+	}
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	cursor, err := decodeCursor(fields["cursor"], "invalid_arg_name")
-	if err != nil {
-		writeDecodeError(w, err)
+	if page > maxStarPages {
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	items, next, more, err := h.Messages.Stars(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: limit, Cursor: cursor})
-	if err != nil {
-		writeError(w, mapServiceError(err, "fatal_error"))
-		return
+	// A page past the first is reached by walking the keyset from the start;
+	// it is bounded by maxStarPages.
+	var starred domain.StarPage
+	for current := 1; ; current++ {
+		starred, err = h.Messages.Stars(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: limit, Cursor: cursor})
+		if err != nil {
+			writeError(w, mapServiceError(err, "fatal_error"))
+			return
+		}
+		if current >= page {
+			break
+		}
+		if !starred.HasMore {
+			starred.Stars, starred.HasMore, starred.NextCursor = nil, false, ""
+			break
+		}
+		cursor = starred.NextCursor
 	}
-	result := make([]map[string]any, 0, len(items))
-	for _, item := range items {
+	result := make([]map[string]any, 0, len(starred.Stars))
+	for _, item := range starred.Stars {
+		if item.IsChannel() {
+			result = append(result, map[string]any{"type": "channel", "channel": item.Conversation, "date_create": item.CreatedAt.Unix()})
+			continue
+		}
 		result = append(result, map[string]any{"type": "message", "channel": item.Conversation, "date_create": item.CreatedAt.Unix(), "message": messageResponse(h.origin(r), item.Message)})
 	}
-	// The cursor the store returns is the only way to reach page two. It used to be
-	// discarded and replaced by an invented `spill` key, so a workspace with more
-	// stars than one page could never be read in full.
-	paging := map[string]any{"page": 1, "total": len(result), "per_page": limit}
+	// paging describes the whole set: total is every star the member has and
+	// pages how many pages of this size hold them. It used to report the
+	// length of the page as the total.
+	pages := 1
+	if starred.Total > 0 {
+		pages = (starred.Total + count - 1) / count
+	}
+	paging := map[string]any{"per_page": count, "page": page, "total": starred.Total, "pages": pages}
 	body := map[string]any{"ok": true, "items": result, "paging": paging}
-	if more {
-		body["response_metadata"] = map[string]string{"next_cursor": string(next)}
+	if cursorMode && starred.HasMore {
+		body["response_metadata"] = map[string]string{"next_cursor": string(starred.NextCursor)}
 	}
 	writeJSON(w, http.StatusOK, body)
 }
+
+// maxStarPages bounds stars.list's page walk.
+const maxStarPages = 100
 
 func reminderResponse(reminder domain.Reminder) map[string]any {
 	response := map[string]any{"id": reminder.ID, "creator": reminder.Creator, "user": reminder.User, "text": reminder.Text, "time": reminder.Time.Unix(), "recurring": reminder.Recurring}
@@ -8306,7 +8594,8 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "cannot_parse")
 		return
 	}
-	when, err := reminderTime(fields["time"], time.Now().UTC())
+	location := h.memberLocation(r.Context(), principal)
+	schedule, err := reminderSchedule(fields["time"], time.Now().UTC(), location)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -8320,7 +8609,11 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "cannot_add_others")
 		return
 	}
-	reminder, err := h.Messages.AddReminder(r.Context(), principal.WorkspaceID, principal.UserID, targetID, textValue, when)
+	if targetID != "" && targetID != principal.UserID && schedule.Recurrence != domain.ReminderOnce {
+		writeError(w, "cannot_add_others_recurring")
+		return
+	}
+	reminder, err := h.Messages.AddReminder(r.Context(), principal.WorkspaceID, principal.UserID, targetID, textValue, schedule)
 	if err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
@@ -8434,14 +8727,40 @@ func (h Handler) listReminders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "reminders": result, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
+// The methods Slack serves to user tokens only - the ones that act on a
+// person's own snooze, identity, photo, saved items or search - refuse a bot
+// token through the one predicate, isBotPrincipal. search.* used to check
+// inline and dnd.*, users.identity, users.setPhoto/deletePhoto and stars.* not
+// at all, so a bot token could set a member's snooze and photo and read their
+// saved items.
+
+// refuseBotToken answers a bot token with user_is_bot, the code the user-only
+// methods' pinned enums declare, and reports whether it did.
+func refuseBotToken(w http.ResponseWriter, principal auth.Principal) bool {
+	if !isBotPrincipal(principal) {
+		return false
+	}
+	writeError(w, "user_is_bot")
+	return true
+}
+
+// refuseBotSearchToken is refuseBotToken for search.*, which declares no enum;
+// Slack answers a bot token there with not_allowed_token_type.
+func refuseBotSearchToken(w http.ResponseWriter, principal auth.Principal) bool {
+	if !isBotPrincipal(principal) {
+		return false
+	}
+	writeError(w, "not_allowed_token_type")
+	return true
+}
+
 func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeSearchRead)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType.IsBot() || principal.BotID != "" {
-		writeError(w, "not_allowed_token_type")
+	if refuseBotSearchToken(w, principal) {
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -8476,8 +8795,7 @@ func (h Handler) searchFiles(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType.IsBot() || principal.BotID != "" {
-		writeError(w, "not_allowed_token_type")
+	if refuseBotSearchToken(w, principal) {
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -8507,8 +8825,7 @@ func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	if principal.TokenType.IsBot() || principal.BotID != "" {
-		writeError(w, "not_allowed_token_type")
+	if refuseBotSearchToken(w, principal) {
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -8616,6 +8933,10 @@ func (h Handler) searchMessagePage(ctx context.Context, principal auth.Principal
 
 func (h Handler) searchMessageEnvelope(ctx context.Context, origin string, principal auth.Principal, arguments searchArguments, page domain.MessagePage) (map[string]any, error) {
 	matches := make([]map[string]any, 0, len(page.Messages))
+	var highlightTerms []string
+	if arguments.highlight {
+		highlightTerms = service.SearchHighlightTerms(arguments.query)
+	}
 	// A page of matches usually repeats a handful of channels and authors, so
 	// each is resolved once; the permalink needs no call at all, because it is
 	// a function of the message and the origin.
@@ -8623,6 +8944,9 @@ func (h Handler) searchMessageEnvelope(ctx context.Context, origin string, princ
 	authors := make(map[domain.UserID]domain.User)
 	for _, message := range page.Messages {
 		match := messageResponse(origin, message)
+		if arguments.highlight {
+			match["text"] = highlightSearchText(message.Text, highlightTerms)
+		}
 		conversation, known := conversations[message.Conversation]
 		if !known {
 			resolved, err := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, message.Conversation)
@@ -8659,10 +8983,61 @@ func (h Handler) searchMessageEnvelope(ctx context.Context, origin string, princ
 	return map[string]any{"matches": matches, "total": page.Total, "pagination": pagination, "paging": paging}, nil
 }
 
+// Slack's highlight markers: search with highlight=true wraps each matched
+// term in U+E000 and U+E001, private-use characters no message text carries.
+const (
+	searchHighlightStart = "\ue000"
+	searchHighlightEnd   = "\ue001"
+)
+
+// highlightSearchText wraps every case-insensitive occurrence of each term in
+// Slack's highlight markers. Overlapping matches merge into one span. Text
+// whose lower-casing changes its byte length is left unmarked rather than
+// marked at the wrong offsets.
+func highlightSearchText(text string, terms []string) string {
+	lower := strings.ToLower(text)
+	if len(lower) != len(text) || len(terms) == 0 {
+		return text
+	}
+	marked := make([]bool, len(text))
+	for _, term := range terms {
+		term = strings.ToLower(term)
+		if term == "" || len(term) > len(lower) {
+			continue
+		}
+		for offset := 0; ; {
+			index := strings.Index(lower[offset:], term)
+			if index < 0 {
+				break
+			}
+			for position := offset + index; position < offset+index+len(term); position++ {
+				marked[position] = true
+			}
+			offset += index + len(term)
+		}
+	}
+	var result strings.Builder
+	inside := false
+	for position := 0; position < len(text); position++ {
+		if marked[position] && !inside {
+			result.WriteString(searchHighlightStart)
+			inside = true
+		} else if !marked[position] && inside {
+			result.WriteString(searchHighlightEnd)
+			inside = false
+		}
+		result.WriteByte(text[position])
+	}
+	if inside {
+		result.WriteString(searchHighlightEnd)
+	}
+	return result.String()
+}
+
 func searchFileEnvelope(origin string, arguments searchArguments, page domain.FilePage) map[string]any {
 	matches := make([]map[string]any, 0, len(page.Files))
 	for _, file := range page.Files {
-		matches = append(matches, fileResponse(origin, file))
+		matches = append(matches, slackobject.File(origin, file))
 	}
 	pageCount := 0
 	if page.Total > 0 {
@@ -8884,7 +9259,7 @@ func (h Handler) fileInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	response := fileResponse(h.origin(r), file)
+	response := slackobject.File(h.origin(r), file)
 	h.addSnippetFields(r.Context(), principal, response, file)
 	// The pinned 200 schema requires comments. Slack retired file comments
 	// and no route here creates one, so the page is always empty and final.
@@ -8959,7 +9334,7 @@ func (h Handler) shareFilePublic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(h.origin(r), file), "permalink_public": fileURLs{origin: h.origin(r)}.public(file.PublicToken)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": slackobject.File(h.origin(r), file), "permalink_public": slackobject.FileURLs{Origin: h.origin(r)}.Public(file.PublicToken)})
 }
 
 func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
@@ -8983,7 +9358,7 @@ func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(h.origin(r), file)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": slackobject.File(h.origin(r), file)})
 }
 
 func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
@@ -9035,7 +9410,7 @@ func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
 	}
 	files := make([]map[string]any, 0, len(window.files))
 	for _, file := range window.files {
-		files = append(files, fileResponse(h.origin(r), file))
+		files = append(files, slackobject.File(h.origin(r), file))
 	}
 	pages := (window.total + filter.count - 1) / filter.count
 	if pages == 0 {
@@ -9394,7 +9769,7 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		file.SharedChannels = shared
 	}
-	response := fileResponse(h.origin(r), file)
+	response := slackobject.File(h.origin(r), file)
 	h.addSnippetFields(r.Context(), principal, response, file)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": response})
 }
@@ -9774,66 +10149,6 @@ func copyUploadPart(destination *os.File, source io.Reader) error {
 	return nil
 }
 
-func fileResponse(origin string, file domain.File) map[string]any {
-	// A deleted file survives only as a tombstone: Slack keeps its id in the
-	// messages that shared it and says nothing else about it, so neither its
-	// name nor a download URL outlives the deletion.
-	if file.Deleted {
-		return map[string]any{"id": file.ID, "mode": file.Mode()}
-	}
-	fileType, prettyType := file.FileTypes()
-	urls := fileURLs{origin: origin}
-	result := map[string]any{
-		"id": file.ID, "name": file.Name, "title": file.Title, "mimetype": file.MIMEType,
-		"size": file.Size, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(),
-		"user": file.Uploader, "is_public": file.PublicToken != "", "team_id": file.WorkspaceID,
-		"filetype": fileType, "pretty_type": prettyType, "mode": file.Mode(),
-		"is_external": false, "external_type": "", "public_url_shared": file.PublicToken != "",
-		"editable": file.IsSnippet(), "display_as_bot": false,
-		// Every URL is absolute: SDKs and apps fetch them verbatim.
-		"url_private":          urls.private(string(file.ID)),
-		"url_private_download": urls.private(string(file.ID)),
-		"permalink":            urls.permalink(string(file.ID)),
-	}
-	if file.PublicToken != "" {
-		result["permalink_public"] = urls.public(file.PublicToken)
-	}
-	if len(file.SharedChannels) > 0 {
-		result["channels"] = file.SharedChannels
-	}
-	if shares := fileSharesResponse(file); shares != nil {
-		result["shares"] = shares
-	}
-	return result
-}
-
-// fileSharesResponse is Slack's shares map: {public|private: {channel:
-// [share, ...]}}, one entry per message that carries the file.
-func fileSharesResponse(file domain.File) map[string]any {
-	if len(file.Shares) == 0 {
-		return nil
-	}
-	shares := map[string]any{}
-	for _, share := range file.Shares {
-		visibility := "public"
-		if share.Private {
-			visibility = "private"
-		}
-		byChannel, _ := shares[visibility].(map[string]any)
-		if byChannel == nil {
-			byChannel = map[string]any{}
-			shares[visibility] = byChannel
-		}
-		entry := map[string]any{"ts": share.Timestamp, "channel_name": share.ConversationName, "team_id": file.WorkspaceID, "share_user_id": share.SharedBy}
-		if share.ThreadTimestamp != "" {
-			entry["thread_ts"] = share.ThreadTimestamp
-		}
-		existing, _ := byChannel[string(share.Conversation)].([]map[string]any)
-		byChannel[string(share.Conversation)] = append(existing, entry)
-	}
-	return shares
-}
-
 // defaultSnippetFilename names a content= snippet the caller left unnamed. Slack
 // synthesizes one rather than refusing; the title is the natural choice, falling
 // back to "untitled".
@@ -9904,6 +10219,20 @@ func normalizeReactionFields(fields map[string]string) (domain.ConversationID, d
 		return "", "", "", decodeFailure("invalid_name", "name is required")
 	}
 	return channel, timestamp, name, nil
+}
+
+// normalizeStarTarget reads a stars.add/remove item: a channel with a message
+// timestamp stars the message, and a channel alone stars the channel.
+func normalizeStarTarget(fields map[string]string) (domain.ConversationID, domain.MessageTimestamp, error) {
+	channel := strings.TrimSpace(fields["channel"])
+	timestamp := strings.TrimSpace(fields["timestamp"])
+	if channel == "" {
+		return "", "", decodeFailure("no_item_specified", "channel is required")
+	}
+	if timestamp == "" {
+		return domain.ConversationID(channel), "", nil
+	}
+	return normalizeReactionTarget(fields)
 }
 
 func normalizeReactionTarget(fields map[string]string) (domain.ConversationID, domain.MessageTimestamp, error) {
@@ -10032,14 +10361,38 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 	for key, raw := range rawUnfurls {
 		unfurls[key] = string(raw)
 	}
-	message, err := h.Messages.Unfurl(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.MessageTimestamp(strings.TrimSpace(fields["ts"])), unfurls)
-	if err != nil {
-		// /chat.unfurl declares cannot_unfurl_url; message_not_found is not in its
-		// enum.
+	// A message is named either by channel and ts or, as a link_shared event
+	// hands it to the app, by source and unfurl_id. A composer unfurl names a
+	// message that has not been posted, which this product never offers, so
+	// there is nothing it could attach to.
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	timestamp := domain.MessageTimestamp(strings.TrimSpace(fields["ts"]))
+	if unfurlID := strings.TrimSpace(fields["unfurl_id"]); unfurlID != "" {
+		source := strings.TrimSpace(fields["source"])
+		parsedChannel, parsedTimestamp, ok := domain.ParseUnfurlID(unfurlID)
+		if (source != "" && source != "conversations_history") || !ok {
+			writeError(w, "cannot_unfurl_url")
+			return
+		}
+		channel, timestamp = parsedChannel, parsedTimestamp
+	}
+	if channel == "" || timestamp == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	if _, err := h.Messages.Unfurl(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp, unfurls); err != nil {
+		// /chat.unfurl declares cannot_unfurl_url; message_not_found and
+		// not_in_channel are not in its enum.
+		if errors.Is(err, service.ErrNotInConversation) || errors.Is(err, service.ErrMessageAlreadyDeleted) {
+			writeError(w, "cannot_unfurl_url")
+			return
+		}
 		writeError(w, mapServiceError(err, "cannot_unfurl_url"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": messageResponse(h.origin(r), message)})
+	// The pinned success schema is exactly {"ok": true}: additionalProperties
+	// is false, so the message this used to echo was outside the contract.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h Handler) meMessage(w http.ResponseWriter, r *http.Request) {
@@ -10594,7 +10947,8 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
-	postAt, err := strconv.ParseInt(strings.TrimSpace(fields["post_at"]), 10, 64)
+	rawPostAt := strings.TrimSpace(fields["post_at"])
+	postAt, postAtErr := strconv.ParseInt(rawPostAt, 10, 64)
 	optionalBoolean := func(name string) (*bool, bool) {
 		raw := strings.TrimSpace(fields[name])
 		if raw == "" {
@@ -10611,11 +10965,17 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	unfurlLinks, unfurlLinksOK := optionalBoolean("unfurl_links")
 	unfurlMedia, unfurlMediaOK := optionalBoolean("unfurl_media")
 	parse := strings.TrimSpace(fields["parse"])
+	// A post_at that is present but not a positive whole Unix time is the
+	// pinned invalid_time, not a generic argument error.
+	if rawPostAt != "" && (postAtErr != nil || postAt <= 0) {
+		writeError(w, "invalid_time")
+		return
+	}
 	if blockErr != nil {
 		writeError(w, "invalid_blocks")
 		return
 	}
-	if channel == "" || (textValue == "" && domain.NoStructuredContent(blocks) && domain.NoStructuredContent(attachments)) || attachmentErr != nil || err != nil || postAt <= 0 ||
+	if channel == "" || (textValue == "" && domain.NoStructuredContent(blocks) && domain.NoStructuredContent(attachments)) || attachmentErr != nil || rawPostAt == "" ||
 		!replyBroadcastOK || !asUserOK || !linkNamesOK || !unfurlLinksOK || !unfurlMediaOK ||
 		(parse != "" && parse != "none" && parse != "full") {
 		writeError(w, "invalid_arguments")
@@ -10651,7 +11011,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		Metadata: fields["metadata"], StreamState: streamState,
 		ThreadTimestamp: domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
 		PostAt:          time.Unix(postAt, 0).UTC(), AppID: principal.AppID, BotID: principal.BotID,
-		CredentialHash: principal.CredentialHash,
+		CredentialHash: scheduledMessageOwner(principal),
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrScheduledTimeInPast) {
@@ -10718,14 +11078,16 @@ func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := h.Messages.ScheduledMessagesForCredential(r.Context(), principal.WorkspaceID, principal.UserID, domain.ScheduledMessageQuery{
-		CredentialHash: principal.CredentialHash,
+		CredentialHash: scheduledMessageOwner(principal),
 		Channel:        domain.ConversationID(strings.TrimSpace(fields["channel"])),
 		Oldest:         oldest,
 		Latest:         latest,
 		Page:           domain.PageRequest{Limit: limit, Cursor: cursor},
 	})
 	if err != nil {
-		writeError(w, mapServiceError(err, "fatal_error"))
+		// A channel filter naming no channel the caller can see is the
+		// pinned invalid_channel; it used to be reported as fatal_error.
+		writeError(w, mapServiceError(err, "invalid_channel"))
 		return
 	}
 	items := make([]map[string]any, 0, len(page.Items))
@@ -10733,6 +11095,17 @@ func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
 		items = append(items, scheduledMessageResponse(value))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "scheduled_messages": items, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+// scheduledMessageOwner is who a Web API caller schedules, lists and deletes
+// messages as: its bot, or its member and app. See
+// domain.ScheduledMessageOwner.
+func scheduledMessageOwner(principal auth.Principal) string {
+	bot := principal.BotID
+	if principal.TokenType == domain.TokenUser {
+		bot = ""
+	}
+	return domain.ScheduledMessageOwner(principal.WorkspaceID, principal.UserID, principal.AppID, bot)
 }
 
 func (h Handler) deleteScheduledMessage(w http.ResponseWriter, r *http.Request) {
@@ -10752,7 +11125,7 @@ func (h Handler) deleteScheduledMessage(w http.ResponseWriter, r *http.Request) 
 		writeError(w, "invalid_arguments")
 		return
 	}
-	if err := h.Messages.DeleteScheduledMessageForCredential(r.Context(), principal.WorkspaceID, principal.UserID, principal.CredentialHash, channel, id); err != nil {
+	if err := h.Messages.DeleteScheduledMessageForCredential(r.Context(), principal.WorkspaceID, principal.UserID, scheduledMessageOwner(principal), channel, id); err != nil {
 		writeError(w, mapServiceError(err, "invalid_scheduled_message_id"))
 		return
 	}
@@ -10787,12 +11160,12 @@ func userGroupResponse(value domain.UserGroup, includeUsers bool) map[string]any
 }
 
 func (h Handler) createUserGroup(w http.ResponseWriter, r *http.Request) {
-	h.mutateUserGroup(w, r, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
+	h.mutateUserGroup(w, r, userGroupPermissionDenied, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
 		return h.Messages.CreateUserGroup(r.Context(), p.WorkspaceID, p.UserID, f["name"], f["handle"], f["description"], parseIDList[domain.ConversationID](f["channels"]))
 	})
 }
 func (h Handler) updateUserGroup(w http.ResponseWriter, r *http.Request) {
-	h.mutateUserGroup(w, r, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
+	h.mutateUserGroup(w, r, userGroupPermissionDenied, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
 		return h.Messages.UpdateUserGroup(r.Context(), p.WorkspaceID, p.UserID, domain.UserGroupID(strings.TrimSpace(f["usergroup"])), f["name"], f["handle"], f["description"], parseIDList[domain.ConversationID](f["channels"]))
 	})
 }
@@ -10803,11 +11176,24 @@ func (h Handler) disableUserGroup(w http.ResponseWriter, r *http.Request) {
 	h.toggleUserGroup(w, r, false)
 }
 func (h Handler) toggleUserGroup(w http.ResponseWriter, r *http.Request, enabled bool) {
-	h.mutateUserGroup(w, r, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
+	// usergroups.disable declares permission_denied; usergroups.enable's pinned
+	// enum does not, and keeps no_permission.
+	denied := userGroupPermissionDenied
+	if enabled {
+		denied = userGroupNoPermission
+	}
+	h.mutateUserGroup(w, r, denied, func(p auth.Principal, f map[string]string) (domain.UserGroup, error) {
 		return h.Messages.SetUserGroupEnabled(r.Context(), p.WorkspaceID, p.UserID, domain.UserGroupID(strings.TrimSpace(f["usergroup"])), enabled)
 	})
 }
-func (h Handler) mutateUserGroup(w http.ResponseWriter, r *http.Request, operation func(auth.Principal, map[string]string) (domain.UserGroup, error)) {
+
+// userGroupPermissionDenied and userGroupNoPermission name a member who is not
+// allowed to change user groups: permission_denied is what usergroups.create,
+// update, disable and users.update declare for it.
+func userGroupPermissionDenied(w http.ResponseWriter) { writeError(w, "permission_denied") }
+func userGroupNoPermission(w http.ResponseWriter)     { writeError(w, "no_permission") }
+
+func (h Handler) mutateUserGroup(w http.ResponseWriter, r *http.Request, denied func(http.ResponseWriter), operation func(auth.Principal, map[string]string) (domain.UserGroup, error)) {
 	principal, err := h.authenticate(r, auth.ScopeUserGroupsWrite)
 	if err != nil {
 		writeAuthError(w, err)
@@ -10819,6 +11205,10 @@ func (h Handler) mutateUserGroup(w http.ResponseWriter, r *http.Request, operati
 		return
 	}
 	value, err := operation(principal, fields)
+	if errors.Is(err, service.ErrNotWorkspaceAdmin) {
+		denied(w)
+		return
+	}
 	if err != nil {
 		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
@@ -10927,6 +11317,10 @@ func (h Handler) updateUserGroupUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	value, err := h.Messages.SetUserGroupUsers(r.Context(), principal.WorkspaceID, principal.UserID, group, users)
+	if errors.Is(err, service.ErrNotWorkspaceAdmin) {
+		userGroupPermissionDenied(w)
+		return
+	}
 	if err != nil {
 		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
@@ -11266,41 +11660,60 @@ func (h Handler) adminTeamsRoleList(w http.ResponseWriter, r *http.Request, role
 	writeJSON(w, http.StatusOK, response)
 }
 
-func parseCallUsers(raw string) []domain.UserID {
-	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
+// parseCallUsers reads a calls-API `users` argument: Slack documents a JSON
+// array of objects, each naming a member by `slack_id` or an external
+// participant by `external_id` with `display_name` and `avatar_url`. A plain
+// comma-separated list of member IDs is also accepted. An external_id used to
+// be taken for a member ID, so every external participant was dropped.
+func parseCallUsers(raw string) ([]domain.CallParticipant, error) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "[") {
 		var participants []struct {
-			SlackID    string `json:"slack_id"`
-			ExternalID string `json:"external_id"`
+			SlackID     string `json:"slack_id"`
+			ExternalID  string `json:"external_id"`
+			DisplayName string `json:"display_name"`
+			AvatarURL   string `json:"avatar_url"`
 		}
 		if err := json.Unmarshal([]byte(raw), &participants); err != nil {
-			return nil
+			return nil, err
 		}
-		result := make([]domain.UserID, 0, len(participants))
+		result := make([]domain.CallParticipant, 0, len(participants))
 		for _, participant := range participants {
-			id := strings.TrimSpace(participant.SlackID)
-			if id == "" {
-				id = strings.TrimSpace(participant.ExternalID)
-			}
-			if id != "" {
-				result = append(result, domain.UserID(id))
-			}
+			result = append(result, domain.CallParticipant{
+				SlackID:  domain.UserID(strings.TrimSpace(participant.SlackID)),
+				External: domain.ExternalCallParticipant{ExternalID: participant.ExternalID, DisplayName: participant.DisplayName, AvatarURL: participant.AvatarURL},
+			})
 		}
-		return result
+		return result, nil
 	}
 	parts := strings.Split(raw, ",")
-	result := make([]domain.UserID, 0, len(parts))
+	result := make([]domain.CallParticipant, 0, len(parts))
 	for _, part := range parts {
 		if value := strings.TrimSpace(part); value != "" {
-			result = append(result, domain.UserID(value))
+			result = append(result, domain.CallParticipant{SlackID: domain.UserID(value)})
 		}
 	}
-	return result
+	return result, nil
 }
 
+// callResponse renders a call as Slack's Call object. `users` is a list of
+// participant objects — {"slack_id"} for a member, {"external_id",
+// "display_name", "avatar_url"} for anyone else — which the official SDKs
+// model (Java's CallParticipant); a list of bare IDs failed to decode.
 func callResponse(value domain.Call) map[string]any {
-	users := make([]string, 0, len(value.Participants))
+	users := make([]map[string]any, 0, len(value.Participants)+len(value.ExternalParticipants))
 	for _, user := range value.Participants {
-		users = append(users, string(user))
+		users = append(users, map[string]any{"slack_id": string(user)})
+	}
+	for _, external := range value.ExternalParticipants {
+		participant := map[string]any{"external_id": external.ExternalID}
+		if external.DisplayName != "" {
+			participant["display_name"] = external.DisplayName
+		}
+		if external.AvatarURL != "" {
+			participant["avatar_url"] = external.AvatarURL
+		}
+		users = append(users, participant)
 	}
 	result := map[string]any{"id": value.ID, "external_unique_id": value.ExternalUniqueID, "external_display_id": value.ExternalDisplayID, "join_url": value.JoinURL, "desktop_app_join_url": value.DesktopAppJoinURL, "title": value.Title, "created_by": value.CreatedBy, "date_start": value.StartedAt.Unix(), "users": users}
 	if !value.EndedAt.IsZero() {
@@ -11330,7 +11743,12 @@ func (h Handler) addCall(w http.ResponseWriter, r *http.Request) {
 		}
 		started = time.Unix(seconds, 0).UTC()
 	}
-	value, err := h.Messages.AddCall(r.Context(), principal.WorkspaceID, principal.UserID, fields["external_unique_id"], fields["external_display_id"], fields["join_url"], fields["desktop_app_join_url"], fields["title"], started, parseCallUsers(fields["users"]))
+	participants, err := parseCallUsers(fields["users"])
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	value, err := h.Messages.AddCall(r.Context(), principal.WorkspaceID, principal.UserID, fields["external_unique_id"], fields["external_display_id"], fields["join_url"], fields["desktop_app_join_url"], fields["title"], started, participants)
 	if err != nil {
 		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
@@ -11431,7 +11849,11 @@ func (h Handler) changeCallParticipantsHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	id := domain.CallID(strings.TrimSpace(fields["id"]))
-	users := parseCallUsers(fields["users"])
+	users, err := parseCallUsers(fields["users"])
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
 	if add {
 		err = h.Messages.AddCallParticipants(r.Context(), principal.WorkspaceID, principal.UserID, id, users)
 	} else {
@@ -11491,7 +11913,7 @@ func messageResponse(origin string, message domain.Message) map[string]any {
 	if len(message.Files) > 0 {
 		files := make([]map[string]any, 0, len(message.Files))
 		for _, file := range message.Files {
-			files = append(files, fileResponse(origin, file))
+			files = append(files, slackobject.File(origin, file))
 		}
 		result["subtype"] = "file_share"
 		result["upload"] = true
@@ -11501,10 +11923,10 @@ func messageResponse(origin string, message domain.Message) map[string]any {
 		result["app_id"] = message.AppID
 	}
 	var stream domain.MessageStreamState
+	if bot := message.PostingBot(); bot != "" {
+		result["bot_id"] = bot
+	}
 	if json.Unmarshal([]byte(message.StreamState), &stream) == nil {
-		if stream.BotID != "" {
-			result["bot_id"] = stream.BotID
-		}
 		if stream.Username != "" {
 			result["username"] = stream.Username
 		}
@@ -11645,6 +12067,26 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) {
 		return "emoji_already_exists"
+	}
+	// Each of these is raised by one operation family and names the code that
+	// family's contract declares for it.
+	switch {
+	case errors.Is(err, service.ErrSnoozeNotActive):
+		return "snooze_not_active"
+	case errors.Is(err, service.ErrSnoozeTooLong):
+		return "too_long"
+	case errors.Is(err, service.ErrReminderUnparseable):
+		return "cannot_parse"
+	case errors.Is(err, service.ErrNotStarred):
+		return "not_starred"
+	case errors.Is(err, service.ErrUserGroupNameTaken):
+		return "name_already_exists"
+	case errors.Is(err, service.ErrUserGroupHandleTaken):
+		return "handle_already_exists"
+	case errors.Is(err, service.ErrInvalidUserGroupUsers):
+		return "invalid_users"
+	case errors.Is(err, service.ErrCannotUnfurlURL):
+		return "cannot_unfurl_url"
 	}
 	// service.ErrNotWorkspaceAdmin is the role denial raised by every admin.*
 	// method. It belongs in the permission branch so mapAdminError can name it
@@ -12997,6 +13439,41 @@ func pageNumber(raw string) (int, error) {
 // relative form used to be read as an absolute epoch, so `time=300` created a
 // reminder dated 1970-01-01T00:05:00Z, and a natural-language value was reported
 // as a generic argument error rather than the enumerated `cannot_parse`.
+// memberLocation is the zone a member's day is reckoned in: their
+// notification schedule's, the only zone this product records for a member,
+// and UTC when they have none (service.Messages.MemberLocation is the same
+// rule on the far side of the seam).
+func (h Handler) memberLocation(ctx context.Context, principal auth.Principal) *time.Location {
+	preferences, err := h.Messages.WorkspaceNotificationPreferences(ctx, principal.WorkspaceID, principal.UserID)
+	if err == nil && preferences.Schedule.TimeZone != "" {
+		if location, loadErr := time.LoadLocation(preferences.Schedule.TimeZone); loadErr == nil {
+			return location
+		}
+	}
+	return time.UTC
+}
+
+// reminderSchedule reads reminders.add's `time`: a Unix timestamp, a number of
+// seconds from now (under a day), or one of the phrases Slack documents - "in
+// 15 minutes", "tomorrow at 9am", "every Thursday", "every day at 9am" - read
+// in the member's zone. Anything else is cannot_parse, as it was for every
+// phrase before.
+func reminderSchedule(raw string, now time.Time, location *time.Location) (domain.ReminderSchedule, error) {
+	raw = strings.TrimSpace(raw)
+	if _, err := strconv.ParseInt(raw, 10, 64); err != nil {
+		due, recurrence, parseErr := service.ParseReminderTime(raw, now, location)
+		if parseErr != nil || !due.After(now) || due.After(now.AddDate(5, 0, 0)) {
+			return domain.ReminderSchedule{}, decodeFailure("cannot_parse", "time is not a timestamp, a number of seconds, or a reminder phrase")
+		}
+		return domain.ReminderSchedule{Due: due, Recurrence: recurrence, TimeZone: location.String()}, nil
+	}
+	due, err := reminderTime(raw, now)
+	if err != nil {
+		return domain.ReminderSchedule{}, err
+	}
+	return domain.ReminderSchedule{Due: due, TimeZone: location.String()}, nil
+}
+
 func reminderTime(raw string, now time.Time) (time.Time, error) {
 	raw = strings.TrimSpace(raw)
 	seconds, err := strconv.ParseInt(raw, 10, 64)
@@ -13441,7 +13918,7 @@ func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Reques
 		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": fileURLs{origin: h.origin(r)}.externalUpload(string(upload.ID)), "file_id": upload.ID})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": slackobject.FileURLs{Origin: h.origin(r)}.ExternalUpload(string(upload.ID)), "file_id": upload.ID})
 }
 
 func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
@@ -13563,7 +14040,7 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 	}
 	responses := make([]map[string]any, 0, len(files))
 	for _, file := range files {
-		responses = append(responses, fileResponse(h.origin(r), file))
+		responses = append(responses, slackobject.File(h.origin(r), file))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": responses})
 }
@@ -13620,10 +14097,10 @@ func (h Handler) conversationNamed(ctx context.Context, principal auth.Principal
 }
 
 // looksLikeUserID and looksLikeConversationID recognise identifier shapes: an
-// uppercase kind letter followed by letters and digits. Slack's own identifiers
-// are uppercase throughout and this deployment mints the tail in lowercase hex;
-// a channel name is lowercase from its first letter, so neither is confused
-// with a name.
+// uppercase kind letter followed by letters and digits. Slack's identifiers,
+// and those domain.SlackID mints, are uppercase throughout; identifiers minted
+// before SlackID carry a lowercase hex tail and stay valid. A channel name is
+// lowercase from its first letter, so neither is confused with a name.
 func looksLikeUserID(value string) bool {
 	return len(value) > 1 && (value[0] == 'U' || value[0] == 'W') && slackIdentifierTail(value[1:])
 }

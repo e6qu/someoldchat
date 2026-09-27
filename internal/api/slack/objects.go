@@ -2,7 +2,6 @@ package slack
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
 	"image"
 	"image/color"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 )
 
 // conversationResponse renders Slack's conversation object for the reader the
@@ -94,103 +94,6 @@ func conversationTextResponse(value string, setBy domain.UserID, setAt time.Time
 // only, so this is the one locale every reader actually gets.
 const workspaceLocale = "en-US"
 
-// userResponse renders Slack's user object.
-//
-// The pinned objs_user requires id, name, profile, is_bot, updated and
-// is_app_user, and Slack's clients read the role and guest flags, tz, color and
-// the image URLs from it. The object used to carry six fields, so a typed client
-// (slack-api-client's User) read a null is_bot for every bot, and every avatar
-// was either empty or a path with no host that no client could fetch.
-func userResponse(origin string, user domain.User, includeEmail bool) map[string]any {
-	profile := profileResponse(origin, user)
-	if !includeEmail {
-		delete(profile, "email")
-	}
-	return map[string]any{
-		"id": user.ID, "team_id": user.WorkspaceID, "name": user.Name, "real_name": user.RealName, "deleted": user.Deleted, "profile": profile,
-		"color": userColor(user.ID),
-		// Nothing here records a member's time zone, so every member is on UTC
-		// rather than on a zone somebody guessed for them.
-		"tz": "UTC", "tz_label": "Coordinated Universal Time", "tz_offset": 0,
-		"is_admin": user.Role == domain.WorkspaceRoleAdmin || user.Role == domain.WorkspaceRoleOwner,
-		// A workspace here has owners but no distinguished primary owner, so
-		// each owner reports both, as admin.users.list always has.
-		"is_owner": user.Role == domain.WorkspaceRoleOwner, "is_primary_owner": user.Role == domain.WorkspaceRoleOwner,
-		"is_restricted": user.Restricted, "is_ultra_restricted": user.UltraRestricted,
-		"is_bot": user.IsBot(), "is_app_user": false, "is_email_confirmed": user.Email != "", "has_2fa": false,
-		"updated": unixSeconds(user.Updated),
-	}
-}
-
-// profileResponse renders Slack's user profile object. Every image is an
-// absolute URL: a photo uploaded here, an external URL a member set, or the
-// generated default avatar this server serves at the requested size.
-func profileResponse(origin string, user domain.User) map[string]any {
-	firstName, lastName, _ := strings.Cut(strings.TrimSpace(user.RealName), " ")
-	profile := map[string]any{
-		"display_name": user.Profile.DisplayName, "display_name_normalized": user.Profile.DisplayName, "email": user.Email,
-		"real_name": user.RealName, "real_name_normalized": user.RealName,
-		"first_name": firstName, "last_name": strings.TrimSpace(lastName),
-		"title": "", "phone": "", "skype": "", "pronouns": "", "fields": map[string]any{},
-		"status_text": user.Profile.StatusText, "status_emoji": user.Profile.StatusEmoji, "status_expiration": unixSeconds(user.Profile.StatusExpiration),
-		"avatar_hash": avatarHash(user),
-		"team":        user.WorkspaceID, "user_id": user.ID,
-	}
-	for _, image := range []struct {
-		size   int
-		stored string
-	}{{24, user.Profile.Image24}, {32, user.Profile.Image32}, {48, user.Profile.Image48}, {72, user.Profile.Image72},
-		{192, user.Profile.Image192}, {512, user.Profile.Image512}, {1024, user.Profile.Image1024}} {
-		profile["image_"+strconv.Itoa(image.size)] = userImageURL(origin, user, image.size, image.stored)
-	}
-	if user.IsBot() {
-		profile["bot_id"], profile["api_app_id"], profile["always_active"] = user.BotID, user.AppID, false
-	}
-	return profile
-}
-
-// userImageURL makes a stored image reference absolute. A stored path is one of
-// this server's photo URLs; an empty one falls back to the default avatar.
-func userImageURL(origin string, user domain.User, size int, stored string) string {
-	switch {
-	case stored == "":
-		return origin + defaultAvatarPath(user.WorkspaceID, user.ID, size)
-	case strings.HasPrefix(stored, "/"):
-		return origin + stored
-	}
-	return stored
-}
-
-// defaultAvatarSizes are the sizes Slack's profile object names an image for.
-var defaultAvatarSizes = map[int]bool{24: true, 32: true, 48: true, 72: true, 192: true, 512: true, 1024: true}
-
-func defaultAvatarPath(workspace domain.WorkspaceID, user domain.UserID, size int) string {
-	return "/avatars/" + url.PathEscape(string(workspace)) + "/" + url.PathEscape(string(user)) + "/" + strconv.Itoa(size) + ".png"
-}
-
-// avatarHash identifies the image a profile shows, so a client can tell when to
-// refetch it. An uploaded photo is identified by its token; the default avatar
-// by the member, with Slack's g prefix for a generated image.
-func avatarHash(user domain.User) string {
-	if _, token, found := strings.Cut(user.Profile.Image24, "/photo/"); found && token != "" {
-		if len(token) > 12 {
-			token = token[:12]
-		}
-		return token
-	}
-	sum := sha256.Sum256([]byte(string(user.WorkspaceID) + "/" + string(user.ID)))
-	return "g" + hex.EncodeToString(sum[:])[:11]
-}
-
-// userColors is the palette Slack draws a member's name color from.
-var userColors = []string{"9f69e7", "4bbe2e", "e7392d", "3c989f", "674b1b", "e96699", "e0a729", "5b89d5", "2b6836", "99d04a", "df3dc0", "dc7dbb", "d1707d", "a63024", "aba727", "965d1b", "8f4a2b", "902d59", "de5f24", "385a86"}
-
-// userColor is a member's stable color: the same member is always drawn the same.
-func userColor(user domain.UserID) string {
-	sum := sha256.Sum256([]byte(user))
-	return userColors[int(sum[0])%len(userColors)]
-}
-
 // defaultAvatar serves the image a member without a photo is shown with: a
 // square in their color at one of the profile sizes. It is a PNG rendered
 // here, not a script-capable format, so it is safe on a public URL; the path
@@ -201,7 +104,7 @@ func (h Handler) defaultAvatar(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	writeGeneratedSquare(w, r, defaultAvatarSizes, userColor(domain.UserID(r.PathValue("user"))))
+	writeGeneratedSquare(w, r, slackobject.DefaultAvatarSizes, slackobject.UserColor(domain.UserID(r.PathValue("user"))))
 }
 
 // teamIconSizes are the sizes Slack's icon object names an image for.
@@ -213,7 +116,7 @@ func (h Handler) defaultTeamIcon(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	writeGeneratedSquare(w, r, teamIconSizes, userColor(domain.UserID(r.PathValue("workspace"))))
+	writeGeneratedSquare(w, r, teamIconSizes, slackobject.UserColor(domain.UserID(r.PathValue("workspace"))))
 }
 
 // writeGeneratedSquare answers {size}.png, for one of the given sizes, with a

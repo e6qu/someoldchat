@@ -1846,6 +1846,31 @@ func TestWorkspaceRendersEphemeralAppResponsesOnlyToTheirRecipient(t *testing.T)
 	requireMissing(t, "non-recipient workspace", response.Body.String(), "Build is ready", "Only visible to you")
 }
 
+// An ephemeral message sent with thread_ts is part of that thread: it renders
+// in the thread and not in the channel. It used to render in the channel view
+// and never in the thread it answered.
+func TestAThreadedEphemeralMessageRendersInItsThreadOnly(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "helper-bot", RealName: "Helper Bot"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cdev", "UBOT"); err != nil {
+		t.Fatal(err)
+	}
+	root := seedMessage(t, s, "M1", "the root of the thread", time.Now().UTC().Add(-time.Minute))
+	rootTimestamp := domain.NewMessageTimestamp(root.CreatedAt)
+	if _, err := (service.Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(
+		context.Background(), "T1", "UBOT", "Cdev", "U1", "Private threaded answer", "", "", "A1", rootTimestamp,
+	); err != nil {
+		t.Fatal(err)
+	}
+	channel := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "channel view", channel, "the root of the thread")
+	requireMissing(t, "channel view", channel, "Private threaded answer")
+	thread := get(t, mux, "/app?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp))).Body.String()
+	requireContains(t, "thread view", thread, "the root of the thread", "Private threaded answer", "Only visible to you")
+}
+
 // A public channel may be read before it is joined, but every conversational
 // mutation requires membership. The workspace used to ignore that distinction:
 // it rendered a working-looking composer, reaction inputs, pin controls, and an
@@ -2874,7 +2899,7 @@ func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *tes
 		{expression: "stand-up at 7am", wantError: service.ErrReminderTimeInPast},
 	} {
 		t.Run(testCase.expression, func(t *testing.T) {
-			text, due, recurrence, err := parseChannelReminderExpression(testCase.expression, now, time.UTC)
+			text, due, recurrence, err := service.ParseReminderExpression(testCase.expression, now, time.UTC)
 			if testCase.wantError != nil {
 				if !errors.Is(err, testCase.wantError) {
 					t.Fatalf("error=%v want=%v", err, testCase.wantError)
@@ -2911,7 +2936,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 		t.Fatal(err)
 	}
 	timestamp := domain.NewMessageTimestamp(message.CreatedAt)
-	if _, err := chat.Update(ctx, "T1", "U1", "Cdev", timestamp, "hello again"); err != nil {
+	if _, err := chat.Update(ctx, "T1", "U1", "Cdev", timestamp, "hello again https://example.test"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := chat.Unfurl(ctx, "T1", "U1", "Cdev", timestamp, map[string]string{"https://example.test": `{"title":"x"}`}); err != nil {
@@ -5840,7 +5865,7 @@ func TestADeliveredReminderIsVisibleWithItsText(t *testing.T) {
 	now := time.Now().UTC()
 
 	messages := service.Messages{Store: store}
-	reminder, err := messages.AddReminder(ctx, "T1", "U1", "U1", "call the dentist", now.Add(-time.Minute))
+	reminder, err := messages.AddReminder(ctx, "T1", "U1", "U1", "call the dentist", domain.ReminderSchedule{Due: now.Add(-time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}

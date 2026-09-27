@@ -196,10 +196,31 @@ type ListPage struct {
 	HasMore    bool
 }
 
+// UserReactionPage is one page of reactions.list. It pages by reacted
+// message, not by reaction row: Items holds every reaction row of up to Limit
+// messages, so a message a member reacted to more than once is never split
+// across pages (and never listed on two of them). Paging by row did both.
 type UserReactionPage struct {
 	Items      []UserReaction
 	NextCursor Cursor
 	HasMore    bool
+}
+
+// UserReactionCursorKey is the keyset position after one reacted message: its
+// fixed-width creation instant and its identifier.
+func UserReactionCursorKey(message Message) string {
+	return string(NewStoredTime(message.CreatedAt)) + "\x00" + string(message.ID)
+}
+
+// ParseUserReactionCursorKey reads a position UserReactionCursorKey minted.
+// A cursor minted when pages were cut by reaction row carries the reaction's
+// name and user after the message; it resumes after that whole message.
+func ParseUserReactionCursorKey(key string) (string, MessageID, bool) {
+	parts := strings.Split(key, "\x00")
+	if (len(parts) != 2 && len(parts) != 4) || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], MessageID(parts[1]), true
 }
 
 type messageCursor struct {

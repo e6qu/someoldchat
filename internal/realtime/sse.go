@@ -117,6 +117,8 @@ type RTMMessageService interface {
 // fallback is how the SSE stream came to be wired to one.
 type UserEventSource interface {
 	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) (events.UserEventPage, error)
+	// LatestEventSequence is where a stream with no cursor opens.
+	LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error)
 }
 
 const maxRTMMessageBytes = 16 << 10
@@ -250,12 +252,12 @@ func (h Handler) rtmWebSocket(w http.ResponseWriter, request *http.Request) {
 	// carries it. Before it did, that client resumed at zero and was sent the
 	// whole workspace journal as live events on every connect.
 	after := connection.Cursor
-	requested, err := lastEventID(request)
+	requested, resumed, err := lastEventID(request)
 	if err != nil {
 		_ = conn.Send(`{"type":"error","error":{"code":3,"msg":"invalid_event_cursor"}}`)
 		return
 	}
-	if requested > 0 {
+	if resumed {
 		after = requested
 	}
 	commands := make(chan string)
@@ -555,10 +557,22 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	// construction-time workspace bound every reader to one, which is what
 	// made a workspace switch impossible to serve from the same process.
 	workspace := principal.WorkspaceID
-	after, err := lastEventID(r)
+	after, resumed, err := lastEventID(r)
 	if err != nil {
 		http.Error(w, "invalid event cursor", http.StatusBadRequest)
 		return
+	}
+	if !resumed {
+		// A reader with no cursor is opening a stream, not resuming one: it
+		// starts at the journal head, as an RTM ticket does, so it carries what
+		// happens next. It used to start at sequence zero and replay the
+		// member's whole visible history as if it were live.
+		after, err = h.Source.LatestEventSequence(r.Context(), workspace, principal.UserID)
+		if err != nil {
+			h.logger().Error("event stream could not read the journal head", "workspace", workspace, "user", principal.UserID, "error", err)
+			http.Error(w, "streaming is unavailable", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -740,15 +754,18 @@ func writeUnsequencedEvent(w io.Writer, topic, encoded string) error {
 	return err
 }
 
-func lastEventID(r *http.Request) (uint64, error) {
+// lastEventID reads the cursor a reconnecting client resumes from, and reports
+// whether it named one at all.
+func lastEventID(r *http.Request) (uint64, bool, error) {
 	value := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
 	if value == "" {
 		value = strings.TrimSpace(r.URL.Query().Get("last_event_id"))
 	}
 	if value == "" {
-		return 0, nil
+		return 0, false, nil
 	}
-	return strconv.ParseUint(value, 10, 64)
+	after, err := strconv.ParseUint(value, 10, 64)
+	return after, true, err
 }
 
 // armWrite bounds the next write to this client. A ResponseWriter that cannot

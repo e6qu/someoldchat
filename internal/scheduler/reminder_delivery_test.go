@@ -107,3 +107,40 @@ func TestReminderDeliveryIsClaimedOnceUnderConcurrency(t *testing.T) {
 		t.Fatalf("the two workers delivered %d of 8 reminders between them", oneCount+twoCount)
 	}
 }
+
+// A recurring reminders.add reminder is not retired by delivery: it moves to
+// its next occurrence, in its own zone, and fires again when that comes due.
+func TestRecurringReminderMovesToItsNextOccurrence(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Workspace"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	// Thursday 1 January 2026, 09:00 in Paris.
+	paris, err := time.LoadLocation("Europe/Paris")
+	if err != nil {
+		t.Skip("no time zone database")
+	}
+	first := time.Date(2026, time.January, 1, 9, 0, 0, 0, paris).UTC()
+	reminder := domain.Reminder{WorkspaceID: "T1", ID: "Rm-weekly", Creator: "U1", User: "U1", Text: "weekly sync", Time: first,
+		Recurring: true, Recurrence: domain.ReminderWeekly, TimeZone: "Europe/Paris", RecurrenceAnchor: first}
+	if err := store.CreateReminder(ctx, reminder, events.Event{ID: "evt-weekly", WorkspaceID: "T1", ActorID: "U1", Topic: "reminder.created", Payload: "Rm-weekly", CreatedAt: first}); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := NewReminderDeliveryWorker(store, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for week := 0; week < 3; week++ {
+		due := time.Date(2026, time.January, 1+7*week, 9, 0, 0, 0, paris)
+		if delivered, err := worker.RunOnceAt(ctx, "T1", due); err != nil || delivered != 1 {
+			t.Fatalf("week %d: delivered=%d err=%v", week, delivered, err)
+		}
+		if again, err := worker.RunOnceAt(ctx, "T1", due); err != nil || again != 0 {
+			t.Fatalf("week %d fired twice: %d err=%v", week, again, err)
+		}
+		stored, err := store.GetReminder(ctx, "T1", "U1", "Rm-weekly")
+		if err != nil || !stored.Time.Equal(due.AddDate(0, 0, 7).UTC()) || !stored.CompleteAt.IsZero() {
+			t.Fatalf("week %d: next due %s err=%v, want %s", week, stored.Time, err, due.AddDate(0, 0, 7).UTC())
+		}
+	}
+}

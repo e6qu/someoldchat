@@ -1,7 +1,6 @@
 package slack
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
@@ -62,7 +61,7 @@ func (h Handler) loadMessageContext(r *http.Request, principal auth.Principal, c
 		if message.ThreadTimestamp == "" {
 			roots = append(roots, timestamp)
 		}
-		if bot := messageBotID(message); bot != "" {
+		if bot := message.PostingBot(); bot != "" {
 			if _, seen := value.bots[bot]; !seen {
 				// A bot that has since been removed is still named by its
 				// messages; its profile is simply absent, which is what Slack
@@ -149,7 +148,7 @@ func (c messageContext) project(message domain.Message) map[string]any {
 			result["pinned_to"] = []domain.ConversationID{c.conversation}
 		}
 	}
-	if bot, ok := c.bots[messageBotID(message)]; ok && bot.ID != "" {
+	if bot, ok := c.bots[message.PostingBot()]; ok && bot.ID != "" {
 		result["bot_profile"] = botProfileResponse(bot)
 	}
 	return result
@@ -171,17 +170,4 @@ func botProfileResponse(bot domain.Bot) map[string]any {
 		"updated": bot.UpdatedAt.Unix(), "team_id": bot.WorkspaceID,
 		"icons": map[string]string{"image_36": bot.Image36, "image_48": bot.Image48, "image_72": bot.Image72},
 	}
-}
-
-// messageBotID reads the posting bot's identity from the message's stream
-// state, where the service records it for every bot-token post.
-func messageBotID(message domain.Message) domain.BotID {
-	if message.StreamState == "" {
-		return ""
-	}
-	var state domain.MessageStreamState
-	if json.Unmarshal([]byte(message.StreamState), &state) != nil {
-		return ""
-	}
-	return state.BotID
 }

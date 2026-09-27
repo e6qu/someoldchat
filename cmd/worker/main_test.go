@@ -61,6 +61,26 @@ func TestWorkerRejectsHalfConfiguredWakePublication(t *testing.T) {
 	}
 }
 
+// slack-events callbacks build their URLs on -auth-public-url, so a value no
+// client could be sent to is a configuration fault, and record delivery —
+// which builds no URL — refuses the flag rather than accepting and dropping it.
+func TestWorkerValidatesThePublicURLItBuildsCallbacksOn(t *testing.T) {
+	t.Setenv("SAMEOLDCHAT_AUTH_PUBLIC_URL", "")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	key := strings.Repeat("ab", 32)
+	for name, args := range map[string][]string{
+		"not https":            {"-store", "memory", "-delivery-format", "slack-events", "-owner", "w", "-app-credential-key-hex", key, "-auth-public-url", "http://chat.example.com"},
+		"query":                {"-store", "memory", "-delivery-format", "slack-events", "-owner", "w", "-app-credential-key-hex", key, "-auth-public-url", "https://chat.example.com/?x=1"},
+		"record builds no URL": {"-store", "memory", "-delivery-format", "record", "-owner", "w", "-workspace", "T1", "-delivery-url", "https://sink.example.com", "-auth-public-url", "https://chat.example.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if code := run(context.Background(), logger, args); code != exitConfiguration {
+				t.Fatalf("exit code=%d, want configuration failure %d", code, exitConfiguration)
+			}
+		})
+	}
+}
+
 // An ephemeral message is defined as visible to exactly one user and its payload
 // carries that user's text, blocks and attachments. The record delivery format
 // ships the durable record itself and never decodes the payload, so it has no

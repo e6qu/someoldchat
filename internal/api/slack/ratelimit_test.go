@@ -39,7 +39,7 @@ func limitedRequest(t *testing.T, handler http.Handler, method, target, token, b
 }
 
 // The method budget answers exactly the way official SDK retry handlers key
-// on: 429, a positive integer Retry-After, and the pinned rate_limited code —
+// on: 429, a positive integer Retry-After, and Slack's ratelimited code (the one python-slack-sdk retries apps.connections.open and rtm.connect on) —
 // and the budget is per credential and per method, so one caller cannot
 // starve another and one hot method cannot silence the rest of the API.
 func TestRateLimiterAnswers429WithRetryAfterPerCredentialAndMethod(t *testing.T) {
@@ -56,7 +56,7 @@ func TestRateLimiterAnswers429WithRetryAfterPerCredentialAndMethod(t *testing.T)
 	if limited.Code != http.StatusTooManyRequests {
 		t.Fatalf("over-budget status=%d, want %d", limited.Code, http.StatusTooManyRequests)
 	}
-	if !strings.Contains(limited.Body.String(), `"error":"rate_limited"`) || !strings.Contains(limited.Body.String(), `"ok":false`) {
+	if !strings.Contains(limited.Body.String(), `"error":"ratelimited"`) || !strings.Contains(limited.Body.String(), `"ok":false`) {
 		t.Fatalf("over-budget body=%s", limited.Body)
 	}
 	retryAfter, err := strconv.Atoi(limited.Header().Get("Retry-After"))
@@ -105,6 +105,11 @@ func TestRateLimiterEnforcesThePerChannelPostingAllowance(t *testing.T) {
 	limited := limitedRequest(t, wrapped, http.MethodPost, "/api/chat.postMessage", "xoxb-one", form, "application/x-www-form-urlencoded")
 	if limited.Code != http.StatusTooManyRequests || limited.Header().Get("Retry-After") == "" {
 		t.Fatalf("burst overflow status=%d Retry-After=%q", limited.Code, limited.Header().Get("Retry-After"))
+	}
+	// The posting limit is the pinned chat.postMessage rate_limited, not the
+	// method budget's ratelimited.
+	if !strings.Contains(limited.Body.String(), `"error":"rate_limited"`) {
+		t.Fatalf("burst overflow body=%s", limited.Body)
 	}
 	// Another channel posts freely; JSON bodies are understood too.
 	if response := limitedRequest(t, wrapped, http.MethodPost, "/api/chat.postMessage", "xoxb-one", `{"channel":"C2","text":"hello"}`, "application/json"); response.Code != http.StatusOK {

@@ -24,14 +24,14 @@ func TestCallBlockRendersTheRegisteredCall(t *testing.T) {
 	}
 	messages := service.Messages{Store: s}
 	call, err := messages.AddCall(context.Background(), "T1", "U1", "external-1", "EXT-1",
-		"https://calls.example/join/1", "", "Release sync", time.Unix(1700000400, 0).UTC(), []domain.UserID{"U1", "U2"})
+		"https://calls.example/join/1", "", "Release sync", time.Unix(1700000400, 0).UTC(), []domain.CallParticipant{{SlackID: "U1"}, {SlackID: "U2"}, {External: domain.ExternalCallParticipant{ExternalID: "guest-7", DisplayName: "Guest Speaker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	postCallMessage(t, s, "Mcall", string(call.ID))
 
 	body := renderWorkspacePage(t, mux)
-	for _, want := range []string{"Release sync", "In progress", "Join call", "https://calls.example/join/1", "Bob Builder"} {
+	for _, want := range []string{"Release sync", "In progress", "Join call", "https://calls.example/join/1", "Bob Builder", "Guest Speaker", "3 in the call"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the call block did not render %q", want)
 		}

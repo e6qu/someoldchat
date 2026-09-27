@@ -143,7 +143,7 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 		"command":               {command},
 		"is_enterprise_install": {"false"},
 		"response_url":          {responseURL},
-		"team_domain":           {workspace.Domain},
+		"team_domain":           {workspace.SlackDomain()},
 		"team_id":               {string(workspace.ID)},
 		"text":                  {strings.TrimSpace(text)},
 		"token":                 {verificationToken},
@@ -249,7 +249,7 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 		"api_app_id": snapshot.App.ID,
 		"token":      verificationToken,
 		"trigger_id": triggerID,
-		"team":       map[string]any{"id": workspace.ID, "domain": workspace.Domain},
+		"team":       map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
 		"user":       map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
 		"channel":    map[string]any{"id": conversation.ID, "name": conversation.Name},
 		"container": map[string]any{
@@ -335,7 +335,7 @@ func (m Messages) DispatchViewBlockAction(ctx context.Context, workspaceID domai
 		"api_app_id": snapshot.App.ID,
 		"token":      verificationToken,
 		"trigger_id": triggerID,
-		"team":       map[string]any{"id": workspace.ID, "domain": workspace.Domain},
+		"team":       map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
 		"user":       map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
 		"container":  map[string]any{"type": "view", "view_id": current.ID},
 		"view":       view,
@@ -388,7 +388,7 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 	}
 	payload := map[string]any{
 		"type": "block_suggestion", "api_app_id": query.AppID,
-		"team":      map[string]any{"id": workspace.ID, "domain": workspace.Domain},
+		"team":      map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
 		"user":      map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
 		"block_id":  query.BlockID,
 		"action_id": query.ActionID,
@@ -639,7 +639,7 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 	// asked for response_url_enabled. The trigger was minted and discarded.
 	payload := map[string]any{
 		"type": "view_submission", "api_app_id": current.AppID, "token": verificationToken,
-		"team":                  map[string]any{"id": workspace.ID, "domain": workspace.Domain},
+		"team":                  map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
 		"user":                  map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
 		"view":                  view,
 		"trigger_id":            triggerID,
@@ -719,7 +719,7 @@ func (m Messages) CloseView(ctx context.Context, workspaceID domain.WorkspaceID,
 	}
 	payload := map[string]any{
 		"type": "view_closed", "api_app_id": current.AppID, "token": verificationToken, "is_cleared": clear,
-		"team": map[string]any{"id": workspace.ID, "domain": workspace.Domain},
+		"team": map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
 		"user": map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
 		"view": view,
 	}
@@ -1047,7 +1047,7 @@ func (m Messages) DispatchAppShortcut(ctx context.Context, workspaceID domain.Wo
 	payload := map[string]any{
 		"type": shortcutPayloadType(shortcutType), "token": verificationToken,
 		"action_ts": domain.NewMessageTimestamp(time.Now().UTC()), "callback_id": callbackID,
-		"trigger_id": triggerID, "team": map[string]any{"id": workspace.ID, "domain": workspace.Domain},
+		"trigger_id": triggerID, "team": map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
 		"user":       map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
 		"api_app_id": snapshot.App.ID,
 	}

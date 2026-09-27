@@ -36,6 +36,7 @@ service.cannot_invite_self
 service.cannot_kick_from_default
 service.cannot_kick_self
 service.cannot_leave_default
+service.cannot_unfurl_url
 service.conversation_already_archived
 service.conversation_archived
 service.conversation_not_archived
@@ -97,6 +98,7 @@ service.invalid_timestamp
 service.invalid_trigger
 service.invalid_trigger_config
 service.invalid_user_group
+service.invalid_user_group_users
 service.invalid_view
 service.invalid_workflow_step
 service.invalid_workspace
@@ -109,12 +111,14 @@ service.message_not_streaming
 service.missing_stream_recipient_team
 service.missing_stream_recipient_user
 service.not_in_conversation
+service.not_starred
 service.not_workspace_admin
 service.oauth_app_mismatch
 service.recipient_not_in_conversation
 service.reminder_owned_by_other
 service.reminder_recurring
 service.reminder_time_in_past
+service.reminder_unparseable
 service.retention_not_supported
 service.scheduled_status_limit
 service.scheduled_time_in_past
@@ -124,10 +128,14 @@ service.shared_invite_settled
 service.slack_connect_full
 service.slash_command_in_thread
 service.slash_command_not_found
+service.snooze_not_active
+service.snooze_too_long
 service.thread_not_found
 service.trigger_exchanged
 service.trigger_expired
 service.trigger_type_restricted
+service.user_group_handle_taken
+service.user_group_name_taken
 service.user_is_restricted
 service.user_is_ultra_restricted
 service.user_not_found

@@ -194,7 +194,7 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	if functionRecord.Event.ID == "" || functionRecord.Event.PrivatePayload == "" {
 		t.Fatalf("function event not durably snapshotted: %+v", functionRecord)
 	}
-	prepared, visible, err := PrepareAppEvent(ctx, repository, []byte("0123456789abcdef0123456789abcdef"), "A1", functionRecord)
+	prepared, visible, err := PrepareAppEvent(ctx, repository, []byte("0123456789abcdef0123456789abcdef"), "", "A1", functionRecord)
 	if err != nil || !visible {
 		t.Fatalf("prepared=%+v visible=%v err=%v", prepared, visible, err)
 	}
@@ -759,7 +759,7 @@ func TestFunctionExecutedDispatchCarriesTheBotAccessToken(t *testing.T) {
 		t.Fatal("no function_executed event")
 	}
 	// At dispatch the sealed token is opened and sent as bot_access_token.
-	prepared, visible, err := PrepareAppEvent(ctx, repository, []byte("0123456789abcdef0123456789abcdef"), workflow.AppID, functionRecord)
+	prepared, visible, err := PrepareAppEvent(ctx, repository, []byte("0123456789abcdef0123456789abcdef"), "", workflow.AppID, functionRecord)
 	if err != nil || !visible {
 		t.Fatalf("prepared=%+v visible=%v err=%v", prepared, visible, err)
 	}

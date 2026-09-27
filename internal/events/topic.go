@@ -308,7 +308,16 @@ var topicRules = []topicRule{
 		note: "not settled, as remote_file.created"},
 
 	// ---- product concepts with no Slack event ------------------------------
-	{topic: "app.requested", note: "not pinned: app administration has no Slack event; scope_granted and scope_denied are a different fact"},
+	// Slack's current catalog does name this fact (specs/upstream/slack-reference/current-events.txt):
+	// app_requested reaches an organization's admin app, under admin.apps:read,
+	// with an app_request object — the app's directory profile, the requesting
+	// user, the team, every requested scope with its description, and the
+	// requester's message. The durable payload carries two identifiers, and no
+	// product path creates a request yet (only an administrator's decision
+	// writes an approval row), so the event is withheld rather than published
+	// without the object it is defined by.
+	{topic: "app.requested", slack: mapped("app_requested", appSurfaces),
+		note: "current Slack reference; the app_request object is not modelled, so the mapping is withheld"},
 	{topic: "app.approved", note: "not pinned: app administration has no Slack event"},
 	{topic: "app.restricted", note: "not pinned: app administration has no Slack event"},
 	{topic: "app.permissions_requested", note: "not pinned: app administration has no Slack event"},

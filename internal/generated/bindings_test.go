@@ -11,13 +11,16 @@ import (
 )
 
 func TestLocalBindingUsesDirectServiceImplementation(t *testing.T) {
-	local := ProvideChatServiceLocal(memory.New(), blob.Disabled{}, []byte("0123456789abcdef0123456789abcdef"))
+	local := ProvideChatServiceLocal(memory.New(), blob.Disabled{}, []byte("0123456789abcdef0123456789abcdef"), "https://chat.example.test")
 	messages, ok := local.(service.Messages)
 	if !ok {
 		t.Fatalf("local binding type=%T, want service.Messages", local)
 	}
 	if string(messages.AppCredentialKey) != "0123456789abcdef0123456789abcdef" {
 		t.Fatal("local binding dropped the application credential key")
+	}
+	if messages.PublicURL != "https://chat.example.test" {
+		t.Fatal("local binding dropped the public URL")
 	}
 }
 

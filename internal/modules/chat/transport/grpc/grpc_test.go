@@ -718,8 +718,9 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := remote.AddStar(ctx, "T1", "U1", "C1", starTimestamp); err != nil {
 		t.Fatalf("add star: %v", err)
 	}
-	stars, _, more, err := remote.Stars(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
-	if err != nil || len(stars) != 1 || stars[0].Message.ID == "" || more {
+	starPage, err := remote.Stars(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+	stars, more := starPage.Stars, starPage.HasMore
+	if err != nil || len(stars) != 1 || stars[0].Message.ID == "" || more || starPage.Total != 1 {
 		t.Fatalf("stars=%+v more=%v err=%v", stars, more, err)
 	}
 	if err := remote.RemoveStar(ctx, "T1", "U1", "C1", starTimestamp); err != nil {
@@ -740,7 +741,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := remote.RemoveBookmark(ctx, "T1", "U1", "C1", bookmark.ID); err != nil {
 		t.Fatalf("remove bookmark: %v", err)
 	}
-	reminder, err := remote.AddReminder(ctx, "T1", "U1", "", "remote reminder", time.Now().UTC().Add(time.Hour))
+	reminder, err := remote.AddReminder(ctx, "T1", "U1", "", "remote reminder", domain.ReminderSchedule{Due: time.Now().UTC().Add(time.Hour)})
 	if err != nil || reminder.ID == "" || reminder.Text != "remote reminder" {
 		t.Fatalf("reminder=%+v err=%v", reminder, err)
 	}
@@ -890,9 +891,11 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	}
 	// Sequence 1 is the fixture's own role seed, which is a durable journal record
 	// like any other role change. The contract records this test asserts begin
-	// after it; the count, ordering, payload and actor assertions are unchanged.
-	records, err := remote.ListEventsAfter(ctx, "T1", 1, 23)
-	if err != nil || len(records) != 23 || records[0].Sequence != 2 || records[0].Event.Topic != "user.created" {
+	// after it. The member's view of the journal is what crosses the seam; the
+	// unfiltered workspace journal does not.
+	journal, err := remote.ListUserEventsAfter(ctx, "T1", "U1", 1, 23)
+	records := journal.Records
+	if err != nil || len(records) == 0 || records[0].Sequence != 2 || records[0].Event.Topic != "user.created" {
 		t.Fatalf("events=%+v err=%v", records, err)
 	}
 	// The payload is a self-describing JSON object and crosses the seam verbatim;

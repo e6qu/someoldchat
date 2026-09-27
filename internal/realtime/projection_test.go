@@ -153,3 +153,7 @@ func TestRTMStreamAdvancesPastWithheldRecords(t *testing.T) {
 	}
 	assertCursorsAdvanceByHundred(t, source.cursors())
 }
+
+func (*throughSource) LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error) {
+	return 0, nil
+}

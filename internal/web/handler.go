@@ -61,14 +61,6 @@ type Handler struct {
 
 var immutableReleaseRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$|^sha256:[0-9a-f]{64}$`)
 var immutableCommitRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
-var remindInPattern = regexp.MustCompile(`(?i)^(.*?)\s+in\s+(a|an|[1-9][0-9]*)\s+(minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)$`)
-var remindTomorrowPattern = regexp.MustCompile(`(?i)^(.*?)\s+tomorrow(?:\s+at\s+(.+))?$`)
-var remindDatePattern = regexp.MustCompile(`(?i)^(.*?)\s+on\s+([0-9]{4}-[0-9]{2}-[0-9]{2})(?:\s+at\s+(.+))?$`)
-var remindWeekdayPattern = regexp.MustCompile(`(?i)^(.*?)\s+every\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?:\s+at\s+(.+))?$`)
-var remindRecurringPattern = regexp.MustCompile(`(?i)^(.*?)\s+every\s+(day|week|month|year)(?:\s+at\s+(.+))?$`)
-var remindOnWeekdayPattern = regexp.MustCompile(`(?i)^(.*?)\s+on\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?:\s+at\s+(.+))?$`)
-var remindOnMonthDayPattern = regexp.MustCompile(`(?i)^(.*?)\s+on\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\s+([0-9]{1,2})(?:\s+at\s+(.+))?$`)
-var remindTodayPattern = regexp.MustCompile(`(?i)^(.*?)\s+at\s+(.+)$`)
 
 // ValidateReleaseRevision decides, without constructing anything, whether a
 // release identity is acceptable. It is exported so a process can settle the
@@ -4723,12 +4715,18 @@ func (h Handler) Register(mux *http.ServeMux) {
 		// Deliberately reachable signed-out: the person it is for has no
 		// account yet. See internal/web/invite.go for why it carries no secret.
 		mux.HandleFunc("GET /app/invite/{inviteRequestID}", h.invitationPage)
-		mux.HandleFunc("GET /api/admin.auth.methods.list", h.authMethodsList)
-		mux.HandleFunc("POST /api/admin.auth.methods.set", h.authMethodSet)
-		mux.HandleFunc("POST /api/admin.auth.users.invite", h.authUserInvite)
-		mux.HandleFunc("POST /api/admin.auth.users.create", h.authUserCreate)
-		mux.HandleFunc("GET /api/admin.auth.users.list", h.authUsersList)
-		mux.HandleFunc("POST /api/admin.auth.users.set", h.authUserSet)
+		// The control plane's own endpoints live under the page they serve.
+		// They were registered as /api/admin.auth.*: first-party endpoints
+		// masquerading as Slack Web API methods, which shadowed the Web API's
+		// /api/ tree for those paths — one verb each, outside its rate limiter
+		// and without its OAuth scope headers — for methods no Slack client
+		// knows. Slack's own admin.auth.policy.* stay in the Web API.
+		mux.HandleFunc("GET /app/admin/auth/methods.list", h.authMethodsList)
+		mux.HandleFunc("POST /app/admin/auth/methods.set", h.authMethodSet)
+		mux.HandleFunc("POST /app/admin/auth/users.invite", h.authUserInvite)
+		mux.HandleFunc("POST /app/admin/auth/users.create", h.authUserCreate)
+		mux.HandleFunc("GET /app/admin/auth/users.list", h.authUsersList)
+		mux.HandleFunc("POST /app/admin/auth/users.set", h.authUserSet)
 	}
 	// Workspace administration is not identity-provider administration. These
 	// govern retention, discoverability, default channels, analytics, the audit
@@ -5592,7 +5590,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			forwardDestinations = options
 		}
 	}
-	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "" && threadTimestamp == "", ThreadSummaries: timelineSummaries, LastRead: timelineLastRead, ForwardDestinations: forwardDestinations})
+	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "", ThreadSummaries: timelineSummaries, LastRead: timelineLastRead, ForwardDestinations: forwardDestinations})
 	if timelineNotice != "" {
 		notices = append(notices, timelineNotice)
 	}
@@ -6020,7 +6018,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		messages = history.Messages
 	}
 	fragmentSummaries, fragmentLastRead := h.timelineChrome(r.Context(), principal, conversation.ID, messages, isMember)
-	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "" && threadTimestamp == "", ThreadSummaries: fragmentSummaries, LastRead: fragmentLastRead})
+	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "", ThreadSummaries: fragmentSummaries, LastRead: fragmentLastRead})
 	h.writeFragment(w, list)
 }
 
@@ -6278,7 +6276,7 @@ func (h Handler) resolveCallBlocks(ctx context.Context, principal auth.Principal
 					view = &callBlockView{
 						Title:        call.Title,
 						JoinURL:      call.JoinURL,
-						Participants: h.callParticipantNames(ctx, principal, call.Participants),
+						Participants: h.callParticipantNames(ctx, principal, call),
 						Active:       call.Active(),
 					}
 				}
@@ -6289,14 +6287,24 @@ func (h Handler) resolveCallBlocks(ctx context.Context, principal auth.Principal
 	}
 }
 
-func (h Handler) callParticipantNames(ctx context.Context, principal auth.Principal, participants []domain.UserID) []string {
-	if len(participants) == 0 {
+// callParticipantNames names everyone in a call: members by their profile
+// name, and the call provider's external participants by the display name it
+// registered (or their external ID when it registered none).
+func (h Handler) callParticipantNames(ctx context.Context, principal auth.Principal, call domain.Call) []string {
+	if len(call.Participants) == 0 && len(call.ExternalParticipants) == 0 {
 		return nil
 	}
 	names := h.newUserNames(ctx, principal)
-	values := make([]string, 0, len(participants))
-	for _, participant := range participants {
+	values := make([]string, 0, len(call.Participants)+len(call.ExternalParticipants))
+	for _, participant := range call.Participants {
 		values = append(values, names.name(participant))
+	}
+	for _, external := range call.ExternalParticipants {
+		if external.DisplayName != "" {
+			values = append(values, external.DisplayName)
+		} else {
+			values = append(values, external.ExternalID)
+		}
 	}
 	return values
 }
@@ -6315,11 +6323,17 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			values = nil
 		}
 		for _, value := range values {
+			// An ephemeral message sent with thread_ts belongs to that thread
+			// and nowhere else: it used to be rendered in the channel view and
+			// never in the thread it answered.
+			if string(value.ThreadTimestamp) != request.Thread {
+				continue
+			}
 			ephemeralIDs[value.ID] = struct{}{}
 			messages = append(messages, domain.Message{
 				ID: value.ID, WorkspaceID: value.WorkspaceID, Conversation: value.Conversation,
 				AuthorID: value.AuthorID, AppID: value.AppID, Text: value.Text, Blocks: value.Blocks,
-				Attachments: value.Attachments, CreatedAt: value.CreatedAt,
+				Attachments: value.Attachments, ThreadTimestamp: value.ThreadTimestamp, CreatedAt: value.CreatedAt,
 			})
 		}
 		sort.Slice(messages, func(left, right int) bool {
@@ -6328,7 +6342,9 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			}
 			return messages[left].CreatedAt.Before(messages[right].CreatedAt)
 		})
-		if len(messages) > timelineWindow {
+		// A channel window keeps its newest messages; a thread keeps its root,
+		// which trimming from the front would drop.
+		if request.Thread == "" && len(messages) > timelineWindow {
 			messages = messages[len(messages)-timelineWindow:]
 		}
 	}
@@ -11866,7 +11882,7 @@ func (h Handler) channelReminderRequest(ctx context.Context, principal auth.Prin
 	if err != nil {
 		return domain.LaterReminderRequest{}, service.ErrInvalidLaterReminder
 	}
-	text, due, recurrence, err := parseChannelReminderExpression(expression, now, location)
+	text, due, recurrence, err := service.ParseReminderExpression(expression, now, location)
 	if err != nil {
 		return domain.LaterReminderRequest{}, err
 	}
@@ -11896,225 +11912,6 @@ func (h Handler) joinedChannelByName(ctx context.Context, principal auth.Princip
 		}
 		request.Cursor = page.NextCursor
 	}
-}
-
-func parseChannelReminderExpression(expression string, now time.Time, location *time.Location) (string, time.Time, domain.ReminderRecurrence, error) {
-	localNow := now.In(location)
-	if match := remindInPattern.FindStringSubmatch(expression); match != nil {
-		// "a" and "an" are the spoken form of one: "in an hour" means "in 1 hour".
-		count := 1
-		if quantity := strings.ToLower(match[2]); quantity != "a" && quantity != "an" {
-			count, _ = strconv.Atoi(quantity)
-		}
-		unit := strings.ToLower(match[3])
-		// A month and a year are calendar steps, not fixed spans: "in 2 months"
-		// keeps the wall-clock time of day and lands on the same day-of-month two
-		// months on, the way AddDate resolves a short month (Jan 31 + 1 month is
-		// early March, matching how "every month" already steps here). The fixed
-		// units stay an absolute duration, as they were.
-		switch {
-		case strings.HasPrefix(unit, "month"):
-			return strings.TrimSpace(match[1]), localNow.AddDate(0, count, 0), domain.ReminderOnce, nil
-		case strings.HasPrefix(unit, "year"):
-			return strings.TrimSpace(match[1]), localNow.AddDate(count, 0, 0), domain.ReminderOnce, nil
-		}
-		duration := time.Duration(count) * time.Minute
-		switch {
-		case strings.HasPrefix(unit, "hour"):
-			duration = time.Duration(count) * time.Hour
-		case strings.HasPrefix(unit, "day"):
-			duration = time.Duration(count) * 24 * time.Hour
-		case strings.HasPrefix(unit, "week"):
-			duration = time.Duration(count) * 7 * 24 * time.Hour
-		}
-		return strings.TrimSpace(match[1]), now.Add(duration), domain.ReminderOnce, nil
-	}
-	if match := remindTomorrowPattern.FindStringSubmatch(expression); match != nil {
-		hour, minute, err := parseReminderClock(match[2], 9, 0)
-		if err != nil {
-			return "", time.Time{}, "", service.ErrInvalidLaterReminder
-		}
-		tomorrow := localNow.AddDate(0, 0, 1)
-		due, err := reminderLocalTime(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), hour, minute, location)
-		return strings.TrimSpace(match[1]), due, domain.ReminderOnce, err
-	}
-	if match := remindDatePattern.FindStringSubmatch(expression); match != nil {
-		date, err := time.ParseInLocation("2006-01-02", match[2], location)
-		if err != nil {
-			return "", time.Time{}, "", service.ErrInvalidLaterReminder
-		}
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
-		if err != nil {
-			return "", time.Time{}, "", service.ErrInvalidLaterReminder
-		}
-		due, err := reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
-		return strings.TrimSpace(match[1]), due, domain.ReminderOnce, err
-	}
-	if match := remindWeekdayPattern.FindStringSubmatch(expression); match != nil {
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
-		if err != nil {
-			return "", time.Time{}, "", service.ErrInvalidLaterReminder
-		}
-		due, err := comingWeekday(match[2], hour, minute, localNow, now, location)
-		if err != nil {
-			return "", time.Time{}, "", err
-		}
-		return strings.TrimSpace(match[1]), due, domain.ReminderWeekly, nil
-	}
-	if match := remindRecurringPattern.FindStringSubmatch(expression); match != nil {
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
-		if err != nil {
-			return "", time.Time{}, "", service.ErrInvalidLaterReminder
-		}
-		recurrence := map[string]domain.ReminderRecurrence{
-			"day": domain.ReminderDaily, "week": domain.ReminderWeekly,
-			"month": domain.ReminderMonthly, "year": domain.ReminderYearly,
-		}[strings.ToLower(match[2])]
-		due, err := reminderLocalTime(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, location)
-		if err != nil {
-			return "", time.Time{}, "", err
-		}
-		for !due.After(now) {
-			switch recurrence {
-			case domain.ReminderDaily:
-				due = due.AddDate(0, 0, 1)
-			case domain.ReminderWeekly:
-				due = due.AddDate(0, 0, 7)
-			case domain.ReminderMonthly:
-				due = due.AddDate(0, 1, 0)
-			case domain.ReminderYearly:
-				due = due.AddDate(1, 0, 0)
-			}
-		}
-		return strings.TrimSpace(match[1]), due, recurrence, nil
-	}
-	if match := remindOnWeekdayPattern.FindStringSubmatch(expression); match != nil {
-		// "on friday" is a single occurrence on the coming Friday, distinct from
-		// "every friday". It shares the coming-weekday resolution with the
-		// recurring form but records no recurrence.
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
-		if err != nil {
-			return "", time.Time{}, "", service.ErrInvalidLaterReminder
-		}
-		due, err := comingWeekday(match[2], hour, minute, localNow, now, location)
-		if err != nil {
-			return "", time.Time{}, "", err
-		}
-		return strings.TrimSpace(match[1]), due, domain.ReminderOnce, nil
-	}
-	if match := remindOnMonthDayPattern.FindStringSubmatch(expression); match != nil {
-		// "on July 4" is a single occurrence on the next such date: this year if it
-		// is still ahead, otherwise the next. An impossible day for the month —
-		// "on February 30" — is rejected rather than rolled into March.
-		month := monthByName(match[2])
-		day, _ := strconv.Atoi(match[3])
-		hour, minute, err := parseReminderClock(match[4], 9, 0)
-		if err != nil {
-			return "", time.Time{}, "", service.ErrInvalidLaterReminder
-		}
-		due, err := reminderLocalTime(localNow.Year(), month, day, hour, minute, location)
-		if err != nil {
-			return "", time.Time{}, "", service.ErrInvalidLaterReminder
-		}
-		if !due.After(now) {
-			due, err = reminderLocalTime(localNow.Year()+1, month, day, hour, minute, location)
-			if err != nil {
-				return "", time.Time{}, "", service.ErrInvalidLaterReminder
-			}
-		}
-		return strings.TrimSpace(match[1]), due, domain.ReminderOnce, nil
-	}
-	if match := remindTodayPattern.FindStringSubmatch(expression); match != nil {
-		hour, minute, err := parseReminderClock(match[2], 0, 0)
-		if err != nil {
-			return "", time.Time{}, "", service.ErrInvalidLaterReminder
-		}
-		due, err := reminderLocalTime(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, location)
-		if err != nil || !due.After(now) {
-			return "", time.Time{}, "", service.ErrReminderTimeInPast
-		}
-		return strings.TrimSpace(match[1]), due, domain.ReminderOnce, nil
-	}
-	return "", time.Time{}, "", service.ErrInvalidLaterReminder
-}
-
-// comingWeekday resolves the next occurrence of a named weekday at the given
-// clock time, rolling to the following week when this week's time has already
-// passed. Both "every <weekday>" and "on <weekday>" position their first
-// delivery this way.
-func comingWeekday(name string, hour, minute int, localNow, now time.Time, location *time.Location) (time.Time, error) {
-	weekday := map[string]time.Weekday{
-		"sunday": time.Sunday, "monday": time.Monday, "tuesday": time.Tuesday,
-		"wednesday": time.Wednesday, "thursday": time.Thursday,
-		"friday": time.Friday, "saturday": time.Saturday,
-	}[strings.ToLower(name)]
-	days := (int(weekday) - int(localNow.Weekday()) + 7) % 7
-	date := localNow.AddDate(0, 0, days)
-	due, err := reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if !due.After(now) {
-		date = date.AddDate(0, 0, 7)
-		due, err = reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
-	}
-	return due, err
-}
-
-// monthByName maps a full or abbreviated month name to its time.Month. The
-// pattern only hands it a name it already matched, so the zero return is
-// unreachable and exists to keep the switch total.
-func monthByName(name string) time.Month {
-	switch strings.ToLower(name) {
-	case "january", "jan":
-		return time.January
-	case "february", "feb":
-		return time.February
-	case "march", "mar":
-		return time.March
-	case "april", "apr":
-		return time.April
-	case "may":
-		return time.May
-	case "june", "jun":
-		return time.June
-	case "july", "jul":
-		return time.July
-	case "august", "aug":
-		return time.August
-	case "september", "sep", "sept":
-		return time.September
-	case "october", "oct":
-		return time.October
-	case "november", "nov":
-		return time.November
-	case "december", "dec":
-		return time.December
-	}
-	return time.Month(0)
-}
-
-func parseReminderClock(value string, defaultHour, defaultMinute int) (int, int, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return defaultHour, defaultMinute, nil
-	}
-	for _, layout := range []string{"15:04", "3pm", "3:04pm"} {
-		parsed, err := time.Parse(layout, value)
-		if err == nil {
-			return parsed.Hour(), parsed.Minute(), nil
-		}
-	}
-	return 0, 0, service.ErrInvalidLaterReminder
-}
-
-func reminderLocalTime(year int, month time.Month, day, hour, minute int, location *time.Location) (time.Time, error) {
-	value := time.Date(year, month, day, hour, minute, 0, 0, location)
-	local := value.In(location)
-	if local.Year() != year || local.Month() != month || local.Day() != day || local.Hour() != hour || local.Minute() != minute {
-		return time.Time{}, service.ErrInvalidLaterReminder
-	}
-	return value, nil
 }
 
 func (h Handler) appInteraction(w http.ResponseWriter, r *http.Request) {

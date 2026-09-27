@@ -228,18 +228,21 @@ Implemented evidence:
   notification history created by an older release. Existing source messages
   remain available through conversation/search history; Activity begins with
   notification-producing mutations committed after the upgrade;
-- search does not yet provide Slack's semantic relevance scoring or
-  highlighting — a canvas result carries a leading snippet rather than a
-  marked match, because a substring search for the term would mark the wrong
-  span whenever the match was in the title — every `to:`/link/specific
-  emoji/`hasmy:` modifier, prefix `*`, section-valued `in:`, Slack's natural
-  month/year date forms, participant-accurate `with:` thread semantics, `to:`,
-  `hasmy:`, prefix `*`, or history on both sides of an opened hit — a result or
+- search does not yet provide Slack's semantic relevance scoring or, in the
+  first-party client, highlighting — a canvas result carries a leading snippet
+  rather than a marked match, because a substring search for the term would
+  mark the wrong span whenever the match was in the title (the Web API's
+  `highlight=true` does mark message text with Slack's U+E000/U+E001
+  markers) — every `to:`/specific emoji/`hasmy:` modifier, section-valued
+  `in:`, participant-accurate `with:` thread semantics, `to:`, `hasmy:`, or
+  history on both sides of an opened hit (a trailing `*` is a prefix search,
+  and `today`/`yesterday`, month and year dates resolve in the searcher's
+  zone) — a result or
   permalink window ends at the message it names but is paged forward toward the
   present with a "show newer messages" pager, the counterpart of paging older,
   and reaching the present makes the window live again;
 - the Slack APIs retain documented compatibility deviations for relevance
-  scoring, highlight markers, cursor pagination on file/combined legacy
+  scoring, highlight markers outside message text, cursor pagination on file/combined legacy
   results, match projection detail, and full tier rate limiting;
 - controlled live-Slack comparison and visual baselines remain required.
 ## Journey-source map
