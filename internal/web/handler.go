@@ -782,9 +782,14 @@ type documentGrant struct {
 }
 
 type canvasSectionView struct {
-	ID       string
-	Type     string
-	Text     string
+	ID   string
+	Type string
+	Text string
+	// HTML is the block as a reader sees it (lists, links, emphasis,
+	// mentions), and Heading its level when it is a heading, so the page
+	// renders a document rather than its markdown source.
+	HTML     template.HTML
+	Heading  int
 	Position int
 	// First and Last gate the reorder controls: the top block offers no "move
 	// up" and the bottom none "move down", rather than drawing a control that
@@ -3474,24 +3479,67 @@ const sharingSection = `<section class="sharing" aria-labelledby="sharing-headin
 </section>`
 
 const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
-.layout{width:min(860px,calc(100% - 32px));margin:28px auto 56px}.canvas{padding:28px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.canvas h2{margin:0 0 8px}.canvas .meta{color:var(--muted);font-size:12px}.canvas-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
-.canvas-section{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}.canvas-section:first-of-type{border-top:0;padding-top:0}
+{{define "styles"}}` + viewStyle + `<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar>a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
+.canvas-page{width:min(860px,calc(100% - 32px))}
+.canvas{padding:28px 36px;border:1px solid var(--line);border-radius:12px;background:var(--panel-strong)}
+.canvas-top{display:flex;align-items:flex-start;gap:10px}
+.canvas-top h2{margin:0 auto 4px 0;font-size:28px;line-height:1.2;overflow-wrap:anywhere}
+.canvas-top-actions{display:flex;align-items:center;gap:6px}
+.canvas .meta{margin:0 0 18px;color:var(--muted);font-size:12px}
+.canvas-section{position:relative;margin:0 -12px;padding:4px 12px;border-radius:8px}
+.canvas-section:hover,.canvas-section:focus-within{background:var(--hover)}
+.canvas-body{line-height:1.6;overflow-wrap:anywhere}
+.canvas-body p{margin:0 0 8px}.canvas-body p:last-child{margin-bottom:0}
+.canvas-body ul,.canvas-body ol{margin:0 0 8px;padding-left:24px}
+.canvas-body ul.checklist{list-style:none;padding-left:4px}.canvas-body .check{display:inline-block;width:20px;color:var(--muted)}.canvas-body .check.done{color:var(--ok)}
+.canvas-body blockquote{margin:0 0 8px;padding-left:12px;border-left:3px solid var(--line);color:var(--muted)}
+.canvas-body pre{margin:0 0 8px;padding:10px;border-radius:6px;background:var(--hover);white-space:pre-wrap}
+.canvas-body code{padding:1px 4px;border-radius:4px;background:var(--hover);font-size:13px}
+.canvas-body .canvas-mention{padding:0 2px;border-radius:3px;background:color-mix(in srgb,var(--action) 14%,transparent);color:var(--action);font-weight:700;text-decoration:none}
+.canvas-body h3,.canvas-body h4,.canvas-body h5{margin:14px 0 4px;line-height:1.25}
+.canvas-body h3{font-size:24px}.canvas-body h4{font-size:19px}.canvas-body h5{font-size:16px}
+.block-tools{position:absolute;top:2px;right:4px;display:flex;gap:2px;opacity:0}
+.canvas-section:hover .block-tools,.canvas-section:focus-within .block-tools{opacity:1}
+@media(hover:none){.block-tools{opacity:1}}
+.js .canvas-section:not(.editing) [data-block-editor],.js .canvas-section:not(.editing) .delete-block{display:none}
+.js .canvas-section.editing [data-block-view],.js .canvas-section.editing .block-tools{display:none}
+.canvas-section.editing{background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}
+.format-bar{display:flex;flex-wrap:wrap;gap:2px;padding:4px;border:1px solid var(--line);border-bottom:0;border-radius:7px 7px 0 0;background:var(--panel-strong)}
+.format-bar button{min-width:30px;height:28px;border:0;border-radius:5px;background:transparent;color:var(--text);font:inherit;font-weight:700;cursor:pointer}
+.format-bar button:hover,.format-bar button:focus-visible{background:var(--hover)}
+.format-bar .sep{width:1px;margin:4px 3px;background:var(--line)}
 ` + sharingStyle + `
-.editor{display:grid;gap:11px;margin-top:16px;padding-top:16px;border-top:1px dashed var(--line)}.editor label{display:grid;gap:6px;font-weight:700}.editor input,.editor textarea{padding:10px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.editor textarea{min-height:300px;resize:vertical}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions button{border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}.delete{margin-top:18px}.delete button{border:1px solid var(--danger);border-radius:7px;padding:8px 12px;background:transparent;color:var(--danger);font-weight:800}
-.editor.block{min-height:0}.editor.block textarea{min-height:120px}.editor.block select{padding:8px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.editor.block .actions button:not(:first-child){background:transparent;border:1px solid var(--line);color:var(--text)}.rename{margin:8px 0 4px}.add-block{margin-top:22px;padding-top:14px;border-top:1px dashed var(--line)}.delete-block{margin-top:8px}.delete-block button{border:1px solid var(--danger);border-radius:7px;padding:7px 11px;background:transparent;color:var(--danger);font-weight:800}details.rename summary,details.add-block summary,details.delete-block summary{cursor:pointer;font-weight:700;color:var(--muted);min-height:24px;padding:3px 0}
-.editor.block .actions button{min-height:28px}
+.editor{display:grid;gap:10px;margin-top:10px}.editor label{display:grid;gap:6px;font-weight:700;font-size:14px}.editor input,.editor textarea{padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--bg);color:var(--text);font:inherit}.editor textarea{min-height:140px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px}.editor .with-toolbar textarea{border-radius:0 0 7px 7px}.actions{display:flex;gap:8px;flex-wrap:wrap}.actions button{border:1px solid var(--field-line);border-radius:6px;padding:7px 12px;background:var(--panel-strong);color:var(--text);font-weight:800}.actions button:first-child{border-color:var(--ok);background:var(--ok);color:var(--on-strong)}
+.editor.block select{padding:7px;border:1px solid var(--field-line);border-radius:7px;background:var(--bg);color:var(--text)}.rename{margin:0 0 14px}.add-block{margin-top:18px;padding-top:12px;border-top:1px dashed var(--line)}.delete-block{margin:8px 0 4px}.delete-block button{border:1px solid var(--danger);border-radius:7px;padding:7px 11px;background:transparent;color:var(--danger);font-weight:800}details.rename summary,details.add-block summary,details.delete-block summary{cursor:pointer;font-weight:700;color:var(--muted);min-height:24px;padding:3px 0}
+.delete{margin-top:18px}.delete button{border:1px solid var(--danger);border-radius:7px;padding:8px 12px;background:transparent;color:var(--danger);font-weight:800}
+.canvas-comments,.canvas-history{margin-top:26px;padding-top:16px;border-top:1px solid var(--line)}
+.canvas-comments h3,.canvas-history h3{margin:0 0 10px;font-size:16px}
+.comments,.revisions{margin:0 0 12px;padding:0;list-style:none;display:grid;gap:10px}
+.comment,.revision{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.comment-head,.revision-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.comment-author,.revision-title{font-weight:800}
+.comment-anchor,.comment-time,.revision-time,.revision-editor{color:var(--muted);font-size:12px}
+.comment-text,.revision-excerpt{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.comment form,.revision form{margin-top:6px}
+.comment button,.revision button{border:1px solid var(--line);border-radius:6px;padding:4px 9px;background:transparent;color:var(--muted);font-size:12px;font-weight:700}
+.new-comment{display:grid;gap:6px;max-width:560px}
+.new-comment select,.new-comment textarea{padding:8px;border:1px solid var(--field-line);border-radius:7px;background:var(--bg);color:var(--text);font:inherit}
+.new-comment button{justify-self:start;border:0;border-radius:6px;padding:8px 14px;background:var(--ok);color:var(--on-strong);font-weight:800}
+.read-only{color:var(--muted);font-size:13px}
+@media(max-width:640px){.canvas{padding:18px 16px}.canvas-top h2{font-size:22px}.bar{padding:0 12px}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas"><h2>{{.Title}}</h2><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}{{if .CanWrite}}<details class="rename"><summary>Rename canvas</summary><form class="editor" method="post" action="/app/canvases/{{.ID}}/sections"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="op" value="title"><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><div class="actions"><button type="submit">Rename</button></div></form></details>{{end}}
-{{range .Sections}}<section class="canvas-section" aria-label="Canvas part {{.Position}}{{if .Type}}, {{.Type}}{{end}}">
-  <div class="canvas-body">{{.Text}}</div>
-  {{if $.CanWrite}}<form class="editor block" method="post" action="/app/canvases/{{$.ID}}/sections">
+{{define "scripts"}}` + localTimeScript + rowLinkScript + profilePanelScript + canvasEditorScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="v-page canvas-page">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas"><div class="canvas-top"><h2>{{.Title}}</h2><div class="canvas-top-actions"><a class="v-btn primary" href="#sharing-heading">Share</a></div></div><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}{{if .CanWrite}}<details class="rename"><summary>Rename canvas</summary><form class="editor" method="post" action="/app/canvases/{{.ID}}/sections"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="op" value="title"><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><div class="actions"><button type="submit">Rename</button></div></form></details>{{end}}
+{{range .Sections}}<section class="canvas-section" id="block-{{.Position}}" aria-label="Canvas part {{.Position}}{{if .Type}}, {{.Type}}{{end}}">
+  <div class="canvas-body" data-block-view>{{if eq .Heading 1}}<h3>{{.Text}}</h3>{{else if eq .Heading 2}}<h4>{{.Text}}</h4>{{else if eq .Heading 3}}<h5>{{.Text}}</h5>{{else}}{{.HTML}}{{end}}</div>
+  {{if $.CanWrite}}<div class="block-tools"><button class="v-icon" type="button" data-block-edit aria-label="Edit block {{.Position}}" title="Edit"><span aria-hidden="true">✎</span></button></div>
+  <form class="editor block" method="post" action="/app/canvases/{{$.ID}}/sections" data-block-editor>
     <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}">
     {{if .KnownKind}}<label>Kind<select name="type">{{range .Kinds}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label>{{else}}<input type="hidden" name="type" value="{{.Type}}"><p class="read-only">This block is {{.Type}} content; its kind is kept as you edit its text.</p>{{end}}
-    <label>Block {{.Position}} content<textarea name="body" maxlength="100000">{{.Text}}</textarea></label>
-    <div class="actions"><button type="submit" name="op" value="save">Save block {{.Position}}</button>{{if not .First}}<button type="submit" name="op" value="move_up">Move up</button>{{end}}{{if not .Last}}<button type="submit" name="op" value="move_down">Move down</button>{{end}}</div>
+    <div class="with-toolbar"><div class="format-bar" role="toolbar" aria-label="Formatting for block {{.Position}}"><button type="button" data-format="bold" aria-label="Bold" title="Bold (Ctrl+B)"><b>B</b></button><button type="button" data-format="italic" aria-label="Italic" title="Italic (Ctrl+I)"><i>I</i></button><button type="button" data-format="strike" aria-label="Strikethrough" title="Strikethrough"><s>S</s></button><button type="button" data-format="code" aria-label="Code" title="Code">&lt;/&gt;</button><button type="button" data-format="link" aria-label="Link" title="Link">🔗</button><span class="sep" aria-hidden="true"></span><button type="button" data-format="bullet" aria-label="Bulleted list" title="Bulleted list">•</button><button type="button" data-format="number" aria-label="Numbered list" title="Numbered list">1.</button><button type="button" data-format="check" aria-label="Checklist" title="Checklist">☑</button><button type="button" data-format="quote" aria-label="Quote" title="Quote">❝</button></div>
+    <label><span class="visually-hidden">Block {{.Position}} content</span><textarea name="body" maxlength="100000" aria-label="Block {{.Position}} content" data-block-text>{{.Text}}</textarea></label></div>
+    <div class="actions"><button type="submit" name="op" value="save">Save block {{.Position}}</button><button type="button" data-block-cancel>Cancel</button>{{if not .First}}<button type="submit" name="op" value="move_up">Move up</button>{{end}}{{if not .Last}}<button type="submit" name="op" value="move_down">Move down</button>{{end}}</div>
   </form>
   <details class="delete-block"><summary>Delete block {{.Position}}</summary><form method="post" action="/app/canvases/{{$.ID}}/sections"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="op" value="delete"><input type="hidden" name="section_id" value="{{.ID}}"><p class="read-only">Deleting a block removes its text for good; a comment left on it is kept and marked as being about a removed section.</p><button type="submit">Delete block {{.Position}}</button></form></details>{{end}}
 </section>{{end}}
@@ -3509,6 +3557,24 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 <p class="read-only">Restoring is an ordinary edit: the current content becomes a revision of its own, so restoring the wrong one can be undone.</p>
 </section>{{end}}
 {{if .CanDelete}}<form class="delete" method="post" action="/app/canvases/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Delete canvas</button></form>{{end}}</article></main>{{end}}`
+
+// canvasEditorScript is the canvas's in-place block editor: Edit (or a
+// double-click) turns a block into its markdown editor with a formatting
+// toolbar, Ctrl/Cmd+B and I format the selection, Ctrl/Cmd+Enter saves and
+// Escape cancels, restoring the text and returning focus to Edit. Without
+// script every block's editor is simply shown, as it always was.
+const canvasEditorScript = `<script>(function(){
+function sectionOf(node){return node&&node.closest?node.closest('.canvas-section'):null}
+function open(section){if(!section||!section.querySelector('[data-block-editor]'))return;Array.prototype.forEach.call(document.querySelectorAll('.canvas-section.editing'),function(other){if(other!==section)close(other,false)});var text=section.querySelector('[data-block-text]');if(text&&!text.hasAttribute('data-original'))text.setAttribute('data-original',text.value);section.classList.add('editing');if(text){text.focus();text.setSelectionRange(text.value.length,text.value.length)}}
+function close(section,restore){var text=section.querySelector('[data-block-text]');if(restore&&text&&text.hasAttribute('data-original'))text.value=text.getAttribute('data-original');section.classList.remove('editing');var edit=section.querySelector('[data-block-edit]');if(restore&&edit)edit.focus()}
+function wrap(text,before,after,placeholder){var start=text.selectionStart,end=text.selectionEnd,value=text.value,chosen=value.slice(start,end)||placeholder;text.value=value.slice(0,start)+before+chosen+after+value.slice(end);text.setSelectionRange(start+before.length,start+before.length+chosen.length);text.focus()}
+function prefix(text,marker){var start=text.selectionStart,end=text.selectionEnd,value=text.value;var lineStart=value.lastIndexOf('\n',start-1)+1;var block=value.slice(lineStart,end);var count=0;var lines=block.split('\n').map(function(line){count++;var mark=typeof marker==='function'?marker(count):marker;return line.indexOf(mark)===0?line.slice(mark.length):mark+line});var replaced=lines.join('\n');text.value=value.slice(0,lineStart)+replaced+value.slice(end);text.setSelectionRange(lineStart,lineStart+replaced.length);text.focus()}
+function format(text,kind){if(kind==='bold')wrap(text,'**','**','bold text');else if(kind==='italic')wrap(text,'_','_','italic text');else if(kind==='strike')wrap(text,'~~','~~','text');else if(kind==='code')wrap(text,'`+"`"+`','`+"`"+`','code');else if(kind==='link'){var address=window.prompt('Link address','https://');if(!address)return;wrap(text,'[','](' + address + ')','link text')}else if(kind==='bullet')prefix(text,'- ');else if(kind==='number')prefix(text,function(n){return n+'. '});else if(kind==='check')prefix(text,'- [ ] ');else if(kind==='quote')prefix(text,'> ')}
+document.addEventListener('click',function(event){var edit=event.target.closest('[data-block-edit]');if(edit){open(sectionOf(edit));return}var cancel=event.target.closest('[data-block-cancel]');if(cancel){close(sectionOf(cancel),true);return}var button=event.target.closest('[data-format]');if(button){var section=sectionOf(button);var text=section&&section.querySelector('[data-block-text]');if(text)format(text,button.getAttribute('data-format'))}});
+document.addEventListener('dblclick',function(event){var view=event.target.closest('[data-block-view]');if(view&&!event.target.closest('a'))open(sectionOf(view))});
+document.addEventListener('keydown',function(event){var text=event.target.closest?event.target.closest('[data-block-text]'):null;if(!text)return;var section=sectionOf(text);var primary=event.ctrlKey||event.metaKey;if(event.key==='Escape'){event.preventDefault();close(section,true)}else if(primary&&event.key==='Enter'){event.preventDefault();if(text.form.requestSubmit)text.form.requestSubmit(text.form.querySelector('button[value=save]'));else text.form.submit()}else if(primary&&(event.key==='b'||event.key==='B')){event.preventDefault();format(text,'bold')}else if(primary&&(event.key==='i'||event.key==='I')){event.preventDefault();format(text,'italic')}});
+var target=window.location.hash?document.querySelector(window.location.hash):null;if(target&&target.classList&&target.classList.contains('canvas-section'))target.scrollIntoView({block:'center'});
+})();</script>`
 
 var canvasTemplate = mustPage(canvasMarkup)
 
@@ -9945,7 +10011,7 @@ func pageCSRFToken(r *http.Request) (string, error) {
 // flatten it on save. Those sections render as stored and say they are not
 // editable, which is the difference between "this client cannot edit it" and
 // "this canvas cannot be edited".
-func canvasSections(value domain.Canvas) ([]canvasSectionView, bool) {
+func canvasSections(value domain.Canvas, names *userNames) ([]canvasSectionView, bool) {
 	var document struct {
 		Sections []domain.CanvasSection `json:"sections"`
 	}
@@ -9960,6 +10026,8 @@ func canvasSections(value domain.Canvas) ([]canvasSectionView, bool) {
 			// and text, so editing any block is lossless — there is no longer a
 			// class of block the editor renders read-only.
 			ID: section.ID, Type: string(section.Type), Text: section.Text,
+			HTML:      renderCanvasMarkdown(section.Text, names),
+			Heading:   canvasHeadingLevel(section.Type),
 			Position:  index + 1,
 			First:     index == 0,
 			Last:      index == len(document.Sections)-1,
@@ -9968,6 +10036,19 @@ func canvasSections(value domain.Canvas) ([]canvasSectionView, bool) {
 		})
 	}
 	return views, true
+}
+
+// canvasHeadingLevel is 1, 2 or 3 for a heading block and 0 otherwise.
+func canvasHeadingLevel(kind domain.CanvasSectionType) int {
+	switch kind {
+	case domain.CanvasSectionHeading1:
+		return 1
+	case domain.CanvasSectionHeading2:
+		return 2
+	case domain.CanvasSectionHeading3:
+		return 3
+	}
+	return 0
 }
 
 // canvasBody joins a canvas's blocks into one preview string for the directory
@@ -10044,7 +10125,7 @@ func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
 	}
 	owner := value.OwnerID == principal.UserID
 	canWrite := access.Access == domain.AccessWrite || access.Access == domain.AccessOwner
-	sections, readable := canvasSections(value)
+	sections, readable := canvasSections(value, h.newUserNames(r.Context(), principal))
 	canEdit := canWrite && principal.HasScope(auth.ScopeCanvasesWrite)
 	readOnlyReason := ""
 	if !readable {
@@ -10494,7 +10575,7 @@ func (h Handler) editCanvasSection(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusNotFound, "The canvas was not saved", "It no longer exists or you no longer have access.")
 		return
 	}
-	sections, readable := canvasSections(current)
+	sections, readable := canvasSections(current, nil)
 	if !readable {
 		h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "Its document could not be read. Reload it before editing.")
 		return
@@ -14023,7 +14104,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup, notificationsMarkup, rowLinkScript, profilePanelScript, liveFilterScript, listCellEditScript), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup, notificationsMarkup, rowLinkScript, profilePanelScript, liveFilterScript, listCellEditScript, canvasEditorScript), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:

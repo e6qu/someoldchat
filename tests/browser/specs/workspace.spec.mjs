@@ -2044,6 +2044,7 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   await expect(page.getByText('Canvas saved')).toBeVisible();
   // Each block carries its own editor, so the control names the block it saves.
   // A canvas created through the UI has exactly one block to start.
+  await page.getByRole('button', { name: 'Edit block 1' }).click();
   await page.getByLabel('Block 1 content').fill('One atomic revision');
   await page.getByRole('button', { name: 'Save block 1' }).click();
   await expect(page.getByText('Canvas saved')).toBeVisible();
@@ -3442,6 +3443,7 @@ test('[CANVAS-01 A11Y-01] a canvas keeps its history and an earlier revision can
   // A canvas created with content has one block, edited in place through its own
   // block editor. Its text is shown in the block body and mirrored in the editor
   // textarea, so it appears twice.
+  await page.getByRole('button', { name: 'Edit block 1' }).click();
   await page.getByLabel('Block 1 content').fill('the replacement body');
   await page.getByRole('button', { name: 'Save block 1' }).click();
   await expect(page.getByText('the replacement body')).toHaveCount(2);
@@ -3484,6 +3486,7 @@ test('[CANVAS-01 A11Y-01] a canvas section can be commented on and the comment o
   await expectNoSeriousAccessibilityViolations(page);
 
   // Rewriting the paragraph the comment was about leaves the comment in place.
+  await page.getByRole('button', { name: 'Edit block 1' }).click();
   await page.getByLabel('Block 1 content').fill('a rewrite');
   await page.getByRole('button', { name: 'Save block 1' }).click();
   await expect(page.locator('.comment').first()).toContainText('this paragraph is wrong');
