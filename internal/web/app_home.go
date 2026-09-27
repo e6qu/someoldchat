@@ -28,14 +28,12 @@ type workspaceAppsData struct {
 	// ExternalProviders are the accounts a member may connect for the selected
 	// app, shown on its About tab. Empty unless the app declares any.
 	ExternalProviders []domain.ExternalAuthProvider
+	Shell             shellView
 }
 
 const workspaceAppsMarkup = `{{define "title"}}{{if .Selected}}{{.Selected.Name}}{{else}}Apps{{end}} · {{.WorkspaceName}}{{end}}
-{{define "styles"}}<style>
-.apps-shell{min-height:100vh;display:grid;grid-template-rows:48px minmax(0,1fr)}
-.apps-topbar{display:flex;align-items:center;gap:14px;padding:0 16px;background:var(--accent);color:var(--on-accent)}
-.apps-topbar a{color:inherit;text-decoration:none;font-weight:800}.apps-topbar .theme-toggle{margin-left:auto}
-.apps-workspace{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:0}
+{{define "styles"}}` + shellStyle + `<style>
+.apps-workspace{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100%}
 .apps-sidebar{padding:16px 10px;background:linear-gradient(180deg,var(--accent),#3f1645);color:var(--on-accent);overflow:auto}
 .apps-sidebar h2{margin:0 10px 12px;font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:#e8cbe9}
 .installed-apps{display:grid;gap:3px;margin:0;padding:0;list-style:none}
@@ -69,8 +67,7 @@ const workspaceAppsMarkup = `{{define "title"}}{{if .Selected}}{{.Selected.Name}
 @media(max-width:720px){.apps-workspace{grid-template-columns:minmax(0,1fr)}.apps-sidebar{padding:10px}.apps-sidebar h2{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.installed-apps{display:flex;overflow:auto}.installed-app{min-width:180px}.developer-link{margin:10px}.apps-heading,.app-tabs{padding-left:14px;padding-right:14px}.directory{padding:16px}.app-home{width:calc(100% - 24px)}}
 </style>{{end}}
 {{define "content"}}
-<div class="apps-shell">
-  <header class="apps-topbar"><a href="/app?channel={{.Channel}}">← {{.WorkspaceName}}</a><span>Apps</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header>
+{{template "shell-open" .Shell}}
   <div class="apps-workspace">
     <aside class="apps-sidebar" aria-label="Installed apps"><h2>Apps</h2><ul class="installed-apps">{{range .Apps}}<li><a class="installed-app" href="/app/apps/{{.ID}}?channel={{$.Channel}}"{{if and $.Selected (eq $.Selected.ID .ID)}} aria-current="page"{{end}}><span class="app-avatar" aria-hidden="true">{{slice .Name 0 1}}</span><span><strong>{{.Name}}</strong><small>{{if .HomeTabEnabled}}Home{{else}}About{{end}}</small></span></a></li>{{else}}<li class="apps-empty">No apps are installed in this workspace.</li>{{end}}</ul><a class="developer-link" href="/app/developer/apps">Developer apps</a></aside>
     <main class="apps-main">
@@ -97,9 +94,9 @@ const workspaceAppsMarkup = `{{define "title"}}{{if .Selected}}{{.Selected.Name}
     {{else}}<header class="apps-heading"><div><h1>Apps</h1><p>Open an installed app’s Home tab or learn what it does.</p></div></header><section class="directory">{{range .Apps}}<a class="directory-card" href="/app/apps/{{.ID}}?channel={{$.Channel}}"><span class="app-avatar" aria-hidden="true">{{slice .Name 0 1}}</span><span><h2>{{.Name}}</h2><p>{{if .Description}}{{.Description}}{{else}}{{.BotDisplayName}}{{end}}</p></span></a>{{else}}<div class="home-empty"><h2>No apps installed</h2><p class="muted">Install an app through its OAuth flow to see it here.</p></div>{{end}}</section>{{end}}
     </main>
   </div>
-</div>
+{{template "shell-close" .Shell}}
 {{end}}
-{{define "scripts"}}` + appOptionsScript + viewInputScript + appHomeLiveScript + `{{end}}`
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + appOptionsScript + viewInputScript + appHomeLiveScript + `{{end}}`
 
 var workspaceAppsTemplate = mustPage(workspaceAppsMarkup)
 
@@ -163,6 +160,7 @@ func (h Handler) renderWorkspaceApps(w http.ResponseWriter, r *http.Request, pri
 		CanMessage: principal.HasScope(auth.ScopeChannelsManage), WorkspaceName: workspaceName,
 	}
 	if selectedID == "" {
+		data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationMore})
 		h.writeLivePage(w, head, workspaceAppsTemplate, data, http.StatusOK, "installed apps rendering unavailable")
 		return
 	}
@@ -228,6 +226,7 @@ func (h Handler) renderWorkspaceApps(w http.ResponseWriter, r *http.Request, pri
 	if r.URL.Query().Get("notice") == "action_sent" {
 		data.Notice = "The app action ran."
 	}
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationMore})
 	h.writeLivePage(w, head, workspaceAppsTemplate, data, http.StatusOK, "app home rendering unavailable")
 }
 

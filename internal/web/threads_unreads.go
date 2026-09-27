@@ -32,6 +32,8 @@ const (
 )
 
 type threadsData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell     shellView
 	Channel   string
 	CSRFToken string
 	Threads   []followedThreadView
@@ -52,6 +54,8 @@ type followedThreadView struct {
 }
 
 type unreadsData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell         shellView
 	Channel       string
 	CSRFToken     string
 	Conversations []unreadConversationView
@@ -124,6 +128,7 @@ func (h Handler) threadsPage(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	data.Empty = len(data.Threads) == 0
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationHome})
 	h.writeHTML(w, threadsTemplate, data, http.StatusOK, "Threads rendering unavailable")
 }
 
@@ -183,6 +188,7 @@ func (h Handler) unreadsPage(w http.ResponseWriter, r *http.Request) {
 		data.Conversations = append(data.Conversations, view)
 	}
 	data.Shown = len(data.Conversations)
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationHome})
 	h.writeHTML(w, unreadsTemplate, data, http.StatusOK, "Unreads rendering unavailable")
 }
 
@@ -236,8 +242,8 @@ func unreadPrefix(conversation domain.Conversation) string {
 var threadsTemplate = mustPage(threadsMarkup)
 
 const threadsMarkup = `{{define "title"}}Threads · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(900px,calc(100% - 32px));margin:28px auto 48px}.heading{display:grid;gap:5px;margin-bottom:17px}.heading h2,.heading p{margin:0}.heading p{color:var(--muted)}
 .thread-list{display:grid;gap:10px;margin:0;padding:0;list-style:none}
 .thread-item{display:grid;gap:9px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
@@ -246,10 +252,11 @@ const threadsMarkup = `{{define "title"}}Threads · SameOldChat{{end}}
 .thread-unread{border-radius:9px;background:var(--action);color:var(--on-strong);font-size:11px;font-weight:800;padding:2px 8px;min-height:20px;display:inline-flex;align-items:center}
 .thread-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .empty{padding:30px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}
-@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 20px,900px);margin-top:18px}}
+@media(max-width:600px){.layout{width:min(100% - 20px,900px);margin-top:18px}}
 </style>{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Threads</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
-<div class="heading"><h2>Threads</h2><p>Threads you follow, most recently replied first.</p></div>
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `{{end}}
+{{define "content"}}{{template "shell-open" .Shell}}<main class="layout">
+<div class="heading"><h1>Threads</h1><p>Threads you follow, most recently replied first.</p></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if .Empty}}<p class="empty">You are not following any threads yet. Replying in a thread, or being mentioned in one, starts following it.</p>
 {{else}}<ul class="thread-list" aria-label="Followed threads">{{range .Threads}}
@@ -262,13 +269,13 @@ const threadsMarkup = `{{define "title"}}Threads · SameOldChat{{end}}
     <p class="thread-text">{{.RootText}}</p>
   </li>{{end}}
 </ul>{{end}}
-</main>{{end}}`
+</main>{{template "shell-close" .Shell}}{{end}}`
 
 var unreadsTemplate = mustPage(unreadsMarkup)
 
 const unreadsMarkup = `{{define "title"}}Unreads · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(900px,calc(100% - 32px));margin:28px auto 48px}.heading{display:grid;gap:5px;margin-bottom:17px}.heading h2,.heading p{margin:0}.heading p{color:var(--muted)}
 .unread-group{margin:0 0 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
 .unread-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:13px 16px;border-bottom:1px solid var(--line)}
@@ -281,10 +288,11 @@ const unreadsMarkup = `{{define "title"}}Unreads · SameOldChat{{end}}
 .unread-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .unread-more{padding:10px 16px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
 .empty{padding:30px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}
-@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 20px,900px);margin-top:18px}.unread-head form{margin-left:0}}
+@media(max-width:600px){.layout{width:min(100% - 20px,900px);margin-top:18px}.unread-head form{margin-left:0}}
 </style>{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Unreads</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
-<div class="heading"><h2>Unreads</h2><p>{{if .Total}}{{.Total}} conversations have unread messages.{{else}}Everything is read.{{end}}</p></div>
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `{{end}}
+{{define "content"}}{{template "shell-open" .Shell}}<main class="layout">
+<div class="heading"><h1>Unreads</h1><p>{{if .Total}}{{.Total}} conversations have unread messages.{{else}}Everything is read.{{end}}</p></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if .Total}}<form method="post" action="/app/read/all?channel={{.Channel}}" style="margin:0 0 16px">
   <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
@@ -304,4 +312,4 @@ const unreadsMarkup = `{{define "title"}}Unreads · SameOldChat{{end}}
 </section>{{end}}
 {{else}}<p class="empty">Nothing unread. Everything in this workspace has been read.</p>{{end}}
 {{if .Truncated}}<p class="unread-more">Showing the first {{.Shown}} of {{.Total}} conversations with unread messages.</p>{{end}}
-</main>{{end}}`
+</main>{{template "shell-close" .Shell}}{{end}}`
