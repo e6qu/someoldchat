@@ -2076,6 +2076,8 @@ test('[CONV-02 NAV-04] channel creation is reachable and conversation shortcuts 
   const name = `browser-${Date.now()}`;
   await createChannel(page, name, { isPrivate: true });
   await expect(page.locator('.channel-name-text')).toHaveText(name);
+  // With room to spare, the header shows the whole name rather than an ellipsis.
+  expect(await page.locator('.channel-name-text').evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
   // A private channel carries a lock, not a #, in the header and the sidebar.
   await expect(page.locator('#conversation-name-button use').first()).toHaveAttribute('href', '#i-lock');
   await expect(page.locator('.side-row', { hasText: name }).locator('.side-icon use')).toHaveAttribute('href', '#i-lock');
