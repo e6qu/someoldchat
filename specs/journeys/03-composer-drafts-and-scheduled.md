@@ -20,7 +20,30 @@
    corresponding event, and is returned by Web API history.
 5. Empty, over-limit, disconnected, permission-changed, archived, rate-limited,
    duplicate, and server-rejected sends retain recoverable input and present a
-   specific non-500 result.
+   specific non-500 result. `Enter` on an empty composer does nothing. An
+   over-limit message shows how far over it is and cannot be sent until it is
+   shortened; it is never silently truncated. A send that fails in transit or
+   on a transient server failure stays in the conversation marked as not sent
+   with Retry and Delete, and a retry cannot post a second copy.
+6. The composer draws Slack's controls in Slack's order: a formatting bar above
+   the text (Bold, Italic, Strikethrough, Link, Ordered list, Bulleted list,
+   Blockquote, Code, Code block) that the "Aa" control shows and hides, and a
+   bottom row of attach (`+`), formatting, emoji, mention, video clip, audio
+   clip and shortcuts, ending in Send and a separate schedule chevron. The
+   `+` menu offers uploading from the computer, a canvas, a list, a workflow,
+   a text snippet and the shortcuts browser. "Shift + Return to add a new
+   line" is shown only while there is text to send, and the composer grows
+   with its content up to a maximum height.
+7. With a thread open, the conversation keeps its own composer and the thread
+   pane has a separate "Reply…" composer with an "Also send to #channel"
+   ("Also send as direct message" in a DM) choice; each keeps its own draft.
+8. `Up` in an empty composer opens the member's own most recent message for
+   editing.
+9. Mentioning a workspace member who is not in the channel is allowed; after
+   the message is sent Slack says the person is not in the channel and offers
+   to add them or do nothing. `@channel`, `@here` and `@everyone` are offered
+   with their descriptions, and using one in a large channel asks for
+   confirmation before notifying everyone.
 
 A channel may restrict who posts. Slack's manage-posting-permissions surface
 offers everyone, everyone except guests, admins only, and a named allowlist, and
@@ -50,9 +73,20 @@ and remain explicit differential requirements until implemented and captured.
 Formatting controls and keyboard shortcuts MUST produce Slack-compatible
 message markup and selection behavior. At minimum the current Slack mappings
 for bold (`Command/Control+B`), italic (`Command/Control+I`), strikethrough
-(`Command/Control+Shift+X`), link, ordered/bulleted list, block quote, and code
-must work where Slack supports them. The visible pressed/active state and
-accessible description follow the selection.
+(`Command/Control+Shift+X`), code (`Command/Control+Shift+C`), code block
+(`Command/Control+Alt+Shift+C`), link (`Command/Control+Shift+U`), ordered
+list (`Command/Control+Shift+7`), bulleted list (`Command/Control+Shift+8`)
+and block quote (`Command/Control+Shift+9`) must work where Slack supports
+them, and applying a format to text that already has it removes it. The
+visible pressed/active state and accessible description follow the selection.
+Link opens a dialog with the link's text (the selection) and address, and
+pasting an address over selected text makes that text a link.
+
+Slack's composer formats as the member types (WYSIWYG): formatted text,
+mentions and channels appear formatted rather than as markup, and the sent
+message carries Slack's markup and entity syntax. The "Format messages with
+markup" preference writes markup instead. Preferences also choose whether
+`Enter` sends or starts a new line; the help text follows the choice.
 
 Formatting MUST not inject unsafe HTML, corrupt Slack entity syntax, or move
 focus unexpectedly. Pasted rich text and plain text follow the member's Slack
@@ -64,10 +98,12 @@ Typing Slack's trigger characters opens a contextual, keyboard-operable
 suggestion list anchored to the caret:
 
 - `@` resolves visible members and user groups with identity-disambiguating
-  details;
+  details — avatar, name and display name; a workspace member outside the
+  conversation labelled "Not in channel", an app labelled as one — and
+  Slack's broadcast mentions with their descriptions;
 - `#` resolves channels the member may reference without leaking private
   channels;
-- `:` resolves standard and workspace custom emoji;
+- `:` followed by two characters resolves standard and workspace custom emoji;
 - `/` at the start of an otherwise empty composer opens the shortcuts/command
   browser described by `APP-05`.
 
@@ -167,8 +203,9 @@ service and MUST NOT be advertised as a Slack Web API method.
 
 ## SCHED-01 — Schedule a message
 
-The send-arrow menu exposes Slack's suggested times and a custom date/time
-picker in the member's time zone. The confirmation identifies the destination
+The send-arrow menu, headed "Schedule message", exposes Slack's suggested
+times ("Tomorrow at 9:00 AM", "Monday at 9:00 AM") and a "Custom time"
+date/time dialog in the member's time zone. The confirmation identifies the destination
 and exact local time. Slack's supported time window, per-channel quota,
 content/attachment restrictions, thread rules, permissions, and invalid-time
 errors are enforced by the backend and match `chat.scheduleMessage`.
@@ -229,6 +266,14 @@ outcomes are not HTTP 500 responses.
   test asserts the outbox does not grow; cross-profile qualification asserts
   memory and SQL agree on expiry, on renewal replacing rather than
   accumulating, and on a non-member seeing nothing.
+- Composer layout and behavior (2026-09-27): the rich editor serialises to the
+  same form field the no-JavaScript textarea is, so the server contract did
+  not change; both composers on a thread page, the broadcast checkbox,
+  suggestion anchoring, Up-to-edit, the not-sent outbox with an idempotent
+  retry, the non-member prompt and the broadcast confirmation are covered by
+  the browser suite. Slack's exact confirmation threshold for `@channel` and
+  `@here` is not published; this product asks when a channel has more than
+  six members and records the threshold as a live differential.
 - Browser: rich/plain composition, all suggestion types, keyboard formatting,
   pasted/dropped/selected file staging, permission-denied/cancelled/completed
   audio and video clip recording, draft switching/reload, all Drafts & sent
@@ -268,7 +313,7 @@ outcomes are not HTTP 500 responses.
 
 | Journey | Official source | Behavior established |
 | --- | --- | --- |
-| COMP-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack's composer sends text, formatting, files, emoji, mentions, and clips; recordings are at most five minutes and may carry an optional message. |
+| COMP-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack's composer sends text, formatting, files, emoji, mentions, and clips; recordings are at most five minutes and may carry an optional message; a message that fails to send can be retried or deleted. |
 | COMP-02 | [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages) | Slack publishes formatting controls, markup, and keyboard behavior. |
 | COMP-03 | [Create and edit user groups](https://slack.com/help/articles/212906697-Create-and-edit-user-groups) | A user group's unique handle notifies its members; the emoji and developer transport sources checked below establish the other completion representations. |
 | COMP-04 | [user_typing](https://docs.slack.dev/reference/events/user_typing/) | Slack publishes composition as an ephemeral RTM event addressed to channel members, with no Events API delivery and no retraction. |

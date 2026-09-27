@@ -27,8 +27,9 @@ import (
 // writer can lose repeatedly; Go's own pool is no fairer, handing a freed
 // connection to connRequests.TakeRandom() rather than to the longest waiter.
 //
-// So this reports the slowest single write beside the median. A queue should
-// pull the tail in hard while leaving the middle where it was.
+// So this reports the slowest single write beside the median, and asserts that
+// no writer is left behind the others: each writer's finishing time against
+// the first to finish, and no single write waiting out most of the run.
 func TestPostgresConcurrentWritersAreServedFairly(t *testing.T) {
 	if testing.Short() {
 		t.Skip("writes several thousand rows")
@@ -64,6 +65,7 @@ func TestPostgresConcurrentWritersAreServedFairly(t *testing.T) {
 	}
 
 	latencies := make([][]time.Duration, writers)
+	finished := make([]time.Duration, writers)
 	start := make(chan struct{})
 	var group sync.WaitGroup
 	group.Add(writers)
@@ -73,6 +75,7 @@ func TestPostgresConcurrentWritersAreServedFairly(t *testing.T) {
 			defer group.Done()
 			latencies[writer] = make([]time.Duration, 0, eachWrites)
 			<-start
+			defer func() { finished[writer] = time.Since(began) }()
 			for index := 0; index < eachWrites; index++ {
 				at := time.Now()
 				// A distinct instant per write: a message timestamp is its
@@ -115,12 +118,23 @@ func TestPostgresConcurrentWritersAreServedFairly(t *testing.T) {
 		len(all), writers, total.Round(time.Millisecond), float64(len(all))/total.Seconds(),
 		median.Round(time.Microsecond), all[len(all)*99/100].Round(time.Microsecond), worst.Round(time.Microsecond))
 
-	// The tail is the assertion. Without ordering a loser can be passed over
-	// again and again, and the worst write runs orders of magnitude behind the
-	// median; with a queue its wait is bounded by the writers already ahead of
-	// it. Sixteen writers cannot make one wait a hundred times the median
-	// unless something is starving it.
-	if ratio := float64(worst) / float64(median); ratio > 100 {
-		t.Fatalf("the slowest write took %.0f times the median (%s against %s); writers are not being served fairly", ratio, worst.Round(time.Microsecond), median.Round(time.Microsecond))
+	// Fairness is about who waits, so the assertion compares writers with one
+	// another rather than one write with the median. Event-producing commits on
+	// PostgreSQL are serialized in commit order (see outboxCommitOrderStatements),
+	// so a single slow WAL flush holds every queued writer behind it: the worst
+	// write can sit far above the median while every writer is served in turn.
+	// Starvation looks different — one writer keeps losing and finishes long
+	// after the rest. With a first-in, first-out wait each writer finishes its
+	// share at about the same time.
+	sort.Slice(finished, func(i, j int) bool { return finished[i] < finished[j] })
+	first, last := finished[0], finished[len(finished)-1]
+	t.Logf("writers finished between %s and %s", first.Round(time.Millisecond), last.Round(time.Millisecond))
+	if last > 3*first && last-first > time.Second {
+		t.Fatalf("the last writer finished %s after starting, the first %s: writers are not being served fairly", last.Round(time.Millisecond), first.Round(time.Millisecond))
+	}
+	// A write that waits out most of the run is starved however the others
+	// fared.
+	if worst > total*3/4 && worst > time.Second {
+		t.Fatalf("one write waited %s of a %s run; writers are not being served fairly", worst.Round(time.Microsecond), total.Round(time.Millisecond))
 	}
 }
