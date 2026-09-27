@@ -254,7 +254,7 @@ func TestSlackMrkdwnAndRichTextRenderFormattingWithoutTrustingAppHTML(t *testing
 	mrkdwn := string(blocks[0].HTML)
 	if !strings.Contains(mrkdwn, "<strong>Ready</strong>") ||
 		!strings.Contains(mrkdwn, `href="https://example.com/build"`) ||
-		!strings.Contains(mrkdwn, `<span class="slack-mention">@U123</span>`) {
+		!strings.Contains(mrkdwn, `<a class="slack-mention" href="/app/members?q=U123" data-user-id="U123">@U123</a>`) {
 		t.Fatalf("mrkdwn=%q", mrkdwn)
 	}
 	rich := string(blocks[1].HTML)
@@ -273,7 +273,7 @@ func TestSlackMrkdwnAndRichTextRenderFormattingWithoutTrustingAppHTML(t *testing
 func TestTopLevelMessageTextRendersSlackMarkupSafely(t *testing.T) {
 	content := newRichMessageContent(domain.Message{Text: `*Ready* <@U1|@Ada> <script>alert(1)</script>`})
 	rendered := string(content.Text)
-	if !strings.Contains(rendered, "<strong>Ready</strong>") || !strings.Contains(rendered, `<span class="slack-mention">@Ada</span>`) {
+	if !strings.Contains(rendered, "<strong>Ready</strong>") || !strings.Contains(rendered, `data-user-id="U1">@Ada</a>`) {
 		t.Fatalf("rendered=%q", rendered)
 	}
 	if strings.Contains(rendered, "<script>") {

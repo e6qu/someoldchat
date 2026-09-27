@@ -78,7 +78,7 @@ const composerPartial = `{{define "composer"}}  {{if .CanUpload}}<form class="up
           </div>
         </details>
         <button class="composer-tool" type="button" data-format-toggle aria-pressed="false" aria-controls="{{.IDPrefix}}composer-format" aria-label="Show formatting" data-tip="Show formatting" hidden>` + composerIconFormat + `</button>
-        <button class="composer-tool" type="button" data-open-emoji-picker data-emoji-target="composer" aria-label="Emoji" aria-haspopup="dialog" aria-controls="emoji-picker-dialog" data-tip="Emoji">` + composerIconEmoji + `</button>
+        <button class="composer-tool" type="button" data-open-emoji-picker data-emoji-target="composer" aria-label="Emoji" aria-haspopup="dialog" aria-controls="emoji-picker" data-tip="Emoji">` + composerIconEmoji + `</button>
         <button class="composer-tool" type="button" data-composer-action="mention" aria-label="Mention someone" data-tip="Mention someone" hidden>` + composerIconMention + `</button>
         {{if .CanUpload}}<span class="composer-separator" aria-hidden="true"></span>
         <button class="composer-tool" type="button" data-record-clip="video" aria-label="Record video clip" aria-haspopup="dialog" aria-controls="clip-recorder" data-tip="Record video clip">` + composerIconVideo + `</button>
@@ -176,7 +176,7 @@ const composerStyle = `<style>
 .composer-wrap{grid-area:composer;padding:6px 20px 4px;background:var(--panel-strong);min-width:0}
 .thread:has(.thread-composer-wrap){display:flex;flex-direction:column;overflow:hidden}
 .thread:has(.thread-composer-wrap)>#thread-messages{flex:1 1 auto;min-height:0;overflow:auto}
-.thread-composer-wrap{grid-area:auto;flex:0 0 auto;padding:8px 0 0;background:var(--panel)}
+.thread-composer-wrap{grid-area:auto;flex:0 0 auto;padding:8px 16px 12px;background:var(--panel)}
 .composer{position:relative;border:1px solid var(--field-line);border-radius:9px;background:var(--panel-strong);padding:0;min-width:0}
 .composer:focus-within{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
 .composer.is-error{border-color:var(--danger)}
@@ -284,10 +284,9 @@ const composerStyle = `<style>
 .composer-preferences legend{font-weight:800;margin-bottom:6px}
 .composer-preferences label{display:flex;align-items:center;gap:8px}
 .upload-form{display:none}
-.message-quote{margin:2px 0;padding-left:10px;border-left:4px solid var(--line);color:inherit}
 @media(max-width:800px){
 .composer-wrap{padding:4px 8px 2px}
-.thread-composer-wrap{padding:8px 0 0}
+.thread-composer-wrap{padding:8px 12px 8px}
 .composer-hint{display:none}
 .composer-toolbar .composer-separator{display:none}
 .composer-tool{width:32px;height:32px}
