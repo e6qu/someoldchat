@@ -282,7 +282,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
 </form>{{end}}
 
 {{define "preferences-panels"}}<div class="preferences-layout">
-  <div class="preferences-tabs" role="tablist" aria-label="Preference sections" aria-orientation="vertical">
+  <div class="preferences-tabs" role="tablist" data-shell-tabs aria-label="Preference sections" aria-orientation="vertical">
     <button type="button" role="tab" id="pref-tab-notifications" aria-controls="pref-notifications" aria-selected="true">{{icon "activity"}}<span>Notifications</span></button>
     <button type="button" role="tab" id="pref-tab-home" aria-controls="pref-home" aria-selected="false" tabindex="-1">{{icon "home"}}<span>Home</span></button>
     <button type="button" role="tab" id="pref-tab-appearance" aria-controls="pref-appearance" aria-selected="false" tabindex="-1">{{icon "status"}}<span>Appearance</span></button>

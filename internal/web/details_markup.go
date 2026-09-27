@@ -11,7 +11,7 @@ const conversationDetailsPartial = `{{define "conversation-details"}}<dialog cla
     <a class="dialog-close conversation-details-close" href="{{.Details.CloseURL}}" data-dialog-close aria-label="Close conversation details">{{icon "close"}}</a>
   </div>
   <p class="dialog-note details-type">{{.Details.Type}}{{if .Details.Archived}} · Archived{{end}}</p>
-  <div class="details-tabs" role="tablist" aria-label="Conversation details">
+  <div class="details-tabs" role="tablist" data-shell-tabs aria-label="Conversation details">
     <a role="tab" id="details-tab-about" data-tab="about" href="{{.Details.TabURL "about"}}" aria-controls="details-about" {{if eq .Details.InitialTab "about"}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>About</a>
     <a role="tab" id="details-tab-members" data-tab="members" href="{{.Details.TabURL "members"}}" aria-controls="details-members" {{if eq .Details.InitialTab "members"}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Members {{len .Details.Members}}</a>
     {{if .Details.IsChannel}}<a role="tab" id="details-tab-integrations" data-tab="integrations" href="{{.Details.TabURL "integrations"}}" aria-controls="details-integrations" {{if eq .Details.InitialTab "integrations"}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Integrations</a>{{end}}
