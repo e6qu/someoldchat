@@ -2247,7 +2247,7 @@ const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox
 {{end}}`
 
 var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
-{{define "styles"}}` + pageStyle + workspaceRefinements + composerStyle + `<style>` + profilePanelStyle + `
+{{define "styles"}}` + pageStyle + workspaceRefinements + composerStyle + `<style>` + viewControlRules + profilePanelStyle + `
 .message-head a.author{color:var(--text);text-decoration:none}.message-head a.author:hover{text-decoration:underline}</style>{{end}}
 {{define "scripts"}}` + progressiveEnhancementScript + composerScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + rowLinkScript + profilePanelScript + `{{end}}
 {{define "content"}}

@@ -45,15 +45,7 @@ const viewStyle = `<style>
 .v-tabs a:hover{color:var(--text)}
 .v-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}
 .v-count{display:inline-grid;place-items:center;min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:var(--hover);color:var(--muted);font-size:11px;font-weight:800}
-.v-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;padding:0 12px;border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);font:inherit;font-size:14px;font-weight:700;text-decoration:none;cursor:pointer;white-space:nowrap}
-.v-btn:hover{background:var(--hover)}
-.v-btn.primary{border-color:var(--ok);background:var(--ok);color:var(--on-strong)}
-.v-btn.primary:hover{filter:brightness(1.08)}
-.v-btn.danger{border-color:var(--danger);color:var(--danger)}
-.v-btn.quiet{border-color:transparent;background:transparent;color:var(--muted)}
-.v-btn.quiet:hover{background:var(--hover);color:var(--text)}
-.v-icon{display:inline-grid;place-items:center;width:32px;height:32px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);font:inherit;font-size:16px;line-height:1;text-decoration:none;cursor:pointer}
-.v-icon:hover,.v-icon[aria-expanded=true]{background:var(--hover);color:var(--text)}
+` + viewControlRules + `
 .v-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
 .v-chip{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border:1px solid var(--field-line);border-radius:15px;background:var(--panel-strong);color:var(--text);font:inherit;font-size:13px;font-weight:700;text-decoration:none;cursor:pointer;white-space:nowrap}
 .v-chip:hover{background:var(--hover)}
@@ -92,20 +84,6 @@ const viewStyle = `<style>
 .v-avatar.glyph{background:var(--hover);color:var(--text);font-size:18px;text-transform:none}
 .v-avatar-badge{position:absolute;right:-4px;bottom:-4px;display:grid;place-items:center;width:18px;height:18px;border:2px solid var(--panel-strong);border-radius:50%;background:var(--panel-strong);font-size:11px}
 .v-avatar-wrap{position:relative;width:36px;height:36px}
-.v-badge{display:inline-flex;align-items:center;padding:0 6px;border-radius:4px;background:var(--hover);color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;vertical-align:middle}
-.v-presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;vertical-align:middle}
-.v-presence.active{border-color:var(--ok);background:var(--ok)}
-.v-menu{position:relative;display:inline-block}
-.v-menu>summary{list-style:none}
-.v-menu>summary::-webkit-details-marker{display:none}
-.v-menu-list{position:absolute;z-index:35;right:0;top:calc(100% + 4px);display:grid;min-width:200px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow)}
-.v-menu-list.up{top:auto;bottom:calc(100% + 4px)}
-.v-menu-list>*,.v-menu-list form>button{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:0 10px;border:0;border-radius:5px;background:transparent;color:var(--text);font:inherit;font-size:14px;text-align:left;text-decoration:none;cursor:pointer}
-.v-menu-list form{margin:0;padding:0}
-.v-menu-list>*:hover,.v-menu-list form>button:hover,.v-menu-list>*:focus-visible{background:var(--action);color:var(--on-strong)}
-.v-menu-list hr{height:1px;min-height:0;margin:4px 0;padding:0;background:var(--line)}
-.v-menu-list .danger{color:var(--danger)}
-.v-menu-label{padding:4px 10px;color:var(--muted);font-size:12px;font-weight:800}
 .v-empty{margin:0;padding:40px 20px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}
 .v-empty strong{display:block;margin-bottom:4px;color:var(--text);font-size:16px}
 .v-field{display:grid;gap:5px;color:var(--muted);font-size:12px;font-weight:700}
@@ -114,7 +92,6 @@ const viewStyle = `<style>
 .v-search>span[aria-hidden]{color:var(--muted);font-size:18px;line-height:1}
 .v-search input{flex:1 1 auto;min-width:0;min-height:36px;border:0;outline:0;background:transparent;color:var(--text);font:inherit}
 .v-search:focus-within{box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 35%,transparent);border-color:var(--focus)}
-.v-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 .v-text p{margin:0}.v-text p+p{margin-top:4px}.v-text code{padding:1px 4px;border-radius:4px;background:var(--hover);font-size:13px}.v-text pre{margin:4px 0;padding:8px;border-radius:6px;background:var(--hover);white-space:pre-wrap}.v-text blockquote{margin:2px 0;padding-left:10px;border-left:3px solid var(--line)}.v-text mark{background:var(--mark-bg);color:inherit}
 @media(max-width:650px){.v-page{width:calc(100% - 20px);margin-top:12px}.v-row{grid-template-columns:auto minmax(0,1fr);padding:11px 12px}.v-row-side{grid-column:2;flex-direction:row;align-items:center;justify-content:space-between}.v-head h2{font-size:20px}}
 ` + profilePanelStyle + `</style>`
@@ -173,6 +150,36 @@ document.addEventListener('input',function(event){var form=event.target.form;if(
 document.addEventListener('change',function(event){var form=event.target.form;if(!form||!form.hasAttribute('data-live-filter')||typed(event.target))return;run(form)});
 document.addEventListener('submit',function(event){var form=event.target;if(!form.hasAttribute||!form.hasAttribute('data-live-filter'))return;event.preventDefault();run(form)});
 })();</script>`
+
+// viewControlRules are the buttons, icon buttons, badges, presence dots,
+// menus and screen-reader text every view and the profile panel draw with.
+// The panel also opens over the conversation page, which does not carry
+// viewStyle, so they are one block both stylesheets include rather than rules
+// the panel silently lacked there.
+const viewControlRules = `.v-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;padding:0 12px;border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);font:inherit;font-size:14px;font-weight:700;text-decoration:none;cursor:pointer;white-space:nowrap}
+.v-btn:hover{background:var(--hover)}
+.v-btn.primary{border-color:var(--ok);background:var(--ok);color:var(--on-strong)}
+.v-btn.primary:hover{filter:brightness(1.08)}
+.v-btn.danger{border-color:var(--danger);color:var(--danger)}
+.v-btn.quiet{border-color:transparent;background:transparent;color:var(--muted)}
+.v-btn.quiet:hover{background:var(--hover);color:var(--text)}
+.v-icon{display:inline-grid;place-items:center;width:32px;height:32px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);font:inherit;font-size:16px;line-height:1;text-decoration:none;cursor:pointer}
+.v-icon:hover,.v-icon[aria-expanded=true]{background:var(--hover);color:var(--text)}
+.v-badge{display:inline-flex;align-items:center;padding:0 6px;border-radius:4px;background:var(--hover);color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;vertical-align:middle}
+.v-presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;vertical-align:middle}
+.v-presence.active{border-color:var(--ok);background:var(--ok)}
+.v-menu{position:relative;display:inline-block}
+.v-menu>summary{list-style:none}
+.v-menu>summary::-webkit-details-marker{display:none}
+.v-menu-list{position:absolute;z-index:35;right:0;top:calc(100% + 4px);display:grid;min-width:200px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.v-menu-list.up{top:auto;bottom:calc(100% + 4px)}
+.v-menu-list>*,.v-menu-list form>button{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:0 10px;border:0;border-radius:5px;background:transparent;color:var(--text);font:inherit;font-size:14px;text-align:left;text-decoration:none;cursor:pointer}
+.v-menu-list form{margin:0;padding:0}
+.v-menu-list>*:hover,.v-menu-list form>button:hover,.v-menu-list>*:focus-visible{background:var(--action);color:var(--on-strong)}
+.v-menu-list hr{height:1px;min-height:0;margin:4px 0;padding:0;background:var(--line)}
+.v-menu-list .danger{color:var(--danger)}
+.v-menu-label{padding:4px 10px;color:var(--muted);font-size:12px;font-weight:800}
+.v-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}`
 
 // profilePanelStyle is the member profile panel's own stylesheet. It is part
 // of viewStyle, and the workspace page includes it on its own, because the
