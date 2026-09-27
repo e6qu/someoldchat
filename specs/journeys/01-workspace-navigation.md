@@ -16,6 +16,17 @@ navigation controls. Opening or closing navigation moves focus predictably,
 prevents background interaction while modal, and does not reset the open
 conversation.
 
+Every destination is drawn inside one frame, as Slack's client is: a top bar
+with history controls, search and Help; a left rail with the workspace menu,
+Home, DMs, Activity, Later and More (Files, Canvases, Lists, Workflows, People,
+Apps), a Create button (Message, Channel, Canvas, List, Huddle, Workflow) and
+the member's avatar menu; and the destination beside it. Leaving the
+conversation for a secondary destination keeps the conversation in the rail's
+Home link, so returning never drops it. The workspace menu carries Tools &
+settings (workspace settings for an administrator, developer apps) and sign
+out; the avatar menu carries status, away, pausing notifications, profile,
+Preferences and sign out.
+
 ## NAV-02 — Use Slack's global keyboard navigation
 
 Outside conflicting text-entry contexts, the client MUST implement Slack's
@@ -36,6 +47,13 @@ documented platform and surface mapping:
 | Mark this conversation read | `Escape` | `Escape` | applies outside a text field, so `Escape` still dismisses the composer's suggestions, a dialog, or the navigation drawer |
 | Mark every conversation read | `Shift+Escape` | `Shift+Escape` | applies anywhere, including the composer: `Shift+Escape` means nothing else in a text field |
 | Attach a file | `Command+U` | `Control+U` | none |
+| Browse channels | `Command+Shift+L` | `Control+Shift+L` | none |
+| People | `Command+Shift+E` | `Control+Shift+E` | none |
+| New message | `Command+N` | `Control+N` | browsers reserve `Control+N` for a new window, so on the web the compose button beside the workspace name and the Create menu are the reliable entry points |
+| Set your status | `Command+Shift+Y` | `Control+Shift+Y` | none |
+| Show or hide the sidebar | `Command+Shift+D` | `Control+Shift+D` | none |
+| Show or hide the right pane | `Command+.` | `Control+.` | none |
+| Preferences | `Command+,` | `Control+,` | none |
 | Keyboard shortcuts | `Command+/` | `Control+/` | none |
 
 The client MUST also publish the layer it implements. Slack opens a shortcut
@@ -60,10 +78,29 @@ conversation type and relevant context, support keyboard selection, and never
 reveal a private conversation the member cannot discover. Choosing a result
 navigates once and restores the conversation reading position where Slack does.
 
+The query field is a combobox over a listbox: the highlighted result is its
+active descendant, each result names its type (channel, private channel,
+direct message, group DM, app), and a query that matches nothing says so in a
+live region rather than showing an empty list. With nothing typed, the
+conversations most recently opened lead, excluding the one being read.
+
 ## NAV-04 — Move through sidebar conversations
 
 Previous/next-conversation shortcuts move through the same visible sidebar
-ordering the member sees. Muted, unread, closed-DM, custom-section, and
+ordering the member sees.
+
+The sidebar lists the conversations the member belongs to: Starred first,
+then custom sections, Channels, Direct messages and Apps. A public channel the
+member has not joined is reached through Browse channels, not listed. Rows are
+alphabetical by default, and each section's menu sorts it alphabetically, by
+priority or (for direct messages) by most recent activity, and shows all
+conversations, unreads only or mentions only. An unread conversation is bold;
+a count badge appears only for mentions in a channel and for every unread
+message in a direct message; a muted conversation is greyed and never bold.
+A private channel carries a lock rather than a `#`, and a self-DM is named
+"<name> (you)". Each row's menu opens details, copies its name or link, stars,
+mutes, changes notifications, moves it to a section and leaves it; dragging a
+row onto a section moves it there as well. Muted, unread, closed-DM, custom-section, and
 collapsed-section behavior MUST match a current Slack observation. The
 navigation MUST not submit a composer, lose a draft, or select hidden DOM
 leftovers.
@@ -98,6 +135,11 @@ authentication surfaces; follows Slack's system-theme behavior where selected;
 persists at the same scope as Slack; and preserves contrast, focus, charts,
 syntax, emoji, files, and app-rendered content. Changing appearance MUST not
 reload or discard in-progress work.
+
+Appearance is chosen in Preferences (`Command/Control+,`, or the avatar menu):
+Light, Dark, or the operating system's setting. Here the choice, like the
+other Preferences, is kept per browser rather than per account; that
+difference is recorded in the product gap audit.
 
 ## NAV-07 — Review the threads you follow
 

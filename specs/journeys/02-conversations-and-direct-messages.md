@@ -8,6 +8,12 @@ and join when policy permits. Joining durably adds membership before the
 channel becomes writable. Private, archived, externally shared, full,
 restricted, and approval-gated channels have distinct labels and outcomes.
 
+Browse channels opens from the sidebar's Add channels menu or
+`Command/Control+Shift+L`. It searches by name, filters by type (public,
+private, archived), sorts by name, member count or age, can hide channels
+already joined, and marks joined channels. Viewing a channel before joining
+shows a preview with a Join button.
+
 Empty search results MUST not look like an empty workspace. A channel that
 becomes unavailable between discovery and join produces a handled result and
 does not leave a phantom sidebar item.
@@ -30,11 +36,21 @@ default-channel policy, and concurrent creation are enforced by the backend.
 The committed channel opens exactly once and appears in other clients through
 the corresponding API/event projection.
 
+The dialog is stepped as Slack's is: Name, then Visibility, then Add people,
+with Skip for now. A refusal such as a duplicate name is shown in the dialog
+with the entered name kept.
+
 ## CONV-03 — Read and manage channel details
 
 The channel heading opens details containing at least About, members, settings,
 integrations/bookmarks where available, and the correct public/private/shared/
-archived state. Authorized members can edit topic, description/purpose, and
+archived state. Details is a modal dialog with About, Members, Integrations and
+Settings tabs; it restores focus to its opener on Escape. Each tab has its own
+address, so the dialog works without script, and a change made from a tab
+(inviting or removing a member, changing visibility, archiving, retention,
+sharing) reopens it on that tab. The header beside the name carries the
+member face pile, the huddle menu and a More actions menu, above Messages,
+Canvas and Pins tabs and the channel's bookmarks. Authorized members can edit topic, description/purpose, and
 name; invite or remove members; manage posting/notification settings; and copy
 the channel identifier/link. Unauthorized controls are absent or disabled with
 an explanation, while direct backend requests remain denied.
