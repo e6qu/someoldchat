@@ -86,8 +86,9 @@ details[open]>.menu-list{display:grid}
 .section-toggle[aria-expanded=true] .icon{transform:rotate(90deg)}
 .section-toggle span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .section-collapse{flex:1 1 auto;min-width:0;display:flex;margin:0}
-.side-section-head .menu>summary,.side-row .menu>summary{display:grid;place-items:center;width:26px;height:26px;border-radius:6px;color:var(--chrome-muted);cursor:pointer;visibility:hidden}
-.side-section-head:hover .menu>summary,.side-section-head:focus-within .menu>summary,.side-section-head .menu[open]>summary,.side-row:hover .menu>summary,.side-row:focus-within .menu>summary,.side-row .menu[open]>summary{visibility:visible}
+.side-section-head .menu>summary,.side-row .menu>summary{display:grid;place-items:center;width:26px;height:26px;border-radius:6px;color:var(--chrome-muted);cursor:pointer;opacity:0}
+.side-section-head:hover .menu>summary,.side-section-head:focus-within .menu>summary,.side-section-head .menu[open]>summary,.side-row:hover .menu>summary,.side-row:focus-within .menu>summary,.side-row .menu[open]>summary{opacity:1}
+@media(hover:none){.side-section-head .menu>summary,.side-row .menu>summary{opacity:1}}
 .side-section-head .menu>summary:hover,.side-row .menu>summary:hover{background:#ffffff26;color:var(--on-accent)}
 .side-section-head .menu-list,.side-row .menu-list{left:auto;right:4px;top:calc(100% + 2px)}
 .side-row{position:relative;display:flex;align-items:center;margin:0 8px;border-radius:6px}

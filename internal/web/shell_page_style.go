@@ -74,8 +74,8 @@ const conversationShellStyle = `<style>
 .bookmarks-bar a span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bookmarks-bar a .icon{width:14px;height:14px;color:var(--muted)}
 .bookmarks-bar form{display:flex;margin:0}
-.bookmarks-bar button{display:grid;place-items:center;width:20px;height:20px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;visibility:hidden}
-.bookmarks-bar li:hover button,.bookmarks-bar li:focus-within button{visibility:visible}
+.bookmarks-bar button{display:grid;place-items:center;width:20px;height:20px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;opacity:0}
+.bookmarks-bar li:hover button,.bookmarks-bar li:focus-within button{opacity:1}
 .bookmarks-bar button .icon{width:12px;height:12px}
 .channel-notices{display:grid;gap:6px;padding:0 20px}
 .channel-notices:has(.notice,.action-feedback:not([hidden])){padding:0 20px 8px}
@@ -132,8 +132,9 @@ const conversationShellStyle = `<style>
 .conversation-member-avatar .presence-dot.auto{display:none}
 .conversation-member-name{flex:1 1 auto;min-width:0}
 .member-menu{margin-left:auto}
-.member-menu>summary{display:grid;place-items:center;width:28px;height:28px;border-radius:6px;color:var(--muted);cursor:pointer;visibility:hidden}
-.conversation-member:hover .member-menu>summary,.conversation-member:focus-within .member-menu>summary,.member-menu[open]>summary{visibility:visible}
+.member-menu>summary{display:grid;place-items:center;width:28px;height:28px;border-radius:6px;color:var(--muted);cursor:pointer;opacity:0}
+.conversation-member:hover .member-menu>summary,.conversation-member:focus-within .member-menu>summary,.member-menu[open]>summary{opacity:1}
+@media(hover:none){.bookmarks-bar button,.member-menu>summary{opacity:1}}
 .details-apps{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
 .details-edit-dialog textarea,.details-edit textarea{min-height:90px;resize:vertical}
 @media(max-width:800px){

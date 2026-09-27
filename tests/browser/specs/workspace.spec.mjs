@@ -2160,6 +2160,162 @@ test('[NAV-06] theme choice persists across workspace pages', async ({ page, con
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 });
 
+// Slack's switcher is a combobox over a listbox: the typed text filters, the
+// highlighted option is the active descendant, an empty result says so, and
+// with nothing typed the conversations just visited lead.
+test('[NAV-03 A11Y-01] Jump to a conversation filters as a combobox, says when nothing matches, and leads with recents', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const name = `jump-${Date.now()}`;
+  await createChannel(page, name);
+  await expect(page.locator('.channel-name-text')).toHaveText(name);
+  const created = page.url();
+  await page.goto(`/app?channel=${CHANNEL}`);
+
+  const { primary } = await slackModifiers(page);
+  await page.locator('#timeline').focus();
+  await page.keyboard.press(`${primary}+k`);
+  const switcher = page.getByRole('dialog', { name: 'Jump to a conversation' });
+  const query = switcher.getByRole('combobox', { name: 'Jump to a conversation' });
+  await expect(query).toBeFocused();
+  await expect(switcher.locator('#conversation-switcher-group')).toHaveText('Recent');
+  await expect(switcher.getByRole('option').first()).toContainText(name);
+
+  await query.fill('no-such-conversation-anywhere');
+  await expect(switcher.getByRole('status')).toHaveText('No results for “no-such-conversation-anywhere”');
+  await expect(query).toHaveAttribute('aria-expanded', 'false');
+
+  await query.fill(name);
+  const option = switcher.getByRole('option', { name: new RegExp(name) });
+  await expect(option).toHaveAttribute('aria-selected', 'true');
+  await expect(option).toContainText('Channel');
+  await expect(query).toHaveAttribute('aria-activedescendant', (await option.getAttribute('id')) || '');
+  await expectNoSeriousAccessibilityViolations(page);
+  await query.press('Enter');
+  await expect(page).toHaveURL(created);
+});
+
+// The sidebar lists the channels the member belongs to; the rest are found in
+// Browse channels, which previews and joins them.
+test('[CONV-01 NAV-01 A11Y-01] the sidebar lists joined channels and Browse channels finds and joins the rest', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const name = `browse-${Date.now()}`;
+  await createChannel(page, name);
+  await expect(page.locator('.channel-name-text')).toHaveText(name);
+  await (await openMenu(page, 'More actions for this conversation')).getByRole('menuitem', { name: 'Leave channel' }).click();
+  await expect(page.getByText(`You are viewing #${name}`, { exact: true })).toBeVisible();
+  await page.goto(`/app?channel=${CHANNEL}`);
+  await expect(page.locator('.side-row', { hasText: name })).toHaveCount(0);
+
+  const { primary } = await slackModifiers(page);
+  await page.locator('#timeline').focus();
+  await page.keyboard.press(`${primary}+Shift+L`);
+  await expect(page).toHaveURL(/\/app\/channels/);
+  await expect(page.getByRole('heading', { name: 'Channels', level: 1 })).toBeVisible();
+  await page.getByRole('searchbox', { name: 'Search for channels' }).fill(name);
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByRole('status')).toHaveText('1 result');
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.getByRole('button', { name: `Join ${name}` }).click();
+  await expect(page.locator('.channel-name-text')).toHaveText(name);
+  await expect(page.locator('.side-row', { hasText: name })).toHaveCount(1);
+});
+
+// Starring moves a conversation into Starred; muting greys it and says so to
+// assistive technology. Both are on the row's own menu, as in Slack.
+test('[NAV-04 NOTIFY-02] a sidebar row is starred and muted from its own menu', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const name = `star-${Date.now()}`;
+  await createChannel(page, name);
+  await expect(page.locator('.channel-name-text')).toHaveText(name);
+
+  const row = () => page.locator('.side-row', { hasText: name });
+  await row().hover();
+  await (await openMenu(page, `Options for ${name}`, row())).getByRole('menuitem', { name: 'Star channel' }).click();
+  await expect(page.getByRole('navigation', { name: 'Starred' }).locator('.side-row', { hasText: name })).toBeVisible();
+
+  await row().hover();
+  await (await openMenu(page, `Options for ${name}`, row())).getByRole('menuitem', { name: 'Mute channel' }).click();
+  await expect(row().locator('.side-link')).toHaveClass(/is-muted/);
+  await expect(row().locator('.side-link')).toHaveAttribute('aria-label', /muted$/);
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await row().hover();
+  await (await openMenu(page, `Options for ${name}`, row())).getByRole('menuitem', { name: 'Unmute channel' }).click();
+  await expect(row().locator('.side-link')).not.toHaveClass(/is-muted/);
+  await row().hover();
+  await (await openMenu(page, `Options for ${name}`, row())).getByRole('menuitem', { name: 'Unstar channel' }).click();
+  await expect(page.getByRole('navigation', { name: 'Starred' })).toHaveCount(0);
+});
+
+// The status dialog opens from the avatar menu with Slack's suggestions; a
+// suggestion fills the fields and the clearing time, and the status is shown
+// back on the menu.
+test('[STATUS-01 STATUS-02 A11Y-01] the avatar menu sets a suggested status and clears it', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await page.locator('.rail-avatar > summary').click();
+  await page.locator('.rail-avatar').getByRole('menuitem', { name: /status/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Set a status' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: /In a meeting/ }).click();
+  await expect(dialog.getByRole('textbox', { name: 'What’s your status?' })).toHaveValue('In a meeting');
+  await expect(dialog.getByRole('combobox', { name: 'Clear after' })).toHaveValue('60');
+  await expectNoSeriousAccessibilityViolations(page);
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toBeHidden();
+
+  await page.locator('.rail-avatar > summary').click();
+  await expect(page.locator('.rail-avatar').getByRole('menuitem', { name: /In a meeting/ })).toBeVisible();
+  await page.locator('.rail-avatar').getByRole('menuitem', { name: /In a meeting/ }).click();
+  await page.getByRole('dialog', { name: 'Set a status' }).getByRole('button', { name: 'Clear status' }).click();
+  await page.locator('.rail-avatar > summary').click();
+  await expect(page.locator('.rail-avatar').getByRole('menuitem', { name: 'Update your status' })).toBeVisible();
+});
+
+// A channel's bookmarks bar keeps web links beside the tabs, and the Pins tab
+// is the conversation's pinned messages.
+test('[CONV-03 ACT-03] a channel keeps bookmarks beside its tabs and a Pins tab', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const name = `marks-${Date.now()}`;
+  await createChannel(page, name);
+  await expect(page.locator('.channel-name-text')).toHaveText(name);
+
+  await page.getByRole('navigation', { name: 'Conversation tabs' }).locator('.bookmark-add > summary').click();
+  await page.getByRole('textbox', { name: 'Link' }).fill('https://example.com/runbook');
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Runbook');
+  await page.getByRole('button', { name: 'Add bookmark' }).click();
+  const bookmarks = page.getByRole('list', { name: 'Bookmarks' });
+  await expect(bookmarks.getByRole('link', { name: 'Runbook' })).toHaveAttribute('href', 'https://example.com/runbook');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.getByRole('navigation', { name: 'Conversation tabs' }).getByRole('link', { name: 'Pins' }).click();
+  await expect(page.getByRole('navigation', { name: 'Conversation tabs' }).getByRole('link', { name: 'Pins' })).toHaveAttribute('aria-current', 'page');
+  await bookmarks.getByRole('button', { name: 'Remove bookmark Runbook' }).click();
+  await expect(page.getByRole('list', { name: 'Bookmarks' })).toHaveCount(0);
+});
+
+// WCAG 1.4.10 and 1.4.4: at 320 CSS pixels, which is what a 1280-pixel window
+// shows at 400% zoom, and at 200% zoom, nothing scrolls sideways and every
+// destination stays reachable.
+for (const viewport of [{ width: 320, height: 640, label: '320px' }, { width: 640, height: 400, label: '200% zoom' }]) {
+  test(`[RESPONSIVE-01 A11Y-01] the shell reflows without sideways scrolling at ${viewport.label}`, async ({ page, context }) => {
+    await signIn(context);
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    for (const path of ['/app', '/app?details=1', '/app/activity', '/app/later', '/app/dms', '/app/channels', '/app/preferences']) {
+      await page.goto(path);
+      const [scrollWidth, innerWidth] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+      expect(scrollWidth, `${path} scrolls sideways`).toBeLessThanOrEqual(innerWidth);
+    }
+    await page.goto('/app');
+    await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Activity' })).toBeVisible();
+    await expect(composerEditor(page)).toBeVisible();
+  });
+}
+
 // A failed post added a class no stylesheet defined, so the failure was
 // invisible and the typed message was lost with no explanation. Slack keeps a
 // message whose send failed in the conversation as "not sent" with Retry and
@@ -3217,8 +3373,18 @@ test('[NAV-01 A11Y-01] channels can be organised into a custom sidebar section',
   await expect(section).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 
-  // Move the general channel into the section through its own menu, the
-  // keyboard equivalent of dragging it there.
+  // Dragging a row onto a section moves it there, as in Slack; the row's own
+  // Move to menu is the keyboard equivalent and moves it back.
+  await channels.locator('.side-row', { hasText: 'general' }).dragTo(section.locator('.side-section-head'));
+  const draggedRow = section.locator('.side-row', { hasText: 'general' });
+  await expect(draggedRow).toBeVisible();
+  await draggedRow.hover();
+  await draggedRow.getByRole('button', { name: 'Options for general' }).click();
+  await draggedRow.getByRole('menuitem', { name: 'Move to…' }).click();
+  await draggedRow.getByRole('menuitem', { name: 'Channels' }).click();
+  await expect(page.locator('.side-section[aria-label="Channels"] .side-row', { hasText: 'general' })).toBeVisible();
+
+  // Move the general channel into the section through its own menu.
   const generalRow = page.locator('.side-section[aria-label="Channels"] .side-row', { hasText: 'general' });
   await generalRow.hover();
   await generalRow.getByRole('button', { name: 'Options for general' }).click();
