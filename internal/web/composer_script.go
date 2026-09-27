@@ -19,7 +19,9 @@ package web
 //   - Two composers. The conversation composer and the thread pane's reply
 //     composer are separate instances with separate drafts, staged files,
 //     suggestions and errors. A thread pane opened in place announces itself
-//     with sameoldchat:thread-pane and its reply composer is initialised then.
+//     with sameoldchat:thread-pane and its reply composer is initialised then;
+//     a composer the swap removed flushes its pending draft save, because no
+//     pagehide fires to do it and the server would keep a stale draft.
 //     The emoji picker is the message layer's one shared popover; it hands a
 //     choice back as sameoldchat:composer-emoji with the button that opened
 //     it, so the emoji lands in that button's composer. The page-level
@@ -244,6 +246,7 @@ var body=new URLSearchParams();body.set('_csrf',csrf);body.set('text',field.valu
 var threadInput=form.querySelector('input[name=thread_ts]');if(threadInput)body.set('thread_ts',threadInput.value);
 return fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin',keepalive:!!keepalive}).then(function(response){if(!response.ok)announce('Your draft has not been saved yet. Keep this tab open and try typing again.')}).catch(function(){announce('Your draft has not been saved yet. Keep this tab open and try typing again.')});
 }
+api.flushDraft=function(){if(draftTimer)return saveDraftRemote(false);return Promise.resolve()};
 function persistDraftNow(){try{if(field.value)localStorage.setItem(draftKey,field.value);else localStorage.removeItem(draftKey)}catch(error){}return saveDraftRemote(false)}
 function setValue(text){field.value=text;if(mode==='rich')renderMarkup(editor,text);refresh()}
 function showError(message){if(!errorBox){window.alert(message);return}errorBox.textContent=message;errorBox.hidden=false;form.classList.add('is-error');errorBox.scrollIntoView({block:'nearest'});errorBox.focus()}
@@ -792,7 +795,7 @@ adopt(doc);
 active=composers.filter(function(composer){return composer.thread})[0]||composers[0];
 doc.addEventListener('selectionchange',function(){if(active)active.updatePressed()});
 doc.addEventListener('sameoldchat:composer-emoji',function(event){var detail=event.detail||{};var owner=(detail.trigger&&composerFor(detail.trigger))||active||composers[0];if(!owner||!detail.name)return;active=owner;owner.insertEmoji(detail.name,detail.glyph||'',detail.image||'')});
-doc.addEventListener('sameoldchat:thread-pane',function(event){for(var index=composers.length-1;index>=0;index--){if(!doc.contains(composers[index].form))composers.splice(index,1)}var pane=event.detail&&event.detail.pane;if(pane&&doc.contains(pane))adopt(pane);if(!active||!doc.contains(active.form))active=composers.filter(function(composer){return composer.thread})[0]||composers[0]||null});
+doc.addEventListener('sameoldchat:thread-pane',function(event){for(var index=composers.length-1;index>=0;index--){if(!doc.contains(composers[index].form)){if(composers[index].flushDraft)composers[index].flushDraft();composers.splice(index,1)}}var pane=event.detail&&event.detail.pane;if(pane&&doc.contains(pane))adopt(pane);if(!active||!doc.contains(active.form))active=composers.filter(function(composer){return composer.thread})[0]||composers[0]||null});
 function openMenus(){return Array.prototype.slice.call(doc.querySelectorAll('details.composer-menu[open],details.schedule-menu[open]'))}
 doc.addEventListener('keydown',function(event){
 if(event.key==='Escape'){var menus=openMenus();if(menus.length){event.preventDefault();event.stopPropagation();menus.forEach(function(menu){menu.open=false});var summary=menus[0].querySelector('summary');if(summary)summary.focus();return}}
