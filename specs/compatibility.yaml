@@ -1111,8 +1111,14 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestChatUnfurlPersistsMetadata
       - go-test:internal/service:TestUnfurlPersistsNormalizedMetadata
+      - go-test:internal/service:TestAnAppUnfurlsItsOwnDomainsInAPublicChannelItHasNotJoined
+      - go-test:internal/service:TestPostedLinksReachEachAppWhoseUnfurlDomainsClaimThem
+      - go-test:internal/slackapp:TestEventProcessorDeliversLinkSharedForTheAppsUnfurlDomains
+      - official-sdk:tests/official-sdk-qualification/node-bolt/qualification.mjs
     deviations:
-      - No link_shared event is emitted yet, so the unfurl_id form is only reachable with an ID built by domain.NewUnfurlID; source=composer is answered cannot_unfurl_url because no composer preview exists.
+      - link_shared always carries source=conversations_history; source=composer is answered cannot_unfurl_url because the first-party client previews no unsent draft, so no composer unfurl_id exists.
+      - The user_auth_* parameters (unfurling behind an ephemeral authentication prompt) are accepted but not acted on.
+      - The message_changed event Slack sends when an unfurl attaches is not emitted (the message.unfurled topic is mapped but not built); conversations.history and the first-party client show the unfurl.
   - method: dialog.open
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -2520,7 +2526,12 @@ decisions:
       as expiring state rather than translated from the outbox, so it is never
       replayed to a reconnecting client and never reaches a webhook or Socket
       Mode. Its frames carry no event id for that reason. app_mention is derived by the per-app message
-      projection for the app whose bot the text names, and app_installed is
+      projection for the app whose bot the text names, link_shared is
+      journalled with the message (or edit) that shares new links and
+      projected per app from its manifest unfurl_domains (subdomains match,
+      at most five links, none inside code), links:read and channel
+      visibility — any public channel, reported by is_bot_user_member —
+      and app_installed is
       committed with the install's bot-token issuance, target-routed and
       automatic. Remaining recorded gaps: tokens_revoked (the revocation
       mutation reaches the token store directly across the auth seam, so the
@@ -2531,7 +2542,8 @@ decisions:
       app_installations join that scopes app event reads would hide the
       app's own announcement), dnd_updated_user (delivery does not vary the
       event name per recipient), Bolt callback qualifications still submit
-      independently constructed signed callbacks, and no callback shape is
+      independently constructed signed callbacks (the Node Bolt link_shared
+      round trip excepted: a real post produces it), and no callback shape is
       live-Slack verified. The evidence therefore still does not promote the
       whole Events API surface.
   - method: rtm.connect

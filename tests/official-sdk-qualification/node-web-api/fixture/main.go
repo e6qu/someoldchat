@@ -99,7 +99,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	manifest := fmt.Sprintf(`{"display_information":{"name":"Qualification"},"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true}},"oauth_config":{"redirect_urls":["https://example.com/oauth"],"scopes":{"bot":["chat:write","datastore:read","datastore:write"],"user":["users:read"]}},"settings":{"event_subscriptions":{"request_url":%q,"bot_events":["reaction_added","message.channels"]},"token_rotation_enabled":true,"is_hosted":true,"function_runtime":"slack"},"datastores":{"incidents":{"primary_key":"id","attributes":{"id":{"type":"string"},"title":{"type":"string"},"priority":{"type":"integer"}}}}}`, boltProxy.URL+"/slack/events")
+	manifest := fmt.Sprintf(`{"display_information":{"name":"Qualification"},"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true},"unfurl_domains":["qualification.example"]},"oauth_config":{"redirect_urls":["https://example.com/oauth"],"scopes":{"bot":["chat:write","datastore:read","datastore:write","links:read","links:write"],"user":["users:read"]}},"settings":{"event_subscriptions":{"request_url":%q,"bot_events":["reaction_added","message.channels","link_shared"]},"token_rotation_enabled":true,"is_hosted":true,"function_runtime":"slack"},"datastores":{"incidents":{"primary_key":"id","attributes":{"id":{"type":"string"},"title":{"type":"string"},"priority":{"type":"integer"}}}}}`, boltProxy.URL+"/slack/events")
 	if err := store.CreateApp(context.Background(),
 		domain.App{ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Qualification", ClientID: "qualification-client", SigningSecretHash: domain.HashToken("qualification-signing"), SigningSecretCiphertext: signingSecretCiphertext, VerificationTokenHash: domain.HashToken("qualification-verification"), VerificationTokenCiphertext: verificationTokenCiphertext, ManifestVersion: 1, Distribution: "private", TokenRotationEnabled: true, CreatedAt: now, UpdatedAt: now},
 		domain.AppManifestRevision{AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now},
@@ -368,7 +368,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	responses := &qualificationResponseSink{messages: messages, values: make(map[string]string)}
+	responses := &qualificationResponseSink{messages: messages, values: make(map[string]string), recorded: make(chan struct{})}
 	appAuthenticator, err := auth.NewAppStored(store)
 	if err != nil {
 		panic(err)
@@ -441,7 +441,7 @@ func main() {
 	})
 	mux.HandleFunc("GET /qualification/socket-mode-response", func(w http.ResponseWriter, r *http.Request) {
 		envelopeID := r.URL.Query().Get("envelope_id")
-		payload, ok := responses.get(envelopeID)
+		payload, ok := responses.wait(r.Context(), envelopeID, 3*time.Second)
 		if !ok {
 			http.Error(w, "response not recorded", http.StatusNotFound)
 			return
@@ -547,6 +547,25 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})
+	// deliverToBolt drains the journal to the Bolt app through the production
+	// Events API processor: projection, subscription filtering and signing.
+	deliverToBolt := func(ctx context.Context) error {
+		processor := slackapp.EventProcessor{Store: store, AppCredentialKey: appCredentialKey, Owner: "qualification-bolt", Lease: time.Minute, Client: boltProxy.Client()}
+		for index := 0; index < 32; index++ {
+			count, cycleErr := processor.RunOnce(ctx)
+			// A malformed historical producer record is acknowledged so it
+			// cannot block the app forever and is returned as an operator
+			// warning. Continue only when that acknowledgement made progress;
+			// an error with no progress is an actual delivery outage.
+			if cycleErr != nil && count == 0 {
+				return cycleErr
+			}
+			if count == 0 {
+				break
+			}
+		}
+		return nil
+	}
 	mux.HandleFunc("POST /qualification/bolt-event", func(w http.ResponseWriter, r *http.Request) {
 		event, err := events.New("qualification-bolt-event", "T1", "U1", events.NewPayload("reaction.added",
 			events.String("channel_id", "C1"),
@@ -557,22 +576,20 @@ func main() {
 		if err == nil {
 			err = store.AppendEvent(r.Context(), event)
 		}
-		processor := slackapp.EventProcessor{Store: store, AppCredentialKey: appCredentialKey, Owner: "qualification-bolt", Lease: time.Minute, Client: boltProxy.Client()}
-		for index := 0; index < 32; index++ {
-			count, cycleErr := processor.RunOnce(r.Context())
-			// A malformed historical producer record is acknowledged so it
-			// cannot block the app forever and is returned as an operator
-			// warning. Continue only when that acknowledgement made progress;
-			// an error with no progress is an actual delivery outage.
-			if cycleErr != nil && count == 0 {
-				err = cycleErr
-				break
-			}
-			if count == 0 {
-				break
-			}
+		if err == nil {
+			err = deliverToBolt(r.Context())
 		}
 		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	// The link_shared round trip starts from a message the Bolt app posts
+	// through the Web API, so the event is the one the real producer
+	// journals, not one the fixture builds.
+	mux.HandleFunc("POST /qualification/bolt-deliver", func(w http.ResponseWriter, r *http.Request) {
+		if err := deliverToBolt(r.Context()); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
@@ -639,8 +656,10 @@ func (r *sdkMethodRecorder) ServeHTTP(w http.ResponseWriter, request *http.Reque
 
 type qualificationResponseSink struct {
 	messages service.Messages
-	mu       sync.RWMutex
+	mu       sync.Mutex
 	values   map[string]string
+	// recorded is closed, and replaced, whenever a response is recorded.
+	recorded chan struct{}
 }
 
 func (s *qualificationResponseSink) HandleSocketModeResponse(ctx context.Context, appID domain.AppID, envelopeID string, payload []byte) error {
@@ -649,15 +668,35 @@ func (s *qualificationResponseSink) HandleSocketModeResponse(ctx context.Context
 	}
 	s.mu.Lock()
 	s.values[envelopeID] = string(payload)
+	close(s.recorded)
+	s.recorded = make(chan struct{})
 	s.mu.Unlock()
 	return nil
 }
 
-func (s *qualificationResponseSink) get(envelopeID string) (string, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	payload, ok := s.values[envelopeID]
-	return payload, ok
+// wait returns the response recorded for an envelope, waiting up to timeout
+// for it. A client's acknowledgement travels over its socket while the suite
+// asks for it over HTTP, so the question can arrive first; answering 404 then
+// made the Socket Mode suites fail on the race, not on the contract.
+func (s *qualificationResponseSink) wait(ctx context.Context, envelopeID string, timeout time.Duration) (string, bool) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		s.mu.Lock()
+		payload, ok := s.values[envelopeID]
+		recorded := s.recorded
+		s.mu.Unlock()
+		if ok {
+			return payload, true
+		}
+		select {
+		case <-recorded:
+		case <-deadline.C:
+			return "", false
+		case <-ctx.Done():
+			return "", false
+		}
+	}
 }
 
 // fixturePublicURL is the one address every qualification suite reaches the
