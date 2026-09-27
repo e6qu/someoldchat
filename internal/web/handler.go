@@ -3174,41 +3174,82 @@ describe();
 })();</script>`
 
 const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end}}
-{{define "styles"}}<style>
+{{define "styles"}}` + viewStyle + `<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
-.layout{width:min(760px,calc(100% - 28px));margin:24px auto 48px}.heading h2{margin:0 0 5px}.heading p{margin:0;color:var(--muted)}.settings{display:grid;gap:18px;margin-top:20px}.card{padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.card h3{margin:0 0 6px}.card>p{margin:0 0 14px;color:var(--muted)}.fields{display:grid;gap:12px}.fields label{display:grid;gap:6px;font-weight:700}.fields input[type=text],.fields input[type=number],.fields select{padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.check{display:flex!important;grid-template-columns:auto 1fr!important;align-items:start;gap:8px!important;font-weight:600!important}.actions{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.actions label{flex:1 1 180px}.actions button,.fields button{border:0;border-radius:6px;background:var(--action);color:var(--on-strong);padding:9px 12px;font-weight:800}.resume{background:var(--danger)!important}.exceptions{margin:0;padding:0;list-style:none;display:grid;gap:8px}.exceptions a{display:flex;justify-content:space-between;gap:10px;padding:11px;border:1px solid var(--line);border-radius:7px;color:var(--text);text-decoration:none}.exceptions span:last-child{color:var(--muted)}
-@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 18px,760px);margin-top:16px}.card{padding:14px}.actions{display:grid}.actions label{width:100%}}
+.notifications-page{width:min(760px,calc(100% - 32px))}
+.settings{display:grid;gap:16px;margin-top:12px}
+.card{padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel-strong)}
+.card h3{margin:0 0 4px;font-size:16px}
+.card>p{margin:0 0 12px;color:var(--muted);font-size:14px}
+.fields{display:grid;gap:12px}
+.fields>label,.stack>label{display:grid;gap:6px;font-weight:700;font-size:14px}
+.fields input[type=text],.fields input[type=number],.fields input[type=time],.fields input[type=datetime-local],.fields select{min-width:0;min-height:36px;padding:6px 10px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-weight:400}
+.hint{color:var(--muted);font-size:12px;font-weight:400}
+.check{display:flex!important;align-items:flex-start;gap:8px!important;font-weight:600!important}
+.check input{margin-top:3px;accent-color:var(--action)}
+.choices{display:grid;gap:6px;margin:0;padding:0;border:0}
+.choices legend{margin-bottom:6px;font-weight:700;font-size:14px}
+.choice{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-weight:600;cursor:pointer}
+.choice:has(input:checked){border-color:var(--action);background:var(--hover)}
+.choice input{accent-color:var(--action)}
+.schedule-days{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;border:0}
+.schedule-days legend{margin-bottom:6px;font-weight:700;font-size:14px}
+.day-chip{position:relative}
+.day-chip input{position:absolute;opacity:0;inset:0;cursor:pointer}
+.day-chip span{display:inline-grid;place-items:center;min-width:44px;min-height:32px;padding:0 10px;border:1px solid var(--field-line);border-radius:16px;font-size:13px;font-weight:700}
+.day-chip input:checked+span{border-color:var(--action);background:var(--action);color:var(--on-strong)}
+.day-chip input:focus-visible+span{outline:3px solid var(--focus);outline-offset:2px}
+.hours{display:grid;grid-template-columns:repeat(2,minmax(0,160px));gap:12px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.paused{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--hover)}
+.paused p{margin:0 auto 0 0;font-weight:700}
+.pause-custom[hidden]{display:none}
+.not-delivered{margin:0;padding-left:18px;color:var(--muted);font-size:14px}
+.not-delivered li+li{margin-top:4px}
+.exceptions{margin:0;padding:0;list-style:none;display:grid;gap:6px}.exceptions a{display:flex;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;color:var(--text);text-decoration:none}.exceptions a:hover{background:var(--hover)}.exceptions span:last-child{color:var(--muted)}
+@media(max-width:600px){.bar{padding:0 12px}.card{padding:14px}.hours{grid-template-columns:1fr 1fr}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + browserNotificationSettingScript + `{{end}}
+{{define "scripts"}}` + localTimeScript + browserNotificationSettingScript + notificationPauseScript + rowLinkScript + `{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Notifications</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
-<main class="layout"><div class="heading"><h2>Notification preferences</h2><p>Choose what needs your attention without changing what you can read.</p></div>{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+{{template "notifications-view" .}}{{end}}
+{{define "notifications-view"}}<main class="v-page notifications-page"><div class="v-head"><h2>Notifications</h2></div><p class="v-sub">Choose what needs your attention without changing what you can read.</p>{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 <div class="settings">
-<section class="card" aria-labelledby="workspace-notifications-heading"><h3 id="workspace-notifications-heading">Workspace defaults</h3><p>Conversation exceptions override this trigger.</p>
+<section class="card" aria-labelledby="workspace-notifications-heading"><h3 id="workspace-notifications-heading">Notify me about…</h3><p>Conversation exceptions override this choice.</p>
 <form class="fields" method="post" action="/app/notifications/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-<label for="workspace-notification-level">Notify me about<select id="workspace-notification-level" name="level"><option value="mentions"{{if eq .Level "mentions"}} selected{{end}}>Mentions and direct messages</option><option value="all"{{if eq .Level "all"}} selected{{end}}>All new messages</option></select></label>
-<label for="notification-keywords">Channel keywords<input id="notification-keywords" type="text" name="keywords" maxlength="5049" value="{{.Keywords}}" placeholder="release, customer escalation"><span class="muted">Comma-separated; exact matches are case-insensitive and do not trigger in threads.</span></label>
+<fieldset class="choices"><legend class="visually-hidden">Notify me about</legend>
+<label class="choice"><input type="radio" name="level" value="all"{{if eq .Level "all"}} checked{{end}}> All new messages</label>
+<label class="choice"><input type="radio" name="level" value="mentions"{{if eq .Level "mentions"}} checked{{end}}> Direct messages, mentions and keywords</label>
+<label class="choice"><input type="radio" name="level" value="mute"{{if eq .Level "mute"}} checked{{end}}> Nothing</label>
+</fieldset>
+<label for="notification-keywords">My keywords<input id="notification-keywords" type="text" name="keywords" maxlength="5049" value="{{.Keywords}}" placeholder="release, customer escalation"><span class="hint">Comma-separated. You’ll be notified when someone uses one in a channel you’re in; exact matches are case-insensitive and do not trigger in threads.</span></label>
 <label class="check"><input type="checkbox" name="activity_channels" value="true"{{if .ActivityChannels}} checked{{end}}> Show channels set to All new posts in Activity</label>
 <label class="check"><input type="checkbox" name="activity_reminders" value="true"{{if .ActivityReminders}} checked{{end}}> Show due personal reminders in Activity</label>
 <label class="check"><input type="checkbox" id="browser-notifications" name="browser_notifications" value="true"{{if .BrowserNotifications}} checked{{end}}> Show desktop notifications while SameOldChat is open in a tab</label>
-<p class="muted" id="browser-notification-state" aria-live="polite">{{.BrowserNotificationState}}</p>
-<button type="submit">Save workspace defaults</button></form></section>
-<section class="card" aria-labelledby="notification-absent-heading"><h3 id="notification-absent-heading">Not delivered here</h3><p>These are absent rather than off, so you know to look elsewhere for them.</p><ul><li><strong>Push to a phone.</strong> There is no mobile application and no push service.</li><li><strong>E-mail.</strong> This deployment sends no mail at all.</li><li><strong>Sounds and notification schedules.</strong> Pausing above is the only schedule.</li></ul></section>
+<p class="hint" id="browser-notification-state" aria-live="polite">{{.BrowserNotificationState}}</p>
+<div class="actions"><button class="v-btn primary" type="submit">Save changes</button></div></form></section>
+<section class="card" aria-labelledby="pause-notifications-heading"><h3 id="pause-notifications-heading">Pause notifications</h3>{{if .Snoozed}}<div class="paused"><p>Paused until <time datetime="{{.SnoozeUntil}}">{{.SnoozeUntil}}</time></p><form method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="resume"><button class="v-btn" type="submit">Resume notifications</button></form></div><p class="hint">Messages and Activity remain available while notifications are paused.</p>{{else}}<p>Stop banners and badges for a while. Messages and Activity are unaffected.</p><form class="fields" method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="pause"><input type="hidden" name="timezone" data-browser-timezone value="UTC">
+<label for="dnd-preset">Pause for<select id="dnd-preset" name="preset" data-pause-preset><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="tomorrow">Until tomorrow</option><option value="next_week">Until next week</option><option value="custom">Custom…</option></select></label>
+<label class="pause-custom" for="dnd-until" data-pause-custom>Until<input id="dnd-until" type="datetime-local" name="until"><span class="hint">In your own time zone.</span></label>
+<div class="actions"><button class="v-btn primary" type="submit">Pause notifications</button></div></form>{{end}}</section>
 <section class="card" aria-labelledby="schedule-heading"><h3 id="schedule-heading">Notification schedule</h3>
 <p>Choose the days and hours you allow notifications. Outside them nothing is delivered; Activity and messages are unaffected.</p>
 {{if .ScheduleSuppressing}}<p class="notice" role="status">Right now you are outside your schedule, so notifications are not being delivered.</p>{{end}}
-<form method="post" action="/app/notifications/schedule?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<form class="fields" method="post" action="/app/notifications/schedule?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
 <input type="hidden" name="timezone" data-browser-timezone value="UTC">
-<label><span><input type="checkbox" name="enabled" value="true"{{if .ScheduleEnabled}} checked{{end}}> Only notify me during these hours</span></label>
-<fieldset class="schedule-days"><legend>Days</legend>{{range .ScheduleDays}}<label><span><input type="checkbox" name="day" value="{{.Number}}"{{if .Selected}} checked{{end}}> {{.Label}}</span></label>{{end}}</fieldset>
-<label for="schedule-start">From<input id="schedule-start" type="time" name="start" value="{{.ScheduleStart}}" required></label>
-<label for="schedule-end">To<input id="schedule-end" type="time" name="end" value="{{.ScheduleEnd}}" required></label>
-{{if .ScheduleZone}}<p class="muted">Times are read in {{.ScheduleZone}}.</p>{{end}}
-<button type="submit">Save schedule</button></form>
-<p class="read-only">A window ending before it starts runs overnight, and belongs to the day it began on.</p>
+<label class="check"><input type="checkbox" name="enabled" value="true"{{if .ScheduleEnabled}} checked{{end}}> Only notify me during these hours</label>
+<fieldset class="schedule-days"><legend>Days</legend>{{range .ScheduleDays}}<label class="day-chip"><input type="checkbox" name="day" value="{{.Number}}"{{if .Selected}} checked{{end}}><span>{{.Label}}</span></label>{{end}}</fieldset>
+<div class="hours"><label for="schedule-start">From<input id="schedule-start" type="time" name="start" value="{{.ScheduleStart}}" required></label>
+<label for="schedule-end">To<input id="schedule-end" type="time" name="end" value="{{.ScheduleEnd}}" required></label></div>
+<p class="hint">{{if .ScheduleZone}}Saved in {{.ScheduleZone}}. {{end}}Saving uses your browser’s time zone. A window ending before it starts runs overnight, and belongs to the day it began on.</p>
+<div class="actions"><button class="v-btn primary" type="submit">Save schedule</button></div></form>
 </section>
-<section class="card" aria-labelledby="pause-notifications-heading"><h3 id="pause-notifications-heading">Pause notifications</h3>{{if .Snoozed}}<p>Paused until <time datetime="{{.SnoozeUntil}}">{{.SnoozeUntil}}</time>. Messages and Activity remain available.</p><form method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="resume"><button class="resume" type="submit">Resume notifications</button></form>{{else}}<p>Pause banners and sounds for a preset or custom duration.</p><form class="actions" method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="pause"><label for="dnd-minutes">Preset<select id="dnd-minutes" name="minutes"><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="480">8 hours</option><option value="1440">24 hours</option></select></label><label for="dnd-custom-minutes">Custom minutes (optional)<input id="dnd-custom-minutes" type="number" name="custom_minutes" min="1" max="1440"></label><button type="submit">Pause notifications</button></form>{{end}}</section>
 <section class="card" aria-labelledby="notification-exceptions-heading"><h3 id="notification-exceptions-heading">Exceptions to defaults</h3>{{if .Exceptions}}<ul class="exceptions">{{range .Exceptions}}<li><a href="{{.URL}}"><span>{{.Prefix}}{{.Name}}</span><span>{{.Level}}{{if .FollowEveryThread}} · following every thread{{end}}</span></a></li>{{end}}</ul>{{else}}<p>No conversation-specific exceptions.</p>{{end}}</section>
+<section class="card" aria-labelledby="notification-absent-heading"><h3 id="notification-absent-heading">Not delivered here</h3><p>These are absent rather than off, so you know to look elsewhere for them.</p><ul class="not-delivered"><li><strong>Push to a phone.</strong> There is no mobile application and no push service.</li><li><strong>E-mail.</strong> This deployment sends no mail at all.</li><li><strong>Sounds.</strong> Desktop notifications arrive silently; there is no sound setting.</li></ul></section>
 </div></main>{{end}}`
+
+// notificationPauseScript reveals the custom date field only for a custom
+// pause, and requires it then, so a preset pause never submits a stale date.
+const notificationPauseScript = `<script>(function(){var preset=document.querySelector('[data-pause-preset]');var custom=document.querySelector('[data-pause-custom]');if(!preset||!custom)return;var input=custom.querySelector('input');function sync(){var on=preset.value==='custom';custom.hidden=!on;input.required=on;input.disabled=!on}preset.addEventListener('change',function(){sync();if(preset.value==='custom')input.focus()});sync()})();</script>`
 
 var notificationsTemplate = mustPage(notificationsMarkup)
 
@@ -3477,7 +3518,7 @@ var listTemplate = mustPage(listMarkup)
 // localTimeScript renders machine timestamps in the reader's own locale and
 // zone. The server keeps the machine value in datetime= so the page is still
 // readable without JavaScript.
-const localTimeScript = `<script>(function(){window.sameoldchatLocalTimes=function(root){if(!root||!window.Intl)return;var nodes=root.querySelectorAll('time[datetime]');for(var index=0;index<nodes.length;index++){var value=new Date(nodes[index].getAttribute('datetime'));if(isNaN(value.getTime()))continue;nodes[index].textContent=value.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}};window.sameoldchatLocalTimes(document)})();</script>`
+const localTimeScript = `<script>(function(){window.sameoldchatLocalTimes=function(root){if(!root)return;var zone='UTC';try{zone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(error){}Array.prototype.forEach.call(root.querySelectorAll('[data-browser-timezone]'),function(input){input.value=zone});if(!window.Intl)return;var nodes=root.querySelectorAll('time[datetime]');for(var index=0;index<nodes.length;index++){var value=new Date(nodes[index].getAttribute('datetime'));if(isNaN(value.getTime()))continue;nodes[index].textContent=value.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}};window.sameoldchatLocalTimes(document)})();</script>`
 
 // searchSuggestionsScript progressively enhances both workspace search inputs
 // with the same accessible listbox. The anchors remain real destinations, and
@@ -6110,7 +6151,8 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	// A failure to read either leaves notifications off: the safe default for
 	// something that interrupts a person is not to.
 	if preferences, prefErr := h.Messages.WorkspaceNotificationPreferences(r.Context(), principal.WorkspaceID, principal.UserID); prefErr == nil {
-		data.BrowserNotifications = preferences.BrowserNotifications
+		// "Nothing" is Slack's third trigger: no desktop notification at all.
+		data.BrowserNotifications = preferences.BrowserNotifications && preferences.Level != domain.NotificationMute
 		// Outside the member's window is a fourth reason nothing arrives, and
 		// it reaches the client through the same attribute the other reasons
 		// do — one gate rather than a second one the client could forget.
@@ -8768,14 +8810,30 @@ func (h Handler) setNotificationSnooze(w http.ResponseWriter, r *http.Request) {
 		_, err = h.Messages.EndSnooze(r.Context(), principal.WorkspaceID, principal.UserID)
 		status = "resumed"
 	case "pause":
-		minutesValue := strings.TrimSpace(fields["custom_minutes"])
-		if minutesValue == "" {
-			minutesValue = strings.TrimSpace(fields["minutes"])
-		}
-		var minutes int64
-		minutes, err = strconv.ParseInt(minutesValue, 10, 64)
-		if err == nil {
-			_, err = h.Messages.SetSnooze(r.Context(), principal.WorkspaceID, principal.UserID, minutes)
+		preset := strings.TrimSpace(fields["preset"])
+		switch preset {
+		case "", "30", "60", "120":
+			// A minute count: Slack's short presets, and the minutes and
+			// custom_minutes fields older pages and scripts still send.
+			minutesValue := preset
+			if minutesValue == "" {
+				minutesValue = strings.TrimSpace(fields["custom_minutes"])
+			}
+			if minutesValue == "" {
+				minutesValue = strings.TrimSpace(fields["minutes"])
+			}
+			var minutes int64
+			minutes, err = strconv.ParseInt(minutesValue, 10, 64)
+			if err == nil {
+				_, err = h.Messages.SetSnooze(r.Context(), principal.WorkspaceID, principal.UserID, minutes)
+			}
+		default:
+			until, ok := notificationPauseEnd(preset, strings.TrimSpace(fields["until"]), h.pauseLocation(r, principal, fields["timezone"]), time.Now())
+			if !ok {
+				h.writeMutationError(w, r, http.StatusBadRequest, "That pause is not valid", "Choose a preset, or a custom date and time in the future.")
+				return
+			}
+			_, err = h.Messages.PauseNotificationsUntil(r.Context(), principal.WorkspaceID, principal.UserID, until)
 		}
 	default:
 		h.writeMutationError(w, r, http.StatusBadRequest, "That notification pause is not valid", "Choose a pause duration or Resume notifications.")
@@ -8783,13 +8841,64 @@ func (h Handler) setNotificationSnooze(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, strconv.ErrSyntax) {
-			h.writeMutationError(w, r, http.StatusBadRequest, "That pause duration is not valid", "Choose between 1 minute and 24 hours.")
+			h.writeMutationError(w, r, http.StatusBadRequest, "That pause duration is not valid", "Choose a time in the future.")
+			return
+		}
+		if errors.Is(err, service.ErrSnoozeTooLong) {
+			h.writeMutationError(w, r, http.StatusBadRequest, "That pause is too long", "Choose a time within the next month.")
 			return
 		}
 		h.writeMutationError(w, r, http.StatusServiceUnavailable, "The notification pause was not changed", "The workspace store is temporarily unavailable.")
 		return
 	}
 	h.redirectMutation(w, r, "/app/notifications?channel="+url.QueryEscape(string(h.requestChannel(r)))+"&status="+status)
+}
+
+// pauseLocation is the zone a pause preset is read in: the browser's own
+// zone from the form, else the member's profile zone, else UTC.
+func (h Handler) pauseLocation(r *http.Request, principal auth.Principal, browserZone string) *time.Location {
+	candidates := []string{strings.TrimSpace(browserZone)}
+	if user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID); err == nil {
+		candidates = append(candidates, user.Profile.Timezone)
+	}
+	for _, zone := range candidates {
+		if zone == "" || zone == "Local" {
+			continue
+		}
+		if location, err := time.LoadLocation(zone); err == nil {
+			return location
+		}
+	}
+	return time.UTC
+}
+
+// notificationPauseEnd resolves Slack's pause presets to an instant in the
+// member's zone: "Until tomorrow" is 9:00 tomorrow and "Until next week" is
+// 9:00 next Monday, as Slack's menu reads, and "custom" is the date and time
+// the member typed. The second result is false for an unknown preset or an
+// unreadable custom value.
+func notificationPauseEnd(preset, custom string, location *time.Location, now time.Time) (time.Time, bool) {
+	local := now.In(location)
+	morning := func(days int) time.Time {
+		return time.Date(local.Year(), local.Month(), local.Day()+days, 9, 0, 0, 0, location)
+	}
+	switch preset {
+	case "tomorrow":
+		return morning(1), true
+	case "next_week":
+		days := (8 - int(local.Weekday())) % 7
+		if days == 0 {
+			days = 7
+		}
+		return morning(days), true
+	case "custom":
+		value, err := time.ParseInLocation("2006-01-02T15:04", custom, location)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return value, true
+	}
+	return time.Time{}, false
 }
 
 func (h Handler) hasUnacknowledgedReminder(ctx context.Context, principal auth.Principal) (bool, error) {

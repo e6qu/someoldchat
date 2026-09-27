@@ -6416,6 +6416,16 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The client's pause names an instant past dnd.setSnooze's one
+				// day, and refuses one that has already passed.
+				paused, err := chat.PauseNotificationsUntil(ctx, "T1", "U1", time.Now().Add(48*time.Hour))
+				if err != nil {
+					return nil, err
+				}
+				_, pastErr := chat.PauseNotificationsUntil(ctx, "T1", "U1", time.Now().Add(-time.Minute))
+				if _, err := chat.EndSnooze(ctx, "T1", "U1"); err != nil {
+					return nil, err
+				}
 				// EndDND clears the schedule itself, which EndSnooze does not: a
 				// snooze is an override of the schedule and ending it leaves the
 				// schedule in force. Reading the state back is what separates them.
@@ -6429,6 +6439,7 @@ func parityCases() []parityCase {
 				reference := time.Now().UTC()
 				return []any{
 					initial.Enabled, snoozed.SnoozeEnabled(reference), ended.SnoozeEnabled(reference),
+					paused.SnoozeEnabled(reference), paused.SnoozeUntil.Sub(reference) > 47*time.Hour, errors.Is(pastErr, service.ErrInvalidSnooze),
 					afterEndDND.Enabled, afterEndDND.SnoozeEnabled(reference),
 				}, nil
 			},

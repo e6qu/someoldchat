@@ -2,8 +2,10 @@ package web
 
 import (
 	"errors"
+	"html/template"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -72,11 +74,19 @@ type unreadConversationView struct {
 	Messages    []unreadMessageView
 }
 
+// unreadMessageView is one unread message as the Unreads view shows it: the
+// author's face and name (which open their profile), the message rendered
+// by the same mrkdwn renderer as the timeline, a machine time the page shows
+// in the reader's own zone, and the permalink the row opens.
 type unreadMessageView struct {
-	AuthorName string
-	Text       string
-	Time       string
-	URL        string
+	AuthorID    string
+	AuthorName  string
+	AvatarURL   string
+	Initial     string
+	Text        template.HTML
+	MachineTime string
+	Time        string
+	URL         string
 }
 
 // threadsPage lists the threads the member follows, newest reply first.
@@ -191,12 +201,8 @@ func (h Handler) unreadsPage(w http.ResponseWriter, r *http.Request) {
 // because the read position is a MessageTimestamp and the page cursor is not:
 // there is no cursor that means "the message after the one I have read".
 func (h Handler) unreadMessages(r *http.Request, principal auth.Principal, conversation domain.Conversation, names *userNames) ([]unreadMessageView, bool) {
-	limit := conversation.UnreadCount
-	if limit > unreadMessageWindow {
-		limit = unreadMessageWindow
-	}
 	history, err := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID,
-		domain.HistoryRequest{Page: domain.PageRequest{Limit: limit, Descending: true}})
+		domain.HistoryRequest{Page: domain.PageRequest{Limit: unreadMessageWindow, Descending: true}})
 	if err != nil {
 		return nil, false
 	}
@@ -204,22 +210,40 @@ func (h Handler) unreadMessages(r *http.Request, principal auth.Principal, conve
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, false
 	}
-	lastRead := cursor.LastRead
-	views := make([]unreadMessageView, 0, len(history.Messages))
+	// Compared as instants, not as timestamp text: the textual form's seconds
+	// field is unpadded, so string order is only accidentally time order.
+	var lastRead time.Time
+	if cursor.LastRead != "" {
+		if parsed, parseErr := domain.ParseMessageTimestamp(cursor.LastRead); parseErr == nil {
+			lastRead = parsed
+		}
+	}
+	unread := make([]domain.Message, 0, len(history.Messages))
 	// History answered newest-first; the view reads oldest-first, which is the
-	// order a member catches up in.
+	// order a member catches up in. A member's own messages are never unread
+	// to them, so they are not listed even when the cursor is behind them.
 	for index := len(history.Messages) - 1; index >= 0; index-- {
 		message := history.Messages[index]
-		timestamp := domain.NewMessageTimestamp(message.CreatedAt)
-		if lastRead != "" && timestamp <= lastRead {
+		if message.AuthorID == principal.UserID {
 			continue
 		}
-		views = append(views, unreadMessageView{
-			AuthorName: names.name(message.AuthorID),
-			Text:       message.Text,
-			Time:       message.CreatedAt.UTC().Format("Jan 2, 15:04"),
-			URL:        appURL(string(conversation.ID), "", "", "", "") + "#" + messageAnchor(message.ID),
-		})
+		if !lastRead.IsZero() && !message.CreatedAt.Truncate(time.Microsecond).After(lastRead.Truncate(time.Microsecond)) {
+			continue
+		}
+		unread = append(unread, message)
+	}
+	rendered := h.newResultViews(r.Context(), principal, unread, names)
+	views := make([]unreadMessageView, 0, len(rendered))
+	for index, message := range rendered {
+		author := unread[index].AuthorID
+		view := unreadMessageView{
+			AuthorName: message.AuthorName, AvatarURL: names.avatarURL(author), Initial: message.AuthorInitial,
+			Text: message.DisplayText, MachineTime: message.MachineTime, Time: message.DisplayTime, URL: message.Permalink,
+		}
+		if unread[index].AppID == "" && author != "" {
+			view.AuthorID = string(author)
+		}
+		views = append(views, view)
 	}
 	return views, true
 }
@@ -267,41 +291,42 @@ const threadsMarkup = `{{define "title"}}Threads · SameOldChat{{end}}
 var unreadsTemplate = mustPage(unreadsMarkup)
 
 const unreadsMarkup = `{{define "title"}}Unreads · SameOldChat{{end}}
-{{define "styles"}}<style>
+{{define "styles"}}` + viewStyle + `<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
-.layout{width:min(900px,calc(100% - 32px));margin:28px auto 48px}.heading{display:grid;gap:5px;margin-bottom:17px}.heading h2,.heading p{margin:0}.heading p{color:var(--muted)}
-.unread-group{margin:0 0 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
-.unread-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:13px 16px;border-bottom:1px solid var(--line)}
-.unread-head a{font-weight:800;color:var(--text);text-decoration:none;min-height:24px;display:inline-flex;align-items:center}.unread-head a:hover{color:var(--action)}
-.unread-count{border-radius:9px;background:var(--action);color:var(--on-strong);font-size:11px;font-weight:800;padding:2px 8px;min-height:20px;display:inline-flex;align-items:center}
-.unread-head form{margin:0 0 0 auto}.unread-head button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:6px 10px;font-weight:800;min-height:24px}
+.unread-group{margin:0 0 16px}
+.unread-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+.unread-head h3{margin:0;font-size:16px}
+.unread-head h3 a{color:var(--text);text-decoration:none}.unread-head h3 a:hover{text-decoration:underline}
+.unread-head form{margin:0 0 0 auto}
 .unread-messages{margin:0;padding:0;list-style:none}
-.unread-messages li{display:grid;gap:3px;padding:11px 16px;border-top:1px solid var(--line)}.unread-messages li:first-child{border-top:0}
-.unread-author{font-weight:800}.unread-time{color:var(--muted);font-size:12px}
-.unread-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
-.unread-more{padding:10px 16px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
-.empty{padding:30px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}
-@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 20px,900px);margin-top:18px}.unread-head form{margin-left:0}}
+.unread-meta{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.unread-author{color:var(--text);font-weight:800;text-decoration:none}.unread-author:hover{text-decoration:underline}
+.unread-time{color:var(--muted);font-size:12px;text-decoration:none}.unread-time:hover{text-decoration:underline}
+.unread-more{margin:0;padding:10px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+.unread-more a{font-weight:700}
+@media(max-width:600px){.bar{padding:0 12px}.unread-head form{margin-left:0}}
 </style>{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Unreads</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
-<div class="heading"><h2>Unreads</h2><p>{{if .Total}}{{.Total}} conversations have unread messages.{{else}}Everything is read.{{end}}</p></div>
+{{define "scripts"}}` + localTimeScript + rowLinkScript + profilePanelScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Unreads</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
+{{template "unreads-view" .}}{{end}}
+{{define "unreads-view"}}<main class="v-page unreads-page">
+<div class="v-head"><h2>Unreads</h2>{{if .Total}}<form method="post" action="/app/read/all?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="v-btn" type="submit" {{ariaKeyshortcuts "Mark every conversation read"}}><span aria-hidden="true">✓</span> Mark all as read</button></form>{{end}}</div>
+<p class="v-sub">{{if eq .Total 1}}1 conversation has unread messages.{{else if .Total}}{{.Total}} conversations have unread messages.{{else}}Everything is read.{{end}}</p>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-{{if .Total}}<form method="post" action="/app/read/all?channel={{.Channel}}" style="margin:0 0 16px">
-  <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-  <button type="submit" {{ariaKeyshortcuts "Mark every conversation read"}}>Mark all as read</button>
-</form>{{end}}
 {{if .Conversations}}{{range .Conversations}}
-<section class="unread-group" aria-label="{{.Prefix}}{{.Name}}">
+<section class="unread-group v-list" aria-labelledby="unread-heading-{{.ID}}">
   <div class="unread-head">
-    <a href="{{.URL}}">{{.Prefix}}{{.Name}}</a>
-    <span class="unread-count">{{.Count}} unread</span>
-    <form method="post" action="{{.MarkReadURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Mark read</button></form>
+    <h3 id="unread-heading-{{.ID}}"><a href="{{.URL}}">{{.Prefix}}{{.Name}}</a></h3>
+    <span class="v-count">{{.Count}} new</span>
+    <form method="post" action="{{.MarkReadURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="v-btn quiet" type="submit" aria-label="Mark {{.Prefix}}{{.Name}} as read">Mark as read</button></form>
   </div>
   <ul class="unread-messages">{{range .Messages}}
-    <li><span class="unread-author">{{.AuthorName}}</span> <span class="unread-time">{{.Time}}</span><p class="unread-text">{{.Text}}</p></li>{{end}}
+    <li class="v-row" data-row-href="{{.URL}}"><span class="v-avatar" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.Initial}}{{end}}</span>
+      <div class="v-row-main"><div class="unread-meta">{{if .AuthorID}}<a class="unread-author" href="/app/members?user={{.AuthorID}}" data-profile-user="{{.AuthorID}}">{{.AuthorName}}</a>{{else}}<span class="unread-author">{{.AuthorName}}</span>{{end}}<a class="unread-time" href="{{.URL}}" aria-label="Open message from {{.AuthorName}}"><time datetime="{{.MachineTime}}">{{.Time}}</time></a></div>
+      <div class="v-row-text v-text">{{.Text}}</div></div></li>{{end}}
   </ul>
-  {{if .More}}<p class="unread-more">{{.More}} older unread messages are not shown here. Open the conversation to read them.</p>{{end}}
+  {{if .More}}<p class="unread-more">{{.More}} older unread messages are not shown here. <a href="{{.URL}}">Open the conversation</a> to read them.</p>{{end}}
 </section>{{end}}
-{{else}}<p class="empty">Nothing unread. Everything in this workspace has been read.</p>{{end}}
-{{if .Truncated}}<p class="unread-more">Showing the first {{.Shown}} of {{.Total}} conversations with unread messages.</p>{{end}}
+{{else}}<p class="v-empty"><strong>You’re all caught up</strong>Everything in this workspace has been read.</p>{{end}}
+{{if .Truncated}}<p class="pager">Showing the first {{.Shown}} of {{.Total}} conversations with unread messages.</p>{{end}}
 </main>{{end}}`

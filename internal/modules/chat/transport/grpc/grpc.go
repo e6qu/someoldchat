@@ -3286,6 +3286,14 @@ func (r Remote) SetSnooze(ctx context.Context, workspaceID domain.WorkspaceID, u
 	return decodeProtoDoNotDisturb(out)
 }
 
+func (r Remote) PauseNotificationsUntil(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, until time.Time) (domain.DoNotDisturb, error) {
+	out, err := r.presence.PauseNotificationsUntil(ctx, &chatv1.PauseNotificationsUntilRequest{WorkspaceId: string(workspaceID), UserId: string(userID), UntilUnix: until.Unix()})
+	if err != nil {
+		return domain.DoNotDisturb{}, err
+	}
+	return decodeProtoDoNotDisturb(out)
+}
+
 func (r Remote) EndSnooze(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.DoNotDisturb, error) {
 	out, err := r.presence.EndSnooze(ctx, &chatv1.DoNotDisturbRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	if err != nil {
@@ -10269,6 +10277,14 @@ func (s *Server) DoNotDisturbInfo(ctx context.Context, input *chatv1.DoNotDistur
 
 func (s *Server) SetSnooze(ctx context.Context, input *chatv1.SetSnoozeRequest) (*chatv1.DoNotDisturb, error) {
 	return s.setSnoozeProto(ctx, input)
+}
+
+func (s *Server) PauseNotificationsUntil(ctx context.Context, input *chatv1.PauseNotificationsUntilRequest) (*chatv1.DoNotDisturb, error) {
+	result, err := s.implementation.PauseNotificationsUntil(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), time.Unix(input.GetUntilUnix(), 0).UTC())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoDoNotDisturb(result), nil
 }
 
 func (s *Server) EndSnooze(ctx context.Context, input *chatv1.DoNotDisturbRequest) (*chatv1.DoNotDisturb, error) {

@@ -2238,10 +2238,13 @@ func TestNotificationPreferencesDNDConversationExceptionAndThreadFollowJourney(t
 		t.Fatalf("notifications status=%d body=%s", notifications.Code, notifications.Body)
 	}
 	requireContains(t, "notification preferences", notifications.Body.String(),
-		"Notification preferences", "Mentions and direct messages", "Channel keywords",
+		"Notify me about", "Direct messages, mentions and keywords", `value="mute"`, "Nothing", "My keywords",
 		"Show channels set to All new posts in Activity", "Pause notifications",
+		`<option value="tomorrow">Until tomorrow</option>`, `<option value="next_week">Until next week</option>`, `<option value="custom">Custom…</option>`,
 		"No conversation-specific exceptions",
 	)
+	// The page no longer claims schedules do not exist.
+	requireMissing(t, "notification preferences", notifications.Body.String(), "Pausing above is the only schedule")
 
 	saved := postForm(t, mux, "/app/notifications/preferences?channel=Cdev", url.Values{
 		"_csrf":             {auth.CSRFToken("session")},

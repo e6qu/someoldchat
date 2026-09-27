@@ -3965,11 +3965,39 @@ func (m Messages) SetSnooze(ctx context.Context, workspaceID domain.WorkspaceID,
 	if minutes > 1440 {
 		return domain.DoNotDisturb{}, ErrSnoozeTooLong
 	}
+	return m.snoozeUntil(ctx, workspaceID, userID, time.Now().UTC().Truncate(time.Second).Add(time.Duration(minutes)*time.Minute))
+}
+
+// maxNotificationPause bounds the client's pause. Slack's own client offers
+// "until next week" and a custom date; a month is far past either, and a
+// bound keeps a mistyped year from silencing a member indefinitely.
+const maxNotificationPause = 31 * 24 * time.Hour
+
+// PauseNotificationsUntil is the first-party client's "Pause notifications"
+// with an end instant: Slack's menu offers until tomorrow and until next week,
+// which dnd.setSnooze's one-day minute count cannot express. It shares the
+// snooze state and event with SetSnooze, so the API reports the same pause.
+func (m Messages) PauseNotificationsUntil(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, until time.Time) (domain.DoNotDisturb, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.DoNotDisturb{}, err
+	}
+	now := time.Now().UTC()
+	until = until.UTC().Truncate(time.Second)
+	if !until.After(now) {
+		return domain.DoNotDisturb{}, ErrInvalidSnooze
+	}
+	if until.Sub(now) > maxNotificationPause {
+		return domain.DoNotDisturb{}, ErrSnoozeTooLong
+	}
+	return m.snoozeUntil(ctx, workspaceID, userID, until)
+}
+
+func (m Messages) snoozeUntil(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, until time.Time) (domain.DoNotDisturb, error) {
 	value, err := m.Store.GetDoNotDisturb(ctx, workspaceID, userID)
 	if err != nil {
 		return domain.DoNotDisturb{}, err
 	}
-	value.SnoozeUntil = time.Now().UTC().Truncate(time.Second).Add(time.Duration(minutes) * time.Minute)
+	value.SnoozeUntil = until
 	event, err := newEvent(workspaceID, userID, dndEventPayload("user.dnd_snoozed", userID, value, time.Now().UTC()), time.Now().UTC())
 	if err != nil {
 		return domain.DoNotDisturb{}, err

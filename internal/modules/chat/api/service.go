@@ -290,6 +290,7 @@ type Service interface {
 	SetUserPresence(context.Context, domain.WorkspaceID, domain.UserID, domain.Presence) (domain.User, error)
 	DoNotDisturbInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.DoNotDisturb, error)
 	SetSnooze(context.Context, domain.WorkspaceID, domain.UserID, int64) (domain.DoNotDisturb, error)
+	PauseNotificationsUntil(context.Context, domain.WorkspaceID, domain.UserID, time.Time) (domain.DoNotDisturb, error)
 	EndSnooze(context.Context, domain.WorkspaceID, domain.UserID) (domain.DoNotDisturb, error)
 	EndDND(context.Context, domain.WorkspaceID, domain.UserID) error
 	Users(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.UserPage, error)

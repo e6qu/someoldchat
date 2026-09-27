@@ -1489,8 +1489,11 @@ const (
 	NotificationMute     NotificationLevel = "mute"
 )
 
+// ValidWorkspaceDefault is Slack's three workspace triggers: all new
+// messages, direct messages and mentions (and keywords), or nothing. Nothing
+// silences notifications, not Activity: mentions and DMs are still recorded.
 func (level NotificationLevel) ValidWorkspaceDefault() bool {
-	return level == NotificationAll || level == NotificationMentions
+	return level == NotificationAll || level == NotificationMentions || level == NotificationMute
 }
 
 func (level NotificationLevel) ValidConversationOverride() bool {

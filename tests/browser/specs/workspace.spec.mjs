@@ -398,16 +398,18 @@ test('[NOTIFY-01 NOTIFY-02 NOTIFY-03 THREAD-02 A11Y-01] notification preferences
   await signIn(context);
   await page.goto('/app');
   await page.goto(`/app/notifications?channel=${CHANNEL}`);
-  await expect(page.getByRole('heading', { name: 'Notification preferences' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Notify me about…' })).toBeVisible();
 
-  await page.getByLabel('Notify me about').selectOption('all');
-  await page.getByLabel('Channel keywords').fill('release, customer escalation, RELEASE');
+  // Slack's three triggers, as a choice rather than a hidden select.
+  await expect(page.getByRole('radio', { name: 'Nothing' })).toBeVisible();
+  await page.getByRole('radio', { name: 'All new messages' }).check();
+  await page.getByLabel('My keywords').fill('release, customer escalation, RELEASE');
   await page.getByLabel('Show channels set to All new posts in Activity').check();
   await page.getByLabel('Show due personal reminders in Activity').uncheck();
-  await page.getByRole('button', { name: 'Save workspace defaults' }).click();
+  await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByRole('status')).toHaveText('Notification preferences saved.');
-  await expect(page.getByLabel('Notify me about')).toHaveValue('all');
-  await expect(page.getByLabel('Channel keywords')).toHaveValue('customer escalation, release');
+  await expect(page.getByRole('radio', { name: 'All new messages' })).toBeChecked();
+  await expect(page.getByLabel('My keywords')).toHaveValue('customer escalation, release');
   await expect(page.getByLabel('Show due personal reminders in Activity')).not.toBeChecked();
 
   await page.getByRole('link', { name: 'Back to chat' }).click();
@@ -424,9 +426,12 @@ test('[NOTIFY-01 NOTIFY-02 NOTIFY-03 THREAD-02 A11Y-01] notification preferences
   await expect(exception).toContainText('mute');
   await expect(exception).toContainText('following every thread');
 
-  await page.getByLabel('Custom minutes (optional)').fill('1');
+  // Slack's presets, including ones past dnd.setSnooze's one day.
+  await page.getByLabel('Pause for').selectOption('next_week');
+  await expect(page.getByLabel('Until', { exact: true })).toBeHidden();
   await page.getByRole('button', { name: 'Pause notifications' }).click();
   await expect(page.getByRole('status')).toHaveText('Notifications paused. Messages and Activity remain available.');
+  await expect(page.getByText(/Paused until/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Resume notifications' })).toBeVisible();
   await page.getByRole('button', { name: 'Resume notifications' }).click();
   await expect(page.getByRole('status')).toHaveText('Notifications resumed.');
@@ -2583,7 +2588,7 @@ test('[NOTIFY-04] the notification preferences name every permission and every g
   await expect(page.getByText('sends no mail at all')).toBeVisible();
 
   await desktop.check();
-  await page.getByRole('button', { name: 'Save workspace defaults' }).click();
+  await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByLabel('Show desktop notifications while SameOldChat is open in a tab')).toBeChecked();
   await expectNoSeriousAccessibilityViolations(page);
 });

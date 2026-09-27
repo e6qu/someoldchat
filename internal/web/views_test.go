@@ -168,3 +168,52 @@ func TestActivityGroupsReactionsAndKeepsTheReactor(t *testing.T) {
 	unread := get(t, mux, "/app/activity?channel=Cdev&unread=1").Body.String()
 	requireContains(t, "after mark all read", unread, "You’re all caught up.")
 }
+
+// TestNotificationPausePresetsResolveInTheMembersZone covers NOTIFY-03's
+// presets: until tomorrow and until next week are 9:00 in the member's own
+// zone (past dnd.setSnooze's one-day limit), a custom time is read in that
+// zone, and a time already past is a handled refusal.
+func TestNotificationPausePresetsResolveInTheMembersZone(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 25, 22, 30, 0, 0, tokyo) // a Friday evening in Tokyo
+	for preset, want := range map[string]time.Time{
+		"tomorrow":  time.Date(2026, 9, 26, 9, 0, 0, 0, tokyo),
+		"next_week": time.Date(2026, 9, 28, 9, 0, 0, 0, tokyo),
+	} {
+		got, ok := notificationPauseEnd(preset, "", tokyo, now.UTC())
+		if !ok || !got.Equal(want) {
+			t.Fatalf("%s = %v (%v), want %v", preset, got, ok, want)
+		}
+	}
+	if got, ok := notificationPauseEnd("custom", "2026-09-30T14:15", tokyo, now); !ok || !got.Equal(time.Date(2026, 9, 30, 14, 15, 0, 0, tokyo)) {
+		t.Fatalf("custom = %v %v", got, ok)
+	}
+	if _, ok := notificationPauseEnd("custom", "not a time", tokyo, now); ok {
+		t.Fatal("an unreadable custom time was accepted")
+	}
+
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	csrf := auth.CSRFToken("session")
+	paused := postForm(t, mux, "/app/notifications/dnd?channel=Cdev", url.Values{"_csrf": {csrf}, "action": {"pause"}, "preset": {"next_week"}, "timezone": {"Asia/Tokyo"}}.Encode(), false)
+	if paused.Code != http.StatusSeeOther {
+		t.Fatalf("pause status=%d body=%s", paused.Code, paused.Body)
+	}
+	dnd, err := s.GetDoNotDisturb(context.Background(), "T1", "U1")
+	if err != nil || !dnd.SnoozeUntil.After(time.Now()) || dnd.SnoozeUntil.In(tokyo).Hour() != 9 || dnd.SnoozeUntil.In(tokyo).Weekday() != time.Monday {
+		t.Fatalf("paused until %v err=%v, want 9:00 next Monday in Tokyo", dnd.SnoozeUntil.In(tokyo), err)
+	}
+	past := postForm(t, mux, "/app/notifications/dnd?channel=Cdev", url.Values{"_csrf": {csrf}, "action": {"pause"}, "preset": {"custom"}, "until": {"2001-01-01T09:00"}, "timezone": {"UTC"}}.Encode(), false)
+	if past.Code != http.StatusBadRequest {
+		t.Fatalf("a past custom pause status=%d, want a handled 400", past.Code)
+	}
+
+	// "Nothing" is a workspace trigger, and it turns desktop notifications off.
+	saved := postForm(t, mux, "/app/notifications/preferences?channel=Cdev", url.Values{"_csrf": {csrf}, "level": {"mute"}, "browser_notifications": {"true"}}.Encode(), false)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("save Nothing status=%d body=%s", saved.Code, saved.Body)
+	}
+	requireContains(t, "workspace with Nothing", get(t, mux, "/app?channel=Cdev").Body.String(), `data-browser-notifications="false"`)
+}
