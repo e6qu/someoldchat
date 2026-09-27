@@ -72,6 +72,8 @@ type messageActionView struct {
 	Dispatch           bool
 	AccessibilityLabel string
 	Tone               string
+	// Style is a button's Block Kit style, "primary" or "danger".
+	Style string
 	// MinLength and MaxLength are a text input's min_length/max_length.
 	MinLength int
 	MaxLength int
@@ -1123,6 +1125,10 @@ func actionElementList(value any, blockID string) []messageActionView {
 			action.Control = "button"
 			if action.Text == "" {
 				action.Text = "Action"
+			}
+			// Block Kit's two button styles; anything else is the default.
+			if style := strings.TrimSpace(stringValue(element["style"])); style == "primary" || style == "danger" {
+				action.Style = style
 			}
 		case "static_select", "overflow":
 			action.Control = "select"

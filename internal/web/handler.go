@@ -193,27 +193,88 @@ var liveEventTopics = []string{
 // so the partial cannot be reached with a value that is missing a field it
 // needs: that mismatch is what made every thread view fail to render.
 type messageList struct {
-	// ForwardDestinations are the conversations this reader may forward into.
-	// They are the reader's own visible channels: ACT-03 requires a forward
-	// not to disclose a destination the actor cannot post to.
-	ForwardDestinations []conversationView
-	Messages            []messageView
-	ChannelName         string
-	CSRFToken           string
-	IsMember            bool
-	CanReact            bool
-	CanPin              bool
-	CanReply            bool
+	Messages    []messageView
+	ChannelName string
+	CSRFToken   string
+	IsMember    bool
+	CanReact    bool
+	CanPin      bool
+	CanReply    bool
+	// ThreadPane marks the list rendered in the thread pane, whose first
+	// message is the root; ThreadReplyCount labels the divider under it.
+	ThreadPane       bool
+	ThreadReplyLabel string
+	// ThreadFollowURL and FollowingThread drive the root's "Get notified
+	// about new replies" item, which Slack keeps in the root's menu.
+	ThreadFollowURL string
+	FollowingThread bool
+	// QuickReactions are the one-click reactions at the head of the message
+	// toolbar.
+	QuickReactions []quickReactionView
 }
 
 type messageView struct {
-	ID            string
-	MessageID     string
+	ID        string
+	MessageID string
+	// Timestamp is the message's Slack ts, which its links and forms name.
+	Timestamp string
+	// Preview is the message as one line of plain text, for the labels and
+	// dialogs that quote it.
+	Preview       string
 	Anchor        string
+	AuthorID      string
 	AuthorName    string
 	AuthorInitial string
 	AvatarURL     string
-	AvatarEmoji   string
+	// AvatarEmoji is a bot's icon_emoji, resolved to its glyph or custom
+	// image; the raw ":steam_locomotive:" code used to be printed instead.
+	AvatarEmoji template.HTML
+	// Continuation marks a message shown under the one before it without
+	// repeating name and avatar: the same author, within a few minutes.
+	Continuation bool
+	// ClockTime is the time beside the name ("10:19 AM") and FullTime the
+	// tooltip ("Saturday, September 27th at 10:19:05 AM"), both in the
+	// reader's time zone.
+	ClockTime string
+	FullTime  string
+	// MentionsMe highlights a message that mentions the reader, directly or
+	// through @here, @channel or @everyone.
+	MentionsMe bool
+	// Jumbo enlarges a message that is nothing but a few emoji.
+	Jumbo bool
+	// PinnedBy names who pinned the message, shown above it as Slack does.
+	PinnedBy string
+	// SystemSentence is a channel notice as the client prints it after the
+	// author's name: "joined #general.".
+	SystemSentence string
+	// BroadcastRootPreview and BroadcastThreadURL label a thread reply that
+	// was also sent to the channel: "replied to a thread: <root>".
+	BroadcastRootPreview string
+	BroadcastThreadURL   string
+	// InThread is set for the messages rendered in the thread pane, where a
+	// broadcast reads "Also sent to #channel".
+	InThread bool
+	// ThreadRepliers are the avatars in the thread summary row, and
+	// LastReplyMachine/LastReplyRelative its "Last reply 5 minutes ago".
+	ThreadRepliers    []replierView
+	LastReplyMachine  string
+	LastReplyRelative string
+	ReplyCountLabel   string
+	// ThreadRoot marks the first message of the thread pane, whose menu
+	// carries the follow toggle.
+	ThreadRoot bool
+	// FollowURL and Following drive "Get notified about new replies" /
+	// "Turn off notifications for replies" on a message with a thread.
+	FollowURL string
+	Following bool
+	// EditLinkURL, DeleteLinkURL and ForwardLinkURL open the editor and the
+	// two confirmation dialogs by navigation, for a reader without script;
+	// the page script opens them in place instead. Editing is set on the
+	// message whose editor such a link opened.
+	EditLinkURL    string
+	DeleteLinkURL  string
+	ForwardLinkURL string
+	Editing        bool
 	// AuthorStatus is the author's current status emoji, resolved to a glyph,
 	// projected beside their name the way Slack shows it on every message. It is
 	// set only for a human author posting as themselves — an app message or one
@@ -324,6 +385,8 @@ type reactionView struct {
 	Display template.HTML
 	Count   int
 	Mine    bool
+	// Tooltip names who reacted: "Ada, Grace and you reacted with :eyes:".
+	Tooltip string
 }
 
 type emojiOptionView struct {
@@ -333,6 +396,9 @@ type emojiOptionView struct {
 	Category  string `json:"category"`
 	Custom    bool   `json:"custom"`
 	SkinTones bool   `json:"skin_tones,omitempty"`
+	// Label is the name shown for the emoji when it differs from the one
+	// submitted: :thumbsup: for the catalog's "+1".
+	Label string `json:"label,omitempty"`
 }
 
 type conversationView struct {
@@ -514,16 +580,25 @@ type pageData struct {
 	StageUploadURL    string
 	TimelineURL       string
 	ThreadURL         string
-	ThreadFollowURL   string
-	FollowingThread   bool
-	GlobalShortcuts   []domain.AppShortcut
-	SlashCommands     []domain.AppShortcut
-	ComposerMembers   []memberView
-	ComposerGroups    []userGroupView
-	ComposerChannels  []conversationView
-	Apps              []domain.InstalledApp
-	Modal             *modalView
-	Details           *conversationDetailsView
+	// ForwardDestinations are the conversations this reader may forward a
+	// message into, offered by the one Forward message dialog on the page.
+	// ACT-03 requires a forward not to disclose a destination the actor
+	// cannot post to, so they are the reader's own channels and DMs.
+	ForwardDestinations []conversationView
+	// MessageDialog is a Delete message or Forward message dialog a
+	// no-script link asked for; the page script opens both in place.
+	MessageDialog *messageDialogView
+	// CanAddEmoji offers "Add emoji" in the emoji picker to the members who
+	// may add a workspace emoji: its administrators.
+	CanAddEmoji      bool
+	GlobalShortcuts  []domain.AppShortcut
+	SlashCommands    []domain.AppShortcut
+	ComposerMembers  []memberView
+	ComposerGroups   []userGroupView
+	ComposerChannels []conversationView
+	Apps             []domain.InstalledApp
+	Modal            *modalView
+	Details          *conversationDetailsView
 }
 
 type memberView struct {
@@ -1410,7 +1485,7 @@ const layoutMarkup = `<!doctype html>
 // an aria-keyshortcuts value by hand. Every advertised chord is looked up in
 // keyboardSections, which is what keeps the announced binding, the documented
 // binding and the implemented binding the same thing.
-var templateFunctions = template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts}
+var templateFunctions = template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts, "emojiSkinTones": emojiSkinTones, "emojiCategoryTabs": emojiCategoryTabs}
 
 var layoutTemplate = template.Must(template.New("layout").Funcs(templateFunctions).Parse(layoutMarkup))
 
@@ -1486,7 +1561,6 @@ const pageStyle = `<style>
 .channel-title-status{display:inline-flex;align-items:center;vertical-align:middle;margin-left:6px}.channel-title-status .standard-emoji,.channel-title-status .custom-emoji{width:18px;height:18px;font-size:16px;line-height:18px}
 a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;margin:0 -4px;border-radius:5px}a.time:hover{background:var(--hover)}
 .time{color:var(--muted);font-size:12px}
-.pinned{color:var(--muted);font-size:12px;font-weight:700}
 .message-text{margin:2px 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}
 .message-files{display:grid;gap:7px;margin:7px 0;max-width:520px}
 .message-file{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
@@ -1525,13 +1599,6 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .message-attachment .attachment-title{display:block;margin:2px 0;font-weight:800}
 .message-attachment .attachment-text{margin:4px 0;white-space:pre-wrap}
 .message-unfurls .message-attachment{border-left-color:var(--action)}
-.reactions{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0;list-style:none}
-.chip{display:inline-flex;gap:5px;align-items:center;border:1px solid var(--field-line);border-radius:12px;background:var(--panel);color:var(--text);padding:1px 9px;font-size:12px}
-.chip[aria-pressed=true]{border-color:var(--action);font-weight:800}
-.chip-count{font-variant-numeric:tabular-nums;font-weight:700}
-.message-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.message-actions a,.message-actions button{display:inline-flex;flex:0 0 auto;align-items:center;min-height:24px;color:var(--muted);background:transparent;border:0;padding:2px 4px;margin:0 -4px;border-radius:5px;text-decoration:none;font-size:12px}
-.message-actions a:hover,.message-actions button:hover{color:var(--action);text-decoration:underline}
 .inline-form{display:inline-flex;gap:6px;align-items:center}
 .inline-form input[type=text]{width:130px;border:1px solid var(--field-line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:3px 6px}
 .empty{color:var(--muted);padding:26px;text-align:center}
@@ -1568,7 +1635,6 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .slash-suggestions button{align-items:flex-start;gap:10px}.slash-suggestions strong{min-width:100px}.slash-suggestions small{display:block;color:var(--muted)}
 .mention-suggestions button:hover,.mention-suggestions button:focus-visible,.mention-suggestions button[aria-selected="true"],.channel-suggestions button:hover,.channel-suggestions button:focus-visible,.channel-suggestions button[aria-selected="true"],.emoji-suggestions button:hover,.emoji-suggestions button:focus-visible,.emoji-suggestions button[aria-selected="true"],.slash-suggestions button:hover,.slash-suggestions button:focus-visible,.slash-suggestions button[aria-selected="true"]{background:var(--panel)}
 .emoji-glyph,.custom-emoji{display:inline-block;width:20px;height:20px;object-fit:contain;vertical-align:-4px}.emoji-glyph,.standard-emoji{font-size:18px;line-height:20px;text-align:center}.reaction-emoji{display:inline-grid;min-width:20px;place-items:center}.reaction-picker-form{display:none}
-.emoji-picker-dialog{width:min(620px,calc(100vw - 28px));height:min(620px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.emoji-picker-dialog::backdrop{background:#0008}.emoji-picker-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.emoji-picker-head label{display:grid;gap:5px;font-weight:800}.emoji-picker-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.emoji-picker-close{align-self:end;border:0;background:transparent;color:var(--muted);font-size:22px}.emoji-picker-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,180px);gap:8px;padding:10px 14px 0}.emoji-picker-filters label{display:grid;gap:4px;color:var(--muted);font-size:12px;font-weight:700}.emoji-picker-filters select{min-width:0;border:1px solid var(--field-line);border-radius:6px;background:var(--panel);color:var(--text);padding:7px}.emoji-picker-status{margin:0;padding:9px 14px;color:var(--muted);font-size:12px}.emoji-picker-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:4px;margin:0;padding:0 10px 14px;list-style:none;overflow:auto;max-height:calc(100% - 174px)}.emoji-picker-results button{display:flex;width:100%;gap:7px;align-items:center;border:0;border-radius:6px;background:transparent;color:var(--text);padding:8px;text-align:left}.emoji-picker-results button:hover,.emoji-picker-results button:focus-visible,.emoji-picker-results button[aria-selected="true"]{background:var(--hover)}.emoji-picker-results small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .shortcut-browser{width:min(620px,calc(100vw - 28px));height:min(620px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.shortcut-browser::backdrop{background:#0008}.shortcut-browser-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.shortcut-browser-head label{display:grid;gap:5px;font-weight:800}.shortcut-browser-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.shortcut-browser-head button{align-self:end;border:0;background:transparent;color:var(--muted);font-size:22px}.shortcut-browser-results{display:grid;gap:4px;padding:10px;overflow:auto;max-height:calc(100% - 78px)}.shortcut-browser-results>button,.shortcut-browser-results form>button{display:grid;grid-template-columns:minmax(110px,auto) minmax(0,1fr);align-items:start;gap:12px;width:100%;border:0;border-radius:7px;background:transparent;color:var(--text);padding:10px;text-align:left}.shortcut-browser-results>button:hover,.shortcut-browser-results>button:focus-visible,.shortcut-browser-results form>button:hover,.shortcut-browser-results form>button:focus-visible{background:var(--hover)}.shortcut-browser-results span{display:grid;gap:2px}.shortcut-browser-results small{color:var(--muted)}.shortcut-browser-empty{padding:30px;text-align:center;color:var(--muted)}
 .clip-recorder{width:min(560px,calc(100vw - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:18px}.clip-recorder::backdrop{background:#0008}.clip-recorder h2{margin:0 0 6px;font-size:18px}.clip-recorder p{margin:0 0 14px;color:var(--muted)}.clip-recorder video{display:block;width:100%;max-height:min(360px,55vh);margin:0 0 14px;border-radius:9px;background:#111;object-fit:contain}.clip-recorder-actions{display:flex;justify-content:flex-end;gap:8px}.clip-recorder-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel);color:var(--text);padding:8px 12px;font-weight:800}.clip-recorder-actions .clip-stop{border-color:var(--danger);background:var(--danger);color:var(--on-strong)}
 .conversation-switcher{width:min(560px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}
@@ -1720,7 +1786,6 @@ const workspaceRefinements = `<style>
 .message-action::-webkit-details-marker{display:none}
 .message-action:hover{background:var(--hover);color:var(--text)}
 .action-icon{width:18px;height:18px;display:block}
-.message-more>.shortcut-list,.forward-menu>form{position:absolute;z-index:6;right:0;top:32px}
 .message-actions a,.message-actions button,.message-actions summary{display:inline-flex;flex:0 0 auto;align-items:center;min-height:28px;border-radius:4px;padding:4px 7px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
 /* The toolbar is revealed by pointing at the message or focusing it, and is
    otherwise out of the way. It used to be permanently visible under every
@@ -1752,12 +1817,6 @@ const workspaceRefinements = `<style>
 .message-actions details{display:inline-block;position:relative}
 .message-actions summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none}
 .message-actions summary::-webkit-details-marker{display:none}
-.message-actions details[open]>form{position:absolute;z-index:5;right:0;top:34px;display:flex;width:max-content;max-width:min(480px,80vw);padding:9px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow)}
-.shortcut-list{display:grid;gap:3px;min-width:220px;padding:6px}
-.message-actions details[open]>.shortcut-list{position:absolute;z-index:5;right:0;top:34px;width:max-content;max-width:min(360px,80vw);border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow)}
-.shortcut-list form{display:block}
-.shortcut-list button{display:block;width:100%;padding:7px 9px;text-align:left}
-.shortcut-list small{display:block;color:var(--muted);font-weight:400}
 .composer-shortcuts{position:relative}
 /* Attaching is a plus button at the head of the composer's own toolbar, where
    Slack puts it.
@@ -1776,9 +1835,6 @@ const workspaceRefinements = `<style>
 .composer-shortcuts summary{display:inline-flex;align-items:center;gap:6px;min-height:28px;width:max-content;cursor:pointer;padding:2px 8px;border-radius:6px;color:var(--muted);font-size:13px;font-weight:700}
 .composer-shortcuts summary:hover{background:var(--hover);color:var(--text)}
 .composer-shortcuts[open]>.shortcut-list{position:absolute;z-index:6;left:0;bottom:30px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow)}
-.message-actions .edit-message{width:min(420px,70vw)}
-.message-actions .edit-message textarea{width:min(320px,55vw);min-height:64px;resize:vertical;border:1px solid var(--field-line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:5px 7px}
-.message-actions .delete-message button{color:var(--danger);font-weight:700}
 .new-channel{margin:4px 8px 0}
 .new-channel summary{cursor:pointer;color:#f5eaf6;font-size:13px;font-weight:700;list-style:none;padding:5px 2px}
 .new-channel summary::-webkit-details-marker{display:none}
@@ -1843,9 +1899,7 @@ const workspaceRefinements = `<style>
    divider rendered as bare left-aligned text because .day-separator was
    mobile-only. */
 .day-separator{display:flex;align-items:center;gap:8px;margin:14px 0 6px;color:var(--muted);font-size:12px}
-.day-separator::before,.day-separator::after{content:"";flex:1;height:1px;background:var(--field-line)}
 .unread-divider{display:flex;align-items:center;gap:8px;margin:10px 0;color:var(--action);font-size:12px;font-weight:700}
-.unread-divider::before,.unread-divider::after{content:"";flex:1;height:1px;background:var(--action)}
 /* No blanket opacity. The rule that used to be here faded the whole message to
    85%, which was harmless only because it had been stranded in a media query
    and never applied; switched on, it blends the muted text toward whatever is
@@ -1855,9 +1909,6 @@ const workspaceRefinements = `<style>
    not a transparency that quietly degrades every one of them. */
 .system-text{margin:0;color:var(--muted);font-size:13px}
 .edited-label,.broadcast-label{margin-left:6px;color:var(--muted);font-size:11px}
-.thread-summary{margin:2px 0 0;font-size:12px}
-.thread-summary a{color:var(--action);font-weight:700;text-decoration:none}
-.thread-last-reply{color:var(--muted);margin-left:6px}
 .file-delete summary{cursor:pointer;color:var(--muted);font-size:12px}
 .file-delete p{margin:6px 0;font-size:12px;color:var(--muted)}
 /* A system message carries no avatar, so its body landed in the 38px avatar
@@ -1884,8 +1935,6 @@ html.js .sidebar.is-open{transform:translateX(0)}
 .search-submit{display:none}
 .channel-header{padding-left:12px;padding-right:12px}
 .membership-pill{display:none}
-.message-actions{position:static;margin-top:2px;padding:0;border:0;background:transparent;box-shadow:none;opacity:1;visibility:visible}
-.message-actions details[open]>form{left:0;right:auto}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
 .new-channel{position:relative;margin-left:4px;margin-right:4px}
@@ -1893,7 +1942,6 @@ html.js .sidebar.is-open{transform:translateX(0)}
 .modal-backdrop{padding:0;align-items:end}.app-modal{width:100%;max-height:calc(100vh - 48px);border-radius:12px 12px 0 0}
 }
 @media(hover:none){
-.message-actions{position:static;margin-top:2px;padding:0;border:0;background:transparent;box-shadow:none;opacity:1;visibility:visible}
 }
 </style>`
 
@@ -1904,222 +1952,16 @@ const attachmentPartial = `{{define "attachment"}}
   {{if .Title}}{{if .TitleURL}}<a class="attachment-title" href="{{.TitleURL}}" rel="noreferrer noopener">{{.Title}}</a>{{else}}<strong class="attachment-title">{{.Title}}</strong>{{end}}{{end}}
   {{if .Text}}<p class="attachment-text">{{.Text}}</p>{{end}}
   {{if .Fields}}<ul class="attachment-fields">{{range .Fields}}<li>{{if .Title}}<strong>{{.Title}}</strong><br>{{end}}{{.Value}}</li>{{end}}</ul>{{end}}
-  {{if .Blocks}}<div class="message-blocks">{{range $block := .Blocks}}{{if eq $block.Kind "divider"}}<hr class="message-block divider">{{else}}<div class="message-block {{$block.Kind}}">{{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else}}{{$block.Text}}{{end}}{{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}{{.}}{{else}}{{$field}}{{end}}</li>{{end}}</ul>{{end}}{{if $block.Table}}<div class="block-table-wrap"><table class="block-table">{{if $block.Caption}}<caption>{{$block.Caption}}</caption>{{end}}<tbody>{{range $rowIndex, $row := $block.Table}}<tr>{{range $row}}{{if and $block.HeaderRow (eq $rowIndex 0)}}<th scope="col">{{.}}</th>{{else}}<td>{{.}}</td>{{end}}{{end}}</tr>{{end}}</tbody></table></div>{{end}}</div>{{end}}{{end}}</div>{{end}}
+  {{if .Blocks}}<div class="message-blocks">{{range $block := .Blocks}}{{if eq $block.Kind "divider"}}<hr class="message-block divider">{{else}}<div class="message-block {{$block.Kind}}">{{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else}}<div class="block-text">{{$block.Text}}</div>{{end}}{{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}<div class="formatted-text">{{.}}</div>{{else}}<div class="block-text">{{$field}}</div>{{end}}</li>{{end}}</ul>{{end}}{{if $block.Table}}<div class="block-table-wrap"><table class="block-table">{{if $block.Caption}}<caption>{{$block.Caption}}</caption>{{end}}<tbody>{{range $rowIndex, $row := $block.Table}}<tr>{{range $row}}{{if and $block.HeaderRow (eq $rowIndex 0)}}<th scope="col">{{.}}</th>{{else}}<td>{{.}}</td>{{end}}{{end}}</tr>{{end}}</tbody></table></div>{{end}}</div>{{end}}{{end}}</div>{{end}}
   {{if .ImageURL}}<img class="message-media" src="{{.ImageURL}}" alt="{{.ImageAlt}}" loading="lazy">{{end}}
   {{if .Footer}}<div class="attachment-footer">{{.Footer}}</div>{{end}}
   {{if .SourceURL}}<a class="unfurl-source" href="{{.SourceURL}}" rel="noreferrer noopener">{{.SourceURL}}</a>{{end}}
 </article>
 {{end}}`
 
-const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="7.25" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="7.4" cy="8.4" r="1" fill="currentColor"/><circle cx="12.6" cy="8.4" r="1" fill="currentColor"/><path d="M6.9 12.2a4 4 0 0 0 6.2 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>{{end}}
-{{define "icon-thread"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3.2 6.2A2 2 0 0 1 5.2 4.2h9.6a2 2 0 0 1 2 2v5.2a2 2 0 0 1-2 2H8.4L5 16.2v-2.8a2 2 0 0 1-1.8-2Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>{{end}}
-{{define "icon-forward"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M11 4.5 17 10l-6 5.5V12C7.6 12 5.2 13.1 3.5 15.5c.3-4.6 3-7.4 7.5-7.9Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>{{end}}
-{{define "icon-bookmark"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5.5 3.8h9v12.4L10 12.6l-4.5 3.6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>{{end}}
-{{define "icon-more"}}<svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="4.6" cy="10" r="1.4" fill="currentColor"/><circle cx="10" cy="10" r="1.4" fill="currentColor"/><circle cx="15.4" cy="10" r="1.4" fill="currentColor"/></svg>{{end}}
-{{define "messages"}}
-{{range $message := .Messages}}
-{{if $message.DaySeparator}}<div class="day-separator" role="separator"><time datetime="{{$message.DaySeparatorMachine}}">{{$message.DaySeparator}}</time></div>{{end}}
-{{if $message.FirstUnread}}<div class="unread-divider" role="separator" aria-label="New messages"><span>New</span></div>{{end}}
-{{if $message.System}}<article class="message system-message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" data-subtype="{{$message.Subtype}}" tabindex="-1" aria-label="{{$message.DisplayText}}">
-  <div class="message-body"><p class="system-text">{{$message.DisplayText}}</p><time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time></div>
-</article>
-{{else}}
-<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" tabindex="-1" aria-label="{{if $message.Ephemeral}}Private message only visible to you{{else}}Message{{end}} from {{$message.AuthorName}} at {{$message.DisplayTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End ArrowRight T{{if not $message.Ephemeral}} A M F{{end}}{{if $message.MarkUnreadURL}} U{{end}}{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
-  <div class="avatar{{if $message.AvatarEmoji}} avatar-emoji{{end}}" aria-hidden="true">{{if $message.AvatarURL}}<img src="{{$message.AvatarURL}}" alt="">{{else if $message.AvatarEmoji}}{{$message.AvatarEmoji}}{{else}}{{$message.AuthorInitial}}{{end}}</div>
-  <div class="message-body">
-    <div class="message-head">
-      <span class="author">{{$message.AuthorName}}</span>{{if $message.AuthorStatus}}<span class="author-status"{{if $message.AuthorStatusText}} title="{{$message.AuthorStatusText}}"{{end}}>{{$message.AuthorStatus}}</span>{{end}}{{if $message.IsApp}}<span class="app-label">APP</span>{{end}}
-      {{if $message.Permalink}}<a class="time" href="{{$message.Permalink}}"><time datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time></a>{{else}}<time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{end}}{{if $message.Edited}}<span class="edited-label" title="Edited {{$message.EditedTime}}">(edited)</span>{{end}}{{if $message.Broadcast}}<span class="broadcast-label">Also sent to the channel</span>{{end}}{{if $message.Streaming}}<span class="streaming-label" role="status">Responding…</span>{{end}}
-      {{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}
-      {{if $message.Ephemeral}}<span class="ephemeral-label">Only visible to you</span>{{end}}
-    </div>
-    {{if $message.DisplayText}}<p class="message-text">{{$message.DisplayText}}</p>{{end}}
-    {{if $message.Files}}<div class="message-files" aria-label="Shared files">{{range $file := $message.Files}}
-      <div class="message-file{{if $file.IsImage}} is-image{{end}}{{if $file.IsSnippet}} is-snippet{{end}}">
-        {{if $file.IsImage}}<a class="message-image-link" href="{{$file.DownloadURL}}"><img class="message-image" src="{{$file.ThumbnailURL}}" alt="{{$file.AccessibleName}}" loading="lazy"></a>
-        {{else if $file.IsSnippet}}<span class="message-file-icon" aria-hidden="true">{{if $file.FileType}}{{$file.FileType}}{{else}}snippet{{end}}</span>
-        {{else}}<span class="message-file-icon" aria-hidden="true">FILE</span>{{end}}
-        <span class="message-file-copy"><span class="message-file-title">{{$file.Title}}</span><span class="message-file-meta">{{$file.Name}} · {{$file.MIMEType}} · {{$file.Size}}</span>{{if and $file.IsImage (not $file.AccessibleName)}}<span class="message-file-meta undescribed">No description yet</span>{{end}}</span>
-        {{if $file.IsSnippet}}<pre class="message-snippet"{{if $file.FileType}} data-filetype="{{$file.FileType}}"{{end}}><code>{{$file.SnippetContent}}</code></pre>{{if $file.SnippetTruncated}}<span class="message-file-meta">Truncated — download for the full snippet.</span>{{end}}{{end}}
-        {{if $file.Deleted}}<span class="message-file-meta">Deleted</span>{{else}}<a href="{{$file.DownloadURL}}" download>Download</a>{{if $file.DeleteURL}}<details class="file-delete"><summary>Delete file</summary>
-          <form method="post" action="{{$file.DeleteURL}}" hx-post="{{$file.DeleteURL}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <p>Deleting {{$file.Title}} removes it from every message and search result in this workspace. This cannot be undone.</p>
-            <button type="submit">Delete this file</button>
-          </form>
-        </details>{{end}}{{if $file.DescribeURL}}<details class="file-describe"><summary>{{if $file.Description}}Edit description{{else}}Add a description{{end}}</summary>
-          <form method="post" action="{{$file.DescribeURL}}" hx-post="{{$file.DescribeURL}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <label for="describe-{{$file.ID}}">Describe this image for people who cannot see it</label>
-            <textarea id="describe-{{$file.ID}}" name="description" maxlength="1000" rows="2">{{$file.Description}}</textarea>
-            <button type="submit">Save description</button>
-          </form>
-        </details>{{end}}{{end}}
-      </div>{{end}}</div>{{end}}
-    {{if $message.Blocks}}
-    <div class="message-blocks" aria-label="Structured message">
-      {{range $block := $message.Blocks}}
-        {{if eq $block.Kind "divider"}}<hr class="message-block divider">
-        {{else}}<div class="message-block {{$block.Kind}}">
-          {{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else if $block.Text}}<div>{{$block.Text}}</div>{{end}}
-          {{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}{{.}}{{else}}{{$field}}{{end}}</li>{{end}}</ul>{{end}}
-          {{if $block.Table}}<div class="block-table-wrap"><table class="block-table">{{if $block.Caption}}<caption>{{$block.Caption}}</caption>{{end}}<tbody>{{range $rowIndex, $row := $block.Table}}<tr>{{range $cell := $row}}{{if and $block.HeaderRow (eq $rowIndex 0)}}<th scope="col">{{$cell}}</th>{{else}}<td>{{$cell}}</td>{{end}}{{end}}</tr>{{end}}</tbody></table></div>{{end}}
-          {{if and $message.CanInteract $block.Actions}}<div class="message-block-actions" aria-label="Message actions">{{range $action := $block.Actions}}
-            {{if $action.Dispatch}}<form method="post" action="/app/interaction" hx-post="/app/interaction">{{else}}<div>
-              {{end}}
-              <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-              <input type="hidden" name="message_id" value="{{$message.MessageID}}">
-              <input type="hidden" name="app_id" value="{{$message.AppID}}">
-              <input type="hidden" name="block_id" value="{{$action.BlockID}}">
-              <input type="hidden" name="action_id" value="{{$action.ActionID}}">
-              <input type="hidden" name="action_type" value="{{$action.Type}}">
-              <input type="hidden" name="channel" value="{{$message.Channel}}">
-              {{if eq $action.Control "button"}}<input type="hidden" name="value" value="{{$action.Value}}">{{if $action.Dispatch}}<button class="block-action{{if $action.Tone}} feedback-{{$action.Tone}}{{end}}" type="submit"{{if $action.AccessibilityLabel}} aria-label="{{$action.AccessibilityLabel}}"{{end}}>{{$action.Text}}</button>{{end}}
-              {{else if eq $action.Control "date"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="date" name="value" value="{{$action.Value}}" required></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
-              {{else if eq $action.Control "time"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="time" name="value" value="{{$action.Value}}" required></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
-              {{else if eq $action.Control "datetime"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="datetime-local" name="value" value="{{$action.Value}}"{{if $action.DateTimeUnix}} data-unix="{{$action.DateTimeUnix}}"{{end}} data-unix-seconds="true" required><input type="hidden" name="timezone" data-browser-timezone value="UTC"></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
-              {{else if eq $action.Control "radio"}}<fieldset class="block-action-options"><legend class="sr-only">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="radio" name="value" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}} required> {{$option.Text}}</label>{{end}}</fieldset>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
-              {{else if eq $action.Control "checkbox"}}<fieldset class="block-action-options"><legend class="sr-only">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="checkbox" name="value" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}> {{$option.Text}}</label>{{end}}</fieldset>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
-              {{else if eq $action.Control "external"}}<div class="external-select" data-app-options data-app-id="{{$message.AppID}}" data-message-id="{{$message.MessageID}}" data-block-id="{{$action.BlockID}}" data-action-id="{{$action.ActionID}}" data-channel="{{$message.Channel}}" data-min-query="{{$action.MinQueryLength}}"><label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="search" data-options-query placeholder="{{$action.Text}}" minlength="{{$action.MinQueryLength}}"></label><button class="block-action" type="button" data-options-load>Search</button><label><span class="sr-only">Results</span><select class="block-action block-action-select" name="value" data-options-results{{if $action.Multiple}} multiple{{end}}{{if not $action.Options}} disabled{{end}}>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label>{{if $action.Dispatch}}<button class="block-action" type="submit" data-options-choose{{if not $action.Options}} disabled{{end}}>Choose</button>{{end}}<p class="external-select-status" data-options-status role="status"></p><noscript>Dynamic options require JavaScript in this client.</noscript></div>
-              {{else if eq $action.Control "file"}}<p class="modal-hint modal-unsupported" role="note">{{$action.Text}} Files are attached in an app's modal form, not here.</p>
-            {{else if or (eq $action.Control "text") (eq $action.Control "textarea") (eq $action.Control "richtext") (eq $action.Control "email") (eq $action.Control "url") (eq $action.Control "number")}}{{if or (eq $action.Control "textarea") (eq $action.Control "richtext")}}<textarea class="block-action" name="value" placeholder="{{$action.Text}}">{{$action.Value}}</textarea>{{else}}<input class="block-action" type="{{$action.Control}}" name="value" value="{{$action.Value}}" placeholder="{{$action.Text}}">{{end}}{{if $action.Dispatch}}<button class="block-action" type="submit">Send</button>{{end}}
-              {{else}}<label><span class="sr-only">{{$action.Text}}</span><select class="block-action block-action-select" name="value"{{if $action.Multiple}} multiple{{end}} required>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}{{end}}
-            {{if $action.Dispatch}}</form>{{else}}</div>{{end}}
-          {{end}}</div>{{end}}
-          {{if $block.Call}}<div class="call-card">
-            {{if $block.Call.Unavailable}}<p class="call-unavailable">This call is no longer available.</p>
-            {{else}}<p class="call-title">{{if $block.Call.Title}}{{$block.Call.Title}}{{else}}Call{{end}}</p>
-            <p class="call-state">{{if $block.Call.Active}}In progress{{else}}Ended{{end}}{{if $block.Call.Participants}} · {{len $block.Call.Participants}} in the call{{end}}</p>
-            {{if $block.Call.Participants}}<ul class="call-participants">{{range $block.Call.Participants}}<li>{{.}}</li>{{end}}</ul>{{end}}
-            {{if and $block.Call.Active $block.Call.JoinURL}}<a class="call-join" href="{{$block.Call.JoinURL}}" rel="noreferrer noopener">Join call</a>
-            {{else if $block.Call.JoinURL}}<p class="call-state">This call has ended. The link it was created with is no longer offered.</p>{{end}}{{end}}
-          </div>{{end}}
-          {{if $block.ImageURL}}<img class="message-media" src="{{$block.ImageURL}}" alt="{{$block.ImageAlt}}" loading="lazy">{{end}}
-          {{if $block.LinkURL}}<a href="{{$block.LinkURL}}" rel="noreferrer noopener">{{$block.LinkLabel}}</a>{{end}}
-        </div>{{end}}
-      {{end}}
-    </div>
-    {{end}}
-    {{if $message.Attachments}}
-    <div class="message-attachments" aria-label="Attachments">
-      {{range $attachment := $message.Attachments}}{{template "attachment" $attachment}}{{end}}
-    </div>
-    {{end}}
-    {{if $message.Unfurls}}
-    <div class="message-unfurls" aria-label="Link previews">
-      {{range $attachment := $message.Unfurls}}{{template "attachment" $attachment}}{{end}}
-    </div>
-    {{end}}
-    {{if $message.Reactions}}
-    <ul class="reactions">
-      {{range $reaction := $message.Reactions}}
-      <li>
-        {{if $.CanReact}}
-        <form class="inline-form" method="post" action="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}" hx-post="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}">
-          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <input type="hidden" name="name" value="{{$reaction.Name}}">
-          <button class="chip" type="submit" aria-pressed="{{if $reaction.Mine}}true{{else}}false{{end}}" aria-label="{{if $reaction.Mine}}Remove your {{$reaction.Name}} reaction{{else}}React with {{$reaction.Name}}{{end}}, {{$reaction.Count}} so far"><span class="reaction-emoji">{{$reaction.Display}}</span> <span class="chip-count">{{$reaction.Count}}</span></button>
-        </form>
-        {{else}}
-        <span class="chip" role="img" aria-label="{{$reaction.Name}}, {{$reaction.Count}} reactions"><span class="reaction-emoji">{{$reaction.Display}}</span> <span class="chip-count">{{$reaction.Count}}</span></span>
-        {{end}}
-      </li>
-      {{end}}
-    </ul>
-    {{end}}
-    {{if $message.ReplyCount}}<p class="thread-summary"><a href="{{$message.ReplyURL}}">{{$message.ReplySummary}}</a>{{if $message.LastReplyTime}} <span class="thread-last-reply">Last reply {{$message.LastReplyTime}}</span>{{end}}</p>{{end}}
-    {{if not $message.Ephemeral}}<div class="message-actions" role="group" aria-label="Actions for the message from {{$message.AuthorName}}">
-      {{if $.CanReact}}
-      <form id="reaction-form-{{$message.ID}}" class="reaction-picker-form" aria-label="Add a reaction to the message from {{$message.AuthorName}}" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}">
-        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-        <input type="hidden" name="name" value="">
-      </form>
-      <button class="message-action" type="button" data-open-emoji-picker data-emoji-target="reaction" data-reaction-form="reaction-form-{{$message.ID}}" aria-haspopup="dialog" aria-label="Add reaction" title="Add reaction">{{template "icon-emoji"}}</button>
-      {{end}}
-      <a class="message-action" href="{{$message.ReplyURL}}" aria-label="{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}" title="{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}">{{template "icon-thread"}}</a>
-      {{if and $message.ForwardURL $.CanReply}}<details class="forward-menu"><summary class="message-action" aria-label="Forward" title="Forward">{{template "icon-forward"}}</summary>
-        <form method="post" action="{{$message.ForwardURL}}" hx-post="{{$message.ForwardURL}}">
-          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <label>Forward to<select name="destination">{{range $.ForwardDestinations}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label>
-          <label>Add a message<input name="comment" maxlength="2000"></label>
-          <button type="submit">Forward</button>
-        </form>
-      </details>{{end}}
-      <form method="post" action="{{if $message.Saved}}{{$message.UnsaveURL}}{{else}}{{$message.SaveURL}}{{end}}" hx-post="{{if $message.Saved}}{{$message.UnsaveURL}}{{else}}{{$message.SaveURL}}{{end}}" data-message-save>
-        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-        <button class="message-action" type="submit" aria-pressed="{{if $message.Saved}}true{{else}}false{{end}}" aria-label="{{if $message.Saved}}Remove from Later{{else}}Save for later{{end}}" title="{{if $message.Saved}}Remove from Later{{else}}Save for later{{end}}">{{template "icon-bookmark"}}</button>
-      </form>
-      <details class="message-more"><summary class="message-action" aria-label="More actions" title="More actions">{{template "icon-more"}}</summary>
-      <div class="shortcut-list">
-        {{if $message.CopyLinkURL}}<a class="copy-link" href="{{$message.CopyLinkURL}}" data-copy-link="{{$message.CopyLinkURL}}">Copy link</a>{{end}}
-        {{if $message.MarkUnreadURL}}<form method="post" action="{{$message.MarkUnreadURL}}" hx-post="{{$message.MarkUnreadURL}}">
-          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <button type="submit">Mark unread from here</button>
-        </form>{{end}}
-        <details data-reminder-menu>
-          <summary>Remind me about this</summary>
-          <form class="inline-form reminder-form" aria-label="Set a reminder for this message" method="post" action="{{$message.RemindURL}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <input type="hidden" name="timezone" data-browser-timezone value="UTC">
-            <button type="submit" name="preset" value="20m">In 20 minutes</button>
-            <button type="submit" name="preset" value="1h">In 1 hour</button>
-            <button type="submit" name="preset" value="tomorrow">Tomorrow at 9:00 AM</button>
-            <label>Custom date<input type="date" name="date"></label>
-            <label>Time<input type="time" name="time" value="09:00"></label>
-            <button type="submit" name="preset" value="custom">Set reminder</button>
-          </form>
-        </details>
-        {{if $.CanPin}}
-        <form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}">
-          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button>
-        </form>
-        {{end}}
-        {{range $shortcut := $message.Shortcuts}}
-        <form method="post" action="/app/shortcut" hx-post="/app/shortcut">
-          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <input type="hidden" name="channel" value="{{$message.Channel}}">
-          <input type="hidden" name="message_id" value="{{$message.MessageID}}">
-          <input type="hidden" name="app_id" value="{{$shortcut.AppID}}">
-          <input type="hidden" name="callback_id" value="{{$shortcut.CallbackID}}">
-          <button type="submit">{{$shortcut.Name}}<small>{{$shortcut.AppName}} · {{$shortcut.Description}}</small></button>
-        </form>
-        {{end}}
-        {{if $message.CanEdit}}
-        <details>
-          <summary>Edit</summary>
-          <form class="inline-form edit-message" aria-label="Edit message" method="post" action="{{$message.UpdateURL}}" hx-post="{{$message.UpdateURL}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <label class="visually-hidden" for="edit-{{$message.ID}}">Edit your message</label>
-            <textarea id="edit-{{$message.ID}}" name="text" maxlength="40000" required>{{$message.Text}}</textarea>
-            <button type="submit">Save changes</button>
-          </form>
-        </details>
-        {{end}}
-        {{if $message.CanDelete}}
-        <details class="delete-message">
-          <summary>Delete</summary>
-          <form aria-label="Delete message" method="post" action="{{$message.DeleteURL}}" hx-post="{{$message.DeleteURL}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            {{if $message.Files}}<p>This message shares a file. Deleting it also removes the file from this conversation, unless another message here shares it too. The file itself is kept.</p>{{end}}
-            <button type="submit">Delete this message</button>
-          </form>
-        </details>
-        {{end}}
-      </div>
-      </details>
-    </div>{{end}}
-  </div>
-</article>
-{{end}}
-{{else}}
-<p class="empty">{{if .IsMember}}No messages yet. Start the conversation.{{else}}No messages have been posted in this channel yet.{{end}}</p>
-{{end}}
-{{end}}`
-
 var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
-{{define "styles"}}` + pageStyle + workspaceRefinements + `{{end}}
-{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + `{{end}}
+{{define "styles"}}` + pageStyle + workspaceRefinements + messageStyle + `{{end}}
+{{define "scripts"}}` + progressiveEnhancementScript + messageScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
 <div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}"{{if .CanonicalURL}} data-canonical-url="{{.CanonicalURL}}"{{end}}>
@@ -2143,12 +1985,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
     <div class="switcher-head"><label><span class="visually-hidden" id="conversation-switcher-title">Jump to a conversation</span><input id="conversation-switcher-query" type="search" autocomplete="off" placeholder="Jump to a conversation"></label><button class="switcher-close" type="button" aria-label="Close conversation switcher">×</button></div>
     <ul class="switcher-results" id="conversation-switcher-results">{{range .Channels}}<li><a href="/app?channel={{.ID}}" data-conversation-name="{{.Name}}"><span aria-hidden="true">#</span><span>{{.Name}}</span></a></li>{{end}}{{range .Directs}}<li><a href="/app?channel={{.ID}}" data-conversation-name="{{.Name}}"><span aria-hidden="true">@</span><span>{{.Name}}</span></a></li>{{end}}</ul>
   </dialog>
-  {{if or .CanPost .Timeline.CanReact}}<dialog class="emoji-picker-dialog" id="emoji-picker-dialog" aria-labelledby="emoji-picker-title">
-    <div class="emoji-picker-head"><label><span id="emoji-picker-title">Emoji</span><input id="emoji-picker-query" type="search" autocomplete="off" maxlength="100" placeholder="Search emoji"></label><button class="emoji-picker-close" id="emoji-picker-close" type="button" aria-label="Close emoji picker">×</button></div>
-    <div class="emoji-picker-filters"><label>Category<select id="emoji-picker-category"><option value="">All emoji</option><option value="Recent">Recent</option><option value="Custom">Custom</option></select></label><label>Skin tone<select id="emoji-picker-tone"><option value="">Default</option><option value="2">Light</option><option value="3">Medium-light</option><option value="4">Medium</option><option value="5">Medium-dark</option><option value="6">Dark</option></select></label></div>
-    <p class="emoji-picker-status" id="emoji-picker-status" role="status">Choose an emoji.</p>
-    <ul class="emoji-picker-results" id="emoji-picker-results" role="listbox" aria-label="Emoji results"></ul>
-  </dialog>{{end}}
+  {{template "message-dialogs" .}}
   {{if and .CanPost (or .SlashCommands .GlobalShortcuts)}}<dialog class="shortcut-browser" id="shortcut-browser" aria-labelledby="shortcut-browser-title">
     <div class="shortcut-browser-head"><label><span id="shortcut-browser-title">Shortcuts</span><input id="shortcut-browser-query" type="search" autocomplete="off" placeholder="Search shortcuts and commands"></label><button id="shortcut-browser-close" type="button" aria-label="Close shortcuts">×</button></div>
     <div class="shortcut-browser-results" id="shortcut-browser-results">{{range .SlashCommands}}<button type="button" data-browser-command="{{.Command}}" data-shortcut-search="{{.Command}} {{.Description}} {{.UsageHint}} {{.AppName}}"><strong>{{.Command}}</strong><span>{{.Description}}{{if .UsageHint}}<small>{{.UsageHint}}</small>{{end}}{{if .AppName}}<small>{{.AppName}}</small>{{end}}</span></button>{{end}}{{range $shortcut := .GlobalShortcuts}}
@@ -2326,7 +2163,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </div>
       {{if .ThreadTimestamp}}
       <aside class="thread" aria-labelledby="thread-heading">
-        <div class="thread-heading"><h2 id="thread-heading">Thread</h2>{{if .ThreadFollowURL}}<form method="post" action="{{.ThreadFollowURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="followed" value="{{if .FollowingThread}}false{{else}}true{{end}}"><button type="submit" aria-pressed="{{if .FollowingThread}}true{{else}}false{{end}}">{{if .FollowingThread}}Following{{else}}Follow thread{{end}}</button></form>{{end}}</div>
+        <div class="thread-heading"><h2 id="thread-heading" tabindex="-1">Thread</h2><span class="thread-channel">{{.ChannelPrefix}}{{.ChannelName}}</span><a class="thread-close" href="/app?channel={{.Channel}}" data-thread-close aria-label="Close thread" title="Close" aria-keyshortcuts="Escape">×</a></div>
         {{if .Assistant.Present}}<div class="assistant-state">
           {{if .Assistant.Title}}<p class="assistant-title">{{.Assistant.Title}}</p>{{end}}
           {{if .Assistant.Status}}<p class="assistant-status" role="status">{{.Assistant.Status}}</p>{{end}}
@@ -2607,7 +2444,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
           {{if $input.Hint}}<p class="modal-hint">{{$input.Hint}}</p>{{end}}{{if $block.Error}}<p class="modal-error" id="modal-error-{{$input.Index}}" role="alert">{{$block.Error}}</p>{{end}}
         </div>
         {{else if eq $block.Kind "divider"}}<hr class="modal-block divider">
-        {{else}}<div class="modal-block message-block {{$block.Kind}}">{{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else if $block.Text}}<div>{{$block.Text}}</div>{{end}}{{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}{{.}}{{else}}{{$field}}{{end}}</li>{{end}}</ul>{{end}}{{if $block.Table}}<div class="block-table-wrap"><table class="block-table">{{if $block.Caption}}<caption>{{$block.Caption}}</caption>{{end}}<tbody>{{range $rowIndex, $row := $block.Table}}<tr>{{range $cell := $row}}{{if and $block.HeaderRow (eq $rowIndex 0)}}<th scope="col">{{$cell}}</th>{{else}}<td>{{$cell}}</td>{{end}}{{end}}</tr>{{end}}</tbody></table></div>{{end}}{{if $block.ImageURL}}<img class="message-media" src="{{$block.ImageURL}}" alt="{{$block.ImageAlt}}" loading="lazy">{{end}}
+        {{else}}<div class="modal-block message-block {{$block.Kind}}">{{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else if $block.Text}}<div class="block-text">{{$block.Text}}</div>{{end}}{{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}{{.}}{{else}}{{$field}}{{end}}</li>{{end}}</ul>{{end}}{{if $block.Table}}<div class="block-table-wrap"><table class="block-table">{{if $block.Caption}}<caption>{{$block.Caption}}</caption>{{end}}<tbody>{{range $rowIndex, $row := $block.Table}}<tr>{{range $cell := $row}}{{if and $block.HeaderRow (eq $rowIndex 0)}}<th scope="col">{{$cell}}</th>{{else}}<td>{{$cell}}</td>{{end}}{{end}}</tr>{{end}}</tbody></table></div>{{end}}{{if $block.ImageURL}}<img class="message-media" src="{{$block.ImageURL}}" alt="{{$block.ImageAlt}}" loading="lazy">{{end}}
           {{if $block.Actions}}<div class="modal-actions" aria-label="App actions">{{range $action := $block.Actions}}
             {{if eq $action.Control "button"}}<button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>{{$action.Text}}</button>
             {{else if eq $action.Control "date"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="date" name="action_{{$action.Index}}" value="{{$action.Value}}"></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
@@ -2629,7 +2466,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
 </div>
 {{end}}
 {{end}}
-` + messagesPartial + huddlePartial + typingPartial
+` + messagesPartial + messageDialogsPartial + huddlePartial + typingPartial
 
 var pageTemplate = mustPage(pageMarkup)
 
@@ -3348,7 +3185,44 @@ var listTemplate = mustPage(listMarkup)
 // localTimeScript renders machine timestamps in the reader's own locale and
 // zone. The server keeps the machine value in datetime= so the page is still
 // readable without JavaScript.
-const localTimeScript = `<script>(function(){window.sameoldchatLocalTimes=function(root){if(!root||!window.Intl)return;var nodes=root.querySelectorAll('time[datetime]');for(var index=0;index<nodes.length;index++){var value=new Date(nodes[index].getAttribute('datetime'));if(isNaN(value.getTime()))continue;nodes[index].textContent=value.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}};window.sameoldchatLocalTimes(document)})();</script>`
+const localTimeScript = `<script>(function(){
+var english=/^en\b/i.test(navigator.language||'en');
+function ordinal(day){var tens=day%100;if(tens>10&&tens<14)return day+'th';return day+({1:'st',2:'nd',3:'rd'}[day%10]||'th')}
+function sameDay(left,right){return left.getFullYear()===right.getFullYear()&&left.getMonth()===right.getMonth()&&left.getDate()===right.getDate()}
+function clock(value){return value.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}
+function dayName(value,now){
+if(sameDay(value,now))return 'Today';
+var yesterday=new Date(now.getFullYear(),now.getMonth(),now.getDate()-1);if(sameDay(value,yesterday))return 'Yesterday';
+var options={weekday:'long',month:'long'};if(value.getFullYear()!==now.getFullYear())options.year='numeric';
+if(!english){options.day='numeric';return value.toLocaleDateString(undefined,options)}
+var label=value.toLocaleDateString('en-US',{weekday:'long'})+', '+value.toLocaleDateString('en-US',{month:'long'})+' '+ordinal(value.getDate());
+return value.getFullYear()!==now.getFullYear()?label+', '+value.getFullYear():label;
+}
+function full(value){
+if(!english)return value.toLocaleString(undefined,{weekday:'long',month:'long',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'});
+return value.toLocaleDateString('en-US',{weekday:'long'})+', '+value.toLocaleDateString('en-US',{month:'long'})+' '+ordinal(value.getDate())+' at '+value.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit'});
+}
+function relative(value,now){
+var seconds=Math.round((value.getTime()-now.getTime())/1000);var units=[['year',31536000],['month',2592000],['day',86400],['hour',3600],['minute',60]];
+if(Math.abs(seconds)<60)return 'just now';
+for(var index=0;index<units.length;index++){if(Math.abs(seconds)>=units[index][1]){var amount=Math.round(seconds/units[index][1]);return window.Intl&&Intl.RelativeTimeFormat?new Intl.RelativeTimeFormat(undefined,{numeric:'always'}).format(amount,units[index][0]):Math.abs(amount)+' '+units[index][0]+(Math.abs(amount)===1?'':'s')+' ago'}}
+return 'just now';
+}
+window.sameoldchatLocalTimes=function(root){
+if(!root||!window.Intl)return;
+var nodes=root.querySelectorAll('time[datetime]');var now=new Date();
+for(var index=0;index<nodes.length;index++){
+var node=nodes[index];var format=node.getAttribute('data-format')||'';var raw=node.getAttribute('datetime');
+if(format==='day'){var parts=raw.split('-');if(parts.length!==3)continue;node.textContent=dayName(new Date(+parts[0],+parts[1]-1,+parts[2]),now);continue}
+var value=new Date(raw);if(isNaN(value.getTime()))continue;
+if(format==='time'){node.textContent=clock(value);node.title=full(value);continue}
+if(format==='clock'){node.textContent=clock(value).replace(/\s?[AP]\.?M\.?$/i,'');node.title=full(value);continue}
+if(format==='relative'){node.textContent=relative(value,now);node.title=full(value);continue}
+node.textContent=value.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+};
+window.sameoldchatLocalTimes(document);
+})();</script>`
 
 // searchSuggestionsScript progressively enhances both workspace search inputs
 // with the same accessible listbox. The anchors remain real destinations, and
@@ -3556,13 +3430,6 @@ var mentionSuggestions=document.getElementById('mention-suggestions');
 var channelSuggestions=document.getElementById('channel-suggestions');
 var emojiSuggestions=document.getElementById('emoji-suggestions');
 var slashSuggestions=document.getElementById('slash-suggestions');
-var emojiPicker=document.getElementById('emoji-picker-dialog');
-var emojiPickerQuery=document.getElementById('emoji-picker-query');
-var emojiPickerResults=document.getElementById('emoji-picker-results');
-var emojiPickerStatus=document.getElementById('emoji-picker-status');
-var emojiPickerClose=document.getElementById('emoji-picker-close');
-var emojiPickerCategory=document.getElementById('emoji-picker-category');
-var emojiPickerTone=document.getElementById('emoji-picker-tone');
 var shortcutBrowser=document.getElementById('shortcut-browser');
 var shortcutBrowserQuery=document.getElementById('shortcut-browser-query');
 var shortcutBrowserResults=document.getElementById('shortcut-browser-results');
@@ -3617,9 +3484,6 @@ var channelStart=-1;
 var emojiStart=-1;
 var emojiRequest=null;
 var emojiTimer=null;
-var emojiPickerTarget='composer';
-var emojiReactionFormID='';
-var emojiPickerTrigger=null;
 var clipRecorder=null;
 var clipStream=null;
 var clipChunks=[];
@@ -3792,13 +3656,14 @@ button.setAttribute('aria-selected',index===0?'true':'false');
 if(option.skin_tones)button.setAttribute('data-skin-tones','true');
 var visual;
 if(option.image_url){visual=document.createElement('img');visual.className='custom-emoji';visual.src=option.image_url;visual.alt=''}
-else{visual=document.createElement('span');visual.className='emoji-glyph';visual.setAttribute('aria-hidden','true');visual.textContent=(option.display||'')+(option.skin_tones&&emojiPickerTone&&emojiPickerTone.value?String.fromCodePoint(0x1F3FB+parseInt(emojiPickerTone.value,10)-2):'')}
+else{visual=document.createElement('span');visual.className='emoji-glyph';visual.setAttribute('aria-hidden','true');visual.textContent=(option.display||'')+(option.skin_tones&&emojiTone()?String.fromCodePoint(0x1F3FB+parseInt(emojiTone(),10)-2):'')}
 var label=document.createElement('small');
 label.textContent=':'+option.name+':';
 button.appendChild(visual);
 button.appendChild(label);
 return button;
 }
+function emojiTone(){try{return localStorage.getItem('sameoldchat-emoji-tone')||''}catch(error){return''}}
 function loadEmojiOptions(query,region,statusNode){
 if(!region)return Promise.resolve([]);
 if(emojiRequest)emojiRequest.abort();
@@ -3806,11 +3671,9 @@ emojiRequest=window.AbortController?new AbortController():null;
 var options={credentials:'same-origin'};
 if(emojiRequest)options.signal=emojiRequest.signal;
 if(statusNode)statusNode.textContent='Loading emoji…';
-var category=region===emojiPickerResults&&emojiPickerCategory?emojiPickerCategory.value:'';
 var recent=[];
 try{recent=JSON.parse(localStorage.getItem('sameoldchat-recent-emoji')||'[]');if(!Array.isArray(recent))recent=[]}catch(error){recent=[]}
 var parameters=new URLSearchParams({q:query||''});
-if(category)parameters.set('category',category);
 if(recent.length)parameters.set('recent',recent.slice(0,24).join(','));
 return fetch('/app/emoji/options?'+parameters.toString(),options).then(function(response){
 if(!response.ok)throw new Error('Emoji could not be loaded.');
@@ -3818,12 +3681,6 @@ return response.json();
 }).then(function(payload){
 region.textContent='';
 var values=payload&&Array.isArray(payload.options)?payload.options:[];
-if(emojiPickerCategory&&payload&&Array.isArray(payload.categories)&&emojiPickerCategory.options.length<=3){
-for(var categoryIndex=0;categoryIndex<payload.categories.length;categoryIndex++){
-var categoryName=String(payload.categories[categoryIndex]||'');
-if(!categoryName||Array.prototype.some.call(emojiPickerCategory.options,function(item){return item.value===categoryName}))continue;
-var categoryOption=document.createElement('option');categoryOption.value=categoryName;categoryOption.textContent=categoryName;emojiPickerCategory.appendChild(categoryOption);
-}}
 for(var index=0;index<values.length;index++){
 var item=document.createElement('li');
 item.appendChild(emojiOption(values[index],index));
@@ -3860,7 +3717,7 @@ if(!option)return;
 var name=option.getAttribute('data-emoji-name')||'';
 if(!name)return;
 try{var recent=JSON.parse(localStorage.getItem('sameoldchat-recent-emoji')||'[]');if(!Array.isArray(recent))recent=[];recent=recent.filter(function(value){return value!==name});recent.unshift(name);localStorage.setItem('sameoldchat-recent-emoji',JSON.stringify(recent.slice(0,24)))}catch(error){}
-var tone=option.hasAttribute('data-skin-tones')&&emojiPickerTone?emojiPickerTone.value:'';
+var tone=option.hasAttribute('data-skin-tones')?emojiTone():'';
 var reactionName=name+(tone?'::skin-tone-'+tone:'');
 if(inline&&text){
 var emoji=currentEmoji();
@@ -3870,30 +3727,6 @@ replaceComposerRange(start,text.selectionStart,':'+reactionName+': ',undefined,u
 hideEmojiSuggestions();
 return;
 }
-if(emojiPickerTarget==='reaction'&&emojiReactionFormID){
-var reactionForm=document.getElementById(emojiReactionFormID);
-if(!reactionForm){if(emojiPicker&&emojiPicker.open)emojiPicker.close();announce('That message changed while the picker was open. Open its reaction picker again.');return}
-var input=reactionForm.querySelector('input[name=name]');
-if(input)input.value=reactionName;
-if(emojiPicker&&emojiPicker.open)emojiPicker.close();
-if(typeof reactionForm.requestSubmit==='function')reactionForm.requestSubmit();else reactionForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
-return;
-}
-if(text){
-replaceComposerRange(text.selectionStart,text.selectionEnd,':'+reactionName+':',undefined,undefined);
-if(emojiPicker&&emojiPicker.open)emojiPicker.close();
-}
-}
-function openEmojiPicker(control){
-if(!emojiPicker||typeof emojiPicker.showModal!=='function')return false;
-emojiPickerTarget=control&&control.getAttribute('data-emoji-target')||'composer';
-emojiReactionFormID='';
-if(emojiPickerTarget==='reaction'){emojiReactionFormID=control.getAttribute('data-reaction-form')||'';if(!emojiReactionFormID||!document.getElementById(emojiReactionFormID))return false}
-emojiPickerTrigger=control;
-if(!emojiPicker.open)emojiPicker.showModal();
-if(emojiPickerQuery){emojiPickerQuery.value='';emojiPickerQuery.focus()}
-loadEmojiOptions('',emojiPickerResults,emojiPickerStatus);
-return true;
 }
 function currentSlash(){
 if(!text||text.selectionStart!==text.selectionEnd)return null;
@@ -3973,23 +3806,6 @@ function atBottom(region){return region.scrollHeight-region.scrollTop-region.cli
 function toBottom(region){if(region)region.scrollTop=region.scrollHeight}
 function messageItems(region){return region?Array.prototype.slice.call(region.querySelectorAll('.message')).filter(shown):[]}
 function focusMessage(message){if(!message)return false;try{message.focus({preventScroll:true})}catch(error){message.focus()}message.scrollIntoView({block:'nearest'});return true}
-function messageDetails(message,label){
-var details=message?message.querySelectorAll('.message-actions details'):null;
-for(var index=0;details&&index<details.length;index++){var summary=details[index].querySelector('summary');if(summary&&summary.textContent.trim()===label)return details[index]}
-return null;
-}
-function revealDisclosure(details){
-var node=details;
-while(node){node.open=true;node=node.parentElement?node.parentElement.closest('details'):null;}
-}
-function openMessageDetails(message,label,control){
-var details=messageDetails(message,label);
-if(!details)return false;
-revealDisclosure(details);
-var target=details.querySelector(control);
-if(target)target.focus();
-return true;
-}
 function notify(arrived){
 var shell=document.querySelector('[data-browser-notifications]');
 if(!shell||shell.getAttribute('data-browser-notifications')!=='true')return;
@@ -4066,17 +3882,7 @@ if(!ownPath(action))return;
 fetch(action,{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('Unread state could not be saved.');form.hidden=true}).catch(function(){announce('Unread state could not be saved. Messages are still available.')});
 }
 document.addEventListener('click',function(event){
-var copyLink=event.target.closest?event.target.closest('[data-copy-link]'):null;
-if(copyLink){
-if(navigator.clipboard&&navigator.clipboard.writeText){
-event.preventDefault();
-var absolute=new URL(copyLink.getAttribute('data-copy-link'),window.location.origin).toString();
-navigator.clipboard.writeText(absolute).then(function(){announce('Link copied.')}).catch(function(){window.location.assign(copyLink.getAttribute('href'))});
-}
-return;
-}
-var control=event.target.closest?event.target.closest('[data-wrap],[data-insert],[data-mention-user],[data-mention-group],[data-channel-id],[data-slash-command],[data-emoji-name],[data-open-emoji-picker]'):null;
-if(control&&control.hasAttribute('data-open-emoji-picker')){if(openEmojiPicker(control))event.preventDefault();return}
+var control=event.target.closest?event.target.closest('[data-wrap],[data-insert],[data-mention-user],[data-mention-group],[data-channel-id],[data-slash-command],[data-emoji-name]'):null;
 if(control&&control.hasAttribute('data-emoji-name')){chooseEmoji(control,!!(emojiSuggestions&&emojiSuggestions.contains(control)));return}
 if(!control||!composer||!composer.contains(control)||!text)return;
 if(control.hasAttribute('data-mention-user')||control.hasAttribute('data-mention-group')){chooseMention(control);return}
@@ -4107,44 +3913,6 @@ window.addEventListener('beforeunload',function(event){if(stagingFiles){event.pr
 }
 if(switcherQuery)switcherQuery.addEventListener('input',filterSwitcher);
 if(switcherClose)switcherClose.addEventListener('click',function(){switcher.close()});
-if(emojiPickerQuery)emojiPickerQuery.addEventListener('input',function(){
-if(emojiTimer)window.clearTimeout(emojiTimer);
-emojiTimer=window.setTimeout(function(){loadEmojiOptions(emojiPickerQuery.value,emojiPickerResults,emojiPickerStatus)},100);
-});
-if(emojiPickerCategory)emojiPickerCategory.addEventListener('change',function(){loadEmojiOptions(emojiPickerQuery?emojiPickerQuery.value:'',emojiPickerResults,emojiPickerStatus)});
-if(emojiPickerTone)emojiPickerTone.addEventListener('change',function(){try{localStorage.setItem('sameoldchat-emoji-tone',emojiPickerTone.value)}catch(error){}loadEmojiOptions(emojiPickerQuery?emojiPickerQuery.value:'',emojiPickerResults,emojiPickerStatus)});
-if(emojiPickerTone){try{emojiPickerTone.value=localStorage.getItem('sameoldchat-emoji-tone')||''}catch(error){}}
-if(emojiPickerQuery)emojiPickerQuery.addEventListener('keydown',function(event){
-var options=emojiOptions(emojiPickerResults);
-if(!options.length)return;
-var selected=options.findIndex(function(option){return option.getAttribute('aria-selected')==='true'});
-if(event.key==='ArrowDown'||event.key==='ArrowUp'){
-event.preventDefault();
-if(selected<0)selected=event.key==='ArrowDown'?0:options.length-1;
-for(var index=0;index<options.length;index++)options[index].setAttribute('aria-selected',index===selected?'true':'false');
-options[selected].scrollIntoView({block:'nearest'});
-options[selected].focus();
-return;
-}
-if(event.key==='Enter'){event.preventDefault();chooseEmoji(options[selected<0?0:selected],false)}
-});
-if(emojiPickerResults)emojiPickerResults.addEventListener('keydown',function(event){
-var options=emojiOptions(emojiPickerResults);
-var selected=options.indexOf(document.activeElement);
-if(event.key==='ArrowDown'||event.key==='ArrowUp'){
-event.preventDefault();
-if(selected<0)selected=0;else selected=event.key==='ArrowDown'?(selected+1)%options.length:(selected+options.length-1)%options.length;
-for(var index=0;index<options.length;index++)options[index].setAttribute('aria-selected',index===selected?'true':'false');
-if(options[selected])options[selected].focus();
-return;
-}
-if(event.key==='Escape'&&emojiPickerQuery){event.preventDefault();emojiPickerQuery.focus()}
-});
-if(emojiPickerClose)emojiPickerClose.addEventListener('click',function(){emojiPicker.close()});
-if(emojiPicker)emojiPicker.addEventListener('close',function(){
-if(emojiPickerTrigger&&document.contains(emojiPickerTrigger))emojiPickerTrigger.focus();
-emojiPickerTarget='composer';emojiReactionFormID='';emojiPickerTrigger=null;
-});
 function filterShortcuts(){
 if(!shortcutBrowserResults)return;
 var query=(shortcutBrowserQuery.value||'').trim().toLowerCase();var shown=0;
@@ -4318,6 +4086,7 @@ var activeMessage=document.activeElement&&document.activeElement.closest?documen
 var restoreMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):'';
 var quiet=form.getAttribute('data-quiet')==='true';
 var body=new FormData(form);
+if(submitter&&submitter.name)body.set(submitter.name,submitter.value);
 var unixInput=form.querySelector('[data-unix-seconds="true"]');
 if(unixInput&&unixInput.value){var unixMillis=new Date(unixInput.value).getTime();if(!isNaN(unixMillis))body.set('value',String(Math.floor(unixMillis/1000)))}
 var scheduleInput=form.querySelector('[data-schedule-at]');
@@ -4333,7 +4102,7 @@ if(!response.ok)return response.text().then(function(body){throw new Error(body)
 if(response.headers.get('X-SameOldChat-Draft-Cleanup')==='failed')announce('Your message was sent, but its old draft could not be cleared. Delete it from Drafts & sent.');
 var redirect=response.headers.get('HX-Redirect');
 if(redirect){if(form===composer&&text&&text.value===sent){text.value='';draftAttachments=[];syncDraftAttachments();persistDraft()}if(ownPath(redirect))window.location.assign(redirect);return null}
-if(response.status===204)return '';
+if(response.status===204){var notice=response.headers.get('X-SameOldChat-Notice');if(notice){try{notice=decodeURIComponent(notice)}catch(error){}document.dispatchEvent(new CustomEvent('sameoldchat:notice',{detail:notice}))}return ''}
 return response.text();
 }).then(function(html){
 releaseButton();
@@ -4527,52 +4296,6 @@ if(upload){event.preventDefault();upload.click();return}
 }
 var target=event.target;
 var editing=target&&(target.tagName==='INPUT'||target.tagName==='TEXTAREA'||target.isContentEditable);
-var focusedMessage=target&&target.closest?target.closest('.message'):null;
-if(focusedMessage&&target===focusedMessage&&!event.ctrlKey&&!event.metaKey&&!event.altKey){
-var region=focusedMessage.closest('[data-fragment]');
-var items=messageItems(region);
-var position=items.indexOf(focusedMessage);
-if(event.key==='ArrowUp'||event.key==='ArrowDown'||event.key==='Home'||event.key==='End'){
-var next=position;
-if(event.key==='ArrowUp')next=Math.max(0,position-1);
-if(event.key==='ArrowDown')next=Math.min(items.length-1,position+1);
-if(event.key==='Home')next=0;
-if(event.key==='End')next=items.length-1;
-if(next>=0){event.preventDefault();focusMessage(items[next]);return}
-}
-if(event.key==='ArrowRight'||key==='t'){
-var reply=focusedMessage.querySelector('.message-actions a');
-if(reply&&ownPath(reply.getAttribute('href'))){event.preventDefault();window.location.assign(reply.getAttribute('href'));return}
-}
-if(event.key==='ArrowLeft'){
-var back=Array.prototype.slice.call(document.querySelectorAll('.channel-actions a')).find(function(link){return link.textContent.trim()==='Back to channel'});
-if(back&&ownPath(back.getAttribute('href'))){event.preventDefault();window.location.assign(back.getAttribute('href'));return}
-}
-if(key==='f'&&openMessageDetails(focusedMessage,'Forward','select,input,button')){event.preventDefault();return}
-if(key==='u'){
-var unread=Array.prototype.slice.call(focusedMessage.querySelectorAll('.message-actions button')).find(function(button){return button.textContent.trim()==='Mark unread from here'});
-if(unread){event.preventDefault();unread.click();return}
-}
-if(key==='e'&&openMessageDetails(focusedMessage,'Edit','textarea')){event.preventDefault();return}
-if(event.key==='Delete'&&openMessageDetails(focusedMessage,'Delete','button[type=submit]')){event.preventDefault();return}
-if(key==='r'){
-var reactionButton=focusedMessage.querySelector('[data-open-emoji-picker][data-emoji-target="reaction"]');
-if(reactionButton&&openEmojiPicker(reactionButton)){event.preventDefault();return}
-}
-if(key==='m'){
-var reminderMenu=focusedMessage.querySelector('[data-reminder-menu]');
-if(reminderMenu){event.preventDefault();revealDisclosure(reminderMenu);var reminderControl=reminderMenu.querySelector('button,input');if(reminderControl)reminderControl.focus();return}
-}
-if(key==='a'){
-var save=focusedMessage.querySelector('[data-message-save] button[type=submit]');
-if(save){event.preventDefault();var saveForm=save.closest('form');if(saveForm&&typeof saveForm.requestSubmit==='function')saveForm.requestSubmit(save);else if(saveForm)saveForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));return}
-}
-if(key==='p'){
-var buttons=focusedMessage.querySelectorAll('.message-actions button[type=submit]');
-var pin=Array.prototype.slice.call(buttons).find(function(button){var label=button.textContent.trim();return label==='Pin'||label==='Unpin'});
-if(pin){event.preventDefault();var form=pin.closest('form');if(form&&typeof form.requestSubmit==='function')form.requestSubmit(pin);else if(form)form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));return}
-}
-}
 if(event.key==='Escape'&&search&&document.activeElement===search&&text){
 event.preventDefault();
 text.focus();
@@ -4824,6 +4547,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/search/suggestions", h.searchSuggestions)
 	mux.HandleFunc("GET /app/emoji/options", h.emojiOptions)
+	mux.HandleFunc("GET /app/customize/emoji", h.customEmojiPage)
+	mux.HandleFunc("POST /app/customize/emoji/add", h.addCustomEmoji)
+	mux.HandleFunc("POST /app/customize/emoji/remove", h.removeCustomEmoji)
 	mux.HandleFunc("GET /app/activity", h.activity)
 	mux.HandleFunc("POST /app/activity/mutate", h.mutateActivity)
 	mux.HandleFunc("POST /app/activity/preferences", h.setActivityPreferences)
@@ -5141,6 +4867,21 @@ func (h Handler) forwardMessage(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusBadRequest, "The message was not forwarded", "Choose a destination and try again.")
 		return
 	}
+	// The Forward message dialog offers people as well as conversations, as
+	// Slack's does; forwarding to a person opens the DM with them first.
+	if person, ok := strings.CutPrefix(string(destination), "user:"); ok {
+		users, err := normalizeUserIDs(person)
+		if err != nil || len(users) != 1 {
+			h.writeMutationError(w, r, http.StatusBadRequest, "The message was not forwarded", "Choose a destination and try again.")
+			return
+		}
+		opening, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
+		if err != nil {
+			h.writeMessageMutationError(w, r, err, "forwarded")
+			return
+		}
+		destination = opening.Conversation.ID
+	}
 	original, lookupErr := h.Messages.MessageAt(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp)
 	if lookupErr != nil {
 		h.writeMessageMutationError(w, r, lookupErr, "forwarded")
@@ -5166,6 +4907,18 @@ func (h Handler) forwardMessage(w http.ResponseWriter, r *http.Request) {
 		Attachments:  string(encoded),
 	}); err != nil {
 		h.writeMessageMutationError(w, r, err, "forwarded")
+		return
+	}
+	// Slack keeps the member where they were and confirms the forward; a
+	// reader without script is taken to where the message went.
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("Vary", "HX-Request")
+		label := string(destination)
+		if forwardedTo, infoErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, destination); infoErr == nil {
+			label = unreadPrefix(forwardedTo) + conversationName(forwardedTo)
+		}
+		setMutationNotice(w, "Message forwarded to "+label)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	h.redirectMutation(w, r, appURL(string(destination), "", "", "", "")+"&notice="+url.QueryEscape("Message forwarded"))
@@ -5205,6 +4958,14 @@ func (h Handler) markUnreadFromHere(w http.ResponseWriter, r *http.Request) {
 	before := domain.NewMessageTimestamp(instant.Add(-time.Microsecond))
 	if _, err := h.Messages.MarkRead(r.Context(), principal.WorkspaceID, principal.UserID, channel, before); err != nil {
 		h.writeMessageMutationError(w, r, err, "marked unread")
+		return
+	}
+	// In place, as in Slack: the timeline refresh draws the unread line where
+	// the cursor now sits, without reloading the page or losing the reader's
+	// scroll position.
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("Vary", "HX-Request")
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	h.redirectMutation(w, r, appURL(string(channel), "", "", "", "")+"&notice="+url.QueryEscape("Marked unread"))
@@ -5631,7 +5392,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			forwardDestinations = options
 		}
 	}
-	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "", ThreadSummaries: timelineSummaries, LastRead: timelineLastRead, ForwardDestinations: forwardDestinations})
+	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "", ThreadSummaries: timelineSummaries, LastRead: timelineLastRead, Location: readerLocation(r), RecentEmoji: recentReactionNames(r), Editing: strings.TrimSpace(r.URL.Query().Get("edit"))})
 	if timelineNotice != "" {
 		notices = append(notices, timelineNotice)
 	}
@@ -5648,11 +5409,12 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			return
 		}
 		var threadNotice string
-		thread, threadNotice = h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: replies.Messages, Thread: threadTimestamp, Before: string(before), ThreadPane: true, Member: isMember, Names: names})
+		thread, threadNotice = h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: replies.Messages, Thread: threadTimestamp, Before: string(before), ThreadPane: true, Member: isMember, Names: names, Location: readerLocation(r), RecentEmoji: recentReactionNames(r), Editing: strings.TrimSpace(r.URL.Query().Get("edit"))})
 		if threadNotice != "" && timelineNotice == "" {
 			notices = append(notices, threadNotice)
 		}
 	}
+	messageDialog := requestedMessageDialog(r, timeline, thread)
 
 	conversations := h.sidebar(r.Context(), principal, channel, history.AtLatest, domain.Cursor(strings.TrimSpace(r.URL.Query().Get("conversations"))))
 	if conversations.Notice != "" {
@@ -5942,6 +5704,9 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		Apps:                 workspaceApps,
 		Modal:                modal,
 		Details:              details,
+		ForwardDestinations:  forwardDestinations,
+		MessageDialog:        messageDialog,
+		CanAddEmoji:          h.canShowWorkspaceAdmin(r.Context(), principal),
 	}
 	if canJoin {
 		data.JoinURL = mutationURL("/app/join", string(channel), "", threadTimestamp, "")
@@ -5966,17 +5731,6 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	data.HuddleURL = "/app/huddle?channel=" + url.QueryEscape(string(channel))
 	data.Huddle = h.huddleFor(r.Context(), principal, conversation, data.CSRFToken, "", names)
-	if isMember && threadTimestamp != "" {
-		following, followErr := h.Messages.ThreadFollowed(
-			r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp),
-		)
-		if followErr != nil {
-			data.Notice = strings.TrimSpace(data.Notice + " Thread follow state is temporarily unavailable.")
-		} else {
-			data.ThreadFollowURL = mutationURL("/app/thread/follow", string(channel), "", threadTimestamp, "")
-			data.FollowingThread = following
-		}
-	}
 	if conversations.More != "" {
 		data.MoreChannelsURL = appURL(string(channel), threadTimestamp, string(before), "", string(conversations.More))
 	}
@@ -6060,7 +5814,13 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		messages = history.Messages
 	}
 	fragmentSummaries, fragmentLastRead := h.timelineChrome(r.Context(), principal, conversation.ID, messages, isMember)
-	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "", ThreadSummaries: fragmentSummaries, LastRead: fragmentLastRead})
+	if threadTimestamp != "" {
+		// The conversation's read cursor places the channel's unread line.
+		// Applied to the thread pane it drew "New" above the reply the reader
+		// had just sent, because every reply is newer than the channel cursor.
+		fragmentLastRead = ""
+	}
+	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "", ThreadSummaries: fragmentSummaries, LastRead: fragmentLastRead, Location: readerLocation(r), RecentEmoji: recentReactionNames(r)})
 	h.writeFragment(w, list)
 }
 
@@ -6173,22 +5933,30 @@ func (h Handler) historyWindowForward(ctx context.Context, principal auth.Princi
 // conversation it belongs to, the messages in it, and the view state that its
 // controls have to return to.
 type messageListRequest struct {
-	Conversation        domain.Conversation
-	CSRFToken           string
-	Messages            []domain.Message
-	Thread              string
-	Before              string
-	ThreadPane          bool
-	Member              bool
-	Names               *userNames
-	IncludeEphemeral    bool
-	ForwardDestinations []conversationView
+	Conversation     domain.Conversation
+	CSRFToken        string
+	Messages         []domain.Message
+	Thread           string
+	Before           string
+	ThreadPane       bool
+	Member           bool
+	Names            *userNames
+	IncludeEphemeral bool
 	// ThreadSummaries carries what each rendered parent's thread has
 	// accumulated, read once for the whole window rather than per message.
 	ThreadSummaries map[domain.MessageTimestamp]domain.ThreadSummary
 	// LastRead is the reader's cursor, used to place the unread divider. The
 	// zero value means the reader has read nothing in this conversation.
 	LastRead domain.MessageTimestamp
+	// Location is the reader's time zone, which decides the calendar day a
+	// message falls on and the clock time printed beside it. Nil is UTC.
+	Location *time.Location
+	// Editing is the timestamp of a message whose editor a no-script "Edit
+	// message" link opened.
+	Editing string
+	// RecentEmoji are the reader's most recently used emoji, which lead the
+	// toolbar's one-click reactions.
+	RecentEmoji []string
 }
 
 // timelineChrome reads the two per-window facts the chrome needs: what each
@@ -6248,14 +6016,21 @@ func threadReplySummary(summary domain.ThreadSummary, names *userNames) string {
 // message. It is server-side for the same reason every other flag here is:
 // the fragment refresh re-renders this partial, and a boundary computed in
 // the browser would vanish on the next live update.
-func markDaysAndFirstUnread(views []messageView, messages []domain.Message, lastRead domain.MessageTimestamp) {
+//
+// The day is the reader's calendar day. The same pass groups each message
+// under the one before it when Slack would, so the grouping sees the dividers
+// it must not cross.
+func markDaysAndFirstUnread(views []messageView, messages []domain.Message, lastRead domain.MessageTimestamp, location *time.Location, now time.Time) {
+	if location == nil {
+		location = time.UTC
+	}
 	previousDay := ""
 	unreadMarked := lastRead == ""
 	for index := range views {
-		created := messages[index].CreatedAt.UTC()
+		created := messages[index].CreatedAt.In(location)
 		day := created.Format("2006-01-02")
 		if day != previousDay {
-			views[index].DaySeparator = created.Format("Monday, 2 January 2006")
+			views[index].DaySeparator = dayLabel(messages[index].CreatedAt, now, location)
 			views[index].DaySeparatorMachine = day
 			previousDay = day
 		}
@@ -6264,6 +6039,9 @@ func markDaysAndFirstUnread(views []messageView, messages []domain.Message, last
 				views[index].FirstUnread = true
 				unreadMarked = true
 			}
+		}
+		if index > 0 && !views[index].ThreadRoot {
+			views[index].Continuation = !startsGroup(views[index-1], views[index], messages[index-1].CreatedAt, messages[index].CreatedAt)
 		}
 	}
 }
@@ -6404,15 +6182,35 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		anchorPrefix = "thread-"
 	}
 	channel := string(conversation.ID)
+	location := request.Location
+	if location == nil {
+		location = time.UTC
+	}
+	now := time.Now()
+	channelLabel := ""
+	if conversation.Kind == domain.ConversationTypePublic || conversation.Kind == domain.ConversationTypePrivate {
+		channelLabel = "#" + conversationName(conversation)
+	}
 	list := messageList{
-		ForwardDestinations: request.ForwardDestinations,
-		ChannelName:         conversationName(conversation),
-		CSRFToken:           csrfToken,
-		IsMember:            request.Member,
-		CanReact:            request.Member && principal.HasScope(auth.ScopeReactionsWrite),
-		CanPin:              request.Member && principal.HasScope(auth.ScopePinsWrite),
-		CanReply:            request.Member && principal.HasScope(auth.ScopeChatWrite),
-		Messages:            make([]messageView, 0, len(messages)),
+		ChannelName: conversationName(conversation),
+		CSRFToken:   csrfToken,
+		IsMember:    request.Member,
+		CanReact:    request.Member && principal.HasScope(auth.ScopeReactionsWrite),
+		CanPin:      request.Member && principal.HasScope(auth.ScopePinsWrite),
+		CanReply:    request.Member && principal.HasScope(auth.ScopeChatWrite),
+		Messages:    make([]messageView, 0, len(messages)),
+	}
+	// The thread pane's first message is its root when the window starts at
+	// the root. A single reply rendered for the pane after a post is not.
+	threadRootIncluded := request.ThreadPane && len(messages) > 0 && messages[0].ThreadTimestamp == "" && string(domain.NewMessageTimestamp(messages[0].CreatedAt)) == threadTimestamp
+	if threadRootIncluded {
+		list.ThreadPane = true
+		if request.Member {
+			if following, err := h.Messages.ThreadFollowed(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.MessageTimestamp(threadTimestamp)); err == nil {
+				list.ThreadFollowURL = mutationURL("/app/thread/follow", channel, "", threadTimestamp, before)
+				list.FollowingThread = following
+			}
+		}
 	}
 	notice := ""
 	emojiImages := map[string]string{}
@@ -6421,14 +6219,23 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 	} else {
 		emojiImages = customEmojiImages(customEmoji)
 	}
-	pinned := map[domain.MessageID]struct{}{}
+	list.QuickReactions = quickReactions(request.RecentEmoji, emojiImages)
+	pinned := map[domain.MessageID]domain.UserID{}
 	if principal.HasScope(auth.ScopePinsRead) || principal.HasScope(auth.ScopePinsWrite) {
 		pins, _, _, err := h.Messages.Pins(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: pinWindow})
 		if err != nil {
 			notice = "Pinned messages are temporarily unavailable."
 		}
 		for _, pin := range pins {
-			pinned[pin.Message] = struct{}{}
+			pinned[pin.Message] = pin.UserID
+		}
+	}
+	// A broadcast reply names its thread's root. The root is normally in the
+	// same window; one that is not is read once per root.
+	windowRoots := make(map[domain.MessageTimestamp]domain.Message, len(messages))
+	for _, message := range messages {
+		if message.ThreadTimestamp == "" {
+			windowRoots[domain.NewMessageTimestamp(message.CreatedAt)] = message
 		}
 	}
 	saved := make(map[domain.MessageID]domain.SavedItem)
@@ -6484,14 +6291,21 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		view := messageView{
 			ID:            anchorPrefix + string(message.ID),
 			MessageID:     string(message.ID),
+			Timestamp:     timestamp,
 			Anchor:        anchorPrefix + messageAnchor(message.ID),
+			AuthorID:      string(message.AuthorID),
 			AuthorName:    author,
 			AuthorInitial: initial(author),
 			AvatarURL:     presentation.IconURL,
-			AvatarEmoji:   presentation.IconEmoji,
 			IsApp:         message.AppID != "",
 			Text:          message.Text,
-			DisplayText:   content.Text,
+			DisplayText:   markSelfMentions(content.Text, string(principal.UserID)),
+			Preview:       plainPreview(displayMessage.Text, 160),
+			ClockTime:     clockTime(message.CreatedAt, location),
+			FullTime:      fullTime(message.CreatedAt, location),
+			MentionsMe:    !ephemeral && message.AuthorID != principal.UserID && mentionsViewer(message.Text, string(principal.UserID)),
+			Jumbo:         len(content.Blocks) == 0 && jumbomoji(message.Text, emojiImages),
+			InThread:      request.ThreadPane,
 			Blocks:        content.Blocks,
 			Attachments:   content.Attachments,
 			Unfurls:       content.Unfurls,
@@ -6522,6 +6336,30 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			System:      message.Subtype.System(),
 			Broadcast:   message.ReplyBroadcast,
 		}
+		if presentation.IconEmoji != "" {
+			view.AvatarEmoji = renderReactionEmoji(presentation.IconEmoji, emojiImages)
+		}
+		if view.System {
+			if sentence, ok := systemSentence(message, channelLabel); ok {
+				view.SystemSentence = sentence
+			}
+		}
+		if message.ReplyBroadcast && message.ThreadTimestamp != "" && !request.ThreadPane {
+			root, found := windowRoots[message.ThreadTimestamp]
+			if !found {
+				if fetched, err := h.Messages.MessageAt(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, message.ThreadTimestamp); err == nil {
+					root, found = fetched, true
+					windowRoots[message.ThreadTimestamp] = fetched
+				}
+			}
+			view.BroadcastThreadURL = appURL(channel, string(message.ThreadTimestamp), before, "", "")
+			if found && !root.Deleted {
+				view.BroadcastRootPreview = plainPreview(resolveSlackReferences(root.Text, names), 80)
+			}
+		}
+		if threadRootIncluded && len(list.Messages) == 0 {
+			view.ThreadRoot = true
+		}
 		// A human posting as themselves carries their current status beside their
 		// name; an app message or one wearing a custom username is not a person.
 		if message.AppID == "" && presentation.Username == "" && message.AuthorID != "" {
@@ -6543,12 +6381,38 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			if request.Member {
 				view.MarkUnreadURL = mutationURL("/app/read/unread", channel, timestamp, threadTimestamp, before)
 			}
+			here := appURL(channel, threadTimestamp, before, "", "")
+			view.ForwardLinkURL = here + "&forward=" + url.QueryEscape(timestamp) + "#" + view.Anchor
+			if view.CanEdit {
+				view.EditLinkURL = here + "&edit=" + url.QueryEscape(timestamp) + "#" + view.Anchor
+				view.Editing = request.Editing == timestamp
+			}
+			if view.CanDelete {
+				view.DeleteLinkURL = here + "&delete=" + url.QueryEscape(timestamp) + "#" + view.Anchor
+			}
 		}
-		if summary, ok := request.ThreadSummaries[domain.MessageTimestamp(timestamp)]; ok && summary.ReplyCount > 0 {
+		if view.ThreadRoot && list.ThreadFollowURL != "" {
+			view.FollowURL, view.Following = list.ThreadFollowURL, list.FollowingThread
+		}
+		if summary, ok := request.ThreadSummaries[domain.MessageTimestamp(timestamp)]; ok && summary.ReplyCount > 0 && !request.ThreadPane {
 			view.ReplyCount = summary.ReplyCount
 			view.ReplySummary = threadReplySummary(summary, names)
+			view.ReplyCountLabel = replyCountLabel(summary.ReplyCount)
+			if request.Member {
+				view.FollowURL = mutationURL("/app/thread/follow", channel, "", timestamp, before)
+				view.Following = summary.Subscribed
+			}
+			for _, participant := range summary.Participants {
+				if len(view.ThreadRepliers) == 5 {
+					break
+				}
+				name := names.name(participant)
+				view.ThreadRepliers = append(view.ThreadRepliers, replierView{Name: name, Initial: initial(name)})
+			}
 			if !summary.LastReplyAt.IsZero() {
 				view.LastReplyTime = formatTime(summary.LastReplyAt)
+				view.LastReplyMachine = summary.LastReplyAt.UTC().Format(time.RFC3339Nano)
+				view.LastReplyRelative = relativeTime(summary.LastReplyAt, now)
 			}
 		}
 		if item, ok := saved[message.ID]; ok {
@@ -6596,15 +6460,21 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		if !ephemeral {
 			view.Shortcuts = messageShortcuts
 		}
-		if _, ok := pinned[message.ID]; ok {
+		if pinner, ok := pinned[message.ID]; ok {
 			view.Pinned = true
+			if pinner != "" {
+				view.PinnedBy = names.name(pinner)
+				if pinner == principal.UserID {
+					view.PinnedBy = "you"
+				}
+			}
 		}
 		if readReactions && !ephemeral {
 			reactions, _, _, err := h.Messages.Reactions(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.MessageTimestamp(timestamp), domain.PageRequest{Limit: reactionWindow})
 			if err != nil && notice == "" {
 				notice = "Reactions are temporarily unavailable."
 			}
-			view.Reactions = summarizeReactions(reactions, principal.UserID, emojiImages)
+			view.Reactions = summarizeReactions(reactions, principal.UserID, names, emojiImages)
 		}
 		list.Messages = append(list.Messages, view)
 		rendered = append(rendered, message)
@@ -6612,7 +6482,12 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 	// The day separators and the unread divider are placed over the messages
 	// that were actually rendered: the loop above drops soft-deleted rows, so
 	// the two slices only line up once both are built.
-	markDaysAndFirstUnread(list.Messages, rendered, request.LastRead)
+	markDaysAndFirstUnread(list.Messages, rendered, request.LastRead, location, now)
+	if threadRootIncluded {
+		if replies := len(list.Messages) - 1; replies > 0 {
+			list.ThreadReplyLabel = replyCountLabel(replies)
+		}
+	}
 	h.resolveCallBlocks(ctx, principal, list.Messages)
 	return list, notice
 }
@@ -6726,30 +6601,48 @@ func cloneActionOptions(values []messageActionOptionView) []messageActionOptionV
 	return append([]messageActionOptionView(nil), values...)
 }
 
-func summarizeReactions(reactions []domain.Reaction, viewer domain.UserID, customEmoji ...map[string]string) []reactionView {
+// summarizeReactions groups a message's reactions into pills in the order
+// each emoji was first used, as Slack orders them, and names who reacted for
+// the pill's tooltip.
+func summarizeReactions(reactions []domain.Reaction, viewer domain.UserID, names *userNames, customEmoji ...map[string]string) []reactionView {
 	if len(reactions) == 0 {
 		return nil
 	}
-	order := make([]string, 0, len(reactions))
+	ordered := append([]domain.Reaction(nil), reactions...)
+	sort.SliceStable(ordered, func(left, right int) bool { return ordered[left].CreatedAt.Before(ordered[right].CreatedAt) })
+	order := make([]string, 0, len(ordered))
 	counts := map[string]int{}
 	mine := map[string]bool{}
-	for _, reaction := range reactions {
+	reactors := map[string][]string{}
+	for _, reaction := range ordered {
 		if _, seen := counts[reaction.Name]; !seen {
 			order = append(order, reaction.Name)
 		}
 		counts[reaction.Name]++
 		if reaction.UserID == viewer {
 			mine[reaction.Name] = true
+			continue
+		}
+		if names != nil {
+			reactors[reaction.Name] = append(reactors[reaction.Name], names.name(reaction.UserID))
 		}
 	}
-	sort.Strings(order)
 	views := make([]reactionView, 0, len(order))
 	var emojiImages map[string]string
 	if len(customEmoji) > 0 {
 		emojiImages = customEmoji[0]
 	}
 	for _, name := range order {
-		views = append(views, reactionView{Name: name, Display: renderReactionEmoji(name, emojiImages), Count: counts[name], Mine: mine[name]})
+		who := reactors[name]
+		if mine[name] {
+			// Slack lists the reader last, as "you".
+			who = append(append([]string(nil), who...), "you")
+		}
+		tooltip := ""
+		if names != nil {
+			tooltip = reactionTooltip(who, name)
+		}
+		views = append(views, reactionView{Name: name, Display: renderReactionEmoji(name, emojiImages), Count: counts[name], Mine: mine[name], Tooltip: tooltip})
 	}
 	return views
 }
@@ -8956,7 +8849,23 @@ func (h Handler) emojiOptions(w http.ResponseWriter, r *http.Request) {
 	if len(recent) > 24 {
 		recent = recent[:24]
 	}
-	options := mergedEmojiOptions(query, category, recent, custom, 60)
+	// Autocomplete asks for a handful; the picker asks for a whole category,
+	// which is how the full catalogue is browsed a page at a time.
+	limit := 60
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed < 1 {
+			writeJSONRefusal(w, http.StatusBadRequest, "invalid_limit")
+			return
+		}
+		limit = min(parsed, emojiOptionsLimit)
+	}
+	options := mergedEmojiOptions(query, category, recent, custom, limit)
+	for index := range options {
+		if label := emojiDisplayName(options[index].Name); label != options[index].Name {
+			options[index].Label = label
+		}
+	}
 	categories := []string{"Recent", "Custom"}
 	for _, value := range slackemoji.Categories() {
 		categories = append(categories, value.Name)
@@ -11263,7 +11172,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		thread := strings.TrimSpace(fields["thread_ts"])
-		list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: []domain.Message{message}, Thread: thread, ThreadPane: thread != "", Member: true, Names: h.newUserNames(r.Context(), principal)})
+		list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: []domain.Message{message}, Thread: thread, ThreadPane: thread != "", Member: true, Names: h.newUserNames(r.Context(), principal), Location: readerLocation(r), RecentEmoji: recentReactionNames(r)})
 		h.writeFragment(w, list)
 		return
 	}
@@ -12403,6 +12312,14 @@ func (h Handler) createLaterReminder(w http.ResponseWriter, r *http.Request) {
 		h.writeLaterReminderError(w, r, err, "The reminder was not created")
 		return
 	}
+	// A reminder set from a message's menu is confirmed where the member is,
+	// as Slack does, rather than by taking them to Later.
+	if request.SourceTimestamp != "" && r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("Vary", "HX-Request")
+		setMutationNotice(w, reminderConfirmation(request.DueAt, request.TimeZone, time.Now()))
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	h.redirectReminderMutation(w, r, "reminder")
 }
 
@@ -12491,9 +12408,20 @@ func personalReminderRequest(fields map[string]string, now time.Time) (domain.La
 		due = now.Add(20 * time.Minute)
 	case "1h":
 		due = now.Add(time.Hour)
+	case "3h":
+		due = now.Add(3 * time.Hour)
 	case "tomorrow":
 		local := now.In(location).AddDate(0, 0, 1)
 		due = time.Date(local.Year(), local.Month(), local.Day(), 9, 0, 0, 0, location)
+	case "nextweek":
+		// Slack's "Next week" is the coming Monday at 9:00 AM.
+		local := now.In(location)
+		days := (int(time.Monday) - int(local.Weekday()) + 7) % 7
+		if days == 0 {
+			days = 7
+		}
+		monday := local.AddDate(0, 0, days)
+		due = time.Date(monday.Year(), monday.Month(), monday.Day(), 9, 0, 0, 0, location)
 	case "", "custom":
 		date := strings.TrimSpace(fields["date"])
 		clock := strings.TrimSpace(fields["time"])
@@ -13007,6 +12935,16 @@ func (h Handler) setThreadFollow(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if r.Header.Get("HX-Request") == "true" {
+		notice := "You'll be notified about new replies."
+		if !followed {
+			notice = "You won't be notified about new replies."
+		}
+		w.Header().Set("Vary", "HX-Request")
+		setMutationNotice(w, notice)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	h.redirectMutation(w, r, appURL(string(h.requestChannel(r)), string(thread), "", "", "")+"#thread-heading")
 }
 
@@ -13184,7 +13122,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, messageScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:
