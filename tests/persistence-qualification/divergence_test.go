@@ -72,13 +72,34 @@ func newFixture(t *testing.T, ctx context.Context, open opener) (fixture, func()
 	return value, closeRepository
 }
 
+// secondMember seeds another member of the fixture's channel. A member's own
+// messages are never unread to them, so a contract about unread state needs
+// somebody else to write what the reader has not read. It is seeded only where
+// asked for, because contracts that count members count this one too.
+func (f fixture) secondMember(t *testing.T, ctx context.Context) domain.UserID {
+	t.Helper()
+	other := domain.UserID("U-divergence-other-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: other, WorkspaceID: f.workspaceID, Email: "divergence-other-" + f.suffix + "@example.com", Name: "divergence-other"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SeedConversationMember(ctx, f.channelID, other); err != nil {
+		t.Fatal(err)
+	}
+	return other
+}
+
 func (f fixture) event(name, topic, payload string) events.Event {
 	return events.Event{ID: domain.EventID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Topic: topic, Payload: payload, CreatedAt: time.Unix(1700000000, 0).UTC()}
 }
 
 func (f fixture) message(t *testing.T, ctx context.Context, name string, createdAt time.Time) domain.Message {
 	t.Helper()
-	message := domain.Message{ID: domain.MessageID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID, AuthorID: f.userID, Text: "text " + name, CreatedAt: createdAt}
+	return f.messageFrom(t, ctx, f.userID, name, createdAt)
+}
+
+func (f fixture) messageFrom(t *testing.T, ctx context.Context, author domain.UserID, name string, createdAt time.Time) domain.Message {
+	t.Helper()
+	message := domain.Message{ID: domain.MessageID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID, AuthorID: author, Text: "text " + name, CreatedAt: createdAt}
 	if err := f.repository.CreateMessage(ctx, message, f.event("event-"+name, "message.created", string(message.ID)), ""); err != nil {
 		t.Fatalf("create message %s: %v", name, err)
 	}
@@ -90,9 +111,14 @@ func (f fixture) message(t *testing.T, ctx context.Context, name string, created
 // exercises it needs replies as a first-class fixture step.
 func (f fixture) reply(t *testing.T, ctx context.Context, name string, root domain.MessageTimestamp, createdAt time.Time) domain.Message {
 	t.Helper()
+	return f.replyFrom(t, ctx, f.userID, name, root, createdAt)
+}
+
+func (f fixture) replyFrom(t *testing.T, ctx context.Context, author domain.UserID, name string, root domain.MessageTimestamp, createdAt time.Time) domain.Message {
+	t.Helper()
 	message := domain.Message{
 		ID: domain.MessageID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
-		AuthorID: f.userID, Text: "reply " + name, ThreadTimestamp: root, Attachments: "[]",
+		AuthorID: author, Text: "reply " + name, ThreadTimestamp: root, Attachments: "[]",
 		CreatedAt: domain.MessageInstant(createdAt),
 	}
 	if err := f.repository.CreateMessage(ctx, message, f.event("event-"+name, "message.created", string(message.ID)), ""); err != nil {
@@ -155,7 +181,7 @@ func unreadCountFollowsTheReadCursor(t *testing.T, open opener) {
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	read := base.Add(500 * time.Millisecond)
 	f.message(t, ctx, "M-read", read)
-	f.message(t, ctx, "M-unread", base.Add(550*time.Millisecond))
+	f.messageFrom(t, ctx, f.secondMember(t, ctx), "M-unread", base.Add(550*time.Millisecond))
 	cursor := domain.ReadCursor{WorkspaceID: f.workspaceID, UserID: f.userID, Conversation: f.channelID, LastRead: domain.NewMessageTimestamp(read), UpdatedAt: read}
 	if err := f.repository.SetReadCursor(ctx, cursor, f.event("cursor", "conversation.marked", string(f.channelID))); err != nil {
 		t.Fatal(err)
@@ -245,8 +271,9 @@ func followedThreadsAgreeAcrossProfiles(t *testing.T, open opener) {
 	base := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
 	root := f.message(t, ctx, "M-thread-root", base)
 	rootTimestamp := domain.NewMessageTimestamp(base)
-	f.reply(t, ctx, "M-thread-reply-one", rootTimestamp, base.Add(time.Second))
-	f.reply(t, ctx, "M-thread-reply-two", rootTimestamp, base.Add(2*time.Second))
+	other := f.secondMember(t, ctx)
+	f.replyFrom(t, ctx, other, "M-thread-reply-one", rootTimestamp, base.Add(time.Second))
+	f.replyFrom(t, ctx, other, "M-thread-reply-two", rootTimestamp, base.Add(2*time.Second))
 
 	if err := f.repository.SetThreadFollowed(ctx, f.workspaceID, f.userID, f.channelID, rootTimestamp, true,
 		f.event("follow", "thread.followed", string(f.channelID))); err != nil {
