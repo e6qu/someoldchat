@@ -832,6 +832,18 @@ type TokenRecord struct {
 	FunctionExecutionID WorkflowStepID
 }
 
+// FileAccessGrant lets one user read a file that is shared nowhere they can
+// see. Slack grants an app read access to the files a member attaches in a
+// modal's file_input: the app's bot user receives the grant when the files
+// are handed to it, so files.info and url_private work with its bot token
+// while the file stays private to the member who uploaded it.
+type FileAccessGrant struct {
+	FileID      FileID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	GrantedAt   time.Time
+}
+
 // FunctionExecutionToken is the execution-scoped bot credential Slack sends
 // an app as bot_access_token with function_executed and with every
 // interaction that comes from what the execution posted or opened. It acts as

@@ -303,6 +303,9 @@ func (m Messages) DispatchViewBlockAction(ctx context.Context, workspaceID domai
 	if err != nil {
 		return err
 	}
+	if stateJSON, err = m.attachViewFiles(ctx, current, userID, stateJSON); err != nil {
+		return err
+	}
 	var state map[string]any
 	if json.Unmarshal([]byte(stateJSON), &state) != nil || state == nil {
 		return ErrInvalidAppResponse
@@ -613,6 +616,9 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 	}
 	stateJSON, err = m.sanitizeViewState(current, stateJSON)
 	if err != nil {
+		return domain.ViewInteractionResult{}, err
+	}
+	if stateJSON, err = m.attachViewFiles(ctx, current, userID, stateJSON); err != nil {
 		return domain.ViewInteractionResult{}, err
 	}
 	var state map[string]any

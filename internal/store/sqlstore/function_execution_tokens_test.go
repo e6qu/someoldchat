@@ -8,7 +8,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/storetest"
 )
 
-func TestSQLiteFunctionExecutionTokens(t *testing.T) {
+func TestSQLiteFunctionExecutionTokensAndFileAccessGrants(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, memoryDSN(t))
 	if err != nil {
@@ -24,4 +24,5 @@ func TestSQLiteFunctionExecutionTokens(t *testing.T) {
 		}
 	}
 	storetest.CheckFunctionExecutionTokens(t, s)
+	storetest.CheckFileAccessGrants(t, s)
 }

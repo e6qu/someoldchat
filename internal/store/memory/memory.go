@@ -162,6 +162,8 @@ type Store struct {
 	appDatastoreItems             map[string]domain.AppDatastoreItem
 	externalUploads               map[domain.ExternalUploadID]domain.ExternalUpload
 	fileShares                    map[domain.FileID][]domain.ConversationID
+	// fileGrants holds read grants by file, then by grantee.
+	fileGrants map[domain.FileID]map[domain.UserID]domain.FileAccessGrant
 }
 
 var _ store.Store = (*Store)(nil)
@@ -406,6 +408,7 @@ func New() *Store {
 		canvasComments:                make(map[domain.CanvasCommentID]domain.CanvasComment),
 		listItemComments:              make(map[domain.ListItemCommentID]domain.ListItemComment),
 		listItemFiles:                 make(map[domain.ListItemFileID]domain.ListItemFile),
+		fileGrants:                    make(map[domain.FileID]map[domain.UserID]domain.FileAccessGrant),
 		roleAssignments:               make(map[string]domain.RoleAssignment),
 		authPolicyEntities:            make(map[string]domain.AuthPolicyEntity),
 		sessionSettings:               make(map[string]domain.SessionSettings),
@@ -950,6 +953,38 @@ func (s *Store) FileReadableViaListItem(_ context.Context, workspace domain.Work
 		}
 	}
 	return false, nil
+}
+
+func (s *Store) GrantFileAccess(_ context.Context, grants []domain.FileAccessGrant) error {
+	for _, grant := range grants {
+		if grant.FileID == "" || grant.WorkspaceID == "" || grant.UserID == "" || grant.GrantedAt.IsZero() {
+			return store.InvalidArgument("invalid file access grant")
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, grant := range grants {
+		if file, exists := s.files[grant.FileID]; !exists || file.WorkspaceID != grant.WorkspaceID {
+			return store.ErrNotFound
+		}
+	}
+	for _, grant := range grants {
+		if s.fileGrants[grant.FileID] == nil {
+			s.fileGrants[grant.FileID] = make(map[domain.UserID]domain.FileAccessGrant)
+		}
+		if _, exists := s.fileGrants[grant.FileID][grant.UserID]; !exists {
+			grant.GrantedAt = grant.GrantedAt.UTC()
+			s.fileGrants[grant.FileID][grant.UserID] = grant
+		}
+	}
+	return nil
+}
+
+func (s *Store) FileReadableViaGrant(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, fileID domain.FileID) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	grant, exists := s.fileGrants[fileID][user]
+	return exists && grant.WorkspaceID == workspace, nil
 }
 
 func (s *Store) ListCanvasComments(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasCommentPage, error) {
@@ -7023,6 +7058,12 @@ func (s *Store) sweepFilesLocked(request domain.RetentionSweepRequest) []domain.
 	for _, blob := range expired {
 		delete(s.files, blob.FileID)
 		delete(s.fileShares, blob.FileID)
+		delete(s.fileGrants, blob.FileID)
+		for id, link := range s.listItemFiles {
+			if link.FileID == blob.FileID {
+				delete(s.listItemFiles, id)
+			}
+		}
 		for id, comment := range s.fileComments {
 			if comment.File == blob.FileID {
 				delete(s.fileComments, id)

@@ -1343,6 +1343,12 @@ type Store interface {
 	// (conversation-share based) and the list-access model that lets a list
 	// reader download an attachment that was never shared into any channel.
 	FileReadableViaListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (bool, error)
+	// GrantFileAccess records durable read grants. Granting again is not an
+	// error; a grant disappears with its file.
+	GrantFileAccess(context.Context, []domain.FileAccessGrant) error
+	// FileReadableViaGrant reports whether the user holds a read grant on the
+	// file (see domain.FileAccessGrant).
+	FileReadableViaGrant(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (bool, error)
 	SetListAccess(context.Context, domain.ListAccess, events.Event) error
 	DeleteListAccess(context.Context, domain.ListAccess, events.Event) error
 	// GetListAccess resolves the effective access one user has to one list.

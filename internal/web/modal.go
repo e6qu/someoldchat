@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"html/template"
 	"math"
+	"mime/multipart"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +38,9 @@ type modalView struct {
 	// machinery: it submits to /app/dialog/submit and closes through
 	// /app/dialog/close, identified by dialog_id.
 	Dialog bool
+	// Multipart marks a modal with a file_input: its form is submitted as
+	// multipart/form-data so the member's files travel with it.
+	Multipart bool
 }
 
 type modalBlockView struct {
@@ -89,6 +94,74 @@ type modalInputView struct {
 	// Unsupported explains an element this client cannot collect a value
 	// for; it is shown instead of a control, never silently dropped.
 	Unsupported string
+	// FileTypes, Accept and MaxFiles are a file_input's filetypes, the same
+	// list as an <input accept> value, and max_files. Files are the files the
+	// member already attached, kept across a submission the app or this
+	// client returned with errors.
+	FileTypes []string
+	Accept    string
+	MaxFiles  int
+	Files     []modalFileView
+}
+
+// modalFileView is one file attached to a file_input. Value is what the form
+// submits for it (see encodeFileChoice); Name is only shown.
+type modalFileView struct {
+	Value string
+	Name  string
+}
+
+// fileChoice is a file the member attached to a file_input: the service
+// resolves the id, and checks it is the member's own upload, before anything
+// reaches the app. The name is only what the browser shows.
+type fileChoice struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// fileChoicePrefix marks a form value that carries a fileChoice.
+const fileChoicePrefix = "file:"
+
+func encodeFileChoice(choice fileChoice) string {
+	encoded, _ := json.Marshal(choice)
+	return fileChoicePrefix + base64.RawURLEncoding.EncodeToString(encoded)
+}
+
+func decodeFileChoice(raw string) (fileChoice, bool) {
+	if !strings.HasPrefix(raw, fileChoicePrefix) {
+		return fileChoice{}, false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(raw, fileChoicePrefix))
+	var choice fileChoice
+	if err != nil || json.Unmarshal(decoded, &choice) != nil || strings.TrimSpace(choice.ID) == "" {
+		return fileChoice{}, false
+	}
+	return choice, true
+}
+
+// fileAccept is an <input type=file> accept value for a file_input's
+// filetypes.
+func fileAccept(fileTypes []string) string {
+	extensions := make([]string, 0, len(fileTypes))
+	for _, fileType := range fileTypes {
+		extensions = append(extensions, "."+fileType)
+	}
+	return strings.Join(extensions, ",")
+}
+
+// fileNameAccepted applies filetypes to a file name, as the service does to
+// the stored file.
+func fileNameAccepted(fileTypes []string, name string) bool {
+	if len(fileTypes) == 0 {
+		return true
+	}
+	extension := strings.TrimPrefix(strings.ToLower(path.Ext(name)), ".")
+	for _, fileType := range fileTypes {
+		if fileType == extension {
+			return true
+		}
+	}
+	return false
 }
 
 // DispatchTriggers is when an input block with dispatch_action sends
@@ -217,7 +290,9 @@ func (h Handler) newModalView(ctx context.Context, principal auth.Principal, val
 				Dispatch: boolValue(raw["dispatch_action"]), DispatchOn: action.DispatchOn,
 			}
 			if input.Control == "file" {
-				input.Unsupported = fileInputUnsupported
+				input.FileTypes, input.MaxFiles = action.FileTypes, action.MaxFiles
+				input.Accept = fileAccept(action.FileTypes)
+				result.Multipart = true
 			}
 			values, hasSubmitted := submitted[inputIndex]
 			if !hasSubmitted && submitted == nil {
@@ -240,6 +315,14 @@ func (h Handler) newModalView(ctx context.Context, principal auth.Principal, val
 				}
 				if input.Control == "external" {
 					input.Options = withChosenOptions(input.Options, values)
+				}
+				if input.Control == "file" {
+					input.Value = ""
+					for _, value := range values {
+						if choice, ok := decodeFileChoice(value); ok {
+							input.Files = append(input.Files, modalFileView{Value: value, Name: choice.Name})
+						}
+					}
 				}
 				for optionIndex := range input.Options {
 					input.Options[optionIndex].Selected = containsValue(values, input.Options[optionIndex].Value)
@@ -470,7 +553,25 @@ func modalActionValues(actionType string, state map[string]any) ([]string, bool)
 		}
 		return []string{richTextPlain(raw)}, true
 	case "file_input":
-		return nil, false
+		raw, exists := state["files"]
+		if !exists {
+			return nil, false
+		}
+		items, _ := raw.([]any)
+		result := make([]string, 0, len(items))
+		for _, item := range items {
+			file, _ := item.(map[string]any)
+			id := strings.TrimSpace(stringValue(file["id"]))
+			if id == "" {
+				continue
+			}
+			name := stringValue(file["name"])
+			if name == "" {
+				name = id
+			}
+			result = append(result, encodeFileChoice(fileChoice{ID: id, Name: name}))
+		}
+		return result, true
 	default:
 		return stringField("value")
 	}
@@ -600,8 +701,15 @@ func modalStateAction(actionType string, options []messageActionOptionView, sele
 	case "rich_text_input":
 		action["rich_text_value"] = richTextValue(firstValue(selected))
 	case "file_input":
-		// This client attaches no files to app forms (see fileInputError).
-		action["files"] = []any{}
+		// Files are named by id; the service resolves them into Slack file
+		// objects after checking each is the member's own upload.
+		files := make([]any, 0, len(nonEmpty))
+		for _, value := range nonEmpty {
+			if choice, ok := decodeFileChoice(value); ok {
+				files = append(files, map[string]any{"id": choice.ID})
+			}
+		}
+		action["files"] = files
 	default:
 		action["value"] = nil
 		if value := firstValue(selected); value != "" {
@@ -685,6 +793,9 @@ func (h Handler) viewSubmit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
 	if len(values["view_id"]) != 1 || strings.TrimSpace(values["view_id"][0]) == "" {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That app modal could not be read", "Reload the workspace and try again.")
 		return
@@ -700,6 +811,15 @@ func (h Handler) viewSubmit(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusBadGateway, "That app modal is invalid", "The app supplied a view that SameOldChat could not render safely.")
 		return
 	}
+	fileFailures, err := h.uploadModalFiles(r, principal, rendered, values)
+	if err != nil {
+		_, submitted, _ := modalStateJSON(rendered, values)
+		h.renderModalResult(w, r, principal, composerState{
+			Status: http.StatusServiceUnavailable, ModalSubmitted: submitted,
+			ModalErrors: map[string]string{"": "Your files could not be stored. Your entries are still here; try again."},
+		})
+		return
+	}
 	stateJSON, submitted, err := modalStateJSON(rendered, values)
 	if err != nil {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That app form could not be read", "Review the fields and submit the modal again.")
@@ -708,7 +828,11 @@ func (h Handler) viewSubmit(w http.ResponseWriter, r *http.Request) {
 	// Slack's client refuses a submission that breaks an element's own
 	// constraints before the app hears of it; so does this one, whether or
 	// not the browser enforced the same attributes.
-	if failures := modalInputFailures(rendered, submitted); len(failures) != 0 {
+	failures := modalInputFailures(rendered, submitted)
+	for blockID, failure := range fileFailures {
+		failures[blockID] = failure
+	}
+	if len(failures) != 0 {
 		h.renderModalResult(w, r, principal, composerState{
 			Status: http.StatusUnprocessableEntity, ModalSubmitted: submitted, ModalErrors: failures,
 		})
@@ -720,7 +844,7 @@ func (h Handler) viewSubmit(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		h.renderModalResult(w, r, principal, composerState{
-			Status: http.StatusBadGateway, ModalSubmitted: submitted,
+			Status: modalInteractionStatus(err), ModalSubmitted: submitted,
 			ModalErrors: map[string]string{"": modalInteractionError(err)},
 		})
 		return
@@ -739,6 +863,94 @@ func (h Handler) viewSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, appURL(string(h.requestChannel(r)), "", "", "", ""), http.StatusSeeOther)
+}
+
+// uploadModalFiles stores the files a member chose for each file_input of a
+// submitted modal, through the same staging path the composer uses, as files
+// private to the member (shared into no conversation). Each stored file joins
+// the input's submitted values, so a form returned with errors keeps it
+// attached. A choice the element cannot accept — too many files, or a type
+// outside filetypes — is refused before anything is stored and reported
+// against the input's block.
+func (h Handler) uploadModalFiles(r *http.Request, principal auth.Principal, modal *modalView, values map[string][]string) (map[string]string, error) {
+	failures := make(map[string]string)
+	if r.MultipartForm == nil {
+		return failures, nil
+	}
+	for _, block := range modal.Blocks {
+		input := block.Input
+		if input == nil || input.Control != "file" {
+			continue
+		}
+		field := fmt.Sprintf("input_%d", input.Index)
+		var headers []*multipart.FileHeader
+		for _, header := range r.MultipartForm.File[field+"_upload"] {
+			// A file control left empty still submits one nameless part.
+			if strings.TrimSpace(header.Filename) != "" || header.Size != 0 {
+				headers = append(headers, header)
+			}
+		}
+		if len(headers) == 0 {
+			continue
+		}
+		if input.MaxFiles > 0 && len(values[field])+len(headers) > input.MaxFiles {
+			failures[input.BlockID] = fmt.Sprintf("Attach no more than %d files.", input.MaxFiles)
+			continue
+		}
+		refused := false
+		for _, header := range headers {
+			if !fileNameAccepted(input.FileTypes, header.Filename) {
+				failures[input.BlockID] = "Attach only " + fileTypeList(input.FileTypes) + " files."
+				refused = true
+			}
+		}
+		if refused {
+			continue
+		}
+		completions := make([]domain.ExternalUploadCompletion, 0, len(headers))
+		for index, header := range headers {
+			name := strings.TrimSpace(header.Filename)
+			if name == "" {
+				name = "attachment-" + strconv.Itoa(index+1)
+			}
+			mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
+			if mimeType == "" {
+				mimeType = "application/octet-stream"
+			}
+			upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, header.Size, draftAttachmentTTL)
+			if errors.Is(err, service.ErrInvalidExternalUpload) {
+				failures[input.BlockID] = "Choose files that are not empty."
+				refused = true
+				break
+			}
+			if err != nil {
+				return nil, err
+			}
+			source, err := header.Open()
+			if err != nil {
+				return nil, err
+			}
+			err = h.Messages.UploadExternalFile(r.Context(), upload.ID, header.Size, source)
+			if closeErr := source.Close(); err == nil {
+				err = closeErr
+			}
+			if err != nil {
+				return nil, err
+			}
+			completions = append(completions, domain.ExternalUploadCompletion{ID: upload.ID, Title: name})
+		}
+		if refused {
+			continue
+		}
+		files, err := h.Messages.CompleteExternalUploads(r.Context(), principal.WorkspaceID, principal.UserID, completions, nil, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range files {
+			values[field] = append(values[field], encodeFileChoice(fileChoice{ID: string(file.ID), Name: file.Name}))
+		}
+	}
+	return failures, nil
 }
 
 // modalInputFailures checks each input against the constraints its element
@@ -769,6 +981,19 @@ func modalInputFailures(modal *modalView, submitted modalFormState) map[string]s
 		}
 		value := firstValue(values)
 		switch input.Control {
+		case "file":
+			if input.MaxFiles > 0 && len(values) > input.MaxFiles {
+				failures[input.BlockID] = fmt.Sprintf("Attach no more than %d files.", input.MaxFiles)
+			}
+			for _, raw := range values {
+				choice, ok := decodeFileChoice(raw)
+				switch {
+				case !ok:
+					failures[input.BlockID] = "An attached file could not be read. Attach it again."
+				case !fileNameAccepted(input.FileTypes, choice.Name):
+					failures[input.BlockID] = "Attach only " + fileTypeList(input.FileTypes) + " files."
+				}
+			}
 		case "text", "textarea":
 			length := utf8.RuneCountInString(value)
 			if input.MinLength > 0 && length < input.MinLength {
@@ -795,10 +1020,14 @@ func modalInputFailures(modal *modalView, submitted modalFormState) map[string]s
 	return failures
 }
 
-// fileInputUnsupported explains a file_input: this client cannot attach files
-// to an app form, and saying so is better than submitting the form without a
-// value the app requires.
-const fileInputUnsupported = "This client cannot attach files to app forms yet."
+// fileTypeList names a file_input's filetypes for an error message.
+func fileTypeList(fileTypes []string) string {
+	names := make([]string, 0, len(fileTypes))
+	for _, fileType := range fileTypes {
+		names = append(names, strings.ToUpper(fileType))
+	}
+	return strings.Join(names, ", ")
+}
 
 // unsupportedRequired completes the explanation for a required element this
 // client cannot fill.
@@ -813,6 +1042,11 @@ func (h Handler) viewAction(w http.ResponseWriter, r *http.Request) {
 	values, ok := h.decodeModalMutation(w, r, "view_id")
 	if !ok {
 		return
+	}
+	// A block action carries the files the member already attached; files
+	// still being chosen are stored only when the modal is submitted.
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
 	}
 	actionField, inputField := len(values["modal_action"]) == 1, len(values["modal_input_action"]) == 1
 	if actionField == inputField {
@@ -883,7 +1117,7 @@ func (h Handler) viewAction(w http.ResponseWriter, r *http.Request) {
 	}, h.responseBaseURL(r))
 	if err != nil {
 		h.renderModalResult(w, r, principal, composerState{
-			Status: http.StatusBadGateway, ModalSubmitted: submitted,
+			Status: modalInteractionStatus(err), ModalSubmitted: submitted,
 			ModalErrors: map[string]string{"": modalInteractionError(err)},
 		})
 		return
@@ -980,11 +1214,15 @@ func (h Handler) renderModalResult(w http.ResponseWriter, r *http.Request, princ
 }
 
 func (h Handler) decodeModalMutation(w http.ResponseWriter, r *http.Request, idField string) (map[string][]string, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
 	var err error
 	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
-		err = r.ParseMultipartForm(maxFormBody)
+		// A modal with a file_input carries the member's files: the same
+		// budget as the composer's uploads, spilled to disk beyond the
+		// in-memory field allowance. The caller removes the spill files.
+		r.Body = http.MaxBytesReader(w, r.Body, maxWorkspaceUploadBytes+maxWorkspaceUploadFields)
+		err = r.ParseMultipartForm(maxWorkspaceUploadFields)
 	} else {
+		r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
 		err = r.ParseForm()
 	}
 	if err != nil || len(r.Form["_csrf"]) != 1 {
@@ -1003,6 +1241,15 @@ func (h Handler) decodeModalMutation(w http.ResponseWriter, r *http.Request, idF
 	return r.Form, true
 }
 
+// modalInteractionStatus is the status of a refused modal interaction: the
+// member's own input is 422, anything the app or the service failed at 502.
+func modalInteractionStatus(err error) int {
+	if errors.Is(err, service.ErrViewFilesInvalid) {
+		return http.StatusUnprocessableEntity
+	}
+	return http.StatusBadGateway
+}
+
 func modalInteractionError(err error) string {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -1011,6 +1258,8 @@ func modalInteractionError(err error) string {
 		return "The app did not respond in time. Your entries are still here; try again."
 	case errors.Is(err, service.ErrInvalidAppResponse):
 		return "The app returned an invalid modal response. Your entries are still here."
+	case errors.Is(err, service.ErrViewFilesInvalid):
+		return "An attached file is no longer available or is not one this form accepts. Remove it and attach the file again."
 	default:
 		return "The app modal could not be submitted. Your entries are still here; try again."
 	}

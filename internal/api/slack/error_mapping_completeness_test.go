@@ -88,7 +88,10 @@ func TestMapServiceErrorNamesEveryTransportRelevantSentinel(t *testing.T) {
 		"ErrAppResponseURLUsed":        "returned only by HandleAppResponse, answered by the web /app-response route",
 		"ErrAppResponseURLExpired":     "returned only by HandleAppResponse, answered by the web /app-response route",
 		"ErrCapabilityExpired":         "UseAppResponseURL's refusal, translated by HandleAppResponse to ErrAppResponseURLExpired",
-		"ErrCapabilityExhausted":       "UseAppResponseURL's refusal, translated by HandleAppResponse to ErrAppResponseURLUsed",
+		// file_input values come only from the first-party modal submit and
+		// block action, whose web handler names it (modalInteractionError).
+		"ErrViewFilesInvalid":    "returned only for a first-party modal's file_input, answered by the web /app/view routes",
+		"ErrCapabilityExhausted": "UseAppResponseURL's refusal, translated by HandleAppResponse to ErrAppResponseURLUsed",
 	}
 	missing := make([]string, 0)
 	for _, pkg := range []struct {

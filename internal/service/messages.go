@@ -814,6 +814,16 @@ func (m Messages) authorizeFileAccess(ctx context.Context, userID domain.UserID,
 	if readable {
 		return nil
 	}
+	// A file a member attached in an app's modal (file_input) is shared
+	// nowhere; the app's bot reads it through the grant it received with the
+	// submission.
+	readable, err = m.Store.FileReadableViaGrant(ctx, file.WorkspaceID, userID, file.ID)
+	if err != nil {
+		return err
+	}
+	if readable {
+		return nil
+	}
 	return store.ErrNotFound
 }
 

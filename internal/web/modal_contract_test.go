@@ -266,7 +266,7 @@ func TestMessageRichTextInputDispatchesRichText(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
-	requireContains(t, "rich text input", body, `<textarea class="block-action" name="value"`, "cannot attach files to app forms")
+	requireContains(t, "rich text input", body, `<textarea class="block-action" name="value"`, "Files are attached in an app")
 	response := postForm(t, mux, "/app/interaction", url.Values{
 		"_csrf": {auth.CSRFToken("session")}, "message_id": {"Mrt"}, "app_id": {"A1"}, "block_id": {"b"}, "action_id": {"a"},
 		"action_type": {"rich_text_input"}, "channel": {"Cdev"}, "value": {"hello"},
@@ -335,7 +335,7 @@ func TestModalInputElementsRenderAndSubmitInSlackShapes(t *testing.T) {
 	seedOpenModal(t, s, "Vp", elementsModal)
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "modal elements", body,
-		"RichLabel", ">Seed</textarea>", "FileLabel", "cannot attach files to app forms",
+		"RichLabel", ">Seed</textarea>", "FileLabel", `type="file" name="input_1_upload" multiple`, `enctype="multipart/form-data"`,
 		`value="2023-11-14T22:13" data-unix="1700000000"`, `minlength="2" maxlength="5"`,
 		`step="any" min="1" max="9"`, `data-dispatch-input="9" data-dispatch-on="character"`,
 		`name="modal_input_action" value="9"`, `name="timezone" data-browser-timezone value="UTC"`,
@@ -406,7 +406,7 @@ func TestModalSubmissionEnforcesElementConstraints(t *testing.T) {
 	if response.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("required file input status=%d", response.Code)
 	}
-	requireContains(t, "required file input", response.Body.String(), "cannot attach files to app forms")
+	requireContains(t, "required file input", response.Body.String(), "This field is required.")
 }
 
 // An input block with dispatch_action sends block_actions for its own

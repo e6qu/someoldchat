@@ -127,7 +127,12 @@ identity, and option schema.
 `views.open`, `views.push`, and `views.update` honor one-time trigger IDs,
 view hashes, stack order, private metadata, input state, validation errors,
 close/clear behavior, and submit acknowledgement. Concurrent stale hashes do
-not overwrite a newer view.
+not overwrite a newer view. A modal's `file_input` accepts the member's files
+within its `filetypes` and `max_files`; the submission carries them as file
+objects that stay private to the member while the app is granted read access.
+A modal opened with a function execution's token reports that execution's
+`function_data` with its submission and closure, so a custom step can finish
+from the modal.
 
 ## APP-08 — Receive Events API and Socket Mode traffic
 

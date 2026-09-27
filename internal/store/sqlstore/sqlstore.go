@@ -195,6 +195,7 @@ CREATE TABLE IF NOT EXISTS conversation_prefs (
 CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES users(id), channel_ids TEXT NOT NULL DEFAULT '[]', custom_message TEXT NOT NULL DEFAULT '', real_name TEXT NOT NULL DEFAULT '', resend INTEGER NOT NULL DEFAULT 0, restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0, guest_expiration_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0, accepted_by TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, installer_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (app_id, workspace_id));
+CREATE TABLE IF NOT EXISTS file_access_grants (file_id TEXT NOT NULL, user_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), granted_at INTEGER NOT NULL, PRIMARY KEY (file_id, user_id));
 CREATE TABLE IF NOT EXISTS function_execution_tokens (token_hash TEXT PRIMARY KEY, execution_id TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, callback_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL, bot_id TEXT NOT NULL DEFAULT '', scopes TEXT NOT NULL DEFAULT '', token_ciphertext TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS incoming_webhooks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id), user_id TEXT NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspace_id, app_id, secret_hash, enabled);
@@ -592,7 +593,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 190
+const schemaVersion = 191
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3543,6 +3544,15 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 191: file_input grants ---
+	if version < 191 {
+		// Files a member attaches in a modal's file_input stay private to the
+		// member, and the app that receives them is granted read access.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS file_access_grants (file_id TEXT NOT NULL, user_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), granted_at INTEGER NOT NULL, PRIMARY KEY (file_id, user_id))`); err != nil {
+			return fmt.Errorf("migrate file access grants: %w", err)
+		}
+	}
+	// --- end schema 191 ---
 	// --- schema 190: function-scoped interactivity (execution tokens) ---
 	if version < 190 {
 		// function_executed hands the app an execution-scoped bot token
@@ -12677,6 +12687,11 @@ func deleteFilesTx(ctx context.Context, tx txRunner, expired []domain.ExpiredBlo
 		`DELETE FROM file_shares WHERE file_id IN ` + list,
 		`DELETE FROM message_files WHERE file_id IN ` + list,
 		`DELETE FROM file_comments WHERE file_id IN ` + list,
+		`DELETE FROM file_access_grants WHERE file_id IN ` + list,
+		// list_item_files references files(id): a file attached to a list
+		// item must lose the attachment with the file, or PostgreSQL refuses
+		// the delete.
+		`DELETE FROM list_item_files WHERE file_id IN ` + list,
 		`DELETE FROM files WHERE id IN ` + list,
 	} {
 		if _, err := tx.ExecContext(ctx, statement, arguments...); err != nil {
@@ -17253,6 +17268,39 @@ func (s *Store) ListItemFiles(ctx context.Context, workspace domain.WorkspaceID,
 		files[i].SharedChannels = shares
 	}
 	return files, nil
+}
+
+func (s *Store) GrantFileAccess(ctx context.Context, grants []domain.FileAccessGrant) error {
+	for _, grant := range grants {
+		if grant.FileID == "" || grant.WorkspaceID == "" || grant.UserID == "" || grant.GrantedAt.IsZero() {
+			return store.InvalidArgument("invalid file access grant")
+		}
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, grant := range grants {
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM files WHERE id = ? AND workspace_id = ?`, grant.FileID, grant.WorkspaceID).Scan(&exists); err != nil {
+			return translateNotFound(err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO file_access_grants(file_id, user_id, workspace_id, granted_at) VALUES (?, ?, ?, ?) ON CONFLICT(file_id, user_id) DO NOTHING`,
+			grant.FileID, grant.UserID, grant.WorkspaceID, grant.GrantedAt.UTC().UnixNano()); err != nil {
+			return classify(err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) FileReadableViaGrant(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, fileID domain.FileID) (bool, error) {
+	var exists int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM file_access_grants WHERE file_id = ? AND user_id = ? AND workspace_id = ?`, fileID, user, workspace).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // FileReadableViaListItem reports whether a file is attached to an item on a

@@ -72,6 +72,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_message", code: codes.InvalidArgument, sentinel: service.ErrInvalidMessage},
 	{key: "service.invalid_message_stream", code: codes.InvalidArgument, sentinel: service.ErrInvalidMessageStream},
 	{key: "service.invalid_stream_chunks", code: codes.InvalidArgument, sentinel: service.ErrInvalidStreamChunks},
+	{key: "service.view_files_invalid", code: codes.InvalidArgument, sentinel: service.ErrViewFilesInvalid},
 	{key: "service.missing_stream_recipient_team", code: codes.InvalidArgument, sentinel: service.ErrMissingStreamRecipientTeam},
 	{key: "service.missing_stream_recipient_user", code: codes.InvalidArgument, sentinel: service.ErrMissingStreamRecipientUser},
 	{key: "service.invalid_timestamp", code: codes.InvalidArgument, sentinel: service.ErrInvalidTimestamp},
