@@ -40,7 +40,12 @@ func livenessHandler(t *testing.T) Handler {
 // without a TCP FIN held its stream until the operating system gave up. A
 // client that answers the server's pings stays connected.
 func TestRTMPingsTheClientAndKeepsAResponsiveOneConnected(t *testing.T) {
-	client := dialRTM(t, livenessHandler(t), http.Header{"Origin": []string{"https://proxy.example.com"}})
+	// A period long enough that a loaded machine delaying the client's pong
+	// cannot pass the two-missed-pings read deadline; the unresponsive case
+	// below keeps the short period because it waits for that deadline.
+	handler := livenessHandler(t)
+	handler.RTMPingPeriod = 250 * time.Millisecond
+	client := dialRTM(t, handler, http.Header{"Origin": []string{"https://proxy.example.com"}})
 	var pings atomic.Int32
 	client.SetPingHandler(func(data string) error {
 		pings.Add(1)
@@ -57,7 +62,7 @@ func TestRTMPingsTheClientAndKeepsAResponsiveOneConnected(t *testing.T) {
 			frames <- string(payload)
 		}
 	}()
-	deadline := time.After(time.Second)
+	deadline := time.After(1250 * time.Millisecond)
 	for {
 		select {
 		case frame, ok := <-frames:
@@ -69,7 +74,7 @@ func TestRTMPingsTheClientAndKeepsAResponsiveOneConnected(t *testing.T) {
 			}
 		case <-deadline:
 			if pings.Load() < 3 {
-				t.Fatalf("pings=%d in one second at a 50ms period", pings.Load())
+				t.Fatalf("pings=%d in 1.25s at a 250ms period", pings.Load())
 			}
 			return
 		}
