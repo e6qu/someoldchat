@@ -890,7 +890,7 @@ test('[FILE-04 FILE-05 A11Y-01] the Files browser lists, filters and opens a fil
 
 // A name in the conversation opens the member's profile beside it, as Slack's
 // profile pane does, instead of leaving the conversation for People.
-test('[PROFILE-01 A11Y-01] an author name opens the member profile beside the conversation', async ({ page, context }) => {
+test('[PROFILE-01 A11Y-01] an author name or a mention opens the member profile beside the conversation', async ({ page, context, request }) => {
   await signIn(context);
   await page.goto('/app');
   const text = `profile panel ${Date.now()}`;
@@ -914,6 +914,16 @@ test('[PROFILE-01 A11Y-01] an author name opens the member profile beside the co
 
   await panel.getByRole('button', { name: 'Close profile' }).click();
   await expect(panel).toBeHidden();
+
+  // A mention in a message opens the same panel.
+  const mentioned = `profile mention ${Date.now()}`;
+  await postThroughTheAPI(request, `${mentioned} <@Udev>`);
+  await page.goto('/app');
+  const mention = page.locator('.message', { hasText: mentioned }).locator('a.slack-mention[data-user-id="Udev"]');
+  await expect(mention).toBeVisible();
+  await mention.click();
+  await expect(panel).toBeVisible();
+  await expect(page).toHaveURL(/\/app(\?|$)/);
 });
 
 test('[FILE-01] staged attachments can be reordered before sending', async ({ page, context }) => {
