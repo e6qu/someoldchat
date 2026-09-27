@@ -1342,7 +1342,7 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 		`aria-label="Mention a person or user group"`,
 		`data-mention-user="U1"`,
 		`You can also paste or drop files into the composer.`,
-		`<span class="author">Ada Developer</span>`,
+		`data-profile-user="U1">Ada Developer</a>`,
 		`<div class="avatar" aria-hidden="true">A</div>`,
 		`<span class="signed-in-avatar" aria-hidden="true">A</span>`,
 		// Slack's header carries the member count beside the topic, and it is a
@@ -1367,7 +1367,7 @@ func TestTimelineProjectsAuthorStatusBesideTheName(t *testing.T) {
 	seedMessage(t, s, "M1", "hello", time.Unix(1700000000, 0).UTC())
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "author status projection", body,
-		`<span class="author">Ada Developer</span><span class="author-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`,
+		`data-profile-user="U1">Ada Developer</a><span class="author-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`,
 	)
 }
 
@@ -1683,8 +1683,9 @@ func TestMemberDirectoryMarksAndRemovesVIPs(t *testing.T) {
 	}
 	csrf := auth.CSRFToken("session")
 
-	requireContains(t, "mark VIP control", get(t, mux, "/app/members").Body.String(),
-		"Mark VIP", "/app/notifications/vips")
+	// The VIP control lives in the member's profile panel, as Slack's does.
+	requireContains(t, "mark VIP control", get(t, mux, "/app/members?user=U2").Body.String(),
+		"Add to VIPs", "/app/notifications/vips")
 
 	if r := postForm(t, mux, "/app/notifications/vips", url.Values{"_csrf": {csrf}, "target": {"U2"}, "add": {"true"}}.Encode(), false); r.Code != http.StatusSeeOther {
 		t.Fatalf("mark VIP status=%d body=%s", r.Code, r.Body)
@@ -1692,12 +1693,12 @@ func TestMemberDirectoryMarksAndRemovesVIPs(t *testing.T) {
 	if prefs, err := (service.Messages{Store: s}).WorkspaceNotificationPreferences(context.Background(), "T1", "U1"); err != nil || len(prefs.VIPs) != 1 || prefs.VIPs[0] != "U2" {
 		t.Fatalf("VIPs after mark = %+v err=%v, want [U2]", prefs.VIPs, err)
 	}
-	requireContains(t, "VIP shown as marked", get(t, mux, "/app/members").Body.String(), "★ VIP")
+	requireContains(t, "VIP shown as marked", get(t, mux, "/app/members?user=U2").Body.String(), "Remove from VIPs")
 
 	if r := postForm(t, mux, "/app/notifications/vips", url.Values{"_csrf": {csrf}, "target": {"U2"}, "add": {"false"}}.Encode(), false); r.Code != http.StatusSeeOther {
 		t.Fatalf("remove VIP status=%d body=%s", r.Code, r.Body)
 	}
-	requireMissing(t, "VIP removed", get(t, mux, "/app/members").Body.String(), "★ VIP")
+	requireMissing(t, "VIP removed", get(t, mux, "/app/members?user=U2").Body.String(), "Remove from VIPs")
 }
 
 // TestSidebarSectionsOrganizeChannels covers the sidebar section lifecycle: a
@@ -3671,8 +3672,12 @@ func TestDeactivatedMembersAreNotOfferedAsPeople(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "gone", RealName: "Gone Person", Deleted: true})
 	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "here", RealName: "Still Here"})
 	body := get(t, mux, "/app/members").Body.String()
-	requireContains(t, "members page", body, "Still Here", `name="users" value="U3"`)
-	requireMissing(t, "members page", body, "Gone Person", `name="users" value="U2"`)
+	requireContains(t, "members page", body, "Still Here", `data-profile-user="U3"`)
+	requireMissing(t, "members page", body, "Gone Person", `data-profile-user="U2"`)
+	// A deactivated member's profile says so instead of offering to message them.
+	gone := get(t, mux, "/app/members?user=U2").Body.String()
+	requireContains(t, "deactivated profile", gone, `class="pp-error"`)
+	requireMissing(t, "deactivated profile", gone, `name="users" value="U2"`)
 }
 
 // TestFailedPostKeepsTheDraftAndExplainsTheFailure covers the defect where a
@@ -4957,7 +4962,7 @@ func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	}
 	// The form mirrors the limits the service enforces without exposing the
 	// seven size-specific image fields in Slack's API model.
-	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`, `name="status_expiration" value="4102444800"`, `action="/app/presence"`, "Active (automatic)", "automatic; activity unavailable", "💬 Heads down", "Schedule a status", "No scheduled statuses.")
+	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`, `name="status_expiration" value="4102444800"`, `action="/app/presence"`, "Active (automatic)", "presence unavailable", "💬 Heads down", "Schedule a status", "No scheduled statuses.")
 	requireMissing(t, "profile form", res.Body.String(), `name="image_24"`, `name="image_1024"`)
 	updateResult := postForm(t, mux, "/app/profile", "display_name=updated&status_text=Ready&status_emoji=%3Aok%3A&status_expiration=4102444800&avatar_url=https%3A%2F%2Fexample.test%2Favatar.png", false)
 	if updateResult.Code != http.StatusSeeOther {
@@ -5053,10 +5058,15 @@ func TestRejectedScheduledStatusKeepsEveryFieldAndExplainsTheContract(t *testing
 func TestMembersPageOffersADirectMessageAction(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
-	body := get(t, mux, "/app/members").Body.String()
-	requireContains(t, "members page", body, `action="/app/conversation/open"`, `name="users" value="U2"`, "Message Bob Builder")
-	if strings.Contains(body, `name="users" value="U1"`) {
-		t.Fatal("the members page offers to open a direct conversation with the signed-in user")
+	// The directory opens a member's profile, and the profile carries the
+	// Message action (PROFILE-01).
+	directory := get(t, mux, "/app/members").Body.String()
+	requireContains(t, "members page", directory, `data-profile-user="U2"`, `href="/app/members?user=U2"`)
+	body := get(t, mux, "/app/members?user=U2").Body.String()
+	requireContains(t, "profile panel", body, `action="/app/conversation/open"`, `name="users" value="U2"`, "Message Bob Builder")
+	self := get(t, mux, "/app/members?user=U1").Body.String()
+	if strings.Contains(self, `name="users" value="U1"`) {
+		t.Fatal("the profile panel offers to open a direct conversation with the signed-in user")
 	}
 }
 

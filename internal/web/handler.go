@@ -207,10 +207,14 @@ type messageList struct {
 }
 
 type messageView struct {
-	ID            string
-	MessageID     string
-	Anchor        string
-	AuthorName    string
+	ID         string
+	MessageID  string
+	Anchor     string
+	AuthorName string
+	// AuthorID is set only for a member posting as themselves, so their name
+	// opens their profile (PROFILE-01); an app or a custom username is not a
+	// member whose profile the name could honestly open.
+	AuthorID      string
 	AuthorInitial string
 	AvatarURL     string
 	AvatarEmoji   string
@@ -557,7 +561,20 @@ type userGroupView struct {
 }
 
 type membersData struct {
-	Members        []memberView
+	Members []memberView
+	// Apps are the workspace's bot users. Slack lists them apart from people:
+	// an app is not a teammate to message about lunch.
+	Apps []memberView
+	// Query and Type are the directory's search and account-type filter;
+	// Summary is the sentence announced when a live filter replaces the list.
+	Query     string
+	Type      string
+	Summary   string
+	Truncated bool
+	// Panel is the member profile shown open beside the directory for
+	// /app/members?user=<id>; PanelError explains a profile that cannot be.
+	Panel          *profileView
+	PanelError     string
 	Profile        domain.UserProfile
 	StatusDisplay  template.HTML
 	Presence       string
@@ -1928,7 +1945,7 @@ const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox
   <div class="avatar{{if $message.AvatarEmoji}} avatar-emoji{{end}}" aria-hidden="true">{{if $message.AvatarURL}}<img src="{{$message.AvatarURL}}" alt="">{{else if $message.AvatarEmoji}}{{$message.AvatarEmoji}}{{else}}{{$message.AuthorInitial}}{{end}}</div>
   <div class="message-body">
     <div class="message-head">
-      <span class="author">{{$message.AuthorName}}</span>{{if $message.AuthorStatus}}<span class="author-status"{{if $message.AuthorStatusText}} title="{{$message.AuthorStatusText}}"{{end}}>{{$message.AuthorStatus}}</span>{{end}}{{if $message.IsApp}}<span class="app-label">APP</span>{{end}}
+      {{if $message.AuthorID}}<a class="author" href="/app/members?user={{$message.AuthorID}}" data-profile-user="{{$message.AuthorID}}">{{$message.AuthorName}}</a>{{else}}<span class="author">{{$message.AuthorName}}</span>{{end}}{{if $message.AuthorStatus}}<span class="author-status"{{if $message.AuthorStatusText}} title="{{$message.AuthorStatusText}}"{{end}}>{{$message.AuthorStatus}}</span>{{end}}{{if $message.IsApp}}<span class="app-label">APP</span>{{end}}
       {{if $message.Permalink}}<a class="time" href="{{$message.Permalink}}"><time datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time></a>{{else}}<time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{end}}{{if $message.Edited}}<span class="edited-label" title="Edited {{$message.EditedTime}}">(edited)</span>{{end}}{{if $message.Broadcast}}<span class="broadcast-label">Also sent to the channel</span>{{end}}{{if $message.Streaming}}<span class="streaming-label" role="status">Responding…</span>{{end}}
       {{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}
       {{if $message.Ephemeral}}<span class="ephemeral-label">Only visible to you</span>{{end}}
@@ -2118,8 +2135,9 @@ const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox
 {{end}}`
 
 var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
-{{define "styles"}}` + pageStyle + workspaceRefinements + `{{end}}
-{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + `{{end}}
+{{define "styles"}}` + pageStyle + workspaceRefinements + `<style>` + profilePanelStyle + `
+.message-head a.author{color:var(--text);text-decoration:none}.message-head a.author:hover{text-decoration:underline}</style>{{end}}
+{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + profilePanelScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
 <div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}"{{if .CanonicalURL}} data-canonical-url="{{.CanonicalURL}}"{{end}}>
@@ -2693,44 +2711,91 @@ const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{
 const typingPartial = `{{define "typing"}}<p class="typing" role="status" aria-live="polite">{{if .Text}}<span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{.Text}}{{end}}</p>{{end}}`
 
 const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
-{{define "styles"}}<style>
+{{define "styles"}}` + viewStyle + `<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}
 .bar a{color:var(--on-accent);text-decoration:none;font-weight:700}
 .bar .theme-toggle{margin-left:auto}
-.layout{max-width:1100px;margin:0 auto;padding:28px 22px}
-.heading{border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:22px}
-.heading h1{margin:0 0 4px;font-size:26px}
+.people-page{width:min(1180px,calc(100% - 32px))}
+.people-page h1{margin:0 auto 0 0;font-size:24px}
 .muted{color:var(--muted)}
-.grid{display:grid;grid-template-columns:minmax(280px,380px) minmax(0,1fr);gap:22px;align-items:start}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px}
-.card h2{margin-top:0}
-.profile-summary{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-.profile-avatar,.person-avatar{flex:0 0 auto;display:grid;place-items:center;overflow:hidden;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;font-weight:800;text-transform:uppercase}
-.profile-avatar{width:56px;height:56px;border-radius:10px;font-size:22px}
-.person-avatar{width:42px;height:42px;border-radius:8px;font-size:16px}
-.profile-avatar img,.person-avatar img{width:100%;height:100%;object-fit:cover}
+.people-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 16px}
+.people-filters .v-search{flex:1 1 320px;max-width:560px}
+.people-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:22px;align-items:start}
+.people-section+.people-section{margin-top:22px}
+.people-section h2{margin:0 0 10px;font-size:16px}
+.people-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:14px;margin:0;padding:0;list-style:none}
+.person-card{min-width:0}
+.person-open{display:grid;align-content:start;gap:2px;height:100%;padding:0 0 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel-strong);color:var(--text);text-decoration:none;overflow:hidden}
+.person-open:hover{box-shadow:var(--shadow);border-color:var(--field-line)}
+.person-photo{display:grid;place-items:center;aspect-ratio:1;margin-bottom:8px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;font-size:48px;font-weight:800;text-transform:uppercase}
+.person-photo img{width:100%;height:100%;object-fit:cover}
+.person-name{display:flex;align-items:center;gap:6px;padding:0 10px;font-weight:800;overflow:hidden}
+.person-name span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.person-line{padding:0 10px;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.person-status .standard-emoji,.person-status .custom-emoji{width:15px;height:15px;font-size:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px}
+.card h2{margin:0 0 12px;font-size:17px}
+.card h2:focus{outline:0}
+.profile-summary{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.profile-avatar{flex:0 0 auto;display:grid;place-items:center;overflow:hidden;width:56px;height:56px;border-radius:10px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;font-size:22px;font-weight:800;text-transform:uppercase}
+.profile-avatar img{width:100%;height:100%;object-fit:cover}
 .profile-summary p{margin:3px 0}
-.field{display:grid;gap:5px;margin:12px 0}
-.field input{width:100%;border:1px solid var(--field-line);border-radius:5px;background:var(--bg);color:var(--text);padding:9px}
-.field small{color:var(--muted)}
-.save{background:var(--ok);color:var(--on-strong);border:0;border-radius:5px;padding:9px 14px;font-weight:700}
-.members{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
-.person{display:grid;grid-template-columns:42px minmax(0,1fr);gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px}
-.person-copy{min-width:0}
-.person h3{font-size:16px;margin:0}
-.person p{margin:5px 0;color:var(--muted)}
-.person form{display:inline-block;margin:6px 8px 0 0}.vip-form button[aria-pressed=true]{border-color:var(--action);color:var(--action);font-weight:800}
-.person button{border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--text);padding:5px 10px}
-.presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;margin-right:5px;vertical-align:middle}.presence.active{border-color:var(--ok);background:var(--ok)}.presence.auto{border-style:dashed}.status-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.status-suggestions button,.secondary{border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--text);padding:7px 9px}.profile-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.availability-form{margin:0 0 18px;padding:12px;border:1px solid var(--line);border-radius:8px}.availability-form label{display:flex;align-items:end;gap:8px}.availability-form select{min-width:150px}.scheduled-statuses{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}.scheduled-status{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px}.scheduled-status h4{margin:0}.scheduled-actions{display:flex;gap:8px;align-items:center}.danger{border:1px solid var(--danger);color:var(--danger);border-radius:5px;background:transparent;padding:8px 12px;font-weight:700}
-@media(max-width:720px){.grid{grid-template-columns:minmax(0,1fr)}.layout{padding:20px 14px}}
+.field{display:grid;gap:5px;margin:12px 0;font-weight:700;font-size:14px}
+.field input,.field select{width:100%;min-width:0;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 10px;font:inherit;font-weight:400}
+.field small{color:var(--muted);font-weight:400}
+.save{border:1px solid var(--ok);border-radius:6px;background:var(--ok);color:var(--on-strong);padding:7px 14px;font-weight:800;white-space:nowrap}
+.presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;margin-right:5px;vertical-align:middle}.presence.active{border-color:var(--ok);background:var(--ok)}.presence.auto{border-style:dashed}
+.status-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.status-suggestions button,.secondary{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:6px 9px}
+.profile-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.availability-form{display:grid;gap:6px;margin:0 0 16px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong)}
+.availability-form>label{font-weight:700;font-size:14px}
+.availability-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.availability-row select{flex:1 1 140px;min-width:0;min-height:34px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:0 8px;font:inherit}
+.scheduled-statuses{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}.scheduled-status{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong)}.scheduled-status h4{margin:0}.scheduled-actions{display:flex;gap:8px;align-items:center}.danger{border:1px solid var(--danger);color:var(--danger);border-radius:6px;background:transparent;padding:7px 12px;font-weight:700}
+@media(max-width:860px){.people-layout{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:520px){.people-page{width:calc(100% - 20px)}.people-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.person-photo{font-size:36px}}
 </style>{{end}}
 {{define "content"}}
 <header class="bar"><a href="/app">← Back to chat</a><span>People</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
-<main class="layout">
-  <div class="heading"><h1>People</h1><p class="muted">Find teammates, start a direct message, and keep your profile current.</p></div>
-  <div class="grid">
+{{template "people-view" .}}
+{{if .Panel}}<aside id="profile-panel" class="profile-panel" aria-labelledby="profile-panel-heading">{{template "profile-panel" .Panel}}</aside>{{else if .PanelError}}<aside id="profile-panel" class="profile-panel" aria-labelledby="profile-panel-heading"><div class="pp-head"><h2 id="profile-panel-heading" tabindex="-1">Profile</h2><button type="button" class="v-icon" data-profile-close aria-label="Close profile">×</button></div><p class="pp-error" role="alert">{{.PanelError}}</p></aside>{{end}}
+{{end}}
+{{define "people-view"}}<main class="v-page people-page">
+  <div class="v-head"><h1>People</h1></div>
+  <p class="v-sub">Find teammates, open their profile, and keep your own profile current.</p>
+  <form class="people-filters" role="search" method="get" action="/app/members" data-live-filter="#people-directory">
+    <label class="v-search"><span aria-hidden="true">⌕</span><span class="visually-hidden">Search for people</span><input type="search" name="q" value="{{.Query}}" placeholder="Search for people" autocomplete="off"></label>
+    <label class="v-chip"><span class="visually-hidden">Account type</span><select name="type" aria-label="Account type"><option value=""{{if eq .Type ""}} selected{{end}}>Everyone</option><option value="members"{{if eq .Type "members"}} selected{{end}}>Members</option><option value="guests"{{if eq .Type "guests"}} selected{{end}}>Guests</option><option value="apps"{{if eq .Type "apps"}} selected{{end}}>Apps</option></select></label>
+    <noscript><button class="v-btn" type="submit">Search</button></noscript>
+  </form>
+  <p class="visually-hidden" id="view-status" role="status" aria-live="polite"></p>
+  <div class="people-layout">
+    <div id="people-directory" data-live-summary="{{.Summary}}">
+    {{if ne .Type "apps"}}<section class="people-section" aria-labelledby="people-heading">
+      <h2 id="people-heading">Workspace members</h2>
+      {{if .Members}}<ul class="people-grid">{{range .Members}}
+        <li class="person-card"><a class="person-open" href="/app/members?user={{.ID}}" data-profile-user="{{.ID}}" aria-label="{{.Name}}{{if .Profile.Title}}, {{.Profile.Title}}{{end}}{{if eq .Presence "away"}}, away{{else if eq .Presence "active"}}, active{{else}}, presence unavailable{{end}}. Open profile">
+          <span class="person-photo" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="" loading="lazy">{{else}}{{.AuthorInitial}}{{end}}</span>
+          <span class="person-name"><span>{{.Name}}</span>{{if .IsSelf}}<span class="v-badge">you</span>{{end}}<span class="presence {{.Presence}}" aria-hidden="true"></span></span>
+          {{if .Profile.Title}}<span class="person-line">{{.Profile.Title}}</span>{{else if and .RealName (ne .RealName .Name)}}<span class="person-line">{{.RealName}}</span>{{end}}
+          {{if .Profile.StatusText}}<span class="person-line person-status">{{if .StatusDisplay}}{{.StatusDisplay}}{{else}}💬{{end}} {{.Profile.StatusText}}</span>{{end}}
+        </a></li>{{end}}
+      </ul>{{else}}<p class="v-empty">{{if .Query}}<strong>No one matches “{{.Query}}”</strong>Try a different name, title or e-mail address.{{else}}No members available.{{end}}</p>{{end}}
+      {{if .MoreMembersURL}}<p class="pager"><a href="{{.MoreMembersURL}}">Show more members</a></p>{{end}}
+      {{if .Truncated}}<p class="pager">Showing the first matches. Narrow the search to find someone else.</p>{{end}}
+    </section>{{end}}
+    {{if .Apps}}<section class="people-section" aria-labelledby="people-apps-heading">
+      <h2 id="people-apps-heading">Apps</h2>
+      <ul class="people-grid">{{range .Apps}}
+        <li class="person-card"><a class="person-open" href="/app/members?user={{.ID}}" data-profile-user="{{.ID}}" aria-label="{{.Name}}, app. Open profile">
+          <span class="person-photo" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="" loading="lazy">{{else}}{{.AuthorInitial}}{{end}}</span>
+          <span class="person-name"><span>{{.Name}}</span><span class="v-badge">App</span></span>
+        </a></li>{{end}}
+      </ul>
+    </section>{{else if eq .Type "apps"}}<p class="v-empty">{{if .Query}}<strong>No app matches “{{.Query}}”</strong>{{else}}No apps are installed.{{end}}</p>{{end}}
+    </div>
     <section class="card" aria-labelledby="profile-heading">
-      <h2 id="profile-heading">Your profile</h2>
+      <h2 id="profile-heading" tabindex="-1">Your profile</h2>
       <div class="profile-summary">
         <span class="profile-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.UserInitial}}{{end}}</span>
         <div><strong>{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}Add a display name{{end}}</strong><p class="muted"><span class="presence {{.Presence}}" aria-hidden="true"></span>{{if eq .Presence "active"}}Active{{else if eq .Presence "away"}}Away{{else}}Automatic{{end}}</p>{{if .Profile.StatusText}}<p class="muted">{{if .StatusDisplay}}{{.StatusDisplay}}{{else}}💬{{end}} {{.Profile.StatusText}}{{if .StatusExpires}} · clears <time data-status-expires="{{.StatusExpires}}"></time>{{end}}</p>{{else}}<p class="muted">No status set</p>{{end}}</div>
@@ -2738,11 +2803,13 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
       {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}
       {{if .CanEditProfile}}<form class="availability-form" method="post" action="/app/presence">
         <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-        <label for="presence">Availability<select id="presence" name="presence"><option value="auto"{{if eq .Presence "active"}} selected{{end}}>Active (automatic)</option><option value="away"{{if eq .Presence "away"}} selected{{end}}>Away</option></select><button class="save" type="submit">Update availability</button></label>
+        <label for="presence">Availability</label><div class="availability-row"><select id="presence" name="presence"><option value="auto"{{if eq .Presence "active"}} selected{{end}}>Active (automatic)</option><option value="away"{{if eq .Presence "away"}} selected{{end}}>Away</option></select><button class="save" type="submit">Update availability</button></div>
       </form>{{end}}
       {{if .CanEditProfile}}<form method="post" action="/app/profile">
         <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
         <label class="field" for="display_name">Display name<input id="display_name" name="display_name" maxlength="80" value="{{.Profile.DisplayName}}"><small>The name teammates see in messages.</small></label>
+        <label class="field" for="profile_title">Title<input id="profile_title" name="title" maxlength="150" value="{{.Profile.Title}}" placeholder="What you do"><small>Shown on your profile, for example “Design lead”.</small></label>
+        <label class="field" for="profile_pronouns">Pronouns<input id="profile_pronouns" name="pronouns" maxlength="40" value="{{.Profile.Pronouns}}" placeholder="she/her"></label>
         <div class="status-suggestions" aria-label="Suggested statuses"><button type="button" data-status-text="In a meeting" data-status-emoji=":calendar:">📅 In a meeting</button><button type="button" data-status-text="Commuting" data-status-emoji=":car:">🚗 Commuting</button><button type="button" data-status-text="Out sick" data-status-emoji=":face_with_thermometer:">🤒 Out sick</button><button type="button" data-status-text="Vacationing" data-status-emoji=":palm_tree:">🌴 Vacationing</button><button type="button" data-status-text="Working remotely" data-status-emoji=":house_with_garden:">🏠 Working remotely</button></div>
         <label class="field" for="status_text">Status<input id="status_text" name="status_text" maxlength="100" value="{{.Profile.StatusText}}" placeholder="What are you working on?"></label>
         <label class="field" for="status_emoji">Status emoji<input id="status_emoji" name="status_emoji" maxlength="64" value="{{.Profile.StatusEmoji}}" placeholder=":wave:"></label>
@@ -2775,22 +2842,9 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
       </section>
       {{else}}<p class="muted">Your current permissions allow viewing profiles but not changing yours.</p>{{end}}
     </section>
-    <section class="card" aria-labelledby="people-heading">
-      <h2 id="people-heading">Workspace members</h2>
-      <div class="members">
-        {{range .Members}}
-        <article class="person">
-          <span class="person-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span>
-          <div class="person-copy"><h3><span class="presence {{.Presence}}" aria-hidden="true"></span>{{.Name}} <span class="visually-hidden">({{if eq .Presence "active"}}active{{else if eq .Presence "away"}}away{{else}}automatic; activity unavailable{{end}})</span></h3>{{if and .RealName (ne .RealName .Name)}}<p>{{.RealName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{if .StatusDisplay}}{{.StatusDisplay}}{{else}}💬{{end}} {{.Profile.StatusText}}</p>{{end}}{{if and $.CanMessage (not .IsSelf)}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button type="submit" aria-label="Message {{.Name}}">Message</button></form>{{end}}{{if not .IsSelf}}<form class="vip-form" method="post" action="/app/notifications/vips"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="target" value="{{.ID}}"><input type="hidden" name="add" value="{{if .IsVIP}}false{{else}}true{{end}}"><button type="submit" aria-pressed="{{if .IsVIP}}true{{else}}false{{end}}" aria-label="{{if .IsVIP}}Remove {{.Name}} as a VIP{{else}}Mark {{.Name}} as a VIP{{end}}">{{if .IsVIP}}★ VIP{{else}}☆ Mark VIP{{end}}</button></form>{{end}}</div>
-        </article>
-        {{else}}<p class="muted">No members available.</p>{{end}}
-      </div>
-      {{if .MoreMembersURL}}<p class="pager"><a href="{{.MoreMembersURL}}">Show more members</a></p>{{end}}
-    </section>
   </div>
-</main>
-{{end}}
-{{define "scripts"}}<script>(function(){
+</main>{{end}}
+` + profilePanelPartial + `{{define "scripts"}}` + localTimeScript + liveFilterScript + profilePanelScript + `<script>(function(){
 var hidden=document.querySelector('[data-status-expiration]');
 var local=document.querySelector('[data-status-expiration-local]');
 function localValue(date){var offset=date.getTimezoneOffset()*60000;return new Date(date.getTime()-offset).toISOString().slice(0,16)}
@@ -4850,6 +4904,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/scheduled", h.scheduledMessages)
 	mux.HandleFunc("GET /app/dms", h.directMessages)
 	mux.HandleFunc("GET /app/members", h.members)
+	mux.HandleFunc("GET /app/members/profile", h.memberProfile)
+	mux.HandleFunc("GET /favicon.ico", h.favicon)
+	mux.HandleFunc("GET /favicon.svg", h.favicon)
 	mux.HandleFunc("GET /app/canvases", h.canvases)
 	mux.HandleFunc("POST /app/canvases/create", h.createCanvas)
 	mux.HandleFunc("GET /app/canvases/{canvasID}", h.canvas)
@@ -6550,6 +6607,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		// A human posting as themselves carries their current status beside their
 		// name; an app message or one wearing a custom username is not a person.
 		if message.AppID == "" && presentation.Username == "" && message.AuthorID != "" {
+			view.AuthorID = string(message.AuthorID)
 			if emoji := names.statusEmoji(message.AuthorID); emoji != "" {
 				view.AuthorStatus = renderReactionEmoji(emoji, emojiImages)
 				view.AuthorStatusText = names.statusText(message.AuthorID)
@@ -10544,6 +10602,55 @@ func (h Handler) toggleListItem(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, listReturnPath(listID, fields["return"]))
 }
 
+// directoryPage reads the People directory. Unfiltered, it is one page of
+// the member list with its cursor. Filtered by a search or an account type,
+// it walks the directory (bounded, so a very large workspace still answers)
+// and keeps what matches name, display name, title or e-mail; truncated says
+// the walk stopped before the end.
+func (h Handler) directoryPage(r *http.Request, principal auth.Principal, cursor domain.Cursor, query, accountType string) (domain.UserPage, bool, error) {
+	if query == "" && accountType == "" {
+		page, err := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: memberWindow, Cursor: cursor})
+		return page, false, err
+	}
+	folded := domain.FoldSearchText(query)
+	matched := domain.UserPage{}
+	request := domain.PageRequest{Limit: memberWindow}
+	for pages := 0; pages < 20; pages++ {
+		page, err := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, request)
+		if err != nil {
+			return domain.UserPage{}, false, err
+		}
+		for _, user := range page.Users {
+			switch accountType {
+			case "members":
+				if user.IsBot() || user.Restricted || user.UltraRestricted {
+					continue
+				}
+			case "guests":
+				if !user.Restricted && !user.UltraRestricted {
+					continue
+				}
+			case "apps":
+				if !user.IsBot() {
+					continue
+				}
+			}
+			if folded != "" && !strings.Contains(domain.FoldSearchText(strings.Join([]string{user.Name, user.RealName, user.Profile.DisplayName, user.Profile.Title, user.Email}, " ")), folded) {
+				continue
+			}
+			matched.Users = append(matched.Users, user)
+			if len(matched.Users) >= memberWindow {
+				return matched, true, nil
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
+			return matched, false, nil
+		}
+		request.Cursor = page.NextCursor
+	}
+	return matched, true, nil
+}
+
 func (h Handler) members(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersRead)
 	if err != nil {
@@ -10638,7 +10745,14 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal auth.Principal, submitted *domain.UserProfile, submittedScheduled *scheduledStatusView, message string, status int) {
 	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
-	page, err := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: memberWindow, Cursor: cursor})
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	accountType := strings.TrimSpace(r.URL.Query().Get("type"))
+	switch accountType {
+	case "", "members", "guests", "apps":
+	default:
+		accountType = ""
+	}
+	page, truncated, err := h.directoryPage(r, principal, cursor, query, accountType)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidCursor) {
 			h.writePageError(w, http.StatusBadRequest, "That members link is not valid", "Open the member directory again to see who is here.")
@@ -10678,6 +10792,8 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		}
 	}
 	members := make([]memberView, 0, len(page.Users))
+	var apps []memberView
+	now := time.Now().UTC()
 	for _, user := range page.Users {
 		// A deactivated account is not a person to message: UserInfo already
 		// treats it as absent, and offering "Message <them>" here opened a dead
@@ -10688,7 +10804,20 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		name := displayName(user)
 		isSelf := user.ID == principal.UserID
 		_, isVIP := vips[user.ID]
-		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, Profile: user.Profile, StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), Presence: webPresence(user.Presence, isSelf), AvatarURL: profileImageURL(user.Profile), AuthorInitial: initial(name), IsSelf: isSelf, IsVIP: isVIP})
+		// A member never seen active has no presence to report; "auto" says
+		// so rather than claiming they are active.
+		presence := user.Presence.CurrentAt(user.LastActiveAt, now)
+		if isSelf {
+			presence = webPresence(user.Presence, true)
+		} else if user.LastActiveAt.IsZero() && user.Presence != domain.PresenceAway {
+			presence = "auto"
+		}
+		view := memberView{ID: string(user.ID), Name: name, RealName: user.RealName, Profile: user.Profile, StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), Presence: presence, AvatarURL: profileImageURL(user.Profile), AuthorInitial: initial(name), IsSelf: isSelf, IsVIP: isVIP}
+		if user.IsBot() {
+			apps = append(apps, view)
+			continue
+		}
+		members = append(members, view)
 	}
 	profile := current.Profile
 	if submitted != nil {
@@ -10696,6 +10825,10 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 	}
 	data := membersData{
 		Members:        members,
+		Apps:           apps,
+		Query:          query,
+		Type:           accountType,
+		Truncated:      truncated,
 		Profile:        profile,
 		StatusDisplay:  statusEmojiDisplay(profile.StatusEmoji, emojiImages),
 		Presence:       current.Presence.CurrentAt(current.LastActiveAt, time.Now().UTC()),
@@ -10728,6 +10861,21 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 	}
 	if page.HasMore && page.NextCursor != "" {
 		data.MoreMembersURL = "/app/members?" + url.Values{"cursor": {string(page.NextCursor)}}.Encode()
+	}
+	switch count := len(members) + len(apps); {
+	case query != "" && count == 1:
+		data.Summary = "1 match."
+	case query != "":
+		data.Summary = strconv.Itoa(count) + " matches."
+	default:
+		data.Summary = "Directory updated."
+	}
+	if user := strings.TrimSpace(r.URL.Query().Get("user")); user != "" {
+		if panel, panelStatus, panelMessage := h.buildProfileView(r, principal, domain.UserID(user)); panelStatus == http.StatusOK {
+			data.Panel = &panel
+		} else {
+			data.PanelError = panelMessage
+		}
 	}
 	if definitions, fieldsErr := h.Messages.WorkspaceProfileFields(r.Context(), principal.WorkspaceID, principal.UserID); fieldsErr == nil && len(definitions) > 0 {
 		values := map[domain.ProfileFieldID]string{}
@@ -12726,6 +12874,16 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A profile's Huddle button opens the DM and starts (or joins) its huddle
+	// in one action, as Slack's does; the DM opens with the huddle running.
+	if fields["huddle"] == "1" {
+		if _, err := h.Messages.StartHuddle(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, ""); err != nil {
+			h.writeHuddleError(w, r, err, "started")
+			return
+		}
+		h.redirectMutation(w, r, "/app?"+url.Values{"channel": {string(conversation.ID)}, "notice": {"Huddle started"}}.Encode())
+		return
+	}
 	h.redirectMutation(w, r, appURL(string(conversation.ID), "", "", "", ""))
 }
 
@@ -13217,7 +13375,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup, notificationsMarkup, rowLinkScript, profilePanelScript, liveFilterScript), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:
@@ -13541,6 +13699,8 @@ type userNameEntry struct {
 	name        string
 	statusEmoji string
 	statusText  string
+	avatarURL   string
+	bot         bool
 }
 
 func (h Handler) newUserNames(ctx context.Context, principal auth.Principal) *userNames {
@@ -13585,6 +13745,8 @@ func (n *userNames) entry(id domain.UserID) userNameEntry {
 		entry.name = displayName(user)
 		entry.statusEmoji = user.Profile.StatusEmoji
 		entry.statusText = user.Profile.StatusText
+		entry.avatarURL = profileImageURL(user.Profile)
+		entry.bot = user.IsBot()
 	}
 	n.cache[id] = entry
 	return entry
