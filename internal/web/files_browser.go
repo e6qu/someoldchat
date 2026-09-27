@@ -317,7 +317,7 @@ const filesBrowserStyle = `<style>
 .file-thumb{display:grid;place-items:center;width:40px;height:40px;overflow:hidden;border-radius:6px;background:var(--hover);font-size:18px}
 .file-thumb img{width:100%;height:100%;object-fit:cover}
 .file-title{margin:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.file-title a{color:var(--text);text-decoration:none}.file-title a:hover{text-decoration:underline}
+.file-title a{display:inline-block;min-height:24px;line-height:24px;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:top;color:var(--text);text-decoration:none}.file-title a:hover{text-decoration:underline}
 .file-view{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
 .file-preview{display:grid;place-items:center;min-height:260px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
 .file-preview img{max-width:100%;max-height:70vh;border-radius:6px}

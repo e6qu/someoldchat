@@ -3808,7 +3808,6 @@ return;
 }
 if(event.key==='Escape'&&!list.hidden){
 event.preventDefault();
-event.stopPropagation();
 close();
 }
 });
