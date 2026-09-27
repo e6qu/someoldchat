@@ -868,7 +868,8 @@ test('[FILE-04 FILE-05 A11Y-01] the Files browser lists, filters and opens a fil
 
   // The type filter applies as it changes; a text file is not an image.
   await page.getByLabel('File type').selectOption('images');
-  await expect(page.getByText('No files match')).toBeVisible();
+  await expect(page).toHaveURL(/type=images/);
+  await expect(files.getByRole('link', { name: title, exact: true })).toHaveCount(0);
   await page.getByLabel('File type').selectOption('');
   await expect(files.getByRole('link', { name: title, exact: true })).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
@@ -899,7 +900,7 @@ test('[PROFILE-01 A11Y-01] an author name or a mention opens the member profile 
   await composer.press('Enter');
   await expect(page.locator('.message-text', { hasText: text })).toBeVisible();
 
-  const author = page.locator('#timeline [data-profile-user]').last();
+  const author = page.locator('#timeline .message:not(.is-continuation) .message-head a.author').last();
   const name = (await author.innerText()).trim();
   await author.click();
   const panel = page.getByRole('complementary', { name: 'Profile' });
