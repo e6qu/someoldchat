@@ -1291,10 +1291,15 @@ type searchClock struct {
 	location *time.Location
 }
 
-// MemberLocation is the zone a member's day is reckoned in: the one their
-// notification schedule carries - the only zone this product records for a
-// member, supplied by their own browser - and UTC when they have none.
+// MemberLocation is the zone a member's day is reckoned in: their profile's
+// time zone (Slack's tz, reported by their own browser), else the zone their
+// notification schedule was saved in, and UTC when they have neither.
 func (m Messages) MemberLocation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) *time.Location {
+	if user, err := m.Store.GetUser(ctx, userID); err == nil && user.WorkspaceID == workspaceID && user.Profile.Timezone != "" {
+		if location, loadErr := time.LoadLocation(user.Profile.Timezone); loadErr == nil {
+			return location
+		}
+	}
 	preferences, err := m.Store.GetWorkspaceNotificationPreferences(ctx, workspaceID, userID)
 	if err == nil && preferences.Schedule.TimeZone != "" {
 		if location, loadErr := time.LoadLocation(preferences.Schedule.TimeZone); loadErr == nil {
@@ -3529,6 +3534,17 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 		return domain.User{}, err
 	}
 	profile.DisplayName = strings.TrimSpace(profile.DisplayName)
+	profile.Title = strings.TrimSpace(profile.Title)
+	profile.Pronouns = strings.TrimSpace(profile.Pronouns)
+	profile.Timezone = strings.TrimSpace(profile.Timezone)
+	if profile.Timezone != "" {
+		// Only a zone this host can resolve is stored: a profile's local time
+		// and the user object's tz_offset are computed from it, and a name
+		// nothing can load would make both silently wrong.
+		if _, err := time.LoadLocation(profile.Timezone); err != nil || profile.Timezone == "Local" || len(profile.Timezone) > 64 {
+			return domain.User{}, ErrInvalidProfile
+		}
+	}
 	profile.StatusText = strings.TrimSpace(profile.StatusText)
 	profile.StatusEmoji = strings.TrimSpace(profile.StatusEmoji)
 	profile.Image24 = strings.TrimSpace(profile.Image24)
@@ -3549,7 +3565,7 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 			return domain.User{}, ErrInvalidProfile
 		}
 	}
-	if len(profile.DisplayName) > 80 || len(profile.StatusText) > 100 || len(profile.StatusEmoji) > 64 || len(profile.Image24) > 2048 || len(profile.Image32) > 2048 || len(profile.Image48) > 2048 || len(profile.Image72) > 2048 || len(profile.Image192) > 2048 || len(profile.Image512) > 2048 || len(profile.Image1024) > 2048 {
+	if len(profile.DisplayName) > 80 || len(profile.Title) > 150 || len(profile.Pronouns) > 40 || len(profile.StatusText) > 100 || len(profile.StatusEmoji) > 64 || len(profile.Image24) > 2048 || len(profile.Image32) > 2048 || len(profile.Image48) > 2048 || len(profile.Image72) > 2048 || len(profile.Image192) > 2048 || len(profile.Image512) > 2048 || len(profile.Image1024) > 2048 {
 		return domain.User{}, ErrInvalidProfile
 	}
 	if err := m.validateStatusEmoji(ctx, workspaceID, profile.StatusEmoji, ErrInvalidProfile); err != nil {
@@ -3949,11 +3965,39 @@ func (m Messages) SetSnooze(ctx context.Context, workspaceID domain.WorkspaceID,
 	if minutes > 1440 {
 		return domain.DoNotDisturb{}, ErrSnoozeTooLong
 	}
+	return m.snoozeUntil(ctx, workspaceID, userID, time.Now().UTC().Truncate(time.Second).Add(time.Duration(minutes)*time.Minute))
+}
+
+// maxNotificationPause bounds the client's pause. Slack's own client offers
+// "until next week" and a custom date; a month is far past either, and a
+// bound keeps a mistyped year from silencing a member indefinitely.
+const maxNotificationPause = 31 * 24 * time.Hour
+
+// PauseNotificationsUntil is the first-party client's "Pause notifications"
+// with an end instant: Slack's menu offers until tomorrow and until next week,
+// which dnd.setSnooze's one-day minute count cannot express. It shares the
+// snooze state and event with SetSnooze, so the API reports the same pause.
+func (m Messages) PauseNotificationsUntil(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, until time.Time) (domain.DoNotDisturb, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.DoNotDisturb{}, err
+	}
+	now := time.Now().UTC()
+	until = until.UTC().Truncate(time.Second)
+	if !until.After(now) {
+		return domain.DoNotDisturb{}, ErrInvalidSnooze
+	}
+	if until.Sub(now) > maxNotificationPause {
+		return domain.DoNotDisturb{}, ErrSnoozeTooLong
+	}
+	return m.snoozeUntil(ctx, workspaceID, userID, until)
+}
+
+func (m Messages) snoozeUntil(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, until time.Time) (domain.DoNotDisturb, error) {
 	value, err := m.Store.GetDoNotDisturb(ctx, workspaceID, userID)
 	if err != nil {
 		return domain.DoNotDisturb{}, err
 	}
-	value.SnoozeUntil = time.Now().UTC().Truncate(time.Second).Add(time.Duration(minutes) * time.Minute)
+	value.SnoozeUntil = until
 	event, err := newEvent(workspaceID, userID, dndEventPayload("user.dnd_snoozed", userID, value, time.Now().UTC()), time.Now().UTC())
 	if err != nil {
 		return domain.DoNotDisturb{}, err

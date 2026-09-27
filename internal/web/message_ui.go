@@ -51,12 +51,12 @@ const messagesPartial = messageIcons + `{{define "messages"}}
   {{if $message.Pinned}}<p class="message-context pinned-label">{{template "icon-pin"}}<span>Pinned{{if $message.PinnedBy}} by {{$message.PinnedBy}}{{end}}</span></p>{{end}}
   {{if $message.BroadcastThreadURL}}<p class="message-context broadcast-context">replied to a thread: <a href="{{$message.BroadcastThreadURL}}" data-thread-link>{{if $message.BroadcastRootPreview}}{{$message.BroadcastRootPreview}}{{else}}View thread{{end}}</a></p>{{end}}
   <div class="message-gutter">
-    <div class="avatar{{if $message.AvatarEmoji}} avatar-emoji{{end}}" aria-hidden="true">{{if $message.AvatarURL}}<img src="{{$message.AvatarURL}}" alt="">{{else if $message.AvatarEmoji}}{{$message.AvatarEmoji}}{{else}}{{$message.AuthorInitial}}{{end}}</div>
+    <div class="avatar{{if $message.AvatarEmoji}} avatar-emoji{{end}}" aria-hidden="true"{{if $message.ProfileID}} data-profile-user="{{$message.ProfileID}}"{{end}}>{{if $message.AvatarURL}}<img src="{{$message.AvatarURL}}" alt="">{{else if $message.AvatarEmoji}}{{$message.AvatarEmoji}}{{else}}{{$message.AuthorInitial}}{{end}}</div>
     {{if $message.Continuation}}<span class="gutter-time" aria-hidden="true"><time datetime="{{$message.MachineTime}}" title="{{$message.FullTime}}" data-format="clock">{{$message.ClockTime}}</time></span>{{end}}
   </div>
   <div class="message-body">
     <div class="message-head">
-      <span class="author">{{$message.AuthorName}}</span>{{if $message.AuthorStatus}}<span class="author-status"{{if $message.AuthorStatusText}} title="{{$message.AuthorStatusText}}"{{end}}>{{$message.AuthorStatus}}</span>{{end}}{{if $message.IsApp}}<span class="app-label">APP</span>{{end}}
+      {{if $message.ProfileID}}<a class="author" href="/app/members?user={{$message.ProfileID}}" data-profile-user="{{$message.ProfileID}}">{{$message.AuthorName}}</a>{{else}}<span class="author">{{$message.AuthorName}}</span>{{end}}{{if $message.AuthorStatus}}<span class="author-status"{{if $message.AuthorStatusText}} title="{{$message.AuthorStatusText}}"{{end}}>{{$message.AuthorStatus}}</span>{{end}}{{if $message.IsApp}}<span class="app-label">APP</span>{{end}}
       {{if $message.Permalink}}<a class="time" href="{{$message.Permalink}}"><time datetime="{{$message.MachineTime}}" title="{{$message.FullTime}}" data-format="time">{{$message.ClockTime}}</time></a>{{else}}<time class="time" datetime="{{$message.MachineTime}}" title="{{$message.FullTime}}" data-format="time">{{$message.ClockTime}}</time>{{end}}{{if $message.Streaming}}<span class="streaming-label" role="status">Responding…</span>{{end}}{{if $message.Ephemeral}}<span class="ephemeral-label">Only visible to you</span>{{end}}
     </div>
     {{if and $message.InThread $message.Broadcast}}<p class="broadcast-label">Also sent to #{{$message.ChannelName}}</p>{{end}}

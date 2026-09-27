@@ -159,7 +159,17 @@ type BillableInfo struct {
 }
 
 type UserProfile struct {
-	DisplayName      string
+	DisplayName string
+	// Title and Pronouns are the member-editable standard fields Slack's
+	// profile carries beside the display name ("Title", "Pronouns").
+	Title    string
+	Pronouns string
+	// Timezone is the member's IANA zone, which Slack reports on the user
+	// object as tz and uses for a profile's "local time". It travels with the
+	// profile because every member-editable fact about a member already does;
+	// empty means unknown, which is rendered as no local time rather than a
+	// guessed UTC.
+	Timezone         string
 	StatusText       string
 	StatusEmoji      string
 	StatusExpiration time.Time
@@ -1479,8 +1489,11 @@ const (
 	NotificationMute     NotificationLevel = "mute"
 )
 
+// ValidWorkspaceDefault is Slack's three workspace triggers: all new
+// messages, direct messages and mentions (and keywords), or nothing. Nothing
+// silences notifications, not Activity: mentions and DMs are still recorded.
 func (level NotificationLevel) ValidWorkspaceDefault() bool {
-	return level == NotificationAll || level == NotificationMentions
+	return level == NotificationAll || level == NotificationMentions || level == NotificationMute
 }
 
 func (level NotificationLevel) ValidConversationOverride() bool {

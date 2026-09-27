@@ -1353,8 +1353,8 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 		`role="toolbar" aria-label="Composer actions"`,
 		`aria-label="Mention someone"`,
 		`data-kind="person" data-id="U1" data-name="Ada Developer"`,
-		`<span class="author">Ada Developer</span>`,
-		`<div class="avatar" aria-hidden="true">A</div>`,
+		`data-profile-user="U1">Ada Developer</a>`,
+		`<div class="avatar" aria-hidden="true" data-profile-user="U1">A</div>`,
 		`<span class="self-avatar" aria-hidden="true">A<span class="presence-dot">`,
 		// Slack's header carries the member count as a face pile that opens the
 		// member list, and the topic beside the conversation's name.
@@ -1380,7 +1380,7 @@ func TestTimelineProjectsAuthorStatusBesideTheName(t *testing.T) {
 	seedMessage(t, s, "M1", "hello", time.Unix(1700000000, 0).UTC())
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "author status projection", body,
-		`<span class="author">Ada Developer</span><span class="author-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`,
+		`data-profile-user="U1">Ada Developer</a><span class="author-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`,
 	)
 }
 
@@ -1452,11 +1452,30 @@ func TestListTableViewSortsByColumn(t *testing.T) {
 	// Ascending by Priority: 1 (low), 2 (mid), 3 (high) — numeric, not "1,2,3" as text.
 	asc := get(t, mux, target+"?view=table&sort=priority&dir=asc").Body.String()
 	requireContains(t, "table renders", asc, `<table class="list-table">`, "Priority")
-	requireOrdered(t, "ascending by priority", asc, "<td>low</td>", "<td>mid</td>", "<td>high</td>")
+	// The primary cell names the item and opens it; there is no separate
+	// "Open" column to confuse with a status value.
+	requireOrdered(t, "ascending by priority", asc, ">low</a>", ">mid</a>", ">high</a>")
+	requireMissing(t, "table without an Open column", asc, `<th scope="col">Open</th>`, `<th scope="col">Assignment due</th>`)
 
 	// The Priority header now links to descending, and desc reverses the rows.
 	desc := get(t, mux, target+"?view=table&sort=priority&dir=desc").Body.String()
-	requireOrdered(t, "descending by priority", desc, "<td>high</td>", "<td>mid</td>", "<td>low</td>")
+	requireOrdered(t, "descending by priority", desc, ">high</a>", ">mid</a>", ">low</a>")
+
+	// A cell is edited in place, through the same cell update the API uses.
+	items, err := messages.ListItems(ctx, "T1", "U1", value.ID, domain.PageRequest{Limit: 10}, true)
+	if err != nil || len(items.Items) == 0 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	item := items.Items[0]
+	requireContains(t, "editable cell", asc, `action="`+target+`/items/`+string(item.ID)+`/cell"`, `name="column" value="priority"`, `type="number"`)
+	edited := postForm(t, mux, target+"/items/"+string(item.ID)+"/cell", url.Values{"_csrf": {auth.CSRFToken("session")}, "column": {"priority"}, "value": {"7"}, "return": {"view=table"}}.Encode(), false)
+	if edited.Code != http.StatusSeeOther || !strings.Contains(edited.Header().Get("Location"), "view=table") {
+		t.Fatalf("cell edit status=%d location=%q body=%s", edited.Code, edited.Header().Get("Location"), edited.Body)
+	}
+	stored, err := messages.GetListItem(ctx, "T1", "U1", value.ID, item.ID)
+	if err != nil || !strings.Contains(stored.Fields, `"7"`) {
+		t.Fatalf("stored fields=%s err=%v", stored.Fields, err)
+	}
 }
 
 // TestListFilterNarrowsItemsAndSurvivesViewSwitch covers filtering: a filter by a
@@ -1696,8 +1715,9 @@ func TestMemberDirectoryMarksAndRemovesVIPs(t *testing.T) {
 	}
 	csrf := auth.CSRFToken("session")
 
-	requireContains(t, "mark VIP control", get(t, mux, "/app/members").Body.String(),
-		"Mark VIP", "/app/notifications/vips")
+	// The VIP control lives in the member's profile panel, as Slack's does.
+	requireContains(t, "mark VIP control", get(t, mux, "/app/members?user=U2").Body.String(),
+		"Add to VIPs", "/app/notifications/vips")
 
 	if r := postForm(t, mux, "/app/notifications/vips", url.Values{"_csrf": {csrf}, "target": {"U2"}, "add": {"true"}}.Encode(), false); r.Code != http.StatusSeeOther {
 		t.Fatalf("mark VIP status=%d body=%s", r.Code, r.Body)
@@ -1705,12 +1725,12 @@ func TestMemberDirectoryMarksAndRemovesVIPs(t *testing.T) {
 	if prefs, err := (service.Messages{Store: s}).WorkspaceNotificationPreferences(context.Background(), "T1", "U1"); err != nil || len(prefs.VIPs) != 1 || prefs.VIPs[0] != "U2" {
 		t.Fatalf("VIPs after mark = %+v err=%v, want [U2]", prefs.VIPs, err)
 	}
-	requireContains(t, "VIP shown as marked", get(t, mux, "/app/members").Body.String(), "★ VIP")
+	requireContains(t, "VIP shown as marked", get(t, mux, "/app/members?user=U2").Body.String(), "Remove from VIPs")
 
 	if r := postForm(t, mux, "/app/notifications/vips", url.Values{"_csrf": {csrf}, "target": {"U2"}, "add": {"false"}}.Encode(), false); r.Code != http.StatusSeeOther {
 		t.Fatalf("remove VIP status=%d body=%s", r.Code, r.Body)
 	}
-	requireMissing(t, "VIP removed", get(t, mux, "/app/members").Body.String(), "★ VIP")
+	requireMissing(t, "VIP removed", get(t, mux, "/app/members?user=U2").Body.String(), "Remove from VIPs")
 }
 
 // TestSidebarSectionsOrganizeChannels covers the sidebar section lifecycle: a
@@ -1938,7 +1958,8 @@ func TestSidebarSeparatesDirectMessagesAndClearsTheOpenChannelBadge(t *testing.T
 	s.SeedConversationMember("Cdm", "U1")
 	s.SeedConversationMember("Cdm", "U2")
 	seedMessage(t, s, "M1", "hello", time.Unix(1700000000, 0).UTC())
-	other := domain.Message{ID: "M2", WorkspaceID: "T1", Conversation: "Cother", AuthorID: "U1", Text: "unread one", CreatedAt: time.Unix(1700000100, 0).UTC()}
+	// Another member's message: a member's own post is never unread to them.
+	other := domain.Message{ID: "M2", WorkspaceID: "T1", Conversation: "Cother", AuthorID: "U2", Text: "unread one", CreatedAt: time.Unix(1700000100, 0).UTC()}
 	if err := s.CreateMessage(context.Background(), other, events.Event{ID: "E2", WorkspaceID: "T1", Topic: "message.created", Payload: "M2", CreatedAt: other.CreatedAt}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -1989,10 +2010,13 @@ func TestActivityShowsDurableMentionWithFiltersAndTriage(t *testing.T) {
 	requireContains(t, "activity page", activity.Body.String(),
 		"<title>Activity · SameOldChat</title>",
 		`aria-label="Activity filters"`,
-		">Unread</a>",
-		">Cleared</a>",
-		">Detailed</button>",
+		`role="switch" aria-checked="false"><span>Unreads</span>`,
+		">View cleared activity</a>",
+		">✓ Detailed</button>",
 		">Dense</button>",
+		`value="read_all">Mark all as read</button>`,
+		"Mention in #general",
+		"<strong>Bob Builder</strong> mentioned you",
 		"#general",
 		"Mentions",
 		"Invitations",
@@ -2227,7 +2251,7 @@ func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {
 		t.Fatalf("layout redirect lost Activity filters: %q", location)
 	}
 	dense := get(t, mux, "/app/activity?channel=Cdev&kind=mention&unread=1")
-	requireContains(t, "dense layout persisted", dense.Body.String(), `class="activity-list dense"`, `value="dense"><button type="submit" aria-pressed="true"`)
+	requireContains(t, "dense layout persisted", dense.Body.String(), `class="v-list activity-list dense"`, `value="dense"><button type="submit" aria-pressed="true"`)
 	requireContains(t, "Activity keyboard contract", activityMarkup,
 		"event.key==='ArrowDown'", "event.key==='ArrowUp'", "event.key==='Enter'",
 		"event.key==='x'", "event.key==='c'", "event.key==='r'",
@@ -2246,10 +2270,13 @@ func TestNotificationPreferencesDNDConversationExceptionAndThreadFollowJourney(t
 		t.Fatalf("notifications status=%d body=%s", notifications.Code, notifications.Body)
 	}
 	requireContains(t, "notification preferences", notifications.Body.String(),
-		"Notification preferences", "Mentions and direct messages", "Channel keywords",
+		"Notify me about", "Direct messages, mentions and keywords", `value="mute"`, "Nothing", "My keywords",
 		"Show channels set to All new posts in Activity", "Pause notifications",
+		`<option value="tomorrow">Until tomorrow</option>`, `<option value="next_week">Until next week</option>`, `<option value="custom">Custom…</option>`,
 		"No conversation-specific exceptions",
 	)
+	// The page no longer claims schedules do not exist.
+	requireMissing(t, "notification preferences", notifications.Body.String(), "Pausing above is the only schedule")
 
 	saved := postForm(t, mux, "/app/notifications/preferences?channel=Cdev", url.Values{
 		"_csrf":             {auth.CSRFToken("session")},
@@ -2760,8 +2787,21 @@ func TestReminderJourneysCreateFromMessageAndManageInLater(t *testing.T) {
 	later := get(t, mux, createdResponse.Header().Get("Location"))
 	requireContains(t, "REMIND-02 Later", later.Body.String(),
 		"Reminder saved.", "Message reminder", "View source message", "Mark complete",
-		"Edit", "Delete reminder", "Upcoming reminders", "Add a reminder",
+		"Edit reminder", "Delete reminder", "Add a reminder", `In progress <span class="v-count">1</span>`,
 	)
+
+	// Once the message is also saved, its reminder is the saved item's due
+	// chip, not a second card for the same message.
+	savedItem, err := (service.Messages{Store: s}).SaveForLater(context.Background(), "T1", "U1", "Cdev", timestamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withSaved := get(t, mux, "/app/later?channel=Cdev&state=in_progress").Body.String()
+	requireContains(t, "saved item with its reminder", withSaved, "review the launch", `class="due-chip`, "Remind me about", `name="preset" value="3h"`, `name="preset" value="next_week"`, "Copy link", "Mark unread", `In progress <span class="v-count">1</span>`)
+	requireMissing(t, "saved item with its reminder", withSaved, "reminder-item")
+	if err := (service.Messages{Store: s}).RemoveSavedItem(context.Background(), "T1", "U1", savedItem.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	tomorrow := time.Now().UTC().AddDate(0, 0, 1)
 	update := postForm(t, mux, "/app/reminders/update?channel=Cdev&id="+url.QueryEscape(string(reminder.ID))+"&return_state=in_progress", url.Values{
@@ -3353,7 +3393,14 @@ func TestPostMessageNeverRendersHistoryItCannotRead(t *testing.T) {
 func TestReadingIsSafeAndMarkingReadIsAMutation(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	created := time.Unix(1700000000, 0).UTC()
-	seedMessage(t, s, "M1", "hello", created)
+	// Another member's message, so there is something unread to mark: a
+	// member's own post reads the conversation for them.
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMessage(context.Background(), domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U2", Text: "hello", CreatedAt: created}, events.Event{ID: "EM1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
+		t.Fatal(err)
+	}
 
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); err == nil {
@@ -3678,8 +3725,12 @@ func TestDeactivatedMembersAreNotOfferedAsPeople(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "gone", RealName: "Gone Person", Deleted: true})
 	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "here", RealName: "Still Here"})
 	body := get(t, mux, "/app/members").Body.String()
-	requireContains(t, "members page", body, "Still Here", `name="users" value="U3"`)
-	requireMissing(t, "members page", body, "Gone Person", `name="users" value="U2"`)
+	requireContains(t, "members page", body, "Still Here", `data-profile-user="U3"`)
+	requireMissing(t, "members page", body, "Gone Person", `data-profile-user="U2"`)
+	// A deactivated member's profile says so instead of offering to message them.
+	gone := get(t, mux, "/app/members?user=U2").Body.String()
+	requireContains(t, "deactivated profile", gone, `class="pp-error"`)
+	requireMissing(t, "deactivated profile", gone, `name="users" value="U2"`)
 }
 
 // TestFailedPostKeepsTheDraftAndExplainsTheFailure covers the defect where a
@@ -3783,6 +3834,9 @@ func TestHTMXPostMessage(t *testing.T) {
 	if !strings.Contains(res.Body.String(), "hello") {
 		t.Fatalf("body = %s", res.Body)
 	}
+	// Posting read the conversation for its author up to the post; the GET
+	// below must leave that cursor exactly where the post put it.
+	postedCursor, _ := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev")
 	indexResult := get(t, mux, "/app")
 	body := indexResult.Body.String()
 	if indexResult.Code != http.StatusOK {
@@ -3804,7 +3858,7 @@ func TestHTMXPostMessage(t *testing.T) {
 	requireMissing(t, "index", body, `href="/me"`, `<label class="search"`)
 	// Reading is a safe method and does not write; the read cursor is advanced
 	// by the explicit, CSRF-checked POST the page carries a form for.
-	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); err == nil {
+	if after, _ := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); after != postedCursor {
 		t.Fatal("GET /app advanced the read cursor")
 	}
 	page, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
@@ -4335,7 +4389,7 @@ func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
 	)
 	// A result opens the message where it lives, anchored, instead of opening it
 	// as an empty thread.
-	result := regexp.MustCompile(`<a class="result" href="([^"]+)">`).FindStringSubmatch(body)
+	result := regexp.MustCompile(`<li class="v-row result" data-row-href="([^"]+)">`).FindStringSubmatch(body)
 	if result == nil {
 		t.Fatalf("no result link: %s", body)
 	}
@@ -4419,7 +4473,7 @@ func TestSearchRecentHistoryAndTypeaheadUseRealVisibleDestinations(t *testing.T)
 	if len(channels) != 1 || channels[0].Kind != "channel" || channels[0].URL != "/app?channel=Cdev" {
 		t.Fatalf("channel suggestions = %+v", channels)
 	}
-	if len(files) != 1 || files[0].Kind != "file" || files[0].URL != "/api/files/Fnotes" {
+	if len(files) != 1 || files[0].Kind != "file" || files[0].URL != "/app/files/Fnotes/view" {
 		t.Fatalf("file suggestions = %+v", files)
 	}
 	private := decodeSuggestions("/app/search/suggestions?q=secret&channel=Cdev")
@@ -4515,15 +4569,24 @@ func TestSearchPageSupportsTypedResultsFiltersAndConversationScope(t *testing.T)
 	if files.Code != http.StatusOK {
 		t.Fatalf("files status=%d body=%s", files.Code, files.Body)
 	}
-	requireContains(t, "file search", files.Body.String(), "<mark>Needle</mark> notes", "<mark>Needle</mark> elsewhere", "text/plain", "/api/files/Fneedle", "2 results in files")
+	requireContains(t, "file search", files.Body.String(), "<mark>Needle</mark> notes", "<mark>Needle</mark> elsewhere", "text/plain", "/app/files/Fneedle/view", "/app/files/Fneedle\"", "2 results for “needle”")
 	scopedFiles := get(t, mux, "/app/search?q=needle&type=files&scope=channel&channel=Cdev")
-	requireContains(t, "scoped file search", scopedFiles.Body.String(), "<mark>Needle</mark> notes", "1 results in files")
+	// One result is "1 result", not "1 results", and the scope is a named chip.
+	requireContains(t, "scoped file search", scopedFiles.Body.String(), "<mark>Needle</mark> notes", "1 result for “needle”", `class="scope-chip">in: #general`)
 	requireMissing(t, "scoped file search", scopedFiles.Body.String(), "<mark>Needle</mark> elsewhere")
 
+	// The results region, not the page: the frame around it links to the
+	// reader's own profile from the avatar menu on every page.
+	results := func(body string) string {
+		if index := strings.Index(body, `id="search-results"`); index >= 0 {
+			return body[index:]
+		}
+		return body
+	}
 	people := get(t, mux, "/app/search?q=Ada&type=people&channel=Cdev")
-	requireContains(t, "people search", people.Body.String(), "Ada Developer", `/app/members?user=U1`)
+	requireContains(t, "people search", results(people.Body.String()), "<mark>Ada</mark> Developer", `/app/members?user=U1`, `data-profile-user="U1"`)
 	excludedPeople := get(t, mux, "/app/search?q=Ada+-Developer&type=people&channel=Cdev")
-	requireMissing(t, "excluded people search", excludedPeople.Body.String(), `/app/members?user=U1`)
+	requireMissing(t, "excluded people search", results(excludedPeople.Body.String()), `/app/members?user=U1`)
 	channels := get(t, mux, "/app/search?q=general&type=channels&channel=Cdev")
 	requireContains(t, "channel search", channels.Body.String(), "# <mark>general</mark>", `/app?channel=Cdev`)
 }
@@ -4788,7 +4851,7 @@ func TestSearchNamesDirectMessagesAfterTheirParticipants(t *testing.T) {
 	}
 
 	body := get(t, mux, "/app/search?q=needle&channel=Cdm").Body.String()
-	requireContains(t, "direct-message search result", body, `<span class="channel">Bob Builder</span>`, "private <mark>needle</mark>")
+	requireContains(t, "direct-message search result", body, "Direct message with Bob Builder", "private <mark>needle</mark>")
 	requireMissing(t, "direct-message search result", body, "#direct")
 }
 
@@ -4974,7 +5037,7 @@ func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	}
 	// The form mirrors the limits the service enforces without exposing the
 	// seven size-specific image fields in Slack's API model.
-	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`, `name="status_expiration" value="4102444800"`, `action="/app/presence"`, "Active (automatic)", "automatic; activity unavailable", "💬 Heads down", "Schedule a status", "No scheduled statuses.")
+	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`, `name="status_expiration" value="4102444800"`, `action="/app/presence"`, "Active (automatic)", "presence unavailable", "💬 Heads down", "Schedule a status", "No scheduled statuses.")
 	requireMissing(t, "profile form", res.Body.String(), `name="image_24"`, `name="image_1024"`)
 	updateResult := postForm(t, mux, "/app/profile", "display_name=updated&status_text=Ready&status_emoji=%3Aok%3A&status_expiration=4102444800&avatar_url=https%3A%2F%2Fexample.test%2Favatar.png", false)
 	if updateResult.Code != http.StatusSeeOther {
@@ -5070,10 +5133,15 @@ func TestRejectedScheduledStatusKeepsEveryFieldAndExplainsTheContract(t *testing
 func TestMembersPageOffersADirectMessageAction(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
-	body := get(t, mux, "/app/members").Body.String()
-	requireContains(t, "members page", body, `action="/app/conversation/open"`, `name="users" value="U2"`, "Message Bob Builder")
-	if strings.Contains(body, `name="users" value="U1"`) {
-		t.Fatal("the members page offers to open a direct conversation with the signed-in user")
+	// The directory opens a member's profile, and the profile carries the
+	// Message action (PROFILE-01).
+	directory := get(t, mux, "/app/members").Body.String()
+	requireContains(t, "members page", directory, `data-profile-user="U2"`, `href="/app/members?user=U2"`)
+	body := get(t, mux, "/app/members?user=U2").Body.String()
+	requireContains(t, "profile panel", body, `action="/app/conversation/open"`, `name="users" value="U2"`, "Message Bob Builder")
+	self := get(t, mux, "/app/members?user=U1").Body.String()
+	if strings.Contains(self, `name="users" value="U1"`) {
+		t.Fatal("the profile panel offers to open a direct conversation with the signed-in user")
 	}
 }
 
@@ -5672,7 +5740,11 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 	}
 	active := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "active huddle bar", active,
-		"Huddle in", "Leave huddle", "End for everyone",
+		"Huddle in #general", "Leave huddle", "End for everyone",
+		// The joined huddle is a window of its own with icon controls, a
+		// minimise toggle, and ending for everyone behind the More menu.
+		`class="huddle-window huddle-media-session"`, `role="toolbar" aria-label="Huddle controls"`,
+		`data-huddle-toggle="minimised"`, `aria-label="More huddle options"`,
 		// The member who started the huddle is in it, so the media session and
 		// its controls are present rather than a note explaining their absence.
 		"data-huddle-call=", "huddle-tiles",
@@ -5702,7 +5774,7 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 		t.Fatal(err)
 	}
 	fragment := get(t, mux, "/app/huddle?channel=Cdev").Body.String()
-	requireContains(t, "huddle fragment", fragment, "Second Person")
+	requireContains(t, "huddle fragment", fragment, "Second Person", "2 people: ")
 	requireMissing(t, "huddle fragment", fragment, "<html", "<body")
 
 	left := postForm(t, mux, "/app/huddle/leave?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)

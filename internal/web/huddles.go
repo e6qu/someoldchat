@@ -28,14 +28,16 @@ type huddleView struct {
 	// Visible is false when the reader cannot be in this conversation's
 	// huddle at all, so the bar is absent rather than showing a control that
 	// would be refused.
-	Visible      bool
-	Active       bool
-	Joined       bool
-	CanEnd       bool
-	ChannelName  string
+	Visible bool
+	Active  bool
+	Joined  bool
+	CanEnd  bool
+	// Title names the huddle the way Slack's window does: "Huddle in #name"
+	// for a channel, "Huddle with <people>" for a DM.
+	Title        string
 	CSRFToken    string
 	Notice       string
-	Participants []string
+	Participants []huddleParticipant
 	StartURL     string
 	JoinURL      string
 	LeaveURL     string
@@ -70,6 +72,15 @@ type huddleView struct {
 	// already here. Empty when there is nobody left to invite.
 	InviteURL string
 	Invitable []huddleInvitee
+}
+
+// huddleParticipant is one person in the huddle, drawn as a face in the
+// window's header and named in its people line.
+type huddleParticipant struct {
+	ID        string
+	Name      string
+	Initial   string
+	AvatarURL string
 }
 
 type huddleInvitee struct {
@@ -116,7 +127,7 @@ func (h Handler) huddleFor(ctx context.Context, principal auth.Principal, conver
 		return huddleView{}
 	}
 	view := huddleView{
-		Visible: true, ChannelName: conversationName(conversation), CSRFToken: csrfToken, Notice: notice,
+		Visible: true, Title: h.huddleTitle(ctx, principal, conversation), CSRFToken: csrfToken, Notice: notice,
 		StartURL: huddleActionURL("start", string(conversation.ID)),
 		JoinURL:  huddleActionURL("join", string(conversation.ID)),
 		LeaveURL: huddleActionURL("leave", string(conversation.ID)),
@@ -147,7 +158,8 @@ func (h Handler) huddleFor(ctx context.Context, principal auth.Principal, conver
 			view.Joined = true
 		}
 		nameMap[string(participant)] = names.name(participant)
-		view.Participants = append(view.Participants, names.name(participant))
+		name := names.name(participant)
+		view.Participants = append(view.Participants, huddleParticipant{ID: string(participant), Name: name, Initial: initial(name), AvatarURL: names.avatarURL(participant)})
 	}
 	if encoded, err := json.Marshal(nameMap); err == nil {
 		view.Names = string(encoded)
@@ -174,6 +186,23 @@ func (h Handler) huddleFor(ctx context.Context, principal auth.Principal, conver
 		}
 	}
 	return view
+}
+
+// huddleTitle names the conversation the huddle runs in: a channel by its
+// #name, a DM by the other person, a group DM by its participants.
+func (h Handler) huddleTitle(ctx context.Context, principal auth.Principal, conversation domain.Conversation) string {
+	if !conversation.IsDirectOrGroup() {
+		return "Huddle in #" + conversationName(conversation)
+	}
+	if conversation.Kind == domain.ConversationTypeIM {
+		if other, ok := h.otherDirectMember(ctx, principal, conversation.ID); ok {
+			return "Huddle with " + displayName(other)
+		}
+	}
+	if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
+		return "Huddle with " + participants
+	}
+	return "Huddle"
 }
 
 func (h Handler) huddleFragment(w http.ResponseWriter, r *http.Request) {

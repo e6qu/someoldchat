@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -264,12 +263,12 @@ func (s sidebarView) switcherEntries() []switcherEntry {
 		case !item.IsMember:
 			context = "Not a member"
 			if item.MemberCount > 0 {
-				context += " · " + pluralCount(item.MemberCount, "member")
+				context += " · " + pluralCount(item.MemberCount, "member", "members")
 			}
 		case item.Kind == "dm" && item.IsSelfDirect:
 			context = "This is your space"
 		case context == "" && item.Kind == "group":
-			context = pluralCount(item.MemberCount, "member")
+			context = pluralCount(item.MemberCount, "member", "members")
 		}
 		entries = append(entries, switcherEntry{
 			ID: item.ID, Name: item.Name, Href: "/app?channel=" + url.QueryEscape(item.ID),
@@ -283,13 +282,6 @@ func (s sidebarView) switcherEntries() []switcherEntry {
 		add(item)
 	}
 	return entries
-}
-
-func pluralCount(count int, noun string) string {
-	if count == 1 {
-		return "1 " + noun
-	}
-	return strconv.Itoa(count) + " " + noun + "s"
 }
 
 // sidebarSectionOption is a section a conversation can be moved to.

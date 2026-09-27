@@ -3,6 +3,7 @@ package slackobject
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
@@ -71,4 +72,20 @@ func mustJSON(t *testing.T, value any) string {
 		t.Fatal(err)
 	}
 	return string(encoded)
+}
+
+// TestUserTimezoneFollowsTheStoredZone pins the user object's tz triple: a
+// stored zone is reported with its offset at the instant rendered, and a
+// member with no zone (or one this host cannot load) is on UTC.
+func TestUserTimezoneFollowsTheStoredZone(t *testing.T) {
+	at := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	zone, label, offset := Timezone(domain.User{Profile: domain.UserProfile{Timezone: "America/New_York"}}, at)
+	if zone != "America/New_York" || label != "EDT" || offset != -4*3600 {
+		t.Fatalf("tz=%q label=%q offset=%d", zone, label, offset)
+	}
+	for _, stored := range []string{"", "Nowhere/Invalid"} {
+		if zone, _, offset := Timezone(domain.User{Profile: domain.UserProfile{Timezone: stored}}, at); zone != "UTC" || offset != 0 {
+			t.Fatalf("stored %q: tz=%q offset=%d, want UTC", stored, zone, offset)
+		}
+	}
 }

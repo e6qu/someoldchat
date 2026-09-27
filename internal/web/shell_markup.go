@@ -132,7 +132,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     </div>
   </details>
   <hr role="separator">
-  <a role="menuitem" href="{{.With "/app/members"}}#profile" data-open-profile="{{.UserID}}">{{icon "user"}}<span>Profile</span></a>
+  <a role="menuitem" href="/app/members?user={{.UserID}}" data-profile-user="{{.UserID}}">{{icon "user"}}<span>Profile</span></a>
   <a role="menuitem" href="{{.With "/app/preferences"}}" data-dialog-open="preferences">{{icon "gear"}}<span>Preferences</span></a>
   <hr role="separator">
   <form class="menu-form" method="post" action="/app/session/revoke" role="none"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit" role="menuitem" data-shauth-sign-out>{{icon "signout"}}<span>Sign out of {{.WorkspaceName}}</span></button></form>
@@ -152,7 +152,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
   <details class="menu rail-more" data-menu>
     <summary class="rail-item" role="button" aria-haspopup="menu" aria-expanded="false"{{if eq .Destination "more"}} aria-current="page"{{end}}>{{icon "more"}}<span class="rail-label">More</span></summary>
     <div class="menu-list" role="menu" aria-label="More">
-      <a role="menuitem" href="{{.With "/app/remote-files"}}">{{icon "files"}}<span>Files</span></a>
+      <a role="menuitem" href="{{.With "/app/files"}}">{{icon "files"}}<span>Files</span></a>
       <a role="menuitem" href="{{.With "/app/canvases"}}">{{icon "canvas"}}<span>Canvases</span></a>
       <a role="menuitem" href="{{.With "/app/lists"}}">{{icon "list"}}<span>Lists</span></a>
       <a role="menuitem" href="{{.With "/app/workflows"}}">{{icon "workflow"}}<span>Workflows</span></a>

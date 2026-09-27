@@ -124,8 +124,21 @@ until the sharer leaves — a browser that stops only sends nothing, which the S
 cannot tell from a momentarily static screen. Reactions are
 implemented — a participant sends one of the huddle's quick emoji and every
 participant sees it float and fade — and the huddle canvas is the channel's own
-canvas, offered from the huddle bar. Captions remain unimplemented because they
-need speech-to-text this deployment hosts nowhere.
+canvas, offered from the huddle window's header. Captions remain unimplemented
+because they need speech-to-text this deployment hosts nowhere.
+
+A joined member's huddle is a small window of its own, as in Slack: it floats
+over the bottom of the sidebar on a wide screen and sits above the timeline on
+a narrow one, so it never covers the composer. It names the conversation
+("Huddle in #design", "Huddle with Ana Lima"), lists who is in it, and can be
+minimised to its controls or expanded for a presenter; the choice survives the
+live refresh of the huddle fragment. Microphone, camera, screen, reactions and
+More are icon buttons whose accessible names follow their state, Leave is the
+one red control, and ending for everyone sits behind More rather than beside
+Leave. A member who is not in a running huddle sees one quiet line with the
+participants' faces and Join huddle. Slack's huddle thread — a message thread
+the huddle opens in the channel — is not modelled: the channel itself is the
+huddle's chat.
 
 The forwarding path is covered by in-process loopback tests — two real pion peer
 connections stand in for browsers over the actual offer/answer/candidate

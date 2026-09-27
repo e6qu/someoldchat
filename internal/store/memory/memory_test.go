@@ -281,8 +281,12 @@ func TestConversationUnreadCountFollowsReadCursor(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	// Another member's message: a member's own posts are never unread to them.
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
 	created := time.Unix(1700000000, 123456789).UTC()
-	if err := s.CreateMessage(ctx, domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "unread", CreatedAt: created}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
+	if err := s.CreateMessage(ctx, domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U2", Text: "unread", CreatedAt: created}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
 	page, err := s.ListConversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 10})

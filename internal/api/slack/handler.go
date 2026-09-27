@@ -6895,6 +6895,10 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 		switch name {
 		case "display_name":
 			profile.DisplayName = value
+		case "title":
+			profile.Title = value
+		case "pronouns":
+			profile.Pronouns = value
 		case "status_text":
 			profile.StatusText = value
 		case "status_emoji":
@@ -12342,7 +12346,7 @@ func decodeProfileJSON(raw string) (decodedProfile, error) {
 	acknowledged := 0
 	for name, value := range fields {
 		switch name {
-		case "display_name", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
+		case "display_name", "title", "pronouns", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
 			var text string
 			if err := json.Unmarshal(value, &text); err != nil {
 				return decodedProfile{}, fmt.Errorf("profile field %s must be a string", name)
@@ -12398,7 +12402,7 @@ func decodeProfileJSON(raw string) (decodedProfile, error) {
 func singleFieldProfile(name, value string) (decodedProfile, error) {
 	result := decodedProfile{Strings: map[string]string{}}
 	switch name {
-	case "display_name", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
+	case "display_name", "title", "pronouns", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
 		result.Strings[name] = value
 	case "status_expiration":
 		seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
@@ -12406,7 +12410,7 @@ func singleFieldProfile(name, value string) (decodedProfile, error) {
 			return decodedProfile{}, errors.New("status_expiration must be a non-negative integer")
 		}
 		result.StatusExpiration = &seconds
-	case "first_name", "last_name", "real_name", "phone", "skype", "title", "pronouns", "start_date", "email":
+	case "first_name", "last_name", "real_name", "phone", "skype", "start_date", "email":
 		// Standard Slack profile fields this deployment does not store. Refusing is
 		// honest — accepting and dropping would report a change that did not happen.
 		return decodedProfile{}, fmt.Errorf("profile field %s is not settable here", name)

@@ -346,3 +346,41 @@ func TestAWithdrawnCanvasShareStaysInActivityAsUnavailable(t *testing.T) {
 		t.Fatalf("item = %+v, want it marked unreachable", page.Items[0])
 	}
 }
+
+// TestCanvasMarkdownBecomesHeadingAndProseSections pins CANVAS-02's
+// round-trip of markdown document content: a heading is a header section
+// canvases.sections.lookup finds by type, the prose and list under it are
+// their own sections, and an edit replacing one section with a markdown
+// document inserts every section it stands for in its place.
+func TestCanvasMarkdownBecomesHeadingAndProseSections(t *testing.T) {
+	ctx, repository, messages := canvasWorld(t)
+	canvas, err := messages.CreateCanvas(ctx, "T1", "U1", "Launch runbook", `{"type":"markdown","markdown":"# Launch runbook\n\nSteps for the launch.\n\n- Freeze\n- Deploy"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	headings, err := messages.LookupCanvasSections(ctx, "T1", "U1", canvas.ID, `{"section_types":["h1"]}`)
+	if err != nil || len(headings) != 1 || headings[0].Text != "Launch runbook" {
+		t.Fatalf("h1 sections=%+v err=%v", headings, err)
+	}
+	stored, err := repository.GetCanvas(ctx, "T1", canvas.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := decodeCanvasDocument(stored.DocumentContent)
+	if err != nil || len(document.Sections) != 3 || document.Sections[2].Text != "- Freeze\n- Deploy" {
+		t.Fatalf("sections=%+v err=%v", document.Sections, err)
+	}
+	change := `[{"operation":"replace","section_id":"` + document.Sections[1].ID + `","document_content":{"type":"markdown","markdown":"## Owners\n\nAna runs it."}}]`
+	if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, change); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ = repository.GetCanvas(ctx, "T1", canvas.ID)
+	document, _ = decodeCanvasDocument(stored.DocumentContent)
+	kinds := []domain.CanvasSectionType{}
+	for _, section := range document.Sections {
+		kinds = append(kinds, section.Type)
+	}
+	if len(document.Sections) != 4 || kinds[1] != domain.CanvasSectionHeading2 || document.Sections[2].Text != "Ana runs it." || document.Sections[3].Text != "- Freeze\n- Deploy" {
+		t.Fatalf("after replace sections=%+v", document.Sections)
+	}
+}

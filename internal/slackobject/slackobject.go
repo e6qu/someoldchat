@@ -76,12 +76,11 @@ func User(origin string, user domain.User, includeEmail bool) map[string]any {
 	if !includeEmail {
 		delete(profile, "email")
 	}
+	tz, tzLabel, tzOffset := Timezone(user, time.Now())
 	return map[string]any{
 		"id": user.ID, "team_id": user.WorkspaceID, "name": user.Name, "real_name": user.RealName, "deleted": user.Deleted, "profile": profile,
 		"color": UserColor(user.ID),
-		// Nothing here records a member's time zone, so every member is on UTC
-		// rather than on a zone somebody guessed for them.
-		"tz": "UTC", "tz_label": "Coordinated Universal Time", "tz_offset": 0,
+		"tz":    tz, "tz_label": tzLabel, "tz_offset": tzOffset,
 		"is_admin": user.Role == domain.WorkspaceRoleAdmin || user.Role == domain.WorkspaceRoleOwner,
 		// A workspace here has owners but no distinguished primary owner, so
 		// each owner reports both, as admin.users.list always has.
@@ -90,6 +89,20 @@ func User(origin string, user domain.User, includeEmail bool) map[string]any {
 		"is_bot": user.IsBot(), "is_app_user": false, "is_email_confirmed": user.Email != "", "has_2fa": false,
 		"updated": unixSeconds(user.Updated),
 	}
+}
+
+// Timezone is the tz, tz_label and tz_offset triple Slack's user object
+// carries, at the instant given. A member whose client never reported a zone
+// (or reported one this host cannot load) is on UTC rather than on a zone
+// somebody guessed for them.
+func Timezone(user domain.User, at time.Time) (string, string, int) {
+	if name := strings.TrimSpace(user.Profile.Timezone); name != "" {
+		if location, err := time.LoadLocation(name); err == nil {
+			abbreviation, offset := at.In(location).Zone()
+			return name, abbreviation, offset
+		}
+	}
+	return "UTC", "Coordinated Universal Time", 0
 }
 
 // Profile renders Slack's user profile object. Every image is a URL on origin
@@ -101,7 +114,7 @@ func Profile(origin string, user domain.User) map[string]any {
 		"display_name": user.Profile.DisplayName, "display_name_normalized": user.Profile.DisplayName, "email": user.Email,
 		"real_name": user.RealName, "real_name_normalized": user.RealName,
 		"first_name": firstName, "last_name": strings.TrimSpace(lastName),
-		"title": "", "phone": "", "skype": "", "pronouns": "", "fields": map[string]any{},
+		"title": user.Profile.Title, "phone": "", "skype": "", "pronouns": user.Profile.Pronouns, "fields": map[string]any{},
 		"status_text": user.Profile.StatusText, "status_emoji": user.Profile.StatusEmoji, "status_expiration": unixSeconds(user.Profile.StatusExpiration),
 		"avatar_hash": AvatarHash(user),
 		"team":        user.WorkspaceID, "user_id": user.ID,

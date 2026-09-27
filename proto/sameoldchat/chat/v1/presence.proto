@@ -20,6 +20,10 @@ message UserProfile {
   int64 status_expiration = 11;
   // Internal lifecycle fence; never projected by the Slack Web API.
   string active_scheduled_status_id = 12;
+  string title = 13;
+  string pronouns = 14;
+  // IANA zone name; empty when the member's client never reported one.
+  string timezone = 15;
 }
 
 message User {
@@ -133,6 +137,15 @@ message SetSnoozeRequest {
   int64 minutes = 3;
 }
 
+// PauseNotificationsUntilRequest is the first-party client's pause, which
+// names an instant ("until tomorrow", "until next week") rather than
+// dnd.setSnooze's minute count and its one-day limit.
+message PauseNotificationsUntilRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int64 until_unix = 3;
+}
+
 message ProfileFieldDefinition {
   string workspace_id = 1;
   string field_id = 2;
@@ -205,6 +218,7 @@ service PresenceService {
   rpc SetUserPresence(SetUserPresenceRequest) returns (User);
   rpc DoNotDisturbInfo(DoNotDisturbRequest) returns (DoNotDisturb);
   rpc SetSnooze(SetSnoozeRequest) returns (DoNotDisturb);
+  rpc PauseNotificationsUntil(PauseNotificationsUntilRequest) returns (DoNotDisturb);
   rpc EndSnooze(DoNotDisturbRequest) returns (DoNotDisturb);
   rpc EndDND(DoNotDisturbRequest) returns (MutationResponse);
 }

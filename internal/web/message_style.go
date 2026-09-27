@@ -140,7 +140,7 @@ a.slack-mention:hover{text-decoration:underline}
 .reminder-custom-fields button{justify-self:start;border:1px solid var(--ok);border-radius:6px;background:var(--ok);color:var(--on-strong);padding:4px 10px;font-weight:700}
 .message-files{display:grid;gap:6px;margin:4px 0;max-width:480px}
 .message-file{position:relative;display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong)}
-.message-file.is-image{display:grid;justify-items:start;gap:4px;padding:0;border:0;background:transparent}
+.message-file.is-image{display:grid;justify-items:start;align-content:start;gap:4px;min-height:64px;padding:0;border:0;background:transparent}
 .file-image-name{color:var(--muted);font-size:12px}
 .message-image-link{display:block;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
 .message-image{display:block;max-width:min(360px,100%);max-height:280px;height:auto;border-radius:0}

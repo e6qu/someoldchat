@@ -26,7 +26,7 @@ var (
 // page shipped with its only script blocked for exactly that reason.
 func TestEveryReachablePageRunsItsOwnScripts(t *testing.T) {
 	_, mux := browserWorkspace(t, auth.AllScopes())
-	queue := []string{"/app", "/app?channel=Cdev", "/app/notifications", "/app/preferences"}
+	queue := []string{"/app", "/app?channel=Cdev", "/app/notifications", "/app/preferences", "/app/files", "/app/members?user=U1", "/app/unreads"}
 	seen := map[string]bool{}
 	checked := 0
 	for len(queue) > 0 && len(seen) < 250 {

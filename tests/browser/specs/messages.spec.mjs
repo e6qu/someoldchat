@@ -73,6 +73,15 @@ test('[MSG-01] mrkdwn reads as Slack formats it: quotes, code blocks, lists, men
 test('[MSG-01 ACT-01] consecutive messages group under one name, with the time on hover', async ({ page, context, request }) => {
   await signIn(context);
   const stamp = Date.now();
+  // The head must start a group whatever the suite posted just before it.
+  // It used to rely on the reader's own message counting as unread, which
+  // put a "New" divider above it; a member's own messages are never unread,
+  // so a channel notice (a topic change) breaks the run instead.
+  const topic = await request.post('/api/conversations.setTopic', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL, topic: `grouping ${stamp}` },
+  });
+  expect((await topic.json()).ok).toBe(true);
   await post(request, { text: `group head ${stamp}` });
   await post(request, { text: `group tail ${stamp}` });
   await page.goto('/app');

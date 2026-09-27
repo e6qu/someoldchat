@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS users (
  image_24 TEXT NOT NULL DEFAULT '', image_32 TEXT NOT NULL DEFAULT '', image_48 TEXT NOT NULL DEFAULT '',
  image_72 TEXT NOT NULL DEFAULT '', image_192 TEXT NOT NULL DEFAULT '', image_512 TEXT NOT NULL DEFAULT '', image_1024 TEXT NOT NULL DEFAULT '',
  deleted INTEGER NOT NULL DEFAULT 0, presence TEXT NOT NULL DEFAULT 'auto', last_active_at INTEGER NOT NULL DEFAULT 0,
- updated_at INTEGER NOT NULL DEFAULT 0
+ updated_at INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '', pronouns TEXT NOT NULL DEFAULT '', tz TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS user_expirations (user_id TEXT PRIMARY KEY REFERENCES users(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), expiration_ts INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS scheduled_statuses (
@@ -593,7 +593,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 191
+const schemaVersion = 192
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -1672,7 +1672,7 @@ func (s *Store) seedUser(ctx context.Context, value domain.User, initialRole dom
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, email, name, real_name, display_name, name_folded, real_name_folded, display_name_folded, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET email = CASE WHEN users.email = '' THEN excluded.email ELSE users.email END`, value.ID, value.WorkspaceID, domain.NormalizeEmail(value.Email), value.Name, value.RealName, value.Profile.DisplayName, domain.FoldSearchText(value.Name), domain.FoldSearchText(value.RealName), domain.FoldSearchText(value.Profile.DisplayName), value.Profile.StatusText, value.Profile.StatusEmoji, unixSeconds(value.Profile.StatusExpiration), value.Profile.Image24, value.Profile.Image32, value.Profile.Image48, value.Profile.Image72, value.Profile.Image192, value.Profile.Image512, value.Profile.Image1024, deleted, presence, unixSeconds(value.Updated)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, email, name, real_name, display_name, name_folded, real_name_folded, display_name_folded, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, updated_at, title, pronouns, tz) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET email = CASE WHEN users.email = '' THEN excluded.email ELSE users.email END`, value.ID, value.WorkspaceID, domain.NormalizeEmail(value.Email), value.Name, value.RealName, value.Profile.DisplayName, domain.FoldSearchText(value.Name), domain.FoldSearchText(value.RealName), domain.FoldSearchText(value.Profile.DisplayName), value.Profile.StatusText, value.Profile.StatusEmoji, unixSeconds(value.Profile.StatusExpiration), value.Profile.Image24, value.Profile.Image32, value.Profile.Image48, value.Profile.Image72, value.Profile.Image192, value.Profile.Image512, value.Profile.Image1024, deleted, presence, unixSeconds(value.Updated), value.Profile.Title, value.Profile.Pronouns, value.Profile.Timezone); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id, user_id, role, active) VALUES (?, ?, ?, 1) ON CONFLICT(workspace_id, user_id) DO NOTHING`, value.WorkspaceID, value.ID, initialRole); err != nil {
@@ -3544,6 +3544,25 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 192: profile title, pronouns and time zone ---
+	if version < 192 {
+		// Slack's profile carries a title and pronouns, and its user object
+		// the member's time zone. None was stored, so users.profile.set
+		// refused title and a profile could not say what local time it is for
+		// the member. Existing rows start empty: nothing stored says any of it.
+		columns, err := s.tableColumns(ctx, db, "users")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{"title", "pronouns", "tz"} {
+			if !columns[column] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN `+column+` TEXT NOT NULL DEFAULT ''`); err != nil {
+					return fmt.Errorf("migrate user %s: %w", column, err)
+				}
+			}
+		}
+	}
+	// --- end schema 192 ---
 	// --- schema 191: file_input grants ---
 	if version < 191 {
 		// Files a member attaches in a modal's file_input stay private to the
@@ -5308,7 +5327,7 @@ func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.Worksp
 		return domain.User{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE users SET display_name = ?, display_name_folded = ?, active_scheduled_status_id = CASE WHEN status_text = ? AND status_emoji = ? AND status_expiration = ? THEN active_scheduled_status_id ELSE '' END, status_text = ?, status_emoji = ?, status_expiration = ?, image_24 = ?, image_32 = ?, image_48 = ?, image_72 = ?, image_192 = ?, image_512 = ?, image_1024 = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1)`, profile.DisplayName, domain.FoldSearchText(profile.DisplayName), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.Image24, profile.Image32, profile.Image48, profile.Image72, profile.Image192, profile.Image512, profile.Image1024, unixSeconds(changes[0].CreatedAt), userID, workspaceID, workspaceID, userID)
+	result, err := tx.ExecContext(ctx, `UPDATE users SET display_name = ?, display_name_folded = ?, active_scheduled_status_id = CASE WHEN status_text = ? AND status_emoji = ? AND status_expiration = ? THEN active_scheduled_status_id ELSE '' END, status_text = ?, status_emoji = ?, status_expiration = ?, image_24 = ?, image_32 = ?, image_48 = ?, image_72 = ?, image_192 = ?, image_512 = ?, image_1024 = ?, title = ?, pronouns = ?, tz = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1)`, profile.DisplayName, domain.FoldSearchText(profile.DisplayName), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.Image24, profile.Image32, profile.Image48, profile.Image72, profile.Image192, profile.Image512, profile.Image1024, profile.Title, profile.Pronouns, profile.Timezone, unixSeconds(changes[0].CreatedAt), userID, workspaceID, workspaceID, userID)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -10826,10 +10845,10 @@ const qualifiedConversationColumns = `c.id, c.workspace_id, c.name, c.topic, c.p
 // them left active_scheduled_status_id out, so the same member read back with
 // and without the scheduled status that fences their current one depending on
 // which method loaded them.
-const userColumns = `id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at, updated_at`
+const userColumns = `id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at, updated_at, title, pronouns, tz`
 
 // qualifiedUserColumns is userColumns for a query that aliases the table as u.
-const qualifiedUserColumns = `u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.active_scheduled_status_id, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at, u.updated_at`
+const qualifiedUserColumns = `u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.active_scheduled_status_id, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at, u.updated_at, u.title, u.pronouns, u.tz`
 
 // scanUserRow reads one user selected with userColumns, optionally followed by
 // extra columns into the given destinations.
@@ -10840,7 +10859,7 @@ func scanUserRow(row rowScanner, extra ...any) (domain.User, error) {
 	destinations := append([]any{&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName,
 		&user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.ActiveScheduledStatusID,
 		&user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024,
-		&deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}, &updated}, extra...)
+		&deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}, &updated, &user.Profile.Title, &user.Profile.Pronouns, &user.Profile.Timezone}, extra...)
 	if err := row.Scan(destinations...); err != nil {
 		return domain.User{}, err
 	}
@@ -13319,7 +13338,7 @@ func (s *Store) ListFollowedThreads(ctx context.Context, workspace domain.Worksp
 		if err != nil {
 			return domain.FollowedThreadPage{}, err
 		}
-		unread, err := s.unreadRepliesByRoot(ctx, conversation, roots, readAt)
+		unread, err := s.unreadRepliesByRoot(ctx, conversation, user, roots, readAt)
 		if err != nil {
 			return domain.FollowedThreadPage{}, err
 		}
@@ -13449,28 +13468,28 @@ func (s *Store) threadRootChunk(ctx context.Context, conversation domain.Convers
 
 // unreadRepliesByRoot counts, for every named root at once, the replies that
 // fall after the member's read position in the conversation.
-func (s *Store) unreadRepliesByRoot(ctx context.Context, conversation domain.ConversationID, all []domain.MessageTimestamp, readAt domain.StoredTime) (map[domain.MessageTimestamp]int, error) {
+func (s *Store) unreadRepliesByRoot(ctx context.Context, conversation domain.ConversationID, user domain.UserID, all []domain.MessageTimestamp, readAt domain.StoredTime) (map[domain.MessageTimestamp]int, error) {
 	counts := make(map[domain.MessageTimestamp]int, len(all))
 	for _, roots := range chunkTimestamps(all) {
-		if err := s.unreadReplyChunk(ctx, conversation, roots, readAt, counts); err != nil {
+		if err := s.unreadReplyChunk(ctx, conversation, user, roots, readAt, counts); err != nil {
 			return nil, err
 		}
 	}
 	return counts, nil
 }
 
-func (s *Store) unreadReplyChunk(ctx context.Context, conversation domain.ConversationID, roots []domain.MessageTimestamp, readAt domain.StoredTime, counts map[domain.MessageTimestamp]int) error {
+func (s *Store) unreadReplyChunk(ctx context.Context, conversation domain.ConversationID, user domain.UserID, roots []domain.MessageTimestamp, readAt domain.StoredTime, counts map[domain.MessageTimestamp]int) error {
 	if len(roots) == 0 {
 		return nil
 	}
 	placeholders := make([]string, 0, len(roots))
-	arguments := make([]any, 0, len(roots)+2)
-	arguments = append(arguments, conversation, readAt)
+	arguments := make([]any, 0, len(roots)+3)
+	arguments = append(arguments, conversation, readAt, user)
 	for _, root := range roots {
 		placeholders = append(placeholders, "?")
 		arguments = append(arguments, string(root))
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT thread_timestamp, COUNT(*) FROM messages WHERE conversation = ? AND deleted = 0 AND created_at > ? AND thread_timestamp IN (`+strings.Join(placeholders, ", ")+`) GROUP BY thread_timestamp`, arguments...)
+	rows, err := s.db.QueryContext(ctx, `SELECT thread_timestamp, COUNT(*) FROM messages WHERE conversation = ? AND deleted = 0 AND created_at > ? AND author_id <> ? AND thread_timestamp IN (`+strings.Join(placeholders, ", ")+`) GROUP BY thread_timestamp`, arguments...)
 	if err != nil {
 		return err
 	}
@@ -13926,6 +13945,49 @@ func setReadCursorTx(ctx context.Context, tx txRunner, cursor domain.ReadCursor,
 		return err
 	}
 	return insertOutbox(ctx, tx, event)
+}
+
+// advanceAuthorReadCursorTx reads a conversation for the member who just
+// posted into it, in the transaction that stores the post. Slack treats
+// sending a message as reading the conversation up to it; without this a
+// member's own message raised their own unread badge and appeared in their
+// own Unreads view until they clicked away and back.
+//
+// The cursor only moves forward, and only for a message the conversation
+// shows at top level (see authorPostAdvancesReadCursor). No conversation.read
+// event is journalled: the message's own event already makes every client
+// re-read the sidebar, which now reports the advanced cursor, and a second
+// event per post would double the journal for no observable difference.
+func advanceAuthorReadCursorTx(ctx context.Context, tx txRunner, message domain.Message) error {
+	if !authorPostAdvancesReadCursor(message) {
+		return nil
+	}
+	var lastRead string
+	switch err := tx.QueryRowContext(ctx, `SELECT last_read FROM read_cursors WHERE workspace_id = ? AND user_id = ? AND conversation_id = ?`, message.WorkspaceID, message.AuthorID, message.Conversation).Scan(&lastRead); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return err
+	default:
+		if readAt, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(lastRead)); parseErr == nil && !message.CreatedAt.Truncate(time.Microsecond).After(readAt.Truncate(time.Microsecond)) {
+			return nil
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO read_cursors(workspace_id, user_id, conversation_id, last_read, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO UPDATE SET last_read = excluded.last_read, updated_at = excluded.updated_at`,
+		message.WorkspaceID, message.AuthorID, message.Conversation, domain.NewMessageTimestamp(message.CreatedAt), domain.NewStoredTime(message.CreatedAt)); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE activity_items SET read_at = ? WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND occurred_at <= ? AND read_at = 0`,
+		message.CreatedAt.UTC().UnixNano(), message.WorkspaceID, message.AuthorID, message.Conversation, message.CreatedAt.UTC().UnixNano())
+	return err
+}
+
+// authorPostAdvancesReadCursor is the rule every profile shares: a message the
+// conversation shows at top level (a root, or a reply also sent to the
+// channel) reads the conversation for its author. A plain thread reply does
+// not, because replying in a thread says nothing about the channel messages
+// posted since the member last looked at it.
+func authorPostAdvancesReadCursor(message domain.Message) bool {
+	return message.AuthorID != "" && (message.ThreadTimestamp == "" || message.ReplyBroadcast)
 }
 
 // LatestMessageTimestamps reports the newest undeleted message in each named
@@ -14953,7 +15015,10 @@ func (s *Store) unreadCount(ctx context.Context, workspace domain.WorkspaceID, u
 		lastRead = domain.NewStoredTime(parsed)
 	}
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE workspace_id = ? AND conversation = ? AND deleted = 0 AND created_at > ?`, workspace, conversation, lastRead).Scan(&count); err != nil {
+	// A member's own messages are never unread to them, whichever path
+	// posted them: a thread reply does not move the cursor, and neither does a
+	// message imported or posted before the cursor rule existed.
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE workspace_id = ? AND conversation = ? AND deleted = 0 AND created_at > ? AND author_id <> ?`, workspace, conversation, lastRead, user).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -15102,6 +15167,9 @@ func (s *Store) createMessage(ctx context.Context, scheduledID domain.ScheduledM
 	if err := insertMessageActivity(ctx, tx, message); err != nil {
 		return err
 	}
+	if err := advanceAuthorReadCursorTx(ctx, tx, message); err != nil {
+		return err
+	}
 	for _, journalled := range append([]events.Event{event}, companions...) {
 		if err := insertOutbox(ctx, tx, journalled); err != nil {
 			_ = tx.Rollback()
@@ -15184,6 +15252,9 @@ func insertFileShareMessage(ctx context.Context, tx txRunner, message domain.Mes
 		return err
 	}
 	if err := insertMessageActivity(ctx, tx, message); err != nil {
+		return err
+	}
+	if err := advanceAuthorReadCursorTx(ctx, tx, message); err != nil {
 		return err
 	}
 	return insertOutbox(ctx, tx, event)

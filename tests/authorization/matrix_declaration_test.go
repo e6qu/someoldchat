@@ -380,6 +380,7 @@ func authorityMatrix() map[string]authority {
 		"OpenFile":                                authorityAnyMember,
 		"OpenUserPhoto":                           authorityAnyMember,
 		"OpenView":                                authorityAnyMember,
+		"PauseNotificationsUntil":                 authorityAnyMember,
 		"Permalink":                               authorityAnyMember,
 		"Pins":                                    authorityAnyMember,
 		"Post":                                    authorityAnyMember,

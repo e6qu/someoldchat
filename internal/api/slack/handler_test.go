@@ -4837,6 +4837,20 @@ func TestUserProfileSetSingleFieldNameValueForm(t *testing.T) {
 		t.Fatalf("name/value display_name: status=%d body=%s", set.Code, set.Body)
 	}
 
+	// Title and pronouns are standard fields Slack's profile carries, stored
+	// and echoed through both forms of the request.
+	title := post(url.Values{"name": {"title"}, "value": {"Staff Engineer"}}.Encode())
+	if title.Code != http.StatusOK || !strings.Contains(title.Body.String(), `"title":"Staff Engineer"`) {
+		t.Fatalf("name/value title: status=%d body=%s", title.Code, title.Body)
+	}
+	object := post(url.Values{"profile": {`{"pronouns":"she/her","title":"Principal Engineer"}`}}.Encode())
+	if object.Code != http.StatusOK || !strings.Contains(object.Body.String(), `"title":"Principal Engineer"`) || !strings.Contains(object.Body.String(), `"pronouns":"she/her"`) {
+		t.Fatalf("profile object title/pronouns: status=%d body=%s", object.Code, object.Body)
+	}
+	if envelope := decodeEnvelope(t, post(url.Values{"name": {"title"}, "value": {strings.Repeat("t", 151)}}.Encode())); envelope.OK || envelope.Error != "invalid_profile" {
+		t.Fatalf("an overlong title body=%+v, want invalid_profile", envelope)
+	}
+
 	// A custom field through name/value, keyed by field id.
 	custom := post(url.Values{"name": {"Xf01"}, "value": {"she/her"}}.Encode())
 	if custom.Code != http.StatusOK || !strings.Contains(custom.Body.String(), `"Xf01"`) || !strings.Contains(custom.Body.String(), `"she/her"`) {

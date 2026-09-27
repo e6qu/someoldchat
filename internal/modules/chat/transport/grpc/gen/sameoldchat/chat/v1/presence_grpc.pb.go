@@ -34,6 +34,7 @@ const (
 	PresenceService_SetUserPresence_FullMethodName             = "/sameoldchat.chat.v1.PresenceService/SetUserPresence"
 	PresenceService_DoNotDisturbInfo_FullMethodName            = "/sameoldchat.chat.v1.PresenceService/DoNotDisturbInfo"
 	PresenceService_SetSnooze_FullMethodName                   = "/sameoldchat.chat.v1.PresenceService/SetSnooze"
+	PresenceService_PauseNotificationsUntil_FullMethodName     = "/sameoldchat.chat.v1.PresenceService/PauseNotificationsUntil"
 	PresenceService_EndSnooze_FullMethodName                   = "/sameoldchat.chat.v1.PresenceService/EndSnooze"
 	PresenceService_EndDND_FullMethodName                      = "/sameoldchat.chat.v1.PresenceService/EndDND"
 )
@@ -57,6 +58,7 @@ type PresenceServiceClient interface {
 	SetUserPresence(ctx context.Context, in *SetUserPresenceRequest, opts ...grpc.CallOption) (*User, error)
 	DoNotDisturbInfo(ctx context.Context, in *DoNotDisturbRequest, opts ...grpc.CallOption) (*DoNotDisturb, error)
 	SetSnooze(ctx context.Context, in *SetSnoozeRequest, opts ...grpc.CallOption) (*DoNotDisturb, error)
+	PauseNotificationsUntil(ctx context.Context, in *PauseNotificationsUntilRequest, opts ...grpc.CallOption) (*DoNotDisturb, error)
 	EndSnooze(ctx context.Context, in *DoNotDisturbRequest, opts ...grpc.CallOption) (*DoNotDisturb, error)
 	EndDND(ctx context.Context, in *DoNotDisturbRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 }
@@ -219,6 +221,16 @@ func (c *presenceServiceClient) SetSnooze(ctx context.Context, in *SetSnoozeRequ
 	return out, nil
 }
 
+func (c *presenceServiceClient) PauseNotificationsUntil(ctx context.Context, in *PauseNotificationsUntilRequest, opts ...grpc.CallOption) (*DoNotDisturb, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DoNotDisturb)
+	err := c.cc.Invoke(ctx, PresenceService_PauseNotificationsUntil_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *presenceServiceClient) EndSnooze(ctx context.Context, in *DoNotDisturbRequest, opts ...grpc.CallOption) (*DoNotDisturb, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DoNotDisturb)
@@ -258,6 +270,7 @@ type PresenceServiceServer interface {
 	SetUserPresence(context.Context, *SetUserPresenceRequest) (*User, error)
 	DoNotDisturbInfo(context.Context, *DoNotDisturbRequest) (*DoNotDisturb, error)
 	SetSnooze(context.Context, *SetSnoozeRequest) (*DoNotDisturb, error)
+	PauseNotificationsUntil(context.Context, *PauseNotificationsUntilRequest) (*DoNotDisturb, error)
 	EndSnooze(context.Context, *DoNotDisturbRequest) (*DoNotDisturb, error)
 	EndDND(context.Context, *DoNotDisturbRequest) (*MutationResponse, error)
 }
@@ -313,6 +326,9 @@ func (UnimplementedPresenceServiceServer) DoNotDisturbInfo(context.Context, *DoN
 }
 func (UnimplementedPresenceServiceServer) SetSnooze(context.Context, *SetSnoozeRequest) (*DoNotDisturb, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetSnooze not implemented")
+}
+func (UnimplementedPresenceServiceServer) PauseNotificationsUntil(context.Context, *PauseNotificationsUntilRequest) (*DoNotDisturb, error) {
+	return nil, status.Error(codes.Unimplemented, "method PauseNotificationsUntil not implemented")
 }
 func (UnimplementedPresenceServiceServer) EndSnooze(context.Context, *DoNotDisturbRequest) (*DoNotDisturb, error) {
 	return nil, status.Error(codes.Unimplemented, "method EndSnooze not implemented")
@@ -610,6 +626,24 @@ func _PresenceService_SetSnooze_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PresenceService_PauseNotificationsUntil_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PauseNotificationsUntilRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).PauseNotificationsUntil(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_PauseNotificationsUntil_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).PauseNotificationsUntil(ctx, req.(*PauseNotificationsUntilRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _PresenceService_EndSnooze_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DoNotDisturbRequest)
 	if err := dec(in); err != nil {
@@ -712,6 +746,10 @@ var PresenceService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetSnooze",
 			Handler:    _PresenceService_SetSnooze_Handler,
+		},
+		{
+			MethodName: "PauseNotificationsUntil",
+			Handler:    _PresenceService_PauseNotificationsUntil_Handler,
 		},
 		{
 			MethodName: "EndSnooze",

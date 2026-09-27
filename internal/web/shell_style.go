@@ -6,6 +6,7 @@ package web
 // inside it with style sheets of their own — several of which style bare
 // `button` or `.search` — and neither may restyle the other.
 const shellStyle = `<style>
+` + searchSuggestionStyle + `
 .icon-sprite{position:absolute;width:0;height:0;overflow:hidden}
 .icon{width:18px;height:18px;flex:0 0 auto;display:inline-block;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
 .icon .fill,.icon-sprite .fill{fill:currentColor;stroke:none}

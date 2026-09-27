@@ -4,6 +4,8 @@ package web
 // needs beyond shellStyle: the heading row and the Browse channels list.
 const shellPageStyle = `<style>
 .shell-main{padding:0 0 32px}
+.shell .shell-main>main.v-page{padding-top:22px}
+.shell .shell-main>.page-search+main.v-page{padding-top:8px}
 .shell-main .page-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 24px 8px}
 .shell-main .page-head h1{margin:0;font-size:22px}
 .browse-filters{display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:8px 24px 12px;border-bottom:1px solid var(--line)}

@@ -316,6 +316,13 @@ test('[DM-03 DM-05 A11Y-01] adding people reviews history and group DMs convert 
     await composer.press('Enter');
     await expect(page.locator('.message-text', { hasText: retained })).toBeVisible();
 
+    const conversationURL = page.url();
+    await page.goto('/app/dms');
+    const row = page.locator('.v-row', { hasText: first.name });
+    await expect(row).toContainText(`You: ${retained}`);
+    await expect(row).not.toHaveClass(/unread/);
+    await page.goto(conversationURL);
+
     await openDetails(page);
     await page.getByRole('tab', { name: /^Members/ }).click();
     await page.locator('#conversation-details').getByText('Add people', { exact: true }).click();
@@ -395,11 +402,16 @@ test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app m
     await expect(page.locator('[data-activity-row]', { hasText: first })).toBeVisible();
     await expect(page.locator('[data-activity-row]', { hasText: second })).toBeVisible();
 
+    // Layout lives in the Activity options menu, as Slack's view settings do.
+    await page.getByRole('button', { name: 'Activity options' }).click();
     await page.getByRole('button', { name: 'Dense' }).click();
     await expect(page.locator('.activity-list')).toHaveClass(/dense/);
+    await page.getByRole('button', { name: 'Activity options' }).click();
     await expect(page.getByRole('button', { name: 'Dense' })).toHaveAttribute('aria-pressed', 'true');
     await page.reload();
+    await page.getByRole('button', { name: 'Activity options' }).click();
     await expect(page.getByRole('button', { name: 'Dense' })).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Escape');
 
     let rows = page.locator('[data-activity-row]');
     await expect(rows).toHaveCount(2);
@@ -435,12 +447,13 @@ test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app m
     await page.keyboard.press('r');
     await expect(liveRow).not.toHaveClass(/unread/);
 
-    await page.getByRole('link', { name: 'Unread' }).click();
-    await expect(page.getByRole('link', { name: 'Unread' })).toHaveAttribute('aria-current', 'page');
+    await page.getByRole('switch', { name: 'Unreads' }).click();
+    await expect(page.getByRole('switch', { name: 'Unreads' })).toHaveAttribute('aria-checked', 'true');
     // Opening the source thread advances the conversation read cursor, so the
     // sibling notification is no longer allowed to stay unread.
     await expect(page.getByText('You’re all caught up.')).toBeVisible();
-    await page.getByRole('link', { name: 'Cleared' }).click();
+    await page.getByRole('button', { name: 'Activity options' }).click();
+    await page.getByRole('link', { name: 'View cleared activity' }).click();
     await expect(page.locator('[data-activity-row]')).toHaveCount(1);
     await page.getByRole('button', { name: 'Restore this activity' }).click();
     await expect(page.getByText('No cleared activity.')).toBeVisible();
@@ -460,16 +473,18 @@ test('[NOTIFY-01 NOTIFY-02 NOTIFY-03 THREAD-02 A11Y-01] notification preferences
   await signIn(context);
   await page.goto('/app');
   await page.goto(`/app/notifications?channel=${CHANNEL}`);
-  await expect(page.getByRole('heading', { name: 'Notification preferences' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Notify me about…' })).toBeVisible();
 
-  await page.getByLabel('Notify me about').selectOption('all');
-  await page.getByLabel('Channel keywords').fill('release, customer escalation, RELEASE');
+  // Slack's three triggers, as a choice rather than a hidden select.
+  await expect(page.getByRole('radio', { name: 'Nothing' })).toBeVisible();
+  await page.getByRole('radio', { name: 'All new messages' }).check();
+  await page.getByLabel('My keywords').fill('release, customer escalation, RELEASE');
   await page.getByLabel('Show channels set to All new posts in Activity').check();
   await page.getByLabel('Show due personal reminders in Activity').uncheck();
-  await page.getByRole('button', { name: 'Save workspace defaults' }).click();
+  await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByRole('status')).toHaveText('Notification preferences saved.');
-  await expect(page.getByLabel('Notify me about')).toHaveValue('all');
-  await expect(page.getByLabel('Channel keywords')).toHaveValue('customer escalation, release');
+  await expect(page.getByRole('radio', { name: 'All new messages' })).toBeChecked();
+  await expect(page.getByLabel('My keywords')).toHaveValue('customer escalation, release');
   await expect(page.getByLabel('Show due personal reminders in Activity')).not.toBeChecked();
 
   await goHome(page);
@@ -486,9 +501,12 @@ test('[NOTIFY-01 NOTIFY-02 NOTIFY-03 THREAD-02 A11Y-01] notification preferences
   await expect(exception).toContainText('mute');
   await expect(exception).toContainText('following every thread');
 
-  await page.getByLabel('Custom minutes (optional)').fill('1');
+  // Slack's presets, including ones past dnd.setSnooze's one day.
+  await page.getByLabel('Pause for').selectOption('next_week');
+  await expect(page.getByLabel('Until', { exact: true })).toBeHidden();
   await page.getByRole('button', { name: 'Pause notifications' }).click();
   await expect(page.getByRole('status')).toHaveText('Notifications paused. Messages and Activity remain available.');
+  await expect(page.getByText(/Paused until/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Resume notifications' })).toBeVisible();
   await page.getByRole('button', { name: 'Resume notifications' }).click();
   await expect(page.getByRole('status')).toHaveText('Notifications resumed.');
@@ -693,6 +711,10 @@ test('[LATER-01 LATER-02 LATER-03 A11Y-01] Later saves privately and supports ev
   item = page.locator('.later-item', { hasText: text });
   await expect(item).toBeVisible();
 
+  // Remove lives in the item's More actions menu, beside Copy link and Mark
+  // unread, as in Slack's Later.
+  await item.hover();
+  await item.getByRole('button', { name: 'More actions for this saved item' }).click();
   await item.getByRole('button', { name: 'Remove from Later' }).click();
   await expect(page.getByRole('status')).toHaveText('Message removed from Later.');
   await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
@@ -727,8 +749,9 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(reminder.getByRole('link', { name: 'View source message' })).toBeVisible();
   await expect(reminder.getByRole('button', { name: 'Mark complete' })).toBeVisible();
 
+  // A reminder is edited from its More actions menu.
   await reminder.hover();
-  await reminder.getByText('Edit', { exact: true }).click();
+  await reminder.getByRole('button', { name: 'More actions for this reminder' }).click();
   const tomorrow = await page.evaluate(() => {
     const value = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const pad = (part) => String(part).padStart(2, '0');
@@ -751,6 +774,8 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(page).toHaveURL(/\/app\/later\?.*state=completed/);
   reminder = page.locator('.later-item', { hasText: description });
   await expect(reminder).toContainText('Completed');
+  await reminder.hover();
+  await reminder.getByRole('button', { name: 'More actions for this reminder' }).click();
   await reminder.getByRole('button', { name: 'Delete reminder' }).click();
   await expect(page.getByRole('status')).toHaveText('Reminder deleted.');
   await expect(page.locator('.later-item', { hasText: description })).toHaveCount(0);
@@ -765,7 +790,10 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(page).toHaveURL(/\/app\/later\?.*filter=channel-reminders/);
   const channelItem = page.locator('.later-item', { hasText: channelReminder });
   await expect(channelItem.getByRole('link', { name: '#general' })).toBeVisible();
+  await channelItem.hover();
+  await channelItem.getByRole('button', { name: 'More actions for this reminder' }).click();
   await expect(channelItem.getByRole('button', { name: 'Delete reminder' })).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(channelItem).toContainText('Repeats weekly');
   await expect(channelItem.getByRole('button', { name: 'Mark complete' })).toHaveCount(0);
   await expect(channelItem.getByText('Edit', { exact: true })).toHaveCount(0);
@@ -855,6 +883,88 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
 // Slack lets a member reorder attachments before sending; the files then arrive
 // in that order. Here the order is the staged list's order, so moving one chip
 // reorders the message it becomes.
+// Slack's Files view lists every file the member can see, with whose-files
+// tabs, a type filter and a file page of its own. The page used to exist only
+// as the upload list inside a conversation.
+test('[FILE-04 FILE-05 A11Y-01] the Files browser lists, filters and opens a file', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const title = `files-browser-${Date.now()}.txt`;
+  await page.locator('#upload-file').setInputFiles({ name: title, mimeType: 'text/plain', buffer: Buffer.from('files browser contents') });
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('button', { name: 'Send now', exact: true }).click();
+  await expect(page.locator('.message-file', { hasText: title }).last()).toBeVisible();
+
+  await page.goto('/app/files');
+  await expect(page.getByRole('heading', { name: 'Files', exact: true, level: 1 })).toBeVisible();
+  const files = page.getByRole('list', { name: 'Files' });
+  await expect(files.getByRole('link', { name: title, exact: true })).toBeVisible();
+
+  await page.getByRole('navigation', { name: 'Whose files' }).getByRole('link', { name: 'Created by you' }).click();
+  await expect(page).toHaveURL(/owner=mine/);
+  await expect(files.getByRole('link', { name: title, exact: true })).toBeVisible();
+
+  // The type filter applies as it changes; a text file is not an image.
+  await page.getByLabel('File type').selectOption('images');
+  await expect(page).toHaveURL(/type=images/);
+  await expect(files.getByRole('link', { name: title, exact: true })).toHaveCount(0);
+  await page.getByLabel('File type').selectOption('');
+  await expect(files.getByRole('link', { name: title, exact: true })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await files.getByRole('link', { name: title, exact: true }).click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+  const details = page.getByRole('complementary', { name: 'File details' });
+  await expect(details.getByRole('link', { name: 'Download' })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Copy link' })).toBeVisible();
+  await expect(page.locator('.file-preview pre')).toHaveText('files browser contents');
+  await expect(details.getByRole('link', { name: /general/ })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto('/app/files');
+  const width = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(width).toBeLessThanOrEqual(390);
+});
+
+// A name in the conversation opens the member's profile beside it, as Slack's
+// profile pane does, instead of leaving the conversation for People.
+test('[PROFILE-01 A11Y-01] an author name or a mention opens the member profile beside the conversation', async ({ page, context, request }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const text = `profile panel ${Date.now()}`;
+  const composer = composerEditor(page);
+  await composer.fill(text);
+  await composer.press('Enter');
+  await expect(page.locator('.message-text', { hasText: text })).toBeVisible();
+
+  const author = page.locator('#timeline .message:not(.is-continuation) .message-head a.author').last();
+  const name = (await author.innerText()).trim();
+  await author.click();
+  const panel = page.getByRole('complementary', { name: 'Profile' });
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('.pp-name')).toContainText(name);
+  await expect(page).toHaveURL(/\/app(\?|$)/);
+  await expect(panel.getByRole('heading', { name: 'Contact information' })).toBeVisible();
+  await panel.getByRole('button', { name: `More actions for ${name}` }).click();
+  await expect(panel.getByRole('button', { name: 'Copy member ID' })).toBeVisible();
+  await expect(panel.getByRole('link', { name: 'View files' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await panel.getByRole('button', { name: 'Close profile' }).click();
+  await expect(panel).toBeHidden();
+
+  // A mention in a message opens the same panel.
+  const mentioned = `profile mention ${Date.now()}`;
+  await postThroughTheAPI(request, `${mentioned} <@Udev>`);
+  await page.goto('/app');
+  const mention = page.locator('.message', { hasText: mentioned }).locator('a.slack-mention[data-user-id="Udev"]');
+  await expect(mention).toBeVisible();
+  await mention.click();
+  await expect(panel).toBeVisible();
+  await expect(page).toHaveURL(/\/app(\?|$)/);
+});
+
 test('[FILE-01] staged attachments can be reordered before sending', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app?channel=Cdev');
@@ -912,15 +1022,18 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   await query.fill(needle);
   await query.press('Enter');
   await expect(page.locator('.result', { hasText: message })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Search the whole workspace' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Search the whole workspace', exact: true })).toBeVisible();
+  // Ctrl/Cmd+F names the conversation it is confined to, as an in: chip.
+  await expect(page.locator('.scope-chip')).toContainText('in: #general');
   await goHome(page);
   await expect(composerValue).toHaveValue('draft survives current-conversation search');
   await page.goBack();
   await expect(page.locator('.result', { hasText: message })).toBeVisible();
 
+  // Filter chips apply the moment they change, as Slack's do.
   await page.getByLabel('Sort').selectOption('oldest');
-  await page.getByRole('button', { name: 'Apply filters' }).click();
   await expect(page).toHaveURL(/order=oldest/);
+  await expect(page.locator('#view-status')).toHaveText(/results? for/);
   await expect(page.locator('.result', { hasText: message })).toBeVisible();
 
   await page.getByRole('link', { name: 'Files', exact: true }).click();
@@ -2602,6 +2715,7 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   await expect(page.getByText('Canvas saved')).toBeVisible();
   // Each block carries its own editor, so the control names the block it saves.
   // A canvas created through the UI has exactly one block to start.
+  await page.getByRole('button', { name: 'Edit block 1' }).click();
   await page.getByLabel('Block 1 content').fill('One atomic revision');
   await page.getByRole('button', { name: 'Save block 1' }).click();
   await expect(page.getByText('Canvas saved')).toBeVisible();
@@ -3111,8 +3225,23 @@ test('[HUDDLE-01] a huddle runs its lifecycle and offers the media it promises',
   await expect(page.getByRole('button', { name: 'Mute microphone' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Share screen' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Leave huddle' })).toBeVisible();
+  // The joined huddle is its own small window, named for the conversation.
+  const huddleWindow = page.getByRole('region', { name: 'Huddle in #general' });
+  await expect(huddleWindow).toBeVisible();
+  await expect(huddleWindow.getByRole('toolbar', { name: 'Huddle controls' })).toBeVisible();
+  // Minimising keeps the controls and hides the tiles; it survives the live
+  // refresh of the huddle fragment because the window remembers it.
+  await huddleWindow.getByRole('button', { name: 'Minimise huddle' }).click();
+  await expect(huddleWindow.getByRole('button', { name: 'Minimise huddle' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-huddle-tiles]')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Leave huddle' })).toBeVisible();
+  await huddleWindow.getByRole('button', { name: 'Minimise huddle' }).click();
+  await expect(page.locator('[data-huddle-tiles]')).toBeAttached();
   // The person who started it can end it for everyone; that is the whole
-  // difference between leaving and ending.
+  // difference between leaving and ending. Like Slack, ending is behind the
+  // More menu rather than a second button beside Leave.
+  await expect(page.getByRole('button', { name: 'End for everyone' })).toBeHidden();
+  await page.getByRole('button', { name: 'More huddle options' }).click();
   await expect(page.getByRole('button', { name: 'End for everyone' })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: 'Start a huddle' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Huddle, in progress' })).toBeVisible();
@@ -3153,7 +3282,7 @@ test('[NOTIFY-04] the notification preferences name every permission and every g
   await expect(page.getByText('sends no mail at all')).toBeVisible();
 
   await desktop.check();
-  await page.getByRole('button', { name: 'Save workspace defaults' }).click();
+  await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByLabel('Show desktop notifications while SameOldChat is open in a tab')).toBeChecked();
   await expectNoSeriousAccessibilityViolations(page);
 });
@@ -3978,8 +4107,8 @@ test('[LIST-01 A11Y-01] a list item can be assigned with a due date', async ({ p
   await page.getByLabel('Due').fill('2026-09-01');
   await page.getByRole('button', { name: 'Save assignment' }).click();
 
-  await expect(page.locator('.item-assignee')).toHaveText('SameOldChat');
-  await expect(page.locator('.item-due')).toContainText('Due 2026-09-01');
+  await expect(page.locator('.item-assignee .cell-value')).toHaveText('SameOldChat');
+  await expect(page.locator('.item-due')).toContainText('Assignment due 2026-09-01');
   await expectNoSeriousAccessibilityViolations(page);
 
   // The control now offers to change the assignment rather than to make one,
@@ -4035,6 +4164,7 @@ test('[CANVAS-01 A11Y-01] a canvas keeps its history and an earlier revision can
   // A canvas created with content has one block, edited in place through its own
   // block editor. Its text is shown in the block body and mirrored in the editor
   // textarea, so it appears twice.
+  await page.getByRole('button', { name: 'Edit block 1' }).click();
   await page.getByLabel('Block 1 content').fill('the replacement body');
   await page.getByRole('button', { name: 'Save block 1' }).click();
   await expect(page.getByText('the replacement body')).toHaveCount(2);
@@ -4077,6 +4207,7 @@ test('[CANVAS-01 A11Y-01] a canvas section can be commented on and the comment o
   await expectNoSeriousAccessibilityViolations(page);
 
   // Rewriting the paragraph the comment was about leaves the comment in place.
+  await page.getByRole('button', { name: 'Edit block 1' }).click();
   await page.getByLabel('Block 1 content').fill('a rewrite');
   await page.getByRole('button', { name: 'Save block 1' }).click();
   await expect(page.locator('.comment').first()).toContainText('this paragraph is wrong');
@@ -4337,11 +4468,13 @@ test('[LIST-01 LIST-02 A11Y-01] a list with declared columns shows and enforces 
 
   await page.goto(`/app/lists/${encodeURIComponent(listID)}`);
   await expect(page.getByText('Columns: Title (text), Status (select), Due (date)')).toBeVisible();
+  // The primary column names the item and opens it; the others read as
+  // labelled values beside it, so a status of "open" is never a link.
+  await expect(page.locator('.item').first().locator('.item-title')).toHaveText('ship it');
   const cells = page.locator('.item').first().locator('.cell-value');
-  await expect(cells).toHaveCount(3);
-  await expect(cells.nth(0)).toHaveText('ship it');
-  await expect(cells.nth(1)).toHaveText('open');
-  await expect(cells.nth(2)).toHaveText('2026-09-01');
+  await expect(cells).toHaveCount(2);
+  await expect(cells.nth(0)).toHaveText('open');
+  await expect(cells.nth(1)).toHaveText('2026-09-01');
   await expectNoSeriousAccessibilityViolations(page);
 
   // The board layout groups items into lanes by the select column, is reached
@@ -4358,6 +4491,14 @@ test('[LIST-01 LIST-02 A11Y-01] a list with declared columns shows and enforces 
   await expect(page).toHaveURL(/\/app\/lists\/.*view=table/);
   await expect(page.getByRole('columnheader', { name: /Status/ })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'ship it' })).toBeVisible();
+  // A cell is edited in place and saved when it changes.
+  await page.getByLabel('Status for ship it').selectOption('done');
+  await expect(page.getByLabel('Status for ship it')).toHaveValue('done');
+  await page.reload();
+  await expect(page.getByLabel('Status for ship it')).toHaveValue('done');
+  await page.getByLabel('Status for ship it').selectOption('open');
+  await expect(page.getByLabel('Status for ship it')).toHaveValue('open');
+  await page.reload();
   await page.getByRole('link', { name: /Status/ }).click();
   await expect(page).toHaveURL(/[?&]sort=status\b/);
   await expect(page).toHaveURL(/[?&]view=table\b/);
@@ -4375,7 +4516,7 @@ test('[LIST-01 LIST-02 A11Y-01] a list with declared columns shows and enforces 
 
   // [LIST-02] An item opens on its own page, where a reader can comment on it,
   // and that page is itself keyboard and screen-reader usable.
-  await page.getByRole('link', { name: 'Open' }).first().click();
+  await page.getByRole('link', { name: /open item details/ }).first().click();
   await expect(page).toHaveURL(/\/app\/lists\/.*\/items\//);
   await expect(page.getByRole('heading', { name: 'Comments' })).toBeVisible();
   await page.getByLabel('Add a comment').fill('who owns this incident');
@@ -4574,6 +4715,7 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   // fade display rides the live stream, whose timing is not asserted here; that
   // the control renders and the send is accepted is the deterministic half.
   const reaction = page.locator('[data-huddle-react-name="tada"]');
+  await page.getByRole('button', { name: 'Reactions' }).click();
   await expect(reaction).toBeVisible();
   const reacted = page.waitForResponse((response) => response.url().endsWith('/app/huddle/react') && response.request().method() === 'POST');
   await reaction.click();

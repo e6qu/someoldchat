@@ -116,10 +116,10 @@ func (c conversationView) AccessibleName() string {
 		parts = append(parts, "group direct message")
 	}
 	if c.UnreadCount > 0 {
-		parts = append(parts, pluralCount(c.UnreadCount, "unread message"))
+		parts = append(parts, pluralCount(c.UnreadCount, "unread message", "unread messages"))
 	}
 	if c.MentionCount > 0 && c.IsChannelKind() {
-		parts = append(parts, pluralCount(c.MentionCount, "mention"))
+		parts = append(parts, pluralCount(c.MentionCount, "mention", "mentions"))
 	}
 	if c.HasDraft {
 		parts = append(parts, "has a draft")

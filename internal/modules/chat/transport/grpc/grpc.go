@@ -3286,6 +3286,14 @@ func (r Remote) SetSnooze(ctx context.Context, workspaceID domain.WorkspaceID, u
 	return decodeProtoDoNotDisturb(out)
 }
 
+func (r Remote) PauseNotificationsUntil(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, until time.Time) (domain.DoNotDisturb, error) {
+	out, err := r.presence.PauseNotificationsUntil(ctx, &chatv1.PauseNotificationsUntilRequest{WorkspaceId: string(workspaceID), UserId: string(userID), UntilUnix: until.Unix()})
+	if err != nil {
+		return domain.DoNotDisturb{}, err
+	}
+	return decodeProtoDoNotDisturb(out)
+}
+
 func (r Remote) EndSnooze(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.DoNotDisturb, error) {
 	out, err := r.presence.EndSnooze(ctx, &chatv1.DoNotDisturbRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	if err != nil {
@@ -10271,6 +10279,14 @@ func (s *Server) SetSnooze(ctx context.Context, input *chatv1.SetSnoozeRequest) 
 	return s.setSnoozeProto(ctx, input)
 }
 
+func (s *Server) PauseNotificationsUntil(ctx context.Context, input *chatv1.PauseNotificationsUntilRequest) (*chatv1.DoNotDisturb, error) {
+	result, err := s.implementation.PauseNotificationsUntil(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), time.Unix(input.GetUntilUnix(), 0).UTC())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoDoNotDisturb(result), nil
+}
+
 func (s *Server) EndSnooze(ctx context.Context, input *chatv1.DoNotDisturbRequest) (*chatv1.DoNotDisturb, error) {
 	return s.endSnoozeProto(ctx, input)
 }
@@ -10668,7 +10684,8 @@ func (s *Server) setUserProfileProto(ctx context.Context, input *chatv1.SetUserP
 	// path accepts it and clears the fields.
 	p := input.GetProfile()
 	profile := domain.UserProfile{
-		DisplayName: p.GetDisplayName(), StatusText: p.GetStatusText(), StatusEmoji: p.GetStatusEmoji(),
+		DisplayName: p.GetDisplayName(), Title: p.GetTitle(), Pronouns: p.GetPronouns(), Timezone: p.GetTimezone(),
+		StatusText: p.GetStatusText(), StatusEmoji: p.GetStatusEmoji(),
 		Image24: p.GetImage_24(), Image32: p.GetImage_32(), Image48: p.GetImage_48(), Image72: p.GetImage_72(),
 		Image192: p.GetImage_192(), Image512: p.GetImage_512(), Image1024: p.GetImage_1024(),
 	}
@@ -11278,6 +11295,9 @@ func decodeProtoInviteRequest(value *chatv1.InviteRequest) domain.InviteRequest 
 func encodeProtoProfile(value domain.UserProfile) *chatv1.UserProfile {
 	result := &chatv1.UserProfile{
 		DisplayName: value.DisplayName,
+		Title:       value.Title,
+		Pronouns:    value.Pronouns,
+		Timezone:    value.Timezone,
 		StatusText:  value.StatusText,
 		StatusEmoji: value.StatusEmoji,
 		Image_24:    value.Image24,
@@ -13025,6 +13045,9 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 		RealName:    value.GetRealName(),
 		Profile: domain.UserProfile{
 			DisplayName:             profile.GetDisplayName(),
+			Title:                   profile.GetTitle(),
+			Pronouns:                profile.GetPronouns(),
+			Timezone:                profile.GetTimezone(),
 			StatusText:              profile.GetStatusText(),
 			StatusEmoji:             profile.GetStatusEmoji(),
 			Image24:                 profile.GetImage_24(),
