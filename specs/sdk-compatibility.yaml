@@ -22,8 +22,10 @@ retrieved_at: 2026-07-28T00:00:00Z
 # user.
 # Bolt callback suites mostly submit an independently constructed signed event
 # callback, so they qualify framework decoding and request authentication, not
-# producer translation; the Node Bolt link_shared round trip is the exception,
-# produced by a real post and answered with chat.unfurl. Immutable producer snapshots and bot/user perspective
+# producer translation. The exceptions are produced end to end: the Node Bolt
+# link_shared round trip, from a real post answered with chat.unfurl, and the
+# Node and Python Bolt custom-function round trip, whose function_executed and
+# block_actions come from a real workflow run and a real click. Immutable producer snapshots and bot/user perspective
 # filtering now cover message create/change/delete and file create/share;
 # file-unshare production and live-Slack differential outcomes remain outside
 # the qualified slice. See the events-api decision in specs/compatibility.yaml.
@@ -77,12 +79,17 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
     note: >-
-      Event-surface suite. Both events reach Bolt through the production Events
-      API processor (projection, subscription filter, signing). reaction_added
-      is translated from a record the fixture appends; link_shared is produced
-      by a real chat.postMessage sharing a link on the app's unfurl domain, and
-      the Bolt handler answers it with chat.unfurl by unfurl_id and source,
-      then reads the is_app_unfurl attachment back from conversations.history.
+      Event-surface suite. Every event reaches Bolt through the production
+      Events API processor (projection, subscription filter, signing).
+      reaction_added is translated from a record the fixture appends;
+      link_shared is produced by a real chat.postMessage sharing a link on the
+      app's unfurl domain, and the Bolt handler answers it with chat.unfurl by
+      unfurl_id and source, then reads the is_app_unfurl attachment back from
+      conversations.history. The custom-function round trip is produced end to
+      end: a workflow run emits function_executed with an execution-scoped
+      xwfp- token, Bolt's function listener posts a button with it, the
+      member's click reaches Bolt's action listener with function_data, and
+      complete() finishes the execution through functions.completeSuccess.
   - id: node-socket-mode
     ecosystem: npm
     package: '@slack/socket-mode'
@@ -142,9 +149,14 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
+      Event-surface suite. Its reaction_added envelope is planted by
       tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      from an internal record; that part qualifies the transport, not the event
+      surface. The custom-function round trip is produced end to end: a
+      workflow run emits function_executed with an execution-scoped xwfp-
+      token, Bolt's function listener posts a button with it, the member's
+      click reaches Bolt's action listener with function_data, and complete()
+      finishes the execution through functions.completeSuccess.
   - id: python-socket-mode
     ecosystem: pypi
     package: slack-sdk
@@ -225,12 +237,17 @@ bolt:
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
     note: >-
-      Event-surface suite. Both events reach Bolt through the production Events
-      API processor (projection, subscription filter, signing). reaction_added
-      is translated from a record the fixture appends; link_shared is produced
-      by a real chat.postMessage sharing a link on the app's unfurl domain, and
-      the Bolt handler answers it with chat.unfurl by unfurl_id and source,
-      then reads the is_app_unfurl attachment back from conversations.history.
+      Event-surface suite. Every event reaches Bolt through the production
+      Events API processor (projection, subscription filter, signing).
+      reaction_added is translated from a record the fixture appends;
+      link_shared is produced by a real chat.postMessage sharing a link on the
+      app's unfurl domain, and the Bolt handler answers it with chat.unfurl by
+      unfurl_id and source, then reads the is_app_unfurl attachment back from
+      conversations.history. The custom-function round trip is produced end to
+      end: a workflow run emits function_executed with an execution-scoped
+      xwfp- token, Bolt's function listener posts a button with it, the
+      member's click reaches Bolt's action listener with function_data, and
+      complete() finishes the execution through functions.completeSuccess.
   - id: bolt-python
     ecosystem: pypi
     package: slack-bolt
@@ -241,9 +258,14 @@ bolt:
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
+      Event-surface suite. Its reaction_added envelope is planted by
       tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      from an internal record; that part qualifies the transport, not the event
+      surface. The custom-function round trip is produced end to end: a
+      workflow run emits function_executed with an execution-scoped xwfp-
+      token, Bolt's function listener posts a button with it, the member's
+      click reaches Bolt's action listener with function_data, and complete()
+      finishes the execution through functions.completeSuccess.
   - id: bolt-java
     ecosystem: maven
     package: com.slack.api:bolt

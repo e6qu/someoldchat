@@ -195,11 +195,12 @@ CREATE TABLE IF NOT EXISTS conversation_prefs (
 CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES users(id), channel_ids TEXT NOT NULL DEFAULT '[]', custom_message TEXT NOT NULL DEFAULT '', real_name TEXT NOT NULL DEFAULT '', resend INTEGER NOT NULL DEFAULT 0, restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0, guest_expiration_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0, accepted_by TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, installer_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (app_id, workspace_id));
-CREATE TABLE IF NOT EXISTS app_bot_tokens (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), token_ciphertext TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
+CREATE TABLE IF NOT EXISTS file_access_grants (file_id TEXT NOT NULL, user_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), granted_at INTEGER NOT NULL, PRIMARY KEY (file_id, user_id));
+CREATE TABLE IF NOT EXISTS function_execution_tokens (token_hash TEXT PRIMARY KEY, execution_id TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, callback_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL, bot_id TEXT NOT NULL DEFAULT '', scopes TEXT NOT NULL DEFAULT '', token_ciphertext TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS incoming_webhooks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id), user_id TEXT NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspace_id, app_id, secret_hash, enabled);
 CREATE TABLE IF NOT EXISTS app_permission_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), requester_id TEXT NOT NULL REFERENCES users(id), target_user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, trigger_id TEXT NOT NULL, created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, app_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, external_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT '', errors TEXT NOT NULL DEFAULT '{}', hash TEXT NOT NULL, root_view_id TEXT NOT NULL, previous_view_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, app_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, external_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT '', errors TEXT NOT NULL DEFAULT '{}', hash TEXT NOT NULL, root_view_id TEXT NOT NULL, previous_view_id TEXT NOT NULL DEFAULT '', function_execution_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS views_workspace_external ON views(workspace_id, external_id) WHERE external_id <> '';
 CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY, workflow_run_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL REFERENCES users(id), function_id TEXT NOT NULL DEFAULT '', edit_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, inputs TEXT NOT NULL DEFAULT '{}', outputs TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', step_name TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '', resume_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS workflow_steps_resume ON workflow_steps(status, resume_at);
@@ -592,7 +593,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 189
+const schemaVersion = 191
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3338,15 +3339,9 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
-	if version < 126 {
-		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_bot_tokens (
-			app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
-			token_ciphertext TEXT NOT NULL, updated_at INTEGER NOT NULL,
-			PRIMARY KEY (app_id, workspace_id)
-		)`); err != nil {
-			return fmt.Errorf("migrate app bot tokens: %w", err)
-		}
-	}
+	// Schema 126 created app_bot_tokens, the sealed copy of each app's bot
+	// token that function_executed used to hand out; schema 190 replaced it
+	// with execution-scoped tokens and drops the table.
 	if version < 127 {
 		// Records written before the typed payload contract hold a bare scalar
 		// where every consumer expects a self-describing JSON object. They can
@@ -3549,6 +3544,41 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 191: file_input grants ---
+	if version < 191 {
+		// Files a member attaches in a modal's file_input stay private to the
+		// member, and the app that receives them is granted read access.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS file_access_grants (file_id TEXT NOT NULL, user_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), granted_at INTEGER NOT NULL, PRIMARY KEY (file_id, user_id))`); err != nil {
+			return fmt.Errorf("migrate file access grants: %w", err)
+		}
+	}
+	// --- end schema 191 ---
+	// --- schema 190: function-scoped interactivity (execution tokens) ---
+	if version < 190 {
+		// function_executed hands the app an execution-scoped bot token
+		// (xwfp-), and what the app opens with it belongs to the execution:
+		// the token is recorded by hash with its sealed plaintext (it is sent
+		// again with every function-scoped interaction), and a view records
+		// the execution that opened it. Messages carry theirs in stream_state.
+		// The sealed copies of apps' ordinary bot tokens function_executed
+		// used to carry (schema 126) have no reader left.
+		if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS app_bot_tokens`); err != nil {
+			return fmt.Errorf("drop app bot tokens: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS function_execution_tokens (token_hash TEXT PRIMARY KEY, execution_id TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, callback_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL, bot_id TEXT NOT NULL DEFAULT '', scopes TEXT NOT NULL DEFAULT '', token_ciphertext TEXT NOT NULL, created_at INTEGER NOT NULL)`); err != nil {
+			return fmt.Errorf("migrate function execution tokens: %w", err)
+		}
+		columns, err := s.tableColumns(ctx, db, "views")
+		if err != nil {
+			return err
+		}
+		if !columns["function_execution_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE views ADD COLUMN function_execution_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate view function execution: %w", err)
+			}
+		}
+	}
+	// --- end schema 190 ---
 	if version < 189 {
 		// A dialog is rendered by the first-party client and submitted to the
 		// app that opened it, so it records that app and the per-element
@@ -6989,6 +7019,9 @@ func (s *Store) LookupToken(ctx context.Context, token string) (domain.TokenReco
 	var revoked int
 	var expiresAt int64
 	err := s.db.QueryRowContext(ctx, `SELECT t.workspace_id, t.user_id, t.app_id, t.bot_id, t.scopes, t.token_type, t.expires_at, t.revoked FROM tokens t WHERE t.token_hash = ? AND NOT EXISTS (SELECT 1 FROM user_expirations e WHERE e.user_id = t.user_id AND e.workspace_id = t.workspace_id AND e.expiration_ts > 0 AND e.expiration_ts <= ?)`, domain.HashToken(token), time.Now().UTC().Unix()).Scan(&record.WorkspaceID, &record.UserID, &record.AppID, &record.BotID, &scopes, &record.TokenType, &expiresAt, &revoked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.lookupFunctionExecutionToken(ctx, token)
+	}
 	if err != nil {
 		return domain.TokenRecord{}, translateNotFound(err)
 	}
@@ -6998,6 +7031,68 @@ func (s *Store) LookupToken(ctx context.Context, token string) (domain.TokenReco
 		record.ExpiresAt = time.Unix(0, expiresAt).UTC()
 	}
 	return record, nil
+}
+
+// lookupFunctionExecutionToken resolves an execution-scoped token to its
+// app's bot. It expires at the instant its execution stopped running (or, if
+// the execution is gone, when it was issued), and it is revoked once the app
+// holds no live bot token in the workspace.
+func (s *Store) lookupFunctionExecutionToken(ctx context.Context, token string) (domain.TokenRecord, error) {
+	now := time.Now().UTC()
+	var record domain.TokenRecord
+	var scopes string
+	var created, live int64
+	var status sql.NullString
+	var ended sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT f.workspace_id, f.user_id, f.app_id, f.bot_id, f.scopes, f.execution_id, f.created_at, s.status, s.updated_at,
+		(SELECT COUNT(1) FROM tokens b WHERE b.app_id = f.app_id AND b.workspace_id = f.workspace_id AND b.token_type = 'bot' AND b.revoked = 0 AND (b.expires_at = 0 OR b.expires_at > ?))
+		FROM function_execution_tokens f LEFT JOIN workflow_steps s ON s.id = f.execution_id AND s.workspace_id = f.workspace_id
+		WHERE f.token_hash = ? AND NOT EXISTS (SELECT 1 FROM user_expirations e WHERE e.user_id = f.user_id AND e.workspace_id = f.workspace_id AND e.expiration_ts > 0 AND e.expiration_ts <= ?)`,
+		now.UnixNano(), domain.HashToken(token), now.Unix()).Scan(&record.WorkspaceID, &record.UserID, &record.AppID, &record.BotID, &scopes, &record.FunctionExecutionID, &created, &status, &ended, &live)
+	if err != nil {
+		return domain.TokenRecord{}, translateNotFound(err)
+	}
+	record.Scopes = domain.NormalizeScopes(strings.Fields(scopes))
+	record.TokenType = domain.TokenBot
+	record.Revoked = live == 0
+	switch {
+	case !status.Valid:
+		record.ExpiresAt = time.Unix(0, created).UTC()
+	case domain.WorkflowStepStatus(status.String) != domain.WorkflowStepExecuting:
+		record.ExpiresAt = time.Unix(0, ended.Int64).UTC()
+	}
+	return record, nil
+}
+
+func (s *Store) IssueFunctionExecutionToken(ctx context.Context, value domain.FunctionExecutionToken, tokenHash string) (domain.FunctionExecutionToken, error) {
+	if value.WorkspaceID == "" || value.ExecutionID == "" || value.AppID == "" || value.UserID == "" || value.Ciphertext == "" || strings.TrimSpace(tokenHash) == "" || value.CreatedAt.IsZero() {
+		return domain.FunctionExecutionToken{}, store.InvalidArgument("invalid function execution token")
+	}
+	value.Scopes = domain.NormalizeScopes(value.Scopes)
+	// The execution's first token wins: a concurrent or repeated issue
+	// inserts nothing and reads back the token already recorded.
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO function_execution_tokens(token_hash, execution_id, workspace_id, app_id, callback_id, user_id, bot_id, scopes, token_ciphertext, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(execution_id) DO NOTHING`,
+		tokenHash, value.ExecutionID, value.WorkspaceID, value.AppID, value.CallbackID, value.UserID, value.BotID,
+		strings.Join(value.Scopes, " "), value.Ciphertext, value.CreatedAt.UTC().UnixNano()); err != nil {
+		return domain.FunctionExecutionToken{}, classify(err)
+	}
+	return s.GetFunctionExecutionToken(ctx, value.WorkspaceID, value.ExecutionID)
+}
+
+func (s *Store) GetFunctionExecutionToken(ctx context.Context, workspace domain.WorkspaceID, executionID domain.WorkflowStepID) (domain.FunctionExecutionToken, error) {
+	var value domain.FunctionExecutionToken
+	var scopes string
+	var created int64
+	err := s.db.QueryRowContext(ctx, `SELECT workspace_id, execution_id, app_id, callback_id, user_id, bot_id, scopes, token_ciphertext, created_at
+		FROM function_execution_tokens WHERE workspace_id = ? AND execution_id = ?`, workspace, executionID).Scan(
+		&value.WorkspaceID, &value.ExecutionID, &value.AppID, &value.CallbackID, &value.UserID, &value.BotID, &scopes, &value.Ciphertext, &created)
+	if err != nil {
+		return domain.FunctionExecutionToken{}, translateNotFound(err)
+	}
+	value.Scopes = domain.NormalizeScopes(strings.Fields(scopes))
+	value.CreatedAt = time.Unix(0, created).UTC()
+	return value, nil
 }
 
 func (s *Store) ListAppAuthorizations(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) ([]domain.AppAuthorization, error) {
@@ -8735,34 +8830,6 @@ func (s *Store) CreateAppInstallation(ctx context.Context, value domain.AppInsta
 	return err
 }
 
-func (s *Store) SetAppBotToken(ctx context.Context, appID domain.AppID, workspace domain.WorkspaceID, tokenCiphertext string, written ...events.Event) error {
-	if appID == "" || workspace == "" || tokenCiphertext == "" || len(written) == 0 {
-		return store.InvalidArgument("invalid app bot token")
-	}
-	tx, err := s.beginWrite(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO app_bot_tokens(app_id, workspace_id, token_ciphertext, updated_at)
-		VALUES (?, ?, ?, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET token_ciphertext = excluded.token_ciphertext, updated_at = excluded.updated_at`,
-		appID, workspace, tokenCiphertext, written[0].CreatedAt.UTC().UnixNano()); err != nil {
-		return err
-	}
-	for _, event := range written {
-		if err := insertOutbox(ctx, tx, event); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func (s *Store) GetAppBotTokenCiphertext(ctx context.Context, appID domain.AppID, workspace domain.WorkspaceID) (string, error) {
-	var ciphertext string
-	err := s.db.QueryRowContext(ctx, `SELECT token_ciphertext FROM app_bot_tokens WHERE app_id = ? AND workspace_id = ?`, appID, workspace).Scan(&ciphertext)
-	return ciphertext, translateNotFound(err)
-}
-
 func (s *Store) ListAppInstallations(ctx context.Context, appID domain.AppID) ([]domain.AppInstallation, error) {
 	if appID == "" {
 		return nil, store.ErrInvalidAppApproval
@@ -8920,7 +8987,7 @@ func (s *Store) CreateView(ctx context.Context, value domain.View, event events.
 	if err != nil {
 		return store.InvalidArgument("invalid view errors")
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO views(id, app_id, workspace_id, user_id, type, external_id, payload, state, errors, hash, root_view_id, previous_view_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.AppID, value.WorkspaceID, value.UserID, value.Type, value.ExternalID, value.Payload, value.State, string(encodedErrors), value.Hash, value.RootViewID, value.PreviousViewID, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO views(id, app_id, workspace_id, user_id, type, external_id, payload, state, errors, hash, root_view_id, previous_view_id, function_execution_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.AppID, value.WorkspaceID, value.UserID, value.Type, value.ExternalID, value.Payload, value.State, string(encodedErrors), value.Hash, value.RootViewID, value.PreviousViewID, value.FunctionExecutionID, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -8933,7 +9000,7 @@ func scanView(row interface{ Scan(...any) error }) (domain.View, error) {
 	var value domain.View
 	var encodedErrors string
 	var created, updated int64
-	if err := row.Scan(&value.ID, &value.AppID, &value.WorkspaceID, &value.UserID, &value.Type, &value.ExternalID, &value.Payload, &value.State, &encodedErrors, &value.Hash, &value.RootViewID, &value.PreviousViewID, &created, &updated); err != nil {
+	if err := row.Scan(&value.ID, &value.AppID, &value.WorkspaceID, &value.UserID, &value.Type, &value.ExternalID, &value.Payload, &value.State, &encodedErrors, &value.Hash, &value.RootViewID, &value.PreviousViewID, &value.FunctionExecutionID, &created, &updated); err != nil {
 		return domain.View{}, err
 	}
 	if err := json.Unmarshal([]byte(encodedErrors), &value.Errors); err != nil {
@@ -8944,7 +9011,7 @@ func scanView(row interface{ Scan(...any) error }) (domain.View, error) {
 	return value, nil
 }
 
-const viewColumns = `id, app_id, workspace_id, user_id, type, external_id, payload, state, errors, hash, root_view_id, previous_view_id, created_at, updated_at`
+const viewColumns = `id, app_id, workspace_id, user_id, type, external_id, payload, state, errors, hash, root_view_id, previous_view_id, function_execution_id, created_at, updated_at`
 
 func (s *Store) GetView(ctx context.Context, workspace domain.WorkspaceID, id domain.ViewID) (domain.View, error) {
 	value, err := scanView(s.db.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND id = ?`, workspace, id))
@@ -9024,7 +9091,7 @@ func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash 
 		return domain.View{}, err
 	}
 	var storedErrors string
-	if err := tx.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND id = ?`, value.WorkspaceID, value.ID).Scan(&value.ID, &value.AppID, &value.WorkspaceID, &value.UserID, &value.Type, &value.ExternalID, &value.Payload, &value.State, &storedErrors, &value.Hash, &value.RootViewID, &value.PreviousViewID, new(int64), new(int64)); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND id = ?`, value.WorkspaceID, value.ID).Scan(&value.ID, &value.AppID, &value.WorkspaceID, &value.UserID, &value.Type, &value.ExternalID, &value.Payload, &value.State, &storedErrors, &value.Hash, &value.RootViewID, &value.PreviousViewID, &value.FunctionExecutionID, new(int64), new(int64)); err != nil {
 		return domain.View{}, err
 	}
 	if err := json.Unmarshal([]byte(storedErrors), &value.Errors); err != nil {
@@ -9595,6 +9662,13 @@ func (s *Store) DeleteWorkflow(ctx context.Context, workspace domain.WorkspaceID
 	if _, err := tx.ExecContext(ctx, `DELETE FROM featured_workflows WHERE workspace_id = ?
 		AND trigger_id IN (SELECT id FROM workflow_triggers WHERE workspace_id = ? AND workflow_id = ?)`,
 		workspace, workspace, workflowID); err != nil {
+		return false, err
+	}
+	// Execution tokens go with their executions.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM function_execution_tokens WHERE workspace_id = ?
+		AND execution_id IN (SELECT s.id FROM workflow_steps s JOIN workflow_runs r ON r.id = s.workflow_run_id
+			WHERE s.workspace_id = ? AND r.workspace_id = ? AND r.workflow_id = ?)`,
+		workspace, workspace, workspace, workflowID); err != nil {
 		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_steps WHERE workspace_id = ?
@@ -12613,6 +12687,11 @@ func deleteFilesTx(ctx context.Context, tx txRunner, expired []domain.ExpiredBlo
 		`DELETE FROM file_shares WHERE file_id IN ` + list,
 		`DELETE FROM message_files WHERE file_id IN ` + list,
 		`DELETE FROM file_comments WHERE file_id IN ` + list,
+		`DELETE FROM file_access_grants WHERE file_id IN ` + list,
+		// list_item_files references files(id): a file attached to a list
+		// item must lose the attachment with the file, or PostgreSQL refuses
+		// the delete.
+		`DELETE FROM list_item_files WHERE file_id IN ` + list,
 		`DELETE FROM files WHERE id IN ` + list,
 	} {
 		if _, err := tx.ExecContext(ctx, statement, arguments...); err != nil {
@@ -17196,6 +17275,39 @@ func (s *Store) ListItemFiles(ctx context.Context, workspace domain.WorkspaceID,
 		files[i].SharedChannels = shares
 	}
 	return files, nil
+}
+
+func (s *Store) GrantFileAccess(ctx context.Context, grants []domain.FileAccessGrant) error {
+	for _, grant := range grants {
+		if grant.FileID == "" || grant.WorkspaceID == "" || grant.UserID == "" || grant.GrantedAt.IsZero() {
+			return store.InvalidArgument("invalid file access grant")
+		}
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, grant := range grants {
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM files WHERE id = ? AND workspace_id = ?`, grant.FileID, grant.WorkspaceID).Scan(&exists); err != nil {
+			return translateNotFound(err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO file_access_grants(file_id, user_id, workspace_id, granted_at) VALUES (?, ?, ?, ?) ON CONFLICT(file_id, user_id) DO NOTHING`,
+			grant.FileID, grant.UserID, grant.WorkspaceID, grant.GrantedAt.UTC().UnixNano()); err != nil {
+			return classify(err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) FileReadableViaGrant(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, fileID domain.FileID) (bool, error) {
+	var exists int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM file_access_grants WHERE file_id = ? AND user_id = ? AND workspace_id = ?`, fileID, user, workspace).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // FileReadableViaListItem reports whether a file is attached to an item on a

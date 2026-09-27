@@ -286,7 +286,21 @@ type Store interface {
 	// ListAccessLogs pages those rows, most recently seen first, keeping only
 	// rows first seen at or before the given instant when it is not zero.
 	ListAccessLogs(context.Context, domain.WorkspaceID, time.Time, int, int) (domain.AccessLogPage, error)
+	// LookupToken resolves a bearer token. An execution-scoped token (see
+	// IssueFunctionExecutionToken) resolves too, as its app's bot with
+	// FunctionExecutionID set; once its execution is no longer running it
+	// reports ExpiresAt as the instant the execution ended, and it reports
+	// Revoked once the app holds no live bot token in the workspace.
 	LookupToken(context.Context, string) (domain.TokenRecord, error)
+	// IssueFunctionExecutionToken records the execution-scoped token for one
+	// function execution under the hash of its plaintext. An execution has at
+	// most one: when one is already recorded it is returned unchanged and the
+	// offered token is discarded, so a redelivered function_executed hands the
+	// app the token it was already given.
+	IssueFunctionExecutionToken(context.Context, domain.FunctionExecutionToken, string) (domain.FunctionExecutionToken, error)
+	// GetFunctionExecutionToken returns an execution's token, or ErrNotFound
+	// when function_executed has not yet been delivered for it.
+	GetFunctionExecutionToken(context.Context, domain.WorkspaceID, domain.WorkflowStepID) (domain.FunctionExecutionToken, error)
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppToken(context.Context, string, domain.AppTokenRecord) error
 	// RevokeAppTokens marks every token issued for an app revoked. Lookup already
@@ -637,13 +651,6 @@ type Store interface {
 	// SetWorkflowManagers replaces a workflow's manager list independently of
 	// its versioned content.
 	SetWorkflowManagers(context.Context, domain.WorkspaceID, domain.WorkflowID, []domain.UserID, events.Event) error
-	// SetAppBotToken stores an app's bot access token as sealed ciphertext so a
-	// function_executed dispatch can include it, exactly as Slack sends
-	// bot_access_token to the app.
-	SetAppBotToken(context.Context, domain.AppID, domain.WorkspaceID, string, ...events.Event) error
-	// GetAppBotTokenCiphertext returns the sealed bot access token for an
-	// installed app, or ErrNotFound when the app has not issued one.
-	GetAppBotTokenCiphertext(context.Context, domain.AppID, domain.WorkspaceID) (string, error)
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
 	// SetWorkflowStatus takes a workflow in or out of service without touching
 	// what it says. It is deliberately not an edit: an administrator stopping a
@@ -1344,6 +1351,12 @@ type Store interface {
 	// (conversation-share based) and the list-access model that lets a list
 	// reader download an attachment that was never shared into any channel.
 	FileReadableViaListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (bool, error)
+	// GrantFileAccess records durable read grants. Granting again is not an
+	// error; a grant disappears with its file.
+	GrantFileAccess(context.Context, []domain.FileAccessGrant) error
+	// FileReadableViaGrant reports whether the user holds a read grant on the
+	// file (see domain.FileAccessGrant).
+	FileReadableViaGrant(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (bool, error)
 	SetListAccess(context.Context, domain.ListAccess, events.Event) error
 	DeleteListAccess(context.Context, domain.ListAccess, events.Event) error
 	// GetListAccess resolves the effective access one user has to one list.

@@ -174,9 +174,9 @@ type Service interface {
 	AdminRestrictApp(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.AppRequestID) error
 	AdminListApps(context.Context, domain.WorkspaceID, domain.UserID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
 	RequestAppPermissions(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, []string, string) error
-	OpenView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (domain.View, error)
+	OpenView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, domain.WorkflowStepID) (domain.View, error)
 	PublishView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.UserID, string, string) (domain.View, error)
-	PushView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (domain.View, error)
+	PushView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, domain.WorkflowStepID) (domain.View, error)
 	UpdateView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, string, string) (domain.View, error)
 	CurrentModalView(context.Context, domain.WorkspaceID, domain.UserID) (domain.View, error)
 	SubmitView(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ViewID, string, string) (domain.ViewInteractionResult, error)

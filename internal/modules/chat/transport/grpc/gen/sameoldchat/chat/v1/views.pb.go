@@ -37,8 +37,11 @@ type View struct {
 	AppId             string                 `protobuf:"bytes,12,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	ErrorsJson        string                 `protobuf:"bytes,13,opt,name=errors_json,json=errorsJson,proto3" json:"errors_json,omitempty"`
 	StateJson         string                 `protobuf:"bytes,14,opt,name=state_json,json=stateJson,proto3" json:"state_json,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// function_execution_id is the function execution whose token opened the
+	// view; its interactions carry that execution's function_data.
+	FunctionExecutionId string `protobuf:"bytes,15,opt,name=function_execution_id,json=functionExecutionId,proto3" json:"function_execution_id,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *View) Reset() {
@@ -169,15 +172,23 @@ func (x *View) GetStateJson() string {
 	return ""
 }
 
+func (x *View) GetFunctionExecutionId() string {
+	if x != nil {
+		return x.FunctionExecutionId
+	}
+	return ""
+}
+
 type OpenViewRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	TriggerId     string                 `protobuf:"bytes,3,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
-	Payload       string                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
-	AppId         string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId         string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId              string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	TriggerId           string                 `protobuf:"bytes,3,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
+	Payload             string                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	AppId               string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	FunctionExecutionId string                 `protobuf:"bytes,6,opt,name=function_execution_id,json=functionExecutionId,proto3" json:"function_execution_id,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *OpenViewRequest) Reset() {
@@ -241,6 +252,13 @@ func (x *OpenViewRequest) GetPayload() string {
 func (x *OpenViewRequest) GetAppId() string {
 	if x != nil {
 		return x.AppId
+	}
+	return ""
+}
+
+func (x *OpenViewRequest) GetFunctionExecutionId() string {
+	if x != nil {
+		return x.FunctionExecutionId
 	}
 	return ""
 }
@@ -330,14 +348,15 @@ func (x *PublishViewRequest) GetAppId() string {
 }
 
 type PushViewRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	TriggerId     string                 `protobuf:"bytes,3,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
-	Payload       string                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
-	AppId         string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId         string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId              string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	TriggerId           string                 `protobuf:"bytes,3,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
+	Payload             string                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	AppId               string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	FunctionExecutionId string                 `protobuf:"bytes,6,opt,name=function_execution_id,json=functionExecutionId,proto3" json:"function_execution_id,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *PushViewRequest) Reset() {
@@ -401,6 +420,13 @@ func (x *PushViewRequest) GetPayload() string {
 func (x *PushViewRequest) GetAppId() string {
 	if x != nil {
 		return x.AppId
+	}
+	return ""
+}
+
+func (x *PushViewRequest) GetFunctionExecutionId() string {
+	if x != nil {
+		return x.FunctionExecutionId
 	}
 	return ""
 }
@@ -937,7 +963,7 @@ var File_sameoldchat_chat_v1_views_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_views_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/views.proto\x12\x13sameoldchat.chat.v1\x1a\x1esameoldchat/chat/v1/apps.proto\x1a'sameoldchat/chat/v1/conversations.proto\"\xba\x03\n" +
+	"\x1fsameoldchat/chat/v1/views.proto\x12\x13sameoldchat.chat.v1\x1a\x1esameoldchat/chat/v1/apps.proto\x1a'sameoldchat/chat/v1/conversations.proto\"\xee\x03\n" +
 	"\x04View\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -957,28 +983,31 @@ const file_sameoldchat_chat_v1_views_proto_rawDesc = "" +
 	"\verrors_json\x18\r \x01(\tR\n" +
 	"errorsJson\x12\x1d\n" +
 	"\n" +
-	"state_json\x18\x0e \x01(\tR\tstateJson\"\x9d\x01\n" +
+	"state_json\x18\x0e \x01(\tR\tstateJson\x122\n" +
+	"\x15function_execution_id\x18\x0f \x01(\tR\x13functionExecutionId\"\xd1\x01\n" +
 	"\x0fOpenViewRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"trigger_id\x18\x03 \x01(\tR\ttriggerId\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\tR\apayload\x12\x15\n" +
-	"\x06app_id\x18\x05 \x01(\tR\x05appId\"\xbb\x01\n" +
+	"\x06app_id\x18\x05 \x01(\tR\x05appId\x122\n" +
+	"\x15function_execution_id\x18\x06 \x01(\tR\x13functionExecutionId\"\xbb\x01\n" +
 	"\x12PublishViewRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12$\n" +
 	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\tR\apayload\x12\x12\n" +
 	"\x04hash\x18\x05 \x01(\tR\x04hash\x12\x15\n" +
-	"\x06app_id\x18\x06 \x01(\tR\x05appId\"\x9d\x01\n" +
+	"\x06app_id\x18\x06 \x01(\tR\x05appId\"\xd1\x01\n" +
 	"\x0fPushViewRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"trigger_id\x18\x03 \x01(\tR\ttriggerId\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\tR\apayload\x12\x15\n" +
-	"\x06app_id\x18\x05 \x01(\tR\x05appId\"\xce\x01\n" +
+	"\x06app_id\x18\x05 \x01(\tR\x05appId\x122\n" +
+	"\x15function_execution_id\x18\x06 \x01(\tR\x13functionExecutionId\"\xce\x01\n" +
 	"\x11UpdateViewRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +

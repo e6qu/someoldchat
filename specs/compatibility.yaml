@@ -1177,6 +1177,10 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/node-bolt/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-bolt/qualification.py
+      - go-test:internal/api/slack:TestExecutionScopedTokenPostsForAndCompletesOnlyItsExecution
+      - go-test:internal/service:TestFunctionScopedInteractivityRoundTrip
   - method: functions.completeError
     status: behavior-compatible
     provenance: slack-reference

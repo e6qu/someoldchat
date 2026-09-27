@@ -158,6 +158,10 @@ type Principal struct {
 	CredentialHash string
 	TokenType      domain.TokenType
 	Scopes         map[Scope]struct{}
+	// FunctionExecutionID is set for an execution-scoped bot token (xwfp-):
+	// what the principal posts or opens belongs to that function execution,
+	// and it may complete only that execution.
+	FunctionExecutionID domain.WorkflowStepID
 }
 
 func (p Principal) HasScope(scope Scope) bool { _, ok := p.Scopes[scope]; return ok }
@@ -745,7 +749,7 @@ func (s Stored) Authenticate(r *http.Request) (Principal, error) {
 	for _, scope := range record.Scopes {
 		scopes[Scope(scope)] = struct{}{}
 	}
-	return Principal{WorkspaceID: record.WorkspaceID, UserID: record.UserID, AppID: record.AppID, BotID: record.BotID, CredentialHash: domain.HashToken(token), TokenType: record.TokenType, Scopes: scopes}, nil
+	return Principal{WorkspaceID: record.WorkspaceID, UserID: record.UserID, AppID: record.AppID, BotID: record.BotID, CredentialHash: domain.HashToken(token), TokenType: record.TokenType, Scopes: scopes, FunctionExecutionID: record.FunctionExecutionID}, nil
 }
 
 func NewStatic(token string, principal Principal) (Static, error) {

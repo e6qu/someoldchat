@@ -38,8 +38,8 @@ type EventStore interface {
 	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
 	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
-	GetAppBotTokenCiphertext(context.Context, domain.AppID, domain.WorkspaceID) (string, error)
 	GetApp(context.Context, domain.AppID) (domain.App, domain.AppManifestRevision, error)
+	IssueFunctionExecutionToken(context.Context, domain.FunctionExecutionToken, string) (domain.FunctionExecutionToken, error)
 }
 
 // Delivery pacing. Each cycle drains up to BatchPerApp records per app, and

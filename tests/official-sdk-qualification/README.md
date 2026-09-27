@@ -46,6 +46,17 @@ editing or immediately sending a scheduled message. SameOldChat implements
 those Slack client journeys only through its authenticated first-party service
 and gRPC seam; it does not advertise invented Slack Web API methods.
 
+The Node and Python Bolt suites run a remote custom function over signed
+HTTP. The fixture's `POST /qualification/bolt-function` runs a workflow whose
+step is the app's `approval` function and delivers `function_executed` to
+Bolt; the function listener posts a button with the execution-scoped
+(`xwfp-`) client Bolt builds from `bot_access_token`, `POST
+/qualification/bolt-function-click` clicks it as a member, and the action
+listener, which Bolt recognizes as function-scoped from `function_data`,
+calls `complete()`. `GET /qualification/bolt-function-state` shows the
+message belonging to the execution and the execution completed with the
+listener's outputs.
+
 The official Node Socket Mode client also consumes a manifest-derived slash
 command envelope whose `should_escape` option resolves a user mention, public
 channel, and URL. This proves the escaped payload survives the real SDK's

@@ -952,7 +952,9 @@ func TestViewsHTTPExposeDurableOpenPushUpdateAndPublish(t *testing.T) {
 	if err := json.Unmarshal(opened.Body.Bytes(), &openedBody); err != nil || openedBody.View.ID == "" || openedBody.View.Hash == "" {
 		t.Fatalf("open body=%s err=%v", opened.Body, err)
 	}
-	pushed := form("/api/views.push", url.Values{"trigger_id": {"trigger-2"}, "view": {`{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`}})
+	// A function receives an interactivity_pointer rather than a trigger_id;
+	// views.push (and views.open) accept it for the same trigger.
+	pushed := form("/api/views.push", url.Values{"interactivity_pointer": {"trigger-2"}, "view": {`{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`}})
 	if pushed.Code != http.StatusOK || !strings.Contains(pushed.Body.String(), openedBody.View.ID) {
 		t.Fatalf("push status=%d body=%s", pushed.Code, pushed.Body)
 	}
@@ -1053,6 +1055,56 @@ func TestFunctionsCompleteErrorHTTPValidatesAndCompletes(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+}
+
+// TestExecutionScopedTokenPostsForAndCompletesOnlyItsExecution drives the
+// xwfp- token function_executed hands an app: a message posted with it
+// belongs to its execution, it may complete that execution and no other, and
+// it stops authenticating (token_expired) once the execution has ended.
+func TestExecutionScopedTokenPostsForAndCompletesOnlyItsExecution(t *testing.T) {
+	handler, repository := testHandlerWithStoredTokenAuth(defaultTestScopes()...)
+	seedFunctionExecution(t, repository, "FxHTTPA")
+	seedFunctionExecution(t, repository, "FxHTTPB")
+	if _, err := repository.IssueFunctionExecutionToken(context.Background(), domain.FunctionExecutionToken{
+		WorkspaceID: "T1", ExecutionID: "FxHTTPA", AppID: "A1", CallbackID: "callback", UserID: "U1", BotID: "B1",
+		Scopes: auth.AllScopes(), Ciphertext: "sealed", CreatedAt: time.Now().UTC(),
+	}, domain.HashToken("xwfp-http")); err != nil {
+		t.Fatal(err)
+	}
+	call := func(path string, values url.Values) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(values.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer xwfp-http")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var body map[string]any
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body)
+		}
+		return body
+	}
+	posted := call("/api/chat.postMessage", url.Values{"channel": {"C1"}, "text": {"Approve?"}})
+	if posted["ok"] != true {
+		t.Fatalf("post with the execution token=%v", posted)
+	}
+	created, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(posted["ts"].(string)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := repository.GetMessageByCreatedAt(context.Background(), "C1", created)
+	if err != nil || message.FunctionExecution() != "FxHTTPA" || message.PostingBot() != "B1" {
+		t.Fatalf("posted message execution=%q bot=%q err=%v", message.FunctionExecution(), message.PostingBot(), err)
+	}
+	if denied := call("/api/functions.completeSuccess", url.Values{"function_execution_id": {"FxHTTPB"}, "outputs": {`{}`}}); denied["error"] != "access_denied" {
+		t.Fatalf("completing another execution=%v, want access_denied", denied)
+	}
+	if completed := call("/api/functions.completeSuccess", url.Values{"function_execution_id": {"FxHTTPA"}, "outputs": {`{}`}}); completed["ok"] != true {
+		t.Fatalf("completing its own execution=%v", completed)
+	}
+	if expired := call("/api/chat.postMessage", url.Values{"channel": {"C1"}, "text": {"late"}}); expired["error"] != "token_expired" {
+		t.Fatalf("post after the execution ended=%v, want token_expired", expired)
 	}
 }
 

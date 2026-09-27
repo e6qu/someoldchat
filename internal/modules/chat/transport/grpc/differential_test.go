@@ -3927,12 +3927,12 @@ func parityCases() []parityCase {
 			seed: seedViewParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				modal := `{"type":"modal","callback_id":"deploy","external_id":"deploy-1","title":{"type":"plain_text","text":"Deploy"},"submit":{"type":"plain_text","text":"Go"},"blocks":[{"type":"input","block_id":"env","label":{"type":"plain_text","text":"Environment"},"element":{"type":"plain_text_input","action_id":"env_input"}}]}`
-				opened, err := chat.OpenView(ctx, "T1", "UBOT", "A1", "trigger_open", modal)
+				opened, err := chat.OpenView(ctx, "T1", "UBOT", "A1", "trigger_open", modal, "")
 				if err != nil {
 					return nil, err
 				}
 				pushed, err := chat.PushView(ctx, "T1", "UBOT", "A1", "trigger_push",
-					`{"type":"modal","callback_id":"confirm","title":{"type":"plain_text","text":"Confirm"},"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Sure?"}}]}`)
+					`{"type":"modal","callback_id":"confirm","title":{"type":"plain_text","text":"Confirm"},"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Sure?"}}]}`, "")
 				if err != nil {
 					return nil, err
 				}
@@ -3952,7 +3952,7 @@ func parityCases() []parityCase {
 				}
 				// A trigger is single use, so the one already spent on the open
 				// must not open a second modal.
-				_, replayErr := chat.OpenView(ctx, "T1", "UBOT", "A1", "trigger_open", modal)
+				_, replayErr := chat.OpenView(ctx, "T1", "UBOT", "A1", "trigger_open", modal, "")
 
 				published, err := chat.PublishView(ctx, "T1", "UBOT", "A1", "U1",
 					`{"type":"home","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Welcome"}}]}`, "")
@@ -4745,7 +4745,7 @@ func parityCases() []parityCase {
 				}, "https://chat.example.test")
 
 				view, err := chat.OpenView(ctx, "T1", "UBOT", "A1", "trigger_dispatch",
-					`{"type":"modal","callback_id":"deploy","title":{"type":"plain_text","text":"Deploy"},"blocks":[{"type":"actions","block_id":"env","elements":[{"type":"external_select","action_id":"pick","placeholder":{"type":"plain_text","text":"Environment"}}]},{"type":"actions","block_id":"go","elements":[{"type":"button","action_id":"confirm","text":{"type":"plain_text","text":"Confirm"},"value":"x"}]}]}`)
+					`{"type":"modal","callback_id":"deploy","title":{"type":"plain_text","text":"Deploy"},"blocks":[{"type":"actions","block_id":"env","elements":[{"type":"external_select","action_id":"pick","placeholder":{"type":"plain_text","text":"Environment"}}]},{"type":"actions","block_id":"go","elements":[{"type":"button","action_id":"confirm","text":{"type":"plain_text","text":"Confirm"},"value":"x"}]}]}`, "")
 				if err != nil {
 					return nil, err
 				}

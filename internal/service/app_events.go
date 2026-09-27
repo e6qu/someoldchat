@@ -9,7 +9,6 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
-	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
@@ -27,12 +26,12 @@ type AppEventProjectionStore interface {
 	GetConversation(context.Context, domain.ConversationID) (domain.Conversation, error)
 	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
-	// GetAppBotTokenCiphertext returns the sealed bot access token a
-	// function_executed dispatch includes for the receiving app.
-	GetAppBotTokenCiphertext(context.Context, domain.AppID, domain.WorkspaceID) (string, error)
 	// GetApp reads the receiving app's current manifest: a link.shared record
 	// reaches the app only for the links its unfurl domains claim.
 	GetApp(context.Context, domain.AppID) (domain.App, domain.AppManifestRevision, error)
+	// IssueFunctionExecutionToken mints (once) the execution-scoped token a
+	// function_executed dispatch hands the receiving app.
+	IssueFunctionExecutionToken(context.Context, domain.FunctionExecutionToken, string) (domain.FunctionExecutionToken, error)
 }
 
 type UserEventProjectionStore interface {
@@ -208,8 +207,8 @@ func prepareUserEvent(ctx context.Context, state UserEventProjectionStore, origi
 // PrepareAppEvent returns a Slack-shaped copy of a content-bearing app event
 // and whether this app may receive it. Identifier-only records for other topics
 // pass through unchanged to the central events translator. The credential key
-// opens the sealed bot access token a function_executed dispatch includes, so
-// the token is decrypted only at delivery time, never persisted in plaintext.
+// seals the execution-scoped token a function_executed dispatch includes, so
+// the token is never persisted in plaintext.
 //
 // origin is the deployment's public URL (slackobject.Origin). Every URL the
 // projected event carries — a file's url_private, a user's image_* — is built
@@ -349,14 +348,18 @@ func prepareFunctionExecutedEvent(ctx context.Context, state AppEventProjectionS
 		events.String("function_execution_id", string(snapshot.FunctionExecutionID)),
 		events.String("workflow_execution_id", string(snapshot.WorkflowRunID)),
 	}
-	// Slack sends the receiving app's bot access token with every
-	// function_executed callback so the app can call back. The token is sealed
-	// at issuance and opened only here, at delivery time; an app that issued no
-	// bot token (older hash-only installations) simply omits the field.
-	if ciphertext, err := state.GetAppBotTokenCiphertext(ctx, snapshot.AppID, record.Event.WorkspaceID); err == nil && ciphertext != "" {
-		if token, err := secretbox.Open(credentialKey, appBotTokenAssociatedData(snapshot.AppID, record.Event.WorkspaceID), ciphertext); err == nil && token != "" {
-			fields = append(fields, events.String("bot_access_token", token))
+	// Slack sends every function_executed callback an execution-scoped bot
+	// token (xwfp-) as bot_access_token: the app calls back with it, and what
+	// it posts or opens with it belongs to this execution. It acts as the
+	// app's bot, so an app without a bot installation receives none. The
+	// credential key is generated at startup whenever it is not configured, so
+	// only a unit test that never delivers lacks one.
+	if bot, exists := botAuthorization(authorizations); exists && len(credentialKey) == 32 {
+		token, err := issueFunctionExecutionToken(ctx, state, credentialKey, bot, snapshot.FunctionExecutionID, functionCallbackID(snapshot.Function), record.Event.CreatedAt)
+		if err != nil {
+			return events.Record{}, false, err
 		}
+		fields = append(fields, events.String("bot_access_token", token))
 	}
 	projected, err := events.New(record.Event.ID, record.Event.WorkspaceID, record.Event.ActorID,
 		events.NewPayload("function_executed", fields...), record.Event.CreatedAt)
@@ -368,10 +371,14 @@ func prepareFunctionExecutedEvent(ctx context.Context, state AppEventProjectionS
 	return withEventAuthorizations(record, authorizations)
 }
 
-// appBotTokenAssociatedData binds an app's sealed bot access token to the
-// app/workspace pair it was issued for.
-func appBotTokenAssociatedData(appID domain.AppID, workspaceID domain.WorkspaceID) string {
-	return "app_bot_token:" + string(appID) + ":" + string(workspaceID)
+// botAuthorization is the app's bot installation among its authorizations.
+func botAuthorization(authorizations []domain.AppAuthorization) (domain.AppAuthorization, bool) {
+	for _, value := range authorizations {
+		if value.TokenType.IsBot() && value.UserID != "" {
+			return value, true
+		}
+	}
+	return domain.AppAuthorization{}, false
 }
 
 func scopedAppAuthorizations(ctx context.Context, state AppEventProjectionStore, event events.Event, authorizations []domain.AppAuthorization) ([]domain.AppAuthorization, error) {

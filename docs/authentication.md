@@ -103,9 +103,13 @@ gain control-plane authority as a side effect. A workspace with real identities
 administers itself through them, never through a token every holder shares.
 
 The application credential key must decode to exactly 32 bytes. It encrypts
-developer-app signing secrets at rest and is required for durable local storage
-or the separate `sameoldchat-chatd` process; losing it prevents Events API,
-interactivity, and slash-command requests from being signed.
+developer-app signing secrets and verification tokens at rest, and the
+execution-scoped (`xwfp-`) bot tokens handed to workflow functions, which are
+sent again with every interaction from what an execution posted or opened. It
+is required for durable local storage or the separate `sameoldchat-chatd`
+process; losing it prevents Events API, interactivity, and slash-command
+requests from being signed, and function-scoped interactions of executions
+still running from carrying their token.
 `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` optionally scopes SameOldChat's own session
 cookies to a parent DNS hostname used only by this SameOldChat deployment. It
 must never be set to a parent shared with unrelated relying applications;

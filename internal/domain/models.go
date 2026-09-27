@@ -408,8 +408,14 @@ type View struct {
 	Hash           string
 	RootViewID     ViewID
 	PreviousViewID ViewID
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// FunctionExecutionID is the function execution whose execution-scoped
+	// token opened or pushed the view. It is fixed when the view is created:
+	// Slack routes the view's view_submission and view_closed with that
+	// execution's function_data, and an update does not move a view to
+	// another execution.
+	FunctionExecutionID WorkflowStepID
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type ViewInteractionResult struct {
@@ -819,6 +825,45 @@ type TokenRecord struct {
 	TokenType   TokenType
 	ExpiresAt   time.Time
 	Revoked     bool
+	// FunctionExecutionID names the function execution an execution-scoped
+	// bot token (xwfp-) was issued for. It is empty for every other token.
+	// Messages posted and views opened with such a token belong to that
+	// execution, and the token expires the moment the execution ends.
+	FunctionExecutionID WorkflowStepID
+}
+
+// FileAccessGrant lets one user read a file that is shared nowhere they can
+// see. Slack grants an app read access to the files a member attaches in a
+// modal's file_input: the app's bot user receives the grant when the files
+// are handed to it, so files.info and url_private work with its bot token
+// while the file stays private to the member who uploaded it.
+type FileAccessGrant struct {
+	FileID      FileID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	GrantedAt   time.Time
+}
+
+// FunctionExecutionToken is the execution-scoped bot credential Slack sends
+// an app as bot_access_token with function_executed and with every
+// interaction that comes from what the execution posted or opened. It acts as
+// the app's bot, with the bot's scopes, for one execution only: it is minted
+// once per execution (a redelivered function_executed carries the same one),
+// sealed so the platform can hand it out again with later interactions, and
+// it stops authenticating when the execution completes, fails, or is
+// cancelled, or when the app loses its bot installation.
+type FunctionExecutionToken struct {
+	WorkspaceID WorkspaceID
+	ExecutionID WorkflowStepID
+	AppID       AppID
+	// CallbackID is the function's callback_id, which function_data names.
+	CallbackID string
+	UserID     UserID
+	BotID      BotID
+	Scopes     []string
+	// Ciphertext is the token sealed with the application credential key.
+	Ciphertext string
+	CreatedAt  time.Time
 }
 
 type AppTokenRecord struct {
@@ -3923,6 +3968,11 @@ type MessageStreamState struct {
 	LinkNames      bool   `json:"link_names,omitempty"`
 	UnfurlLinks    *bool  `json:"unfurl_links,omitempty"`
 	UnfurlMedia    *bool  `json:"unfurl_media,omitempty"`
+	// FunctionExecutionID records that the message was posted with a
+	// function execution's token. Like the bot identity it is provenance the
+	// posting credential supplies: block_actions from the message carry that
+	// execution's function_data.
+	FunctionExecutionID WorkflowStepID `json:"function_execution_id,omitempty"`
 }
 
 // PostingBot is the bot a message was posted as: the bot a bot token
@@ -3941,6 +3991,19 @@ func (m Message) PostingBot() BotID {
 		return ""
 	}
 	return state.BotID
+}
+
+// FunctionExecution is the function execution whose token posted the
+// message, or empty for every other message.
+func (m Message) FunctionExecution() WorkflowStepID {
+	if m.StreamState == "" {
+		return ""
+	}
+	var state MessageStreamState
+	if json.Unmarshal([]byte(m.StreamState), &state) != nil {
+		return ""
+	}
+	return state.FunctionExecutionID
 }
 
 // MessagePostRequest is the complete current chat.postMessage payload after
@@ -3977,6 +4040,9 @@ type MessagePostRequest struct {
 	// to a public channel without joining it. It never reaches a private
 	// channel or a direct conversation.
 	WritePublic bool
+	// FunctionExecutionID is the execution an execution-scoped token posted
+	// for (TokenRecord.FunctionExecutionID).
+	FunctionExecutionID WorkflowStepID
 }
 
 // MessagePatch preserves the difference between an omitted Slack field and a

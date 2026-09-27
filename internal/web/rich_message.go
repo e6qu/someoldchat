@@ -90,6 +90,10 @@ type messageActionView struct {
 	// "enter" (on_enter_pressed), "character" (on_character_entered), or
 	// "change" for a control with no text to type.
 	DispatchOn string
+	// FileTypes and MaxFiles are a file_input's filetypes (extensions,
+	// lower case, no dot; empty accepts any file) and max_files (1-10).
+	FileTypes []string
+	MaxFiles  int
 }
 
 type messageActionOptionView struct {
@@ -1198,10 +1202,19 @@ func actionElementList(value any, blockID string) []messageActionView {
 			action.Value = richTextPlain(element["initial_value"])
 			action.DispatchOn = textDispatchTriggers(element)
 		case "file_input":
-			// Attaching files to an app form is not supported by this client;
-			// the control is shown with that explanation rather than dropped.
+			// A modal's file_input: the member attaches files that stay
+			// private to them, and the app receives them with the submission.
 			action.Control = "file"
 			action.Text = textObjectValue(element["placeholder"])
+			action.MaxFiles = boundedInt(element["max_files"], 1, 10)
+			if action.MaxFiles == 0 {
+				action.MaxFiles = 10
+			}
+			for _, fileType := range stringList(element["filetypes"]) {
+				if fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), "."); fileType != "" {
+					action.FileTypes = append(action.FileTypes, fileType)
+				}
+			}
 		case "email_text_input":
 			action.Control = "email"
 			action.Text = textObjectValue(element["placeholder"])
