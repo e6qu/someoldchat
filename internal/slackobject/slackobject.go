@@ -80,7 +80,7 @@ func User(origin string, user domain.User, includeEmail bool) map[string]any {
 	return map[string]any{
 		"id": user.ID, "team_id": user.WorkspaceID, "name": user.Name, "real_name": user.RealName, "deleted": user.Deleted, "profile": profile,
 		"color": UserColor(user.ID),
-		"tz": tz, "tz_label": tzLabel, "tz_offset": tzOffset,
+		"tz":    tz, "tz_label": tzLabel, "tz_offset": tzOffset,
 		"is_admin": user.Role == domain.WorkspaceRoleAdmin || user.Role == domain.WorkspaceRoleOwner,
 		// A workspace here has owners but no distinguished primary owner, so
 		// each owner reports both, as admin.users.list always has.

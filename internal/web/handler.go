@@ -219,9 +219,9 @@ type messageView struct {
 	// private channel, "Direct message with Ana Lima" for a DM.
 	ChannelPrivate bool
 	DirectLabel    string
-	AuthorInitial string
-	AvatarURL     string
-	AvatarEmoji   string
+	AuthorInitial  string
+	AvatarURL      string
+	AvatarEmoji    string
 	// AuthorStatus is the author's current status emoji, resolved to a glyph,
 	// projected beside their name the way Slack shows it on every message. It is
 	// set only for a human author posting as themselves — an app message or one
@@ -868,8 +868,8 @@ type listData struct {
 	// table shows that column only then, so a list with its own Due column
 	// does not show two columns called Due.
 	HasDueDates bool
-	TodoMode bool
-	Items    []listItemView
+	TodoMode    bool
+	Items       []listItemView
 	// Columns are the list's declared structure. Empty for an unstructured
 	// list, which is what a list created without a schema is.
 	Columns []listColumnView
@@ -3569,7 +3569,7 @@ function open(section){if(!section||!section.querySelector('[data-block-editor]'
 function close(section,restore){var text=section.querySelector('[data-block-text]');if(restore&&text&&text.hasAttribute('data-original'))text.value=text.getAttribute('data-original');section.classList.remove('editing');var edit=section.querySelector('[data-block-edit]');if(restore&&edit)edit.focus()}
 function wrap(text,before,after,placeholder){var start=text.selectionStart,end=text.selectionEnd,value=text.value,chosen=value.slice(start,end)||placeholder;text.value=value.slice(0,start)+before+chosen+after+value.slice(end);text.setSelectionRange(start+before.length,start+before.length+chosen.length);text.focus()}
 function prefix(text,marker){var start=text.selectionStart,end=text.selectionEnd,value=text.value;var lineStart=value.lastIndexOf('\n',start-1)+1;var block=value.slice(lineStart,end);var count=0;var lines=block.split('\n').map(function(line){count++;var mark=typeof marker==='function'?marker(count):marker;return line.indexOf(mark)===0?line.slice(mark.length):mark+line});var replaced=lines.join('\n');text.value=value.slice(0,lineStart)+replaced+value.slice(end);text.setSelectionRange(lineStart,lineStart+replaced.length);text.focus()}
-function format(text,kind){if(kind==='bold')wrap(text,'**','**','bold text');else if(kind==='italic')wrap(text,'_','_','italic text');else if(kind==='strike')wrap(text,'~~','~~','text');else if(kind==='code')wrap(text,'`+"`"+`','`+"`"+`','code');else if(kind==='link'){var address=window.prompt('Link address','https://');if(!address)return;wrap(text,'[','](' + address + ')','link text')}else if(kind==='bullet')prefix(text,'- ');else if(kind==='number')prefix(text,function(n){return n+'. '});else if(kind==='check')prefix(text,'- [ ] ');else if(kind==='quote')prefix(text,'> ')}
+function format(text,kind){if(kind==='bold')wrap(text,'**','**','bold text');else if(kind==='italic')wrap(text,'_','_','italic text');else if(kind==='strike')wrap(text,'~~','~~','text');else if(kind==='code')wrap(text,'` + "`" + `','` + "`" + `','code');else if(kind==='link'){var address=window.prompt('Link address','https://');if(!address)return;wrap(text,'[','](' + address + ')','link text')}else if(kind==='bullet')prefix(text,'- ');else if(kind==='number')prefix(text,function(n){return n+'. '});else if(kind==='check')prefix(text,'- [ ] ');else if(kind==='quote')prefix(text,'> ')}
 document.addEventListener('click',function(event){var edit=event.target.closest('[data-block-edit]');if(edit){open(sectionOf(edit));return}var cancel=event.target.closest('[data-block-cancel]');if(cancel){close(sectionOf(cancel),true);return}var button=event.target.closest('[data-format]');if(button){var section=sectionOf(button);var text=section&&section.querySelector('[data-block-text]');if(text)format(text,button.getAttribute('data-format'))}});
 document.addEventListener('dblclick',function(event){var view=event.target.closest('[data-block-view]');if(view&&!event.target.closest('a'))open(sectionOf(view))});
 document.addEventListener('keydown',function(event){var text=event.target.closest?event.target.closest('[data-block-text]'):null;if(!text)return;var section=sectionOf(text);var primary=event.ctrlKey||event.metaKey;if(event.key==='Escape'){event.preventDefault();close(section,true)}else if(primary&&event.key==='Enter'){event.preventDefault();if(text.form.requestSubmit)text.form.requestSubmit(text.form.querySelector('button[value=save]'));else text.form.submit()}else if(primary&&(event.key==='b'||event.key==='B')){event.preventDefault();format(text,'bold')}else if(primary&&(event.key==='i'||event.key==='I')){event.preventDefault();format(text,'italic')}});
@@ -9961,14 +9961,14 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 		displayMessage := message
 		displayMessage.Text = resolveSlackUserMentions(message.Text, names)
 		view := messageView{
-			ID:            string(message.ID),
-			Anchor:        messageAnchor(message.ID),
-			AuthorName:    author,
-			AuthorInitial: initial(author),
-			Text:          message.Text,
-			DisplayText:   newRichMessageContentMarking(displayMessage, nil, terms).Text,
-			MachineTime:   message.CreatedAt.UTC().Format(time.RFC3339Nano),
-			DisplayTime:   formatTime(message.CreatedAt),
+			ID:             string(message.ID),
+			Anchor:         messageAnchor(message.ID),
+			AuthorName:     author,
+			AuthorInitial:  initial(author),
+			Text:           message.Text,
+			DisplayText:    newRichMessageContentMarking(displayMessage, nil, terms).Text,
+			MachineTime:    message.CreatedAt.UTC().Format(time.RFC3339Nano),
+			DisplayTime:    formatTime(message.CreatedAt),
 			Channel:        string(message.Conversation),
 			ChannelName:    channelName,
 			ChannelPrefix:  channelPrefix,

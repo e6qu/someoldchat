@@ -284,10 +284,14 @@ type authAdminProblem struct {
 
 var (
 	problemNotAuthenticated = authAdminProblem{Status: http.StatusUnauthorized, Code: "not_authenticated", Title: "Sign in required", Message: "Your session has ended. Sign in again to administer authorization."}
-	problemNotAuthorized    = authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Your workspace role does not administer authorization for this workspace."}
-	problemInvalidForm      = authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_form", Title: "Request rejected", Message: "The submitted form could not be read. Reload the page and try again."}
-	problemSessionMissing   = authAdminProblem{Status: http.StatusUnauthorized, Code: "session_unavailable", Title: "Sign in required", Message: "No browser session accompanied this request."}
-	problemRoleUnavailable  = authAdminProblem{Status: http.StatusServiceUnavailable, Code: "workspace_role_unavailable", Title: "Temporarily unavailable", Message: "Your workspace membership could not be read, so no administrative authority was granted."}
+	// The message is shared by every administration page (settings,
+	// analytics, audit, sign-in methods), so it names the requirement rather
+	// than one page's subject: it used to tell a member refused Workspace
+	// settings that their role "does not administer authorization".
+	problemNotAuthorized   = authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Only workspace owners and admins can open this page. Ask one of them if something here needs to change."}
+	problemInvalidForm     = authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_form", Title: "Request rejected", Message: "The submitted form could not be read. Reload the page and try again."}
+	problemSessionMissing  = authAdminProblem{Status: http.StatusUnauthorized, Code: "session_unavailable", Title: "Sign in required", Message: "No browser session accompanied this request."}
+	problemRoleUnavailable = authAdminProblem{Status: http.StatusServiceUnavailable, Code: "workspace_role_unavailable", Title: "Temporarily unavailable", Message: "Your workspace membership could not be read, so no administrative authority was granted."}
 )
 
 // writeAuthAdminProblem answers a rejected request in the shape the caller asked

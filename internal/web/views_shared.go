@@ -381,7 +381,7 @@ func (h Handler) buildProfileView(r *http.Request, principal auth.Principal, id 
 		StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), StatusText: user.Profile.StatusText,
 		IsBot: user.IsBot(), IsSelf: user.ID == principal.UserID,
 		CanMessage: principal.HasScope(auth.ScopeChannelsManage), CanEdit: principal.HasScope(auth.ScopeUsersWrite),
-		FilesURL:  "/app/files?" + url.Values{"from": {string(user.ID)}}.Encode(),
+		FilesURL: "/app/files?" + url.Values{"from": {string(user.ID)}}.Encode(),
 	}
 	// Search by the handle a member would type; an ID reference is the
 	// fallback for a handle search's own syntax cannot carry.
@@ -461,4 +461,4 @@ func (h Handler) buildProfileView(r *http.Request, principal auth.Principal, id 
 // avatarURL and isBot come from the same cached lookup as the name, so a view
 // that shows a member's face beside their name costs no extra read.
 func (n *userNames) avatarURL(id domain.UserID) string { return n.entry(id).avatarURL }
-func (n *userNames) isBot(id domain.UserID) bool      { return n.entry(id).bot }
+func (n *userNames) isBot(id domain.UserID) bool       { return n.entry(id).bot }
