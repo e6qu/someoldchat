@@ -14814,18 +14814,18 @@ func (s *Store) IsConversationMember(ctx context.Context, conversation domain.Co
 	return exists == 1, err
 }
 
-func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
-	return s.createMessage(ctx, "", message, event, idempotencyKey)
+func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string, companions ...events.Event) error {
+	return s.createMessage(ctx, "", message, event, idempotencyKey, companions)
 }
 
-func (s *Store) CreateScheduledMessagePost(ctx context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event) error {
+func (s *Store) CreateScheduledMessagePost(ctx context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event, companions ...events.Event) error {
 	if id == "" {
 		return store.InvalidArgument("scheduled message post requires a schedule")
 	}
-	return s.createMessage(ctx, id, message, event, string(id))
+	return s.createMessage(ctx, id, message, event, string(id), companions)
 }
 
-func (s *Store) createMessage(ctx context.Context, scheduledID domain.ScheduledMessageID, message domain.Message, event events.Event, idempotencyKey string) error {
+func (s *Store) createMessage(ctx context.Context, scheduledID domain.ScheduledMessageID, message domain.Message, event events.Event, idempotencyKey string, companions []events.Event) error {
 	// A message may not be stored at a finer resolution than its own timestamp
 	// can express, or a read cursor built from that timestamp can never cover it
 	// — and it may not be stored at an instant another message in the same
@@ -14924,9 +14924,11 @@ func (s *Store) createMessage(ctx context.Context, scheduledID domain.ScheduledM
 	if err := insertMessageActivity(ctx, tx, message); err != nil {
 		return err
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		_ = tx.Rollback()
-		return err
+	for _, journalled := range append([]events.Event{event}, companions...) {
+		if err := insertOutbox(ctx, tx, journalled); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -15471,7 +15473,7 @@ func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.C
 	return message, nil
 }
 
-func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event events.Event) error {
+func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event events.Event, companions ...events.Event) error {
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
@@ -15479,6 +15481,11 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	defer tx.Rollback()
 	if err := updateMessageTx(ctx, tx, message, event); err != nil {
 		return err
+	}
+	for _, companion := range companions {
+		if err := insertOutbox(ctx, tx, companion); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

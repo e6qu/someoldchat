@@ -1615,8 +1615,11 @@ type UnfurlRequest struct {
 	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	Timestamp      string                 `protobuf:"bytes,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	Unfurls        map[string]string      `protobuf:"bytes,5,rep,name=unfurls,proto3" json:"unfurls,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The app the calling token belongs to. An app may unfurl links on its own
+	// unfurl domains in a public channel its bot has not joined.
+	AppId         string `protobuf:"bytes,6,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UnfurlRequest) Reset() {
@@ -1682,6 +1685,13 @@ func (x *UnfurlRequest) GetUnfurls() map[string]string {
 		return x.Unfurls
 	}
 	return nil
+}
+
+func (x *UnfurlRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
 }
 
 type DeleteRequest struct {
@@ -3122,13 +3132,14 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\rmarkdown_text\x18\x06 \x01(\tR\fmarkdownText\x12\x16\n" +
 	"\x06chunks\x18\a \x01(\tR\x06chunks\x12\x16\n" +
 	"\x06blocks\x18\b \x01(\tR\x06blocks\x12\x1a\n" +
-	"\bmetadata\x18\t \x01(\tR\bmetadata\"\x99\x02\n" +
+	"\bmetadata\x18\t \x01(\tR\bmetadata\"\xb0\x02\n" +
 	"\rUnfurlRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\x12I\n" +
-	"\aunfurls\x18\x05 \x03(\v2/.sameoldchat.chat.v1.UnfurlRequest.UnfurlsEntryR\aunfurls\x1a:\n" +
+	"\aunfurls\x18\x05 \x03(\v2/.sameoldchat.chat.v1.UnfurlRequest.UnfurlsEntryR\aunfurls\x12\x15\n" +
+	"\x06app_id\x18\x06 \x01(\tR\x05appId\x1a:\n" +
 	"\fUnfurlsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x92\x01\n" +

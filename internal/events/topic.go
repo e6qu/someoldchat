@@ -156,6 +156,8 @@ var topicRules = []topicRule{
 		note: "the pinned message schema is exactly this variant (deleted_ts, subtype, hidden, previous_message), but previous_message needs the deleted text"},
 	{topic: "message.unfurled", slack: mapped("message", everySurface),
 		note: "pinned topic; the subtype and the attachment shape are not pinned"},
+	{topic: "link.shared", slack: translated("link_shared", appSurfaces, projectedLinkShared),
+		note: "pinned topic link.shared (x-scopes-required links:read); the record names only the message, and service.PrepareAppEvent projects the link_shared body per app, keeping the links the app's manifest unfurl_domains claim, so an unprojected record is withheld. An app event: RTM does not carry it"},
 	{topic: EphemeralMessageTopic, recipient: true, slack: mapped("message", SurfaceRTM),
 		note: "addressed to one user and carries that user's text, so only a transport with a recipient may carry it; the ephemeral subtype is not pinned"},
 	{topic: "message.scheduled",

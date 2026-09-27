@@ -29,3 +29,25 @@ func TestSQLiteUserReactionsPageByMessage(t *testing.T) {
 	}
 	storetest.CheckUserReactionsPageByMessage(t, s)
 }
+
+func TestSQLiteMessageCompanionEventsCommitWithTheMessage(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, memoryDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Kind: domain.ConversationTypePublic}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember(ctx, "C1", "U1"); err != nil {
+		t.Fatal(err)
+	}
+	storetest.CheckMessageCompanionEventsCommitWithTheMessage(t, s)
+}

@@ -453,8 +453,8 @@ func (r Remote) ShareUploadedFile(ctx context.Context, workspaceID domain.Worksp
 	return shared, nil
 }
 
-func (r Remote) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, unfurls map[string]string) (domain.Message, error) {
-	out, err := r.messages.Unfurl(ctx, &chatv1.UnfurlRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Unfurls: unfurls})
+func (r Remote) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, unfurls map[string]string) (domain.Message, error) {
+	out, err := r.messages.Unfurl(ctx, &chatv1.UnfurlRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Unfurls: unfurls, AppId: string(appID)})
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -8515,7 +8515,7 @@ func (s *Server) ShareUploadedFile(ctx context.Context, input *chatv1.ShareUploa
 }
 
 func (s *Server) Unfurl(ctx context.Context, input *chatv1.UnfurlRequest) (*chatv1.Message, error) {
-	value, err := s.implementation.Unfurl(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), input.GetUnfurls())
+	value, err := s.implementation.Unfurl(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), input.GetUnfurls())
 	if err != nil {
 		return nil, mapError(err)
 	}

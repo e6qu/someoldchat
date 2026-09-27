@@ -23,3 +23,20 @@ func TestUserReactionsPageByMessage(t *testing.T) {
 	}
 	storetest.CheckUserReactionsPageByMessage(t, s)
 }
+
+func TestMessageCompanionEventsCommitWithTheMessage(t *testing.T) {
+	s := New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Kind: domain.ConversationTypePublic}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("C1", "U1"); err != nil {
+		t.Fatal(err)
+	}
+	storetest.CheckMessageCompanionEventsCommitWithTheMessage(t, s)
+}

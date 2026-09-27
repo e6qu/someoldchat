@@ -8246,17 +8246,17 @@ func (s *Store) DirectParticipants(_ context.Context, conversation domain.Conver
 // persisted verbatim here, an empty attachments field read back as "" instead of
 // "[]", a duplicate message identifier silently inserted a second row, and a
 // message could reference a conversation that does not exist.
-func (s *Store) CreateMessage(_ context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+func (s *Store) CreateMessage(_ context.Context, message domain.Message, event events.Event, idempotencyKey string, companions ...events.Event) error {
 	message, err := normalizeMessage(message)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.createMessageLocked(message, event, idempotencyKey)
+	return s.createMessageLocked(message, event, idempotencyKey, companions...)
 }
 
-func (s *Store) CreateScheduledMessagePost(_ context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event) error {
+func (s *Store) CreateScheduledMessagePost(_ context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event, companions ...events.Event) error {
 	message, err := normalizeMessage(message)
 	if err != nil {
 		return err
@@ -8268,7 +8268,7 @@ func (s *Store) CreateScheduledMessagePost(_ context.Context, id domain.Schedule
 		scheduled.WorkspaceID != message.WorkspaceID || scheduled.Author != message.AuthorID || scheduled.Channel != message.Conversation {
 		return store.ErrNotFound
 	}
-	return s.createMessageLocked(message, event, string(id))
+	return s.createMessageLocked(message, event, string(id), companions...)
 }
 
 func normalizeMessage(message domain.Message) (domain.Message, error) {
@@ -8296,12 +8296,13 @@ func normalizeMessage(message domain.Message) (domain.Message, error) {
 	return message, nil
 }
 
-func (s *Store) createMessageLocked(message domain.Message, event events.Event, idempotencyKey string) error {
+func (s *Store) createMessageLocked(message domain.Message, event events.Event, idempotencyKey string, companions ...events.Event) error {
 	message, err := s.prepareMessageLocked(message, idempotencyKey)
 	if err != nil {
 		return err
 	}
 	s.commitMessageLocked(message, event, idempotencyKey)
+	s.outbox = append(s.outbox, companions...)
 	return nil
 }
 
@@ -11154,7 +11155,7 @@ func (s *Store) messageLocked(id domain.MessageID) (domain.Message, error) {
 	return domain.Message{}, store.ErrNotFound
 }
 
-func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event events.Event) error {
+func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event events.Event, companions ...events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	values := s.messages[message.Conversation]
@@ -11164,6 +11165,7 @@ func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event e
 			values[index] = message
 			s.messages[message.Conversation] = values
 			s.outbox = append(s.outbox, event)
+			s.outbox = append(s.outbox, companions...)
 			return nil
 		}
 	}

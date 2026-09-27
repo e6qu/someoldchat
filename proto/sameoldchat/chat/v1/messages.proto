@@ -194,6 +194,9 @@ message UnfurlRequest {
   string conversation_id = 3;
   string timestamp = 4;
   map<string, string> unfurls = 5;
+  // The app the calling token belongs to. An app may unfurl links on its own
+  // unfurl domains in a public channel its bot has not joined.
+  string app_id = 6;
 }
 
 message DeleteRequest {

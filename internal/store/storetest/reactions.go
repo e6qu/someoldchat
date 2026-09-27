@@ -16,7 +16,7 @@ import (
 // UserReactionRepository is the part of store.Store the reactions.list check
 // drives.
 type UserReactionRepository interface {
-	CreateMessage(context.Context, domain.Message, events.Event, string) error
+	CreateMessage(context.Context, domain.Message, events.Event, string, ...events.Event) error
 	AddReaction(context.Context, domain.Reaction, events.Event) error
 	ListUserReactions(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.UserReactionPage, error)
 }
