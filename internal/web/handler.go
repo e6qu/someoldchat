@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -405,13 +406,40 @@ type conversationView struct {
 	ID   string
 	Name string
 	// MarkedName is set only for a search result; see memberView.MarkedName.
-	MarkedName    template.HTML
-	Current       bool
-	UnreadCount   int
-	IsGroupDirect bool
-	RecentAt      time.Time
-	OpenUsers     string
-	HasDraft      bool
+	MarkedName template.HTML
+	Current    bool
+	// Kind is conversationKind: channel, private, dm or group. The icon and
+	// the accessible type are derived from it, so a private channel carries a
+	// lock everywhere it is drawn.
+	Kind         string
+	IsMember     bool
+	IsPrivate    bool
+	IsSelfDirect bool
+	Archived     bool
+	// UnreadCount is every unread message; IsUnread is whether there is any.
+	// Slack shows an unread channel in bold and gives it a count badge only
+	// for mentions and keywords (MentionCount); a DM's badge counts every
+	// unread message, because every one of them is addressed to the member.
+	UnreadCount       int
+	IsUnread          bool
+	MentionCount      int
+	Muted             bool
+	IsStarred         bool
+	NotificationLevel string
+	FollowEveryThread bool
+	MemberCount       int
+	Topic             string
+	SectionID         string
+	AvatarURL         string
+	Initial           string
+	Presence          string
+	IsGroupDirect     bool
+	RecentAt          time.Time
+	OpenUsers         string
+	HasDraft          bool
+	// CanLeave offers Leave channel (or Close conversation for a DM) in the
+	// row's menu. A required channel cannot be left.
+	CanLeave bool
 }
 
 type conversationDetailsView struct {
@@ -457,6 +485,25 @@ type conversationDetailsView struct {
 	RetentionSummary string
 	ConnectURL       string
 	ConnectHosts     []conversationView
+	// Kind is conversationKind, so the dialog's title carries the same icon
+	// as the sidebar row and the header.
+	Kind string
+	// CreatedBy and CreatedOn are the About tab's "Created by" row. Both are
+	// empty for a conversation created before its creation was recorded.
+	CreatedBy  string
+	CreatedOn  string
+	InitialTab string
+	// HasSettings says the Settings tab has something the reader may change.
+	HasSettings bool
+	CanMessage  bool
+	CanRemove   bool
+}
+
+// TabURL is the address of one details tab. The tabs are links so that the
+// dialog works without script: each tab is a server rendering of its own, and
+// the shell script only swaps panels in place when it is present.
+func (v conversationDetailsView) TabURL(tab string) string {
+	return conversationDetailsURL(domain.ConversationID(v.ID), tab)
 }
 
 type connectOrganizationView struct {
@@ -501,10 +548,31 @@ type pageData struct {
 	SidebarSections []sidebarSectionView
 	SectionOptions  []sidebarSectionOption
 	Directs         []conversationView
-	MoreChannelsURL string
-	Channel         string
-	ChannelName     string
-	ChannelPrefix   string
+	// Shell is the frame around the conversation; HomeSections is the Home
+	// pane beside the rail, in the order it is drawn.
+	Shell            shellView
+	HomeSections     []homeSectionView
+	SidebarTruncated bool
+	// Kind, KindText and KindNoun describe the open conversation for the
+	// header: its icon, its spoken type and the noun its menu items use.
+	Kind          string
+	KindText      string
+	KindNoun      string
+	IsChannelKind bool
+	ChannelTopic  string
+	FaceInitials  []string
+	// Current is the open conversation as the sidebar sees it: its muted,
+	// starred and notification state, which the header's menu acts on. It is
+	// the zero value in preview, where the member has no such state.
+	Current conversationView
+	// Tab is the header tab being shown: "" for Messages, "pins" for Pins.
+	Tab           string
+	Pins          messageList
+	Bookmarks     []domain.Bookmark
+	CanBookmark   bool
+	Channel       string
+	ChannelName   string
+	ChannelPrefix string
 	// ChannelStatusDisplay is the other person's current status emoji resolved
 	// to a glyph, shown beside a one-to-one DM's title the way it is shown beside
 	// their name everywhere else. Empty for a channel or a group DM, which are
@@ -526,17 +594,7 @@ type pageData struct {
 	Typing typingView
 	// Assistant is the state an assistant app has set on the open thread. It is
 	// empty for every thread no app has touched, which is almost all of them.
-	Assistant   assistantThreadView
-	ShowProfile bool
-	// ShowAdmin gates workspace administration; ShowAuthAdmin gates the
-	// identity-provider page, which needs a provider to have anything to say.
-	ShowAdmin     bool
-	ShowAuthAdmin bool
-	// Keyboard is the client's whole keyboard layer, rendered into the help
-	// dialog Command/Control+/ opens. It comes from keyboardSections so the
-	// dialog cannot describe a binding the page does not announce.
-	Keyboard       []keyboardSectionView
-	ReminderUnread bool
+	Assistant assistantThreadView
 	// CanvasURL opens this conversation's own canvas. Slack gives every channel
 	// one canvas of its own, which is not the same thing as a canvas shared
 	// into it; it is empty until somebody writes in it, and it is offered only
@@ -623,6 +681,8 @@ type userGroupView struct {
 }
 
 type membersData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell          shellView
 	Members        []memberView
 	Profile        domain.UserProfile
 	StatusDisplay  template.HTML
@@ -660,6 +720,8 @@ type scheduledStatusView struct {
 }
 
 type directMessagesData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell      shellView
 	Query      string
 	Recent     []conversationView
 	Members    []memberView
@@ -669,6 +731,8 @@ type directMessagesData struct {
 }
 
 type documentsData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell     shellView
 	Kind      string
 	Title     string
 	CSRFToken string
@@ -999,6 +1063,8 @@ type directExpansionReviewData struct {
 }
 
 type searchData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell                shellView
 	Query                string
 	Channel              string
 	Type                 string
@@ -1128,6 +1194,8 @@ type searchSuggestionsResponse struct {
 }
 
 type activityData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell       shellView
 	Channel     string
 	CSRFToken   string
 	Items       []activityItemView
@@ -1194,6 +1262,8 @@ type notificationExceptionView struct {
 }
 
 type notificationsData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell             shellView
 	Channel           string
 	CSRFToken         string
 	Level             string
@@ -1292,6 +1362,8 @@ type sentMessageView struct {
 }
 
 type draftsAndSentData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell     shellView
 	Channel   string
 	CSRFToken string
 	ActiveTab string
@@ -1320,6 +1392,8 @@ type laterItemView struct {
 }
 
 type laterData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell             shellView
 	Channel           string
 	CSRFToken         string
 	State             domain.SavedItemState
@@ -1466,58 +1540,50 @@ a{color:var(--action)}
 
 // themeBootstrap resolves the theme before the first paint, so a stored or
 // operating-system dark preference never flashes the light palette.
-const themeBootstrap = `<script>(function(){var root=document.documentElement;var dark=false;root.classList.add('js');try{var stored=localStorage.getItem('sameoldchat-theme');dark=stored?stored==='dark':!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)}catch(error){dark=false}root.setAttribute('data-theme',dark?'dark':'light');root.setAttribute('data-theme-explicit','')})();</script>`
+const themeBootstrap = `<script>(function(){var root=document.documentElement;var dark=false;root.classList.add('js');try{var stored=localStorage.getItem('sameoldchat-theme');dark=stored==='dark'||(stored!=='light'&&!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches))}catch(error){dark=false}root.setAttribute('data-theme',dark?'dark':'light');root.setAttribute('data-theme-explicit','')})();</script>`
 
 const themeToggleScript = `<script>(function(){var root=document.documentElement;var toggle=document.getElementById('theme-toggle');function apply(theme){root.setAttribute('data-theme',theme);root.setAttribute('data-theme-explicit','');if(toggle)toggle.setAttribute('aria-pressed',theme==='dark'?'true':'false')}apply(root.getAttribute('data-theme')==='dark'?'dark':'light');if(!toggle)return;toggle.addEventListener('click',function(){var next=root.getAttribute('data-theme')==='dark'?'light':'dark';apply(next);try{localStorage.setItem('sameoldchat-theme',next)}catch(error){}})})();</script>`
 
 const layoutMarkup = `<!doctype html>
-<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "title" .Page}}</title><style>` + sharedStyle + `</style>{{block "styles" .Page}}{{end}}` + themeBootstrap + `</head><body{{with .EventHead}} data-event-head="{{.}}"{{end}}>{{template "content" .Page}}` + themeToggleScript + `{{block "scripts" .Page}}{{end}}</body></html>`
+<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{{template "title" .Page}}</title><style>` + sharedStyle + `</style>{{block "styles" .Page}}{{end}}` + themeBootstrap + `</head><body{{with .EventHead}} data-event-head="{{.}}"{{end}}>{{template "content" .Page}}` + themeToggleScript + `{{block "scripts" .Page}}{{end}}</body></html>`
 
 // templateFunctions is deliberately tiny: it exists so a template cannot write
 // an aria-keyshortcuts value by hand. Every advertised chord is looked up in
 // keyboardSections, which is what keeps the announced binding, the documented
 // binding and the implemented binding the same thing.
-var templateFunctions = template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts, "emojiSkinTones": emojiSkinTones, "emojiCategoryTabs": emojiCategoryTabs}
+var templateFunctions = template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts, "icon": icon, "emojiSkinTones": emojiSkinTones, "emojiCategoryTabs": emojiCategoryTabs}
 
 var layoutTemplate = template.Must(template.New("layout").Funcs(templateFunctions).Parse(layoutMarkup))
 
+// pageMarkups is every document mustPage has built a template from. The
+// workspace policy is derived from it (workspaceContentSecurityPolicy()), so a
+// page cannot be added without its inline scripts being allowed: the policy
+// used to be a hand-kept list of script constants, and a page that was left off
+// it (the notification preferences) had its only script blocked by the browser.
+var pageMarkups []string
+
 func mustPage(markup string) *template.Template {
-	return template.Must(template.Must(layoutTemplate.Clone()).Parse(markup))
+	pageMarkups = append(pageMarkups, markup)
+	return template.Must(template.Must(template.Must(layoutTemplate.Clone()).Parse(shellPartials + dmPanePartial + composerPreferencesPartial)).Parse(markup))
 }
 
 const pageStyle = `<style>
 .shell{height:100vh;display:grid;grid-template-rows:52px minmax(0,1fr);grid-template-columns:minmax(0,1fr)}
 .topbar{background:var(--chrome-top);color:var(--on-accent);display:flex;align-items:center;gap:12px;padding:0 16px;box-shadow:none}
-.brand{font-weight:800;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .search{position:relative;flex:1 1 auto;min-width:0;max-width:560px;margin:auto;display:flex;align-items:center;gap:8px;background:#ffffff2b;border:1px solid #ffffff8a;border-radius:7px;padding:4px 10px}
 .search input[name=q]{flex:1 1 auto;min-width:0;border:0;outline:0;background:transparent;color:var(--on-accent)}
 .search input[name=q]::placeholder{color:#ffffffd6}
-.search-submit{border:0;background:transparent;color:var(--on-accent);font-weight:700;padding:2px 2px}
 .search-suggestions{position:absolute;z-index:30;top:calc(100% + 6px);left:0;right:0;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
 .search-suggestions[hidden]{display:none}.search-suggestion{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:8px 10px;border-radius:6px;color:var(--text);text-decoration:none}.search-suggestion:hover,.search-suggestion[aria-selected=true]{background:var(--hover)}.search-suggestion-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.search-suggestion-kind{color:var(--muted);font-size:12px;text-transform:capitalize}
 .top-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex:0 0 auto}
-.icon-button{border:0;background:transparent;color:var(--on-accent);border-radius:6px;padding:7px 9px;text-decoration:none}
-.icon-button:hover{background:#ffffff2b}
 .workspace{display:grid;grid-template-columns:256px minmax(0,1fr);min-height:0}
 .sidebar{background:var(--chrome);color:var(--on-accent);padding:8px 0 16px;display:flex;flex-direction:column;gap:2px;overflow:auto}
-.workspace-name{font-weight:800;padding:0 10px}
 .connect-invites{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}
 .connect-invites li{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:8px;border:1px solid var(--line);border-radius:8px}
 .connect-actions{display:flex;gap:8px}
 .connect-invite{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:8px}
 .connect-invite label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
-.workspace-switch summary{cursor:pointer;list-style:none}
-.workspace-switch summary::-webkit-details-marker{display:none}
-.workspace-switch summary::after{content:" ▾"}
-.workspace-list{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:2px}
-.workspace-list button{width:100%;text-align:left;border:0;border-radius:5px;background:transparent;color:var(--on-accent);padding:7px 10px;font:inherit}
-.workspace-list button:hover{background:#ffffff2b}
-.workspace-list small{display:block;color:#e8cbe9;font-weight:400}
-.workspace-current{display:block;padding:7px 10px;border-radius:5px;background:#ffffff2b;font-weight:700}
-.workspace-current small{display:block;color:#e8cbe9;font-weight:400}
-.workspace-sub{color:#e8cbe9;font-size:12px;padding:2px 10px}
 .side-section{display:grid;gap:2px}
-.side-label{color:var(--chrome-muted);font-size:13px;font-weight:700;padding:14px 16px 4px;text-transform:none;letter-spacing:0}
 .side-link{display:flex;align-items:center;gap:9px;width:100%;min-height:28px;padding:2px 16px;border:0;border-radius:0;background:transparent;color:var(--chrome-muted);font:inherit;line-height:1.3;text-align:left;text-decoration:none}
 .side-link:hover{background:#ffffff14;color:var(--on-accent)}
 .side-link[aria-current=page]{background:#1164a3;color:#fff}
@@ -1525,13 +1591,9 @@ const pageStyle = `<style>
 .side-icon{flex:0 0 auto;display:inline-block;min-width:1em;text-align:center}
 .side-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .side-empty{margin:0;padding:6px 10px;color:#e8cbe9;font-size:13px}
-.side-more{padding:6px 10px;color:var(--on-accent);font-size:13px}
 .badge{margin-left:auto;background:var(--on-accent);color:var(--accent);border-radius:12px;min-width:20px;text-align:center;padding:1px 6px;font-size:12px;font-weight:800}
 .draft-badge{margin-left:auto;color:#f3e3f4;font-size:11px;font-style:italic}
-.sidebar-bottom{margin-top:auto;border-top:1px solid #ffffff5c;padding-top:12px}
 .signed-in{display:flex;align-items:center;gap:9px;padding:4px 10px 10px;min-width:0}
-.signed-in-avatar{flex:0 0 auto;width:24px;height:24px;border-radius:5px;display:grid;place-items:center;background:#ffffff42;font-size:11px;font-weight:800;text-transform:uppercase;overflow:hidden}
-.signed-in-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
 .content{min-width:0;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "timeline" "composer"}
 .channel-header{grid-area:head;display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:12px 26px}
 .channel-title{margin:0;font-size:18px;font-weight:800}
@@ -1605,7 +1667,7 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .channel-overflow[open]>.channel-overflow-menu{position:absolute;z-index:7;right:0;top:30px;display:grid;gap:2px;min-width:200px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow);padding:5px}
 .channel-overflow-menu button{width:100%;border:0;border-radius:5px;background:transparent;color:var(--text);text-align:left;padding:6px 9px;cursor:pointer}
 .channel-overflow-menu button:hover,.channel-overflow-menu button:focus-visible{background:var(--hover)}
-.emoji-glyph,.custom-emoji{display:inline-block;width:20px;height:20px;object-fit:contain;vertical-align:-4px}.emoji-glyph,.standard-emoji{font-size:18px;line-height:20px;text-align:center}.reaction-emoji{display:inline-grid;min-width:20px;place-items:center}.reaction-picker-form{display:none}
+.custom-emoji{display:inline-block;width:20px;height:20px;object-fit:contain;vertical-align:-4px}.standard-emoji{font-size:18px;line-height:20px;text-align:center}.reaction-emoji{display:inline-grid;min-width:20px;place-items:center}.reaction-picker-form{display:none}
 .shortcut-browser{width:min(620px,calc(100vw - 28px));height:min(620px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.shortcut-browser::backdrop{background:#0008}.shortcut-browser-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.shortcut-browser-head label{display:grid;gap:5px;font-weight:800}.shortcut-browser-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.shortcut-browser-head button{align-self:end;border:0;background:transparent;color:var(--muted);font-size:22px}.shortcut-browser-results{display:grid;gap:4px;padding:10px;overflow:auto;max-height:calc(100% - 78px)}.shortcut-browser-results>button,.shortcut-browser-results form>button{display:grid;grid-template-columns:minmax(110px,auto) minmax(0,1fr);align-items:start;gap:12px;width:100%;border:0;border-radius:7px;background:transparent;color:var(--text);padding:10px;text-align:left}.shortcut-browser-results>button:hover,.shortcut-browser-results>button:focus-visible,.shortcut-browser-results form>button:hover,.shortcut-browser-results form>button:focus-visible{background:var(--hover)}.shortcut-browser-results span{display:grid;gap:2px}.shortcut-browser-results small{color:var(--muted)}.shortcut-browser-empty{padding:30px;text-align:center;color:var(--muted)}
 .clip-recorder{width:min(560px,calc(100vw - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:18px}.clip-recorder::backdrop{background:#0008}.clip-recorder h2{margin:0 0 6px;font-size:18px}.clip-recorder p{margin:0 0 14px;color:var(--muted)}.clip-recorder video{display:block;width:100%;max-height:min(360px,55vh);margin:0 0 14px;border-radius:9px;background:#111;object-fit:contain}.clip-recorder-actions{display:flex;justify-content:flex-end;gap:8px}.clip-recorder-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel);color:var(--text);padding:8px 12px;font-weight:800}.clip-recorder-actions .clip-stop{border-color:var(--danger);background:var(--danger);color:var(--on-strong)}
 .conversation-switcher{width:min(560px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}
@@ -1624,9 +1686,7 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 
 const workspaceRefinements = `<style>
 .topbar{height:44px;padding:0 10px;border-bottom:0;box-shadow:none}
-.brand{max-width:220px}
 .search{height:34px;max-width:680px;padding:3px 8px;background:#ffffff20}
-.search-icon{width:16px;height:16px;flex:0 0 auto}
 .keyboard-help{width:min(720px,calc(100vw - 28px));max-height:min(680px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.keyboard-help::backdrop{background:#0008}
 .keyboard-help-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,220px) auto;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}.keyboard-help-head h2{margin:0;font-size:1.1rem}.keyboard-help-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:8px 10px}.keyboard-help-head button{border:0;background:transparent;color:var(--muted);font-size:22px;line-height:1}
 .keyboard-help-body{padding:6px 16px 16px;overflow:auto;max-height:calc(min(680px,100vh - 28px) - 74px)}.keyboard-help-body h3{margin:16px 0 6px;font-size:.82rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}.keyboard-help-body dl{display:grid;gap:2px;margin:0}
@@ -1647,12 +1707,8 @@ const workspaceRefinements = `<style>
 .assistant-prompts form{margin:0}
 .assistant-prompt{display:block;width:100%;min-height:32px;padding:7px 10px;border:1px solid var(--field-line);border-radius:7px;background:var(--panel-strong);color:var(--text);text-align:left;font-weight:600}
 .assistant-prompt:hover{background:var(--hover)}
-.search-shortcut{border:1px solid #ffffff66;border-radius:4px;padding:0 5px;color:#fff;font-size:11px;line-height:20px;background:#0000001f}
-.top-profile{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:7px;background:#ffffff35;font-weight:800;text-transform:uppercase}
 .workspace{grid-template-columns:260px minmax(0,1fr)}
 .sidebar{padding:8px 0 16px;background:var(--chrome)}
-.workspace-name{font-size:17px;line-height:1.25}
-.workspace-sub{display:flex;align-items:center;gap:6px}
 .presence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#2eb67d;box-shadow:0 0 0 2px #ffffff2e}
 .side-link{min-height:28px}
 .side-link[aria-current=page]{background:#1264a3;color:#fff}
@@ -1660,10 +1716,7 @@ const workspaceRefinements = `<style>
 .channel-header{min-height:52px;padding:8px 20px;background:var(--panel-strong)}
 .channel-identity{display:flex;align-items:center;gap:10px;min-width:0}
 .channel-title{display:flex;align-items:center;gap:4px;white-space:nowrap}
-.channel-copy{min-width:0}
 .channel-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:680px}
-.membership-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
-.membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 /* Quiet controls. Slack's channel header carries the conversation — its name,
    its topic, who is in it — and keeps its controls light so they do not compete
    with it. These were bordered, bold and filled, which made five of them read
@@ -1782,15 +1835,6 @@ const workspaceRefinements = `<style>
 .message-actions details{display:inline-block;position:relative}
 .message-actions summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none}
 .message-actions summary::-webkit-details-marker{display:none}
-.new-channel{margin:4px 8px 0}
-.new-channel summary{cursor:pointer;color:#f5eaf6;font-size:13px;font-weight:700;list-style:none;padding:5px 2px}
-.new-channel summary::-webkit-details-marker{display:none}
-.new-channel[open]{padding:8px;border:1px solid #ffffff4a;border-radius:6px;background:#0000001c}
-.new-channel[open] summary{margin-bottom:7px}
-.new-channel label{display:grid;gap:4px;color:#f5eaf6;font-size:12px;margin:6px 0}
-.new-channel input[type=text]{min-width:0;width:100%;border:1px solid #ffffff8a;border-radius:4px;background:#ffffff1f;color:#fff;padding:6px 7px}
-.new-channel .privacy{display:flex;grid-template-columns:none;align-items:center;gap:6px}
-.new-channel button{width:100%;border:0;border-radius:5px;background:#fff;color:var(--accent);font-weight:800;padding:6px 9px}
 .side-section-custom{margin-top:6px}.side-section-head{display:flex;align-items:center;gap:2px}
 .section-collapse{flex:1;min-width:0;margin:0}.section-collapse button{width:100%;text-align:left;border:0;background:transparent;color:#f5eaf6;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:5px 8px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .side-row{display:flex;align-items:center}.side-row .side-link{flex:1;min-width:0}
@@ -1804,21 +1848,14 @@ const workspaceRefinements = `<style>
 .conversation-gate strong{display:block;margin-bottom:2px}
 .conversation-gate p{margin:0;color:var(--muted);font-size:13px}
 .join-button{border:0;border-radius:6px;background:var(--ok);color:var(--on-strong);font-weight:800;padding:8px 18px;white-space:nowrap}
-.conversation-details-backdrop{position:fixed;inset:0;z-index:18;display:grid;place-items:center;padding:24px;background:#0009}
 .conversation-details{width:min(720px,calc(100vw - 32px));max-height:min(820px,calc(100vh - 32px));overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);box-shadow:0 24px 80px #0007}
 .conversation-details-head{position:sticky;top:0;z-index:1;display:flex;align-items:flex-start;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line);background:var(--panel-strong)}
 .conversation-details-head h2{margin:0;font-size:21px}.conversation-details-head p{margin:3px 0 0;color:var(--muted);font-size:13px}
 .conversation-details-close{margin-left:auto;border-radius:6px;padding:5px 9px;color:var(--muted);font-size:22px;line-height:1;text-decoration:none}.conversation-details-close:hover{background:var(--hover);color:var(--text)}
-.conversation-details-body{display:grid;gap:20px;padding:18px 20px}
-.conversation-details-tabs{display:flex;gap:16px;border-bottom:1px solid var(--line);padding-bottom:10px}.conversation-details-tabs a{color:var(--text);font-weight:800;text-decoration:none}.conversation-details-tabs a:hover{text-decoration:underline}
-.conversation-details-section{display:grid;gap:10px}.conversation-details-section h3{margin:0;font-size:15px}
-.conversation-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
-.conversation-facts div{padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:var(--panel)}.conversation-facts dt{color:var(--muted);font-size:12px;font-weight:700}.conversation-facts dd{margin:3px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
-.conversation-settings{display:grid;gap:10px}.conversation-setting{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:9px}.conversation-setting label{display:grid;gap:4px;font-size:12px;font-weight:700}
+.conversation-setting{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:9px}.conversation-setting label{display:grid;gap:4px;font-size:12px;font-weight:700}
 .conversation-setting input,.conversation-setting textarea,.conversation-setting select{width:100%;min-width:0;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 9px;font:inherit}.conversation-setting textarea{min-height:70px;resize:vertical}
-.conversation-setting button,.conversation-danger button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:8px 12px;font-weight:800}.conversation-setting button:hover{background:var(--hover)}
+.conversation-setting button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:8px 12px;font-weight:800}.conversation-setting button:hover{background:var(--hover)}
 .conversation-members{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px;margin:0;padding:0;list-style:none}.conversation-member{display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--line);border-radius:7px}.conversation-member-avatar{width:26px;height:26px;display:grid;place-items:center;border-radius:5px;background:var(--hover);font-size:11px;font-weight:800}.conversation-member-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.conversation-member-status{display:inline-flex;align-items:center}.conversation-member-status .standard-emoji,.conversation-member-status .custom-emoji{width:16px;height:16px;font-size:15px;line-height:16px}
-.conversation-danger{display:flex;flex-wrap:wrap;gap:8px;padding-top:16px;border-top:1px solid var(--line)}.conversation-danger form{display:inline-flex}.conversation-danger button{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 50%,var(--line))}
 .conversation-details-note{margin:0;color:var(--muted);font-size:13px}
 .modal-backdrop{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:24px;background:#0009}
 .app-modal{display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(620px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 32px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);box-shadow:0 24px 80px #0007;overflow:hidden}
@@ -1855,7 +1892,6 @@ const workspaceRefinements = `<style>
    these lines too. */
 .system-message>.message-body{grid-column:2}
 @media(max-width:800px){
-.brand{display:none}
 html.js .nav-toggle{display:grid;place-items:center;flex:0 0 auto;width:34px;height:34px;border:1px solid #ffffff8a;border-radius:6px;background:transparent;color:var(--on-accent);font-size:21px;line-height:1}
 html.js .nav-toggle:hover{background:#ffffff2b}
 html.js .nav-scrim{position:fixed;inset:48px 0 0;z-index:7;border:0;background:#0008}
@@ -1863,24 +1899,16 @@ html.js .nav-scrim.is-open{display:block}
 .workspace{grid-template-columns:minmax(0,1fr)}
 html.js .sidebar{position:fixed;inset:48px auto 0 0;z-index:8;width:min(320px,calc(100vw - 48px));padding:12px 8px;transform:translateX(-105%);transition:transform .18s ease;box-shadow:var(--shadow)}
 html.js .sidebar.is-open{transform:translateX(0)}
-.workspace-name{display:block}
-.workspace-sub{display:flex}
-.side-label,.side-text,.signed-in-name{display:block}
+.side-text{display:block}
 .side-link{justify-content:flex-start;padding:7px 10px}
-.side-more{padding:6px 10px;text-align:left;font-size:13px}
 .side-icon{font-size:inherit}
-.search-shortcut{display:none}
-.search-submit{display:none}
 .channel-header{padding-left:12px;padding-right:12px}
-.membership-pill{display:none}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
-.new-channel{position:relative;margin-left:4px;margin-right:4px}
-.conversation-details-backdrop{padding:0;align-items:end}.conversation-details{width:100%;max-height:calc(100vh - 48px);border-radius:12px 12px 0 0}.conversation-facts{grid-template-columns:minmax(0,1fr)}.conversation-setting{grid-template-columns:minmax(0,1fr)}.conversation-setting button{width:100%}
+.conversation-details{width:100%;max-height:calc(100vh - 48px);border-radius:12px 12px 0 0}.conversation-setting{grid-template-columns:minmax(0,1fr)}.conversation-setting button{width:100%}
 .modal-backdrop{padding:0;align-items:end}.app-modal{width:100%;max-height:calc(100vh - 48px);border-radius:12px 12px 0 0}
 }
-@media(hover:none){
-}
+
 </style>`
 
 const attachmentPartial = `{{define "attachment"}}
@@ -1898,189 +1926,25 @@ const attachmentPartial = `{{define "attachment"}}
 {{end}}`
 
 var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
-{{define "styles"}}` + pageStyle + workspaceRefinements + messageStyle + composerStyle + `{{end}}
-{{define "scripts"}}` + progressiveEnhancementScript + messageScript + composerScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + `{{end}}
+{{define "styles"}}` + pageStyle + workspaceRefinements + messageStyle + composerStyle + shellStyle + conversationShellStyle + `{{end}}
+{{define "scripts"}}` + shellScript + progressiveEnhancementScript + messageScript + composerScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
-<div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}"{{if .CanonicalURL}} data-canonical-url="{{.CanonicalURL}}"{{end}}>
-  <header class="topbar">
-    <button class="nav-toggle" id="nav-toggle" type="button" aria-controls="workspace-sidebar" aria-expanded="false" aria-label="Open navigation"><span aria-hidden="true">☰</span></button>
-    <span class="brand">{{.WorkspaceName}}</span>
-    <form class="search" method="get" action="/app/search" role="search" aria-label="Search {{.WorkspaceName}}">
-      <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
-      <label class="visually-hidden" for="workspace-search">Search {{.WorkspaceName}}</label>
-      <input id="workspace-search" type="search" name="q" maxlength="500" placeholder="Search {{.WorkspaceName}}" role="combobox" {{ariaKeyshortcuts "Search the workspace"}} autocomplete="off" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required>
-      <span class="search-shortcut" aria-hidden="true">⌘/Ctrl G</span>
-      <button class="search-submit" type="submit">Search</button>
-      <input type="hidden" name="channel" value="{{.Channel}}">
-    </form>
-    <div class="top-actions">
-      <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button>
-      {{if .ShowProfile}}<a class="icon-button top-profile" href="/me" aria-label="My profile">{{.UserInitial}}</a>{{end}}
-    </div>
-  </header>
-  <dialog class="conversation-switcher" id="conversation-switcher" aria-labelledby="conversation-switcher-title">
-    <div class="switcher-head"><label><span class="visually-hidden" id="conversation-switcher-title">Jump to a conversation</span><input id="conversation-switcher-query" type="search" autocomplete="off" placeholder="Jump to a conversation"></label><button class="switcher-close" type="button" aria-label="Close conversation switcher">×</button></div>
-    <ul class="switcher-results" id="conversation-switcher-results">{{range .Channels}}<li><a href="/app?channel={{.ID}}" data-conversation-name="{{.Name}}"><span aria-hidden="true">#</span><span>{{.Name}}</span></a></li>{{end}}{{range .Directs}}<li><a href="/app?channel={{.ID}}" data-conversation-name="{{.Name}}"><span aria-hidden="true">@</span><span>{{.Name}}</span></a></li>{{end}}</ul>
-  </dialog>
+<div class="shell" data-channel="{{.Channel}}" data-conversation-open="{{if or .IsMember .Directs}}true{{else}}false{{end}}" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}"{{if .CanonicalURL}} data-canonical-url="{{.CanonicalURL}}"{{end}}>
+  {{template "shell-top" .Shell}}
   {{template "message-dialogs" .}}
   {{if .CanPost}}{{template "composer-dialogs" .ComposerDialogs}}{{end}}
-  <dialog class="keyboard-help" id="keyboard-help" aria-labelledby="keyboard-help-title">
-    <div class="keyboard-help-head">
-      <h2 id="keyboard-help-title">Keyboard shortcuts</h2>
-      <label class="visually-hidden" for="keyboard-help-query">Search shortcuts</label>
-      <input id="keyboard-help-query" type="search" autocomplete="off" maxlength="80" placeholder="Search shortcuts">
-      <button id="keyboard-help-close" type="button" aria-label="Close keyboard shortcuts">&times;</button>
-    </div>
-    <div class="keyboard-help-body">{{range .Keyboard}}
-      <section data-keyboard-section aria-labelledby="keyboard-section-{{.Title}}">
-        <h3 id="keyboard-section-{{.Title}}">{{.Title}}</h3>
-        <dl>{{range .Shortcuts}}
-          <div data-keyboard-row data-keyboard-search="{{.Search}}">
-            <dt>{{.Action}}{{if .Note}}<small>{{.Note}}</small>{{end}}</dt>
-            <dd><kbd data-keyboard-apple>{{.Apple}}</kbd><kbd data-keyboard-other>{{.Other}}</kbd></dd>
-          </div>{{end}}
-        </dl>
-      </section>{{end}}
-    </div>
-    <p class="keyboard-help-empty" id="keyboard-help-empty" role="status" hidden>No matching shortcuts.</p>
-  </dialog>
   <div class="workspace">
-    <aside class="sidebar" id="workspace-sidebar">
-      <div>
-        {{if .Workspaces}}<details class="workspace-switch">
-          <summary class="workspace-name">{{.WorkspaceName}}</summary>
-          <form method="post" action="/app/workspace/switch">
-            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-            <ul class="workspace-list" aria-label="Your workspaces">{{range .Workspaces}}<li>{{if .Current}}<span class="workspace-current">{{.Name}} <small>{{.Role}} · you are here</small></span>{{else}}<button type="submit" name="workspace_id" value="{{.ID}}">{{.Name}} <small>{{.Role}}</small></button>{{end}}</li>{{end}}</ul>
-          </form>
-        </details>{{else}}<div class="workspace-name">{{.WorkspaceName}}</div>{{end}}
-        <div class="workspace-sub"><span class="presence-dot" aria-hidden="true"></span>{{.Username}}</div>
-      </div>
-      <nav class="side-section" aria-label="Workspace navigation">
-        <div class="side-label">Workspace</div>
-        <a class="side-link" href="/app/unreads?channel={{.Channel}}" aria-label="Unreads" {{ariaKeyshortcuts "Unreads"}}><span class="side-icon" aria-hidden="true">◍</span><span class="side-text">Unreads</span></a>
-        <a class="side-link" href="/app/threads?channel={{.Channel}}" aria-label="Threads" {{ariaKeyshortcuts "Threads"}}><span class="side-icon" aria-hidden="true">⌸</span><span class="side-text">Threads</span></a>
-        <a class="side-link" id="activity-link" href="/app/activity?channel={{.Channel}}" aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Activity"}}><span class="side-icon" aria-hidden="true">◉</span><span class="side-text">Activity</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
-        <a class="side-link" href="/app/notifications?channel={{.Channel}}" aria-label="Notification preferences"><span class="side-icon" aria-hidden="true">◌</span><span class="side-text">Notifications</span></a>
-        <a class="side-link" href="/app/later?channel={{.Channel}}" aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Later"}}><span class="side-icon" aria-hidden="true">▱</span><span class="side-text">Later</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
-        {{if .CanSchedule}}<a class="side-link" href="/app/drafts?channel={{.Channel}}" aria-label="Drafts and sent"><span class="side-icon" aria-hidden="true">◷</span><span class="side-text">Drafts &amp; sent</span></a>{{end}}
-        <a class="side-link" href="/app/dms" aria-label="Direct messages" {{ariaKeyshortcuts "Direct messages"}}><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">DMs</span></a>
-        <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
-        <a class="side-link" href="/app/remote-files?channel={{.Channel}}" aria-label="Remote files"><span class="side-icon" aria-hidden="true">⇗</span><span class="side-text">Remote files</span></a>
-        <a class="side-link" href="/app/canvases" aria-label="Canvases"><span class="side-icon" aria-hidden="true">▤</span><span class="side-text">Canvases</span></a>
-        <a class="side-link" href="/app/lists" aria-label="Lists"><span class="side-icon" aria-hidden="true">☷</span><span class="side-text">Lists</span></a>
-        <a class="side-link" href="/app/workflows" aria-label="Workflows"><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">Workflows</span></a>
-        <a class="side-link" href="/app/apps?channel={{.Channel}}" aria-label="Apps"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">Apps</span></a>
-        <a class="side-link" href="/app/developer/apps" aria-label="Developer apps"><span class="side-icon" aria-hidden="true">⌘</span><span class="side-text">Developer apps</span></a>
-        {{if .ShowAdmin}}<a class="side-link" href="/app/admin/settings" aria-label="Workspace settings"><span class="side-icon" aria-hidden="true">⚙</span><span class="side-text">Workspace settings</span></a>{{end}}
-        {{if .ShowAuthAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">A</span><span class="side-text">Authorization</span></a>{{end}}
-      </nav>
-      {{if .Apps}}<nav class="side-section" aria-label="Apps"><div class="side-label">Apps</div>{{range .Apps}}<a class="side-link" href="/app/apps/{{.ID}}?channel={{$.Channel}}"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">{{.Name}}</span></a>{{end}}</nav>{{end}}
-      {{range .SidebarSections}}
-      <nav class="side-section side-section-custom" aria-label="{{.Name}}">
-        <div class="side-section-head">
-          <form class="section-collapse" method="post" action="/app/sidebar/sections/collapse?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><input type="hidden" name="collapsed" value="{{if .Collapsed}}false{{else}}true{{end}}"><button type="submit" aria-expanded="{{if .Collapsed}}false{{else}}true{{end}}" aria-label="{{if .Collapsed}}Expand{{else}}Collapse{{end}} {{.Name}}"><span aria-hidden="true">{{if .Collapsed}}▸{{else}}▾{{end}}</span> {{.Name}}</button></form>
-          <details class="section-menu"><summary aria-label="Manage {{.Name}}"><span aria-hidden="true">⋯</span></summary>
-            {{if .CanUp}}<form method="post" action="/app/sidebar/sections/move?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><input type="hidden" name="direction" value="up"><button type="submit">Move up</button></form>{{end}}
-            {{if .CanDown}}<form method="post" action="/app/sidebar/sections/move?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><input type="hidden" name="direction" value="down"><button type="submit">Move down</button></form>{{end}}
-            <form method="post" action="/app/sidebar/sections/rename?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><label>Rename<input type="text" name="name" maxlength="80" value="{{.Name}}" required></label><button type="submit">Save name</button></form>
-            <form method="post" action="/app/sidebar/sections/notify?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><label>Notify me about<select name="level"><option value="inherit"{{if or (eq .NotificationLevel "inherit") (eq .NotificationLevel "")}} selected{{end}}>Workspace default</option><option value="all"{{if eq .NotificationLevel "all"}} selected{{end}}>All new messages</option><option value="mentions"{{if eq .NotificationLevel "mentions"}} selected{{end}}>Mentions</option><option value="mute"{{if eq .NotificationLevel "mute"}} selected{{end}}>Nothing</option></select></label><button type="submit">Save</button></form>
-            <form method="post" action="/app/sidebar/sections/delete?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><button type="submit">Delete section</button></form>
-          </details>
-        </div>
-        {{if not .Collapsed}}{{range .Channels}}
-        <div class="side-row">
-          <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}{{if .HasDraft}}, has a draft{{end}}"><span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>{{if .HasDraft}}<span class="draft-badge" aria-hidden="true">Draft</span>{{else if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>
-          <details class="channel-menu"><summary aria-label="Move {{.Name}} to a section"><span aria-hidden="true">⋯</span></summary><form method="post" action="/app/sidebar/sections/assign?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="conversation" value="{{.ID}}">{{range $.SectionOptions}}<button type="submit" name="section" value="{{.ID}}">Move to {{.Name}}</button>{{end}}<button type="submit" name="section" value="">Remove from section</button></form></details>
-        </div>
-        {{else}}<p class="side-empty">No channels here yet.</p>{{end}}{{end}}
-      </nav>
-      {{end}}
-      <nav class="side-section" aria-label="Channels">
-        <div class="side-label">Channels</div>
-        {{range .Channels}}
-        <div class="side-row">
-          <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}{{if .HasDraft}}, has a draft{{end}}"><span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>{{if .HasDraft}}<span class="draft-badge" aria-hidden="true">Draft</span>{{else if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>
-          {{if $.SectionOptions}}<details class="channel-menu"><summary aria-label="Move {{.Name}} to a section"><span aria-hidden="true">⋯</span></summary><form method="post" action="/app/sidebar/sections/assign?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="conversation" value="{{.ID}}">{{range $.SectionOptions}}<button type="submit" name="section" value="{{.ID}}">Move to {{.Name}}</button>{{end}}</form></details>{{end}}
-        </div>
-        {{else}}<p class="side-empty">No channels available.</p>{{end}}
-        {{if .CanCreate}}
-        <details class="new-channel">
-          <summary>＋ Add channel</summary>
-          <form method="post" action="/app/conversation/create" hx-post="/app/conversation/create">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <label for="new-channel-name">Channel name<input id="new-channel-name" type="text" name="name" maxlength="80" placeholder="project-name" required></label>
-            <label class="privacy"><input type="checkbox" name="is_private" value="true"> Private channel</label>
-            <button type="submit">Create</button>
-          </form>
-        </details>
-        {{end}}
-        <details class="new-channel new-section">
-          <summary>＋ New section</summary>
-          <form method="post" action="/app/sidebar/sections/create?channel={{.Channel}}">
-            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-            <label for="new-section-name">Section name<input id="new-section-name" type="text" name="name" maxlength="80" placeholder="Priorities" required></label>
-            <button type="submit">Create section</button>
-          </form>
-        </details>
-      </nav>
-      {{if .Directs}}
-      <nav class="side-section" aria-label="Direct messages">
-        <div class="side-label">Direct messages</div>
-        {{range .Directs}}
-        <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}{{if .HasDraft}}, has a draft{{end}}">
-          <span class="side-icon" aria-hidden="true">@</span><span class="side-text">{{.Name}}</span>
-          {{if .HasDraft}}<span class="draft-badge" aria-hidden="true">Draft</span>{{else if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}
-        </a>
-        {{end}}
-      </nav>
-      {{end}}
-      {{if .MoreChannelsURL}}<a class="side-more" href="{{.MoreChannelsURL}}">More conversations</a>{{end}}
-      <div class="sidebar-bottom">
-        <div class="signed-in" data-shauth-user="{{.Username}}"><span class="signed-in-avatar" aria-hidden="true">{{.UserInitial}}</span><span class="signed-in-name">{{.Username}}</span></div>
-        <form method="post" action="/app/session/revoke">
-          <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-          <button class="side-link" type="submit" data-shauth-sign-out aria-label="Sign out"><span class="side-icon" aria-hidden="true">→</span><span class="side-text">Sign out</span></button>
-        </form>
-      </div>
-    </aside>
+    {{template "shell-rail" .Shell}}
+    <aside class="sidebar" id="workspace-sidebar" aria-label="{{if eq .Shell.Destination "dms"}}Direct messages{{else}}{{.Shell.WorkspaceName}}{{end}}">{{if eq .Shell.Destination "dms"}}{{template "dm-pane" .}}{{else}}{{template "home-pane" .}}{{end}}</aside>
     <button class="nav-scrim" id="nav-scrim" type="button" aria-label="Close navigation" tabindex="-1"></button>
     <main class="content" id="content">
-      <header class="channel-header">
-        <div class="channel-identity">
-          <div class="channel-copy">
-            <h1 class="channel-title">{{if .ChannelPrefix}}{{.ChannelPrefix}} {{end}}{{.ChannelName}}{{if .ChannelStatusDisplay}}<span class="channel-title-status"{{if .ChannelStatusText}} title="{{.ChannelStatusText}}"{{end}}>{{.ChannelStatusDisplay}}</span>{{end}}</h1>
-            <p class="channel-meta">{{if .MemberCount}}<a class="member-count" href="/app?channel={{.Channel}}&amp;details=1" aria-label="{{.MemberCount}} member{{if ne .MemberCount 1}}s{{end}} — open the member list">{{.MemberCount}} member{{if ne .MemberCount 1}}s{{end}}</a> · {{end}}{{.ChannelMeta}}</p>
-          </div>
-          <span class="membership-pill{{if .IsMember}} joined{{end}}">{{if .IsMember}}Joined{{else}}Not joined{{end}}</span>
-        </div>
-        <div class="channel-actions">
-          <p class="action-feedback" id="action-feedback" role="alert" tabindex="-1" hidden></p>
-          {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-          <details class="channel-overflow"><summary role="button" aria-label="More channel actions">⋮</summary>
-            <div class="channel-overflow-menu" aria-label="Channel actions">
-              {{if .MarkReadURL}}
-              <form class="inline-form" id="mark-read" method="post" action="{{.MarkReadURL}}" hx-post="{{.MarkReadURL}}" data-quiet="true">
-                <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="ts" value="{{.MarkReadTimestamp}}">
-                <button type="submit">Mark as read</button>
-              </form>
-              {{end}}
-              <form class="inline-form" id="mark-all-read" method="post" action="/app/read/all?channel={{.Channel}}">
-                <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-                <button type="submit" {{ariaKeyshortcuts "Mark every conversation read"}}>Mark all as read</button>
-              </form>
-              <button type="button" id="open-keyboard-help" aria-haspopup="dialog" aria-controls="keyboard-help" {{ariaKeyshortcuts "Keyboard shortcuts"}}>Keyboard shortcuts</button>
-            </div>
-          </details>
-          {{if .CanvasURL}}<a href="{{.CanvasURL}}" aria-label="Open the canvas for this conversation">Canvas</a>{{end}}
-          <a href="/app?channel={{.Channel}}&amp;details=1" aria-label="Open conversation details" {{ariaKeyshortcuts "Conversation details"}}>Details</a>
-        </div>
-      </header>
+      {{template "channel-header" .}}
       <div class="timeline-wrap">
         {{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}
         <div id="huddle" data-fragment="{{.HuddleURL}}" data-live="true">{{template "huddle" .Huddle}}</div>
-        <section id="timeline" class="timeline" tabindex="0" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>
+        {{if eq .Tab "pins"}}<section id="pins" class="timeline pins-view" tabindex="0" aria-label="Pinned messages">{{if .Pins.Messages}}{{template "messages" .Pins}}{{else}}<div class="empty"><strong>No pinned messages yet</strong><p>Pin a message from its More actions menu to keep it here for everyone in {{.ChannelPrefix}}{{.ChannelName}}.</p></div>{{end}}</section>
+        {{else}}<section id="timeline" class="timeline" tabindex="0" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>{{end}}
         {{if .NewerURL}}<p class="pager pager-newer"><a href="{{.NewerURL}}">Show newer messages</a></p>{{end}}
         {{if .LatestURL}}<p class="pager pager-latest"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}
       </div>
@@ -2104,7 +1968,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
       {{end}}
       <div class="composer-wrap channel-composer-wrap">
         <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
-        {{if .CanPost}}{{template "composer" .Composer}}
+        {{if eq .Tab "pins"}}{{else if .CanPost}}{{template "composer" .Composer}}
         {{else}}
         <section class="conversation-gate" aria-label="Conversation access">
           <div class="conversation-gate-copy">
@@ -2112,14 +1976,18 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
             <strong>This conversation is read-only for your session.</strong>
             <p>Your current permissions allow reading messages but not posting them.</p>
             {{else}}
-            <strong>Join {{.ChannelPrefix}}{{.ChannelName}} to take part.</strong>
+            <strong>You are viewing {{.ChannelPrefix}}{{.ChannelName}}</strong>
+            <p>{{if .CanJoin}}Join the channel to send messages and get notified about new activity.{{else}}You cannot join this conversation from here.{{end}}</p>
             {{end}}
           </div>
           {{if .CanJoin}}
-          <form method="post" action="{{.JoinURL}}">
-            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-            <button class="join-button" type="submit">Join channel</button>
-          </form>
+          <div class="conversation-gate-actions">
+            <a class="button" href="/app/channels?channel={{.Channel}}">Browse channels</a>
+            <form method="post" action="{{.JoinURL}}">
+              <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+              <button class="join-button" type="submit">Join channel</button>
+            </form>
+          </div>
           {{end}}
         </section>
         {{end}}
@@ -2127,163 +1995,9 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
     </main>
   </div>
 </div>
-{{if .Details}}
-<div class="conversation-details-backdrop">
-  <section class="conversation-details" role="dialog" aria-modal="true" aria-labelledby="conversation-details-title">
-    <header class="conversation-details-head">
-      <div><h2 id="conversation-details-title">{{if .Details.IsChannel}}# {{end}}{{.Details.Name}}</h2><p>{{.Details.Type}}{{if .Details.Archived}} · Archived{{end}}</p></div>
-      <a class="conversation-details-close" href="{{.Details.CloseURL}}" aria-label="Close conversation details">×</a>
-    </header>
-    <div class="conversation-details-body">
-      <nav class="conversation-details-tabs" aria-label="Conversation details sections">
-        <a href="#conversation-about-heading">About</a>
-        <a href="#conversation-members-heading">Members</a>
-        {{if or .Details.CanEdit .Details.CanConvert .Details.CanChangeVisibility}}<a href="#conversation-settings-heading">Settings</a>{{end}}
-      </nav>
-      <section class="conversation-details-section" aria-labelledby="conversation-about-heading">
-        <h3 id="conversation-about-heading">About</h3>
-        <dl class="conversation-facts">
-          <div><dt>Topic</dt><dd>{{if .Details.Topic}}{{.Details.Topic}}{{else}}No topic set{{end}}</dd></div>
-          <div><dt>Purpose</dt><dd>{{if .Details.Purpose}}{{.Details.Purpose}}{{else}}No purpose set{{end}}</dd></div>
-        </dl>
-        {{if .Details.CanEdit}}
-        <div class="conversation-settings">
-          <form class="conversation-setting" method="post" action="/app/conversation/rename?channel={{.Details.ID}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <label for="conversation-name">Channel name<input id="conversation-name" name="name" value="{{.Details.Name}}" maxlength="80" required></label>
-            <button type="submit">Rename</button>
-          </form>
-          <form class="conversation-setting" method="post" action="/app/conversation/topic?channel={{.Details.ID}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <label for="conversation-topic">Topic<textarea id="conversation-topic" name="topic" maxlength="250">{{.Details.Topic}}</textarea></label>
-            <button type="submit">Save topic</button>
-          </form>
-          <form class="conversation-setting" method="post" action="/app/conversation/purpose?channel={{.Details.ID}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <label for="conversation-purpose">Purpose<textarea id="conversation-purpose" name="purpose" maxlength="250">{{.Details.Purpose}}</textarea></label>
-            <button type="submit">Save purpose</button>
-          </form>
-        </div>
-        {{end}}
-      </section>
-      {{if .Details.CanNotify}}
-      <section class="conversation-details-section" id="conversation-notifications" aria-labelledby="conversation-notifications-heading">
-        <h3 id="conversation-notifications-heading">Notifications</h3>
-        <form class="conversation-setting" method="post" action="/app/conversation/notifications?channel={{.Details.ID}}">
-          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <label for="conversation-notification-level">Notify me about
-            <select id="conversation-notification-level" name="level">
-              <option value="inherit"{{if eq .Details.NotificationLevel "inherit"}} selected{{end}}>Use workspace default</option>
-              <option value="all"{{if eq .Details.NotificationLevel "all"}} selected{{end}}>All new posts</option>
-              <option value="mentions"{{if eq .Details.NotificationLevel "mentions"}} selected{{end}}>Just mentions</option>
-              <option value="mute"{{if eq .Details.NotificationLevel "mute"}} selected{{end}}>Mute conversation</option>
-            </select>
-          </label>
-          <label class="privacy"><input type="checkbox" name="follow_every_thread" value="true"{{if .Details.FollowEveryThread}} checked{{end}}> Follow every thread</label>
-          <button type="submit">Save notifications</button>
-        </form>
-      </section>
-      {{end}}
-      <section class="conversation-details-section" aria-labelledby="conversation-members-heading">
-        <h3 id="conversation-members-heading">Members ({{len .Details.Members}})</h3>
-        <ul class="conversation-members">{{range .Details.Members}}<li class="conversation-member"><span class="presence {{.Presence}}" aria-hidden="true"></span><span class="conversation-member-avatar" aria-hidden="true">{{.AuthorInitial}}</span><span class="conversation-member-name">{{.Name}} <span class="visually-hidden">({{if eq .Presence "active"}}active{{else if eq .Presence "away"}}away{{else}}automatic; activity unavailable{{end}})</span></span>{{if .StatusDisplay}}<span class="conversation-member-status"{{if .Profile.StatusText}} title="{{.Profile.StatusText}}"{{end}}>{{.StatusDisplay}}</span>{{end}}</li>{{end}}</ul>
-        {{if .Details.Truncated}}<p class="conversation-details-note">This workspace has more than 1,000 members. Use the member directory to find people outside this list.</p>{{end}}
-        {{if .Details.CanInvite}}
-          {{if .Details.Invitees}}
-          <form class="conversation-setting" method="post" action="/app/conversation/invite?channel={{.Details.ID}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <label for="conversation-invitee">Add a person<select id="conversation-invitee" name="user" required><option value="" selected disabled>Choose a workspace member</option>{{range .Details.Invitees}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
-            <button type="submit">Add</button>
-          </form>
-          {{else}}<p class="conversation-details-note">Every available workspace member is already in this channel.</p>{{end}}
-        {{end}}
-        {{if .Details.CanAddPeople}}
-        <details class="conversation-setting">
-          <summary>Add people</summary>
-          <form method="post" action="/app/conversation/add-people?channel={{.Details.ID}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <fieldset>
-              <legend>Choose people to add</legend>
-              {{range .Details.Invitees}}<label class="privacy"><input type="checkbox" name="user_{{.ID}}" value="1"> {{.Name}}</label>{{end}}
-            </fieldset>
-            <p class="conversation-details-note">Slack creates a new group DM. This conversation and its members stay unchanged.</p>
-            <button type="submit">Next</button>
-          </form>
-        </details>
-        {{end}}
-      </section>
-      {{if or .Details.CanEdit .Details.CanConvert .Details.CanChangeVisibility}}
-      <section class="conversation-details-section" aria-labelledby="conversation-settings-heading">
-        <h3 id="conversation-settings-heading">Settings</h3>
-        {{if .Details.CanConvert}}
-        <details class="conversation-setting">
-          <summary>Change to a private channel</summary>
-          <form method="post" action="/app/conversation/convert-to-private?channel={{.Details.ID}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <label for="converted-channel-name">Private channel name<input id="converted-channel-name" name="name" maxlength="80" required pattern="[A-Za-z0-9_-]+"></label>
-            <p class="conversation-details-note">Messages and files from this group DM will stay in the new private channel and will be visible to members added later. Everyone in this group DM will be notified.</p>
-            <button type="submit">Change to Private</button>
-          </form>
-        </details>
-        {{end}}
-        {{if .Details.CanChangeVisibility}}
-        <details class="conversation-setting">
-          <summary>{{if .Details.IsPrivate}}Make this channel public{{else}}Make this channel private{{end}}</summary>
-          <form method="post" action="/app/conversation/visibility?channel={{.Details.ID}}">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <input type="hidden" name="private" value="{{if .Details.IsPrivate}}false{{else}}true{{end}}">
-            <p class="conversation-details-note">{{if .Details.IsPrivate}}Everyone in the workspace will be able to read everything already said in this channel. That cannot be undone by making it private again.{{else}}Only members will be able to read this channel. Everything already said stays, and stays visible to the people already in it.{{end}}</p>
-            <button type="submit">{{if .Details.IsPrivate}}Make public{{else}}Make private{{end}}</button>
-          </form>
-        </details>
-        {{end}}
-      </section>
-      {{end}}
-      {{if .Details.IsChannel}}
-      {{if .Details.CanSetRetention}}
-      <section class="conversation-details-section" id="conversation-retention" aria-labelledby="conversation-retention-heading">
-        <h3 id="conversation-retention-heading">How long messages are kept</h3>
-        <p>{{.Details.RetentionSummary}}</p>
-        <form class="connect-invite" method="post" action="/app/conversation/retention?channel={{.Details.ID}}">
-          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <label>Keep for<input name="duration_days" type="number" min="1" max="36499" value="{{.Details.RetentionDays}}"><span class="read-only">days</span></label>
-          <button type="submit">Use this limit here</button>
-        </form>
-        {{if .Details.RetentionCustom}}<form method="post" action="/app/conversation/retention/remove?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Follow the workspace default instead</button></form>{{end}}
-        <p class="read-only">Deletion is permanent. A shorter limit here deletes sooner than the workspace default; it cannot keep messages for longer than a channel-specific limit would.</p>
-      </section>
-      {{end}}
-      <section class="conversation-details-section" id="conversation-connect" aria-labelledby="conversation-connect-heading">
-        <h3 id="conversation-connect-heading">Shared with other organizations</h3>
-        {{if .Details.Connected}}<p>In this channel: {{range $index, $org := .Details.Connected}}{{if $index}}, {{end}}{{$org.Name}}{{end}}</p>{{else}}<p class="read-only">Only this workspace is in this channel.</p>{{end}}
-        {{if .Details.Outstanding}}<ul class="connect-invites" aria-label="Outstanding invitations">{{range .Details.Outstanding}}<li>
-          <span><strong>{{.Target}}</strong> <span class="status">{{.Status}}</span>{{if .Expired}}<br><span class="status">expired on {{.Expires}} and can no longer be approved</span>{{else if .Expires}}<br><span class="status">valid until {{.Expires}}</span>{{end}}</span>
-          <span class="connect-actions">
-          {{if .CanApprove}}<form method="post" action="{{.ApproveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_id" value="{{.ID}}"><button type="submit">Approve</button></form>{{end}}
-          {{if .CanRevoke}}<form method="post" action="{{.DenyURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="invite_id" value="{{.ID}}"><button type="submit">Withdraw</button></form>{{end}}
-          </span>
-        </li>{{end}}</ul>{{end}}
-        {{if .Details.CanConnect}}
-        <form class="connect-invite" method="post" action="{{.Details.ConnectURL}}">
-          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <label>Invite an organization<select name="target">{{range .Details.ConnectHosts}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
-          <button type="submit">Send invitation</button>
-        </form>
-        <p class="read-only">An invitation is recorded here and takes effect only when the other organization accepts it. Everyone there will be able to read this channel's history from the moment they join.</p>
-        {{end}}
-      </section>
-      {{end}}
-      {{if or .Details.CanArchive .Details.CanLeave .Details.CanClose}}
-      <section class="conversation-danger" aria-label="Conversation actions">
-        {{if .Details.CanArchive}}<form method="post" action="/app/conversation/archive?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Details.Archived}}false{{else}}true{{end}}"><button type="submit">{{.Details.ArchiveVerb}} channel</button></form>{{end}}
-        {{if .Details.CanLeave}}<form method="post" action="/app/conversation/leave?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Leave channel</button></form>{{end}}
-        {{if .Details.CanClose}}<form method="post" action="/app/conversation/leave?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Close conversation</button></form>{{end}}
-      </section>
-      {{end}}
-    </div>
-  </section>
-</div>
-{{end}}
+{{template "shell-dialogs" .Shell}}
+{{if .Details}}{{template "conversation-details" .}}{{end}}
+{{if .IsMember}}{{template "channel-notifications" .}}{{end}}
 {{if .Modal}}
 <div class="modal-backdrop">
   <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
@@ -2335,7 +2049,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
 </div>
 {{end}}
 {{end}}
-` + messagesPartial + messageDialogsPartial + huddlePartial + typingPartial
+` + messagesPartial + messageDialogsPartial + huddlePartial + typingPartial + homePanePartial + conversationDetailsPartial
 
 var pageTemplate = mustPage(pageMarkup)
 
@@ -2348,7 +2062,7 @@ var pageTemplate = mustPage(pageMarkup)
 // other people join and leave, and the existing data-fragment/data-live
 // refresh already reacts to the durable event stream, so this needs no new
 // transport.
-const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{{if .Active}} active{{end}}">
+const huddlePartial = `{{define "huddle"}}{{if and .Visible (or .Active .Notice)}}<div class="huddle-bar{{if .Active}} active{{end}}">
 {{if .Active}}
 <div class="huddle-state" role="status">
   <strong>Huddle in {{.ChannelName}}</strong>
@@ -2379,11 +2093,6 @@ const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{
   <ul class="huddle-tiles" data-huddle-tiles aria-label="People in this huddle"></ul>
   <div class="huddle-reactions" data-huddle-reactions aria-hidden="true"></div>
 </div>{{end}}
-{{else}}
-<div class="huddle-actions">
-  <form method="post" action="{{.StartURL}}" hx-post="{{.StartURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Start a huddle</button></form>
-  <span class="huddle-media">Starting a huddle opens a call: your browser connects to each person who joins.</span>
-</div>
 {{end}}
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 </div>{{end}}{{end}}`
@@ -2399,10 +2108,10 @@ const huddlePartial = `{{define "huddle"}}{{if .Visible}}<div class="huddle-bar{
 const typingPartial = `{{define "typing"}}<p class="typing" role="status" aria-live="polite">{{if .Text}}<span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{.Text}}{{end}}</p>{{end}}`
 
 const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}
-.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}
-.bar .theme-toggle{margin-left:auto}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+
+
+
 .layout{max-width:1100px;margin:0 auto;padding:28px 22px}
 .heading{border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:22px}
 .heading h1{margin:0 0 4px;font-size:26px}
@@ -2431,7 +2140,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 @media(max-width:720px){.grid{grid-template-columns:minmax(0,1fr)}.layout{padding:20px 14px}}
 </style>{{end}}
 {{define "content"}}
-<header class="bar"><a href="/app">← Back to chat</a><span>People</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
+{{template "shell-open" .Shell}}
 <main class="layout">
   <div class="heading"><h1>People</h1><p class="muted">Find teammates, start a direct message, and keep your profile current.</p></div>
   <div class="grid">
@@ -2494,9 +2203,9 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
       {{if .MoreMembersURL}}<p class="pager"><a href="{{.MoreMembersURL}}">Show more members</a></p>{{end}}
     </section>
   </div>
-</main>
+</main>{{template "shell-close" .Shell}}
 {{end}}
-{{define "scripts"}}<script>(function(){
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `<script>(function(){
 var hidden=document.querySelector('[data-status-expiration]');
 var local=document.querySelector('[data-status-expiration-local]');
 function localValue(date){var offset=date.getTimezoneOffset()*60000;return new Date(date.getTime()-offset).toISOString().slice(0,16)}
@@ -2509,16 +2218,24 @@ Array.prototype.forEach.call(document.querySelectorAll('[data-status-expires]'),
 var membersTemplate = mustPage(membersMarkup)
 
 const directMessagesMarkup = `{{define "title"}}Direct messages · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar .theme-toggle{margin-left:auto}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+
 .layout{width:min(920px,calc(100% - 32px));margin:28px auto 52px}.heading{display:flex;justify-content:space-between;gap:18px;align-items:end;border-bottom:1px solid var(--line);padding-bottom:18px}.heading h1{margin:0 0 4px;font-size:28px}.muted{color:var(--muted)}
 .search{display:flex;gap:8px;margin:20px 0}.search input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}button{border:1px solid var(--field-line);border-radius:7px;background:var(--panel-strong);color:var(--text);padding:9px 13px;font-weight:800}
 .panel{margin-top:22px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.panel h2{margin:0 0 6px}.recent,.people{display:grid;gap:8px;margin:14px 0 0;padding:0;list-style:none}.recent-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px;border:1px solid var(--line);border-radius:8px}.recent-row>a{color:var(--text);font-weight:800;text-decoration:none}.rename{display:flex;gap:6px}.rename input,.group-name{min-width:0;padding:7px 9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}
 .person-choice{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:8px}.person-choice strong{display:block}.compose-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin-top:14px}.primary{border:0;background:var(--action);color:var(--on-strong)}.error{color:var(--danger);font-weight:700}
 @media(max-width:620px){.layout{width:min(100% - 20px,920px);margin-top:18px}.heading{display:block}.recent-row,.compose-actions{grid-template-columns:minmax(0,1fr)}.rename{display:grid}.search{align-items:stretch}}
 </style>{{end}}
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `{{end}}
 {{define "content"}}
-<header class="bar"><a href="/app">← Back to chat</a><span>Direct messages</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
+<a class="skip-link" href="#content">Skip to the content</a>
+<div class="shell" data-channel="{{.Shell.Channel}}">
+{{template "shell-top" .Shell}}
+<div class="workspace">
+{{template "shell-rail" .Shell}}
+<aside class="sidebar" id="workspace-sidebar" aria-label="Direct messages">{{template "dm-pane" .}}</aside>
+<button class="nav-scrim" id="nav-scrim" type="button" aria-label="Close navigation" tabindex="-1"></button>
+<div class="shell-main" id="content" tabindex="-1">
 <main class="layout">
   <div class="heading"><div><h1>Direct messages</h1><p class="muted">Find a conversation or start a DM with up to nine people total.</p></div></div>
   <form class="search" method="get" action="/app/dms"><label class="visually-hidden" for="dm-search">Search direct messages and people</label><input id="dm-search" type="search" name="q" value="{{.Query}}" placeholder="Search direct messages and people"><button type="submit">Search</button></form>
@@ -2526,10 +2243,10 @@ const directMessagesMarkup = `{{define "title"}}Direct messages · SameOldChat{{
   <section class="panel" aria-labelledby="recent-dms"><h2 id="recent-dms">Recent</h2><p class="muted">Closing a DM removes it from this list without deleting its history.</p>
     <ul class="recent">{{range .Recent}}<li class="recent-row">{{if $.Query}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.OpenUsers}}"><button type="submit">Open {{.Name}}{{if .UnreadCount}} ({{.UnreadCount}} unread){{end}}</button></form>{{else}}<a href="/app?channel={{.ID}}">@ {{.Name}}{{if .UnreadCount}} <span aria-label="{{.UnreadCount}} unread">({{.UnreadCount}})</span>{{end}}</a>{{end}}{{if .IsGroupDirect}}<form class="rename" method="post" action="/app/conversation/rename?channel={{.ID}}&return=dms"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label class="visually-hidden" for="name-{{.ID}}">Group DM name</label><input id="name-{{.ID}}" name="name" maxlength="80" value="{{.Name}}" required><button type="submit">Save name</button></form>{{end}}</li>{{else}}<li class="muted">No recent DMs. Start one below.</li>{{end}}</ul>
   </section>
-  <section class="panel" aria-labelledby="new-dm"><h2 id="new-dm">New message</h2><p class="muted">Select one person for a one-to-one DM, or several people for a group DM.</p>
+  <section class="panel" id="new-message" aria-labelledby="new-dm"><h2 id="new-dm" tabindex="-1">New message</h2><p class="muted">Select one person for a one-to-one DM, or several people for a group DM.</p>
     {{if .CanMessage}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="dms"><div class="people">{{range .Members}}<label class="person-choice"><input type="checkbox" name="user_{{.ID}}" value="1"><span><strong>{{.Name}}</strong>{{if and .RealName (ne .RealName .Name)}}<span class="muted">{{.RealName}}</span>{{end}}</span></label>{{else}}<p class="muted">No matching active members.</p>{{end}}</div><div class="compose-actions"><label>Group DM name (optional)<input class="group-name" name="name" maxlength="80" placeholder="Design launch"></label><button class="primary" type="submit">Start conversation</button></div></form>{{else}}<p class="muted">Your current permissions do not allow starting direct messages.</p>{{end}}
   </section>
-</main>
+</main>{{template "shell-close" .Shell}}
 {{end}}`
 
 var directMessagesTemplate = mustPage(directMessagesMarkup)
@@ -2614,13 +2331,13 @@ const oauthConsentMarkup = `{{define "title"}}Authorize {{.AppName}} · SameOldC
 var oauthConsentTemplate = mustPage(oauthConsentMarkup)
 
 const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}
-.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}
-.bar form{position:relative;display:flex;flex:1 1 auto;min-width:0;max-width:600px;margin:auto;gap:8px}
-.bar input{flex:1 1 auto;min-width:0;border:1px solid #ffffff8a;border-radius:5px;padding:8px 10px;background:#ffffff2b;color:var(--on-accent)}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+
+
+
+
 .bar input::placeholder{color:#ffffffd6}
-.bar button{border:1px solid #ffffff6b;background:transparent;color:var(--on-accent);border-radius:5px;padding:6px 10px}
+
 .search-suggestions{position:absolute;z-index:30;top:calc(100% + 6px);left:0;right:0;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
 .search-suggestions[hidden]{display:none}.search-suggestion{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:8px 10px;border-radius:6px;color:var(--text);text-decoration:none}.search-suggestion:hover,.search-suggestion[aria-selected=true]{background:var(--hover)}.search-suggestion-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.search-suggestion-kind{color:var(--muted);font-size:12px;text-transform:capitalize}
 .layout{max-width:980px;margin:0 auto;padding:28px 22px}
@@ -2641,10 +2358,10 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 .recent-searches{margin-top:24px}.recent-searches h2{font-size:16px}.recent-searches ul{display:grid;gap:6px;margin:0;padding:0;list-style:none}.recent-searches a{display:block;padding:10px 12px;border:1px solid var(--line);border-radius:7px;color:var(--text);text-decoration:none}.recent-searches a:hover{background:var(--hover);border-color:var(--action)}
 .pager{text-align:center;margin-top:18px}.pager a{color:var(--action);font-weight:800}
 @media(max-width:820px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:720px){.layout{padding:20px 14px}.bar{padding:0 12px;gap:10px}.filters{grid-template-columns:1fr}.file-result{grid-template-columns:1fr}}
+@media(max-width:720px){.layout{padding:20px 14px}.filters{grid-template-columns:1fr}.file-result{grid-template-columns:1fr}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + searchSuggestionsScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search the workspace</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages, files, people, and channels" role="combobox" autocomplete="off" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required autofocus><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">{{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">{{.ResultCount}} results in {{.Type}} for “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term or choose a recent search.</p>{{end}}{{if .Warning}}<p class="notice" role="status">{{.Warning}}</p>{{end}}</div>
+{{define "scripts"}}` + shellScript + `` + localTimeScript + searchSuggestionsScript + `{{end}}
+{{define "content"}}{{template "shell-open" .Shell}}<main class="layout"><div class="page-search"><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search the workspace</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages, files, people, and channels" role="combobox" autocomplete="off" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required autofocus><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">{{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form></div><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">{{.ResultCount}} results in {{.Type}} for “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term or choose a recent search.</p>{{end}}{{if .Warning}}<p class="notice" role="status">{{.Warning}}</p>{{end}}</div>
 {{if and (not .Searched) .Recent}}<section class="recent-searches" aria-labelledby="recent-searches-title"><h2 id="recent-searches-title">Recent searches</h2><ul>{{range .Recent}}<li><a href="{{.URL}}">{{.Query}}</a></li>{{end}}</ul></section>{{end}}
 {{if .CurrentOnly}}<p class="scope-note">Searching only this conversation. <a href="/app/search?q={{.Query}}&amp;channel={{.Channel}}&amp;type={{.Type}}">Search the whole workspace</a></p>{{end}}
 {{if .Searched}}<nav class="search-tabs" aria-label="Search result types">{{range .Tabs}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
@@ -2662,22 +2379,22 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 {{else if eq .Type "lists"}}{{range .Lists}}<a class="result list-result" href="{{.URL}}"><span><span class="author">{{.Title}}</span><span class="result-kind">List · {{.Owner}}</span>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching lists.</p>{{end}}
 {{else if eq .Type "people"}}{{range .People}}<a class="result" href="/app/members?user={{.ID}}"><span class="author">{{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</span>{{if .RealName}}<p class="text">{{.RealName}}</p>{{end}}</a>{{else}}<p class="empty">No matching people.</p>{{end}}
 {{else}}{{range .Conversations}}<a class="result" href="/app?channel={{.ID}}"><span class="author"># {{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</span></a>{{else}}<p class="empty">No matching channels.</p>{{end}}{{end}}
-</section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
+</section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{template "shell-close" .Shell}}{{end}}`
 
 var searchTemplate = mustPage(searchMarkup)
 
 var activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(980px,calc(100% - 28px));margin:22px auto 48px}.activity-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}.activity-heading h2{margin:0 auto 0 0;font-size:25px}.layout-forms{display:flex;gap:4px}.layout-forms form{margin:0}.layout-forms button,.bulk-actions button,.item-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:7px 10px;font-weight:800}.layout-forms button[aria-pressed=true]{background:var(--action);color:var(--on-strong)}
 .activity-tabs{display:flex;gap:3px;overflow-x:auto;border-bottom:1px solid var(--line);margin-bottom:10px}.activity-tabs a{white-space:nowrap;padding:9px 11px;color:var(--muted);font-weight:800;text-decoration:none;border-bottom:3px solid transparent}.activity-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}.activity-options{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.activity-options a{border:1px solid var(--field-line);border-radius:18px;padding:5px 10px;color:var(--text);text-decoration:none;font-weight:700}.activity-options a[aria-current=page]{background:var(--hover);border-color:var(--action)}
 .saved-views{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;margin:0 0 10px}.saved-view-delete button,.saved-view-create summary{border:1px solid var(--field-line);border-radius:18px;padding:5px 10px;background:var(--bg);color:var(--text);font-weight:700;cursor:pointer;list-style:none}.saved-view-create[open] summary{background:var(--hover);border-color:var(--action)}.saved-view-create form{margin-top:8px;display:grid;gap:8px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--panel);max-width:320px}.saved-view-name{display:grid;gap:4px;font-weight:700}.saved-view-name input{padding:7px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.saved-view-kinds{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;border:1px solid var(--line);border-radius:6px;margin:0;padding:8px}.saved-view-kinds legend{font-weight:700;color:var(--muted);padding:0 4px}.saved-view-kinds label{display:flex;align-items:center;gap:6px;font-weight:400}.saved-view-create button[type=submit]{justify-self:start;border:0;border-radius:6px;padding:8px 12px;background:var(--action);color:var(--on-strong);font-weight:800}
 .bulk-actions{min-height:39px;display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid var(--line);border-radius:8px 8px 0 0;background:var(--panel)}.bulk-actions span{margin-right:auto;color:var(--muted);font-size:13px}.activity-list{margin:0;padding:0;list-style:none;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;overflow:hidden}.activity-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;padding:14px;background:var(--panel);border-top:1px solid var(--line);outline:none}.activity-row:first-child{border-top:0}.activity-row:hover,.activity-row:focus{background:var(--hover)}.activity-row.unread{box-shadow:inset 3px 0 var(--action)}.activity-select{margin-top:3px}.activity-main{min-width:0}.activity-head{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.activity-kind{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;color:var(--action)}.activity-author{font-weight:800}.activity-meta{color:var(--muted);font-size:12px}.activity-text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.activity-source{color:inherit;text-decoration:none}.activity-source:focus-visible{text-decoration:underline}.item-actions{display:flex;gap:4px;align-items:start}.item-actions button{padding:5px 8px}.unavailable{color:var(--muted);font-style:italic}.empty{margin:0;padding:34px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}.pager{text-align:center;margin-top:16px}
 .activity-list.dense .activity-row{padding:8px 12px}.activity-list.dense .activity-text{display:inline;margin-left:5px}.activity-list.dense .activity-head{display:inline-flex}
 .activity-reaction-dialog{width:min(520px,calc(100% - 24px));border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);padding:0;box-shadow:0 18px 55px #0005}.activity-reaction-dialog::backdrop{background:#0007}.activity-reaction-shell{padding:16px}.activity-reaction-head{display:flex;align-items:center;gap:10px}.activity-reaction-head h3{margin:0 auto 0 0}.activity-reaction-head button{border:0;background:transparent;color:var(--text);font-size:22px}.activity-reaction-controls{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;margin:13px 0}.activity-reaction-controls input,.activity-reaction-controls select{min-width:0;padding:8px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.activity-reaction-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:5px;margin:0;padding:0;list-style:none;max-height:310px;overflow:auto}.activity-reaction-results button{width:100%;min-height:58px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text);display:grid;place-items:center;padding:4px}.activity-reaction-results button:hover,.activity-reaction-results button:focus{background:var(--hover);border-color:var(--action)}.activity-reaction-results img{width:24px;height:24px;object-fit:contain}.activity-reaction-results small{max-width:100%;overflow:hidden;text-overflow:ellipsis}.activity-reaction-status{min-height:20px;color:var(--muted);font-size:13px}
-@media(max-width:650px){.bar{padding:0 12px}.layout{width:min(100% - 16px,980px);margin-top:14px}.activity-row{grid-template-columns:auto minmax(0,1fr)}.item-actions{grid-column:2}.bulk-actions{overflow-x:auto}.activity-list.dense .activity-text{display:block;margin:4px 0 0}}
+@media(max-width:650px){.layout{width:min(100% - 16px,980px);margin-top:14px}.activity-row{grid-template-columns:auto minmax(0,1fr)}.item-actions{grid-column:2}.bulk-actions{overflow-x:auto}.activity-list.dense .activity-text{display:block;margin:4px 0 0}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `<script>(function(){
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `` + localTimeScript + `<script>(function(){
 var activityTopics=` + liveEventTopicsLiteral() + `.concat(['later_reminder.delivered','later_reminder.failed']);
 var feed=document.getElementById('activity-feed');var liveStatus=document.getElementById('activity-live-status');var rows=[];var current=0;var refreshing=false;var refreshQueued=false;var refreshTimer=0;
 function syncRows(preferredID){rows=Array.prototype.slice.call(document.querySelectorAll('[data-activity-row]'));current=0;if(preferredID){var preferred=rows.findIndex(function(row){return row.getAttribute('data-activity-id')===preferredID});if(preferred>=0)current=preferred}rows.forEach(function(row,index){row.tabIndex=index===current?0:-1})}
@@ -2704,9 +2421,9 @@ fetch(window.location.pathname+window.location.search,{headers:{'X-SameOldChat-A
 function scheduleActivityRefresh(){window.clearTimeout(refreshTimer);refreshTimer=window.setTimeout(refreshActivity,180)}
 if(window.EventSource){var stream=` + liveStreamOpen + `;activityTopics.forEach(function(topic){stream.addEventListener(topic,scheduleActivityRefresh)});stream.onerror=function(){if(liveStatus)liveStatus.textContent='Reconnecting to live Activity…'};stream.onopen=function(){if(liveStatus&&liveStatus.textContent==='Reconnecting to live Activity…')liveStatus.textContent='Live Activity resumed.'}}
 })();</script>{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
+{{define "content"}}{{template "shell-open" .Shell}}<main class="layout">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-<div class="activity-heading"><h2>Activity</h2><span class="visually-hidden" id="activity-live-status" role="status" aria-live="polite"></span><div class="layout-forms" aria-label="Activity layout"><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">Detailed</button></form><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">Dense</button></form></div></div>
+<div class="activity-heading"><h1>Activity</h1><span class="visually-hidden" id="activity-live-status" role="status" aria-live="polite"></span><div class="layout-forms" aria-label="Activity layout"><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">Detailed</button></form><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="view" value="{{.View}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">Dense</button></form></div></div>
 <nav class="activity-tabs" aria-label="Activity filters">{{range .Filters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}{{range .SavedViews}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</nav>
 <div class="activity-options"><a href="{{.UnreadURL}}"{{if .UnreadOnly}} aria-current="page"{{end}}>Unread</a>{{if .ClearedOnly}}<a href="{{.ActiveURL}}">Back to activity</a>{{else}}<a href="{{.ClearedURL}}">Cleared</a>{{end}}</div>
 <div class="saved-views">{{if .View}}<form class="saved-view-delete" method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.View}}"><button type="submit">Delete this view</button></form>{{end}}<details class="saved-view-create"><summary>New saved view</summary><form method="post" action="{{.CreateURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="saved-view-name">Name<input name="name" maxlength="80" placeholder="Important" required></label><fieldset class="saved-view-kinds"><legend>Kinds</legend>{{range .KindOptions}}<label><input type="checkbox" name="kind" value="{{.Value}}">{{.Label}}</label>{{end}}</fieldset><button type="submit">Save view</button></form></details></div>
@@ -2721,7 +2438,7 @@ if(window.EventSource){var stream=` + liveStreamOpen + `;activityTopics.forEach(
 </li>{{end}}</ul>{{else}}<p class="empty">{{if .ClearedOnly}}No cleared activity.{{else if .UnreadOnly}}You’re all caught up.{{else}}No activity yet. New DMs, mentions, thread replies, reactions, invitations, app messages, and delivered reminders will appear here.{{end}}</p>{{end}}
 </form>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more activity</a></p>{{end}}</div>
 <dialog class="activity-reaction-dialog" id="activity-reaction-dialog" aria-labelledby="activity-reaction-heading"><div class="activity-reaction-shell"><div class="activity-reaction-head"><h3 id="activity-reaction-heading">Add reaction</h3><button id="activity-reaction-close" type="button" aria-label="Close reaction picker">×</button></div><form id="activity-reaction-form" method="post"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><div class="activity-reaction-controls"><label class="visually-hidden" for="activity-reaction-search">Search emoji</label><input id="activity-reaction-search" type="search" autocomplete="off" placeholder="Search emoji"><label class="visually-hidden" for="activity-reaction-category">Category</label><select id="activity-reaction-category"><option value="">All categories</option></select><label class="visually-hidden" for="activity-reaction-tone">Skin tone</label><select id="activity-reaction-tone"><option value="">Default tone</option><option value="2">Skin tone 2</option><option value="3">Skin tone 3</option><option value="4">Skin tone 4</option><option value="5">Skin tone 5</option><option value="6">Skin tone 6</option></select></div><p class="activity-reaction-status" id="activity-reaction-status" role="status"></p><ul class="activity-reaction-results" id="activity-reaction-results" aria-label="Emoji results"></ul><noscript><p>Open the message to add a reaction.</p></noscript></form></div></dialog>
-</main>{{end}}`
+</main>{{template "shell-close" .Shell}}{{end}}`
 
 var activityTemplate = mustPage(activityMarkup)
 
@@ -2750,15 +2467,15 @@ describe();
 });
 })();</script>`
 
-var notificationsMarkup = composerPartial + `{{define "title"}}Notifications · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end}}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(760px,calc(100% - 28px));margin:24px auto 48px}.heading h2{margin:0 0 5px}.heading p{margin:0;color:var(--muted)}.settings{display:grid;gap:18px;margin-top:20px}.card{padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.card h3{margin:0 0 6px}.card>p{margin:0 0 14px;color:var(--muted)}.fields{display:grid;gap:12px}.fields label{display:grid;gap:6px;font-weight:700}.fields input[type=text],.fields input[type=number],.fields select{padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.check{display:flex!important;grid-template-columns:auto 1fr!important;align-items:start;gap:8px!important;font-weight:600!important}.actions{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.actions label{flex:1 1 180px}.actions button,.fields button{border:0;border-radius:6px;background:var(--action);color:var(--on-strong);padding:9px 12px;font-weight:800}.resume{background:var(--danger)!important}.exceptions{margin:0;padding:0;list-style:none;display:grid;gap:8px}.exceptions a{display:flex;justify-content:space-between;gap:10px;padding:11px;border:1px solid var(--line);border-radius:7px;color:var(--text);text-decoration:none}.exceptions span:last-child{color:var(--muted)}
-@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 18px,760px);margin-top:16px}.card{padding:14px}.actions{display:grid}.actions label{width:100%}}
+@media(max-width:600px){.layout{width:min(100% - 18px,760px);margin-top:16px}.card{padding:14px}.actions{display:grid}.actions label{width:100%}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + browserNotificationSettingScript + composerScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Notifications</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
-<main class="layout"><div class="heading"><h2>Notification preferences</h2><p>Choose what needs your attention without changing what you can read.</p></div>{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + localTimeScript + browserNotificationSettingScript + `{{end}}
+{{define "content"}}{{template "shell-open" .Shell}}
+<main class="layout"><h1 class="page-title">Notifications</h1><div class="heading"><h2>Notification preferences</h2><p>Choose what needs your attention without changing what you can read.</p></div>{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 <div class="settings">
 <section class="card" aria-labelledby="workspace-notifications-heading"><h3 id="workspace-notifications-heading">Workspace defaults</h3><p>Conversation exceptions override this trigger.</p>
 <form class="fields" method="post" action="/app/notifications/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
@@ -2769,7 +2486,7 @@ var notificationsMarkup = composerPartial + `{{define "title"}}Notifications · 
 <label class="check"><input type="checkbox" id="browser-notifications" name="browser_notifications" value="true"{{if .BrowserNotifications}} checked{{end}}> Show desktop notifications while SameOldChat is open in a tab</label>
 <p class="muted" id="browser-notification-state" aria-live="polite">{{.BrowserNotificationState}}</p>
 <button type="submit">Save workspace defaults</button></form></section>
-<section class="card" aria-labelledby="composing-preferences-heading"><h3 id="composing-preferences-heading">Advanced: composing messages</h3>{{template "composer-preferences"}}</section>
+
 <section class="card" aria-labelledby="notification-absent-heading"><h3 id="notification-absent-heading">Not delivered here</h3><p>These are absent rather than off, so you know to look elsewhere for them.</p><ul><li><strong>Push to a phone.</strong> There is no mobile application and no push service.</li><li><strong>E-mail.</strong> This deployment sends no mail at all.</li><li><strong>Sounds and notification schedules.</strong> Pausing above is the only schedule.</li></ul></section>
 <section class="card" aria-labelledby="schedule-heading"><h3 id="schedule-heading">Notification schedule</h3>
 <p>Choose the days and hours you allow notifications. Outside them nothing is delivered; Activity and messages are unaffected.</p>
@@ -2786,22 +2503,22 @@ var notificationsMarkup = composerPartial + `{{define "title"}}Notifications · 
 </section>
 <section class="card" aria-labelledby="pause-notifications-heading"><h3 id="pause-notifications-heading">Pause notifications</h3>{{if .Snoozed}}<p>Paused until <time datetime="{{.SnoozeUntil}}">{{.SnoozeUntil}}</time>. Messages and Activity remain available.</p><form method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="resume"><button class="resume" type="submit">Resume notifications</button></form>{{else}}<p>Pause banners and sounds for a preset or custom duration.</p><form class="actions" method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="pause"><label for="dnd-minutes">Preset<select id="dnd-minutes" name="minutes"><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="480">8 hours</option><option value="1440">24 hours</option></select></label><label for="dnd-custom-minutes">Custom minutes (optional)<input id="dnd-custom-minutes" type="number" name="custom_minutes" min="1" max="1440"></label><button type="submit">Pause notifications</button></form>{{end}}</section>
 <section class="card" aria-labelledby="notification-exceptions-heading"><h3 id="notification-exceptions-heading">Exceptions to defaults</h3>{{if .Exceptions}}<ul class="exceptions">{{range .Exceptions}}<li><a href="{{.URL}}"><span>{{.Prefix}}{{.Name}}</span><span>{{.Level}}{{if .FollowEveryThread}} · following every thread{{end}}</span></a></li>{{end}}</ul>{{else}}<p>No conversation-specific exceptions.</p>{{end}}</section>
-</div></main>{{end}}`
+</div></main>{{template "shell-close" .Shell}}{{end}}`
 
 var notificationsTemplate = mustPage(notificationsMarkup)
 
 const laterMarkup = `{{define "title"}}Later · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(900px,calc(100% - 32px));margin:28px auto 48px}.heading{display:grid;gap:5px;margin-bottom:17px}.heading h2,.heading p{margin:0}.heading p{color:var(--muted)}
 .later-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px}.later-tabs a{padding:10px 13px;color:var(--muted);font-weight:800;text-decoration:none;border-bottom:3px solid transparent}.later-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}.later-tabs a:hover{color:var(--text);background:var(--hover)}
 .later-list{display:grid;gap:10px;margin:0;padding:0;list-style:none}.later-item{display:grid;gap:11px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.later-source{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.later-source a{font-weight:800;color:var(--text);text-decoration:none}.later-source a:hover{color:var(--action)}.later-meta{color:var(--muted);font-size:12px}.later-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.later-unavailable{margin:0;color:var(--muted);font-weight:700}.later-actions{display:flex;gap:7px;flex-wrap:wrap}.later-actions form{margin:0}.later-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:7px 10px;font-weight:800}.later-actions button:hover{background:var(--hover)}.later-actions .remove{color:var(--danger)}.empty{padding:30px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}.pager{text-align:center;margin-top:18px}
 .reminder-create{margin:0 0 18px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.reminder-create summary{font-weight:800;cursor:pointer}.reminder-fields,.reminder-edit{display:grid;grid-template-columns:minmax(0,2fr) minmax(130px,1fr) minmax(110px,1fr);gap:10px;margin-top:12px}.reminder-fields label,.reminder-edit label{display:grid;gap:5px;color:var(--muted);font-size:12px;font-weight:700}.reminder-fields input,.reminder-fields select,.reminder-edit input,.reminder-edit select{min-width:0;padding:8px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.reminder-fields button,.reminder-edit button{align-self:end;padding:9px 12px;border:0;border-radius:6px;background:var(--action);color:var(--on-strong);font-weight:800}.reminder-heading{margin:22px 0 10px;font-size:18px}.reminder-status{font-weight:800;color:var(--muted)}.reminder-status.failed{color:var(--danger)}
-@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 20px,900px);margin-top:18px}.later-tabs{overflow-x:auto}.later-actions{display:grid;grid-template-columns:1fr 1fr}.later-actions button{width:100%}.reminder-fields,.reminder-edit{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){.layout{width:min(100% - 20px,900px);margin-top:18px}.later-tabs{overflow-x:auto}.later-actions{display:grid;grid-template-columns:1fr 1fr}.later-actions button{width:100%}.reminder-fields,.reminder-edit{grid-template-columns:minmax(0,1fr)}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + laterLiveScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Later</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
-<div class="heading"><h2>Later</h2><p>Saved messages and personal reminders are private to you.</p></div>
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `` + localTimeScript + laterLiveScript + `{{end}}
+{{define "content"}}{{template "shell-open" .Shell}}<main class="layout">
+<div class="heading"><h1>Later</h1><p>Saved messages and personal reminders are private to you.</p></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if not .ChannelReminders}}<details class="reminder-create"><summary>Add a reminder</summary><form class="reminder-fields" method="post" action="/app/reminders/create?channel={{.Channel}}">
 <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC">
@@ -2822,7 +2539,7 @@ const laterMarkup = `{{define "title"}}Later · SameOldChat{{end}}
 </div></li>{{else}}<li class="empty">No items in {{.StateTitle}}.</li>{{end}}</ul>
 {{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more saved items</a></p>{{end}}
 {{end}}
-</main>{{end}}`
+</main>{{template "shell-close" .Shell}}{{end}}`
 
 var laterTemplate = mustPage(laterMarkup)
 
@@ -2843,14 +2560,14 @@ window.location.reload()});
 })();</script>`
 
 const draftsAndSentMarkup = `{{define "title"}}Drafts &amp; sent · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(900px,calc(100% - 32px));margin:28px auto 48px}.heading{margin-bottom:14px}.heading h2{margin:0 0 5px;font-size:25px}.heading p{margin:0;color:var(--muted)}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px}.tabs a{padding:10px 14px;color:var(--muted);text-decoration:none;font-weight:800;border-bottom:3px solid transparent}.tabs a[aria-current="page"]{color:var(--text);border-color:var(--action)}
 .work-list{display:grid;gap:9px;margin:0;padding:0;list-style:none}.work-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:15px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}.work-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px}.work-channel{font-weight:800;color:var(--text);text-decoration:none}.work-channel:hover{color:var(--action)}.work-text{margin:7px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.work-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.work-actions form{margin:0}.work-actions button,.work-actions summary{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:7px 10px;font-weight:800;cursor:pointer}.work-actions .danger{color:var(--danger)}.edit-panel{position:absolute;right:0;z-index:3;width:min(380px,calc(100vw - 32px));padding:14px;border:1px solid var(--line);border-radius:9px;background:var(--panel);box-shadow:0 12px 30px var(--shadow)}.edit-panel label{display:grid;gap:5px;margin-bottom:10px;font-weight:700}.edit-panel textarea,.edit-panel input{box-sizing:border-box;width:100%;padding:8px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.failed{color:var(--danger);font-weight:800}.empty{padding:28px;border:1px dashed var(--line);border-radius:9px;color:var(--muted);text-align:center}.pager{text-align:center;margin-top:18px}
-@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 20px,900px);margin-top:18px}.work-item{grid-template-columns:minmax(0,1fr)}.work-actions{align-items:stretch}.work-actions form,.work-actions button,.work-actions details{width:100%}.work-actions summary{box-sizing:border-box;width:100%;text-align:center}}
+@media(max-width:600px){.layout{width:min(100% - 20px,900px);margin-top:18px}.work-item{grid-template-columns:minmax(0,1fr)}.work-actions{align-items:stretch}.work-actions form,.work-actions button,.work-actions details{width:100%}.work-actions summary{box-sizing:border-box;width:100%;text-align:center}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `<script>(function(){
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `` + localTimeScript + `<script>(function(){
 document.querySelectorAll('[data-local-datetime]').forEach(function(input){
 var date=new Date(input.getAttribute('data-local-datetime'));if(isNaN(date.getTime()))return;
 var pad=function(n){return String(n).padStart(2,'0')};
@@ -2867,8 +2584,8 @@ input.addEventListener('input',setPostAt);input.addEventListener('change',setPos
 form.addEventListener('submit',setPostAt);setPostAt();
 });
 })();</script>{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Drafts &amp; sent</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
-<div class="heading"><h2>Drafts &amp; sent</h2><p>Continue drafts, manage scheduled messages, or return to something you sent.</p></div>
+{{define "content"}}{{template "shell-open" .Shell}}<main class="layout">
+<div class="heading"><h1>Drafts &amp; sent</h1><p>Continue drafts, manage scheduled messages, or return to something you sent.</p></div>
 <nav class="tabs" aria-label="Drafts and sent views">
 <a href="/app/drafts?channel={{.Channel}}&amp;tab=drafts" {{if eq .ActiveTab "drafts"}}aria-current="page"{{end}}>Drafts</a>
 <a href="/app/drafts?channel={{.Channel}}&amp;tab=scheduled" {{if eq .ActiveTab "scheduled"}}aria-current="page"{{end}}>Scheduled</a>
@@ -2879,7 +2596,7 @@ form.addEventListener('submit',setPostAt);setPostAt();
 {{if eq .ActiveTab "scheduled"}}<ul class="work-list" aria-label="Scheduled messages">{{range .Scheduled}}<li class="work-item scheduled-item"><div><div class="work-meta">{{if .ConversationURL}}<a class="work-channel" href="{{.ConversationURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="work-channel">{{.ChannelName}}</span>{{end}}<span>{{.Status}} for <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span>{{if .AttachmentCount}}<span>{{.AttachmentCount}} attachment{{if ne .AttachmentCount 1}}s{{end}}</span>{{end}}{{if .Failure}}<span class="failed">{{.Failure}}</span>{{end}}</div><p class="work-text">{{.DisplayText}}</p></div><div class="work-actions"><details><summary>Edit</summary><form class="edit-panel" method="post" action="{{.UpdateURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label>Message<textarea name="text" maxlength="40000" {{if not .AttachmentCount}}required{{end}}>{{.Text}}</textarea></label>{{if .AttachmentCount}}<p class="work-meta">Attached files stay with this scheduled message.</p>{{end}}<label>Send date and time<input type="datetime-local" name="schedule_at" data-schedule-at data-local-datetime="{{.MachineTime}}" required></label><input type="hidden" name="post_at"><button type="submit">Save changes</button></form></details><form method="post" action="{{.SendNowURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Send now</button></form><form method="post" action="{{.CancelURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger" type="submit" aria-label="Cancel scheduled message in {{.ChannelName}}">Cancel message</button></form></div></li>{{else}}<li class="empty">You have no scheduled messages.</li>{{end}}</ul>{{end}}
 {{if eq .ActiveTab "sent"}}<ul class="work-list" aria-label="Sent messages">{{range .Sent}}<li class="work-item"><div><div class="work-meta">{{if .OpenURL}}<a class="work-channel" href="{{.OpenURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="work-channel">{{.ChannelName}}</span>{{end}}<span>Sent <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span></div><p class="work-text">{{.Text}}</p></div>{{if .OpenURL}}<div class="work-actions"><a href="{{.OpenURL}}">View conversation</a></div>{{end}}</li>{{else}}<li class="empty">You have no recently sent messages.</li>{{end}}</ul>{{end}}
 {{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">{{.MoreLabel}}</a></p>{{end}}
-</main>{{end}}`
+</main>{{template "shell-close" .Shell}}{{end}}`
 
 var draftsAndSentTemplate = mustPage(draftsAndSentMarkup)
 
@@ -2919,20 +2636,20 @@ a{font-weight:700}
 var errorTemplate = mustPage(errorMarkup)
 
 const documentsMarkup = `{{define "title"}}{{.Title}} · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(940px,calc(100% - 32px));margin:28px auto 56px}.heading{display:flex;align-items:start;justify-content:space-between;gap:20px;margin-bottom:20px}.heading h2,.heading p{margin:0}.heading p{color:var(--muted);margin-top:5px}
 .create{padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:18px}.create summary{cursor:pointer;font-weight:800;min-height:24px;padding:3px 0}.create form{display:grid;gap:10px;margin-top:14px}.create label{display:grid;gap:6px;font-weight:700}.create input,.create textarea{padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.create textarea{min-height:130px;resize:vertical}.create button{justify-self:start;border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}.card{display:grid;gap:10px;min-height:150px;padding:17px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);text-decoration:none}.card:hover{border-color:var(--action);background:var(--hover)}.card h3,.card p{margin:0}.card p{color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}.card time{align-self:end;color:var(--muted);font-size:12px}.empty{padding:32px;border:1px dashed var(--line);border-radius:10px;text-align:center;color:var(--muted)}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app">← Back to chat</a><h1>{{.Title}}</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">
-<div class="heading"><div><h2>{{.Title}}</h2><p>{{if eq .Kind "canvas"}}Create, read, and revise shared workspace documents.{{else}}Track work in persisted, structured rows.{{end}}</p></div></div>
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `` + localTimeScript + `{{end}}
+{{define "content"}}{{template "shell-open" .Shell}}<main class="layout">
+<div class="heading"><div><h1>{{.Title}}</h1><p>{{if eq .Kind "canvas"}}Create, read, and revise shared workspace documents.{{else}}Track work in persisted, structured rows.{{end}}</p></div></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if .CanWrite}}<details class="create"><summary>Create {{if eq .Kind "canvas"}}a canvas{{else}}a list{{end}}</summary><form method="post" action="/app/{{if eq .Kind "canvas"}}canvases{{else}}lists{{end}}/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Name<input name="title" maxlength="255" required></label>{{if eq .Kind "canvas"}}<label>Content<textarea name="body" maxlength="100000" placeholder="Start writing…"></textarea></label>{{else}}{{if .Templates}}<label>Start from<select name="template"><option value="">Blank list</option>{{range .Templates}}<option value="{{.ID}}">{{.Name}} ({{.Kind}})</option>{{end}}</select><small>A template brings its columns and starter rows; a name is still required.</small></label>{{end}}<label><span><input type="checkbox" name="todo_mode" value="true"> Use as a to-do list</span></label>{{end}}<button type="submit">Create</button></form></details>{{end}}
 {{if and (eq .Kind "list") .Templates}}<details class="create"><summary>Templates ({{len .Templates}})</summary><ul class="connections">{{range .Templates}}<li class="connection"><span class="connection-name">{{.Name}} <span class="status">{{.Kind}}</span></span>{{if $.CanWrite}}<form method="post" action="/app/lists/templates/delete"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="template" value="{{.ID}}"><button type="submit">Remove {{.Name}}</button></form>{{end}}</li>{{end}}</ul></details>{{end}}
 <div class="grid">{{if eq .Kind "canvas"}}{{range .Canvases}}<a class="card" href="{{.URL}}"><h3>{{.Title}}</h3><p>{{.Preview}}</p><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></a>{{else}}<p class="empty">No canvases yet.</p>{{end}}{{else}}{{range .Lists}}<a class="card" href="{{.URL}}"><h3>{{.Title}}</h3><p>{{.Preview}}</p><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></a>{{else}}<p class="empty">No lists yet.</p>{{end}}{{end}}</div>
-{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more</a></p>{{end}}</main>{{end}}`
+{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more</a></p>{{end}}</main>{{template "shell-close" .Shell}}{{end}}`
 
 var documentsTemplate = mustPage(documentsMarkup)
 
@@ -3202,7 +2919,7 @@ close();
 form.addEventListener('submit',close);
 document.addEventListener('pointerdown',function(event){if(!form.contains(event.target))close()});
 }
-var inputs=document.querySelectorAll('form.search input[name=q],#search-query');
+var inputs=document.querySelectorAll('#workspace-search,#search-query');
 for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 })();</script>`
 
@@ -3295,19 +3012,11 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
 var search=document.getElementById('workspace-search');
-var activityLink=document.getElementById('activity-link');
 var actionBox=document.getElementById('action-feedback');
 var status=document.getElementById('live-status');
-var nav=document.getElementById('workspace-sidebar');
-var navToggle=document.getElementById('nav-toggle');
-var navScrim=document.getElementById('nav-scrim');
-var switcher=document.getElementById('conversation-switcher');
-var switcherQuery=document.getElementById('conversation-switcher-query');
-var switcherClose=switcher?switcher.querySelector('.switcher-close'):null;
 var browserTimezone='UTC';
 try{browserTimezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(error){}
 Array.prototype.forEach.call(document.querySelectorAll('[data-browser-timezone]'),function(input){input.value=browserTimezone});
-var narrow=window.matchMedia?window.matchMedia('(max-width:800px)'):null;
 var generation=0;
 var refreshResponses=0;
 var discardedRefreshes=0;
@@ -3325,38 +3034,8 @@ function announce(message){if(status)status.textContent=message}
 function showError(message){var box=actionBox;if(!box){window.alert(message);return}box.textContent=message;box.hidden=false;box.scrollIntoView({block:'nearest'});box.focus()}
 function clearError(){if(!actionBox)return;actionBox.textContent='';actionBox.hidden=true}
 function failure(error){var message=error&&error.message?String(error.message).trim():'';if(message.charAt(0)==='<')message='';if(message.length>200)message=message.slice(0,200);if(message)return message;return 'The request could not be completed. Nothing was changed.'}
-function openSwitcher(){
-if(!switcher||typeof switcher.showModal!=='function')return false;
-if(!switcher.open)switcher.showModal();
-if(switcherQuery){switcherQuery.value='';filterSwitcher();switcherQuery.focus()}
-return true;
-}
-function filterSwitcher(){
-if(!switcher||!switcherQuery)return;
-var query=switcherQuery.value.trim().toLowerCase();
-var links=switcher.querySelectorAll('[data-conversation-name]');
-for(var index=0;index<links.length;index++){
-var show=(links[index].getAttribute('data-conversation-name')||'').toLowerCase().indexOf(query)!==-1;
-var item=links[index].closest('li');
-if(item)item.hidden=!show;
-}
-}
-function setNav(open,focus){
-if(!nav||!navToggle||!navScrim)return;
-var mobile=!!(narrow&&narrow.matches);
-open=mobile&&open;
-nav.classList.toggle('is-open',open);
-navScrim.classList.toggle('is-open',open);
-navToggle.setAttribute('aria-expanded',open?'true':'false');
-navToggle.setAttribute('aria-label',open?'Close navigation':'Open navigation');
-if(mobile&&!open)nav.setAttribute('inert','');else nav.removeAttribute('inert');
-if(open&&focus){var current=nav.querySelector('[aria-current="page"]')||nav.querySelector('.side-link');if(current)current.focus()}
-}
-function navFocusables(){
-if(!nav)return[];
-return Array.prototype.slice.call(nav.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')).filter(function(item){return !!(item.offsetParent||item.getClientRects().length)});
-}
 function ownPath(value){return typeof value==='string'&&value.charAt(0)==='/'&&value.charAt(1)!=='/'}
+function preference(key,fallback){return window.sameoldchatPreferences?window.sameoldchatPreferences.get(key,fallback):fallback}
 function shown(region){return !!(region.offsetParent||region.getClientRects().length)}
 function atBottom(region){return region.scrollHeight-region.scrollTop-region.clientHeight<48}
 function toBottom(region){if(region)region.scrollTop=region.scrollHeight}
@@ -3439,8 +3118,6 @@ var action=form.getAttribute('hx-post');
 if(!ownPath(action))return;
 fetch(action,{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('Unread state could not be saved.');form.hidden=true}).catch(function(){announce('Unread state could not be saved. Messages are still available.')});
 }
-if(switcherQuery)switcherQuery.addEventListener('input',filterSwitcher);
-if(switcherClose)switcherClose.addEventListener('click',function(){switcher.close()});
 document.addEventListener('submit',function(event){
 var form=event.target.closest('form');
 if(!form||!form.hasAttribute('hx-post'))return;
@@ -3488,99 +3165,11 @@ toBottom(document.getElementById('timeline'));
 return refresh(true);
 }).catch(function(error){showError(failure(error))}).then(release,release);
 });
-var keyboardHelpDialog=document.getElementById('keyboard-help');
-var keyboardHelpQuery=document.getElementById('keyboard-help-query');
-var keyboardHelpEmpty=document.getElementById('keyboard-help-empty');
-function filterKeyboardHelp(){
-if(!keyboardHelpDialog)return;
-var term=keyboardHelpQuery?keyboardHelpQuery.value.trim().toLowerCase():'';
-var shown=0;
-Array.prototype.forEach.call(keyboardHelpDialog.querySelectorAll('[data-keyboard-row]'),function(row){
-var match=!term||(row.getAttribute('data-keyboard-search')||'').indexOf(term)>=0;
-row.hidden=!match;
-if(match)shown++;
-});
-Array.prototype.forEach.call(keyboardHelpDialog.querySelectorAll('[data-keyboard-section]'),function(section){
-section.hidden=!section.querySelector('[data-keyboard-row]:not([hidden])');
-});
-if(keyboardHelpEmpty)keyboardHelpEmpty.hidden=shown>0;
-}
-function openKeyboardHelp(){
-if(!keyboardHelpDialog||typeof keyboardHelpDialog.showModal!=='function'||keyboardHelpDialog.open)return false;
-Array.prototype.forEach.call(keyboardHelpDialog.querySelectorAll('[data-keyboard-apple]'),function(node){node.hidden=!applePlatform});
-Array.prototype.forEach.call(keyboardHelpDialog.querySelectorAll('[data-keyboard-other]'),function(node){node.hidden=applePlatform});
-if(keyboardHelpQuery)keyboardHelpQuery.value='';
-filterKeyboardHelp();
-keyboardHelpDialog.showModal();
-if(keyboardHelpQuery)keyboardHelpQuery.focus();
-return true;
-}
-if(keyboardHelpQuery)keyboardHelpQuery.addEventListener('input',filterKeyboardHelp);
-var keyboardHelpClose=document.getElementById('keyboard-help-close');
-if(keyboardHelpClose)keyboardHelpClose.addEventListener('click',function(){keyboardHelpDialog.close()});
-var keyboardHelpOpen=document.getElementById('open-keyboard-help');
-if(keyboardHelpOpen)keyboardHelpOpen.addEventListener('click',function(){openKeyboardHelp()});
-
-function sectionLandmarks(){
-return Array.prototype.slice.call(document.querySelectorAll('#workspace-sidebar,#workspace-search,#timeline,#thread-messages,#thread-composer,#composer')).filter(function(node){return node&&node.offsetParent!==null||node===document.activeElement});
-}
-function moveSection(backwards){
-var landmarks=sectionLandmarks();
-if(landmarks.length<2)return false;
-var active=document.activeElement;
-var current=-1;
-for(var index=0;index<landmarks.length;index++){if(landmarks[index]===active||landmarks[index].contains(active)){current=index;break}}
-if(current<0)current=backwards?0:landmarks.length-1;
-var next=backwards?(current+landmarks.length-1)%landmarks.length:(current+1)%landmarks.length;
-var target=landmarks[next];
-var focusable=target.matches('input,textarea,select,button,a[href]')?target:target.querySelector('[contenteditable="true"]:not([hidden]),input:not([type=hidden]):not([hidden]),textarea:not([hidden]),select,button,a[href],[tabindex="-1"]');
-var destination=focusable||target;
-if(!destination.hasAttribute('tabindex')&&!destination.matches('input,textarea,select,button,a[href]'))destination.setAttribute('tabindex','-1');
-destination.focus();
-announce('Moved to '+(target.getAttribute('aria-label')||target.id.replace(/[-_]/g,' ')));
-return true;
-}
-function unreadLinks(){
-return Array.prototype.slice.call(document.querySelectorAll('.side-section[aria-label="Channels"] .side-link,.side-section[aria-label="Direct messages"] .side-link')).filter(function(link){
-return /unread messages/.test(link.getAttribute('aria-label')||'');
-});
-}
 document.addEventListener('keydown',function(event){
 var key=typeof event.key==='string'?event.key.toLowerCase():'';
 if(event.key==='Escape'){
 var modalClose=document.getElementById('modal-close-form');
 if(modalClose){event.preventDefault();if(typeof modalClose.requestSubmit==='function')modalClose.requestSubmit();else modalClose.submit();return}
-}
-if(event.key==='Tab'&&nav&&nav.classList.contains('is-open')){
-var focusable=navFocusables();
-if(focusable.length){
-var first=focusable[0];
-var last=focusable[focusable.length-1];
-var active=document.activeElement;
-if(event.shiftKey&&(active===first||!nav.contains(active))){event.preventDefault();last.focus();return}
-if(!event.shiftKey&&(active===last||!nav.contains(active))){event.preventDefault();first.focus();return}
-}
-}
-if(event.key==='Escape'&&nav&&nav.classList.contains('is-open')){
-event.preventDefault();
-setNav(false,false);
-if(navToggle)navToggle.focus();
-return;
-}
-if(event.ctrlKey&&!event.metaKey&&!event.altKey&&key==='3'&&(applePlatform?!event.shiftKey:event.shiftKey)){
-if(!activityLink)return;
-var activityHref=activityLink.getAttribute('href');
-if(!ownPath(activityHref))return;
-event.preventDefault();
-window.location.assign(activityHref);
-return;
-}
-if(primaryShortcut(event)&&!event.shiftKey&&!event.altKey&&key==='g'){
-if(!search)return;
-event.preventDefault();
-search.focus();
-search.select();
-return;
 }
 if(primaryShortcut(event)&&!event.shiftKey&&!event.altKey&&key==='f'){
 if(!search)return;
@@ -3590,34 +3179,9 @@ var searchParams=new URLSearchParams({channel:channelInput?channelInput.value:''
 window.location.assign('/app/search?'+searchParams.toString());
 return;
 }
-if(primaryShortcut(event)&&!event.shiftKey&&!event.altKey&&key==='k'){
-if(openSwitcher()){event.preventDefault();return}
-}
 if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='i'){
-var detailsLink=document.querySelector('a[aria-label="Open conversation details"]');
-if(detailsLink&&ownPath(detailsLink.getAttribute('href'))){event.preventDefault();window.location.assign(detailsLink.getAttribute('href'));return}
-}
-if(primaryShortcut(event)&&!event.shiftKey&&!event.altKey&&key==='/'){
-if(openKeyboardHelp()){event.preventDefault();return}
-}
-if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='k'){
-var directsLink=document.querySelector('.side-link[aria-label="Direct messages"]');
-if(directsLink&&ownPath(directsLink.getAttribute('href'))){event.preventDefault();window.location.assign(directsLink.getAttribute('href'));return}
-}
-if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='a'){
-var unreadsLink=document.querySelector('.side-link[aria-label="Unreads"]');
-if(unreadsLink&&ownPath(unreadsLink.getAttribute('href'))){event.preventDefault();window.location.assign(unreadsLink.getAttribute('href'));return}
-}
-if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='t'){
-var threadsLink=document.querySelector('.side-link[aria-label="Threads"]');
-if(threadsLink&&ownPath(threadsLink.getAttribute('href'))){event.preventDefault();window.location.assign(threadsLink.getAttribute('href'));return}
-}
-if(primaryShortcut(event)&&event.shiftKey&&!event.altKey&&key==='s'){
-var laterLink=document.querySelector('.side-link[aria-keyshortcuts~="Meta+Shift+S"]');
-if(laterLink&&ownPath(laterLink.getAttribute('href'))){event.preventDefault();window.location.assign(laterLink.getAttribute('href'));return}
-}
-if(primaryShortcut(event)&&!event.altKey&&event.key==='F6'){
-if(moveSection(event.shiftKey)){event.preventDefault();return}
+var detailsTrigger=document.getElementById('conversation-name-button');
+if(detailsTrigger){event.preventDefault();detailsTrigger.click();return}
 }
 var target=event.target;
 var editing=target&&(target.tagName==='INPUT'||target.tagName==='TEXTAREA'||target.isContentEditable);
@@ -3626,41 +3190,17 @@ event.preventDefault();
 window.sameoldchatComposer.focus();
 return;
 }
-if(event.key==='Escape'&&(event.shiftKey||!editing)&&!document.querySelector('dialog[open]')&&!(nav&&nav.classList.contains('is-open'))){
+if(event.key==='Escape'&&(event.shiftKey||!editing)&&!document.querySelector('dialog[open]')&&!document.querySelector('.sidebar.is-open')){
 var readForm=event.shiftKey?document.getElementById('mark-all-read'):document.getElementById('mark-read');
 if(readForm){
 event.preventDefault();
+if(event.shiftKey&&preference('confirm-mark-all','false')==='true'&&!window.confirm('Mark all messages as read? This marks every conversation read.'))return;
 announce(event.shiftKey?'Marking every conversation read.':'Marking this conversation read.');
 if(typeof readForm.requestSubmit==='function')readForm.requestSubmit();else readForm.submit();
 return;
 }
 }
-if(event.altKey&&event.shiftKey&&!event.ctrlKey&&!event.metaKey&&(event.key==='ArrowUp'||event.key==='ArrowDown')){
-var unread=unreadLinks();
-if(!unread.length){event.preventDefault();announce('No unread conversations.');return}
-var here=unread.findIndex(function(link){return link.getAttribute('aria-current')==='page'});
-var step=event.key==='ArrowDown'?1:-1;
-var choice=here<0?(event.key==='ArrowDown'?0:unread.length-1):(here+step+unread.length)%unread.length;
-var unreadHref=unread[choice].getAttribute('href');
-if(!ownPath(unreadHref))return;
-event.preventDefault();
-window.location.assign(unreadHref);
-return;
-}
-if(!event.altKey||event.shiftKey||event.ctrlKey||event.metaKey||(event.key!=='ArrowUp'&&event.key!=='ArrowDown'))return;
-var links=Array.prototype.slice.call(document.querySelectorAll('.side-section[aria-label="Channels"] .side-link,.side-section[aria-label="Direct messages"] .side-link'));
-if(links.length<2)return;
-var current=links.findIndex(function(link){return link.getAttribute('aria-current')==='page'});
-if(current<0)current=0;
-var next=event.key==='ArrowDown'?(current+1)%links.length:(current+links.length-1)%links.length;
-var href=links[next].getAttribute('href');
-if(!ownPath(href))return;
-event.preventDefault();
-window.location.assign(href);
 });
-if(navToggle)navToggle.addEventListener('click',function(){setNav(!nav.classList.contains('is-open'),true)});
-if(navScrim)navScrim.addEventListener('click',function(){setNav(false,false);if(navToggle)navToggle.focus()});
-if(narrow){if(typeof narrow.addEventListener==='function')narrow.addEventListener('change',function(){setNav(false,false)});setNav(false,false)}
 var canonicalShell=document.querySelector('[data-canonical-url]');
 if(canonicalShell&&window.history&&typeof window.history.replaceState==='function'){try{window.history.replaceState(null,'',canonicalShell.getAttribute('data-canonical-url'))}catch(error){}}
 function patchDialogErrors(dialogID){
@@ -3746,7 +3286,7 @@ window.setInterval(beat,300000);
 }
 window.sameoldchatPage={refresh:refresh,localize:localize,announce:announce,focusMessage:focusMessage,messageItems:messageItems};
 var markRead=document.getElementById('mark-read');
-if(markRead)submitQuietly(markRead);
+if(markRead&&preference('mark-read','newest')!=='newest-unread')submitQuietly(markRead);
 var arrivedAt=null;
 try{arrivedAt=window.location.hash?document.getElementById(decodeURIComponent(window.location.hash.slice(1))):null}catch(error){arrivedAt=null}
 if(arrivedAt&&arrivedAt.classList&&arrivedAt.classList.contains('message')){
@@ -3756,8 +3296,10 @@ announce('Opened the message you selected.');
 var clearArrival=function(){arrivedAt.classList.remove('is-arrival');['pointerdown','keydown','wheel'].forEach(function(name){document.removeEventListener(name,clearArrival)})};
 ['pointerdown','keydown','wheel'].forEach(function(name){document.addEventListener(name,clearArrival,{once:false,passive:true})});
 }else{
+var leftOff=preference('mark-read','newest')==='left-off'?document.querySelector('#timeline .unread-divider'):null;
 var landing=document.getElementById('timeline');
-if(landing){landing.style.scrollBehavior='auto';toBottom(landing);window.requestAnimationFrame(function(){toBottom(landing);landing.style.scrollBehavior=''})}
+if(leftOff)leftOff.scrollIntoView({block:'start'});
+else if(landing){landing.style.scrollBehavior='auto';toBottom(landing);window.requestAnimationFrame(function(){toBottom(landing);landing.style.scrollBehavior=''})}
 }
 (function(){var pane=document.getElementById('timeline');if(!pane||!window.ResizeObserver)return;var pinned=pane.scrollHeight-pane.scrollTop-pane.clientHeight<8;pane.addEventListener('scroll',function(){pinned=pane.scrollHeight-pane.scrollTop-pane.clientHeight<8},{passive:true});new ResizeObserver(function(){if(pinned){var behavior=pane.style.scrollBehavior;pane.style.scrollBehavior='auto';toBottom(pane);pane.style.scrollBehavior=behavior}}).observe(pane)})();
 var activeModal=document.querySelector('[aria-modal="true"]');
@@ -4000,6 +3542,16 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/conversation/topic", h.setConversationTopic)
 	mux.HandleFunc("POST /app/conversation/purpose", h.setConversationPurpose)
 	mux.HandleFunc("POST /app/conversation/notifications", h.setConversationNotifications)
+	mux.HandleFunc("POST /app/conversation/star", h.starConversation)
+	mux.HandleFunc("POST /app/conversation/remove", h.removeConversationMember)
+	mux.HandleFunc("POST /app/bookmarks/add", h.addBookmark)
+	mux.HandleFunc("POST /app/bookmarks/remove", h.removeBookmark)
+	mux.HandleFunc("GET /app/channels", h.browseChannels)
+	mux.HandleFunc("GET /app/channels/new", h.shellFormPage("Create a channel", "create-channel"))
+	mux.HandleFunc("GET /app/preferences", h.shellFormPage("Preferences", "preferences"))
+	mux.HandleFunc("GET /app/status", h.shellFormPage("Set a status", "status"))
+	mux.HandleFunc("GET /app/sidebar/sections/new", h.shellFormPage("Create a section", "section"))
+	mux.HandleFunc("POST /app/status", h.setStatus)
 	mux.HandleFunc("POST /app/thread/follow", h.setThreadFollow)
 	mux.HandleFunc("POST /app/conversation/archive", h.setConversationArchived)
 	mux.HandleFunc("POST /app/conversation/leave", h.leaveConversation)
@@ -4050,7 +3602,7 @@ func (h Handler) acceptCSRFResult(w http.ResponseWriter, r *http.Request, err er
 func (h Handler) writeMutationError(w http.ResponseWriter, r *http.Request, status int, heading, message string) {
 	w.Header().Set("Vary", "HX-Request")
 	if r.Header.Get("HX-Request") == "true" {
-		secureHeaders(w, workspaceContentSecurityPolicy)
+		secureHeaders(w, workspaceContentSecurityPolicy())
 		http.Error(w, message, status)
 		return
 	}
@@ -4529,7 +4081,7 @@ func redirectOAuthAuthorization(w http.ResponseWriter, r *http.Request, rawRedir
 		query.Set("state", state)
 	}
 	target.RawQuery = query.Encode()
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	http.Redirect(w, r, target.String(), http.StatusFound)
 }
 
@@ -4740,7 +4292,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	messageDialog := requestedMessageDialog(r, timeline, thread)
 
-	conversations := h.sidebar(r.Context(), principal, channel, history.AtLatest, domain.Cursor(strings.TrimSpace(r.URL.Query().Get("conversations"))))
+	conversations := h.sidebar(r.Context(), principal, channel, history.AtLatest)
 	if conversations.Notice != "" {
 		notices = append(notices, conversations.Notice)
 	}
@@ -4831,15 +4383,18 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	if state.Notice != "" {
 		notices = append(notices, state.Notice)
 	}
-	reminderUnread, reminderErr := h.hasUnacknowledgedReminder(r.Context(), principal)
-	if reminderErr != nil {
-		notices = append(notices, "Reminder notification state is temporarily unavailable.")
-	}
 	var details *conversationDetailsView
 	if strings.TrimSpace(r.URL.Query().Get("details")) == "1" {
 		details, err = h.newConversationDetails(r.Context(), principal, workspace, conversation, isMember)
 		if err != nil {
 			notices = append(notices, "Conversation details are temporarily unavailable.")
+		} else {
+			switch tab := strings.TrimSpace(r.URL.Query().Get("tab")); tab {
+			case detailsTabMembers, detailsTabIntegrations, detailsTabSettings:
+				details.InitialTab = tab
+			default:
+				details.InitialTab = detailsTabAbout
+			}
 		}
 	}
 	if isMember {
@@ -4851,17 +4406,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			for _, draft := range draftPage.Items {
 				withDraft[draft.ConversationID] = true
 			}
-			for index := range conversations.Channels {
-				conversations.Channels[index].HasDraft = withDraft[domain.ConversationID(conversations.Channels[index].ID)]
-			}
-			for sectionIndex := range conversations.Sections {
-				for index := range conversations.Sections[sectionIndex].Channels {
-					conversations.Sections[sectionIndex].Channels[index].HasDraft = withDraft[domain.ConversationID(conversations.Sections[sectionIndex].Channels[index].ID)]
-				}
-			}
-			for index := range conversations.Directs {
-				conversations.Directs[index].HasDraft = withDraft[domain.ConversationID(conversations.Directs[index].ID)]
-			}
+			conversations.markDrafts(withDraft)
 		}
 	}
 	// The header's member count. A DM's header is the person, so no count; a
@@ -4885,7 +4430,29 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	})
 	notices = append(notices, composerNotices...)
 
+	kind := conversationKind(conversation)
+	var currentRow conversationView
+	for _, item := range conversations.All {
+		if item.ID == string(channel) {
+			currentRow = item
+		}
+	}
+	destination := destinationHome
+	if strings.TrimSpace(r.URL.Query().Get("pane")) == "dms" {
+		destination = destinationDMs
+	}
+	shell := h.newShell(r, principal, shellRequest{Destination: destination, Channel: channel, CSRFToken: csrfToken, Conversations: &conversations})
 	data := pageData{
+		Shell:                shell,
+		HomeSections:         conversations.homeSections(shell.ShowAuthAdmin, len(workspaceApps) > 0),
+		SidebarTruncated:     conversations.Truncated,
+		Kind:                 kind,
+		KindText:             conversationKindText(kind),
+		KindNoun:             kindNounFor(kind),
+		IsChannelKind:        !conversation.IsDirectOrGroup(),
+		ChannelTopic:         strings.TrimSpace(conversation.Topic),
+		FaceInitials:         h.faceInitials(r.Context(), principal, conversation),
+		Current:              currentRow,
 		CanonicalURL:         canonicalPageURL(r, appURL(string(channel), threadTimestamp, "", "", "")),
 		Timeline:             timeline,
 		Thread:               thread,
@@ -4903,12 +4470,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		MemberCount:          memberCount,
 		WorkspaceName:        workspaceName,
 		CSRFToken:            csrfToken,
-		ShowProfile:          h.canShowIdentity(),
-		ShowAdmin:            h.canShowWorkspaceAdmin(r.Context(), principal),
-		ShowAuthAdmin:        h.Login != nil && h.canShowWorkspaceAdmin(r.Context(), principal),
-		Keyboard:             keyboardHelp(),
 		Assistant:            h.assistantThreadView(r.Context(), principal, channel, domain.MessageTimestamp(threadTimestamp)),
-		ReminderUnread:       reminderUnread,
 		CanvasURL:            channelCanvasURL(principal, conversation, isMember),
 		IsMember:             isMember,
 		CanPost:              canPost,
@@ -4953,11 +4515,29 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	if dnd, dndErr := h.Messages.DoNotDisturbInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID); dndErr == nil && dnd.SnoozeUntil.After(time.Now()) {
 		data.NotificationsPaused = true
 	}
+	if strings.TrimSpace(r.URL.Query().Get("tab")) == "pins" {
+		data.Tab = "pins"
+		pins, _, _, pinsErr := h.Messages.Pins(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{Limit: 100})
+		if pinsErr != nil {
+			data.Notice = strings.TrimSpace(data.Notice + " Pinned messages are temporarily unavailable.")
+		} else {
+			pinned := make([]domain.Message, 0, len(pins))
+			for _, pin := range pins {
+				pinned = append(pinned, pin.Item)
+			}
+			data.Pins, _ = h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: pinned, Member: isMember, Names: names})
+		}
+	}
+	if isMember && principal.HasScope(auth.ScopeBookmarksRead) {
+		if bookmarks, bookmarkErr := h.Messages.Bookmarks(r.Context(), principal.WorkspaceID, principal.UserID, channel); bookmarkErr == nil {
+			data.Bookmarks = bookmarks
+		} else {
+			data.Notice = strings.TrimSpace(data.Notice + " Bookmarks are temporarily unavailable.")
+		}
+	}
+	data.CanBookmark = isMember && !conversation.Archived && principal.HasScope(auth.ScopeBookmarksWrite)
 	data.HuddleURL = "/app/huddle?channel=" + url.QueryEscape(string(channel))
 	data.Huddle = h.huddleFor(r.Context(), principal, conversation, data.CSRFToken, "", names)
-	if conversations.More != "" {
-		data.MoreChannelsURL = appURL(string(channel), threadTimestamp, string(before), "", string(conversations.More))
-	}
 	// Marking the conversation read is a durable write, so the page carries a
 	// form for it rather than performing it while rendering. The client submits
 	// the form once the timeline has settled; a reader without JavaScript sees
@@ -5014,7 +4594,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 	var messages []domain.Message
 	if threadTimestamp != "" {
 		if _, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(threadTimestamp)); parseErr != nil {
-			secureHeaders(w, workspaceContentSecurityPolicy)
+			secureHeaders(w, workspaceContentSecurityPolicy())
 			http.Error(w, "that thread link is not valid", http.StatusBadRequest)
 			return
 		}
@@ -5028,7 +4608,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		history, historyErr := h.historyWindow(r.Context(), principal, channel, before, after)
 		if historyErr != nil {
 			if errors.Is(historyErr, domain.ErrInvalidCursor) {
-				secureHeaders(w, workspaceContentSecurityPolicy)
+				secureHeaders(w, workspaceContentSecurityPolicy())
 				http.Error(w, "that history link is not valid", http.StatusBadRequest)
 				return
 			}
@@ -5892,106 +5472,6 @@ func statusEmojiDisplay(shortcode string, customEmoji map[string]string) templat
 	return renderReactionEmoji(shortcode, customEmoji)
 }
 
-// sidebarView is the conversation list plus the one fact the page outside it
-// needs: whether the conversation being read still has unread messages, which
-// decides whether the page offers to mark it read.
-type sidebarSectionOption struct {
-	ID   string
-	Name string
-}
-
-// sidebarSectionView is one custom section in the channel sidebar: its channels
-// in order, whether it is shown collapsed, and whether it can move up or down
-// among the member's sections.
-type sidebarSectionView struct {
-	ID                string
-	Name              string
-	Collapsed         bool
-	NotificationLevel string
-	CanUp             bool
-	CanDown           bool
-	Channels          []conversationView
-}
-
-type sidebarView struct {
-	Channels       []conversationView
-	Sections       []sidebarSectionView
-	SectionOptions []sidebarSectionOption
-	Directs        []conversationView
-	More           domain.Cursor
-	Notice         string
-	CurrentUnread  int
-}
-
-func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel domain.ConversationID, atLatest bool, cursor domain.Cursor) sidebarView {
-	page, err := h.Messages.Conversations(ctx, principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{Limit: conversationWindow, Cursor: cursor})
-	if err != nil {
-		return sidebarView{Notice: "The conversation list is temporarily out of date."}
-	}
-	view := sidebarView{
-		Channels: make([]conversationView, 0, len(page.Conversations)),
-		Directs:  make([]conversationView, 0, len(page.Conversations)),
-	}
-	channelByID := make(map[domain.ConversationID]conversationView)
-	channelOrder := make([]domain.ConversationID, 0, len(page.Conversations))
-	resolved := 0
-	for _, conversation := range page.Conversations {
-		if conversation.ID == channel {
-			view.CurrentUnread = conversation.UnreadCount
-		}
-		item := conversationView{ID: string(conversation.ID), Name: conversationName(conversation), Current: conversation.ID == channel, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.Kind == domain.ConversationTypeMPIM}
-		if item.Current && atLatest {
-			// The page just rendered every message in this conversation; showing
-			// its own unread badge tells the reader to read what they are reading.
-			item.UnreadCount = 0
-		}
-		if !conversation.IsDirectOrGroup() {
-			channelByID[conversation.ID] = item
-			channelOrder = append(channelOrder, conversation.ID)
-			continue
-		}
-		if resolved < directNameWindow && (conversation.Kind != domain.ConversationTypeMPIM || conversation.Name == "" || conversation.Name == "direct") {
-			resolved++
-			if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
-				item.Name = participants
-			}
-		}
-		view.Directs = append(view.Directs, item)
-	}
-	// Custom sections come first, each holding its assigned channels in order.
-	// A channel the member has left, or that scrolled past the window, simply
-	// falls out — the store keeps the assignment, the sidebar just does not draw
-	// what it cannot see.
-	assigned := make(map[domain.ConversationID]struct{})
-	if sections, err := h.Messages.SidebarSections(ctx, principal.WorkspaceID, principal.UserID); err == nil {
-		for index, section := range sections {
-			sectionView := sidebarSectionView{
-				ID: string(section.ID), Name: section.Name, Collapsed: section.Collapsed,
-				NotificationLevel: string(section.NotificationLevel),
-				CanUp:             index > 0, CanDown: index < len(sections)-1,
-			}
-			for _, id := range section.Conversations {
-				if item, ok := channelByID[id]; ok {
-					sectionView.Channels = append(sectionView.Channels, item)
-					assigned[id] = struct{}{}
-				}
-			}
-			view.Sections = append(view.Sections, sectionView)
-			view.SectionOptions = append(view.SectionOptions, sidebarSectionOption{ID: string(section.ID), Name: section.Name})
-		}
-	}
-	for _, id := range channelOrder {
-		if _, ok := assigned[id]; ok {
-			continue
-		}
-		view.Channels = append(view.Channels, channelByID[id])
-	}
-	if page.HasMore {
-		view.More = page.NextCursor
-	}
-	return view
-}
-
 // participantNames names a direct conversation after the people in it: the
 // stored name of every direct conversation is "direct", which is neither
 // distinguishable nor useful in a sidebar.
@@ -6001,13 +5481,20 @@ func (h Handler) participantNames(ctx context.Context, principal auth.Principal,
 		return ""
 	}
 	names := make([]string, 0, len(page.Users))
+	self := ""
 	for _, user := range page.Users {
 		if user.ID == principal.UserID {
+			self = displayName(user)
 			continue
 		}
 		names = append(names, displayName(user))
 	}
 	if len(names) == 0 {
+		// A self-DM has only the member in it. Slack names it after them with
+		// "(you)"; the stored name, "direct", names nobody.
+		if self != "" {
+			return self + " (you)"
+		}
 		return ""
 	}
 	sort.Strings(names)
@@ -6252,6 +5739,15 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 	// to whoever can manage the channel: it decides who in the whole workspace
 	// may read what was said in it.
 	canChangeVisibility := isChannel && !conversation.Archived && h.canShowWorkspaceAdmin(ctx, principal)
+	createdBy, createdOn := "", ""
+	if !conversation.Created.IsZero() {
+		createdOn = conversation.Created.UTC().Format("January 2, 2006")
+		if conversation.CreatorID != "" {
+			if creator, err := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, conversation.CreatorID); err == nil {
+				createdBy = displayName(creator)
+			}
+		}
+	}
 	return &conversationDetailsView{
 		ID:                  string(conversation.ID),
 		Name:                name,
@@ -6286,6 +5782,12 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		RetentionSummary:    retentionNote,
 		ConnectURL:          "/app/connect/invite?channel=" + url.QueryEscape(string(conversation.ID)),
 		ConnectHosts:        connectDestinations,
+		Kind:                conversationKind(conversation),
+		CreatedBy:           createdBy,
+		CreatedOn:           createdOn,
+		HasSettings:         (canManage && isChannel && !conversation.Archived) || canConvert || canChangeVisibility || retentionAllowed || isChannel || (canManage && isChannel && !required),
+		CanMessage:          principal.HasScope(auth.ScopeChannelsManage),
+		CanRemove:           canManage && isChannel && !conversation.Archived && !required,
 	}, nil
 }
 
@@ -6484,6 +5986,7 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 		query := url.Values{"channel": {channel}, "state": {string(state)}, "cursor": {string(page.NextCursor)}}
 		data.MoreURL = "/app/later?" + query.Encode()
 	}
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationLater})
 	h.writeLivePage(w, head, laterTemplate, data, http.StatusOK, "Later rendering unavailable")
 }
 
@@ -6647,6 +6150,7 @@ func (h Handler) draftsAndSent(w http.ResponseWriter, r *http.Request) {
 			"sent":      "Show more sent messages",
 		}[tab]
 	}
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationHome})
 	h.writeHTML(w, draftsAndSentTemplate, data, http.StatusOK, "Drafts & sent rendering unavailable")
 }
 
@@ -6891,6 +6395,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	if page.HasMore && page.NextCursor != "" {
 		data.MoreURL = activityPageURL(channel, kindValue, viewValue, unreadOnly, clearedOnly, page.NextCursor)
 	}
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationActivity})
 	h.writeLivePage(w, head, activityTemplate, data, http.StatusOK, "activity rendering unavailable")
 }
 
@@ -7353,7 +6858,7 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 			data.Exceptions = append(data.Exceptions, notificationExceptionView{
 				ID: string(conversation.ID), Name: conversationName(conversation), Prefix: "#",
 				Level: string(override.Level), FollowEveryThread: override.FollowEveryThread,
-				URL: conversationDetailsURL(conversation.ID) + "#conversation-notifications",
+				URL: conversationDetailsURL(conversation.ID, detailsTabAbout) + "#conversation-notifications",
 			})
 		}
 		if !page.HasMore || page.NextCursor == "" {
@@ -7370,6 +6875,7 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(data.Exceptions, func(left, right int) bool {
 		return strings.ToLower(data.Exceptions[left].Name) < strings.ToLower(data.Exceptions[right].Name)
 	})
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: ""})
 	h.writeHTML(w, notificationsTemplate, data, http.StatusOK, "notification preferences rendering unavailable")
 }
 
@@ -7520,7 +7026,7 @@ func (h Handler) setNotificationSnooze(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusServiceUnavailable, "The notification pause was not changed", "The workspace store is temporarily unavailable.")
 		return
 	}
-	h.redirectMutation(w, r, "/app/notifications?channel="+url.QueryEscape(string(h.requestChannel(r)))+"&status="+status)
+	h.redirectMutation(w, r, returnTarget(fields, "/app/notifications?channel="+url.QueryEscape(string(h.requestChannel(r)))+"&status="+status))
 }
 
 func (h Handler) hasUnacknowledgedReminder(ctx context.Context, principal auth.Principal) (bool, error) {
@@ -7585,6 +7091,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data.Recent = searchHistoryViews(recent, channel)
+		data.Shell = h.newShell(r, principal, shellRequest{Destination: "", SearchQuery: data.Query})
 		h.writeHTML(w, searchTemplate, data, http.StatusOK, "search rendering unavailable")
 		return
 	}
@@ -7605,6 +7112,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	// bad query, and refusing it here keeps that answer the same on every tab.
 	textTokens, tokenErr := domain.SearchQueryTokens(query)
 	if tokenErr != nil {
+		data.Shell = h.newShell(r, principal, shellRequest{SearchQuery: data.Query})
 		h.writeSearchError(w, data, service.ErrInvalidSearch)
 		return
 	}
@@ -7623,6 +7131,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		}
 		results, searchErr := h.Messages.SearchMessages(r.Context(), principal.WorkspaceID, principal.UserID, request)
 		if searchErr != nil {
+			data.Shell = h.newShell(r, principal, shellRequest{SearchQuery: data.Query})
 			h.writeSearchError(w, data, searchErr)
 			return
 		}
@@ -7639,6 +7148,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			pageNumber, err = strconv.Atoi(raw)
 		}
 		if err != nil || pageNumber <= 0 || pageNumber > 100 {
+			data.Shell = h.newShell(r, principal, shellRequest{SearchQuery: data.Query})
 			h.writeSearchError(w, data, domain.ErrInvalidCursor)
 			return
 		}
@@ -7650,6 +7160,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		}
 		results, searchErr := h.Messages.SearchFiles(r.Context(), principal.WorkspaceID, principal.UserID, request)
 		if searchErr != nil {
+			data.Shell = h.newShell(r, principal, shellRequest{SearchQuery: data.Query})
 			h.writeSearchError(w, data, searchErr)
 			return
 		}
@@ -7673,6 +7184,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor"))),
 		})
 		if searchErr != nil {
+			data.Shell = h.newShell(r, principal, shellRequest{SearchQuery: data.Query})
 			h.writeSearchError(w, data, searchErr)
 			return
 		}
@@ -7695,6 +7207,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			Page: domain.PageRequest{Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))},
 		})
 		if searchErr != nil {
+			data.Shell = h.newShell(r, principal, shellRequest{SearchQuery: data.Query})
 			h.writeSearchError(w, data, searchErr)
 			return
 		}
@@ -7721,6 +7234,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			Page: domain.PageRequest{Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))},
 		})
 		if searchErr != nil {
+			data.Shell = h.newShell(r, principal, shellRequest{SearchQuery: data.Query})
 			h.writeSearchError(w, data, searchErr)
 			return
 		}
@@ -7746,6 +7260,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor"))),
 		})
 		if searchErr != nil {
+			data.Shell = h.newShell(r, principal, shellRequest{SearchQuery: data.Query})
 			h.writeSearchError(w, data, searchErr)
 			return
 		}
@@ -7759,6 +7274,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	if err := h.Messages.RecordSearch(r.Context(), principal.WorkspaceID, principal.UserID, query); err != nil {
 		data.Warning = "Search completed, but it could not be added to recent searches."
 	}
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: "", SearchQuery: data.Query})
 	h.writeHTML(w, searchTemplate, data, http.StatusOK, "search rendering unavailable")
 }
 
@@ -8094,7 +7610,7 @@ func (h Handler) emojiOptions(w http.ResponseWriter, r *http.Request) {
 	for _, value := range slackemoji.Categories() {
 		categories = append(categories, value.Name)
 	}
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_ = json.NewEncoder(w).Encode(map[string]any{"options": options, "count": len(options), "categories": categories})
@@ -8458,7 +7974,7 @@ func (h Handler) canvases(w http.ResponseWriter, r *http.Request) {
 	if page.HasMore {
 		more = "/app/canvases?cursor=" + url.QueryEscape(string(page.NextCursor))
 	}
-	h.writeHTML(w, documentsTemplate, documentsData{Kind: "canvas", Title: "Canvases", CSRFToken: csrf, CanWrite: principal.HasScope(auth.ScopeCanvasesWrite), Canvases: cards, MoreURL: more, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+	h.writeHTML(w, documentsTemplate, documentsData{Shell: h.newShell(r, principal, shellRequest{Destination: destinationMore}), Kind: "canvas", Title: "Canvases", CSRFToken: csrf, CanWrite: principal.HasScope(auth.ScopeCanvasesWrite), Canvases: cards, MoreURL: more, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
 }
 
 func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
@@ -9172,7 +8688,7 @@ func (h Handler) lists(w http.ResponseWriter, r *http.Request) {
 			templates = append(templates, listTemplateView{ID: string(value.ID), Name: value.Name, Kind: kind})
 		}
 	}
-	h.writeHTML(w, documentsTemplate, documentsData{Kind: "list", Title: "Lists", CSRFToken: csrf, CanWrite: principal.HasScope(auth.ScopeListsWrite), Lists: cards, Templates: templates, MoreURL: more, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
+	h.writeHTML(w, documentsTemplate, documentsData{Shell: h.newShell(r, principal, shellRequest{Destination: destinationMore}), Kind: "list", Title: "Lists", CSRFToken: csrf, CanWrite: principal.HasScope(auth.ScopeListsWrite), Lists: cards, Templates: templates, MoreURL: more, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
 }
 
 func (h Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -9717,6 +9233,9 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 		if name == "" || name == "direct" {
 			name = strings.Join(names, ", ")
 		}
+		if name == "" {
+			name = h.participantNames(r.Context(), principal, conversation.ID)
+		}
 		if foldedQuery != "" && !strings.Contains(domain.FoldSearchText(name), foldedQuery) {
 			continue
 		}
@@ -9738,6 +9257,7 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeHTML(w, directMessagesTemplate, directMessagesData{
+		Shell: h.newShell(r, principal, shellRequest{Destination: destinationDMs}),
 		Query: query, Recent: recent, Members: members,
 		CSRFToken:  auth.CSRFToken(sessionCookie.Value),
 		CanMessage: principal.HasScope(auth.ScopeChannelsManage),
@@ -9851,6 +9371,7 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 			})
 		}
 	}
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationMore})
 	h.writeHTML(w, membersTemplate, data, status, "member rendering unavailable")
 }
 
@@ -10051,7 +9572,7 @@ func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, err, "Your availability could not be updated.")
 		return
 	}
-	http.Redirect(w, r, "/app/members", http.StatusSeeOther)
+	http.Redirect(w, r, returnTarget(fields, "/app/members"), http.StatusSeeOther)
 }
 
 // ---------------------------------------------------------------------------
@@ -10370,7 +9891,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("HX-Request") == "true" {
 			// The composer renders this text next to the field and keeps the
 			// draft, so a failure is never silent and never loses the message.
-			secureHeaders(w, workspaceContentSecurityPolicy)
+			secureHeaders(w, workspaceContentSecurityPolicy())
 			http.Error(w, reason, status)
 			return
 		}
@@ -10575,7 +10096,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 func (h Handler) writeScheduleMessageError(w http.ResponseWriter, r *http.Request, principal auth.Principal, fields map[string]string, attachments []domain.DraftAttachment, scheduleAt string, status int, reason string) {
 	w.Header().Set("Vary", "HX-Request")
 	if r.Header.Get("HX-Request") == "true" {
-		secureHeaders(w, workspaceContentSecurityPolicy)
+		secureHeaders(w, workspaceContentSecurityPolicy())
 		http.Error(w, reason, status)
 		return
 	}
@@ -11256,7 +10777,7 @@ func (h Handler) decodeAppInteractionMutation(w http.ResponseWriter, r *http.Req
 }
 
 func (h Handler) appResponse(w http.ResponseWriter, r *http.Request) {
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	body, err := io.ReadAll(io.LimitReader(r.Body, service.MaxMessageBodyBytes+1))
 	if err != nil || len(body) > service.MaxMessageBodyBytes {
 		writeAppResponseError(w, http.StatusBadRequest, "invalid_payload")
@@ -11921,7 +11442,7 @@ func (h Handler) setConversationVisibility(w http.ResponseWriter, r *http.Reques
 		h.writeMutationError(w, r, http.StatusBadRequest, "The channel was not changed", "Only a workspace administrator can change who may read a channel, and a channel shared with another organization cannot be made public.")
 		return
 	}
-	h.redirectMutation(w, r, appURL(string(channel), "", "", "", "")+"&details=1")
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabSettings))
 }
 
 func (h Handler) convertGroupDirectToPrivate(w http.ResponseWriter, r *http.Request) {
@@ -11983,7 +11504,23 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, status, heading, reason)
 		return
 	}
-	h.redirectMutation(w, r, appURL(string(conversation.ID), "", "", "", ""))
+	// The dialog's Add people step sends each chosen person as user_<ID>. The
+	// channel exists by now whatever happens next, so a failed invitation
+	// says so on the new channel instead of reporting the whole create failed.
+	var invitees []domain.UserID
+	for name, value := range fields {
+		if id, ok := strings.CutPrefix(name, "user_"); ok && value == "1" && id != "" && domain.UserID(id) != principal.UserID {
+			invitees = append(invitees, domain.UserID(id))
+		}
+	}
+	target := appURL(string(conversation.ID), "", "", "", "")
+	if len(invitees) > 0 {
+		sort.Slice(invitees, func(left, right int) bool { return invitees[left] < invitees[right] })
+		if _, err := h.Messages.InviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, invitees); err != nil {
+			target += "&notice=" + url.QueryEscape("The channel was created, but the people you chose could not be added. Add them from the channel details.")
+		}
+	}
+	h.redirectMutation(w, r, target)
 }
 
 func (h Handler) inviteConversationMember(w http.ResponseWriter, r *http.Request) {
@@ -12017,7 +11554,7 @@ func (h Handler) inviteConversationMember(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	h.redirectMutation(w, r, conversationDetailsURL(channel))
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabMembers))
 }
 
 func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
@@ -12050,7 +11587,7 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 		h.redirectMutation(w, r, "/app/dms")
 		return
 	}
-	h.redirectMutation(w, r, conversationDetailsURL(channel))
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabAbout))
 }
 
 func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
@@ -12089,7 +11626,7 @@ func (h Handler) setConversationNotifications(w http.ResponseWriter, r *http.Req
 		}
 		return
 	}
-	h.redirectMutation(w, r, conversationDetailsURL(channel)+"#conversation-notifications")
+	h.redirectMutation(w, r, returnTarget(fields, conversationDetailsURL(channel, detailsTabAbout)+"#conversation-notifications"))
 }
 
 func (h Handler) setThreadFollow(w http.ResponseWriter, r *http.Request) {
@@ -12171,7 +11708,7 @@ func (h Handler) setConversationText(w http.ResponseWriter, r *http.Request, fie
 		}
 		return
 	}
-	h.redirectMutation(w, r, conversationDetailsURL(channel))
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabAbout))
 }
 
 func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request) {
@@ -12195,7 +11732,7 @@ func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request)
 		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, service.ErrCannotArchiveDefault):
 			h.writeMutationError(w, r, http.StatusBadRequest, "This conversation cannot be archived", "Only public and private channels that are not required by the workspace can be archived.")
 		case errors.Is(err, service.ErrConversationAlreadyArchived), errors.Is(err, service.ErrConversationNotArchived):
-			h.redirectMutation(w, r, conversationDetailsURL(channel))
+			h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabSettings))
 		case errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That channel is no longer available", "Nothing was changed.")
 		default:
@@ -12203,7 +11740,7 @@ func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request)
 		}
 		return
 	}
-	h.redirectMutation(w, r, conversationDetailsURL(channel))
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabSettings))
 }
 
 func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
@@ -12245,8 +11782,21 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, appURL(string(channel), "", "", "", ""))
 }
 
-func conversationDetailsURL(channel domain.ConversationID) string {
-	return "/app?" + url.Values{"channel": {string(channel)}, "details": {"1"}}.Encode()
+// Details dialog tabs. A mutation made from a tab returns to that tab, so
+// the change it made is on screen when the dialog reopens.
+const (
+	detailsTabAbout        = "about"
+	detailsTabMembers      = "members"
+	detailsTabIntegrations = "integrations"
+	detailsTabSettings     = "settings"
+)
+
+func conversationDetailsURL(channel domain.ConversationID, tab string) string {
+	values := url.Values{"channel": {string(channel)}, "details": {"1"}}
+	if tab != "" && tab != detailsTabAbout {
+		values.Set("tab", tab)
+	}
+	return "/app?" + values.Encode()
 }
 
 func normalizeUserIDs(raw string) ([]domain.UserID, error) {
@@ -12313,9 +11863,19 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // directive would leave global sign-out working in one browser and broken in
 // another. The administration page keeps it, because every form there redirects
 // to itself.
-var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, messageScript, composerScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, notificationsMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
-	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+//
+// The hashes come from every page template the package builds (pageMarkups)
+// plus the layout they all share. Every page is a first-party constant served
+// from this one origin, so allowing one page's script on another grants nothing
+// an attacker controls, while a page whose script is missing from the policy is
+// silently broken. The value is computed once, on first use, because the page
+// templates are package variables whose initialisation order Go does not tie to
+// this one.
+var workspaceContentSecurityPolicy = sync.OnceValue(func() string {
+	documents := append([]string{layoutMarkup}, pageMarkups...)
+	return "default-src 'none'; script-src " + strings.Join(inlineScriptHashes(documents...), " ") +
+		"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+})
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:
 // /login and /signed-out. Both are static documents with one inline stylesheet
@@ -12446,13 +12006,13 @@ func (h Handler) readLiveHead(ctx context.Context, principal auth.Principal) (li
 const liveStreamOpen = `new EventSource('/events'+(/^[0-9]+$/.test(document.body.getAttribute('data-event-head')||'')?'?last_event_id='+document.body.getAttribute('data-event-head'):''))`
 
 func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data any, status int, unavailable string) {
-	h.writeHTMLWithPolicy(w, page, data, status, unavailable, workspaceContentSecurityPolicy)
+	h.writeHTMLWithPolicy(w, page, data, status, unavailable, workspaceContentSecurityPolicy())
 }
 
 // writeLivePage serves a workspace page whose script opens the live event
 // stream from head.
 func (h Handler) writeLivePage(w http.ResponseWriter, head liveHead, page *template.Template, data any, status int, unavailable string) {
-	h.writeRendered(w, page, data, head, status, unavailable, workspaceContentSecurityPolicy)
+	h.writeRendered(w, page, data, head, status, unavailable, workspaceContentSecurityPolicy())
 }
 
 // writeHTMLWithPolicy serves a page under a policy of its own. A page outside
@@ -12466,6 +12026,9 @@ func (h Handler) writeHTMLWithPolicy(w http.ResponseWriter, page *template.Templ
 func (h Handler) writeRendered(w http.ResponseWriter, page *template.Template, data any, head liveHead, status int, unavailable, policy string) {
 	var output bytes.Buffer
 	if err := renderPage(&output, page, data, head); err != nil {
+		// A template that cannot execute is a programming error rather than an
+		// outage, and the 503 below cannot say which it was; the log can.
+		log.Printf("web: rendering a page failed: %v", err)
 		secureHeaders(w, policy)
 		http.Error(w, unavailable, http.StatusServiceUnavailable)
 		return
@@ -12486,11 +12049,11 @@ func (h Handler) writeFragment(w http.ResponseWriter, list messageList) {
 func (h Handler) writePartial(w http.ResponseWriter, name string, data any, unavailable string) {
 	var output bytes.Buffer
 	if err := pageTemplate.ExecuteTemplate(&output, name, data); err != nil {
-		secureHeaders(w, workspaceContentSecurityPolicy)
+		secureHeaders(w, workspaceContentSecurityPolicy())
 		http.Error(w, unavailable, http.StatusServiceUnavailable)
 		return
 	}
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(output.Bytes())
 }
@@ -12498,11 +12061,11 @@ func (h Handler) writePartial(w http.ResponseWriter, name string, data any, unav
 func (h Handler) writePageError(w http.ResponseWriter, status int, heading, message string) {
 	var output bytes.Buffer
 	if err := renderPage(&output, errorTemplate, errorData{Heading: heading, Message: message}, liveHead{}); err != nil {
-		secureHeaders(w, workspaceContentSecurityPolicy)
+		secureHeaders(w, workspaceContentSecurityPolicy())
 		http.Error(w, heading, status)
 		return
 	}
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(output.Bytes())
@@ -12526,7 +12089,7 @@ func (h Handler) writeStoreError(w http.ResponseWriter, err error, unavailable s
 // browser, while the test that checks the header set only ever visited a
 // successful page and a 404.
 func (h Handler) writeFragmentError(w http.ResponseWriter, err error, unavailable string) {
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "that conversation is not available", http.StatusNotFound)
 		return
@@ -12546,7 +12109,7 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 }
 
 func (h Handler) writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	// A credential store that did not answer is server trouble, not an
 	// authentication outcome: nothing is known about the session, so neither a
 	// 401 nor a login redirect is honest, and both push a signed-in person

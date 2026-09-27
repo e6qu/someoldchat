@@ -450,13 +450,13 @@ func TestChannelVisibilityChangesBothWaysForAnAdministrator(t *testing.T) {
 	}
 	// The warning is the point of the control: going public cannot be undone in
 	// effect, and the page says so before it is used.
-	requireContains(t, "public channel details", details(), "Make this channel private", "Only members will be able to read")
+	requireContains(t, "public channel details", details(), "Change to a private channel", "Only members will be able to read")
 
 	private := postForm(t, mux, "/app/conversation/visibility?channel=Cdev", url.Values{"_csrf": {csrf}, "private": {"true"}}.Encode(), false)
 	if private.Code != http.StatusSeeOther {
 		t.Fatalf("make private = %d: %s", private.Code, private.Body)
 	}
-	requireContains(t, "private channel details", details(), "Make this channel public", "will be able to read everything already said")
+	requireContains(t, "private channel details", details(), "Change to a public channel", "will be able to read everything already said")
 
 	public := postForm(t, mux, "/app/conversation/visibility?channel=Cdev", url.Values{"_csrf": {csrf}, "private": {"false"}}.Encode(), false)
 	if public.Code != http.StatusSeeOther {
@@ -475,7 +475,7 @@ func TestChannelVisibilityChangesBothWaysForAnAdministrator(t *testing.T) {
 	if err := s.SetWorkspaceRole(context.Background(), "T1", "U1", domain.WorkspaceRoleMember, events.Event{}); err != nil {
 		t.Fatal(err)
 	}
-	requireMissing(t, "member details", details(), "Make this channel private")
+	requireMissing(t, "member details", details(), "Change to a private channel")
 	refused := postForm(t, mux, "/app/conversation/visibility?channel=Cdev", url.Values{"_csrf": {csrf}, "private": {"true"}}.Encode(), false)
 	if refused.Code != http.StatusBadRequest {
 		t.Fatalf("member conversion = %d: %s", refused.Code, refused.Body)
@@ -1346,7 +1346,7 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 	}
 	body := response.Body.String()
 	requireContains(t, "workspace shell", body,
-		`<h1 class="channel-title"># general</h1>`,
+		`<span class="visually-hidden">Channel </span><span class="channel-name-text">general</span>`,
 		"<title>#general · SameOldChat</title>",
 		`placeholder="Message #general"`,
 		`role="toolbar" aria-label="Formatting"`,
@@ -1355,10 +1355,11 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 		`data-kind="person" data-id="U1" data-name="Ada Developer"`,
 		`<span class="author">Ada Developer</span>`,
 		`<div class="avatar" aria-hidden="true">A</div>`,
-		`<span class="signed-in-avatar" aria-hidden="true">A</span>`,
-		// Slack's header carries the member count beside the topic, and it is a
-		// link into the member list rather than a bare number.
-		`>1 member</a> · Everything else`,
+		`<span class="self-avatar" aria-hidden="true">A<span class="presence-dot">`,
+		// Slack's header carries the member count as a face pile that opens the
+		// member list, and the topic beside the conversation's name.
+		`aria-label="1 member — open the member list"`,
+		`<p class="channel-meta" title="Everything else">Everything else</p>`,
 	)
 	requireMissing(t, "workspace shell", body, "# Cdev", "Message #Cdev", ">U1<")
 	// The machine timestamp stays in datetime= while the reader sees the clock
@@ -1682,7 +1683,7 @@ func TestConversationMemberPanelShowsPresenceAndStatus(t *testing.T) {
 	requireContains(t, "member panel projects status", body,
 		`<span class="conversation-member-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`)
 	requireContains(t, "member panel carries a presence dot", body,
-		`<li class="conversation-member"><span class="presence `)
+		`data-member-name="Bob Builder"><span class="conversation-member-avatar" aria-hidden="true">B<span class="presence-dot `)
 }
 
 // TestMemberDirectoryMarksAndRemovesVIPs covers the VIP toggle: the directory
@@ -1721,7 +1722,7 @@ func TestSidebarSectionsOrganizeChannels(t *testing.T) {
 	messages := service.Messages{Store: s}
 
 	requireContains(t, "new section control", get(t, mux, "/app?channel=Cdev").Body.String(),
-		"New section", "/app/sidebar/sections/create")
+		"Create new section", "/app/sidebar/sections/create")
 
 	if r := postForm(t, mux, "/app/sidebar/sections/create?channel=Cdev", url.Values{"_csrf": {csrf}, "name": {"Priorities"}}.Encode(), false); r.Code != http.StatusSeeOther {
 		t.Fatalf("create status=%d body=%s", r.Code, r.Body)
@@ -1803,7 +1804,7 @@ func TestDirectMessageHeaderProjectsTheOtherMembersStatus(t *testing.T) {
 	}
 	body := get(t, mux, "/app?channel=Cdm").Body.String()
 	requireContains(t, "DM header names the other person and their status", body,
-		`<h1 class="channel-title">Bob Builder<span class="channel-title-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`)
+		`<span class="channel-name-text">Bob Builder</span><span class="channel-title-status" title="Shipping"><span class="standard-emoji" role="img" aria-label=":tada:">`)
 
 	// A group DM shows the joined names and no single status.
 	if err := s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", RealName: "Carol Coder",
@@ -1900,7 +1901,7 @@ func TestPublicChannelPreviewJoinsBeforeOfferingMutationControls(t *testing.T) {
 	}
 	requireContains(t, "public-channel preview", preview.Body.String(),
 		"readable before joining",
-		`<span class="membership-pill">Not joined</span>`,
+		`<strong>You are viewing #general</strong>`,
 		`action="/app/join?channel=Cdev"`,
 		"Join channel",
 		"View thread",
@@ -1918,7 +1919,7 @@ func TestPublicChannelPreviewJoinsBeforeOfferingMutationControls(t *testing.T) {
 	}
 	workspace := get(t, mux, "/app?channel=Cdev")
 	requireContains(t, "joined channel", workspace.Body.String(),
-		`<span class="membership-pill joined">Joined</span>`,
+		`action="/app/conversation/leave?channel=Cdev"`,
 		`id="composer"`,
 		"Reply in thread",
 	)
@@ -1931,6 +1932,8 @@ func TestSidebarSeparatesDirectMessagesAndClearsTheOpenChannelBadge(t *testing.T
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
 	s.SeedConversation(domain.Conversation{ID: "Cother", WorkspaceID: "T1", Name: "release"})
+	// The sidebar lists only conversations the member belongs to.
+	s.SeedConversationMember("Cother", "U1")
 	s.SeedConversation(domain.Conversation{ID: "Cdm", WorkspaceID: "T1", Name: "direct", Kind: domain.ConversationTypeIM})
 	s.SeedConversationMember("Cdm", "U1")
 	s.SeedConversationMember("Cdm", "U2")
@@ -1947,7 +1950,7 @@ func TestSidebarSeparatesDirectMessagesAndClearsTheOpenChannelBadge(t *testing.T
 	requireContains(t, "sidebar", body,
 		`aria-label="Direct messages"`,
 		`aria-label="Bob Builder"`,
-		`aria-label="release, 1 unread messages"`,
+		`aria-label="release, 1 unread message"`,
 	)
 	requireMissing(t, "sidebar", body, `>direct<`, `aria-label="general, `)
 }
@@ -2006,7 +2009,7 @@ func TestActivityShowsDurableMentionWithFiltersAndTriage(t *testing.T) {
 		`href="/app?channel=Cprivate"`,
 		"Added you to #launch-room.",
 	)
-	requireContains(t, "activity shortcut", progressiveEnhancementScript, "key==='3'", "activityLink", "window.location.assign(activityHref)")
+	requireContains(t, "activity shortcut", shellScript, "key==='3'", "getElementById('activity-link')")
 }
 
 func TestComposerUserGroupMentionRendersAndNotifiesEligibleMembers(t *testing.T) {
@@ -2274,7 +2277,7 @@ func TestNotificationPreferencesDNDConversationExceptionAndThreadFollowJourney(t
 	requireContains(t, "notification exception list", notifications.Body.String(), "#general", "mute", "following every thread")
 	details := get(t, mux, "/app?channel=Cdev&details=1")
 	requireContains(t, "conversation notification controls", details.Body.String(),
-		`id="conversation-notifications"`, `<option value="mute" selected>Mute conversation</option>`,
+		`id="conversation-notifications"`, `<input type="radio" name="level" value="mute" checked> Nothing`,
 		`name="follow_every_thread" value="true" checked`,
 	)
 
@@ -2353,9 +2356,8 @@ func TestNarrowNavigationKeepsConversationNamesReachable(t *testing.T) {
 		`aria-label="Open navigation"`,
 		`id="workspace-sidebar"`,
 		`.sidebar.is-open{transform:translateX(0)}`,
-		`.side-label,.side-text,.signed-in-name{display:block}`,
 	)
-	requireMissing(t, "navigation drawer", body, `.side-text,.signed-in-name{display:none}`)
+	requireMissing(t, "navigation drawer", body, `.side-text{display:none}`)
 	if strings.Contains(body, ".thread{display:none}") {
 		t.Fatal("narrow viewports delete the thread pane instead of reflowing it")
 	}
@@ -2523,7 +2525,7 @@ func TestAnotherMembersMessageCannotBeChanged(t *testing.T) {
 func TestWorkspaceCanCreateAChannel(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
-	requireContains(t, "workspace", body, `action="/app/conversation/create"`, `hx-post="/app/conversation/create"`, `name="is_private"`, "Add channel")
+	requireContains(t, "workspace", body, `action="/app/conversation/create"`, `name="is_private"`, "Add channels", "Create a new channel", "Browse channels")
 
 	created := postForm(t, mux, "/app/conversation/create", "name=Product+Launch&is_private=true", false)
 	if created.Code != http.StatusSeeOther {
@@ -2567,7 +2569,7 @@ func TestConversationDetailsManageTheWholeChannelJourney(t *testing.T) {
 
 	body := get(t, mux, "/app?channel=Cdev&details=1").Body.String()
 	requireContains(t, "conversation details", body,
-		`role="dialog" aria-modal="true" aria-labelledby="conversation-details-title"`,
+		`<dialog class="shell-dialog conversation-details" id="conversation-details" aria-labelledby="conversation-details-title"`,
 		"Everything else",
 		"Bob Builder",
 		"Rae Reviewer",
@@ -3747,7 +3749,10 @@ func TestThemeIsResolvedBeforeTheFirstPaint(t *testing.T) {
 		if bootstrap > strings.Index(body, "<body") {
 			t.Fatalf("%s resolves the theme after the first paint", target)
 		}
-		requireContains(t, target, body, "prefers-color-scheme: dark", `id="theme-toggle"`, `aria-pressed="false"`)
+		// The theme is chosen in Preferences, as in Slack: Light, Dark, or the
+		// operating system's setting, which is also what a member who never
+		// chose gets.
+		requireContains(t, target, body, "prefers-color-scheme: dark", `data-preference="theme"`, `value="system" data-preference="theme" data-default="system"`, "Sync with OS setting")
 	}
 }
 
@@ -3786,7 +3791,7 @@ func TestHTMXPostMessage(t *testing.T) {
 	requireContains(t, "index", body,
 		"general",
 		"hello",
-		"theme-toggle",
+		`data-preference="theme"`,
 		`data-theme="light"`,
 		"HX-Request",
 		"last_event_id",
@@ -4216,9 +4221,9 @@ func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.
 	// real sign-out control: post-deployment qualification reads them there, not
 	// on the separate validation page.
 	for _, expected := range []string{
-		`href="/me" aria-label="My profile"`,
+		`href="/me"`,
 		`data-shauth-user="developer"`,
-		`<span class="signed-in-name">developer</span>`,
+		`<strong>developer</strong>`,
 		`data-shauth-sign-out`,
 	} {
 		if applicationResponse.Code != http.StatusOK || !strings.Contains(applicationResponse.Body.String(), expected) {
@@ -4305,7 +4310,7 @@ func TestAuthorizationAdminIsReachableFromTheShell(t *testing.T) {
 	handler.Login = &login
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	requireContains(t, "workspace shell", get(t, mux, "/app?channel=Cdev").Body.String(), `href="/app/admin/auth"`, "Authorization")
+	requireContains(t, "workspace shell", get(t, mux, "/app?channel=Cdev").Body.String(), `href="/app/admin/auth"`, "Members and authorization")
 
 	if err := s.SetWorkspaceRole(context.Background(), "T1", "U1", domain.WorkspaceRoleMember, events.Event{}); err != nil {
 		t.Fatal(err)
@@ -4518,7 +4523,7 @@ func TestSearchPageSupportsTypedResultsFiltersAndConversationScope(t *testing.T)
 	people := get(t, mux, "/app/search?q=Ada&type=people&channel=Cdev")
 	requireContains(t, "people search", people.Body.String(), "Ada Developer", `/app/members?user=U1`)
 	excludedPeople := get(t, mux, "/app/search?q=Ada+-Developer&type=people&channel=Cdev")
-	requireMissing(t, "excluded people search", excludedPeople.Body.String(), "Ada Developer")
+	requireMissing(t, "excluded people search", excludedPeople.Body.String(), `/app/members?user=U1`)
 	channels := get(t, mux, "/app/search?q=general&type=channels&channel=Cdev")
 	requireContains(t, "channel search", channels.Body.String(), "# <mark>general</mark>", `/app?channel=Cdev`)
 }
@@ -4817,7 +4822,7 @@ func TestProgressiveEnhancementHandlesRedirectResponses(t *testing.T) {
 	if !strings.Contains(composerScript, "form.addEventListener('submit',function(event){\nevent.preventDefault();event.stopPropagation();") {
 		t.Fatal("a composer submission can still reach the generic form handler, which would post it twice or show its error elsewhere")
 	}
-	if !strings.Contains(progressiveEnhancementScript, "setNav(false,false)") || !strings.Contains(progressiveEnhancementScript, "navToggle.focus()") {
+	if !strings.Contains(shellScript, "setNav(false,false)") || !strings.Contains(shellScript, "navToggle.focus()") {
 		t.Fatal("the narrow navigation does not close on Escape and restore focus")
 	}
 }
@@ -5109,18 +5114,20 @@ func TestTruncatedListsExposeTheirRemainder(t *testing.T) {
 	})
 	t.Run("conversations", func(t *testing.T) {
 		s, mux := browserWorkspace(t, []string{string(auth.ScopeChannelsHistory)})
+		// The sidebar reads every page of the member's conversations (up to
+		// sidebarPages of them), so a member in more than one listing window
+		// still sees all of them rather than a "More conversations" link that
+		// replaced the page and lost the open conversation.
 		for index := 0; index < conversationWindow+1; index++ {
-			s.SeedConversation(domain.Conversation{ID: domain.ConversationID(fmt.Sprintf("C%03d", index)), WorkspaceID: "T1", Name: fmt.Sprintf("channel-%03d", index)})
+			id := domain.ConversationID(fmt.Sprintf("C%03d", index))
+			s.SeedConversation(domain.Conversation{ID: id, WorkspaceID: "T1", Name: fmt.Sprintf("channel-%03d", index)})
+			if err := s.SeedConversationMember(id, "U1"); err != nil {
+				t.Fatal(err)
+			}
 		}
 		body := get(t, mux, "/app?channel=Cdev").Body.String()
-		more := regexp.MustCompile(`<a class="side-more" href="(/app\?[^"]+)">More conversations</a>`).FindStringSubmatch(body)
-		if more == nil {
-			t.Fatalf("the sidebar hides its remainder: %s", body)
-		}
-		second := get(t, mux, strings.ReplaceAll(more[1], "&amp;", "&"))
-		if second.Code != http.StatusOK {
-			t.Fatalf("second sidebar page status=%d body=%s", second.Code, second.Body)
-		}
+		requireContains(t, "sidebar past one listing window", body, `href="/app?channel=C000"`, `href="/app?channel=C050"`)
+		requireMissing(t, "sidebar past one listing window", body, "More conversations")
 	})
 }
 

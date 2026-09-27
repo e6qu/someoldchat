@@ -52,7 +52,9 @@ qualification separately verifies the configured sign-in destination.
 Every test title carries one or more stable IDs from the normative
 [Slack user-journey catalog](../../specs/journeys/README.md). The suite also
 runs `@axe-core/playwright` 4.12.1 against the desktop workspace, the
-conversation-switcher dialog, and a 320-pixel narrow viewport. Those automated
+conversation-switcher dialog, Browse channels, the status dialog, bookmarks
+and Pins, and a 320-pixel narrow viewport, and checks that the shell reflows
+without sideways scrolling at 320 pixels and at 200% zoom. Those automated
 WCAG 2.0/2.1 A/AA and WCAG 2.2 AA checks complement, but do not replace, manual
 screen-reader, keyboard, zoom, and live-Slack comparison evidence.
 

@@ -160,7 +160,14 @@ const composerPartial = `{{define "composer"}}  {{if .CanUpload}}<form class="up
       <div class="composer-dialog-actions"><button type="submit" value="cancel">Cancel</button><button type="submit" value="send" class="composer-dialog-primary">Send now</button></div>
     </form>
   </dialog>{{end}}
-{{define "composer-preferences"}}<fieldset class="composer-preferences" data-composer-preferences>
+`
+
+// composerPreferencesPartial is the composer's preferences: what Enter does and
+// whether markup is formatted. They are rendered in the shell's Preferences >
+// Advanced section on every page (mustPage parses this with the shell), and
+// written to the same per-browser keys whether composerScript or the shell's
+// script handles the change.
+const composerPreferencesPartial = `{{define "composer-preferences"}}<fieldset class="composer-preferences" data-composer-preferences>
   <legend>When writing a message, press <kbd>Enter</kbd> to…</legend>
   <label><input type="radio" name="composer-enter" value="send" data-composer-preference="enter" checked> Send the message</label>
   <label><input type="radio" name="composer-enter" value="newline" data-composer-preference="enter"> Start a new line (use <kbd data-keyboard-apple>⌘</kbd><kbd data-keyboard-other>Ctrl</kbd> + <kbd>Enter</kbd> to send)</label>

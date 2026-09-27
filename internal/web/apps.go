@@ -46,6 +46,8 @@ const starterAppManifest = `{
 const developerAppsScript = `<script>(function(){var secret=document.querySelector('[data-one-time-secret][data-return]');if(!secret||!window.history||typeof window.history.replaceState!=='function'||typeof window.history.pushState!=='function')return;var target=secret.getAttribute('data-return');if(typeof target!=='string'||target.charAt(0)!=='/'||target.charAt(1)==='/')return;window.history.replaceState({oneTimeSecret:false},'',target);window.history.pushState({oneTimeSecret:true},'',target);window.addEventListener('popstate',function(){window.location.replace(target)},{once:true})})();</script>`
 
 type developerAppsData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell           shellView
 	Apps            []domain.App
 	Selected        *domain.App
 	Manifest        string
@@ -102,9 +104,9 @@ func (h Handler) loadDeveloperAppTokens(r *http.Request, principal auth.Principa
 }
 
 const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}
-.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar .theme-toggle{margin-left:auto}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+
+
 .layout{max-width:1180px;margin:0 auto;padding:28px 22px}.heading{border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:22px}
 .heading h1{margin:0 0 4px;font-size:26px}.muted{color:var(--muted)}
 .grid{display:grid;grid-template-columns:minmax(220px,300px) minmax(0,1fr);gap:22px;align-items:start}
@@ -121,7 +123,7 @@ const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{en
 @media(max-width:760px){.grid{grid-template-columns:minmax(0,1fr)}.layout{padding:20px 14px}.field textarea{min-height:320px}.secret dl{grid-template-columns:1fr}.app-token-table{display:block;overflow-x:auto}}
 </style>{{end}}
 {{define "content"}}
-<header class="bar"><a href="/app">← Back to chat</a><span>Developer apps</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
+{{template "shell-open" .Shell}}
 <main class="layout">
   <div class="heading"><h1>Developer apps</h1><p class="muted">Build OAuth apps, bots, Socket Mode clients, event subscriptions, and interactive experiences against the same APIs Slack SDKs use. <a href="/app/apps">Open installed apps</a>.</p></div>
   {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
@@ -144,9 +146,9 @@ const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{en
       {{if .Selected}}<hr>{{if .Selected.SocketModeEnabled}}<form method="post" action="/app/developer/apps/app-token"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Generate app-level token</button></form><form method="post" action="/app/developer/apps/app-token/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Revoke app-level tokens</button></form>{{if .AppTokens}}<div class="app-tokens"><h3 id="app-tokens-heading">Issued app-level tokens</h3><table class="app-token-table" aria-labelledby="app-tokens-heading"><thead><tr><th scope="col">Token</th><th scope="col">Issued</th><th scope="col">Scopes</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>{{range .AppTokens}}<tr{{if .Revoked}} class="token-revoked"{{end}}><td><code>{{.ShortID}}…</code></td><td>{{.IssuedAt}}</td><td>{{if .Scopes}}{{.Scopes}}{{else}}—{{end}}</td><td>{{if .Revoked}}Revoked{{else}}Active{{end}}</td><td>{{if not .Revoked}}<form class="inline" method="post" action="/app/developer/apps/app-token/revoke-one"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="app_id" value="{{$.Selected.ID}}"><input type="hidden" name="token_id" value="{{.ID}}"><button class="button secondary" type="submit">Revoke</button></form>{{end}}</td></tr>{{end}}</tbody></table></div>{{end}}{{end}}<div class="distribution"><h3 id="distribution-heading">Distribution</h3><p class="muted">{{if eq .Selected.Distribution "public"}}This app is distributed: it can be installed in any workspace through its install flow.{{else}}This app is private: only its development workspace can install it. Activating public distribution needs a redirect URL in the manifest.{{end}}</p><form method="post" action="/app/developer/apps/distribution"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}">{{if eq .Selected.Distribution "public"}}<input type="hidden" name="public" value="false"><button class="button secondary" type="submit">Deactivate public distribution</button>{{else}}<input type="hidden" name="public" value="true"><button class="button" type="submit">Activate public distribution</button>{{end}}</form></div><div class="external-auth"><h3 id="external-auth-heading">External authentication providers</h3><p class="muted">Declare an OAuth provider so members can connect an account at an outside service. The client secret is stored encrypted and never shown again.</p><form method="post" action="/app/developer/apps/external-auth"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><label class="field">Provider name<input name="name" maxlength="80" required></label><label class="field">Provider client ID<input name="client_id" required></label><label class="field">Provider client secret<input name="client_secret" type="password" required></label><label class="field">Authorization URL<input name="authorization_url" type="url" placeholder="https://provider.example/oauth/authorize" required></label><label class="field">Token URL<input name="token_url" type="url" placeholder="https://provider.example/oauth/token" required></label><label class="field">Scopes (space separated)<input name="scopes" placeholder="read write"></label><button class="button secondary" type="submit">Save provider</button></form></div><form method="post" action="/app/developer/apps/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button danger" type="submit">Delete app</button></form>{{end}}
     </section>
   </div>
-</main>
+</main>{{template "shell-close" .Shell}}
 {{end}}
-{{define "scripts"}}` + developerAppsScript + `{{end}}`
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `` + developerAppsScript + `{{end}}`
 
 var developerAppsTemplate = mustPage(developerAppsMarkup)
 
@@ -357,6 +359,7 @@ func (h Handler) renderDeveloperAppsWithToken(w http.ResponseWriter, r *http.Req
 	data := developerAppsData{Apps: apps, Selected: &app, Manifest: manifest, CSRFToken: csrf, Notice: "App-level token generated.", AppToken: &token}
 	setDeveloperAppLinks(&data, app, manifest)
 	data.AppTokens = h.loadDeveloperAppTokens(r, principal, app.ID)
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: ""})
 	h.writeHTML(w, developerAppsTemplate, data, http.StatusCreated, "app console rendering unavailable")
 }
 
@@ -408,6 +411,7 @@ func (h Handler) renderDeveloperApps(w http.ResponseWriter, r *http.Request, pri
 	} else {
 		data.Notice = message
 	}
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: ""})
 	h.writeHTML(w, developerAppsTemplate, data, status, "app console rendering unavailable")
 }
 
