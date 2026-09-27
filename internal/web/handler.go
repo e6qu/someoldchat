@@ -2930,6 +2930,9 @@ const directMessagesMarkup = `{{define "title"}}Direct messages · SameOldChat{{
 .dm-preview{margin:0;color:var(--muted);font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .v-row.unread .dm-preview{color:var(--text)}
 .dm-unread{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--danger);color:#fff;font-size:11px;font-weight:800}
+.dms-page .v-row{position:relative}
+@media(hover:hover) and (min-width:651px){.dms-page .v-hover-actions{position:absolute;top:8px;right:10px}.dms-page .v-row:hover .v-row-time,.dms-page .v-row:focus-within .v-row-time{visibility:hidden}}
+@media(max-width:650px){.dms-page .v-row-side{justify-content:flex-start;gap:8px}.dms-page .v-row-side .v-hover-actions{margin-left:auto}}
 .rename-form{display:grid;gap:6px;padding:6px;min-width:240px}
 .rename-form input{min-height:32px;padding:4px 8px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);font:inherit}
 .new-dm{margin-top:22px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
