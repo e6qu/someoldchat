@@ -45,9 +45,10 @@
 //     app's member owner shadows (the IssueDeveloperAppToken family and SetAppIcon, owner-or-admin on the member-owned app), a
 //     second-organization action (AcceptSharedInvite), an enterprise-grid team
 //     relationship a single workspace cannot form (AdminAddUserGroupTeams), or a
-//     per-(message,user) pin or star whose add and remove share the one probe
-//     timestamp (RemovePin, RemoveStar). Closing these would distort the fixture
-//     other operations depend on.
+//     per-(message,user) pin whose add and remove share the one probe timestamp
+//     (RemovePin). Closing these would distort the fixture other operations
+//     depend on. RemoveStar left this residue once AddStar was driven in its
+//     channel form, which let the holder own a star on the message.
 //   - Complex-state buildable: the rest of the workflow state machine
 //     (RunWorkflow, WebhookTriggerURL with its sealed secret, UpdateWorkflow and
 //     SetWorkflowTrigger with their full definitions, the interactive run and
@@ -115,7 +116,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"OpenAppHome":                             {},
 		"PostEphemeralWithBlocksAndAttachments":   {},
 		"RemovePin":                               {},
-		"RemoveStar":                              {},
 		"RunWorkflow":                             {},
 		"SaveDraftWithAttachments":                {},
 		"ScheduleMessageAs":                       {},
@@ -161,4 +161,7 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 // developer-app operation refuses the holder and a stranger alike with not-found.
 // Re-owning the fixture app would distort the cases that depend on a member-owned
 // app.
-const indistinguishableRefusalCeiling = 61
+//
+// 61 to 60: RemoveStar left once AddStar was driven in its channel form, so the
+// holder could own a star on the seeded message for RemoveStar to remove.
+const indistinguishableRefusalCeiling = 60

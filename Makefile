@@ -113,6 +113,9 @@ test-transport-load:
 # Deletes each authorization guard in internal/service in turn and requires a
 # suite to notice. Its own target because each guard is a separate compile and
 # suite run, and there are hundreds; -timeout is raised for the same reason.
+# SAMEOLDCHAT_MUTATION_ONLY=OpA,OpB judges only the named operations (as the
+# survivor report prints them) and fails on any of them surviving instead of
+# applying the whole-service ceiling.
 test-mutation:
 	SAMEOLDCHAT_MUTATION=1 GOCACHE=$(GOCACHE) go test ./tests/mutation -count=1 -timeout=180m
 
