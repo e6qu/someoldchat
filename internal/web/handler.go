@@ -1545,7 +1545,7 @@ const themeBootstrap = `<script>(function(){var root=document.documentElement;va
 const themeToggleScript = `<script>(function(){var root=document.documentElement;var toggle=document.getElementById('theme-toggle');function apply(theme){root.setAttribute('data-theme',theme);root.setAttribute('data-theme-explicit','');if(toggle)toggle.setAttribute('aria-pressed',theme==='dark'?'true':'false')}apply(root.getAttribute('data-theme')==='dark'?'dark':'light');if(!toggle)return;toggle.addEventListener('click',function(){var next=root.getAttribute('data-theme')==='dark'?'light':'dark';apply(next);try{localStorage.setItem('sameoldchat-theme',next)}catch(error){}})})();</script>`
 
 const layoutMarkup = `<!doctype html>
-<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "title" .Page}}</title><style>` + sharedStyle + `</style>{{block "styles" .Page}}{{end}}` + themeBootstrap + `</head><body{{with .EventHead}} data-event-head="{{.}}"{{end}}>{{template "content" .Page}}` + themeToggleScript + `{{block "scripts" .Page}}{{end}}</body></html>`
+<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{{template "title" .Page}}</title><style>` + sharedStyle + `</style>{{block "styles" .Page}}{{end}}` + themeBootstrap + `</head><body{{with .EventHead}} data-event-head="{{.}}"{{end}}>{{template "content" .Page}}` + themeToggleScript + `{{block "scripts" .Page}}{{end}}</body></html>`
 
 // templateFunctions is deliberately tiny: it exists so a template cannot write
 // an aria-keyshortcuts value by hand. Every advertised chord is looked up in

@@ -63,6 +63,8 @@ func TestEveryDestinationRendersInsideTheWorkspaceFrame(t *testing.T) {
 			`id="preferences"`,
 			// Home keeps the conversation the member was reading.
 			`href="/app?channel=Cdev"`,
+			// An empty icon, so no page asks for a /favicon.ico that 404s.
+			`<link rel="icon" href="data:,">`,
 		)
 		requireMissing(t, target.path, body, "Back to chat")
 		if target.current != "" {
