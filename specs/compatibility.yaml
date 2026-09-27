@@ -1124,9 +1124,9 @@ operations:
       - go-test:internal/api/slack:TestDialogOpenHTTP
       - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
       - go-test:internal/web:TestLegacyDialogRendersSubmitsAndCancels
+      - go-test:internal/service:TestParseDialogOptionsEnforcesSlackDialogOptionContracts
     deviations:
-      - a select element with data_source "external" is shown with an explanation and no options, because the first-party client does not send dialog_suggestion; a required one blocks submission
-      - dialog.open does not answer app_missing_action_url for an app without an interactivity request URL; such a dialog renders, and its submission reports that the app cannot receive it
+      - a select element with data_source "external" loads its options through dialog_suggestion (to the options load URL or over Socket Mode) once min_query_length characters are typed; when the dialog leaves min_query_length unset the client asks after one character
   - method: dnd.endDnd
     status: behavior-compatible
     provenance: slack-api-specs-openapi

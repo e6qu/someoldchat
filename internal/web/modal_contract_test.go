@@ -315,16 +315,50 @@ func TestLegacyDialogRendersSubmitsAndCancels(t *testing.T) {
 		`{"type":"select","name":"remote","label":"Remote","data_source":"external","optional":true}]}`)
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "dialog", body, "File a ticket", `action="/app/dialog/submit?channel=Cdev"`, `name="dialog_id" value="Dl1"`,
-		"Summary", "Details", `<option value="high"`, "Priority", "Owner", "cannot load this app", ">File</button>")
+		"Summary", "Details", `<option value="high"`, "Priority", "Owner", ">File</button>",
+		`data-dialog-id="Dl1" data-block-id="remote" data-action-id="remote"`, `data-min-query="1"`)
+	requireMissing(t, "dialog", body, "cannot load this app")
+	// The external select loads its options through dialog_suggestion: the
+	// app answers with Slack's label/value options, and the choice the member
+	// makes is reported in dialog_submission as its value.
+	suggestion := answerNextInteraction(s, `{"option_groups":[{"label":"Hosts","options":[{"label":"Build host","value":"build-1"}]}]}`)
+	loaded := postForm(t, mux, "/app/options?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "app_id": {"A1"}, "dialog_id": {"Dl1"}, "block_id": {"remote"}, "action_id": {"remote"}, "channel": {"Cdev"}, "query": {"bu"},
+	}.Encode(), false)
+	answer := <-suggestion
+	if answer.err != nil {
+		t.Fatal(answer.err)
+	}
+	if answer.payload["type"] != "dialog_suggestion" || answer.payload["name"] != "remote" || answer.payload["value"] != "bu" ||
+		answer.payload["callback_id"] != "ticket" || answer.payload["state"] != "s1" || answer.payload["token"] != "verification-token" ||
+		answer.payload["team"].(map[string]any)["id"] != "T1" || answer.payload["user"].(map[string]any)["id"] != "U1" ||
+		answer.payload["channel"].(map[string]any)["id"] != "Cdev" || answer.payload["action_ts"] == nil || answer.payload["response_url"] != nil {
+		t.Fatalf("dialog_suggestion = %v", answer.payload)
+	}
+	var options struct {
+		Options []struct{ Text, Value, Group, Choice string } `json:"options"`
+	}
+	if loaded.Code != http.StatusOK || json.Unmarshal(loaded.Body.Bytes(), &options) != nil || len(options.Options) != 1 ||
+		options.Options[0].Text != "Build host" || options.Options[0].Group != "Hosts" || options.Options[0].Choice == "" {
+		t.Fatalf("dialog options status=%d body=%s", loaded.Code, loaded.Body)
+	}
+	remote := options.Options[0].Choice
+	// An element that is not an external select asks for nothing.
+	if refused := postForm(t, mux, "/app/options?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "app_id": {"A1"}, "dialog_id": {"Dl1"}, "block_id": {"priority"}, "action_id": {"priority"}, "channel": {"Cdev"}, "query": {"bu"},
+	}.Encode(), false); refused.Code != http.StatusNotFound {
+		t.Fatalf("options for a static select status=%d body=%s", refused.Code, refused.Body)
+	}
 	submit := func(values url.Values) *httptest.ResponseRecorder {
 		values.Set("_csrf", auth.CSRFToken("session"))
 		values.Set("dialog_id", "Dl1")
 		return postForm(t, mux, "/app/dialog/submit?channel=Cdev", values.Encode(), false)
 	}
-	if response := submit(url.Values{"input_0": {"ab"}, "input_2": {"high"}}); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "Enter between 3 and 150 characters.") {
-		t.Fatalf("short summary status=%d", response.Code)
+	if response := submit(url.Values{"input_0": {"ab"}, "input_2": {"high"}, "input_4": {remote}}); response.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(response.Body.String(), "Enter between 3 and 150 characters.") || !strings.Contains(response.Body.String(), ">Build host</option>") {
+		t.Fatalf("short summary status=%d (the loaded choice must survive the re-render)", response.Code)
 	}
-	if response := submit(url.Values{"input_0": {"Broken build"}, "input_2": {"high"}}); response.Code != http.StatusAccepted {
+	if response := submit(url.Values{"input_0": {"Broken build"}, "input_2": {"high"}, "input_4": {remote}}); response.Code != http.StatusAccepted {
 		t.Fatalf("submit status=%d body=%s", response.Code, response.Body)
 	}
 	interaction, found, err := s.ClaimSocketModeInteraction(ctx, "A1", "modal-client", time.Minute)
@@ -337,7 +371,7 @@ func TestLegacyDialogRendersSubmitsAndCancels(t *testing.T) {
 	}
 	submission, _ := payload["submission"].(map[string]any)
 	if payload["type"] != "dialog_submission" || payload["callback_id"] != "ticket" || payload["state"] != "s1" ||
-		submission["summary"] != "Broken build" || submission["priority"] != "high" || submission["details"] != nil ||
+		submission["summary"] != "Broken build" || submission["priority"] != "high" || submission["details"] != nil || submission["remote"] != "build-1" ||
 		payload["response_url"] == "" || payload["channel"].(map[string]any)["id"] != "Cdev" {
 		t.Fatalf("dialog_submission = %v", payload)
 	}

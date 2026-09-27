@@ -4917,7 +4917,7 @@ func (r Remote) DispatchViewBlockAction(ctx context.Context, workspaceID domain.
 func (r Remote) LoadAppOptions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, query domain.AppOptionQuery, responseBaseURL string) ([]domain.AppOption, error) {
 	out, err := r.interactions.LoadAppOptions(ctx, &chatv1.AppOptionQueryRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
-		AppId: string(query.AppID), MessageId: string(query.MessageID), ViewId: string(query.ViewID),
+		AppId: string(query.AppID), MessageId: string(query.MessageID), ViewId: string(query.ViewID), DialogId: string(query.DialogID),
 		BlockId: query.BlockID, ActionId: query.ActionID, Value: query.Value, ResponseBaseUrl: responseBaseURL,
 	})
 	if err != nil {
@@ -9496,7 +9496,8 @@ func (s *Server) LoadAppOptions(ctx context.Context, input *chatv1.AppOptionQuer
 		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()),
 		domain.AppOptionQuery{
 			AppID: domain.AppID(input.GetAppId()), MessageID: domain.MessageID(input.GetMessageId()), ViewID: domain.ViewID(input.GetViewId()),
-			BlockID: input.GetBlockId(), ActionID: input.GetActionId(), Value: input.GetValue(),
+			DialogID: domain.DialogID(input.GetDialogId()),
+			BlockID:  input.GetBlockId(), ActionID: input.GetActionId(), Value: input.GetValue(),
 		},
 		input.GetResponseBaseUrl(),
 	)

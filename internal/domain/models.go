@@ -3458,11 +3458,14 @@ type AppViewBlockAction struct {
 }
 
 // AppOptionQuery identifies one external_select or multi_external_select
-// element. Exactly one of MessageID and ViewID is set.
+// element, or one legacy dialog select with data_source "external". Exactly
+// one of MessageID, ViewID and DialogID is set; a dialog element's name is
+// both its BlockID and its ActionID.
 type AppOptionQuery struct {
 	AppID     AppID
 	MessageID MessageID
 	ViewID    ViewID
+	DialogID  DialogID
 	BlockID   string
 	ActionID  string
 	Value     string

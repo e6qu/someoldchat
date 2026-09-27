@@ -13,11 +13,6 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
-// dialogExternalUnsupported explains a select whose options come from the
-// app (data_source "external"): this client does not send
-// dialog_suggestion, so it cannot offer those options.
-const dialogExternalUnsupported = "This client cannot load this app's options yet."
-
 // newDialogView renders a legacy dialog with the modal machinery. Each
 // element becomes one input whose block and action are the element's name,
 // so failures keyed by name (the app's {"errors":[{"name","error"}]}) land
@@ -64,7 +59,17 @@ func (h Handler) newDialogView(ctx context.Context, principal auth.Principal, va
 				catalog.enrich(ctx, h, principal, holder)
 				input.Options = holder[0].Actions[0].Options
 			case "external":
-				input.Unsupported = dialogExternalUnsupported
+				// The options come from the app through dialog_suggestion,
+				// loaded by the same control a Block Kit external select
+				// uses; the dialog's selected_options is its initial choice.
+				input.Type, input.Control = "external_select", "external"
+				input.MinQueryLength = 1
+				if element.MinQueryLength != nil && *element.MinQueryLength >= 0 {
+					input.MinQueryLength = *element.MinQueryLength
+				}
+				for _, option := range element.SelectedOptions {
+					input.Options = append(input.Options, messageActionOptionView{Text: option.Label, Value: option.Value, Selected: option.Value == initial})
+				}
 			default:
 				for _, option := range element.Options {
 					input.Options = append(input.Options, messageActionOptionView{Text: option.Label, Value: option.Value, Selected: option.Value == initial})
@@ -80,6 +85,9 @@ func (h Handler) newDialogView(ctx context.Context, principal auth.Principal, va
 		if values, ok := submitted[index]; ok {
 			input.Value = firstValue(values)
 			input.Values = append([]string(nil), values...)
+			if input.Control == "external" {
+				input.Options = withChosenOptions(input.Options, values)
+			}
 			markSelectedOptions(input.Options, values)
 		}
 		result.Blocks = append(result.Blocks, modalBlockView{
@@ -115,7 +123,9 @@ func (h Handler) dialogSubmit(w http.ResponseWriter, r *http.Request) {
 	for _, block := range rendered.Blocks {
 		entered := append([]string(nil), values[fmt.Sprintf("input_%d", block.Input.Index)]...)
 		submitted[block.Input.Index] = entered
-		submission[block.Input.BlockID] = firstValue(entered)
+		// An option loaded through dialog_suggestion posts its choice;
+		// dialog_submission reports only its value, as Slack's does.
+		submission[block.Input.BlockID] = externalChoiceValue(firstValue(entered))
 	}
 	result, err := h.Messages.SubmitDialog(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), dialogID, submission, h.responseBaseURL(r))
 	if err != nil {

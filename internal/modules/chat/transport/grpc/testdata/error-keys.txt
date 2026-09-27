@@ -16,6 +16,7 @@ service.app_credential_key_unavailable
 service.app_datastore_not_found
 service.app_home_not_enabled
 service.app_interaction_unavailable
+service.app_missing_action_url
 service.app_not_distributable
 service.app_not_hosted
 service.app_response_no_text

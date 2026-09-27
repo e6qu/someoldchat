@@ -1278,17 +1278,58 @@ func TestCurrentWorkflowPermissionFeaturedAndStepMethodsAreDurable(t *testing.T)
 	}
 }
 
+// dialog.open refuses a dialog its app could never receive the submission
+// of — no interactivity request URL and no Socket Mode — with Slack's
+// app_missing_action_url, without spending the trigger.
 func TestDialogOpenHTTP(t *testing.T) {
 	handler, store := testHandlerWithStore()
 	seedHTTPInteractionTrigger(t, store, "trigger-http")
-	values := url.Values{"trigger_id": {"trigger-http"}, "dialog": {`{"callback_id":"callback","title":"Title","elements":[{"type":"text","name":"summary","label":"Summary"}]}`}}
-	req := httptest.NewRequest(http.MethodPost, "/api/dialog.open", strings.NewReader(values.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Authorization", "Bearer token")
-	result := httptest.NewRecorder()
-	handler.ServeHTTP(result, req)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+	open := func() *httptest.ResponseRecorder {
+		values := url.Values{"trigger_id": {"trigger-http"}, "dialog": {`{"callback_id":"callback","title":"Title","elements":[{"type":"text","name":"summary","label":"Summary"}]}`}}
+		req := httptest.NewRequest(http.MethodPost, "/api/dialog.open", strings.NewReader(values.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "Bearer token")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+	if result := open(); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"error":"app_missing_action_url"`) {
+		t.Fatalf("no request URL: status=%d body=%s", result.Code, result.Body)
+	}
+	enableFixtureInteractivity(t, store)
+	if result := open(); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
 		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+}
+
+// enableFixtureInteractivity gives the fixture app an interactivity request
+// URL, which dialog.open requires.
+func enableFixtureInteractivity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	ctx := context.Background()
+	app, revision, err := target.GetApp(ctx, "A1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(revision.Manifest), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	settings, _ := manifest["settings"].(map[string]any)
+	if settings == nil {
+		settings = map[string]any{}
+		manifest["settings"] = settings
+	}
+	settings["interactivity"] = map[string]any{"is_enabled": true, "request_url": "https://app.example.test/interactivity"}
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	app.ManifestVersion++
+	app.UpdatedAt = now
+	if err := target.UpdateApp(ctx, app, domain.AppManifestRevision{AppID: app.ID, Version: app.ManifestVersion, Manifest: string(encoded), CreatedBy: app.OwnerID, CreatedAt: now}); err != nil {
+		t.Fatal(err)
 	}
 }
 

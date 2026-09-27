@@ -2255,8 +2255,11 @@ type AppOptionQueryRequest struct {
 	ActionId        string                 `protobuf:"bytes,8,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"`
 	Value           string                 `protobuf:"bytes,9,opt,name=value,proto3" json:"value,omitempty"`
 	ResponseBaseUrl string                 `protobuf:"bytes,10,opt,name=response_base_url,json=responseBaseUrl,proto3" json:"response_base_url,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// dialog_id names a legacy dialog whose select with data_source
+	// "external" is asking for options (dialog_suggestion).
+	DialogId      string `protobuf:"bytes,11,opt,name=dialog_id,json=dialogId,proto3" json:"dialog_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AppOptionQueryRequest) Reset() {
@@ -2355,6 +2358,13 @@ func (x *AppOptionQueryRequest) GetValue() string {
 func (x *AppOptionQueryRequest) GetResponseBaseUrl() string {
 	if x != nil {
 		return x.ResponseBaseUrl
+	}
+	return ""
+}
+
+func (x *AppOptionQueryRequest) GetDialogId() string {
+	if x != nil {
+		return x.DialogId
 	}
 	return ""
 }
@@ -3545,7 +3555,7 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\n" +
 	"state_json\x18\t \x01(\tR\tstateJson\x12*\n" +
 	"\x11response_base_url\x18\n" +
-	" \x01(\tR\x0fresponseBaseUrl\"\xc5\x02\n" +
+	" \x01(\tR\x0fresponseBaseUrl\"\xe2\x02\n" +
 	"\x15AppOptionQueryRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -3558,7 +3568,8 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\taction_id\x18\b \x01(\tR\bactionId\x12\x14\n" +
 	"\x05value\x18\t \x01(\tR\x05value\x12*\n" +
 	"\x11response_base_url\x18\n" +
-	" \x01(\tR\x0fresponseBaseUrl\"\x83\x01\n" +
+	" \x01(\tR\x0fresponseBaseUrl\x12\x1b\n" +
+	"\tdialog_id\x18\v \x01(\tR\bdialogId\"\x83\x01\n" +
 	"\tAppOption\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12 \n" +

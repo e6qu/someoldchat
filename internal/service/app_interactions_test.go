@@ -920,6 +920,32 @@ func TestParseAppOptionsEnforcesSlackOptionContracts(t *testing.T) {
 	}
 }
 
+// A dialog_suggestion answer uses the legacy dialog shape: plain label and
+// value strings, not Block Kit text objects.
+func TestParseDialogOptionsEnforcesSlackDialogOptionContracts(t *testing.T) {
+	options, err := parseDialogOptions([]byte(`{"option_groups":[{"label":"Hosts","options":[{"label":"Build host","value":"build-1"}]}]}`))
+	if err != nil || len(options) != 1 || options[0].Text != "Build host" || options[0].Value != "build-1" || options[0].Group != "Hosts" {
+		t.Fatalf("valid options=%+v err=%v", options, err)
+	}
+	if options, err := parseDialogOptions([]byte(`{"options":[]}`)); err != nil || len(options) != 0 {
+		t.Fatalf("no matches options=%+v err=%v", options, err)
+	}
+	for name, body := range map[string]string{
+		"mixed response shapes": `{"options":[{"label":"One","value":"one"}],"option_groups":[{"label":"Group","options":[]}]}`,
+		"block kit text":        `{"options":[{"text":{"type":"plain_text","text":"One"},"value":"one"}]}`,
+		"missing value":         `{"options":[{"label":"One"}]}`,
+		"label over 75":         `{"options":[{"label":"` + strings.Repeat("l", 76) + `","value":"one"}]}`,
+		"group without label":   `{"option_groups":[{"options":[{"label":"One","value":"one"}]}]}`,
+		"empty object":          `{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseDialogOptions([]byte(body)); err != ErrInvalidAppResponse {
+				t.Fatalf("error=%v, want %v", err, ErrInvalidAppResponse)
+			}
+		})
+	}
+}
+
 func TestOnlyAuthoredDispatchableBlockActionsCanBeSent(t *testing.T) {
 	blocks := `[{"type":"actions","block_id":"actions","elements":[{"type":"button","action_id":"run","text":{"type":"plain_text","text":"Run"}}]},{"type":"input","block_id":"quiet","label":{"type":"plain_text","text":"Draft"},"element":{"type":"plain_text_input","action_id":"draft"}},{"type":"input","block_id":"live","dispatch_action":true,"label":{"type":"plain_text","text":"Filter"},"element":{"type":"plain_text_input","action_id":"filter"}}]`
 	if !blocksContainDispatchableAction(blocks, "actions", "run", "button") {

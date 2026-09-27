@@ -327,19 +327,9 @@ func (m Messages) dialogPayload(ctx context.Context, current domain.Dialog, defi
 	if err != nil {
 		return nil, domain.AppResponseURL{}, err
 	}
-	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
+	payload, conversationID, err := m.dialogEnvelope(ctx, current, definition, kind, workspaceID, userID, conversationID)
 	if err != nil {
 		return nil, domain.AppResponseURL{}, err
-	}
-	user, err := m.Store.GetUser(ctx, userID)
-	if err != nil {
-		return nil, domain.AppResponseURL{}, err
-	}
-	channel := map[string]any{"id": conversationID}
-	if m.requireConversationMembership(ctx, workspaceID, userID, conversationID) != nil {
-		conversationID, channel = "", nil
-	} else if conversation, err := m.Store.GetConversation(ctx, conversationID); err == nil {
-		channel["name"] = conversation.Name
 	}
 	_, responseURL, capability, err := m.createInteractionCapabilities(ctx, current.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
 	if err != nil {
@@ -349,19 +339,123 @@ func (m Messages) dialogPayload(ctx context.Context, current domain.Dialog, defi
 	if err != nil {
 		return nil, domain.AppResponseURL{}, err
 	}
+	payload["token"] = verificationToken
+	payload["response_url"] = responseURL
+	return payload, capability, nil
+}
+
+// dialogEnvelope is what every dialog interaction carries: identity, the
+// channel when the member is in it, callback_id and state. It returns the
+// conversation the interaction is scoped to, which is empty when the member
+// is not in the one the request named.
+func (m Messages) dialogEnvelope(ctx context.Context, current domain.Dialog, definition DialogDefinition, kind string, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (map[string]any, domain.ConversationID, error) {
+	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, "", err
+	}
+	user, err := m.Store.GetUser(ctx, userID)
+	if err != nil {
+		return nil, "", err
+	}
+	channel := map[string]any{"id": conversationID}
+	if m.requireConversationMembership(ctx, workspaceID, userID, conversationID) != nil {
+		conversationID, channel = "", nil
+	} else if conversation, err := m.Store.GetConversation(ctx, conversationID); err == nil {
+		channel["name"] = conversation.Name
+	}
 	payload := map[string]any{
-		"type": kind, "token": verificationToken, "api_app_id": current.AppID,
-		"action_ts":    domain.NewMessageTimestamp(time.Now().UTC()),
-		"team":         map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
-		"user":         map[string]any{"id": user.ID, "name": user.Name},
-		"callback_id":  definition.CallbackID,
-		"response_url": responseURL,
-		"state":        definition.State,
+		"type": kind, "api_app_id": current.AppID,
+		"action_ts":   domain.NewMessageTimestamp(time.Now().UTC()),
+		"team":        map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
+		"user":        map[string]any{"id": user.ID, "name": user.Name},
+		"callback_id": definition.CallbackID,
+		"state":       definition.State,
 	}
 	if channel != nil {
 		payload["channel"] = channel
 	}
-	return payload, capability, nil
+	return payload, conversationID, nil
+}
+
+// dialogSuggestionPayload is Slack's dialog_suggestion for a select with
+// data_source "external" in the member's open dialog: the envelope every
+// dialog interaction carries plus the element's name and what the member
+// typed. It carries no response_url, as Slack's does not. The element's name
+// is both the query's block and action, as the client renders it.
+func (m Messages) dialogSuggestionPayload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, query domain.AppOptionQuery) (map[string]any, error) {
+	current, definition, err := m.ownedDialog(ctx, workspaceID, userID, query.DialogID)
+	if err != nil {
+		return nil, err
+	}
+	element, found := definition.element(query.BlockID)
+	if current.AppID != query.AppID || query.ActionID != query.BlockID || !found || element.Type != "select" || element.DataSource != "external" {
+		return nil, store.ErrNotFound
+	}
+	payload, _, err := m.dialogEnvelope(ctx, current, definition, "dialog_suggestion", workspaceID, userID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	payload["name"] = element.Name
+	payload["value"] = query.Value
+	return payload, nil
+}
+
+func (definition DialogDefinition) element(name string) (DialogElement, bool) {
+	for _, element := range definition.Elements {
+		if element.Name == name {
+			return element, true
+		}
+	}
+	return DialogElement{}, false
+}
+
+// parseDialogOptions reads an app's answer to dialog_suggestion: Slack's
+// {"options":[{"label","value"}]} or {"option_groups":[{"label","options"}]},
+// with the dialog limits of 100 options and 75-character labels and values.
+func parseDialogOptions(body []byte) ([]domain.AppOption, error) {
+	type option struct {
+		Label string `json:"label"`
+		Value string `json:"value"`
+	}
+	var response struct {
+		Options      []option `json:"options"`
+		OptionGroups []struct {
+			Label   string   `json:"label"`
+			Options []option `json:"options"`
+		} `json:"option_groups"`
+	}
+	if json.Unmarshal(bytes.TrimSpace(body), &response) != nil ||
+		(response.Options == nil && response.OptionGroups == nil) ||
+		(len(response.Options) != 0 && len(response.OptionGroups) != 0) ||
+		len(response.Options) > 100 || len(response.OptionGroups) > 100 {
+		return nil, ErrInvalidAppResponse
+	}
+	result := make([]domain.AppOption, 0, len(response.Options))
+	add := func(value option, group string) error {
+		label, id := strings.TrimSpace(value.Label), strings.TrimSpace(value.Value)
+		if label == "" || id == "" || utf8.RuneCountInString(label) > 75 || utf8.RuneCountInString(id) > 75 {
+			return ErrInvalidAppResponse
+		}
+		result = append(result, domain.AppOption{Text: label, Value: id, Group: group})
+		return nil
+	}
+	for _, value := range response.Options {
+		if err := add(value, ""); err != nil {
+			return nil, err
+		}
+	}
+	for _, group := range response.OptionGroups {
+		label := strings.TrimSpace(group.Label)
+		if label == "" || utf8.RuneCountInString(label) > 75 || len(group.Options) > 100 {
+			return nil, ErrInvalidAppResponse
+		}
+		for _, value := range group.Options {
+			if err := add(value, label); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return result, nil
 }
 
 func dialogOptionExists(element DialogElement, value string) bool {

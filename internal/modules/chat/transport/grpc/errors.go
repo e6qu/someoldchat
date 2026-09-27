@@ -141,6 +141,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_trigger_config", code: codes.InvalidArgument, sentinel: service.ErrInvalidTriggerConfig},
 	{key: "service.automation_entities_empty", code: codes.InvalidArgument, sentinel: service.ErrAutomationEntitiesEmpty},
 	{key: "service.invalid_dialog", code: codes.InvalidArgument, sentinel: service.ErrInvalidDialog},
+	{key: "service.app_missing_action_url", code: codes.FailedPrecondition, sentinel: service.ErrAppMissingActionURL},
 	{key: "service.invalid_bot", code: codes.InvalidArgument, sentinel: service.ErrInvalidBot},
 	{key: "service.invalid_migration", code: codes.InvalidArgument, sentinel: service.ErrInvalidMigration},
 	{key: "service.invalid_oauth", code: codes.InvalidArgument, sentinel: service.ErrInvalidOAuth},

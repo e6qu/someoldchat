@@ -367,21 +367,100 @@ func (m Messages) DispatchViewBlockAction(ctx context.Context, workspaceID domai
 	return err
 }
 
-// LoadAppOptions sends Slack's block_suggestion payload for a dynamic select
-// and validates the owning app's response before it reaches the first-party
-// client.
+// LoadAppOptions asks the owning app for the options of a dynamic select —
+// Slack's block_suggestion for an external select in a message or view, and
+// dialog_suggestion for a legacy dialog select with data_source "external" —
+// and validates the app's response before it reaches the first-party client.
+// Every option is signed for the element it was loaded into (AppOption.Token).
 func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, query domain.AppOptionQuery, responseBaseURL string) ([]domain.AppOption, error) {
 	query.BlockID = strings.TrimSpace(query.BlockID)
 	query.ActionID = strings.TrimSpace(query.ActionID)
 	query.Value = strings.TrimSpace(query.Value)
-	if query.AppID == "" || query.BlockID == "" || query.ActionID == "" ||
-		(query.MessageID == "" && query.ViewID == "") || (query.MessageID != "" && query.ViewID != "") ||
-		len(query.Value) > 2000 {
+	containers := 0
+	for _, id := range []string{string(query.MessageID), string(query.ViewID), string(query.DialogID)} {
+		if id != "" {
+			containers++
+		}
+	}
+	if query.AppID == "" || query.BlockID == "" || query.ActionID == "" || containers != 1 || len(query.Value) > 2000 {
 		return nil, ErrAppInteractionUnavailable
 	}
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return nil, err
 	}
+	var (
+		payload map[string]any
+		parse   = parseAppOptions
+		err     error
+	)
+	if query.DialogID != "" {
+		// A dialog is the member's own and may have been opened from a
+		// shortcut anywhere; like its submission, the request names the
+		// channel only when the member is in it.
+		payload, err = m.dialogSuggestionPayload(ctx, workspaceID, userID, conversationID, query)
+		parse = parseDialogOptions
+	} else {
+		payload, err = m.blockSuggestionPayload(ctx, workspaceID, userID, conversationID, query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	snapshot, parsed, err := m.installedApp(ctx, workspaceID, query.AppID)
+	if err != nil {
+		return nil, err
+	}
+	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.MessageMenuOptionsURL == "") {
+		return nil, ErrAppInteractionUnavailable
+	}
+	verificationToken, err := m.openAppVerificationToken(snapshot.App)
+	if err != nil {
+		return nil, err
+	}
+	payload["token"] = verificationToken
+	if !parsed.SocketModeEnabled {
+		encoded, encodeErr := json.Marshal(payload)
+		if encodeErr != nil {
+			return nil, encodeErr
+		}
+		body, requestErr := m.postSignedAppForm(ctx, parsed.MessageMenuOptionsURL, snapshot.App, url.Values{"payload": {string(encoded)}})
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		return m.vouchLoadedOptions(query)(parse(body))
+	}
+	_, _, capability, err := m.createInteractionCapabilities(ctx, query.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	envelopeID, err := m.enqueueSocketModeInteractionWithID(ctx, query.AppID, workspaceID, userID, "interactive", payload, capability)
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.NewTimer(appRequestTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		response, responseErr := m.Store.GetSocketModeResponse(ctx, query.AppID, envelopeID)
+		if responseErr == nil {
+			return m.vouchLoadedOptions(query)(parse([]byte(response.Payload)))
+		}
+		if !errors.Is(responseErr, store.ErrNotFound) {
+			return nil, responseErr
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-deadline.C:
+			return nil, ErrAppInteractionUnavailable
+		case <-ticker.C:
+		}
+	}
+}
+
+// blockSuggestionPayload is Slack's block_suggestion for an external select
+// in a message or view the member can see, without the app's token.
+func (m Messages) blockSuggestionPayload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, query domain.AppOptionQuery) (map[string]any, error) {
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return nil, err
 	}
@@ -392,13 +471,6 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 	user, err := m.Store.GetUser(ctx, userID)
 	if err != nil {
 		return nil, err
-	}
-	snapshot, parsed, err := m.installedApp(ctx, workspaceID, query.AppID)
-	if err != nil {
-		return nil, err
-	}
-	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.MessageMenuOptionsURL == "") {
-		return nil, ErrAppInteractionUnavailable
 	}
 	payload := map[string]any{
 		"type": "block_suggestion", "api_app_id": query.AppID,
@@ -425,67 +497,24 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 		}
 		payload["channel"] = map[string]any{"id": message.Conversation}
 		payload["message"] = appInteractionMessage(message)
-	} else {
-		current, _, _, _, _, contextErr := m.viewInteractionContext(ctx, workspaceID, userID, conversationID, query.ViewID, "")
-		if contextErr != nil {
-			return nil, contextErr
-		}
-		if current.AppID != query.AppID ||
-			(!viewContainsAction(current.Payload, query.BlockID, query.ActionID, "external_select") &&
-				!viewContainsAction(current.Payload, query.BlockID, query.ActionID, "multi_external_select")) {
-			return nil, store.ErrNotFound
-		}
-		view, renderErr := appInteractionView(current)
-		if renderErr != nil {
-			return nil, renderErr
-		}
-		payload["container"] = map[string]any{"type": "view", "view_id": current.ID}
-		payload["view"] = view
+		return payload, nil
 	}
-	verificationToken, err := m.openAppVerificationToken(snapshot.App)
+	current, _, _, _, _, err := m.viewInteractionContext(ctx, workspaceID, userID, conversationID, query.ViewID, "")
 	if err != nil {
 		return nil, err
 	}
-	payload["token"] = verificationToken
-	if !parsed.SocketModeEnabled {
-		encoded, encodeErr := json.Marshal(payload)
-		if encodeErr != nil {
-			return nil, encodeErr
-		}
-		body, requestErr := m.postSignedAppForm(ctx, parsed.MessageMenuOptionsURL, snapshot.App, url.Values{"payload": {string(encoded)}})
-		if requestErr != nil {
-			return nil, requestErr
-		}
-		return m.vouchLoadedOptions(query)(parseAppOptions(body))
+	if current.AppID != query.AppID ||
+		(!viewContainsAction(current.Payload, query.BlockID, query.ActionID, "external_select") &&
+			!viewContainsAction(current.Payload, query.BlockID, query.ActionID, "multi_external_select")) {
+		return nil, store.ErrNotFound
 	}
-	_, _, capability, err := m.createInteractionCapabilities(ctx, query.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
+	view, err := appInteractionView(current)
 	if err != nil {
 		return nil, err
 	}
-	envelopeID, err := m.enqueueSocketModeInteractionWithID(ctx, query.AppID, workspaceID, userID, "interactive", payload, capability)
-	if err != nil {
-		return nil, err
-	}
-	deadline := time.NewTimer(appRequestTimeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		response, responseErr := m.Store.GetSocketModeResponse(ctx, query.AppID, envelopeID)
-		if responseErr == nil {
-			return m.vouchLoadedOptions(query)(parseAppOptions([]byte(response.Payload)))
-		}
-		if !errors.Is(responseErr, store.ErrNotFound) {
-			return nil, responseErr
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-deadline.C:
-			return nil, ErrAppInteractionUnavailable
-		case <-ticker.C:
-		}
-	}
+	payload["container"] = map[string]any{"type": "view", "view_id": current.ID}
+	payload["view"] = view
+	return payload, nil
 }
 
 func blocksContainAction(blocks, blockID, actionID string, actionTypes ...string) bool {
@@ -1312,7 +1341,8 @@ func (m Messages) HandleSocketModeResponse(ctx context.Context, appID domain.App
 		_, err = m.applyDialogResponse(ctx, current, payload)
 		return err
 	}
-	if interactionPayload.Type == "block_suggestion" {
+	if interactionPayload.Type == "block_suggestion" || interactionPayload.Type == "dialog_suggestion" {
+		// An options request is waiting for this answer (LoadAppOptions).
 		return m.Store.RecordSocketModeResponse(ctx, domain.SocketModeResponse{
 			AppID: appID, EnvelopeID: strings.TrimSpace(envelopeID), Payload: string(payload), ReceivedAt: time.Now().UTC(),
 		})

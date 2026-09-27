@@ -250,6 +250,9 @@ message AppOptionQueryRequest {
   string action_id = 8;
   string value = 9;
   string response_base_url = 10;
+  // dialog_id names a legacy dialog whose select with data_source
+  // "external" is asking for options (dialog_suggestion).
+  string dialog_id = 11;
 }
 
 message AppOption {

@@ -2433,6 +2433,8 @@ func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {
 			reason = "trigger_expired"
 		case errors.Is(err, service.ErrInvalidTrigger):
 			reason = "invalid_trigger"
+		case errors.Is(err, service.ErrAppMissingActionURL):
+			reason = "app_missing_action_url"
 		}
 		writeError(w, reason)
 		return

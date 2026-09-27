@@ -69,10 +69,17 @@ func messageOptionContainer(id domain.MessageID) optionContainer {
 	return optionContainer{label: "sameoldchat message option text\x00", id: string(id)}
 }
 
+func dialogOptionContainer(id domain.DialogID) optionContainer {
+	return optionContainer{label: "sameoldchat dialog option text\x00", id: string(id)}
+}
+
 // loadedOptionContainer is the container an options request was made for.
 func loadedOptionContainer(query domain.AppOptionQuery) optionContainer {
-	if query.ViewID != "" {
+	switch {
+	case query.ViewID != "":
 		return viewOptionContainer(query.ViewID)
+	case query.DialogID != "":
+		return dialogOptionContainer(query.DialogID)
 	}
 	return messageOptionContainer(query.MessageID)
 }
