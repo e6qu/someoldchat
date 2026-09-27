@@ -316,8 +316,9 @@ func validClientMessageID(value string) bool {
 
 // presetLocalTime resolves one of Slack's suggested times in the member's
 // time zone. The schedule menu offers "Tomorrow at 9:00 AM" and "Monday at
-// 9:00 AM"; reminders share "tomorrow" and the relative presets, so both
-// surfaces resolve a named time the same way.
+// 9:00 AM"; a message reminder's "Tomorrow" and "Next week" are the same two
+// times, and its relative presets are the same offsets, so both surfaces
+// resolve a named time the same way.
 func presetLocalTime(preset string, now time.Time, location *time.Location) (time.Time, bool) {
 	local := now.In(location)
 	nineAM := func(day time.Time) time.Time {
@@ -328,9 +329,12 @@ func presetLocalTime(preset string, now time.Time, location *time.Location) (tim
 		return now.Add(20 * time.Minute), true
 	case "1h":
 		return now.Add(time.Hour), true
+	case "3h":
+		return now.Add(3 * time.Hour), true
 	case "tomorrow":
 		return nineAM(local.AddDate(0, 0, 1)), true
-	case "monday":
+	case "monday", "nextweek":
+		// Slack's "Next week" is the coming Monday at 9:00 AM.
 		days := (int(time.Monday) - int(local.Weekday()) + 7) % 7
 		if days == 0 {
 			days = 7

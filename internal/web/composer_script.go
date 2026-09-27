@@ -18,9 +18,13 @@ package web
 //     markup" (a composer preference) keeps the textarea instead.
 //   - Two composers. The conversation composer and the thread pane's reply
 //     composer are separate instances with separate drafts, staged files,
-//     suggestions and errors. The page-level dialogs (emoji picker, shortcuts,
-//     clip recorder, link, custom schedule time, broadcast confirmation) act on
-//     whichever composer the member was last in.
+//     suggestions and errors. A thread pane opened in place announces itself
+//     with sameoldchat:thread-pane and its reply composer is initialised then.
+//     The emoji picker is the message layer's one shared popover; it hands a
+//     choice back as sameoldchat:composer-emoji with the button that opened
+//     it, so the emoji lands in that button's composer. The page-level
+//     dialogs (shortcuts, clip recorder, link, custom schedule time, broadcast
+//     confirmation) act on whichever composer the member was last in.
 //   - Sending. A send carries a client_msg_id the server uses as the post's
 //     idempotency key. A transport failure, rate limit or unavailable server
 //     moves the message into the composer's outbox as "Not sent" with Retry
@@ -37,10 +41,10 @@ package web
 //   - After a message mentioning someone outside the channel commits, the
 //     outbox offers Slack's "Add them" / "Do nothing". A broadcast mention in
 //     a conversation of more than six members asks first.
-//   - Up in an empty composer edits the member's own last message: the
-//     message layer's window.sameoldchatEditMessage when it provides one, the
-//     message's own Edit disclosure otherwise, and when there is no message of
-//     theirs it moves to the last message as before.
+//   - Up in an empty composer edits the member's own last message in that
+//     composer's conversation or thread, in place, through the message
+//     layer's window.sameoldchatEditLastMessage; when there is no message of
+//     theirs it moves focus to the last message instead.
 //   - Preferences are per browser (localStorage keys sameoldchat-composer-enter,
 //     -markup and -formatting) and are announced with the
 //     sameoldchat:composer-preferences event so a preferences surface and the
@@ -210,7 +214,7 @@ var channelLabel=form.getAttribute('data-channel-label')||'this channel';
 var memberCount=parseInt(form.getAttribute('data-member-count')||'0',10)||0;
 var inviteURL=form.getAttribute('data-invite-url')||'';
 var direct=form.hasAttribute('data-direct');
-var draftKey='sameoldchat-draft:'+form.getAttribute('action');
+var draftKey='sameoldchat-draft:'+(form.getAttribute('data-draft-url')||form.getAttribute('action'));
 var editor=null;var mode='plain';var sending=false;var staging=0;var draftTimer=null;var suggestion=null;var suggestionTimer=null;
 var attachments=[];try{attachments=JSON.parse(draftInput&&draftInput.value||'[]');if(!Array.isArray(attachments))attachments=[]}catch(error){attachments=[]}
 var pendingUploads=[];var thumbnails={};
@@ -428,8 +432,10 @@ if(mode==='rich'){focus();exec('insertText',text)}
 else{var start=field.selectionStart;var end=field.selectionEnd;field.value=field.value.slice(0,start)+text+field.value.slice(end);field.focus();field.setSelectionRange(start+text.length,start+text.length)}
 sync();
 }
+var caretRange=null;
+function restoreCaret(){var range=caretRange;caretRange=null;if(!range||!editor.contains(range.startContainer))return;var selection=window.getSelection();selection.removeAllRanges();selection.addRange(range)}
 api.insertEmoji=function(name,glyph,image){
-if(mode==='rich'){focus();insertNodes([makeEmoji(name,glyph,image)])}else insertText(':'+name+':');
+if(mode==='rich'){focus();restoreCaret();insertNodes([makeEmoji(name,glyph,image)])}else insertText(':'+name+':');
 sync();
 };
 api.insertCommand=function(command){setValue(command+' ');focus();if(mode==='plain'){field.setSelectionRange(field.value.length,field.value.length)}else{var last=editor.lastChild;if(last&&last.lastChild)placeCaret(last.lastChild,last.lastChild.nodeType===3?last.lastChild.data.length:0)}sync()};
@@ -467,15 +473,10 @@ exec('insertParagraph');return true;
 }
 function editLast(){
 var region=api.thread?doc.getElementById('thread-messages'):doc.getElementById('timeline');
-var messages=region?Array.prototype.slice.call(region.querySelectorAll('.message')):[];
+if(!region)return false;
+if(typeof window.sameoldchatEditLastMessage==='function'&&window.sameoldchatEditLastMessage(region))return true;
+var messages=region.querySelectorAll('.message');
 if(!messages.length)return false;
-for(var index=messages.length-1;index>=0;index--){
-var message=messages[index];
-if((message.getAttribute('aria-keyshortcuts')||'').split(' ').indexOf('E')===-1)continue;
-if(typeof window.sameoldchatEditMessage==='function'&&window.sameoldchatEditMessage(message.getAttribute('data-message-id'),message)!==false)return true;
-var summaries=message.querySelectorAll('details>summary');
-for(var position=0;position<summaries.length;position++){if(summaries[position].textContent.trim()!=='Edit')continue;var details=summaries[position].parentNode;var open=details;while(open){if(open.nodeName==='DETAILS')open.open=true;open=open.parentNode}var editField=details.querySelector('textarea');if(editField){editField.focus();editField.setSelectionRange(editField.value.length,editField.value.length)}return true}
-}
 var focusMessage=page().focusMessage;var last=messages[messages.length-1];
 if(focusMessage)focusMessage(last);else{last.focus();last.scrollIntoView({block:'nearest'})}
 return true;
@@ -520,7 +521,7 @@ editor.addEventListener('beforeinput',function(event){if(!/^(insertText|insertRe
 editor.addEventListener('input',function(event){if(/^(delete|insertText|insertReplacementText)/.test(event.inputType||'')&&!cleanText(editor.textContent).trim()&&!editor.querySelector('[data-entity],img')&&!(editor.childNodes.length===1&&editor.firstChild.nodeName==='P')){resetEditor()}autoformat(event);sync();updateSuggestions();updatePressed();if(field.value)sendTyping(csrf)});
 editor.addEventListener('click',function(){updateSuggestions();updatePressed()});
 editor.addEventListener('keyup',function(event){if(event.key==='ArrowLeft'||event.key==='ArrowRight'||event.key==='Home'||event.key==='End'){updateSuggestions();updatePressed()}});
-editor.addEventListener('blur',function(){window.setTimeout(function(){if(!form.contains(doc.activeElement))hideSuggestions()},150)});
+editor.addEventListener('blur',function(){var selection=window.getSelection();caretRange=selection&&selection.rangeCount&&editor.contains(selection.anchorNode)?selection.getRangeAt(0).cloneRange():null;window.setTimeout(function(){if(!form.contains(doc.activeElement))hideSuggestions()},150)});
 editor.addEventListener('paste',function(event){var data=event.clipboardData;if(!data)return;if(data.files&&data.files.length&&uploadFile){event.preventDefault();stageFiles(data.files);return}var text=data.getData('text/plain');if(!text)return;event.preventDefault();var selection=window.getSelection();var inCode=selection.rangeCount&&closest(selection.anchorNode,'code,pre',editor);var trimmed=text.trim();if(!inCode&&selection.rangeCount&&!selection.isCollapsed&&safeHref(trimmed)&&!/\s/.test(trimmed)){exec('createLink',trimmed);sync();return}exec('insertText',text);sync()});
 editor.addEventListener('drop',function(event){if(event.dataTransfer&&event.dataTransfer.files&&event.dataTransfer.files.length)event.preventDefault()});
 }
@@ -719,8 +720,8 @@ return api;
 }
 function presetTime(preset){var now=new Date();var date=new Date(now.getFullYear(),now.getMonth(),now.getDate(),9,0,0,0);if(preset==='monday'){var days=(8-now.getDay())%7;if(days===0)days=7;date.setDate(date.getDate()+days)}else date.setDate(date.getDate()+1);return date}
 function zoneName(){try{return Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(error){return ''}}
-Array.prototype.forEach.call(doc.querySelectorAll('[data-schedule-zone]'),function(node){var zone=zoneName();if(zone)node.textContent='Times are in your time zone ('+zone.replace(/_/g,' ')+').'});
-Array.prototype.forEach.call(doc.querySelectorAll('[data-schedule-preset]'),function(button){var when=presetTime(button.getAttribute('data-schedule-preset'));var label=(button.getAttribute('data-schedule-preset')==='monday'?'Monday':'Tomorrow')+' at '+when.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});button.textContent=label});
+function labelSchedules(root){Array.prototype.forEach.call(root.querySelectorAll('[data-schedule-zone]'),function(node){var zone=zoneName();if(zone)node.textContent='Times are in your time zone ('+zone.replace(/_/g,' ')+').'});
+Array.prototype.forEach.call(root.querySelectorAll('[data-schedule-preset]'),function(button){var when=presetTime(button.getAttribute('data-schedule-preset'));var label=(button.getAttribute('data-schedule-preset')==='monday'?'Monday':'Tomorrow')+' at '+when.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});button.textContent=label})}
 var linkDialog=doc.getElementById('composer-link-dialog');
 if(linkDialog){var linkForm=linkDialog.querySelector('[data-link-form]');linkForm.addEventListener('submit',function(event){event.preventDefault();var owner=composers.filter(function(composer){return composer.form.id===linkDialog.getAttribute('data-owner')})[0]||active;var urlInput=doc.getElementById('composer-link-url');var error=doc.getElementById('composer-link-error');if(!normalizeHref(urlInput.value)){error.textContent='Enter a web address that starts with http:// or https://, or an email link.';error.hidden=false;urlInput.setAttribute('aria-invalid','true');urlInput.focus();return}linkDialog.close();if(owner)owner.applyLink(doc.getElementById('composer-link-text').value.trim(),urlInput.value)});
 linkDialog.addEventListener('close',function(){var owner=composers.filter(function(composer){return composer.form.id===linkDialog.getAttribute('data-owner')})[0]||active;if(owner)owner.focus()});}
@@ -778,22 +779,24 @@ if(clipStop)clipStop.addEventListener('click',function(){if(clipRecorder&&clipRe
 if(clipCancel)clipCancel.addEventListener('click',cancelClip);
 if(clipDialog){clipDialog.addEventListener('cancel',function(event){event.preventDefault();cancelClip()});clipDialog.addEventListener('click',function(event){if(event.target===clipDialog)cancelClip()});clipDialog.addEventListener('close',function(){if(clipTrigger&&doc.contains(clipTrigger))clipTrigger.focus();clipTrigger=null})}
 function chordLabel(chord){var keys=chord.split('+');if(apple)return '\u2318'+keys.map(function(key){return key==='Shift'?'\u21e7':key==='Alt'?'\u2325':key}).join('');return 'Ctrl+'+chord}
-Array.prototype.forEach.call(doc.querySelectorAll('[data-tip-key]'),function(control){control.setAttribute('data-tip',control.getAttribute('data-tip')+'  '+chordLabel(control.getAttribute('data-tip-key')))});
-Array.prototype.forEach.call(composerForms,function(form){var composer=createComposer(form);composer.showError=function(message){var box=form.querySelector('.form-error');if(box){box.textContent=message;box.hidden=false;form.classList.add('is-error');box.focus()}};composers.push(composer)});
-Array.prototype.forEach.call(doc.querySelectorAll('[data-record-clip]'),function(button){button.addEventListener('click',function(){startClip(button.getAttribute('data-record-clip'),button,composerFor(button)||active)})});
+function adopt(root){
+labelSchedules(root);
+Array.prototype.forEach.call(root.querySelectorAll('[data-tip-key]'),function(control){control.setAttribute('data-tip',control.getAttribute('data-tip')+'  '+chordLabel(control.getAttribute('data-tip-key')))});
+Array.prototype.forEach.call(root.querySelectorAll('form[data-composer]'),function(form){var composer=createComposer(form);composer.showError=function(message){var box=form.querySelector('.form-error');if(box){box.textContent=message;box.hidden=false;form.classList.add('is-error');box.focus()}};composers.push(composer)});
+Array.prototype.forEach.call(root.querySelectorAll('[data-record-clip]'),function(button){button.addEventListener('click',function(){startClip(button.getAttribute('data-record-clip'),button,composerFor(button)||active)})});
+Array.prototype.forEach.call(root.querySelectorAll('details.composer-menu,details.schedule-menu'),function(menu){menu.addEventListener('toggle',function(){var toggle=menu.querySelector('summary');if(toggle)toggle.setAttribute('aria-expanded',menu.open?'true':'false');if(menu.open){var first=menu.querySelector('[role=menuitem]');if(first)window.setTimeout(function(){first.focus()},0)}});menu.addEventListener('keydown',function(event){if(event.key!=='ArrowDown'&&event.key!=='ArrowUp')return;var items=Array.prototype.slice.call(menu.querySelectorAll('[role=menuitem]')).filter(function(item){return item.offsetParent!==null});if(!items.length)return;event.preventDefault();var index=items.indexOf(doc.activeElement);index=event.key==='ArrowDown'?(index+1)%items.length:(index-1+items.length)%items.length;items[index].focus()})});
+}
+adopt(doc);
 active=composers.filter(function(composer){return composer.thread})[0]||composers[0];
 doc.addEventListener('selectionchange',function(){if(active)active.updatePressed()});
-var emojiInserted=false;
-doc.addEventListener('sameoldchat:composer-emoji',function(event){var detail=event.detail||{};var owner=active||composers[0];if(!owner||!detail.name)return;emojiInserted=true;owner.insertEmoji(detail.name,detail.glyph||'',detail.image||'')});
-var picker=doc.getElementById('emoji-picker-dialog');
-if(picker)picker.addEventListener('close',function(){if(emojiInserted&&active){emojiInserted=false;active.focus()}});
+doc.addEventListener('sameoldchat:composer-emoji',function(event){var detail=event.detail||{};var owner=(detail.trigger&&composerFor(detail.trigger))||active||composers[0];if(!owner||!detail.name)return;active=owner;owner.insertEmoji(detail.name,detail.glyph||'',detail.image||'')});
+doc.addEventListener('sameoldchat:thread-pane',function(event){for(var index=composers.length-1;index>=0;index--){if(!doc.contains(composers[index].form))composers.splice(index,1)}var pane=event.detail&&event.detail.pane;if(pane&&doc.contains(pane))adopt(pane);if(!active||!doc.contains(active.form))active=composers.filter(function(composer){return composer.thread})[0]||composers[0]||null});
 function openMenus(){return Array.prototype.slice.call(doc.querySelectorAll('details.composer-menu[open],details.schedule-menu[open]'))}
 doc.addEventListener('keydown',function(event){
 if(event.key==='Escape'){var menus=openMenus();if(menus.length){event.preventDefault();event.stopPropagation();menus.forEach(function(menu){menu.open=false});var summary=menus[0].querySelector('summary');if(summary)summary.focus();return}}
 if(primary(event)&&!event.shiftKey&&!event.altKey&&typeof event.key==='string'&&event.key.toLowerCase()==='u'){var owner=composerFor(event.target)||active||composers[0];if(owner&&owner.upload()){event.preventDefault();event.stopPropagation()}}
 },true);
 doc.addEventListener('click',function(event){openMenus().forEach(function(menu){if(!menu.contains(event.target))menu.open=false})});
-Array.prototype.forEach.call(doc.querySelectorAll('details.composer-menu,details.schedule-menu'),function(menu){menu.addEventListener('toggle',function(){var toggle=menu.querySelector('summary');if(toggle)toggle.setAttribute('aria-expanded',menu.open?'true':'false');if(menu.open){var first=menu.querySelector('[role=menuitem]');if(first)window.setTimeout(function(){first.focus()},0)}});menu.addEventListener('keydown',function(event){if(event.key!=='ArrowDown'&&event.key!=='ArrowUp')return;var items=Array.prototype.slice.call(menu.querySelectorAll('[role=menuitem]')).filter(function(item){return item.offsetParent!==null});if(!items.length)return;event.preventDefault();var index=items.indexOf(doc.activeElement);index=event.key==='ArrowDown'?(index+1)%items.length:(index-1+items.length)%items.length;items[index].focus()})});
 syncPreferenceControls();
 window.sameoldchatComposer={focus:function(){var owner=active||composers[0];if(owner)owner.focus()},composers:composers,preferences:function(){return{enter:prefs.enter,markup:prefs.markup,formatting:prefs.formatting}},setPreference:setPref};
 var focused=doc.activeElement;
