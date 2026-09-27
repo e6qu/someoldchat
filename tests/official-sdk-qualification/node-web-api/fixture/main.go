@@ -345,7 +345,7 @@ func main() {
 		panic(err)
 	}
 	qualificationModal, err := messages.OpenView(context.Background(), "T1", "U1", "A2", modalTrigger,
-		`{"type":"modal","title":{"type":"plain_text","text":"SDK modal"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","block_id":"release_name","label":{"type":"plain_text","text":"Release name"},"element":{"type":"plain_text_input","action_id":"name"}}]}`)
+		`{"type":"modal","title":{"type":"plain_text","text":"SDK modal"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","block_id":"release_name","label":{"type":"plain_text","text":"Release name"},"element":{"type":"plain_text_input","action_id":"name"}}]}`, "")
 	if err != nil {
 		panic(err)
 	}
@@ -364,6 +364,50 @@ func main() {
 		panic(err)
 	}
 	store.SeedFileComment(domain.FileComment{ID: "FC1", File: qualificationFile.ID, WorkspaceID: "T1", UserID: "U1", Text: "qualification comment", CreatedAt: time.Now().UTC()})
+	// AFN is a Bolt app built on a remote custom function: function_executed
+	// and its interactions reach Bolt on the same signed HTTP endpoint as A1's
+	// events (it shares A1's signing secret, since one Bolt App verifies
+	// both), and the workflow below runs its "approval" function.
+	functionSigningCiphertext, err := secretbox.Seal(appCredentialKey, "app:AFN:signing-secret", "qualification-signing")
+	if err != nil {
+		panic(err)
+	}
+	functionVerificationCiphertext, err := secretbox.Seal(appCredentialKey, "app:AFN:verification-token", "qualification-verification")
+	if err != nil {
+		panic(err)
+	}
+	functionManifest := fmt.Sprintf(`{"display_information":{"name":"Function Qualification"},"oauth_config":{"scopes":{"bot":["chat:write"]}},"settings":{"event_subscriptions":{"request_url":%q},"interactivity":{"is_enabled":true,"request_url":%q},"function_runtime":"remote"},"functions":{"approval":{"title":"Approval","description":"Asks a member to approve a ticket","input_parameters":{"properties":{"ticket":{"type":"string","title":"Ticket"}},"required":["ticket"]},"output_parameters":{"properties":{"decision":{"type":"string","title":"Decision"}},"required":["decision"]}}}}`, boltProxy.URL+"/slack/events", boltProxy.URL+"/slack/events")
+	if err := store.CreateApp(context.Background(),
+		domain.App{ID: "AFN", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Function Qualification", ClientID: "function-qualification-client", SigningSecretHash: domain.HashToken("qualification-signing"), SigningSecretCiphertext: functionSigningCiphertext, VerificationTokenHash: domain.HashToken("qualification-verification"), VerificationTokenCiphertext: functionVerificationCiphertext, ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now},
+		domain.AppManifestRevision{AppID: "AFN", Version: 1, Manifest: functionManifest, CreatedBy: "U1", CreatedAt: now},
+		domain.OAuthClient{ID: "function-qualification-client", SecretHash: domain.HashToken("function-secret"), AppID: "AFN"},
+	); err != nil {
+		panic(err)
+	}
+	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "AFN", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		panic(err)
+	}
+	if err := store.CreateBot(context.Background(), domain.Bot{ID: "BFN", WorkspaceID: "T1", AppID: "AFN", UserID: "U1", Name: "function-qualification-bot", UpdatedAt: now}); err != nil {
+		panic(err)
+	}
+	store.SeedToken(context.Background(), "xoxb-function-qualification", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "AFN", BotID: "BFN", TokenType: "bot", Scopes: []string{"chat:write"}})
+	functionWorkflow := domain.WorkflowDefinition{
+		ID: "WfFunctionQualification", WorkspaceID: "T1", AppID: "AFN", OwnerID: "U1", CallbackID: "function-qualification-workflow",
+		Title: "Function qualification", InputSchema: `{}`, Steps: `[{"function_id":"approval","title":"Approval","input_mapping":{"ticket":"INC-42"}}]`,
+		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateWorkflow(context.Background(), functionWorkflow,
+		newQualificationEvent("qualification-function-workflow", "U1", events.NewPayload("workflow.created",
+			events.String("workflow_id", string(functionWorkflow.ID)), events.String("app_id", "AFN")))); err != nil {
+		panic(err)
+	}
+	if err := store.SetWorkflowTrigger(context.Background(), domain.WorkflowTrigger{
+		ID: "FtFunctionQualification", WorkflowID: functionWorkflow.ID, WorkspaceID: "T1", AppID: "AFN",
+		Title: "Run function qualification", Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}, newQualificationEvent("qualification-function-trigger", "U1", events.NewPayload("workflow.trigger_created",
+		events.String("workflow_id", string(functionWorkflow.ID)), events.String("trigger_id", "FtFunctionQualification")))); err != nil {
+		panic(err)
+	}
 	authenticator, err := auth.NewStored(store)
 	if err != nil {
 		panic(err)
@@ -547,6 +591,25 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})
+	// deliverToBolt runs signed Events API delivery until the journal is
+	// drained, the way the production worker would, against Bolt's endpoint.
+	deliverToBolt := func(ctx context.Context) error {
+		processor := slackapp.EventProcessor{Store: store, AppCredentialKey: appCredentialKey, Owner: "qualification-bolt", Lease: time.Minute, Client: boltProxy.Client()}
+		for index := 0; index < 32; index++ {
+			count, cycleErr := processor.RunOnce(ctx)
+			// A malformed historical producer record is acknowledged so it
+			// cannot block the app forever and is returned as an operator
+			// warning. Continue only when that acknowledgement made progress;
+			// an error with no progress is an actual delivery outage.
+			if cycleErr != nil && count == 0 {
+				return cycleErr
+			}
+			if count == 0 {
+				return nil
+			}
+		}
+		return nil
+	}
 	mux.HandleFunc("POST /qualification/bolt-event", func(w http.ResponseWriter, r *http.Request) {
 		event, err := events.New("qualification-bolt-event", "T1", "U1", events.NewPayload("reaction.added",
 			events.String("channel_id", "C1"),
@@ -557,26 +620,71 @@ func main() {
 		if err == nil {
 			err = store.AppendEvent(r.Context(), event)
 		}
-		processor := slackapp.EventProcessor{Store: store, AppCredentialKey: appCredentialKey, Owner: "qualification-bolt", Lease: time.Minute, Client: boltProxy.Client()}
-		for index := 0; index < 32; index++ {
-			count, cycleErr := processor.RunOnce(r.Context())
-			// A malformed historical producer record is acknowledged so it
-			// cannot block the app forever and is returned as an operator
-			// warning. Continue only when that acknowledgement made progress;
-			// an error with no progress is an actual delivery outage.
-			if cycleErr != nil && count == 0 {
-				err = cycleErr
-				break
-			}
-			if count == 0 {
-				break
-			}
+		if err == nil {
+			err = deliverToBolt(r.Context())
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	})
+	// The custom-step round trip: a member runs the workflow, Bolt receives
+	// function_executed, posts a button with the execution-scoped token, a
+	// member clicks it, and Bolt's complete() finishes the execution.
+	functionInteractions := messages
+	functionInteractions.AppHTTPClient = boltProxy.Client()
+	mux.HandleFunc("POST /qualification/bolt-function", func(w http.ResponseWriter, r *http.Request) {
+		run, err := messages.RunWorkflow(r.Context(), "T1", "U1", "FtFunctionQualification", "C1", `{}`, "")
+		if err == nil {
+			err = deliverToBolt(r.Context())
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		steps, err := store.ListWorkflowRunSteps(r.Context(), "T1", run.ID)
+		if err != nil || len(steps) != 1 {
+			http.Error(w, fmt.Sprintf("function run steps=%d err=%v", len(steps), err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"function_execution_id": string(steps[0].ID)})
+	})
+	mux.HandleFunc("POST /qualification/bolt-function-click", func(w http.ResponseWriter, r *http.Request) {
+		created, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(r.URL.Query().Get("ts")))
+		if err != nil {
+			http.Error(w, "ts is required", http.StatusBadRequest)
+			return
+		}
+		message, err := store.GetMessageByCreatedAt(r.Context(), "C1", created)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if err := functionInteractions.DispatchBlockAction(r.Context(), "T1", "U1", domain.AppBlockAction{
+			MessageID: message.ID, BlockID: "approval", ActionID: "approve_ticket", Type: "button", Value: "approve",
+		}, fixturePublicURL); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /qualification/bolt-function-state", func(w http.ResponseWriter, r *http.Request) {
+		execution := domain.WorkflowStepID(r.URL.Query().Get("function_execution_id"))
+		step, err := store.GetWorkflowStep(r.Context(), "T1", execution)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		state := map[string]string{"status": string(step.Status), "outputs": step.Outputs}
+		if created, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(r.URL.Query().Get("ts"))); parseErr == nil {
+			if message, messageErr := store.GetMessageByCreatedAt(r.Context(), "C1", created); messageErr == nil {
+				state["message_function_execution_id"] = string(message.FunctionExecution())
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(state)
 	})
 	serverHandler, err := newSDKMethodRecorder(mux, os.Getenv("SAMEOLDCHAT_SDK_COVERAGE_LOG"))
 	if err != nil {

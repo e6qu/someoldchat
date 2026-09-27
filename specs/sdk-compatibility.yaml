@@ -22,7 +22,9 @@ retrieved_at: 2026-07-28T00:00:00Z
 # user.
 # Bolt callback suites still submit an independently constructed signed event
 # callback, so they qualify framework decoding and request authentication, not
-# producer translation. Immutable producer snapshots and bot/user perspective
+# producer translation — except the Node and Python Bolt custom-function round
+# trip, whose function_executed and block_actions are produced by a real
+# workflow run and a real click. Immutable producer snapshots and bot/user perspective
 # filtering now cover message create/change/delete and file create/share;
 # file-unshare production and live-Slack differential outcomes remain outside
 # the qualified slice. See the events-api decision in specs/compatibility.yaml.
@@ -76,9 +78,14 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
+      Event-surface suite. Its reaction_added envelope is planted by
       tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      from an internal record; that part qualifies the transport, not the event
+      surface. The custom-function round trip is produced end to end: a
+      workflow run emits function_executed with an execution-scoped xwfp-
+      token, Bolt's function listener posts a button with it, the member's
+      click reaches Bolt's action listener with function_data, and complete()
+      finishes the execution through functions.completeSuccess.
   - id: node-socket-mode
     ecosystem: npm
     package: '@slack/socket-mode'
@@ -138,9 +145,14 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
+      Event-surface suite. Its reaction_added envelope is planted by
       tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      from an internal record; that part qualifies the transport, not the event
+      surface. The custom-function round trip is produced end to end: a
+      workflow run emits function_executed with an execution-scoped xwfp-
+      token, Bolt's function listener posts a button with it, the member's
+      click reaches Bolt's action listener with function_data, and complete()
+      finishes the execution through functions.completeSuccess.
   - id: python-socket-mode
     ecosystem: pypi
     package: slack-sdk
@@ -221,9 +233,14 @@ bolt:
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
+      Event-surface suite. Its reaction_added envelope is planted by
       tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      from an internal record; that part qualifies the transport, not the event
+      surface. The custom-function round trip is produced end to end: a
+      workflow run emits function_executed with an execution-scoped xwfp-
+      token, Bolt's function listener posts a button with it, the member's
+      click reaches Bolt's action listener with function_data, and complete()
+      finishes the execution through functions.completeSuccess.
   - id: bolt-python
     ecosystem: pypi
     package: slack-bolt
@@ -234,9 +251,14 @@ bolt:
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
+      Event-surface suite. Its reaction_added envelope is planted by
       tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      from an internal record; that part qualifies the transport, not the event
+      surface. The custom-function round trip is produced end to end: a
+      workflow run emits function_executed with an execution-scoped xwfp-
+      token, Bolt's function listener posts a button with it, the member's
+      click reaches Bolt's action listener with function_data, and complete()
+      finishes the execution through functions.completeSuccess.
   - id: bolt-java
     ecosystem: maven
     package: com.slack.api:bolt

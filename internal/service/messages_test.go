@@ -586,7 +586,7 @@ func TestViewsAreTypedDurableAndHashChecked(t *testing.T) {
 	seedInteractionTrigger(t, s, "trigger-2")
 	messages := Messages{Store: s}
 	ctx := context.Background()
-	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"First"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","label":{"type":"plain_text","text":"Name"},"element":{"type":"plain_text_input"}}]}`)
+	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"First"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","label":{"type":"plain_text","text":"Name"},"element":{"type":"plain_text_input"}}]}`, "")
 	if err != nil || opened.RootViewID != opened.ID || opened.Hash == "" {
 		t.Fatalf("opened=%+v err=%v", opened, err)
 	}
@@ -604,7 +604,7 @@ func TestViewsAreTypedDurableAndHashChecked(t *testing.T) {
 		openedPayload.Blocks[0].BlockID == "" || openedPayload.Blocks[0].Element.ActionID == "" {
 		t.Fatalf("opened view payload has no identifiers: %s err=%v", opened.Payload, err)
 	}
-	pushed, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-2", `{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`)
+	pushed, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-2", `{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`, "")
 	if err != nil || pushed.RootViewID != opened.RootViewID || pushed.PreviousViewID != opened.ID {
 		t.Fatalf("pushed=%+v err=%v", pushed, err)
 	}
@@ -615,33 +615,33 @@ func TestViewsAreTypedDurableAndHashChecked(t *testing.T) {
 	if _, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"modal"}`, opened.Hash); err == nil {
 		t.Fatal("stale view hash unexpectedly succeeded")
 	}
-	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal"}`); !errors.Is(err, ErrInvalidView) {
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal"}`, ""); !errors.Is(err, ErrInvalidView) {
 		t.Fatalf("malformed view error=%v, want %v", err, ErrInvalidView)
 	}
-	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`); !errors.Is(err, ErrTriggerExchanged) {
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`, ""); !errors.Is(err, ErrTriggerExchanged) {
 		t.Fatalf("replayed trigger error=%v, want %v", err, ErrTriggerExchanged)
 	}
-	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "unknown", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`); !errors.Is(err, ErrInvalidTrigger) {
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "unknown", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`, ""); !errors.Is(err, ErrInvalidTrigger) {
 		t.Fatalf("unknown trigger error=%v, want %v", err, ErrInvalidTrigger)
 	}
 	// A malformed view must not spend the trigger, and a Home view cannot be
 	// opened, pushed, or reached by updating a modal.
 	seedInteractionTrigger(t, s, "trigger-3")
-	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"home","blocks":[]}`); !errors.Is(err, ErrInvalidView) {
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, ErrInvalidView) {
 		t.Fatalf("home via views.open error=%v, want %v", err, ErrInvalidView)
 	}
-	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"x"},"blocks":[{"type":"bogus"}]}`); !errors.Is(err, ErrInvalidView) {
+	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"x"},"blocks":[{"type":"bogus"}]}`, ""); !errors.Is(err, ErrInvalidView) {
 		t.Fatalf("invalid block error=%v, want %v", err, ErrInvalidView)
 	}
 	if _, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, ErrInvalidView) {
 		t.Fatalf("modal->home update error=%v, want %v", err, ErrInvalidView)
 	}
-	third, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"Third"},"blocks":[]}`)
+	third, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"Third"},"blocks":[]}`, "")
 	if err != nil || third.PreviousViewID != pushed.ID {
 		t.Fatalf("third=%+v err=%v", third, err)
 	}
 	seedInteractionTrigger(t, s, "trigger-4")
-	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-4", `{"type":"modal","title":{"type":"plain_text","text":"Fourth"},"blocks":[]}`); !errors.Is(err, ErrViewPushLimit) {
+	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-4", `{"type":"modal","title":{"type":"plain_text","text":"Fourth"},"blocks":[]}`, ""); !errors.Is(err, ErrViewPushLimit) {
 		t.Fatalf("fourth push error=%v, want %v", err, ErrViewPushLimit)
 	}
 }
@@ -660,7 +660,7 @@ func TestViewUpdateCarriesStateForSurvivingElements(t *testing.T) {
 	input := func(block, action, kind string) string {
 		return `{"type":"input","block_id":"` + block + `","label":{"type":"plain_text","text":"L"},"element":{"type":"` + kind + `","action_id":"` + action + `"}}`
 	}
-	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"x"},"submit":{"type":"plain_text","text":"Go"},"blocks":[`+input("keep", "a", "plain_text_input")+`,`+input("gone", "b", "plain_text_input")+`,`+input("retyped", "c", "plain_text_input")+`]}`)
+	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"x"},"submit":{"type":"plain_text","text":"Go"},"blocks":[`+input("keep", "a", "plain_text_input")+`,`+input("gone", "b", "plain_text_input")+`,`+input("retyped", "c", "plain_text_input")+`]}`, "")
 	if err != nil {
 		t.Fatal(err)
 	}

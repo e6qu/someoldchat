@@ -324,11 +324,14 @@ type PostWithBlocksRequest struct {
 	// bot_id is the posting token's bot identity; write_public is the
 	// chat:write.public grant that lets it post to a public channel it has not
 	// joined; subtype is the workspace-generated message vocabulary (me_message).
-	BotId         string `protobuf:"bytes,23,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
-	WritePublic   bool   `protobuf:"varint,24,opt,name=write_public,json=writePublic,proto3" json:"write_public,omitempty"`
-	Subtype       string `protobuf:"bytes,25,opt,name=subtype,proto3" json:"subtype,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	BotId       string `protobuf:"bytes,23,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
+	WritePublic bool   `protobuf:"varint,24,opt,name=write_public,json=writePublic,proto3" json:"write_public,omitempty"`
+	Subtype     string `protobuf:"bytes,25,opt,name=subtype,proto3" json:"subtype,omitempty"`
+	// function_execution_id is set when an execution-scoped token posts: the
+	// message belongs to that function execution.
+	FunctionExecutionId string `protobuf:"bytes,26,opt,name=function_execution_id,json=functionExecutionId,proto3" json:"function_execution_id,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *PostWithBlocksRequest) Reset() {
@@ -532,6 +535,13 @@ func (x *PostWithBlocksRequest) GetWritePublic() bool {
 func (x *PostWithBlocksRequest) GetSubtype() string {
 	if x != nil {
 		return x.Subtype
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetFunctionExecutionId() string {
+	if x != nil {
+		return x.FunctionExecutionId
 	}
 	return ""
 }
@@ -2994,7 +3004,7 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x12\n" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12)\n" +
 	"\x10thread_timestamp\x18\x05 \x01(\tR\x0fthreadTimestamp\x12'\n" +
-	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\"\xc1\x06\n" +
+	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\"\xf5\x06\n" +
 	"\x15PostWithBlocksRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -3023,7 +3033,8 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\bicon_url\x18\x16 \x01(\tR\aiconUrl\x12\x15\n" +
 	"\x06bot_id\x18\x17 \x01(\tR\x05botId\x12!\n" +
 	"\fwrite_public\x18\x18 \x01(\bR\vwritePublic\x12\x18\n" +
-	"\asubtype\x18\x19 \x01(\tR\asubtype\"\xbb\x01\n" +
+	"\asubtype\x18\x19 \x01(\tR\asubtype\x122\n" +
+	"\x15function_execution_id\x18\x1a \x01(\tR\x13functionExecutionId\"\xbb\x01\n" +
 	"\x10ShareFileRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +

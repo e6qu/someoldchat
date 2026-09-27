@@ -44,7 +44,6 @@ type Store struct {
 	// app, keyed like appInstallations; the SQL profile keeps it in
 	// app_installations.installer_id.
 	appInstallers                 map[string]domain.UserID
-	appBotTokens                  map[string]string
 	apps                          map[domain.AppID]domain.App
 	appManifestRevisions          map[domain.AppID][]domain.AppManifestRevision
 	appTriggers                   map[string]domain.AppTrigger
@@ -78,6 +77,10 @@ type Store struct {
 	appDeliveryAttempts           map[string][]domain.AppDeliveryAttempt
 	memberships                   map[domain.ConversationID]map[domain.UserID]struct{}
 	tokens                        map[string]domain.TokenRecord
+	// functionExecutionTokens holds execution-scoped tokens by the hash of
+	// their plaintext; functionExecutionTokenHashes indexes them by execution.
+	functionExecutionTokens       map[string]domain.FunctionExecutionToken
+	functionExecutionTokenHashes  map[domain.WorkflowStepID]string
 	appTokens                     map[string]domain.AppTokenRecord
 	sessions                      map[string]domain.SessionRecord
 	oidcLogoutTokens              map[string]time.Time
@@ -347,6 +350,8 @@ func New() *Store {
 		appDeliveryAttempts:           make(map[string][]domain.AppDeliveryAttempt),
 		memberships:                   make(map[domain.ConversationID]map[domain.UserID]struct{}),
 		tokens:                        make(map[string]domain.TokenRecord),
+		functionExecutionTokens:       make(map[string]domain.FunctionExecutionToken),
+		functionExecutionTokenHashes:  make(map[domain.WorkflowStepID]string),
 		appTokens:                     make(map[string]domain.AppTokenRecord),
 		sessions:                      make(map[string]domain.SessionRecord),
 		oidcLogoutTokens:              make(map[string]time.Time),
@@ -414,7 +419,6 @@ func New() *Store {
 		workspaceProfileFields:        make(map[string]domain.ProfileFieldDefinition),
 		userProfileFieldValues:        make(map[string]map[domain.ProfileFieldID]domain.UserProfileFieldValue),
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
-		appBotTokens:                  make(map[string]string),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
 	}
 }
@@ -1374,13 +1378,78 @@ func (s *Store) LookupToken(_ context.Context, token string) (domain.TokenRecord
 	defer s.mu.RUnlock()
 	record, ok := s.tokens[domain.HashToken(token)]
 	if !ok {
-		return domain.TokenRecord{}, store.ErrNotFound
+		execution, isExecution := s.functionExecutionTokens[domain.HashToken(token)]
+		if !isExecution {
+			return domain.TokenRecord{}, store.ErrNotFound
+		}
+		record = s.functionExecutionTokenRecordLocked(execution)
 	}
 	if expiration, exists := s.userExpirations[record.UserID]; exists && !expiration.IsZero() && !expiration.After(time.Now().UTC()) {
 		return domain.TokenRecord{}, store.ErrNotFound
 	}
 	record.Scopes = append([]string(nil), record.Scopes...)
 	return record, nil
+}
+
+// functionExecutionTokenRecordLocked is the TokenRecord an execution-scoped
+// token resolves to: the app's bot, expired once its execution stopped
+// running and revoked once the app holds no live bot token.
+func (s *Store) functionExecutionTokenRecordLocked(execution domain.FunctionExecutionToken) domain.TokenRecord {
+	record := domain.TokenRecord{
+		WorkspaceID: execution.WorkspaceID, UserID: execution.UserID, AppID: execution.AppID, BotID: execution.BotID,
+		Scopes: append([]string(nil), execution.Scopes...), TokenType: domain.TokenBot, FunctionExecutionID: execution.ExecutionID,
+	}
+	step, exists := s.workflowSteps[execution.ExecutionID]
+	switch {
+	case !exists || step.WorkspaceID != execution.WorkspaceID:
+		record.ExpiresAt = execution.CreatedAt
+	case step.Status != domain.WorkflowStepExecuting:
+		record.ExpiresAt = step.UpdatedAt
+	}
+	now := time.Now().UTC()
+	record.Revoked = true
+	for _, token := range s.tokens {
+		if token.AppID == execution.AppID && token.WorkspaceID == execution.WorkspaceID && token.TokenType.IsBot() &&
+			!token.Revoked && (token.ExpiresAt.IsZero() || token.ExpiresAt.After(now)) {
+			record.Revoked = false
+			break
+		}
+	}
+	return record
+}
+
+func (s *Store) IssueFunctionExecutionToken(_ context.Context, value domain.FunctionExecutionToken, tokenHash string) (domain.FunctionExecutionToken, error) {
+	if value.WorkspaceID == "" || value.ExecutionID == "" || value.AppID == "" || value.UserID == "" || value.Ciphertext == "" || strings.TrimSpace(tokenHash) == "" || value.CreatedAt.IsZero() {
+		return domain.FunctionExecutionToken{}, store.InvalidArgument("invalid function execution token")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, exists := s.functionExecutionTokenHashes[value.ExecutionID]; exists {
+		return cloneFunctionExecutionToken(s.functionExecutionTokens[existing]), nil
+	}
+	if _, exists := s.functionExecutionTokens[tokenHash]; exists {
+		return domain.FunctionExecutionToken{}, store.ErrAlreadyExists
+	}
+	value.Scopes = domain.NormalizeScopes(value.Scopes)
+	value.CreatedAt = value.CreatedAt.UTC()
+	s.functionExecutionTokens[tokenHash] = cloneFunctionExecutionToken(value)
+	s.functionExecutionTokenHashes[value.ExecutionID] = tokenHash
+	return cloneFunctionExecutionToken(value), nil
+}
+
+func (s *Store) GetFunctionExecutionToken(_ context.Context, workspace domain.WorkspaceID, executionID domain.WorkflowStepID) (domain.FunctionExecutionToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	hash, exists := s.functionExecutionTokenHashes[executionID]
+	if !exists || s.functionExecutionTokens[hash].WorkspaceID != workspace {
+		return domain.FunctionExecutionToken{}, store.ErrNotFound
+	}
+	return cloneFunctionExecutionToken(s.functionExecutionTokens[hash]), nil
+}
+
+func cloneFunctionExecutionToken(value domain.FunctionExecutionToken) domain.FunctionExecutionToken {
+	value.Scopes = append([]string(nil), value.Scopes...)
+	return value
 }
 
 func (s *Store) ListAppAuthorizations(_ context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) ([]domain.AppAuthorization, error) {
@@ -4371,27 +4440,6 @@ func (s *Store) CreateAppInstallation(_ context.Context, value domain.AppInstall
 	return nil
 }
 
-func (s *Store) SetAppBotToken(_ context.Context, appID domain.AppID, workspace domain.WorkspaceID, tokenCiphertext string, written ...events.Event) error {
-	if appID == "" || workspace == "" || tokenCiphertext == "" {
-		return store.InvalidArgument("invalid app bot token")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.appBotTokens[string(appID)+"\x00"+string(workspace)] = tokenCiphertext
-	s.outbox = append(s.outbox, written...)
-	return nil
-}
-
-func (s *Store) GetAppBotTokenCiphertext(_ context.Context, appID domain.AppID, workspace domain.WorkspaceID) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ciphertext, ok := s.appBotTokens[string(appID)+"\x00"+string(workspace)]
-	if !ok {
-		return "", store.ErrNotFound
-	}
-	return ciphertext, nil
-}
-
 func (s *Store) ListAppInstallations(_ context.Context, appID domain.AppID) ([]domain.AppInstallation, error) {
 	if appID == "" {
 		return nil, store.ErrInvalidAppApproval
@@ -4647,6 +4695,8 @@ func (s *Store) UpdateView(_ context.Context, value domain.View, expectedHash st
 	}
 	value.CreatedAt = current.CreatedAt
 	value.UpdatedAt = value.UpdatedAt.UTC()
+	// A view belongs to the execution that created it for its whole life.
+	value.FunctionExecutionID = current.FunctionExecutionID
 	if value.UserID == "" {
 		value.UserID = current.UserID
 	}
@@ -4878,6 +4928,11 @@ func (s *Store) DeleteWorkflow(_ context.Context, workspace domain.WorkspaceID, 
 				s.workflowSteps[stepID] = step
 			}
 			delete(s.workflowSteps, stepID)
+			// The execution's token goes with it.
+			if hash, exists := s.functionExecutionTokenHashes[stepID]; exists {
+				delete(s.functionExecutionTokens, hash)
+				delete(s.functionExecutionTokenHashes, stepID)
+			}
 		}
 	}
 	for triggerID, trigger := range s.workflowTriggers {

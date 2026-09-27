@@ -3394,7 +3394,7 @@ func decodeProtoView(value *chatv1.View) (domain.View, error) {
 	if value == nil {
 		return domain.View{}, errors.New("view response is nil")
 	}
-	result := domain.View{ID: domain.ViewID(value.GetId()), AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Type: value.GetType(), ExternalID: value.GetExternalId(), Payload: value.GetPayload(), State: value.GetStateJson(), Hash: value.GetHash(), RootViewID: domain.ViewID(value.GetRootViewId()), PreviousViewID: domain.ViewID(value.GetPreviousViewId()), CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano())}
+	result := domain.View{ID: domain.ViewID(value.GetId()), AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Type: value.GetType(), ExternalID: value.GetExternalId(), Payload: value.GetPayload(), State: value.GetStateJson(), Hash: value.GetHash(), RootViewID: domain.ViewID(value.GetRootViewId()), PreviousViewID: domain.ViewID(value.GetPreviousViewId()), FunctionExecutionID: domain.WorkflowStepID(value.GetFunctionExecutionId()), CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano())}
 	if raw := strings.TrimSpace(value.GetErrorsJson()); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &result.Errors); err != nil {
 			return domain.View{}, err
@@ -3403,8 +3403,8 @@ func decodeProtoView(value *chatv1.View) (domain.View, error) {
 	return result, nil
 }
 
-func (r Remote) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID, payload string) (domain.View, error) {
-	out, err := r.views.OpenView(ctx, &chatv1.OpenViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), TriggerId: triggerID, Payload: payload})
+func (r Remote) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID, payload string, execution domain.WorkflowStepID) (domain.View, error) {
+	out, err := r.views.OpenView(ctx, &chatv1.OpenViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), TriggerId: triggerID, Payload: payload, FunctionExecutionId: string(execution)})
 	if err != nil {
 		return domain.View{}, err
 	}
@@ -3461,8 +3461,8 @@ func decodeProtoAppHome(out *chatv1.AppHomeResponse) (domain.InstalledApp, domai
 	return app, view, nil
 }
 
-func (r Remote) PushView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID, payload string) (domain.View, error) {
-	out, err := r.views.PushView(ctx, &chatv1.PushViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), TriggerId: triggerID, Payload: payload})
+func (r Remote) PushView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID, payload string, execution domain.WorkflowStepID) (domain.View, error) {
+	out, err := r.views.PushView(ctx, &chatv1.PushViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), TriggerId: triggerID, Payload: payload, FunctionExecutionId: string(execution)})
 	if err != nil {
 		return domain.View{}, err
 	}
@@ -7705,11 +7705,11 @@ func (s *Server) RequestAppPermissions(ctx context.Context, input *chatv1.AppPer
 
 func encodeProtoView(value domain.View) *chatv1.View {
 	encodedErrors, _ := json.Marshal(value.Errors)
-	return &chatv1.View{Id: string(value.ID), AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Type: value.Type, ExternalId: value.ExternalID, Payload: value.Payload, StateJson: value.State, ErrorsJson: string(encodedErrors), Hash: value.Hash, RootViewId: string(value.RootViewID), PreviousViewId: string(value.PreviousViewID), CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt)}
+	return &chatv1.View{Id: string(value.ID), AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Type: value.Type, ExternalId: value.ExternalID, Payload: value.Payload, StateJson: value.State, ErrorsJson: string(encodedErrors), Hash: value.Hash, RootViewId: string(value.RootViewID), PreviousViewId: string(value.PreviousViewID), FunctionExecutionId: string(value.FunctionExecutionID), CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt)}
 }
 
 func (s *Server) OpenView(ctx context.Context, input *chatv1.OpenViewRequest) (*chatv1.View, error) {
-	value, err := s.implementation.OpenView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetTriggerId(), input.GetPayload())
+	value, err := s.implementation.OpenView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetTriggerId(), input.GetPayload(), domain.WorkflowStepID(input.GetFunctionExecutionId()))
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -7757,7 +7757,7 @@ func encodeProtoAppHome(app domain.InstalledApp, view domain.View) *chatv1.AppHo
 }
 
 func (s *Server) PushView(ctx context.Context, input *chatv1.PushViewRequest) (*chatv1.View, error) {
-	value, err := s.implementation.PushView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetTriggerId(), input.GetPayload())
+	value, err := s.implementation.PushView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetTriggerId(), input.GetPayload(), domain.WorkflowStepID(input.GetFunctionExecutionId()))
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -12270,7 +12270,7 @@ func encodeProtoToken(value domain.TokenRecord) *chatv1.TokenRecord {
 	if !value.ExpiresAt.IsZero() {
 		expiresAt = value.ExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
-	return &chatv1.TokenRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), AppId: string(value.AppID), BotId: string(value.BotID), Scopes: domain.NormalizeScopes(value.Scopes), TokenType: string(value.TokenType), ExpiresAt: expiresAt, Revoked: value.Revoked}
+	return &chatv1.TokenRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), AppId: string(value.AppID), BotId: string(value.BotID), Scopes: domain.NormalizeScopes(value.Scopes), TokenType: string(value.TokenType), ExpiresAt: expiresAt, Revoked: value.Revoked, FunctionExecutionId: string(value.FunctionExecutionID)}
 }
 
 func decodeProtoToken(value *chatv1.TokenRecord) (domain.TokenRecord, error) {
@@ -12281,7 +12281,7 @@ func decodeProtoToken(value *chatv1.TokenRecord) (domain.TokenRecord, error) {
 	if err != nil {
 		return domain.TokenRecord{}, err
 	}
-	return domain.TokenRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), AppID: domain.AppID(value.GetAppId()), BotID: domain.BotID(value.GetBotId()), Scopes: domain.NormalizeScopes(value.GetScopes()), TokenType: domain.TokenType(value.GetTokenType()), ExpiresAt: expiresAt, Revoked: value.GetRevoked()}, nil
+	return domain.TokenRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), AppID: domain.AppID(value.GetAppId()), BotID: domain.BotID(value.GetBotId()), Scopes: domain.NormalizeScopes(value.GetScopes()), TokenType: domain.TokenType(value.GetTokenType()), ExpiresAt: expiresAt, Revoked: value.GetRevoked(), FunctionExecutionID: domain.WorkflowStepID(value.GetFunctionExecutionId())}, nil
 }
 
 func encodeProtoSession(value domain.SessionRecord) *chatv1.SessionRecord {
@@ -13335,6 +13335,7 @@ func decodeProtoMessagePostRequest(input *chatv1.PostWithBlocksRequest) domain.M
 		ReplyBroadcast: input.GetReplyBroadcast(), Parse: input.GetParse(), MrkdwnDisabled: input.GetMrkdwnDisabled(),
 		LinkNames: input.GetLinkNames(), Username: input.GetUsername(), IconEmoji: input.GetIconEmoji(), IconURL: input.GetIconUrl(),
 		BotID: domain.BotID(input.GetBotId()), WritePublic: input.GetWritePublic(), Subtype: domain.MessageSubtype(input.GetSubtype()),
+		FunctionExecutionID: domain.WorkflowStepID(input.GetFunctionExecutionId()),
 	}
 	if input.GetUnfurlLinksSet() {
 		value := input.GetUnfurlLinks()
@@ -13426,6 +13427,7 @@ func (r Remote) PostMessageAs(ctx context.Context, workspaceID domain.WorkspaceI
 		MrkdwnDisabled: request.MrkdwnDisabled, LinkNames: request.LinkNames,
 		Username: request.Username, IconEmoji: request.IconEmoji, IconUrl: request.IconURL,
 		BotId: string(request.BotID), WritePublic: request.WritePublic, Subtype: string(request.Subtype),
+		FunctionExecutionId: string(request.FunctionExecutionID),
 	}
 	if request.UnfurlLinks != nil {
 		input.UnfurlLinksSet = true

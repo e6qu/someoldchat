@@ -1,4 +1,8 @@
+import json
 import os
+import threading
+import time
+import urllib.request
 
 from slack_bolt import App
 from slack_bolt.authorization import AuthorizeResult
@@ -72,4 +76,86 @@ response = app.dispatch(
 )
 assert response.status == 200
 assert received is True, response.body
+
+# A remote custom function over signed HTTP, in Slack's current shape:
+# function_executed hands the listener an execution-scoped client, the button
+# it posts routes back with function_data, and complete() inside the action
+# listener finishes the execution with the execution's own token.
+fixture_url = base_url.rsplit("/api/", 1)[0]
+function_app = App(
+    client=WebClient(token=token, base_url=base_url),
+    authorize=authorize,
+    signing_secret="qualification-signing",
+)
+posted = {}
+completed = {}
+failures = []
+
+
+@function_app.function("approval")
+def run_approval(inputs, client, event):
+    try:
+        assert inputs["ticket"] == "INC-42"
+        assert event["bot_access_token"].startswith("xwfp-")
+        message = client.chat_postMessage(
+            channel="C1",
+            text="Approve " + inputs["ticket"] + "?",
+            blocks=[
+                {
+                    "type": "actions",
+                    "block_id": "approval",
+                    "elements": [
+                        {"type": "button", "action_id": "approve_ticket", "text": {"type": "plain_text", "text": "Approve"}, "value": "approve"}
+                    ],
+                }
+            ],
+        )
+        posted.update(ts=message["ts"], execution=event["function_execution_id"], token=event["bot_access_token"])
+    except Exception as error:  # surfaced by the main thread
+        failures.append(error)
+
+
+@function_app.action("approve_ticket")
+def approve(ack, body, inputs, complete, context):
+    ack()
+    try:
+        assert body["function_data"]["function"]["callback_id"] == "approval"
+        assert inputs["ticket"] == "INC-42"
+        assert body["interactivity"]["interactivity_pointer"] == body["trigger_id"]
+        complete(outputs={"decision": "approved"})
+        completed.update(execution=context.function_execution_id, token=body["bot_access_token"])
+    except Exception as error:  # surfaced by the main thread
+        failures.append(error)
+
+
+def fixture(path, method="GET"):
+    request = urllib.request.Request(fixture_url + path, method=method, data=b"" if method == "POST" else None)
+    with urllib.request.urlopen(request, timeout=10) as reply:
+        text = reply.read().decode()
+    return json.loads(text) if text else None
+
+
+def wait_for(values, description):
+    deadline = time.monotonic() + 5
+    while not values and not failures and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if failures:
+        raise failures[0]
+    assert values, description
+
+
+threading.Thread(target=lambda: function_app.start(port=19090, http_server_logger_enabled=False), daemon=True).start()
+time.sleep(0.5)
+execution = fixture("/qualification/bolt-function", "POST")["function_execution_id"]
+wait_for(posted, "Bolt's function listener did not post its message")
+assert posted["execution"] == execution
+state = fixture("/qualification/bolt-function-state?function_execution_id=" + execution + "&ts=" + posted["ts"])
+assert state["status"] == "executing", state
+assert state["message_function_execution_id"] == execution, state
+fixture("/qualification/bolt-function-click?ts=" + posted["ts"], "POST")
+wait_for(completed, "Bolt's action listener did not complete the function")
+assert completed == {"execution": execution, "token": posted["token"]}, completed
+state = fixture("/qualification/bolt-function-state?function_execution_id=" + execution)
+assert state["status"] == "completed", state
+assert json.loads(state["outputs"]) == {"decision": "approved"}, state
 print("python-bolt qualification passed")

@@ -261,6 +261,11 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 		"actions":      []any{actionPayload},
 		"state":        appBlockActionState(actionPayload),
 	}
+	if !ephemeral {
+		if err := m.withFunctionInteraction(ctx, payload, workspaceID, snapshot.App.ID, message.FunctionExecution(), userID, triggerID); err != nil {
+			return err
+		}
+	}
 	if parsed.SocketModeEnabled {
 		return m.enqueueSocketModeInteraction(ctx, snapshot.App.ID, workspaceID, userID, "interactive", payload, capability)
 	}
@@ -341,6 +346,9 @@ func (m Messages) DispatchViewBlockAction(ctx context.Context, workspaceID domai
 		"view":       view,
 		"actions":    []any{actionPayload},
 		"state":      state,
+	}
+	if err := m.withFunctionInteraction(ctx, payload, workspaceID, current.AppID, current.FunctionExecutionID, userID, triggerID); err != nil {
+		return err
 	}
 	if parsed.SocketModeEnabled {
 		return m.enqueueSocketModeInteraction(ctx, snapshot.App.ID, workspaceID, userID, "interactive", payload, capability)
@@ -646,6 +654,9 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 		"response_urls":         []any{},
 		"is_enterprise_install": false,
 	}
+	if err := m.withFunctionInteraction(ctx, payload, workspaceID, current.AppID, current.FunctionExecutionID, userID, triggerID); err != nil {
+		return domain.ViewInteractionResult{}, err
+	}
 	if parsed.SocketModeEnabled {
 		if err := m.enqueueSocketModeInteraction(ctx, current.AppID, workspaceID, userID, "interactive", payload, capability); err != nil {
 			return domain.ViewInteractionResult{}, err
@@ -722,6 +733,9 @@ func (m Messages) CloseView(ctx context.Context, workspaceID domain.WorkspaceID,
 		"team": map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
 		"user": map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
 		"view": view,
+	}
+	if err := m.withFunctionInteraction(ctx, payload, workspaceID, current.AppID, current.FunctionExecutionID, userID, ""); err != nil {
+		return err
 	}
 	if parsed.SocketModeEnabled {
 		return m.enqueueSocketModeInteraction(ctx, current.AppID, workspaceID, userID, "interactive", payload, capability)
@@ -878,7 +892,7 @@ func (m Messages) applyViewSubmissionResponse(ctx context.Context, current domai
 		} else if depth >= 3 {
 			return domain.ViewInteractionResult{}, ErrInvalidAppResponse
 		}
-		_, err := m.createView(ctx, current.WorkspaceID, current.AppID, current.UserID, string(response.View), current.RootViewID, current.ID, "", "view.pushed")
+		_, err := m.createView(ctx, current.WorkspaceID, current.AppID, current.UserID, string(response.View), current.RootViewID, current.ID, "", "view.pushed", current.FunctionExecutionID)
 		return domain.ViewInteractionResult{}, err
 	default:
 		return domain.ViewInteractionResult{}, ErrInvalidAppResponse

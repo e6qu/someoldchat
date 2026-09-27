@@ -318,16 +318,16 @@ func TestAppMentionIsDerivedForTheMentionedAppOnly(t *testing.T) {
 	}
 }
 
-// TestAppInstallCommitsTheInstalledEvent: sealing the freshly issued bot
-// token and announcing app_installed commit together, and the announcement is
-// routed to the installed app alone.
+// TestAppInstallCommitsTheInstalledEvent: issuing a bot token announces
+// app_installed, routed to the installed app alone. It does not depend on
+// the application credential key.
 func TestAppInstallCommitsTheInstalledEvent(t *testing.T) {
 	ctx := context.Background()
 	state := memory.New()
 	state.SeedWorkspace(domain.Workspace{ID: "T1"})
 	state.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
-	messages := Messages{Store: state, AppCredentialKey: []byte("0123456789abcdef0123456789abcdef")}
-	if err := messages.recordAppBotToken(ctx, "A1", "T1", "xoxb-plain", "U1"); err != nil {
+	messages := Messages{Store: state}
+	if err := messages.announceAppInstalled(ctx, "A1", "T1", "U1"); err != nil {
 		t.Fatal(err)
 	}
 	records, err := state.ListEventsAfter(ctx, "T1", 0, 10)

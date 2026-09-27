@@ -24,7 +24,6 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
-	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/store"
@@ -2761,7 +2760,10 @@ func viewHash(id domain.ViewID, payload string, now time.Time) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(string(id)+"\x00"+payload+"\x00"+now.UTC().Format(time.RFC3339Nano))))
 }
 
-func (m Messages) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, triggerID, payload string) (domain.View, error) {
+// OpenView opens a modal from a trigger. execution is the function execution
+// whose execution-scoped token opened it (empty for any other token): the
+// modal then belongs to that execution.
+func (m Messages) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, triggerID, payload string, execution domain.WorkflowStepID) (domain.View, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.View{}, err
 	}
@@ -2775,7 +2777,7 @@ func (m Messages) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if err != nil {
 		return domain.View{}, err
 	}
-	return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, "", "", "", "view.opened")
+	return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, "", "", "", "view.opened", execution)
 }
 
 // requireModalPayload admits only a well-formed modal: views.open and
@@ -2826,7 +2828,7 @@ func (m Messages) PublishView(ctx context.Context, workspaceID domain.WorkspaceI
 	}
 	current, err := m.Store.GetPublishedView(ctx, workspaceID, target, appID)
 	if errors.Is(err, store.ErrNotFound) {
-		return m.createView(ctx, workspaceID, appID, target, payload, "", "", "", "view.published")
+		return m.createView(ctx, workspaceID, appID, target, payload, "", "", "", "view.published", "")
 	}
 	if err != nil {
 		return domain.View{}, err
@@ -2834,7 +2836,7 @@ func (m Messages) PublishView(ctx context.Context, workspaceID domain.WorkspaceI
 	return m.updateView(ctx, workspaceID, actor, current, payload, expectedHash, "view.published")
 }
 
-func (m Messages) PushView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, triggerID, payload string) (domain.View, error) {
+func (m Messages) PushView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, triggerID, payload string, execution domain.WorkflowStepID) (domain.View, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.View{}, err
 	}
@@ -2847,7 +2849,7 @@ func (m Messages) PushView(ctx context.Context, workspaceID domain.WorkspaceID, 
 	}
 	parent, err := m.Store.GetLatestView(ctx, workspaceID, trigger.UserID, appID, "modal")
 	if errors.Is(err, store.ErrNotFound) {
-		return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, "", "", "", "view.pushed")
+		return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, "", "", "", "view.pushed", execution)
 	}
 	if err != nil {
 		return domain.View{}, err
@@ -2857,7 +2859,7 @@ func (m Messages) PushView(ctx context.Context, workspaceID domain.WorkspaceID, 
 	} else if depth >= 3 {
 		return domain.View{}, ErrViewPushLimit
 	}
-	return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, parent.RootViewID, parent.ID, "", "view.pushed")
+	return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, parent.RootViewID, parent.ID, "", "view.pushed", execution)
 }
 
 func (m Messages) UpdateView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, viewID, externalID, payload, expectedHash string) (domain.View, error) {
@@ -2890,7 +2892,7 @@ func (m Messages) CurrentModalView(ctx context.Context, workspaceID domain.Works
 	return m.Store.GetCurrentView(ctx, workspaceID, userID, "modal")
 }
 
-func (m Messages) createView(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, user domain.UserID, payload string, rootID, previousID domain.ViewID, externalID, topic string) (domain.View, error) {
+func (m Messages) createView(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, user domain.UserID, payload string, rootID, previousID domain.ViewID, externalID, topic string, execution domain.WorkflowStepID) (domain.View, error) {
 	viewType, payloadExternalID, err := viewPayload(payload)
 	if err != nil {
 		return domain.View{}, err
@@ -2907,7 +2909,7 @@ func (m Messages) createView(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.View{}, err
 	}
-	value := domain.View{ID: id, AppID: appID, WorkspaceID: domain.WorkspaceID(workspaceID), UserID: domain.UserID(user), Type: viewType, ExternalID: externalID, Payload: payload, Hash: viewHash(id, payload, now), CreatedAt: now, UpdatedAt: now}
+	value := domain.View{ID: id, AppID: appID, WorkspaceID: domain.WorkspaceID(workspaceID), UserID: domain.UserID(user), Type: viewType, ExternalID: externalID, Payload: payload, Hash: viewHash(id, payload, now), FunctionExecutionID: execution, CreatedAt: now, UpdatedAt: now}
 	if rootID == "" {
 		value.RootViewID = id
 	} else {
@@ -3313,7 +3315,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 	// The store decides the issued type: a user-scope-only grant redeems for
 	// the installer's user token even when a bot token was asked for.
 	if token.TokenType.IsBot() {
-		if err := m.recordAppBotToken(ctx, token.AppID, token.WorkspaceID, token.AccessToken, token.InstallerID); err != nil {
+		if err := m.announceAppInstalled(ctx, token.AppID, token.WorkspaceID, token.InstallerID); err != nil {
 			return domain.OAuthToken{}, err
 		}
 	}
@@ -3321,40 +3323,23 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 	return token, nil
 }
 
-// recordAppBotToken seals a freshly issued bot access token so a later
-// function_executed dispatch can include it as bot_access_token, exactly as
-// Slack sends the app's token with the callback. The plaintext lives only in
-// memory here; the store keeps sealed ciphertext opened at delivery time.
-func (m Messages) recordAppBotToken(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID, plaintext string, installer domain.UserID) error {
-	// The credential key is auto-generated at startup when absent, so a missing
-	// key only happens in unit tests that never dispatch — there is nothing to
-	// seal for them, and production can never reach this state.
-	if appID == "" || workspaceID == "" || plaintext == "" || len(m.AppCredentialKey) != 32 {
+// announceAppInstalled journals app_installed for a freshly issued bot token.
+// Slack dispatches it to the newly installed app itself, so it is
+// target-routed and automatic (no manifest subscription). A re-exchange
+// re-announces the install, which is the observable Slack behavior for a
+// reinstall.
+func (m Messages) announceAppInstalled(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID, installer domain.UserID) error {
+	if appID == "" || workspaceID == "" {
 		return nil
 	}
-	ciphertext, err := secretbox.Seal(m.AppCredentialKey, appBotTokenAssociatedData(appID, workspaceID), plaintext)
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, installer, events.NewPayload("app.bot_token_issued",
-		events.String("app_id", string(appID)),
-	), now)
-	if err != nil {
-		return err
-	}
-	// app_installed commits with the issuance: Slack dispatches it to the
-	// newly installed app itself, so it is target-routed and automatic (no
-	// manifest subscription). A re-exchange re-announces the install, which
-	// is the observable Slack behavior for a reinstall.
 	installed, err := newEvent(workspaceID, installer, events.NewPayload("app.installed",
 		events.String("app_id", string(appID)),
 		events.String("target_app_id", string(appID)),
-	), now)
+	), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetAppBotToken(ctx, appID, workspaceID, ciphertext, event, installed)
+	return m.Store.AppendEvent(ctx, installed)
 }
 
 func (m Messages) OAuthV2Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (domain.OAuthToken, error) {
@@ -3440,7 +3425,10 @@ func (m Messages) OAuthV2ExchangeToken(ctx context.Context, clientID, clientSecr
 		return domain.OAuthToken{}, err
 	}
 	record, err := m.Store.LookupToken(ctx, accessToken)
-	if err != nil || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || !record.TokenType.Valid() {
+	if err != nil || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || !record.TokenType.Valid() ||
+		// An execution-scoped token lives only as long as its execution; it is
+		// never exchanged for a long-lived rotating one.
+		record.FunctionExecutionID != "" {
 		if errors.Is(err, store.ErrNotFound) || err == nil {
 			return domain.OAuthToken{}, ErrInvalidOAuth
 		}
@@ -10621,7 +10609,7 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	// domain.Message.ReplyBroadcast. The bot identity is stream state because
 	// it is presentation the posting credential supplies, like the username.
 	state := domain.MessageStreamState{
-		BotID:    request.BotID,
+		BotID: request.BotID, FunctionExecutionID: request.FunctionExecutionID,
 		Username: request.Username, IconEmoji: request.IconEmoji, IconURL: request.IconURL,
 		MarkdownText: request.MarkdownText,
 		Parse:        request.Parse, MrkdwnDisabled: request.MrkdwnDisabled, LinkNames: request.LinkNames,

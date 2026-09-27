@@ -360,6 +360,12 @@ func NewRefreshToken() (string, error) { return PublicID("xoxe-") }
 
 func NewAppToken() (string, error) { return PublicID("xapp-") }
 
+// NewFunctionExecutionToken mints the execution-scoped bot token Slack hands
+// an app with function_executed (bot_access_token). Slack's workflow tokens
+// carry the xwfp- prefix; the token authenticates as the app's bot and lives
+// only as long as its function execution.
+func NewFunctionExecutionToken() (string, error) { return PublicID("xwfp-") }
+
 func NewRTMConnectionID() (string, error) { return PublicID("rtm-") }
 
 func NewSocketModeConnectionID() (string, error) { return PublicID("socket-") }

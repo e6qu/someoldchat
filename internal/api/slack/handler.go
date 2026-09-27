@@ -1671,12 +1671,23 @@ func (h Handler) viewsOpen(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	value, err := h.Messages.OpenView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["trigger_id"]), fields["view"])
+	value, err := h.Messages.OpenView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, viewTrigger(fields), fields["view"], principal.FunctionExecutionID)
 	if err != nil {
 		writeError(w, viewMethodError(err))
 		return
 	}
 	writeViewResponse(w, value)
+}
+
+// viewTrigger is what views.open and views.push open a modal with: the
+// trigger_id of an interaction, or the interactivity_pointer Slack sends a
+// function (in function_data interactivity and in an interactivity input),
+// which names the same short-lived trigger.
+func viewTrigger(fields map[string]string) string {
+	if trigger := strings.TrimSpace(fields["trigger_id"]); trigger != "" {
+		return trigger
+	}
+	return strings.TrimSpace(fields["interactivity_pointer"])
 }
 
 func (h Handler) viewsPublish(w http.ResponseWriter, r *http.Request) {
@@ -1718,7 +1729,7 @@ func (h Handler) viewsPush(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	value, err := h.Messages.PushView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["trigger_id"]), fields["view"])
+	value, err := h.Messages.PushView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, viewTrigger(fields), fields["view"], principal.FunctionExecutionID)
 	if err != nil {
 		writeError(w, viewMethodError(err))
 		return
@@ -1894,6 +1905,11 @@ func (h Handler) functionCompletionFields(w http.ResponseWriter, r *http.Request
 	}
 	if strings.TrimSpace(fields["function_execution_id"]) == "" || strings.TrimSpace(fields[requiredField]) == "" {
 		writeError(w, "invalid_arg_name")
+		return nil, auth.Principal{}, false
+	}
+	// An execution-scoped token answers for its own execution only.
+	if principal.FunctionExecutionID != "" && principal.FunctionExecutionID != domain.WorkflowStepID(strings.TrimSpace(fields["function_execution_id"])) {
+		writeError(w, "access_denied")
 		return nil, auth.Principal{}, false
 	}
 	return fields, principal, true
@@ -10623,6 +10639,7 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 			Parse: parse, MrkdwnDisabled: mrkdwn != nil && !*mrkdwn, LinkNames: linkNames != nil && *linkNames,
 			UnfurlLinks: unfurlLinks, UnfurlMedia: unfurlMedia,
 			Username: username, IconEmoji: iconEmoji, IconURL: iconURL, Subtype: subtype,
+			FunctionExecutionID: principal.FunctionExecutionID,
 		},
 	)
 }

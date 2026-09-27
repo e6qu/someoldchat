@@ -13,6 +13,9 @@ message TokenRecord {
   string bot_id = 6;
   string token_type = 7;
   string expires_at = 8;
+  // function_execution_id names the execution an execution-scoped (xwfp-)
+  // bot token was issued for.
+  string function_execution_id = 9;
 }
 
 message AppTokenRecord {

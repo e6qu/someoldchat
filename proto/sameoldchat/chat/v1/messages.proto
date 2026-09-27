@@ -70,6 +70,9 @@ message PostWithBlocksRequest {
   string bot_id = 23;
   bool write_public = 24;
   string subtype = 25;
+  // function_execution_id is set when an execution-scoped token posts: the
+  // message belongs to that function execution.
+  string function_execution_id = 26;
 }
 
 message ShareFileRequest {

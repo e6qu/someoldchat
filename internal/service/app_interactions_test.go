@@ -148,11 +148,11 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	if triggerID == "" || !strings.HasPrefix(slash.form.Get("response_url"), "https://chat.example.test/app-response/") {
 		t.Fatalf("slash capabilities trigger=%q response_url=%q", triggerID, slash.form.Get("response_url"))
 	}
-	openedView, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Deploy"},"submit":{"type":"plain_text","text":"Deploy"},"blocks":[{"type":"input","block_id":"answer_block","label":{"type":"plain_text","text":"Environment"},"element":{"type":"plain_text_input","action_id":"answer"}}]}`)
+	openedView, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Deploy"},"submit":{"type":"plain_text","text":"Deploy"},"blocks":[{"type":"input","block_id":"answer_block","label":{"type":"plain_text","text":"Environment"},"element":{"type":"plain_text_input","action_id":"answer"}}]}`, "")
 	if err != nil {
 		t.Fatalf("consume trigger: %v", err)
 	}
-	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Replay"},"blocks":[]}`); err != ErrTriggerExchanged {
+	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Replay"},"blocks":[]}`, ""); err != ErrTriggerExchanged {
 		t.Fatalf("trigger replay error=%v, want %v", err, ErrTriggerExchanged)
 	}
 
@@ -297,7 +297,7 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	if submittedPayload.TriggerID == "" || submittedPayload.ResponseURLs == nil || len(submittedPayload.ResponseURLs) != 0 {
 		t.Fatalf("view submission trigger_id=%q response_urls=%v: %s", submittedPayload.TriggerID, submittedPayload.ResponseURLs, goodSubmission.form.Get("payload"))
 	}
-	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", submittedPayload.TriggerID, `{"type":"modal","title":{"type":"plain_text","text":"Done"},"blocks":[]}`); err != nil {
+	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", submittedPayload.TriggerID, `{"type":"modal","title":{"type":"plain_text","text":"Done"},"blocks":[]}`, ""); err != nil {
 		t.Fatalf("the submission's trigger_id did not open a view: %v", err)
 	}
 	if submittedPayload.Type != "view_submission" || submittedPayload.APIAppID != "A1" ||
@@ -601,7 +601,7 @@ func TestSocketModeInteractionsQueueSlackEnvelopesAndApplyAcknowledgementPayload
 		!strings.HasPrefix(slackString(slashPayload["response_url"]), "https://chat.example.test/app-response/") {
 		t.Fatalf("slash payload=%s", slash.Payload)
 	}
-	openedModal, err := messages.OpenView(ctx, "T1", "UBOT", "A1", slackString(slashPayload["trigger_id"]), `{"type":"modal","title":{"type":"plain_text","text":"Socket modal"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","block_id":"name","label":{"type":"plain_text","text":"Name"},"element":{"type":"plain_text_input","action_id":"name_input"}},{"type":"actions","block_id":"preview","elements":[{"type":"button","action_id":"preview_button","text":{"type":"plain_text","text":"Preview"},"value":"current"}]}]}`)
+	openedModal, err := messages.OpenView(ctx, "T1", "UBOT", "A1", slackString(slashPayload["trigger_id"]), `{"type":"modal","title":{"type":"plain_text","text":"Socket modal"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","block_id":"name","label":{"type":"plain_text","text":"Name"},"element":{"type":"plain_text_input","action_id":"name_input"}},{"type":"actions","block_id":"preview","elements":[{"type":"button","action_id":"preview_button","text":{"type":"plain_text","text":"Preview"},"value":"current"}]}]}`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
