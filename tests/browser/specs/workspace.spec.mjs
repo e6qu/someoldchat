@@ -653,6 +653,10 @@ test('[LATER-01 LATER-02 LATER-03 A11Y-01] Later saves privately and supports ev
   item = page.locator('.later-item', { hasText: text });
   await expect(item).toBeVisible();
 
+  // Remove lives in the item's More actions menu, beside Copy link and Mark
+  // unread, as in Slack's Later.
+  await item.hover();
+  await item.getByRole('button', { name: 'More actions for this saved item' }).click();
   await item.getByRole('button', { name: 'Remove from Later' }).click();
   await expect(page.getByRole('status')).toHaveText('Message removed from Later.');
   await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
@@ -684,8 +688,9 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(reminder.getByRole('link', { name: 'View source message' })).toBeVisible();
   await expect(reminder.getByRole('button', { name: 'Mark complete' })).toBeVisible();
 
+  // A reminder is edited from its More actions menu.
   await reminder.hover();
-  await reminder.getByText('Edit', { exact: true }).click();
+  await reminder.getByRole('button', { name: 'More actions for this reminder' }).click();
   const tomorrow = await page.evaluate(() => {
     const value = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const pad = (part) => String(part).padStart(2, '0');
@@ -708,6 +713,8 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(page).toHaveURL(/\/app\/later\?.*state=completed/);
   reminder = page.locator('.later-item', { hasText: description });
   await expect(reminder).toContainText('Completed');
+  await reminder.hover();
+  await reminder.getByRole('button', { name: 'More actions for this reminder' }).click();
   await reminder.getByRole('button', { name: 'Delete reminder' }).click();
   await expect(page.getByRole('status')).toHaveText('Reminder deleted.');
   await expect(page.locator('.later-item', { hasText: description })).toHaveCount(0);
@@ -721,7 +728,10 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(page).toHaveURL(/\/app\/later\?.*filter=channel-reminders/);
   const channelItem = page.locator('.later-item', { hasText: channelReminder });
   await expect(channelItem.getByRole('link', { name: '#general' })).toBeVisible();
+  await channelItem.hover();
+  await channelItem.getByRole('button', { name: 'More actions for this reminder' }).click();
   await expect(channelItem.getByRole('button', { name: 'Delete reminder' })).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(channelItem).toContainText('Repeats weekly');
   await expect(channelItem.getByRole('button', { name: 'Mark complete' })).toHaveCount(0);
   await expect(channelItem.getByText('Edit', { exact: true })).toHaveCount(0);
@@ -876,7 +886,7 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   // Filter chips apply the moment they change, as Slack's do.
   await page.getByLabel('Sort').selectOption('oldest');
   await expect(page).toHaveURL(/order=oldest/);
-  await expect(page.getByRole('status').filter({ hasText: /result/ })).toHaveText(/results? for/);
+  await expect(page.locator('#view-status')).toHaveText(/results? for/);
   await expect(page.locator('.result', { hasText: message })).toBeVisible();
 
   await page.getByRole('link', { name: 'Files', exact: true }).click();

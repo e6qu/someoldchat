@@ -353,7 +353,7 @@ var filesBrowserTemplate = mustPage(`{{define "title"}}Files · SameOldChat{{end
 <noscript><button class="v-btn" type="submit">Filter</button></noscript>
 </form>
 {{if .From}}<p class="v-chips"><span class="v-chip on">From: {{.FromName}} <a href="/app/files" aria-label="Show files from everyone">×</a></span></p>{{end}}
-<p class="visually-hidden" id="view-status" role="status" aria-live="polite"></p>
+<p class="visually-hidden" id="view-status" aria-live="polite"></p>
 <div id="files-results" data-live-summary="{{.Summary}}">
 {{if .Files}}<ul class="v-list" aria-label="Files">{{range .Files}}<li class="v-row" data-row-href="{{.ViewURL}}">
 <span class="file-thumb" aria-hidden="true">{{if .ThumbnailURL}}<img src="{{.ThumbnailURL}}" alt="" loading="lazy">{{else}}{{.Icon}}{{end}}</span>
@@ -370,7 +370,7 @@ var fileViewTemplate = mustPage(`{{define "title"}}{{.File.Title}} · SameOldCha
 {{define "content"}}<header class="bar"><a href="/app/files?channel={{.Channel}}">← All files</a><h1>File</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
 <main class="v-page file-page">
 <div class="v-head"><h2>{{.File.Title}}</h2></div>
-<p class="visually-hidden" id="view-status" role="status" aria-live="polite"></p>
+<p class="visually-hidden" id="view-status" aria-live="polite"></p>
 <div class="file-view">
 <div class="file-preview">{{if .File.ThumbnailURL}}<img src="{{.File.ThumbnailURL}}" alt="{{if .Description}}{{.Description}}{{else}}{{.File.Title}}{{end}}">{{else if .Preview}}<pre>{{.Preview}}</pre>{{else}}<span class="big-icon" aria-hidden="true">{{.File.Icon}}</span><p class="pp-muted">No preview for this file type. Download it to open it.</p>{{end}}</div>
 <aside class="file-details" aria-label="File details">

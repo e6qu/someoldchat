@@ -2772,8 +2772,21 @@ func TestReminderJourneysCreateFromMessageAndManageInLater(t *testing.T) {
 	later := get(t, mux, createdResponse.Header().Get("Location"))
 	requireContains(t, "REMIND-02 Later", later.Body.String(),
 		"Reminder saved.", "Message reminder", "View source message", "Mark complete",
-		"Edit", "Delete reminder", "Upcoming reminders", "Add a reminder",
+		"Edit reminder", "Delete reminder", "Add a reminder", `In progress <span class="v-count">1</span>`,
 	)
+
+	// Once the message is also saved, its reminder is the saved item's due
+	// chip, not a second card for the same message.
+	savedItem, err := (service.Messages{Store: s}).SaveForLater(context.Background(), "T1", "U1", "Cdev", timestamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withSaved := get(t, mux, "/app/later?channel=Cdev&state=in_progress").Body.String()
+	requireContains(t, "saved item with its reminder", withSaved, "review the launch", `class="due-chip`, "Remind me about", `name="preset" value="3h"`, `name="preset" value="next_week"`, "Copy link", "Mark unread", `In progress <span class="v-count">1</span>`)
+	requireMissing(t, "saved item with its reminder", withSaved, "reminder-item")
+	if err := (service.Messages{Store: s}).RemoveSavedItem(context.Background(), "T1", "U1", savedItem.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	tomorrow := time.Now().UTC().AddDate(0, 0, 1)
 	update := postForm(t, mux, "/app/reminders/update?channel=Cdev&id="+url.QueryEscape(string(reminder.ID))+"&return_state=in_progress", url.Values{

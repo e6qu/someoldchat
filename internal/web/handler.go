@@ -1327,8 +1327,19 @@ type draftsAndSentData struct {
 }
 
 type laterItemView struct {
-	ID              string
-	Text            string
+	ID string
+	// Text is the saved message as the timeline renders it; AuthorID,
+	// AvatarURL and Initial are its author's face and profile.
+	Text            template.HTML
+	AuthorID        string
+	AvatarURL       string
+	Initial         string
+	ChannelPrivate  bool
+	RemindURL       string
+	MarkUnreadURL   string
+	// Reminder is the reminder set on this saved message, shown as a due
+	// chip on the item rather than as a second card for the same message.
+	Reminder        *laterReminderView
 	AuthorName      string
 	MachineTime     string
 	DisplayTime     string
@@ -1343,6 +1354,10 @@ type laterItemView struct {
 }
 
 type laterData struct {
+	// InProgressCount, ArchivedCount and CompletedCount label the tabs.
+	InProgressCount   int
+	ArchivedCount     int
+	CompletedCount    int
 	Channel           string
 	CSRFToken         string
 	State             domain.SavedItemState
@@ -1359,7 +1374,9 @@ type laterData struct {
 }
 
 type laterReminderView struct {
-	ID          string
+	ID string
+	// Overdue colours the due chip; Delete is offered from the item's menu.
+	Overdue     bool
 	Text        string
 	MachineTime string
 	DisplayTime string
@@ -1499,7 +1516,19 @@ const layoutMarkup = `<!doctype html>
 // an aria-keyshortcuts value by hand. Every advertised chord is looked up in
 // keyboardSections, which is what keeps the announced binding, the documented
 // binding and the implemented binding the same thing.
-var templateFunctions = template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts}
+var templateFunctions = template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts, "laterRemind": laterRemind}
+
+// laterRemindView is what Later's Remind me menu needs for one item: where
+// to post, the page's CSRF token, and what the menu is about.
+type laterRemindView struct {
+	URL       string
+	CSRFToken string
+	Label     string
+}
+
+func laterRemind(address, csrf, label string) laterRemindView {
+	return laterRemindView{URL: address, CSRFToken: csrf, Label: label}
+}
 
 var layoutTemplate = template.Must(template.New("layout").Funcs(templateFunctions).Parse(layoutMarkup))
 
@@ -2839,7 +2868,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
     <label class="v-chip"><span class="visually-hidden">Account type</span><select name="type" aria-label="Account type"><option value=""{{if eq .Type ""}} selected{{end}}>Everyone</option><option value="members"{{if eq .Type "members"}} selected{{end}}>Members</option><option value="guests"{{if eq .Type "guests"}} selected{{end}}>Guests</option><option value="apps"{{if eq .Type "apps"}} selected{{end}}>Apps</option></select></label>
     <noscript><button class="v-btn" type="submit">Search</button></noscript>
   </form>
-  <p class="visually-hidden" id="view-status" role="status" aria-live="polite"></p>
+  <p class="visually-hidden" id="view-status" aria-live="polite"></p>
   <div class="people-layout">
     <div id="people-directory" data-live-summary="{{.Summary}}">
     {{if ne .Type "apps"}}<section class="people-section" aria-labelledby="people-heading">
@@ -3088,7 +3117,7 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 <label class="v-chip"><span aria-hidden="true">Sort</span><select name="order" aria-label="Sort"><option value="relevant"{{if eq .Sort "score"}} selected{{end}}>Most relevant</option><option value="newest"{{if and (eq .Sort "timestamp") (eq .Direction "desc")}} selected{{end}}>Newest</option><option value="oldest"{{if eq .Direction "asc"}} selected{{end}}>Oldest</option></select></label>
 <noscript><button class="v-btn" type="submit">Apply filters</button></noscript>
 </form>{{end}}{{end}}
-<p class="visually-hidden" id="view-status" role="status" aria-live="polite"></p>
+<p class="visually-hidden" id="view-status" aria-live="polite"></p>
 <div id="search-results" data-live-summary="{{.Summary}}">{{if .Searched}}<p class="search-summary">{{.Summary}}</p>{{end}}
 <section class="results" aria-label="{{.Type}} search results">
 {{if eq .Type "messages"}}{{if .Messages}}<ul class="v-list">{{range .Messages}}<li class="v-row result" data-row-href="{{.Permalink}}"><span class="v-avatar" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span><div class="v-row-main"><div class="v-row-meta"><span class="result-context">{{if .ChannelPrivate}}<span aria-label="Private">🔒</span>{{end}}{{if .DirectLabel}}{{.DirectLabel}}{{else}}{{.ChannelPrefix}}{{.ChannelName}}{{end}}</span></div><p class="result-title">{{if .AuthorID}}<a class="author" href="/app/members?user={{.AuthorID}}" data-profile-user="{{.AuthorID}}">{{.AuthorName}}</a>{{else}}<span class="author">{{.AuthorName}}</span>{{end}}{{if .AuthorStatus}} <span class="author-status"{{if .AuthorStatusText}} title="{{.AuthorStatusText}}"{{end}}>{{.AuthorStatus}}</span>{{end}} <a class="v-row-time" href="{{.Permalink}}"><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a></p><div class="text v-text">{{.DisplayText}}</div></div></li>{{end}}</ul>{{else}}{{if $.Searched}}<p class="v-empty">No matching messages.</p>{{end}}{{end}}
@@ -3316,37 +3345,51 @@ const notificationPauseScript = `<script>(function(){var preset=document.querySe
 var notificationsTemplate = mustPage(notificationsMarkup)
 
 const laterMarkup = `{{define "title"}}Later · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
-.layout{width:min(900px,calc(100% - 32px));margin:28px auto 48px}.heading{display:grid;gap:5px;margin-bottom:17px}.heading h2,.heading p{margin:0}.heading p{color:var(--muted)}
-.later-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px}.later-tabs a{padding:10px 13px;color:var(--muted);font-weight:800;text-decoration:none;border-bottom:3px solid transparent}.later-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}.later-tabs a:hover{color:var(--text);background:var(--hover)}
-.later-list{display:grid;gap:10px;margin:0;padding:0;list-style:none}.later-item{display:grid;gap:11px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.later-source{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.later-source a{font-weight:800;color:var(--text);text-decoration:none}.later-source a:hover{color:var(--action)}.later-meta{color:var(--muted);font-size:12px}.later-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.later-unavailable{margin:0;color:var(--muted);font-weight:700}.later-actions{display:flex;gap:7px;flex-wrap:wrap}.later-actions form{margin:0}.later-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:7px 10px;font-weight:800}.later-actions button:hover{background:var(--hover)}.later-actions .remove{color:var(--danger)}.empty{padding:30px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}.pager{text-align:center;margin-top:18px}
-.reminder-create{margin:0 0 18px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.reminder-create summary{font-weight:800;cursor:pointer}.reminder-fields,.reminder-edit{display:grid;grid-template-columns:minmax(0,2fr) minmax(130px,1fr) minmax(110px,1fr);gap:10px;margin-top:12px}.reminder-fields label,.reminder-edit label{display:grid;gap:5px;color:var(--muted);font-size:12px;font-weight:700}.reminder-fields input,.reminder-fields select,.reminder-edit input,.reminder-edit select{min-width:0;padding:8px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.reminder-fields button,.reminder-edit button{align-self:end;padding:9px 12px;border:0;border-radius:6px;background:var(--action);color:var(--on-strong);font-weight:800}.reminder-heading{margin:22px 0 10px;font-size:18px}.reminder-status{font-weight:800;color:var(--muted)}.reminder-status.failed{color:var(--danger)}
-@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 20px,900px);margin-top:18px}.later-tabs{overflow-x:auto}.later-actions{display:grid;grid-template-columns:1fr 1fr}.later-actions button{width:100%}.reminder-fields,.reminder-edit{grid-template-columns:minmax(0,1fr)}}
+{{define "styles"}}` + viewStyle + `<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar>a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+.later-actions-head{display:flex;align-items:center;gap:4px}
+.later-author{display:inline-block;min-height:24px;line-height:24px;color:var(--text);font-weight:800;text-decoration:none}.later-author:hover{text-decoration:underline}
+.later-source-link{display:inline-block;min-height:24px;line-height:24px;color:inherit;text-decoration:none}.later-source-link:hover{text-decoration:underline}
+.due-chip{display:inline-flex;align-items:center;gap:5px;margin-top:6px;padding:2px 8px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);font-size:12px;font-weight:700}
+.due-chip.overdue{border-color:var(--danger);background:var(--danger-bg);color:var(--danger)}
+.due-chip.done{color:var(--muted)}
+.later-unavailable{margin:0;color:var(--muted);font-weight:700}
+.reminder-status{color:var(--muted);font-size:12px;font-weight:700}.reminder-status.failed{color:var(--danger)}
+.later-menu-form{display:grid;gap:8px;min-width:260px;padding:6px}
+.later-menu-form label{display:grid;gap:4px;font-size:12px;font-weight:700;color:var(--muted)}
+.later-menu-form input,.later-menu-form select{min-height:32px;padding:4px 8px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);font:inherit}
+.later-menu-form .v-btn{justify-self:start}
+.v-menu-list .later-menu-form label:hover,.v-menu-list .later-menu-form:hover{background:transparent;color:var(--muted)}
+.channel-reminder-note{margin:0 0 12px;color:var(--muted);font-size:13px}
+@media(max-width:600px){.bar{padding:0 12px}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + laterLiveScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Later</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
-<div class="heading"><h2>Later</h2><p>Saved messages and personal reminders are private to you.</p></div>
+{{define "scripts"}}` + localTimeScript + laterLiveScript + rowLinkScript + profilePanelScript + `{{end}}
+{{define "remindMenu"}}<details class="v-menu"><summary class="v-icon" role="button" aria-label="Remind me about {{.Label}}" title="Remind me"><span aria-hidden="true">⏰</span></summary><div class="v-menu-list"><span class="v-menu-label">Remind me</span><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="20m">In 20 minutes</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="1h">In 1 hour</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="3h">In 3 hours</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="tomorrow">Tomorrow</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="next_week">Next week</button></form><hr><form class="later-menu-form" method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><input type="hidden" name="preset" value="custom"><label>Custom date<input type="date" name="date" required></label><label>Time<input type="time" name="time" value="09:00"></label><button class="v-btn primary" type="submit">Set reminder</button></form></div></details>{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Later</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
+{{template "later-view" .}}{{end}}
+{{define "later-view"}}<main class="v-page later-page">
+<div class="v-head"><h2>Later</h2><div class="later-actions-head">
+<details class="v-menu"><summary class="v-icon" role="button" aria-label="Add a reminder" title="Add a reminder"><span aria-hidden="true">＋</span></summary><div class="v-menu-list"><form class="later-menu-form reminder-fields" method="post" action="/app/reminders/create?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><label>Description<input name="text" maxlength="3000" required></label><label>Date<input type="date" name="date" required></label><label>Time (defaults to 9:00 AM)<input type="time" name="time"></label><label>Repeat<select name="recurrence"><option value="">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><button class="v-btn primary" type="submit">Create reminder</button></form></div></details>
+<details class="v-menu"><summary class="v-icon" role="button" aria-label="Later options"><span aria-hidden="true">⋮</span></summary><div class="v-menu-list"><a href="/app/later?channel={{.Channel}}&amp;filter=channel-reminders"{{if .ChannelReminders}} aria-current="page"{{end}}>Channel reminders you created</a></div></details>
+</div></div>
+<p class="v-sub">Saved messages and reminders are private to you.</p>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-{{if not .ChannelReminders}}<details class="reminder-create"><summary>Add a reminder</summary><form class="reminder-fields" method="post" action="/app/reminders/create?channel={{.Channel}}">
-<input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC">
-<label>Description<input name="text" maxlength="3000" required></label><label>Date<input type="date" name="date" required></label><label>Time (defaults to 9:00 AM)<input type="time" name="time"></label>
-<label>Repeat<select name="recurrence"><option value="">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><button type="submit">Create reminder</button></form></details>{{end}}
-<nav class="later-tabs" aria-label="Later sections"><a href="/app/later?channel={{.Channel}}&state=in_progress"{{if and .InProgressCurrent (not .RemindersOnly)}} aria-current="page"{{end}}>In progress</a><a href="/app/later?channel={{.Channel}}&state=archived"{{if .ArchivedCurrent}} aria-current="page"{{end}}>Archived</a><a href="/app/later?channel={{.Channel}}&state=completed"{{if .CompletedCurrent}} aria-current="page"{{end}}>Completed</a><a href="/app/later?channel={{.Channel}}&filter=reminders"{{if and .RemindersOnly (not .ChannelReminders)}} aria-current="page"{{end}}>Upcoming reminders</a><a href="/app/later?channel={{.Channel}}&filter=channel-reminders"{{if .ChannelReminders}} aria-current="page"{{end}}>Channel reminders</a></nav>
-{{if or .Reminders .RemindersOnly}}<h3 class="reminder-heading">{{if .ChannelReminders}}Channel reminders you created{{else if .CompletedCurrent}}Completed reminders{{else}}Reminders{{end}}</h3><ul class="later-list" aria-label="{{if .ChannelReminders}}Channel reminders{{else}}Personal reminders{{end}}">{{range .Reminders}}<li class="later-item">
-<div class="later-source"><strong>Reminder</strong><span class="later-meta"><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{if .Recurrence}} · Repeats {{.Recurrence}}{{end}}</span></div><p class="later-text">{{.Text}}</p>
-{{if .SourceURL}}<a href="{{.SourceURL}}">{{.SourceLabel}}</a>{{end}}{{if .Failed}}<span class="reminder-status failed">Delivery failed: {{.FailureCode}}</span>{{else if .Completed}}<span class="reminder-status">Completed</span>{{else if .Delivered}}<span class="reminder-status">Delivered</span>{{end}}
-<div class="later-actions">{{if .CanComplete}}<form method="post" action="{{.CompleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Mark complete</button></form>{{end}}{{if .CanEdit}}<details><summary>Edit</summary><form class="reminder-edit" method="post" action="{{.UpdateURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="{{.TimeZone}}"><label>Description<input name="text" maxlength="3000" value="{{.Text}}" required></label><label>Date<input type="date" name="date" value="{{.DateValue}}" required></label><label>Time<input type="time" name="time" value="{{.TimeValue}}" required></label><label>Repeat<select name="recurrence"><option value="">Does not repeat</option><option value="daily"{{if eq .Recurrence "daily"}} selected{{end}}>Daily</option><option value="weekly"{{if eq .Recurrence "weekly"}} selected{{end}}>Weekly</option><option value="monthly"{{if eq .Recurrence "monthly"}} selected{{end}}>Monthly</option><option value="yearly"{{if eq .Recurrence "yearly"}} selected{{end}}>Yearly</option></select></label><button type="submit">Save changes</button></form></details>{{end}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="remove" type="submit">Delete reminder</button></form></div>
-</li>{{else}}<li class="empty">{{if $.ChannelReminders}}You have not created any channel reminders.{{else}}You have no upcoming reminders.{{end}}</li>{{end}}</ul>{{end}}
-{{if not .RemindersOnly}}
-<ul class="later-list" aria-label="{{.StateTitle}} saved items">{{range .Items}}<li class="later-item">
-{{if .SourceAvailable}}<div class="later-source"><a href="{{.SourceURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a><span class="later-meta">{{.AuthorName}} · <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span></div><p class="later-text">{{.Text}}</p>{{else}}<p class="later-unavailable">This message is no longer available.</p>{{end}}
-<div class="later-actions">
-{{if $.InProgressCurrent}}<form method="post" action="{{.CompleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Mark complete</button></form><form method="post" action="{{.ArchiveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Archive</button></form>{{else}}<form method="post" action="{{.RestoreURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Move to in progress</button></form>{{end}}
-<form method="post" action="{{.RemoveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="remove" type="submit">Remove from Later</button></form>
-</div></li>{{else}}<li class="empty">No items in {{.StateTitle}}.</li>{{end}}</ul>
+<nav class="v-tabs" aria-label="Later sections"><a href="/app/later?channel={{.Channel}}&amp;state=in_progress"{{if and .InProgressCurrent (not .RemindersOnly)}} aria-current="page"{{end}}>In progress <span class="v-count">{{.InProgressCount}}</span></a><a href="/app/later?channel={{.Channel}}&amp;state=archived"{{if and .ArchivedCurrent (not .RemindersOnly)}} aria-current="page"{{end}}>Archived <span class="v-count">{{.ArchivedCount}}</span></a><a href="/app/later?channel={{.Channel}}&amp;state=completed"{{if and .CompletedCurrent (not .RemindersOnly)}} aria-current="page"{{end}}>Completed <span class="v-count">{{.CompletedCount}}</span></a></nav>
+{{if .ChannelReminders}}<p class="channel-reminder-note">Channel reminders you created. They post to the channel when they come due.</p>{{end}}
+<ul class="v-list later-list" aria-label="{{if .ChannelReminders}}Channel reminders{{else}}{{.StateTitle}}{{end}}">
+{{range .Reminders}}<li class="v-row later-item reminder-item"><span class="v-avatar glyph" aria-hidden="true">⏰</span><div class="v-row-main"><div class="v-row-meta"><strong>Reminder</strong>{{if .SourceURL}}<span aria-hidden="true">·</span><a class="later-source-link" href="{{.SourceURL}}">{{.SourceLabel}}</a>{{end}}{{if .Recurrence}}<span aria-hidden="true">·</span><span>Repeats {{.Recurrence}}</span>{{end}}</div><p class="v-row-text">{{.Text}}</p><span class="due-chip{{if .Overdue}} overdue{{end}}{{if .Completed}} done{{end}}"><span aria-hidden="true">⏰</span>{{if .Completed}}Completed · {{else if .Overdue}}Overdue · {{else}}Due {{end}}<time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span>{{if .Failed}} <span class="reminder-status failed">Delivery failed: {{.FailureCode}}</span>{{else if and .Delivered (not .Completed)}} <span class="reminder-status">Delivered</span>{{end}}</div>
+<div class="v-row-side"><div class="v-hover-actions">{{if .CanComplete}}<form method="post" action="{{.CompleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="v-icon" type="submit" aria-label="Mark complete" title="Mark complete"><span aria-hidden="true">✓</span></button></form>{{end}}<details class="v-menu"><summary class="v-icon" role="button" aria-label="More actions for this reminder"><span aria-hidden="true">⋮</span></summary><div class="v-menu-list">{{if .CanEdit}}<form class="later-menu-form reminder-edit" method="post" action="{{.UpdateURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="{{.TimeZone}}"><span class="v-menu-label">Edit reminder</span><label>Description<input name="text" maxlength="3000" value="{{.Text}}" required></label><label>Date<input type="date" name="date" value="{{.DateValue}}" required></label><label>Time<input type="time" name="time" value="{{.TimeValue}}" required></label><label>Repeat<select name="recurrence"><option value="">Does not repeat</option><option value="daily"{{if eq .Recurrence "daily"}} selected{{end}}>Daily</option><option value="weekly"{{if eq .Recurrence "weekly"}} selected{{end}}>Weekly</option><option value="monthly"{{if eq .Recurrence "monthly"}} selected{{end}}>Monthly</option><option value="yearly"{{if eq .Recurrence "yearly"}} selected{{end}}>Yearly</option></select></label><button class="v-btn primary" type="submit">Save changes</button></form><hr>{{end}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger" type="submit">Delete reminder</button></form></div></details></div></div>
+</li>{{end}}
+{{if not .RemindersOnly}}{{range .Items}}<li class="v-row later-item"{{if .SourceAvailable}} data-row-href="{{.SourceURL}}"{{end}}><span class="v-avatar" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else if .Initial}}{{.Initial}}{{else}}?{{end}}</span>
+<div class="v-row-main">{{if .SourceAvailable}}<div class="v-row-meta"><a class="later-source-link" href="{{.SourceURL}}">{{if .ChannelPrivate}}🔒 {{end}}{{.ChannelPrefix}}{{.ChannelName}}</a></div><p class="v-row-title">{{if .AuthorID}}<a class="later-author" href="/app/members?user={{.AuthorID}}" data-profile-user="{{.AuthorID}}">{{.AuthorName}}</a>{{else}}{{.AuthorName}}{{end}} <time class="v-row-time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></p><div class="v-row-text v-text clamp">{{.Text}}</div>{{with .Reminder}}<span class="due-chip{{if .Overdue}} overdue{{end}}{{if .Completed}} done{{end}}"><span aria-hidden="true">⏰</span>{{if .Completed}}Reminder completed · {{else if .Overdue}}Overdue · {{else}}Due {{end}}<time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span>{{end}}{{else}}<p class="later-unavailable">This message is no longer available.</p>{{end}}</div>
+<div class="v-row-side"><div class="v-hover-actions">
+{{if $.InProgressCurrent}}<form method="post" action="{{.CompleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="v-icon" type="submit" aria-label="Mark complete" title="Mark complete"><span aria-hidden="true">✓</span></button></form>{{if .RemindURL}}{{template "remindMenu" (laterRemind .RemindURL $.CSRFToken .AuthorName)}}{{end}}<form method="post" action="{{.ArchiveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="v-icon" type="submit" aria-label="Archive" title="Archive"><span aria-hidden="true">🗄</span></button></form>{{else}}<form method="post" action="{{.RestoreURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="v-icon" type="submit" aria-label="Move to in progress" title="Move to in progress"><span aria-hidden="true">↺</span></button></form>{{end}}
+<details class="v-menu"><summary class="v-icon" role="button" aria-label="More actions for this saved item"><span aria-hidden="true">⋮</span></summary><div class="v-menu-list">{{if .SourceAvailable}}<button type="button" data-copy-text="{{.SourceURL}}" data-copy-done="Link copied.">Copy link</button><form method="post" action="{{.MarkUnreadURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Mark unread</button></form>{{end}}{{with .Reminder}}{{if .CanComplete}}<form method="post" action="{{.CompleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Complete reminder</button></form>{{end}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Delete reminder</button></form>{{end}}<hr><form method="post" action="{{.RemoveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger remove" type="submit">Remove from Later</button></form></div></details>
+</div></div></li>{{end}}{{end}}
+{{if and (not .Reminders) (or .RemindersOnly (not .Items))}}<li class="v-empty">{{if $.ChannelReminders}}You have not created any channel reminders.{{else if .RemindersOnly}}You have no upcoming reminders.{{else if .InProgressCurrent}}<strong>Nothing saved for later</strong>Save a message or set a reminder and it appears here.{{else}}No items in {{.StateTitle}}.{{end}}</li>{{end}}
+</ul>
+<p class="visually-hidden" id="view-status" aria-live="polite"></p>
 {{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more saved items</a></p>{{end}}
-{{end}}
 </main>{{end}}`
 
 var laterTemplate = mustPage(laterMarkup)
@@ -3358,8 +3401,6 @@ var laterTemplate = mustPage(laterMarkup)
 const laterLiveScript = `<script>(function(){
 if(!window.EventSource)return;
 var stream=` + liveStreamOpen + `;
-var timezone='UTC';try{timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(error){}
-Array.prototype.forEach.call(document.querySelectorAll('[data-browser-timezone]'),function(input){input.value=timezone});
 ['saved_item.created','saved_item.changed','saved_item.removed','later_reminder.created','later_reminder.changed','later_reminder.completed','later_reminder.deleted','later_reminder.delivered','later_reminder.failed'].forEach(function(topic){
 stream.addEventListener(topic,function(){
 if(document.querySelector('details[open]'))return;
@@ -7645,13 +7686,30 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, reminderErr, "Reminders are temporarily unavailable.")
 		return
 	}
+	// A reminder on a saved message is shown on that message, as its due
+	// chip, rather than as a second card for the same message.
+	savedKeys := map[string]int{}
+	for index, item := range page.Items {
+		if item.SourceAvailable {
+			savedKeys[string(item.Conversation)+"\x00"+string(domain.NewMessageTimestamp(item.Message.CreatedAt))] = index
+		}
+	}
+	attached := map[int]laterReminderView{}
+	now := time.Now()
 	for _, reminder := range reminderPage.Items {
 		completed := !reminder.CompletedAt.IsZero()
 		if !data.ChannelReminders && (state == domain.SavedItemArchived || (state == domain.SavedItemCompleted) != completed) {
-			continue
+			if state != domain.SavedItemArchived {
+				continue
+			}
+			// An archived message keeps its reminder chip: the chip belongs
+			// to the item, whatever tab the item is on.
+			if _, onItem := savedKeys[string(reminder.SourceConversation)+"\x00"+string(reminder.SourceTimestamp)]; !onItem {
+				continue
+			}
 		}
 		view := laterReminderView{
-			ID: string(reminder.ID), Text: reminder.Text,
+			ID: string(reminder.ID), Text: reminder.Text, Overdue: !completed && reminder.DueAt.Before(now),
 			MachineTime: reminder.DueAt.UTC().Format(time.RFC3339), DisplayTime: formatTime(reminder.DueAt),
 			Recurrence: string(reminder.Recurrence), Delivered: !reminder.LastDeliveredAt.IsZero(), Completed: completed,
 			Failed: !reminder.FailedAt.IsZero(), FailureCode: reminder.FailureCode,
@@ -7685,9 +7743,17 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 				view.SourceLabel = "View source message"
 			}
 		}
+		if index, onItem := savedKeys[string(reminder.SourceConversation)+"\x00"+string(reminder.SourceTimestamp)]; onItem && reminder.SourceTimestamp != "" && !data.ChannelReminders {
+			attached[index] = view
+			continue
+		}
+		if state == domain.SavedItemArchived && !data.ChannelReminders {
+			continue
+		}
 		data.Reminders = append(data.Reminders, view)
 	}
-	for _, item := range page.Items {
+	names := h.newUserNames(r.Context(), principal)
+	for index, item := range page.Items {
 		view := laterItemView{
 			ID:              string(item.ID),
 			SourceAvailable: item.SourceAvailable,
@@ -7696,11 +7762,25 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 			RestoreURL:      laterActionURL("/app/later/state", item.ID, domain.SavedItemInProgress, state, channel),
 			RemoveURL:       laterActionURL("/app/later/remove", item.ID, "", state, channel),
 		}
+		if reminder, onItem := attached[index]; onItem {
+			view.Reminder = &reminder
+		}
 		if item.SourceAvailable {
-			view.Text = item.Message.Text
-			if strings.TrimSpace(view.Text) == "" {
+			timestamp := string(domain.NewMessageTimestamp(item.Message.CreatedAt))
+			if rendered := h.newResultViews(r.Context(), principal, []domain.Message{item.Message}, names); len(rendered) == 1 {
+				view.Text = rendered[0].DisplayText
+				view.ChannelPrivate = rendered[0].ChannelPrivate
+			}
+			if strings.TrimSpace(item.Message.Text) == "" {
 				view.Text = "File or rich message"
 			}
+			view.AvatarURL = names.avatarURL(item.Message.AuthorID)
+			if item.Message.AppID == "" && item.Message.AuthorID != "" {
+				view.AuthorID = string(item.Message.AuthorID)
+			}
+			reminderQuery := url.Values{"channel": {string(item.Conversation)}, "ts": {timestamp}, "return_state": {string(state)}}
+			view.RemindURL = "/app/reminders/create?" + reminderQuery.Encode()
+			view.MarkUnreadURL = "/app/read/unread?" + url.Values{"channel": {string(item.Conversation)}, "ts": {timestamp}}.Encode()
 			view.MachineTime = item.Message.CreatedAt.UTC().Format(time.RFC3339Nano)
 			view.DisplayTime = formatTime(item.Message.CreatedAt)
 			boundary := item.Message
@@ -7714,6 +7794,7 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 			if author, authorErr := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Message.AuthorID); authorErr == nil {
 				view.AuthorName = displayName(author)
 			}
+			view.Initial = initial(view.AuthorName)
 			view.ChannelName = "Conversation"
 			if conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Conversation); conversationErr == nil {
 				view.ChannelName = conversationName(conversation)
@@ -7732,8 +7813,52 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 		query := url.Values{"channel": {channel}, "state": {string(state)}, "cursor": {string(page.NextCursor)}}
 		data.MoreURL = "/app/later?" + query.Encode()
 	}
+	data.InProgressCount, data.ArchivedCount, data.CompletedCount = h.laterCounts(r, principal, reminderPage.Items)
 	h.writeLivePage(w, head, laterTemplate, data, http.StatusOK, "Later rendering unavailable")
 }
+
+// laterCounts are the numbers on Later's tabs: saved items in each state,
+// plus the personal reminders that are not already shown on a saved item
+// (open ones under In progress, completed ones under Completed). Each count
+// stops at laterCountLimit, which the page shows as "999+" rather than
+// reading an unbounded history on every load.
+func (h Handler) laterCounts(r *http.Request, principal auth.Principal, reminders []domain.LaterReminder) (int, int, int) {
+	counts := map[domain.SavedItemState]int{}
+	saved := map[string]bool{}
+	for _, state := range []domain.SavedItemState{domain.SavedItemInProgress, domain.SavedItemArchived, domain.SavedItemCompleted} {
+		request := domain.PageRequest{Limit: 200}
+		for counts[state] < laterCountLimit {
+			page, err := h.Messages.SavedItems(r.Context(), principal.WorkspaceID, principal.UserID, state, request)
+			if err != nil {
+				break
+			}
+			counts[state] += len(page.Items)
+			for _, item := range page.Items {
+				if item.SourceAvailable {
+					saved[string(item.Conversation)+"\x00"+string(domain.NewMessageTimestamp(item.Message.CreatedAt))] = true
+				}
+			}
+			if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
+				break
+			}
+			request.Cursor = page.NextCursor
+		}
+	}
+	for _, reminder := range reminders {
+		if reminder.Target != domain.LaterReminderPersonal || saved[string(reminder.SourceConversation)+"\x00"+string(reminder.SourceTimestamp)] {
+			continue
+		}
+		if reminder.CompletedAt.IsZero() {
+			counts[domain.SavedItemInProgress]++
+		} else {
+			counts[domain.SavedItemCompleted]++
+		}
+	}
+	clamp := func(value int) int { return min(value, laterCountLimit) }
+	return clamp(counts[domain.SavedItemInProgress]), clamp(counts[domain.SavedItemArchived]), clamp(counts[domain.SavedItemCompleted])
+}
+
+const laterCountLimit = 999
 
 func (h Handler) scheduledMessages(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
@@ -13401,9 +13526,19 @@ func personalReminderRequest(fields map[string]string, now time.Time) (domain.La
 		due = now.Add(20 * time.Minute)
 	case "1h":
 		due = now.Add(time.Hour)
+	case "3h":
+		due = now.Add(3 * time.Hour)
 	case "tomorrow":
 		local := now.In(location).AddDate(0, 0, 1)
 		due = time.Date(local.Year(), local.Month(), local.Day(), 9, 0, 0, 0, location)
+	case "next_week":
+		// Slack's "Next week" is 9:00 on the coming Monday.
+		local := now.In(location)
+		days := (8 - int(local.Weekday())) % 7
+		if days == 0 {
+			days = 7
+		}
+		due = time.Date(local.Year(), local.Month(), local.Day()+days, 9, 0, 0, 0, location)
 	case "", "custom":
 		date := strings.TrimSpace(fields["date"])
 		clock := strings.TrimSpace(fields["time"])
