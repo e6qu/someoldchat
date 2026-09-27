@@ -127,7 +127,12 @@ identity, and option schema.
 `views.open`, `views.push`, and `views.update` honor one-time trigger IDs,
 view hashes, stack order, private metadata, input state, validation errors,
 close/clear behavior, and submit acknowledgement. Concurrent stale hashes do
-not overwrite a newer view.
+not overwrite a newer view. A modal's `file_input` accepts the member's files
+within its `filetypes` and `max_files`; the submission carries them as file
+objects that stay private to the member while the app is granted read access.
+A modal opened with a function execution's token reports that execution's
+`function_data` with its submission and closure, so a custom step can finish
+from the modal.
 
 ## APP-08 — Receive Events API and Socket Mode traffic
 
@@ -160,11 +165,22 @@ without deleting user-owned workspace history Slack retains.
   delivery.
 - Browser tests discover manifest-derived commands/shortcuts, distinguish bot
   identity, exercise all response types, and inspect app administration.
-- APP-04 and APP-06 are qualified through the official-SDK harness, not the
-  browser suite, and that is a property of the journeys rather than a missing
-  test. Both are observable only at an app endpoint: APP-04 asserts the
-  interaction payload an activation delivers, and APP-06 asserts what a
-  `response_url` capability accepts and refuses.
+- APP-06 is qualified through the official-SDK harness, not the browser
+  suite, and that is a property of the journey rather than a missing test: it
+  asserts what a `response_url` capability accepts and refuses, which is
+  observable only at an app endpoint.
+- The browser suite plays a Socket Mode app from the test process (it opens
+  the app's socket with the app-level token issued in the developer console
+  and acknowledges envelopes as Bolt does), so APP-03, APP-04 and APP-07 are
+  exercised end to end in Chromium: `[APP-04 APP-07 A11Y-01]` runs a global
+  shortcut from the shortcuts browser, opens a modal with `views.open`, shows
+  the app's `response_action: errors` beside the field while keeping what was
+  entered, submits, and closes with `view_closed`; `[APP-04 APP-07]` opens a
+  legacy dialog with `dialog.open`, loads its external select through
+  `dialog_suggestion`, shows the app's errors without clearing the fields, and
+  submits; `[APP-03 APP-08 A11Y-01]` answers `app_home_opened` with
+  `views.publish` and re-renders the Home live after a button's
+  `block_actions`.
 - The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey installs a Socket
   Mode app and inspects the same payload-redacted durable delivery cursor used
   by local and generated-gRPC workers. SQL restart tests preserve queued retry

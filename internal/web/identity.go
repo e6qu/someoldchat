@@ -695,6 +695,10 @@ func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, 
 		// The subject is already bound to a local user, so no email is trusted
 		// here and no new link is created.
 		user, lookupErr := h.service.UserInfo(ctx, h.workspace, h.lookupUser, link.UserID)
+		if lookupErr == nil && user.Deleted {
+			// UserInfo describes a deactivated member too; one never signs in.
+			lookupErr = store.ErrNotFound
+		}
 		if lookupErr != nil {
 			return domain.User{}, "", lookupErr
 		}
@@ -755,6 +759,9 @@ func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, 
 		link, err = h.service.GetExternalIdentity(ctx, h.workspace, provider, identity.Subject)
 		if err == nil {
 			user, err = h.service.UserInfo(ctx, h.workspace, h.lookupUser, link.UserID)
+			if err == nil && user.Deleted {
+				err = store.ErrNotFound
+			}
 		}
 	}
 	if err != nil {

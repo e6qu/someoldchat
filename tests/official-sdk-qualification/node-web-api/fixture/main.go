@@ -23,11 +23,9 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
-	"github.com/sameoldchat/sameoldchat/internal/realtime"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/slackapp"
-	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	storepkg "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
@@ -101,7 +99,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	manifest := fmt.Sprintf(`{"display_information":{"name":"Qualification"},"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true}},"oauth_config":{"redirect_urls":["https://example.com/oauth"],"scopes":{"bot":["chat:write","datastore:read","datastore:write"],"user":["users:read"]}},"settings":{"event_subscriptions":{"request_url":%q,"bot_events":["reaction_added","message.channels"]},"token_rotation_enabled":true,"is_hosted":true,"function_runtime":"slack"},"datastores":{"incidents":{"primary_key":"id","attributes":{"id":{"type":"string"},"title":{"type":"string"},"priority":{"type":"integer"}}}}}`, boltProxy.URL+"/slack/events")
+	// A1 opens a legacy dialog in the Web API suite, and Slack refuses a
+	// dialog whose app has no interactivity request URL to submit it to
+	// (app_missing_action_url), so the manifest declares one.
+	manifest := fmt.Sprintf(`{"display_information":{"name":"Qualification"},"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true},"unfurl_domains":["qualification.example"]},"oauth_config":{"redirect_urls":["https://example.com/oauth"],"scopes":{"bot":["chat:write","datastore:read","datastore:write","links:read","links:write"],"user":["users:read"]}},"settings":{"event_subscriptions":{"request_url":%q,"bot_events":["reaction_added","message.channels","link_shared"]},"interactivity":{"is_enabled":true,"request_url":%q},"token_rotation_enabled":true,"is_hosted":true,"function_runtime":"slack"},"datastores":{"incidents":{"primary_key":"id","attributes":{"id":{"type":"string"},"title":{"type":"string"},"priority":{"type":"integer"}}}}}`, boltProxy.URL+"/slack/events", boltProxy.URL+"/slack/events")
 	if err := store.CreateApp(context.Background(),
 		domain.App{ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Qualification", ClientID: "qualification-client", SigningSecretHash: domain.HashToken("qualification-signing"), SigningSecretCiphertext: signingSecretCiphertext, VerificationTokenHash: domain.HashToken("qualification-verification"), VerificationTokenCiphertext: verificationTokenCiphertext, ManifestVersion: 1, Distribution: "private", TokenRotationEnabled: true, CreatedAt: now, UpdatedAt: now},
 		domain.AppManifestRevision{AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now},
@@ -150,6 +151,24 @@ func main() {
 	if err := store.CreateBot(context.Background(), domain.Bot{ID: "B2", WorkspaceID: "T1", AppID: "A2", UserID: "U1", Name: "interaction-bot", UpdatedAt: now}); err != nil {
 		panic(err)
 	}
+	// An app the OAuth walks install from nothing: no bot, no installation,
+	// one redirect URL, so an install may name it or leave it implied.
+	installSigningCiphertext, err := secretbox.Seal(appCredentialKey, "app:A4:signing-secret", "install-signing")
+	if err != nil {
+		panic(err)
+	}
+	installVerificationCiphertext, err := secretbox.Seal(appCredentialKey, "app:A4:verification-token", "install-verification")
+	if err != nil {
+		panic(err)
+	}
+	installManifest := `{"display_information":{"name":"Install Qualification"},"oauth_config":{"redirect_urls":["https://example.com/install"],"scopes":{"bot":["chat:write"],"user":["search:read"]}}}`
+	if err := store.CreateApp(context.Background(),
+		domain.App{ID: "A4", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Install Qualification", ClientID: "install-client", SigningSecretHash: domain.HashToken("install-signing"), SigningSecretCiphertext: installSigningCiphertext, VerificationTokenHash: domain.HashToken("install-verification"), VerificationTokenCiphertext: installVerificationCiphertext, ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now},
+		domain.AppManifestRevision{AppID: "A4", Version: 1, Manifest: installManifest, CreatedBy: "U1", CreatedAt: now},
+		domain.OAuthClient{ID: "install-client", SecretHash: domain.HashToken("install-secret"), AppID: "A4"},
+	); err != nil {
+		panic(err)
+	}
 	for _, code := range []string{"qualification-code", "qualification-v2-code", "qualification-v2-user-code", "qualification-token-code", "qualification-openid-code"} {
 		scopes := auth.AllScopes()
 		if code == "qualification-openid-code" {
@@ -183,17 +202,28 @@ func main() {
 	}
 	// A request the walk withdraws. Cancelling applies only to a request nobody
 	// has decided, so the walk needs one that is really open.
-	if err := store.SetAppApproval(context.Background(), "T1", "request:Rq-sdk", "Rq-sdk", domain.AppApprovalRequested, now, events.Event{
-		ID: "evt-app-request-sdk", WorkspaceID: "T1", ActorID: "U1", Topic: "app.requested", Payload: "Rq-sdk", CreatedAt: now,
-	}); err != nil {
+	// Both records are the ones the service writes for these facts, built
+	// through the typed constructor. They used to be hand-written with a bare
+	// identifier as the payload (and an invented topic for the credential),
+	// which every event stream then reported as an undeliverable malformed
+	// record on each qualification run.
+	requested, err := events.New("evt-app-request-sdk", "T1", "U1", events.NewPayload("app.requested", events.String("app_id", "request:Rq-sdk"), events.String("app_request_id", "Rq-sdk")), now)
+	if err != nil {
+		panic(err)
+	}
+	if err := store.SetAppApproval(context.Background(), "T1", "request:Rq-sdk", "Rq-sdk", domain.AppApprovalRequested, now, requested); err != nil {
 		panic(err)
 	}
 	// An external credential for the walk to read and revoke. The ciphertext is
 	// here so the walk can prove the secret does not come back out.
+	connected, err := events.New("evt-external-qualification", "T1", "U1", events.NewPayload("app.external_token_connected", events.String("app_id", "A1"), events.String("provider_name", "example")), now)
+	if err != nil {
+		panic(err)
+	}
 	if err := store.SetExternalAuthToken(context.Background(), domain.ExternalAuthToken{
 		ID: "Et-qualification", AppID: "A1", WorkspaceID: "T1", UserID: "U1", Provider: "example",
 		Ciphertext: "sealed-qualification", ExpiresAt: now.Add(12 * time.Hour), CreatedAt: now,
-	}, events.Event{ID: "evt-external-qualification", WorkspaceID: "T1", Topic: "app.external_token_set", Payload: "Et-qualification", CreatedAt: now}); err != nil {
+	}, connected); err != nil {
 		panic(err)
 	}
 	for _, candidate := range []struct {
@@ -248,7 +278,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	messages := service.Messages{Store: store, Blob: blobs, AppCredentialKey: appCredentialKey}
+	// The fixture is reached on one address, which is its public URL: the Web
+	// API and every event payload build their absolute URLs on it, as a
+	// deployment's -auth-public-url makes them.
+	messages := service.Messages{Store: store, Blob: blobs, AppCredentialKey: appCredentialKey, PublicURL: fixturePublicURL}
 	qualificationWorkflow := domain.WorkflowDefinition{
 		ID: "WfQualification", WorkspaceID: "T1", AppID: "A3", OwnerID: "U1", CallbackID: "qualification-workflow",
 		Title: "Qualification workflow", InputSchema: `{}`, Steps: `[{"function_id":"triage","title":"Triage"}]`,
@@ -315,7 +348,7 @@ func main() {
 		panic(err)
 	}
 	qualificationModal, err := messages.OpenView(context.Background(), "T1", "U1", "A2", modalTrigger,
-		`{"type":"modal","title":{"type":"plain_text","text":"SDK modal"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","block_id":"release_name","label":{"type":"plain_text","text":"Release name"},"element":{"type":"plain_text_input","action_id":"name"}}]}`)
+		`{"type":"modal","title":{"type":"plain_text","text":"SDK modal"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","block_id":"release_name","label":{"type":"plain_text","text":"Release name"},"element":{"type":"plain_text_input","action_id":"name"}}]}`, "")
 	if err != nil {
 		panic(err)
 	}
@@ -334,24 +367,110 @@ func main() {
 		panic(err)
 	}
 	store.SeedFileComment(domain.FileComment{ID: "FC1", File: qualificationFile.ID, WorkspaceID: "T1", UserID: "U1", Text: "qualification comment", CreatedAt: time.Now().UTC()})
+	// AFN is a Bolt app built on a remote custom function: function_executed
+	// and its interactions reach Bolt on the same signed HTTP endpoint as A1's
+	// events (it shares A1's signing secret, since one Bolt App verifies
+	// both), and the workflow below runs its "approval" function.
+	functionSigningCiphertext, err := secretbox.Seal(appCredentialKey, "app:AFN:signing-secret", "qualification-signing")
+	if err != nil {
+		panic(err)
+	}
+	functionVerificationCiphertext, err := secretbox.Seal(appCredentialKey, "app:AFN:verification-token", "qualification-verification")
+	if err != nil {
+		panic(err)
+	}
+	functionManifest := fmt.Sprintf(`{"display_information":{"name":"Function Qualification"},"oauth_config":{"scopes":{"bot":["chat:write"]}},"settings":{"event_subscriptions":{"request_url":%q},"interactivity":{"is_enabled":true,"request_url":%q},"function_runtime":"remote"},"functions":{"approval":{"title":"Approval","description":"Asks a member to approve a ticket","input_parameters":{"properties":{"ticket":{"type":"string","title":"Ticket"}},"required":["ticket"]},"output_parameters":{"properties":{"decision":{"type":"string","title":"Decision"}},"required":["decision"]}}}}`, boltProxy.URL+"/slack/events", boltProxy.URL+"/slack/events")
+	if err := store.CreateApp(context.Background(),
+		domain.App{ID: "AFN", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Function Qualification", ClientID: "function-qualification-client", SigningSecretHash: domain.HashToken("qualification-signing"), SigningSecretCiphertext: functionSigningCiphertext, VerificationTokenHash: domain.HashToken("qualification-verification"), VerificationTokenCiphertext: functionVerificationCiphertext, ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now},
+		domain.AppManifestRevision{AppID: "AFN", Version: 1, Manifest: functionManifest, CreatedBy: "U1", CreatedAt: now},
+		domain.OAuthClient{ID: "function-qualification-client", SecretHash: domain.HashToken("function-secret"), AppID: "AFN"},
+	); err != nil {
+		panic(err)
+	}
+	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "AFN", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		panic(err)
+	}
+	if err := store.CreateBot(context.Background(), domain.Bot{ID: "BFN", WorkspaceID: "T1", AppID: "AFN", UserID: "U1", Name: "function-qualification-bot", UpdatedAt: now}); err != nil {
+		panic(err)
+	}
+	store.SeedToken(context.Background(), "xoxb-function-qualification", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "AFN", BotID: "BFN", TokenType: "bot", Scopes: []string{"chat:write"}})
+	functionWorkflow := domain.WorkflowDefinition{
+		ID: "WfFunctionQualification", WorkspaceID: "T1", AppID: "AFN", OwnerID: "U1", CallbackID: "function-qualification-workflow",
+		Title: "Function qualification", InputSchema: `{}`, Steps: `[{"function_id":"approval","title":"Approval","input_mapping":{"ticket":"INC-42"}}]`,
+		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateWorkflow(context.Background(), functionWorkflow,
+		newQualificationEvent("qualification-function-workflow", "U1", events.NewPayload("workflow.created",
+			events.String("workflow_id", string(functionWorkflow.ID)), events.String("app_id", "AFN")))); err != nil {
+		panic(err)
+	}
+	if err := store.SetWorkflowTrigger(context.Background(), domain.WorkflowTrigger{
+		ID: "FtFunctionQualification", WorkflowID: functionWorkflow.ID, WorkspaceID: "T1", AppID: "AFN",
+		Title: "Run function qualification", Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}, newQualificationEvent("qualification-function-trigger", "U1", events.NewPayload("workflow.trigger_created",
+		events.String("workflow_id", string(functionWorkflow.ID)), events.String("trigger_id", "FtFunctionQualification")))); err != nil {
+		panic(err)
+	}
 	authenticator, err := auth.NewStored(store)
 	if err != nil {
 		panic(err)
 	}
-	handler, err := slack.NewHandler(messages, authenticator)
-	if err != nil {
-		panic(err)
-	}
-	responses := &qualificationResponseSink{store: store, messages: messages, values: make(map[string]string)}
+	responses := &qualificationResponseSink{messages: messages, values: make(map[string]string), recorded: make(chan struct{})}
 	appAuthenticator, err := auth.NewAppStored(store)
 	if err != nil {
 		panic(err)
 	}
-	handler.ConfigureSocketMode(socketmode.Service{Store: store, Host: "127.0.0.1:18080"}, appAuthenticator)
 	mux := http.NewServeMux()
-	handler.Register(mux)
+	// The Slack surface — Web API, Socket Mode and RTM — is mounted by the
+	// same composition cmd/server uses, so what qualifies here is the
+	// production wiring. No Socket Mode host is configured: connection URLs
+	// follow the origin each SDK called apps.connections.open on, exactly as
+	// they do in a deployment that sets none. The rate limiter is mounted as
+	// in production: registering without one once hid that the limited
+	// registration left every route outside /api/ — the files_upload_v2
+	// upload URL among them — answering 404 by default.
+	if err := slack.Mount(mux, slack.Surface{
+		Messages: messages, Authenticator: authenticator, AppAuthenticator: appAuthenticator, Responses: responses,
+		Limiter: slack.NewRateLimiter(), PublicURL: fixturePublicURL,
+	}); err != nil {
+		panic(err)
+	}
 	mux.HandleFunc("GET /qualification/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
+	})
+	// The consent stand-in for the OAuth walks. The browser consent page is
+	// qualified by the browser suite; this answers the authorize URL an SDK
+	// generates by approving it as U1 through the same service call the
+	// page's approval makes, and redirects the way the page does.
+	mux.HandleFunc("GET /qualification/authorize", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		split := func(value string) []string {
+			var scopes []string
+			for _, scope := range strings.Split(value, ",") {
+				if scope = strings.TrimSpace(scope); scope != "" {
+					scopes = append(scopes, scope)
+				}
+			}
+			return scopes
+		}
+		authorization, err := messages.AuthorizeOAuth(r.Context(), domain.OAuthAuthorizationRequest{
+			ClientID: query.Get("client_id"), WorkspaceID: "T1", UserID: "U1", RedirectURI: query.Get("redirect_uri"),
+			BotScopes: split(query.Get("scope")), UserScopes: split(query.Get("user_scope")), State: query.Get("state"),
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		target, err := url.Parse(authorization.RedirectURI)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		values := target.Query()
+		values.Set("code", authorization.Code)
+		values.Set("state", authorization.State)
+		target.RawQuery = values.Encode()
+		http.Redirect(w, r, target.String(), http.StatusFound)
 	})
 	mux.HandleFunc("GET /qualification/event-context", func(w http.ResponseWriter, r *http.Request) {
 		records, err := messages.ListAppEventsAfter(r.Context(), "A1", 0, 1)
@@ -359,7 +478,7 @@ func main() {
 			http.Error(w, "qualification event is unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		value, err := events.EventContext("A1", records[0])
+		value, err := events.EventContext("A1", records[0], records[0].Event.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -367,15 +486,9 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, value)
 	})
-	mux.Handle("/socket-mode", socketmode.Handler{Store: store, Queue: messages, Interactions: messages, Responses: responses})
-	rtmHandler, err := realtime.NewRTMHandler(messages, messages, messages, messages)
-	if err != nil {
-		panic(err)
-	}
-	rtmHandler.RegisterRTM(mux)
 	mux.HandleFunc("GET /qualification/socket-mode-response", func(w http.ResponseWriter, r *http.Request) {
 		envelopeID := r.URL.Query().Get("envelope_id")
-		payload, ok := responses.get(envelopeID)
+		payload, ok := responses.wait(r.Context(), envelopeID, 3*time.Second)
 		if !ok {
 			http.Error(w, "response not recorded", http.StatusNotFound)
 			return
@@ -481,6 +594,25 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})
+	// deliverToBolt drains the journal to the Bolt app through the production
+	// Events API processor: projection, subscription filtering and signing.
+	deliverToBolt := func(ctx context.Context) error {
+		processor := slackapp.EventProcessor{Store: store, AppCredentialKey: appCredentialKey, Owner: "qualification-bolt", Lease: time.Minute, Client: boltProxy.Client()}
+		for index := 0; index < 32; index++ {
+			count, cycleErr := processor.RunOnce(ctx)
+			// A malformed historical producer record is acknowledged so it
+			// cannot block the app forever and is returned as an operator
+			// warning. Continue only when that acknowledgement made progress;
+			// an error with no progress is an actual delivery outage.
+			if cycleErr != nil && count == 0 {
+				return cycleErr
+			}
+			if count == 0 {
+				return nil
+			}
+		}
+		return nil
+	}
 	mux.HandleFunc("POST /qualification/bolt-event", func(w http.ResponseWriter, r *http.Request) {
 		event, err := events.New("qualification-bolt-event", "T1", "U1", events.NewPayload("reaction.added",
 			events.String("channel_id", "C1"),
@@ -491,20 +623,8 @@ func main() {
 		if err == nil {
 			err = store.AppendEvent(r.Context(), event)
 		}
-		processor := slackapp.EventProcessor{Store: store, AppCredentialKey: appCredentialKey, Owner: "qualification-bolt", Lease: time.Minute, Client: boltProxy.Client()}
-		for index := 0; index < 32; index++ {
-			count, cycleErr := processor.RunOnce(r.Context())
-			// A malformed historical producer record is acknowledged so it
-			// cannot block the app forever and is returned as an operator
-			// warning. Continue only when that acknowledgement made progress;
-			// an error with no progress is an actual delivery outage.
-			if cycleErr != nil && count == 0 {
-				err = cycleErr
-				break
-			}
-			if count == 0 {
-				break
-			}
+		if err == nil {
+			err = deliverToBolt(r.Context())
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -512,11 +632,78 @@ func main() {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	// The link_shared round trip starts from a message the Bolt app posts
+	// through the Web API, so the event is the one the real producer
+	// journals, not one the fixture builds.
+	mux.HandleFunc("POST /qualification/bolt-deliver", func(w http.ResponseWriter, r *http.Request) {
+		if err := deliverToBolt(r.Context()); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	// The custom-step round trip: a member runs the workflow, Bolt receives
+	// function_executed, posts a button with the execution-scoped token, a
+	// member clicks it, and Bolt's complete() finishes the execution.
+	functionInteractions := messages
+	functionInteractions.AppHTTPClient = boltProxy.Client()
+	mux.HandleFunc("POST /qualification/bolt-function", func(w http.ResponseWriter, r *http.Request) {
+		run, err := messages.RunWorkflow(r.Context(), "T1", "U1", "FtFunctionQualification", "C1", `{}`, "")
+		if err == nil {
+			err = deliverToBolt(r.Context())
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		steps, err := store.ListWorkflowRunSteps(r.Context(), "T1", run.ID)
+		if err != nil || len(steps) != 1 {
+			http.Error(w, fmt.Sprintf("function run steps=%d err=%v", len(steps), err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"function_execution_id": string(steps[0].ID)})
+	})
+	mux.HandleFunc("POST /qualification/bolt-function-click", func(w http.ResponseWriter, r *http.Request) {
+		created, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(r.URL.Query().Get("ts")))
+		if err != nil {
+			http.Error(w, "ts is required", http.StatusBadRequest)
+			return
+		}
+		message, err := store.GetMessageByCreatedAt(r.Context(), "C1", created)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if err := functionInteractions.DispatchBlockAction(r.Context(), "T1", "U1", domain.AppBlockAction{
+			MessageID: message.ID, BlockID: "approval", ActionID: "approve_ticket", Type: "button", Value: "approve",
+		}, fixturePublicURL); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /qualification/bolt-function-state", func(w http.ResponseWriter, r *http.Request) {
+		execution := domain.WorkflowStepID(r.URL.Query().Get("function_execution_id"))
+		step, err := store.GetWorkflowStep(r.Context(), "T1", execution)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		state := map[string]string{"status": string(step.Status), "outputs": step.Outputs}
+		if created, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(r.URL.Query().Get("ts"))); parseErr == nil {
+			if message, messageErr := store.GetMessageByCreatedAt(r.Context(), "C1", created); messageErr == nil {
+				state["message_function_execution_id"] = string(message.FunctionExecution())
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(state)
+	})
 	serverHandler, err := newSDKMethodRecorder(mux, os.Getenv("SAMEOLDCHAT_SDK_COVERAGE_LOG"))
 	if err != nil {
 		panic(err)
 	}
-	server := &http.Server{Addr: "127.0.0.1:18080", Handler: serverHandler}
+	server := &http.Server{Addr: strings.TrimPrefix(fixturePublicURL, "http://"), Handler: serverHandler}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			panic(err)
@@ -572,10 +759,11 @@ func (r *sdkMethodRecorder) ServeHTTP(w http.ResponseWriter, request *http.Reque
 }
 
 type qualificationResponseSink struct {
-	store    *memory.Store
 	messages service.Messages
-	mu       sync.RWMutex
+	mu       sync.Mutex
 	values   map[string]string
+	// recorded is closed, and replaced, whenever a response is recorded.
+	recorded chan struct{}
 }
 
 func (s *qualificationResponseSink) HandleSocketModeResponse(ctx context.Context, appID domain.AppID, envelopeID string, payload []byte) error {
@@ -584,13 +772,37 @@ func (s *qualificationResponseSink) HandleSocketModeResponse(ctx context.Context
 	}
 	s.mu.Lock()
 	s.values[envelopeID] = string(payload)
+	close(s.recorded)
+	s.recorded = make(chan struct{})
 	s.mu.Unlock()
 	return nil
 }
 
-func (s *qualificationResponseSink) get(envelopeID string) (string, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	payload, ok := s.values[envelopeID]
-	return payload, ok
+// wait returns the response recorded for an envelope, waiting up to timeout
+// for it. A client's acknowledgement travels over its socket while the suite
+// asks for it over HTTP, so the question can arrive first; answering 404 then
+// made the Socket Mode suites fail on the race, not on the contract.
+func (s *qualificationResponseSink) wait(ctx context.Context, envelopeID string, timeout time.Duration) (string, bool) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		s.mu.Lock()
+		payload, ok := s.values[envelopeID]
+		recorded := s.recorded
+		s.mu.Unlock()
+		if ok {
+			return payload, true
+		}
+		select {
+		case <-recorded:
+		case <-deadline.C:
+			return "", false
+		case <-ctx.Done():
+			return "", false
+		}
+	}
 }
+
+// fixturePublicURL is the one address every qualification suite reaches the
+// fixture on.
+const fixturePublicURL = "http://127.0.0.1:18080"

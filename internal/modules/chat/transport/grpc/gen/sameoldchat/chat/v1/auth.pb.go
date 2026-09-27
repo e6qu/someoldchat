@@ -22,17 +22,20 @@ const (
 )
 
 type TokenRecord struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Scopes        []string               `protobuf:"bytes,3,rep,name=scopes,proto3" json:"scopes,omitempty"`
-	Revoked       bool                   `protobuf:"varint,4,opt,name=revoked,proto3" json:"revoked,omitempty"`
-	AppId         string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	BotId         string                 `protobuf:"bytes,6,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
-	TokenType     string                 `protobuf:"bytes,7,opt,name=token_type,json=tokenType,proto3" json:"token_type,omitempty"`
-	ExpiresAt     string                 `protobuf:"bytes,8,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Scopes      []string               `protobuf:"bytes,3,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	Revoked     bool                   `protobuf:"varint,4,opt,name=revoked,proto3" json:"revoked,omitempty"`
+	AppId       string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	BotId       string                 `protobuf:"bytes,6,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
+	TokenType   string                 `protobuf:"bytes,7,opt,name=token_type,json=tokenType,proto3" json:"token_type,omitempty"`
+	ExpiresAt   string                 `protobuf:"bytes,8,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	// function_execution_id names the execution an execution-scoped (xwfp-)
+	// bot token was issued for.
+	FunctionExecutionId string `protobuf:"bytes,9,opt,name=function_execution_id,json=functionExecutionId,proto3" json:"function_execution_id,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *TokenRecord) Reset() {
@@ -117,6 +120,13 @@ func (x *TokenRecord) GetTokenType() string {
 func (x *TokenRecord) GetExpiresAt() string {
 	if x != nil {
 		return x.ExpiresAt
+	}
+	return ""
+}
+
+func (x *TokenRecord) GetFunctionExecutionId() string {
+	if x != nil {
+		return x.FunctionExecutionId
 	}
 	return ""
 }
@@ -1193,7 +1203,7 @@ var File_sameoldchat_chat_v1_auth_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x1esameoldchat/chat/v1/auth.proto\x12\x13sameoldchat.chat.v1\"\xe7\x01\n" +
+	"\x1esameoldchat/chat/v1/auth.proto\x12\x13sameoldchat.chat.v1\"\x9b\x02\n" +
 	"\vTokenRecord\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
@@ -1204,7 +1214,8 @@ const file_sameoldchat_chat_v1_auth_proto_rawDesc = "" +
 	"\n" +
 	"token_type\x18\a \x01(\tR\ttokenType\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\b \x01(\tR\texpiresAt\"Y\n" +
+	"expires_at\x18\b \x01(\tR\texpiresAt\x122\n" +
+	"\x15function_execution_id\x18\t \x01(\tR\x13functionExecutionId\"Y\n" +
 	"\x0eAppTokenRecord\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x16\n" +
 	"\x06scopes\x18\x02 \x03(\tR\x06scopes\x12\x18\n" +

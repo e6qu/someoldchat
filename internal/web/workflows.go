@@ -240,6 +240,8 @@ type workflowListOption struct {
 }
 
 type workflowsData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell     shellView
 	CSRFToken string
 	Notice    string
 	Apps      []workflowAppOption
@@ -327,22 +329,22 @@ type workflowInteractionField struct {
 }
 
 const workflowsMarkup = `{{define "title"}}Workflows · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(980px,calc(100% - 32px));margin:28px auto 56px}.heading{display:flex;justify-content:space-between;gap:20px;align-items:start}.heading h2,.heading p{margin:0}.heading p{margin-top:5px;color:var(--muted)}
 .create{margin:20px 0;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.create summary{font-weight:800;cursor:pointer}.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}.fields label{display:grid;gap:6px;font-weight:700}.fields .wide{grid-column:1/-1}.fields input,.fields textarea,.fields select{box-sizing:border-box;width:100%;padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.fields textarea{min-height:90px;resize:vertical}.fields button{justify-self:start;border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}.card{display:grid;gap:9px;min-height:145px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);text-decoration:none}.card:hover{border-color:var(--action);background:var(--hover)}.card h3,.card p{margin:0}.card p{color:var(--muted)}.meta{display:flex;gap:8px;align-self:end;color:var(--muted);font-size:12px}.pill{padding:2px 7px;border-radius:999px;background:var(--panel-strong);font-weight:800}.empty{padding:32px;border:1px dashed var(--line);border-radius:10px;text-align:center;color:var(--muted)}.problem{padding:14px;border:1px solid var(--warning);border-radius:8px;background:var(--panel)}
 @media(max-width:620px){.fields{grid-template-columns:1fr}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `<script>(function(){var app=document.getElementById('workflow-app');var fn=document.getElementById('workflow-function');if(!app||!fn)return;function sync(){var selected=app.value;Array.prototype.forEach.call(fn.options,function(option){if(!option.dataset.app)return;option.hidden=option.dataset.app!==selected;option.disabled=option.dataset.app!==selected});if(fn.selectedOptions.length&&fn.selectedOptions[0].disabled)fn.value=''}app.addEventListener('change',sync);sync()})();</script>{{end}}
-{{define "content"}}<header class="bar"><a href="/app">← Back to chat</a><h1>Workflows</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">
-<div class="heading"><div><h2>Workflows</h2><p>Build, publish, and run durable automations backed by installed app functions.</p></div></div>
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `` + localTimeScript + `<script>(function(){var app=document.getElementById('workflow-app');var fn=document.getElementById('workflow-function');if(!app||!fn)return;function sync(){var selected=app.value;Array.prototype.forEach.call(fn.options,function(option){if(!option.dataset.app)return;option.hidden=option.dataset.app!==selected;option.disabled=option.dataset.app!==selected});if(fn.selectedOptions.length&&fn.selectedOptions[0].disabled)fn.value=''}app.addEventListener('change',sync);sync()})();</script>{{end}}
+{{define "content"}}{{template "shell-open" .Shell}}<main class="layout">
+<div class="heading"><div><h1>Workflows</h1><p>Build, publish, and run durable automations backed by installed app functions.</p></div></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if .Everything}}<form class="admin-search" method="get" action="/app/workflows"><input type="hidden" name="scope" value="all"><label for="workflow-query">Search every workflow</label><input id="workflow-query" name="q" value="{{.Query}}" maxlength="255" placeholder="Title contains…"><button type="submit">Search</button></form>
 <p class="read-only">Every workflow in this workspace, including drafts nobody has published and workflows whose app is gone. Stopping one takes it out of service without changing what it says. <a href="/app/workflows">Back to your workflows</a></p>
 {{else}}<p class="read-only"><a href="/app/workflows?scope=all">See every workflow in the workspace</a> — workspace administrators only.</p>{{end}}
 {{if .Functions}}<details class="create"><summary>Create a workflow</summary><form class="fields" method="post" action="/app/workflows/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Name<input name="title" maxlength="255" required></label><label>Owning app<select id="workflow-app" name="app_id" required><option value="">Choose an app</option>{{range .Apps}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label><label class="wide">Description<textarea name="description" maxlength="2000"></textarea></label><label>Icon (emoji or short text)<input name="icon" maxlength="64" placeholder="🚀"></label><label class="wide">First step<select id="workflow-function" name="function_callback" required><option value="">Choose a function</option>{{range .Functions}}<option value="{{.CallbackID}}" data-app="{{.AppID}}">{{.AppName}} · {{.Title}}</option>{{end}}</select></label><label>Workflow reference<input name="callback_id" maxlength="255" placeholder="triage-request"></label><button type="submit">Create workflow</button></form></details>{{else}}<p class="problem">Workflow Builder needs a developer app with at least one manifest function. <a href="/app/developer/apps">Create or update an app manifest</a>, then return here.</p>{{end}}
-<div class="grid">{{range .Workflows}}<a class="card" href="/app/workflows/{{.ID}}">{{if .Icon}}<span class="wf-icon" aria-hidden="true">{{.Icon}}</span>{{end}}<h3>{{.Title}}</h3><p>{{if .Description}}{{.Description}}{{else}}No description{{end}}</p><div class="meta"><span class="pill">{{.Status}}</span><span>v{{.Version}}</span>{{if .Owned}}<span>Owned by you</span>{{end}}<time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></div></a>{{if .CanStop}}<form class="stop-workflow" method="post" action="/app/workflows/{{.ID}}/stop"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Stop {{.Title}}</button></form>{{end}}{{else}}<p class="empty">No workflows are available yet.</p>{{end}}</div>{{if .MoreURL}}<p><a href="{{.MoreURL}}">Show more workflows</a></p>{{end}}</main>{{end}}`
+<div class="grid">{{range .Workflows}}<a class="card" href="/app/workflows/{{.ID}}">{{if .Icon}}<span class="wf-icon" aria-hidden="true">{{.Icon}}</span>{{end}}<h3>{{.Title}}</h3><p>{{if .Description}}{{.Description}}{{else}}No description{{end}}</p><div class="meta"><span class="pill">{{.Status}}</span><span>v{{.Version}}</span>{{if .Owned}}<span>Owned by you</span>{{end}}<time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></div></a>{{if .CanStop}}<form class="stop-workflow" method="post" action="/app/workflows/{{.ID}}/stop"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Stop {{.Title}}</button></form>{{end}}{{else}}<p class="empty">No workflows are available yet.</p>{{end}}</div>{{if .MoreURL}}<p><a href="{{.MoreURL}}">Show more workflows</a></p>{{end}}</main>{{template "shell-close" .Shell}}{{end}}`
 
 var workflowsTemplate = mustPage(workflowsMarkup)
 
@@ -505,6 +507,7 @@ func (h Handler) workflows(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.writeHTML(w, workflowsTemplate, workflowsData{
+		Shell:     h.newShell(r, principal, shellRequest{Destination: destinationMore}),
 		CSRFToken: csrf, Notice: strings.TrimSpace(r.URL.Query().Get("notice")),
 		Apps: apps, Functions: functions, Workflows: cards, MoreURL: moreURL,
 		Everything: everything, Query: query,
@@ -838,7 +841,9 @@ func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 					h.writeStoreError(w, err, "The webhook URL is temporarily unavailable.")
 					return
 				}
-				view.WebhookURL = invokeURL
+				// The service knows the path; only the HTTP boundary knows the
+				// public origin an external system has to post to.
+				view.WebhookURL = h.responseBaseURL(r) + invokeURL
 			}
 		}
 		triggerViews = append(triggerViews, view)

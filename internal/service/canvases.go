@@ -461,7 +461,7 @@ func (m Messages) SearchCanvases(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.CanvasPage{}, ErrInvalidSearch
 	}
-	parsed, err := parseSearchQuery(request.Query)
+	parsed, err := parseSearchQuery(request.Query, m.searchClockFor(ctx, workspaceID, userID))
 	if err != nil {
 		return domain.CanvasPage{}, ErrInvalidSearch
 	}
@@ -506,16 +506,41 @@ func normalizeCanvasContent(value string) (string, error) {
 	if err := json.Unmarshal([]byte(value), &raw); err != nil || raw == nil {
 		return "", ErrInvalidCanvas
 	}
-	sectionID, err := newCanvasSectionID()
+	sections, err := canvasSectionsFromContent(raw)
 	if err != nil {
 		return "", err
 	}
-	section := domain.CanvasSection{ID: sectionID, Type: domain.CanvasSectionType(stringValue(raw["type"])), Text: stringValue(raw["markdown"])}
-	if section.Text == "" {
-		section.Text = stringValue(raw["text"])
-	}
-	encoded, err := json.Marshal(canvasDocument{Sections: []domain.CanvasSection{section}})
+	encoded, err := json.Marshal(canvasDocument{Sections: sections})
 	return string(encoded), err
+}
+
+// canvasSectionsFromContent turns one document_content object into the
+// sections it stands for. Markdown is split the way Slack splits it —
+// headings become header sections and the prose between them markdown
+// sections (domain.CanvasMarkdownBlocks) — so a document written with
+// "# Heading" shows a heading and is found by canvases.sections.lookup. A
+// section of any other kind (an app's own, or a heading written as one) is
+// kept as the single section it was sent as.
+func canvasSectionsFromContent(raw map[string]any) ([]domain.CanvasSection, error) {
+	kind := domain.CanvasSectionType(stringValue(raw["type"]))
+	text := stringValue(raw["markdown"])
+	if text == "" {
+		text = stringValue(raw["text"])
+	}
+	sections := []domain.CanvasSection{{Type: kind, Text: text}}
+	if kind == domain.CanvasSectionMarkdown || kind == "" {
+		if blocks := domain.CanvasMarkdownBlocks(text); len(blocks) > 0 {
+			sections = blocks
+		}
+	}
+	for index := range sections {
+		id, err := newCanvasSectionID()
+		if err != nil {
+			return nil, err
+		}
+		sections[index].ID = id
+	}
+	return sections, nil
 }
 
 func decodeCanvasDocument(value string) (canvasDocument, error) {
@@ -540,20 +565,12 @@ func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change c
 		canvas.Title = strings.TrimSpace(title.Title)
 		return nil
 	}
-	newSection := func() (domain.CanvasSection, error) {
+	newSections := func() ([]domain.CanvasSection, error) {
 		var raw map[string]any
 		if err := json.Unmarshal(change.DocumentContent, &raw); err != nil || raw == nil {
-			return domain.CanvasSection{}, ErrInvalidCanvas
+			return nil, ErrInvalidCanvas
 		}
-		text := stringValue(raw["markdown"])
-		if text == "" {
-			text = stringValue(raw["text"])
-		}
-		sectionID, err := newCanvasSectionID()
-		if err != nil {
-			return domain.CanvasSection{}, err
-		}
-		return domain.CanvasSection{ID: sectionID, Type: domain.CanvasSectionType(stringValue(raw["type"])), Text: text}, nil
+		return canvasSectionsFromContent(raw)
 	}
 	if change.Operation == "delete" {
 		if change.SectionID == "" {
@@ -603,15 +620,21 @@ func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change c
 		}
 		return store.ErrNotFound
 	}
-	section, err := newSection()
+	sections, err := newSections()
 	if err != nil {
 		return err
 	}
+	// insertAt places every section the content stands for at position, in
+	// order: one markdown document with a heading is several sections.
+	insertAt := func(position int, replaced int) {
+		rest := append([]domain.CanvasSection(nil), document.Sections[position+replaced:]...)
+		document.Sections = append(append(document.Sections[:position], sections...), rest...)
+	}
 	switch change.Operation {
 	case "insert_at_start":
-		document.Sections = append([]domain.CanvasSection{section}, document.Sections...)
+		insertAt(0, 0)
 	case "insert_at_end":
-		document.Sections = append(document.Sections, section)
+		insertAt(len(document.Sections), 0)
 	case "insert_before", "insert_after":
 		for index, existing := range document.Sections {
 			if existing.ID == change.SectionID {
@@ -619,21 +642,19 @@ func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change c
 				if change.Operation == "insert_after" {
 					position++
 				}
-				document.Sections = append(document.Sections, domain.CanvasSection{})
-				copy(document.Sections[position+1:], document.Sections[position:])
-				document.Sections[position] = section
+				insertAt(position, 0)
 				return nil
 			}
 		}
 		return store.ErrNotFound
 	case "replace":
 		if change.SectionID == "" {
-			document.Sections = []domain.CanvasSection{section}
+			document.Sections = sections
 			return nil
 		}
 		for index, existing := range document.Sections {
 			if existing.ID == change.SectionID {
-				document.Sections[index] = section
+				insertAt(index, 1)
 				return nil
 			}
 		}

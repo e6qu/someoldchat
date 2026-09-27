@@ -5,6 +5,7 @@ package sameoldchat.chat.v1;
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
 import "sameoldchat/chat/v1/apps.proto";
+import "sameoldchat/chat/v1/conversations.proto";
 
 message View {
   string id = 1;
@@ -21,6 +22,9 @@ message View {
   string app_id = 12;
   string errors_json = 13;
   string state_json = 14;
+  // function_execution_id is the function execution whose token opened the
+  // view; its interactions carry that execution's function_data.
+  string function_execution_id = 15;
 }
 
 message OpenViewRequest {
@@ -29,6 +33,7 @@ message OpenViewRequest {
   string trigger_id = 3;
   string payload = 4;
   string app_id = 5;
+  string function_execution_id = 6;
 }
 
 message PublishViewRequest {
@@ -46,6 +51,7 @@ message PushViewRequest {
   string trigger_id = 3;
   string payload = 4;
   string app_id = 5;
+  string function_execution_id = 6;
 }
 
 message UpdateViewRequest {
@@ -110,6 +116,9 @@ service ViewsService {
   rpc CurrentModalView(CurrentModalViewRequest) returns (View);
   rpc AppHome(AppHomeRequest) returns (AppHomeResponse);
   rpc OpenAppHome(AppHomeRequest) returns (AppHomeResponse);
+  // OpenAppMessages opens the app bot DM from the app's Messages tab and
+  // records app_home_opened with tab "messages".
+  rpc OpenAppMessages(AppHomeRequest) returns (Conversation);
   rpc SubmitView(ViewSubmissionRequest) returns (ViewInteractionResult);
   rpc CloseView(CloseViewRequest) returns (ViewMutationResponse);
 }

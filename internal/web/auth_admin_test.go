@@ -116,10 +116,10 @@ func TestAuthAdminPageShowsOnlyAuthorizedSections(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, "/api/admin.auth.users.create") {
+	if !strings.Contains(body, "/app/admin/auth/users.create") {
 		t.Fatal("user administration section is missing")
 	}
-	if strings.Contains(body, "/api/admin.auth.methods.set") {
+	if strings.Contains(body, "/app/admin/auth/methods.set") {
 		t.Fatal("authorization-method section was exposed without its scope")
 	}
 	for _, expected := range []string{
@@ -145,7 +145,7 @@ func TestAuthAdminPageShowsOnlyAuthorizedSections(t *testing.T) {
 func TestAuthAdminPageOffersNextUserPage(t *testing.T) {
 	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
 	for index := 0; index < 51; index++ {
-		request := adminMutationRequest(http.MethodPost, "/api/admin.auth.users.create", "email=user-"+strconv.Itoa(index)+"%40example.com&real_name=User-"+strconv.Itoa(index)+"&role=member")
+		request := adminMutationRequest(http.MethodPost, "/app/admin/auth/users.create", "email=user-"+strconv.Itoa(index)+"%40example.com&real_name=User-"+strconv.Itoa(index)+"&role=member")
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		if response.Code != http.StatusCreated {
@@ -164,7 +164,7 @@ func TestAuthAdminPageOffersNextUserPage(t *testing.T) {
 func TestAuthAdminCreatesManualUserWithCSRFAndRole(t *testing.T) {
 	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
 	body := "email=Alice%40Example.COM&real_name=Alice+Example&role=admin&_csrf=" + auth.CSRFToken("session")
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.auth.users.create", strings.NewReader(body))
+	request := httptest.NewRequest(http.MethodPost, "/app/admin/auth/users.create", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
@@ -183,17 +183,17 @@ func TestAuthAdminReadScopeCanInspectProvidersWithoutMutationControl(t *testing.
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, "Google") || !strings.Contains(body, "enabled") || strings.Contains(body, "/api/admin.auth.methods.set") {
+	if !strings.Contains(body, "Google") || !strings.Contains(body, "enabled") || strings.Contains(body, "/app/admin/auth/methods.set") {
 		t.Fatalf("read-only provider page exposed the wrong controls: %s", body)
 	}
-	listRequest := httptest.NewRequest(http.MethodGet, "/api/admin.auth.methods.list", nil)
+	listRequest := httptest.NewRequest(http.MethodGet, "/app/admin/auth/methods.list", nil)
 	listRequest.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	listResponse := httptest.NewRecorder()
 	handler.ServeHTTP(listResponse, listRequest)
 	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"ok":true`) {
 		t.Fatalf("list status=%d body=%s", listResponse.Code, listResponse.Body.String())
 	}
-	setRequest := httptest.NewRequest(http.MethodPost, "/api/admin.auth.methods.set", strings.NewReader("provider=google&enabled=false"))
+	setRequest := httptest.NewRequest(http.MethodPost, "/app/admin/auth/methods.set", strings.NewReader("provider=google&enabled=false"))
 	setRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	setRequest.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	setResponse := httptest.NewRecorder()
@@ -205,7 +205,7 @@ func TestAuthAdminReadScopeCanInspectProvidersWithoutMutationControl(t *testing.
 
 func TestAuthAdminCreateUserRejectsMissingCSRF(t *testing.T) {
 	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.auth.users.create", strings.NewReader("email=a%40example.com&real_name=Alice&role=member"))
+	request := httptest.NewRequest(http.MethodPost, "/app/admin/auth/users.create", strings.NewReader("email=a%40example.com&real_name=Alice&role=member"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	response := httptest.NewRecorder()
@@ -228,7 +228,7 @@ func TestAuthAdminListsMembershipState(t *testing.T) {
 	// The administrator doing the reading and an ordinary member must both be
 	// reported with their own durable role, not with a single hard-coded one.
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "member@example.com", Name: "member"})
-	request := httptest.NewRequest(http.MethodGet, "/api/admin.auth.users.list?limit=10", nil)
+	request := httptest.NewRequest(http.MethodGet, "/app/admin/auth/users.list?limit=10", nil)
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -240,7 +240,7 @@ func TestAuthAdminListsMembershipState(t *testing.T) {
 
 func TestAuthAdminUpdatesUserLifecycle(t *testing.T) {
 	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
-	create := adminMutationRequest(http.MethodPost, "/api/admin.auth.users.create", "email=target%40example.com&real_name=Target&role=member")
+	create := adminMutationRequest(http.MethodPost, "/app/admin/auth/users.create", "email=target%40example.com&real_name=Target&role=member")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, create)
 	if response.Code != http.StatusCreated {
@@ -254,17 +254,17 @@ func TestAuthAdminUpdatesUserLifecycle(t *testing.T) {
 	}
 
 	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id="+string(created.User.ID)+"&action=disable"))
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/auth/users.set", "user_id="+string(created.User.ID)+"&action=disable"))
 	if response.Code != http.StatusOK {
 		t.Fatalf("disable status=%d body=%s", response.Code, response.Body.String())
 	}
 	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id="+string(created.User.ID)+"&action=enable"))
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/auth/users.set", "user_id="+string(created.User.ID)+"&action=enable"))
 	if response.Code != http.StatusOK {
 		t.Fatalf("enable status=%d body=%s", response.Code, response.Body.String())
 	}
 	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id="+string(created.User.ID)+"&action=role&role=admin"))
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/auth/users.set", "user_id="+string(created.User.ID)+"&action=role&role=admin"))
 	if response.Code != http.StatusOK {
 		t.Fatalf("role status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -305,7 +305,7 @@ func TestAuthAdminRoleEditorTellsTheTruthAboutOwnership(t *testing.T) {
 		}
 		// And the write is refused with an authorization answer, not an outage.
 		refused := httptest.NewRecorder()
-		handler.ServeHTTP(refused, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id=U2&action=role&role=member"))
+		handler.ServeHTTP(refused, adminMutationRequest(http.MethodPost, "/app/admin/auth/users.set", "user_id=U2&action=role&role=member"))
 		if refused.Code != http.StatusForbidden {
 			t.Fatalf("demotion status=%d body=%s", refused.Code, refused.Body.String())
 		}
@@ -337,7 +337,7 @@ func TestAuthAdminRoleEditorTellsTheTruthAboutOwnership(t *testing.T) {
 		// An owner can appoint another owner, so ownership is recoverable from
 		// the page that can lose it.
 		promote := httptest.NewRecorder()
-		handler.ServeHTTP(promote, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id=U2&action=role&role=owner"))
+		handler.ServeHTTP(promote, adminMutationRequest(http.MethodPost, "/app/admin/auth/users.set", "user_id=U2&action=role&role=owner"))
 		if promote.Code != http.StatusOK {
 			t.Fatalf("promotion status=%d body=%s", promote.Code, promote.Body.String())
 		}
@@ -351,7 +351,7 @@ func TestAuthAdminRoleEditorTellsTheTruthAboutOwnership(t *testing.T) {
 func TestAuthAdminRejectsUnknownUserMutation(t *testing.T) {
 	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id=U1&action=unknown"))
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/auth/users.set", "user_id=U1&action=unknown"))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid_action") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -360,7 +360,7 @@ func TestAuthAdminRejectsUnknownUserMutation(t *testing.T) {
 func TestAuthAdminReportsMissingUserAsNotFound(t *testing.T) {
 	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id=missing&action=disable"))
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/auth/users.set", "user_id=missing&action=disable"))
 	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "user_not_found") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -379,10 +379,10 @@ func TestAuthAdminRefusesMemberRoleHoldingControlPlaneScopes(t *testing.T) {
 		target string
 		body   string
 	}{
-		{name: "self promotion", method: http.MethodPost, target: "/api/admin.auth.users.set", body: "user_id=U1&action=role&role=admin"},
-		{name: "deactivate", method: http.MethodPost, target: "/api/admin.auth.users.set", body: "user_id=U1&action=disable"},
-		{name: "disable the login provider", method: http.MethodPost, target: "/api/admin.auth.methods.set", body: "provider=google&enabled=false"},
-		{name: "mint an administrator", method: http.MethodPost, target: "/api/admin.auth.users.create", body: "email=mine%40example.com&real_name=Mine&role=admin"},
+		{name: "self promotion", method: http.MethodPost, target: "/app/admin/auth/users.set", body: "user_id=U1&action=role&role=admin"},
+		{name: "deactivate", method: http.MethodPost, target: "/app/admin/auth/users.set", body: "user_id=U1&action=disable"},
+		{name: "disable the login provider", method: http.MethodPost, target: "/app/admin/auth/methods.set", body: "provider=google&enabled=false"},
+		{name: "mint an administrator", method: http.MethodPost, target: "/app/admin/auth/users.create", body: "email=mine%40example.com&real_name=Mine&role=admin"},
 	} {
 		t.Run(attempt.name, func(t *testing.T) {
 			response := httptest.NewRecorder()
@@ -400,7 +400,7 @@ func TestAuthAdminRefusesMemberRoleHoldingControlPlaneScopes(t *testing.T) {
 	if err != nil || !method.Enabled {
 		t.Fatalf("authorization method=%+v err=%v, want it still enabled", method, err)
 	}
-	for _, target := range []string{"/app/admin/auth", "/api/admin.auth.users.list", "/api/admin.auth.methods.list"} {
+	for _, target := range []string{"/app/admin/auth", "/app/admin/auth/users.list", "/app/admin/auth/methods.list"} {
 		request := httptest.NewRequest(http.MethodGet, target, nil)
 		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 		response := httptest.NewRecorder()
@@ -417,7 +417,7 @@ func TestAuthAdminRefusesMemberRoleHoldingControlPlaneScopes(t *testing.T) {
 // administrative mutation from an applied one.
 func TestAuthAdminRejectsRejectedMutationWithAStatusAndABody(t *testing.T) {
 	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite, auth.ScopeAdminAppsWrite})
-	for _, target := range []string{"/api/admin.auth.users.set", "/api/admin.auth.methods.set", "/api/admin.auth.users.create", "/api/admin.auth.users.invite"} {
+	for _, target := range []string{"/app/admin/auth/users.set", "/app/admin/auth/methods.set", "/app/admin/auth/users.create", "/app/admin/auth/users.invite"} {
 		t.Run(target, func(t *testing.T) {
 			// A repeated field is rejected by decodeFormFields, which is the path that
 			// previously wrote no response at all.
@@ -438,7 +438,7 @@ func TestAuthAdminRejectsRejectedMutationWithAStatusAndABody(t *testing.T) {
 // same defect: every failure path used to emit a raw JSON envelope into the browser.
 func TestAuthAdminRendersFailuresAsHypertextForBrowsers(t *testing.T) {
 	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.auth.users.set", strings.NewReader("user_id=missing&action=disable&_csrf="+auth.CSRFToken("session")))
+	request := httptest.NewRequest(http.MethodPost, "/app/admin/auth/users.set", strings.NewReader("user_id=missing&action=disable&_csrf="+auth.CSRFToken("session")))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "text/html,application/xhtml+xml")
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
@@ -525,7 +525,7 @@ func TestAdminInvitationCarriesTheGuestTierAndExpiry(t *testing.T) {
 	store.SeedConversationMember("C2", "U1")
 
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.invite",
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/auth/users.invite",
 		"email=guest%40example.test&real_name=Guest&tier=multi_channel_guest&guest_expires_on=2026-09-01&resend=true&channel_ids=C1&channel_ids=C2"))
 	if response.Code != http.StatusOK {
 		t.Fatalf("invite status=%d body=%s", response.Code, response.Body.String())
@@ -557,7 +557,7 @@ func TestAdminInvitationRefusesAnExpiryOnAFullMember(t *testing.T) {
 	handler, store := newAuthAdminTestHandlerWithRole(t, []auth.Scope{auth.ScopeAdminUsersWrite}, domain.WorkspaceRoleAdmin)
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.invite",
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/auth/users.invite",
 		"email=member%40example.test&real_name=Member&tier=member&guest_expires_on=2026-09-01&channel_ids=C1"))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
@@ -1155,7 +1155,7 @@ func TestAuthAdminShowsSessionCountsAndSignsAMemberOut(t *testing.T) {
 		t.Fatalf("a session token reached the administration page: %s", before)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.auth.users.set", strings.NewReader("_csrf="+auth.CSRFToken("session")+"&user_id=U2&action=sessions"))
+	request := httptest.NewRequest(http.MethodPost, "/app/admin/auth/users.set", strings.NewReader("_csrf="+auth.CSRFToken("session")+"&user_id=U2&action=sessions"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set(auth.CSRFTokenHeaderName, auth.CSRFToken("session"))
 	request.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -1762,5 +1762,24 @@ func TestTheConnectPanelSaysWhenAnInvitationHasLapsed(t *testing.T) {
 	handler.ServeHTTP(denyResponse, deny)
 	if denyResponse.Code != http.StatusSeeOther {
 		t.Fatalf("withdraw=%d body=%s", denyResponse.Code, denyResponse.Body.String())
+	}
+}
+
+// The web client registers nothing in the Slack Web API's /api/ namespace. Its
+// control-plane endpoints used to be /api/admin.auth.*, which shadowed the Web
+// API tree for those paths: one verb, outside the rate limiter, without the
+// OAuth scope headers, for methods no Slack client knows.
+func TestTheWebClientRegistersNothingInTheWebAPINamespace(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, allAdminScopes())
+	mux, ok := handler.(*http.ServeMux)
+	if !ok {
+		t.Fatalf("handler is %T", handler)
+	}
+	for _, path := range []string{"/api/admin.auth.users.list", "/api/admin.auth.methods.list", "/api/admin.auth.users.set", "/api/anything"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			if _, pattern := mux.Handler(httptest.NewRequest(method, path, nil)); pattern != "" {
+				t.Errorf("%s %s is served by the web client's %q", method, path, pattern)
+			}
+		}
 	}
 }

@@ -36,6 +36,7 @@ type Service interface {
 	DeleteAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string) error
 	AppHome(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.InstalledApp, domain.View, error)
 	OpenAppHome(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.InstalledApp, domain.View, error)
+	OpenAppMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.Conversation, error)
 	GetDeveloperApp(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.App, string, error)
 	GetDeveloperAppDeliveryHealth(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.AppDeliveryHealth, error)
 	IssueDeveloperAppToken(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, []string) (domain.AppTokenCredentials, error)
@@ -50,10 +51,10 @@ type Service interface {
 	PostIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	PostIncomingWebhookWithAttachments(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
-	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) ([]events.Record, error)
-	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
+	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) (events.UserEventPage, error)
+	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.AppEventClaim, bool, error)
 	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
-	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
+	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, events.AppEventRelease) error
 	DispatchSlashCommand(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, string, string) error
 	DispatchBlockAction(context.Context, domain.WorkspaceID, domain.UserID, domain.AppBlockAction, string) error
 	DispatchViewBlockAction(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.AppViewBlockAction, string) error
@@ -82,7 +83,7 @@ type Service interface {
 	PostWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	ShareFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
 	ShareUploadedFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID, []domain.ConversationID, string, domain.MessageTimestamp) ([]domain.ConversationID, error)
-	Unfurl(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, map[string]string) (domain.Message, error)
+	Unfurl(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, domain.MessageTimestamp, map[string]string) (domain.Message, error)
 	PostEphemeral(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string) (domain.EphemeralMessage, error)
 	PostEphemeralWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string) (domain.EphemeralMessage, error)
 	PostWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, domain.MessageTimestamp, string, domain.AppID) (domain.Message, error)
@@ -90,10 +91,10 @@ type Service interface {
 	StartMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamStart) (domain.Message, error)
 	AppendMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
 	StopMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
-	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID) (domain.EphemeralMessage, error)
+	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID, domain.MessageTimestamp) (domain.EphemeralMessage, error)
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
 	RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
-	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) ([]domain.AccessLog, bool, error)
+	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) (domain.AccessLogPage, error)
 	WorkspaceAnalytics(context.Context, domain.WorkspaceID, domain.UserID, time.Time) (domain.WorkspaceAnalytics, error)
 	UserWorkspaces(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.WorkspaceMembershipSummary, error)
 	// The Slack Connect invitation lifecycle. Approval and acceptance are
@@ -126,8 +127,8 @@ type Service interface {
 	UpdateWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, string, string) (domain.Message, error)
 	UpdateMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, domain.MessagePatch) (domain.Message, error)
 	Delete(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
-	History(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.MessagePage, error)
-	Replies(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, domain.PageRequest) (domain.MessagePage, error)
+	History(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.HistoryRequest) (domain.MessagePage, error)
+	Replies(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, domain.ThreadRequest) (domain.MessagePage, error)
 	ConversationInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Conversation, error)
 	UserInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.User, error)
 	RemoveUser(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) error
@@ -173,9 +174,9 @@ type Service interface {
 	AdminRestrictApp(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.AppRequestID) error
 	AdminListApps(context.Context, domain.WorkspaceID, domain.UserID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
 	RequestAppPermissions(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, []string, string) error
-	OpenView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (domain.View, error)
+	OpenView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, domain.WorkflowStepID) (domain.View, error)
 	PublishView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.UserID, string, string) (domain.View, error)
-	PushView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (domain.View, error)
+	PushView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, domain.WorkflowStepID) (domain.View, error)
 	UpdateView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, string, string) (domain.View, error)
 	CurrentModalView(context.Context, domain.WorkspaceID, domain.UserID) (domain.View, error)
 	SubmitView(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ViewID, string, string) (domain.ViewInteractionResult, error)
@@ -223,6 +224,9 @@ type Service interface {
 	ListFeaturedWorkflows(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) ([]domain.FeaturedWorkflow, error)
 	ListFunctionWorkflowSteps(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, domain.WorkflowID, string, domain.AppID) ([]domain.WorkflowStepVersion, error)
 	OpenDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) error
+	CurrentDialog(context.Context, domain.WorkspaceID, domain.UserID) (domain.Dialog, error)
+	SubmitDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.DialogID, map[string]string, string) (domain.ViewInteractionResult, error)
+	CancelDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.DialogID, string) error
 	BotInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.BotID) (domain.Bot, error)
 	MigrationExchange(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID, bool) (domain.MigrationExchange, error)
 	AdminDisconnectSharedConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.WorkspaceID) error
@@ -254,6 +258,7 @@ type Service interface {
 	AdminConversationTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) ([]domain.WorkspaceID, bool, domain.Cursor, error)
 	AdminSetConversationTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.WorkspaceID, bool) error
 	Emojis(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.CustomEmoji, error)
+	EmojiRevision(context.Context, domain.WorkspaceID, domain.UserID) (time.Time, error)
 	AdminAddEmoji(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	AdminAddEmojiAlias(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	AdminRemoveEmoji(context.Context, domain.WorkspaceID, domain.UserID, string) error
@@ -285,6 +290,7 @@ type Service interface {
 	SetUserPresence(context.Context, domain.WorkspaceID, domain.UserID, domain.Presence) (domain.User, error)
 	DoNotDisturbInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.DoNotDisturb, error)
 	SetSnooze(context.Context, domain.WorkspaceID, domain.UserID, int64) (domain.DoNotDisturb, error)
+	PauseNotificationsUntil(context.Context, domain.WorkspaceID, domain.UserID, time.Time) (domain.DoNotDisturb, error)
 	EndSnooze(context.Context, domain.WorkspaceID, domain.UserID) (domain.DoNotDisturb, error)
 	EndDND(context.Context, domain.WorkspaceID, domain.UserID) error
 	Users(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.UserPage, error)
@@ -350,7 +356,7 @@ type Service interface {
 	MemberMustUsePasswordSignIn(context.Context, domain.WorkspaceID, domain.UserID) (bool, error)
 	TeamBillableInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.BillableInfo, error)
 	Conversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
-	OpenConversation(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) (domain.Conversation, error)
+	OpenConversation(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) (domain.DirectOpening, error)
 	AddPeopleToDirectConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.UserID, domain.DirectHistorySelection) (domain.Conversation, error)
 	ConvertGroupDirectToPrivate(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string) (domain.Conversation, error)
 	CreateConversation(context.Context, domain.WorkspaceID, domain.UserID, string, bool) (domain.Conversation, error)
@@ -377,6 +383,7 @@ type Service interface {
 	ReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	MessageAt(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
 	ThreadSummaries(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)
+	MessageAnnotations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.MessageID) (map[domain.MessageID]domain.MessageAnnotation, error)
 	WorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceNotificationPreferences, error)
 	SetWorkspaceNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.NotificationLevel, []string, bool, bool, bool) (domain.WorkspaceNotificationPreferences, error)
 	SetNotificationSchedule(context.Context, domain.WorkspaceID, domain.UserID, domain.NotificationSchedule) (domain.WorkspaceNotificationPreferences, error)
@@ -408,7 +415,7 @@ type Service interface {
 	Pins(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) ([]domain.Pin, domain.Cursor, bool, error)
 	AddStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
 	RemoveStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
-	Stars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
+	Stars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.StarPage, error)
 	SaveForLater(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.SavedItem, error)
 	SavedItemForMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)
 	SavedItemsForMessages(context.Context, domain.WorkspaceID, domain.UserID, []domain.MessageID) ([]domain.SavedItem, error)
@@ -419,7 +426,7 @@ type Service interface {
 	EditBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID, domain.BookmarkUpdate) (domain.Bookmark, error)
 	Bookmarks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.Bookmark, error)
 	RemoveBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID) error
-	AddReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, string, time.Time) (domain.Reminder, error)
+	AddReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, string, domain.ReminderSchedule) (domain.Reminder, error)
 	CompleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) error
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) error
 	ReminderInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) (domain.Reminder, error)
@@ -449,13 +456,13 @@ type Service interface {
 	Drafts(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.DraftPage, error)
 	DeleteDraft(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
 	SentMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.MessagePage, error)
-	CreateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) (domain.UserGroup, error)
-	UpdateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, string, string, string) (domain.UserGroup, error)
+	CreateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, []domain.ConversationID) (domain.UserGroup, error)
+	UpdateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, string, string, string, []domain.ConversationID) (domain.UserGroup, error)
 	SetUserGroupEnabled(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, bool) (domain.UserGroup, error)
 	ListUserGroups(context.Context, domain.WorkspaceID, domain.UserID, bool, domain.PageRequest) (domain.UserGroupPage, error)
 	UserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) ([]domain.UserID, error)
 	SetUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserID) (domain.UserGroup, error)
-	AddCall(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string, time.Time, []domain.UserID) (domain.Call, error)
+	AddCall(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string, time.Time, []domain.CallParticipant) (domain.Call, error)
 	// The huddle family takes a conversation rather than a call identifier: a
 	// conversation has at most one running huddle, and naming the conversation
 	// is what lets two concurrent starts converge on one.
@@ -467,8 +474,8 @@ type Service interface {
 	GetCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID) (domain.Call, error)
 	UpdateCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, string, string, string) (domain.Call, error)
 	EndCall(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, int64) error
-	AddCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.UserID) error
-	RemoveCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.UserID) error
+	AddCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.CallParticipant) error
+	RemoveCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.CallParticipant) error
 	Search(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageSearchRequest) (domain.MessagePage, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearchRequest) (domain.FilePage, error)
@@ -548,5 +555,10 @@ type Service interface {
 	PresentEntityDetails(context.Context, domain.WorkspaceID, domain.UserID, string, string, bool, string, string) error
 	PresentEntityComments(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, bool, string, bool, string, string) error
 	AcknowledgeEntityCommentAction(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) error
-	events.Source
+	// LatestEventSequence is the journal head a new live stream for this
+	// member opens at. The raw workspace journal (events.Source) is
+	// deliberately not part of this surface: it carries records about
+	// conversations a reader is not in. Readers use ListUserEventsAfter or
+	// ListAppEventsAfter, which filter by audience.
+	LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error)
 }

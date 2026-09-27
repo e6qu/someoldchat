@@ -13,14 +13,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
-	"golang.org/x/net/websocket"
 )
 
 type Handler struct {
-	Source         events.Source
+	// Source is the per-reader projection of the journal. It is deliberately
+	// not the raw workspace journal (events.Source): that carries records about
+	// private channels and direct messages the reader is not in, and a stream
+	// wired to it told every member of the workspace their names and activity.
+	Source         UserEventSource
 	Authenticator  auth.Authenticator
 	RTMConnections RTMConnectionSource
 	Messages       RTMMessageService
@@ -39,6 +43,10 @@ type Handler struct {
 	Reauthorize time.Duration
 	// WriteTimeout bounds one write to one client. Zero selects writeTimeout.
 	WriteTimeout time.Duration
+	// RTMPingPeriod is how often an RTM socket is pinged; a client that
+	// answers neither that ping nor the next is disconnected. Zero selects
+	// rtmPingPeriod; only tests shorten it.
+	RTMPingPeriod time.Duration
 }
 
 func (h Handler) heartbeat() time.Duration {
@@ -104,8 +112,13 @@ type RTMMessageService interface {
 	Post(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, domain.MessageTimestamp, string) (domain.Message, error)
 }
 
-type RTMUserEventSource interface {
-	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) ([]events.Record, error)
+// UserEventSource reads the journal as one user may see it. Both live streams
+// require it; there is no fallback to the unfiltered journal, because a
+// fallback is how the SSE stream came to be wired to one.
+type UserEventSource interface {
+	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) (events.UserEventPage, error)
+	// LatestEventSequence is where a stream with no cursor opens.
+	LatestEventSequence(context.Context, domain.WorkspaceID, domain.UserID) (uint64, error)
 }
 
 const maxRTMMessageBytes = 16 << 10
@@ -118,7 +131,7 @@ var errUnsupportedRTMCommand = errors.New("unsupported RTM command")
 // reader may switch into. A construction-time workspace both decided nothing
 // once the streams followed their credentials and, while it did decide, made a
 // switch unserviceable from the same process.
-func NewHandler(source events.Source, authenticator auth.Authenticator, typing TypingSource) (Handler, error) {
+func NewHandler(source UserEventSource, authenticator auth.Authenticator, typing TypingSource) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("SSE requires an event source")
 	}
@@ -134,7 +147,7 @@ func NewHandler(source events.Source, authenticator auth.Authenticator, typing T
 	return Handler{Source: source, Authenticator: authenticator, Typing: typing}, nil
 }
 
-func NewRTMHandler(source events.Source, connections RTMConnectionSource, messages RTMMessageService, typing TypingSource) (Handler, error) {
+func NewRTMHandler(source UserEventSource, connections RTMConnectionSource, messages RTMMessageService, typing TypingSource) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("RTM requires an event source")
 	}
@@ -155,29 +168,73 @@ func (h Handler) Register(mux *http.ServeMux) {
 }
 
 func (h Handler) RegisterRTM(mux *http.ServeMux) {
-	mux.Handle("/rtm", websocket.Server{
-		Handler: websocket.Handler(h.rtmWebSocket),
-		Handshake: func(*websocket.Config, *http.Request) error {
-			return nil
-		},
-	})
+	mux.HandleFunc("/rtm", h.rtmWebSocket)
+}
+
+// rtmUpgrader accepts every origin. The single-use session ticket is the
+// credential, and official RTM clients are not browsers: a same-origin check
+// only refuses them behind a proxy that rewrites Host.
+var rtmUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+// rtmPingPeriod is how often the server pings an RTM client. The socket had
+// no liveness check at all: a peer that vanished without a TCP FIN held its
+// goroutine and its poll loop until the operating system gave up on the
+// connection.
+const rtmPingPeriod = 10 * time.Second
+
+func (h Handler) rtmPing() time.Duration {
+	if h.RTMPingPeriod > 0 {
+		return h.RTMPingPeriod
+	}
+	return rtmPingPeriod
+}
+
+// rtmReadTimeout allows one missed ping before the peer is declared gone. A
+// pong or any frame from the client extends it.
+func (h Handler) rtmReadTimeout() time.Duration {
+	return 2 * h.rtmPing()
+}
+
+// rtmSocket serialises every data frame through one deadline-bounded writer,
+// so a client that stops reading cannot park the stream inside a write.
+type rtmSocket struct {
+	conn    *websocket.Conn
+	timeout time.Duration
+}
+
+func (s rtmSocket) Send(frame string) error {
+	if err := s.conn.SetWriteDeadline(time.Now().Add(s.timeout)); err != nil {
+		return err
+	}
+	return s.conn.WriteMessage(websocket.TextMessage, []byte(frame))
 }
 
 func (h Handler) events(w http.ResponseWriter, r *http.Request) {
 	h.stream(w, r, auth.ScopeChannelsHistory)
 }
 
-func (h Handler) rtmWebSocket(conn *websocket.Conn) {
-	request := conn.Request()
-	conn.MaxPayloadBytes = maxRTMMessageBytes
+func (h Handler) rtmWebSocket(w http.ResponseWriter, request *http.Request) {
+	upgraded, err := rtmUpgrader.Upgrade(w, request, nil)
+	if err != nil {
+		return
+	}
+	defer upgraded.Close()
+	upgraded.SetReadLimit(maxRTMMessageBytes)
+	if err := upgraded.SetReadDeadline(time.Now().Add(h.rtmReadTimeout())); err != nil {
+		return
+	}
+	upgraded.SetPongHandler(func(string) error {
+		return upgraded.SetReadDeadline(time.Now().Add(h.rtmReadTimeout()))
+	})
+	conn := rtmSocket{conn: upgraded, timeout: h.writeTimeout()}
 	if h.RTMConnections == nil {
-		_ = websocket.Message.Send(conn, `{"type":"error","error":{"code":1,"msg":"invalid_auth"}}`)
+		_ = conn.Send(`{"type":"error","error":{"code":1,"msg":"invalid_auth"}}`)
 		return
 	}
 	connectionID := strings.TrimSpace(request.URL.Query().Get("session_id"))
 	connection, err := h.RTMConnections.ConsumeRTMConnection(request.Context(), connectionID)
 	if err != nil || connection.WorkspaceID == "" {
-		_ = websocket.Message.Send(conn, `{"type":"error","error":{"code":1,"msg":"invalid_auth"}}`)
+		_ = conn.Send(`{"type":"error","error":{"code":1,"msg":"invalid_auth"}}`)
 		return
 	}
 	// The stream follows the connection's workspace, for the same reason the
@@ -185,7 +242,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	// workspace it was issued for, and a construction-time workspace bound
 	// every connection in the process to one of them.
 	workspace := connection.WorkspaceID
-	if err := websocket.Message.Send(conn, `{"type":"hello"}`); err != nil {
+	if err := conn.Send(`{"type":"hello"}`); err != nil {
 		return
 	}
 	// The ticket's cursor is where this stream starts. An explicit
@@ -195,25 +252,33 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	// carries it. Before it did, that client resumed at zero and was sent the
 	// whole workspace journal as live events on every connect.
 	after := connection.Cursor
-	requested, err := lastEventID(request)
+	requested, resumed, err := lastEventID(request)
 	if err != nil {
-		_ = websocket.Message.Send(conn, `{"type":"error","error":{"code":3,"msg":"invalid_event_cursor"}}`)
+		_ = conn.Send(`{"type":"error","error":{"code":3,"msg":"invalid_event_cursor"}}`)
 		return
 	}
-	if requested > 0 {
+	if resumed {
 		after = requested
 	}
 	commands := make(chan string)
 	readerDone := make(chan error, 1)
+	// done wakes the reader when the stream ends for any reason, including
+	// one the request context does not see.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
 		for {
-			var message string
-			if receiveErr := websocket.Message.Receive(conn, &message); receiveErr != nil {
+			_, message, receiveErr := upgraded.ReadMessage()
+			if receiveErr != nil {
 				readerDone <- receiveErr
 				return
 			}
+			// Any frame from the client proves it is alive, not only a pong.
+			_ = upgraded.SetReadDeadline(time.Now().Add(h.rtmReadTimeout()))
 			select {
-			case commands <- message:
+			case commands <- string(message):
+			case <-done:
+				return
 			case <-request.Context().Done():
 				return
 			}
@@ -221,6 +286,8 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	}()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	pingTicker := time.NewTicker(h.rtmPing())
+	defer pingTicker.Stop()
 	announcer := newTypingAnnouncer()
 	// Zero rather than now, so a client that connects mid-sentence sees the
 	// signal on its first pass instead of waiting out a poll interval.
@@ -229,15 +296,9 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	// intentional end of the stream so an official client reconnects instead
 	// of treating the close as a failure. Best effort by design — the peer
 	// that is already gone cannot be told goodbye.
-	sayGoodbye := func() { _ = websocket.Message.Send(conn, `{"type":"goodbye"}`) }
+	sayGoodbye := func() { _ = conn.Send(`{"type":"goodbye"}`) }
 	for {
-		var records []events.Record
-		var listErr error
-		if projected, ok := h.Source.(RTMUserEventSource); ok {
-			records, listErr = projected.ListUserEventsAfter(request.Context(), workspace, connection.UserID, after, 100)
-		} else {
-			records, listErr = h.Source.ListEventsAfter(request.Context(), workspace, after, 100)
-		}
+		page, listErr := h.Source.ListUserEventsAfter(request.Context(), workspace, connection.UserID, after, 100)
 		if listErr != nil {
 			if request.Context().Err() == nil {
 				h.logger().Error("RTM stream ended on an event source failure", "workspace", workspace, "user", connection.UserID, "error", listErr)
@@ -245,8 +306,10 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 			sayGoodbye()
 			return
 		}
-		for _, record := range records {
-			after = record.Sequence
+		// The cursor moves past everything the projection examined, not only
+		// what it returned, so records this reader may not see are read once.
+		after = max(after, page.Through)
+		for _, record := range page.Records {
 			// The durable journal also carries internal worker records and
 			// records written before the typed payload contract; neither is a
 			// deliverable event, and neither may end the stream.
@@ -275,7 +338,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 					h.logger().Warn("RTM skipped a record it could not encode", "workspace", workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", encodeErr)
 					continue
 				}
-				if websocket.Message.Send(conn, payload) != nil {
+				if conn.Send(payload) != nil {
 					return
 				}
 			}
@@ -297,7 +360,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 					if frameErr != nil {
 						continue
 					}
-					if websocket.Message.Send(conn, string(frame)) != nil {
+					if conn.Send(string(frame)) != nil {
 						return
 					}
 				}
@@ -314,17 +377,21 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 			if err := handleRTMCommand(request.Context(), conn, connection, h.Messages, h.Typing, message); err != nil {
 				return
 			}
+		case <-pingTicker.C:
+			if err := upgraded.WriteControl(websocket.PingMessage, nil, time.Now().Add(h.writeTimeout())); err != nil {
+				return
+			}
 		case <-ticker.C:
 		}
 	}
 }
 
-func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection domain.RTMConnection, messages RTMMessageService, typing TypingSource, raw string) error {
+func handleRTMCommand(ctx context.Context, conn rtmSocket, connection domain.RTMConnection, messages RTMMessageService, typing TypingSource, raw string) error {
 	var command struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal([]byte(raw), &command); err != nil || strings.TrimSpace(command.Type) == "" {
-		return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
+		return conn.Send(`{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
 	}
 	switch command.Type {
 	case "typing":
@@ -348,9 +415,9 @@ func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection doma
 	case "ping":
 		payload, err := encodeRTMPong(raw)
 		if err != nil {
-			return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
+			return conn.Send(`{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
 		}
-		return websocket.Message.Send(conn, string(payload))
+		return conn.Send(string(payload))
 	case "message":
 		payload, err := encodeRTMMessage(ctx, connection, messages, raw)
 		if err != nil {
@@ -362,13 +429,13 @@ func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection doma
 				return sendRTMMessageError(conn, commandID, message)
 			}
 			if errors.Is(err, errRTMMessageFailed) {
-				return websocket.Message.Send(conn, `{"ok":false,"error":{"code":2,"msg":"message_failed"}}`)
+				return conn.Send(`{"ok":false,"error":{"code":2,"msg":"message_failed"}}`)
 			}
-			return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
+			return conn.Send(`{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
 		}
-		return websocket.Message.Send(conn, string(payload))
+		return conn.Send(string(payload))
 	default:
-		return websocket.Message.Send(conn, `{"type":"error","error":{"code":5,"msg":"unsupported_message"}}`)
+		return conn.Send(`{"type":"error","error":{"code":5,"msg":"unsupported_message"}}`)
 	}
 }
 
@@ -417,7 +484,7 @@ func rtmCommandID(raw string) int64 {
 	return command.ID
 }
 
-func sendRTMMessageError(conn *websocket.Conn, id int64, message string) error {
+func sendRTMMessageError(conn rtmSocket, id int64, message string) error {
 	payload, err := json.Marshal(map[string]any{
 		"ok":       false,
 		"reply_to": id,
@@ -429,7 +496,7 @@ func sendRTMMessageError(conn *websocket.Conn, id int64, message string) error {
 	if err != nil {
 		return err
 	}
-	return websocket.Message.Send(conn, string(payload))
+	return conn.Send(string(payload))
 }
 
 func encodeRTMPong(message string) ([]byte, error) {
@@ -490,10 +557,22 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	// construction-time workspace bound every reader to one, which is what
 	// made a workspace switch impossible to serve from the same process.
 	workspace := principal.WorkspaceID
-	after, err := lastEventID(r)
+	after, resumed, err := lastEventID(r)
 	if err != nil {
 		http.Error(w, "invalid event cursor", http.StatusBadRequest)
 		return
+	}
+	if !resumed {
+		// A reader with no cursor is opening a stream, not resuming one: it
+		// starts at the journal head, as an RTM ticket does, so it carries what
+		// happens next. It used to start at sequence zero and replay the
+		// member's whole visible history as if it were live.
+		after, err = h.Source.LatestEventSequence(r.Context(), workspace, principal.UserID)
+		if err != nil {
+			h.logger().Error("event stream could not read the journal head", "workspace", workspace, "user", principal.UserID, "error", err)
+			http.Error(w, "streaming is unavailable", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -527,7 +606,7 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	announcer := newTypingAnnouncer()
 	unresolved := 0
 	for {
-		records, err := h.Source.ListEventsAfter(r.Context(), workspace, after, 100)
+		page, err := h.Source.ListUserEventsAfter(r.Context(), workspace, principal.UserID, after, 100)
 		if err != nil {
 			if r.Context().Err() == nil {
 				h.logger().Error("event stream ended on an event source failure", "workspace", workspace, "user", principal.UserID, "error", err)
@@ -535,8 +614,9 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 			return
 		}
 		wrote := false
-		for _, record := range records {
-			after = record.Sequence
+		// Records the projection withheld are passed, not re-read: see RTM.
+		after = max(after, page.Through)
+		for _, record := range page.Records {
 			delivered, decodeErr := events.Deliverable(record.Event)
 			if decodeErr != nil {
 				// One undeliverable record must not end a durable stream: the
@@ -674,15 +754,18 @@ func writeUnsequencedEvent(w io.Writer, topic, encoded string) error {
 	return err
 }
 
-func lastEventID(r *http.Request) (uint64, error) {
+// lastEventID reads the cursor a reconnecting client resumes from, and reports
+// whether it named one at all.
+func lastEventID(r *http.Request) (uint64, bool, error) {
 	value := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
 	if value == "" {
 		value = strings.TrimSpace(r.URL.Query().Get("last_event_id"))
 	}
 	if value == "" {
-		return 0, nil
+		return 0, false, nil
 	}
-	return strconv.ParseUint(value, 10, 64)
+	after, err := strconv.ParseUint(value, 10, 64)
+	return after, true, err
 }
 
 // armWrite bounds the next write to this client. A ResponseWriter that cannot

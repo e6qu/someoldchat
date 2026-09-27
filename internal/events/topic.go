@@ -156,6 +156,8 @@ var topicRules = []topicRule{
 		note: "the pinned message schema is exactly this variant (deleted_ts, subtype, hidden, previous_message), but previous_message needs the deleted text"},
 	{topic: "message.unfurled", slack: mapped("message", everySurface),
 		note: "pinned topic; the subtype and the attachment shape are not pinned"},
+	{topic: "link.shared", slack: translated("link_shared", appSurfaces, projectedLinkShared),
+		note: "pinned topic link.shared (x-scopes-required links:read); the record names only the message, and service.PrepareAppEvent projects the link_shared body per app, keeping the links the app's manifest unfurl_domains claim, so an unprojected record is withheld. An app event: RTM does not carry it"},
 	{topic: EphemeralMessageTopic, recipient: true, slack: mapped("message", SurfaceRTM),
 		note: "addressed to one user and carries that user's text, so only a transport with a recipient may carry it; the ephemeral subtype is not pinned"},
 	{topic: "message.scheduled",
@@ -290,6 +292,8 @@ var topicRules = []topicRule{
 		note: "current Slack reference; delivery authorizes against the channel recorded before the final share is removed"},
 	{topic: "file.public_shared", slack: translated("file_public", everySurface, filePublic),
 		note: "pinned topic; like Slack's other file events the inner carries identifiers only ({file_id, user_id, file{id}}), and a consumer hydrates through files.info"},
+	{topic: "file.deleted", slack: translated("file_deleted", everySurface, fileDeleted),
+		note: "pinned topic and current Slack reference; the inner carries the identifier only ({file_id, event_ts}) because the file is gone and nothing else about it is readable any more"},
 	{topic: "file.public_revoked",
 		note: "not pinned: file_unshared is a different fact"},
 	{topic: "file.description_changed",
@@ -306,7 +310,16 @@ var topicRules = []topicRule{
 		note: "not settled, as remote_file.created"},
 
 	// ---- product concepts with no Slack event ------------------------------
-	{topic: "app.requested", note: "not pinned: app administration has no Slack event; scope_granted and scope_denied are a different fact"},
+	// Slack's current catalog does name this fact (specs/upstream/slack-reference/current-events.txt):
+	// app_requested reaches an organization's admin app, under admin.apps:read,
+	// with an app_request object — the app's directory profile, the requesting
+	// user, the team, every requested scope with its description, and the
+	// requester's message. The durable payload carries two identifiers, and no
+	// product path creates a request yet (only an administrator's decision
+	// writes an approval row), so the event is withheld rather than published
+	// without the object it is defined by.
+	{topic: "app.requested", slack: mapped("app_requested", appSurfaces),
+		note: "current Slack reference; the app_request object is not modelled, so the mapping is withheld"},
 	{topic: "app.approved", note: "not pinned: app administration has no Slack event"},
 	{topic: "app.restricted", note: "not pinned: app administration has no Slack event"},
 	{topic: "app.permissions_requested", note: "not pinned: app administration has no Slack event"},
@@ -374,13 +387,20 @@ var topicRules = []topicRule{
 	{topic: "list.access.set", note: "not pinned: lists postdate the snapshot"},
 	{topic: "list.access.deleted", note: "not pinned: lists postdate the snapshot"},
 	{topic: "list.download.started", note: "not pinned: lists postdate the snapshot"},
-	{topic: "dialog.opened", note: "an interaction payload, not an event; a different transport contract"},
+	{topic: "dialog.opened", recipient: true, note: "an interaction payload, not an event; a different transport contract; addressed to the member the dialog was opened for"},
+	{topic: "dialog.closed", recipient: true, note: "an interaction payload, not an event; addressed to the member who submitted or cancelled the dialog"},
+	{topic: "dialog.updated", recipient: true, note: "an interaction payload, not an event; the app answered a dialog submission with errors, addressed to the member who submitted it"},
 	{topic: "app.home_opened", slack: translated("app_home_opened", appSurfaces, appHomeOpened),
 		note: "current first-party app_home_opened reference and @slack/types AppHomeOpenedEvent; app-targeted because opening one app must never fan out to another installed app"},
-	{topic: "view.opened", note: "an interaction payload, not an event; app_home_opened is a different fact"},
-	{topic: "view.published", note: "an interaction payload, not an event"},
-	{topic: "view.pushed", note: "an interaction payload, not an event"},
-	{topic: "view.updated", note: "an interaction payload, not an event"},
+	// A view belongs to one member (its user_id): the browser that shows it
+	// re-renders on these records, and no other member may learn that it
+	// changed, so every view topic is addressed to that member alone.
+	{topic: "view.opened", recipient: true, note: "an interaction payload, not an event; app_home_opened is a different fact"},
+	{topic: "view.published", recipient: true, note: "an interaction payload, not an event"},
+	{topic: "view.pushed", recipient: true, note: "an interaction payload, not an event"},
+	{topic: "view.updated", recipient: true, note: "an interaction payload, not an event"},
+	{topic: "view.submitted", recipient: true, note: "an interaction payload, not an event"},
+	{topic: "view.closed", recipient: true, note: "an interaction payload, not an event"},
 	{topic: "app.tokens_revoked", slack: automatic("tokens_revoked", appSurfaces, tokensRevoked),
 		note: "current tokens_revoked reference: dispatched to the app whose token was withdrawn, no subscription or scope required. The record is minted INSIDE the store's revocation mutation — revocation reaches the store directly on the far side of the auth seam, so an event emitted by the service would fire in one composition and not the other; TokensRevokedEvent is the single constructor both repositories share"},
 	{topic: "app.uninstalled", slack: automatic("app_uninstalled", appSurfaces, appLifecycleEvent("app_uninstalled")),

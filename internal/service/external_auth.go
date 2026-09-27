@@ -144,7 +144,7 @@ func (m Messages) CompleteExternalAuthConnection(ctx context.Context, workspaceI
 	if err != nil {
 		return err
 	}
-	id, err := domain.PublicID("Et")
+	id, err := domain.SlackID("Et")
 	if err != nil {
 		return err
 	}

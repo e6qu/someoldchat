@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 )
 
 // Payload is the body of a durable event record.
@@ -458,39 +459,19 @@ func (d Delivered) Encode() (string, error) {
 // to the builders that consume it, so every producer — the service and the
 // status schedulers — snapshots the identical shape.
 //
-// Every field is one the workspace directory already shows; the e-mail
-// address is deliberately absent, because the journal is read by every
-// member's event stream and users:read.email is a separate grant.
+// The user object is users.info's own (slackobject.User), so a bot is a bot
+// and every field a client reads from users.info is present. It is rendered
+// with an empty origin: the journal stores origin-relative image paths, and
+// the delivery projection resolves them against the deployment's public URL
+// (slackobject.AbsoluteUser). The e-mail address is deliberately absent,
+// because the journal is read by every member's event stream and
+// users:read.email is a separate grant.
 func UserChangePayload(topic string, user domain.User, deleted, statusChanged bool, at time.Time, extra ...Field) (Payload, error) {
-	profile := map[string]any{
-		"real_name":    user.RealName,
-		"display_name": user.Profile.DisplayName,
-		"status_text":  user.Profile.StatusText,
-		"status_emoji": user.Profile.StatusEmoji,
+	user.Deleted = deleted
+	if !at.IsZero() {
+		user.Updated = at
 	}
-	if !user.Profile.StatusExpiration.IsZero() {
-		profile["status_expiration"] = user.Profile.StatusExpiration.Unix()
-	}
-	for name, value := range map[string]string{
-		"image_24": user.Profile.Image24, "image_32": user.Profile.Image32,
-		"image_48": user.Profile.Image48, "image_72": user.Profile.Image72,
-		"image_192": user.Profile.Image192, "image_512": user.Profile.Image512,
-		"image_1024": user.Profile.Image1024,
-	} {
-		if value != "" {
-			profile[name] = value
-		}
-	}
-	encoded, err := json.Marshal(map[string]any{
-		"id":        user.ID,
-		"team_id":   user.WorkspaceID,
-		"name":      user.Name,
-		"real_name": user.RealName,
-		"deleted":   deleted,
-		"is_bot":    false,
-		"updated":   at.Unix(),
-		"profile":   profile,
-	})
+	encoded, err := json.Marshal(slackobject.User("", user, false))
 	if err != nil {
 		return Payload{}, err
 	}

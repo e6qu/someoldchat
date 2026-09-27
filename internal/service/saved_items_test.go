@@ -42,12 +42,12 @@ func TestSavedItemsArePrivateIdempotentAndRetainNoInaccessibleContent(t *testing
 	if second.ID != first.ID {
 		t.Fatalf("idempotent save created %q after %q", second.ID, first.ID)
 	}
-	stars, _, _, err := messages.Stars(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+	starred, err := messages.Stars(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stars) != 0 {
-		t.Fatalf("current Later save leaked into deprecated stars.* state: %+v", stars)
+	if stars := starred.Stars; len(stars) != 0 {
+		t.Fatalf("current Later save leaked into deprecated stars.* state: %+v", starred)
 	}
 	if _, err := messages.SavedItemForMessage(ctx, "T1", "U2", message.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("another member read the saved state: %v", err)

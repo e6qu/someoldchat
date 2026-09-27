@@ -13,14 +13,14 @@ import (
 )
 
 const appOptionsScript = `<script>(function(){
-function optionNode(value){var option=document.createElement('option');option.value=value.value;option.textContent=value.description?value.text+' — '+value.description:value.text;return option}
+function optionNode(value){var option=document.createElement('option');option.value=value.choice||value.value;option.textContent=value.description?value.text+' — '+value.description:value.text;return option}
 async function load(control){
  var input=control.querySelector('[data-options-query]'),button=control.querySelector('[data-options-load]'),results=control.querySelector('[data-options-results]'),choose=control.querySelector('[data-options-choose]'),status=control.querySelector('[data-options-status]'),form=control.closest('form');
  if(!input||!button||!results||!status||!form)return;
  var minimum=parseInt(control.getAttribute('data-min-query')||'3',10),value=input.value.trim();
  if(value.length<minimum){status.textContent='Type at least '+minimum+' characters.';input.focus();return}
  var csrf=form.querySelector('input[name="_csrf"]'),params=new URLSearchParams();
- params.set('_csrf',csrf?csrf.value:'');params.set('app_id',control.getAttribute('data-app-id')||'');params.set('message_id',control.getAttribute('data-message-id')||'');params.set('view_id',control.getAttribute('data-view-id')||'');params.set('block_id',control.getAttribute('data-block-id')||'');params.set('action_id',control.getAttribute('data-action-id')||'');params.set('channel',control.getAttribute('data-channel')||'');params.set('query',value);
+ params.set('_csrf',csrf?csrf.value:'');params.set('app_id',control.getAttribute('data-app-id')||'');params.set('message_id',control.getAttribute('data-message-id')||'');params.set('view_id',control.getAttribute('data-view-id')||'');params.set('dialog_id',control.getAttribute('data-dialog-id')||'');params.set('block_id',control.getAttribute('data-block-id')||'');params.set('action_id',control.getAttribute('data-action-id')||'');params.set('channel',control.getAttribute('data-channel')||'');params.set('query',value);
  button.disabled=true;results.disabled=true;if(choose)choose.disabled=true;status.textContent='Loading options…';
  try{
   var response=await fetch('/app/options',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body:params.toString()});
@@ -36,7 +36,7 @@ document.addEventListener('keydown',function(event){if(event.key==='Enter'&&even
 })();</script>`
 
 func (h Handler) appOptions(w http.ResponseWriter, r *http.Request) {
-	secureHeaders(w, workspaceContentSecurityPolicy)
+	secureHeaders(w, workspaceContentSecurityPolicy())
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
 		h.writeOptionsError(w, http.StatusUnauthorized, "Sign in again to load app options.")
@@ -52,7 +52,8 @@ func (h Handler) appOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	query := domain.AppOptionQuery{
 		AppID: domain.AppID(strings.TrimSpace(r.Form.Get("app_id"))), MessageID: domain.MessageID(strings.TrimSpace(r.Form.Get("message_id"))),
-		ViewID: domain.ViewID(strings.TrimSpace(r.Form.Get("view_id"))), BlockID: strings.TrimSpace(r.Form.Get("block_id")),
+		ViewID: domain.ViewID(strings.TrimSpace(r.Form.Get("view_id"))), DialogID: domain.DialogID(strings.TrimSpace(r.Form.Get("dialog_id"))),
+		BlockID:  strings.TrimSpace(r.Form.Get("block_id")),
 		ActionID: strings.TrimSpace(r.Form.Get("action_id")), Value: r.Form.Get("query"),
 	}
 	options, err := h.Messages.LoadAppOptions(
@@ -77,14 +78,21 @@ func (h Handler) appOptions(w http.ResponseWriter, r *http.Request) {
 		Value       string `json:"value"`
 		Description string `json:"description,omitempty"`
 		Group       string `json:"group,omitempty"`
+		// Choice is the <option value> for an option the service vouched
+		// for: it carries the text and the service's token so the view
+		// submission or message action can report the option's text as
+		// Slack does.
+		Choice string `json:"choice,omitempty"`
 	}
 	response := struct {
 		Options []option `json:"options"`
 	}{Options: make([]option, 0, len(options))}
 	for _, value := range options {
-		response.Options = append(response.Options, option{
-			Text: value.Text, Value: value.Value, Description: value.Description, Group: value.Group,
-		})
+		entry := option{Text: value.Text, Value: value.Value, Description: value.Description, Group: value.Group}
+		if value.Token != "" {
+			entry.Choice = encodeExternalChoice(externalChoice{Value: value.Value, Text: value.Text, Token: value.Token})
+		}
+		response.Options = append(response.Options, entry)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(response)

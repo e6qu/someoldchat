@@ -357,6 +357,17 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureWorkflowID)
 	case reflect.TypeOf(domain.AppID("")):
 		return reflect.ValueOf(fixtureAppID)
+	case reflect.TypeOf(domain.DialogID("")):
+		// The dialog operations act on the caller's own dialog, so the deactivated
+		// tier is handed the one it opened before it was deactivated. Handed the
+		// holder's, it is refused by ownership whether or not anything checks its
+		// standing, and the guard-mutation gate could delete the workspace check —
+		// whose one distinct job is refusing a deactivated account its own dialog —
+		// with this suite still green.
+		if caller == "U-gone" {
+			return reflect.ValueOf(fixtureDeactivatedDialogID)
+		}
+		return reflect.ValueOf(fixtureDialogID)
 	case reflect.TypeOf(domain.SharedInviteID("")):
 		// The operation decides which invitation it needs: approving and
 		// denying act on a pending one, revoking on an approved one. Handing
@@ -404,12 +415,25 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 	case reflect.TypeOf(domain.MessageID("")):
 		return reflect.ValueOf(fixtureMessageID)
 	case reflect.TypeOf(domain.MessageTimestamp("")):
-		if chosen == fillingWithoutTimestamps {
+		// AddStar is asked to star the channel itself — stars.add given only a
+		// channel — because that form's only authorization is its own
+		// conversation check, which a deactivated member of the channel must be
+		// refused by; the message form is authorized by messageForTimestamp, which
+		// every other message operation already drives. It also frees the one
+		// message for RemoveStar: the holder's star on it no longer makes AddStar
+		// answer "already exists".
+		if chosen == fillingWithoutTimestamps || method == "AddStar" {
 			return reflect.Zero(argument)
 		}
 		return reflect.ValueOf(fixtureMessageTimestamp)
 	case reflect.TypeOf(domain.PageRequest{}):
 		return reflect.ValueOf(domain.PageRequest{Limit: 10})
+	case reflect.TypeOf(domain.HistoryRequest{}):
+		return reflect.ValueOf(domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
+	case reflect.TypeOf(domain.ThreadRequest{}):
+		return reflect.ValueOf(domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
+	case reflect.TypeOf([]domain.MessageID(nil)):
+		return reflect.ValueOf([]domain.MessageID{fixtureMessageID})
 	case reflect.TypeOf(domain.ListColumnType("")):
 		// A real column type, so AddListColumn passes schema validation and the
 		// holder's write grant carries it to success.
@@ -717,7 +741,7 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		VerificationTokenCiphertext: "fixture-verification-ciphertext",
 		ManifestVersion:             1, Distribution: "private", CreatedAt: at, UpdatedAt: at,
 	}, domain.AppManifestRevision{
-		AppID: fixtureAppID, Version: 1, CreatedBy: "U-member", Manifest: `{"display_information":{"name":"Fixture app"}}`, CreatedAt: at,
+		AppID: fixtureAppID, Version: 1, CreatedBy: "U-member", Manifest: `{"display_information":{"name":"Fixture app"},"features":{"app_home":{"messages_tab_enabled":true}}}`, CreatedAt: at,
 	}, domain.OAuthClient{
 		ID: "fixture-client", AppID: fixtureAppID, SecretHash: "fixture-client-secret-hash",
 	}))
@@ -728,6 +752,23 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	seed("app installation", repository.CreateAppInstallation(ctx, domain.AppInstallation{
 		AppID: fixtureAppID, WorkspaceID: "T1", Enabled: true, CreatedAt: at,
 	}))
+	// The app has a bot and a Messages tab, so opening the app's messages has
+	// a conversation to open; and the holder has a dialog the app opened, so
+	// the dialog operations have one to find.
+	seed("app bot user", repository.SeedUser(domain.User{ID: "U-fixture-bot", WorkspaceID: "T1", Name: "fixture-bot"}))
+	seed("app bot", repository.CreateBot(ctx, domain.Bot{ID: "F-bot", WorkspaceID: "T1", AppID: fixtureAppID, UserID: "U-fixture-bot", Name: "fixture-bot", UpdatedAt: at}))
+	seed("dialog", repository.CreateDialog(ctx, domain.Dialog{
+		ID: fixtureDialogID, WorkspaceID: "T1", UserID: "U-owner", AppID: fixtureAppID, CreatedAt: at,
+		Payload: `{"callback_id":"fixture","title":"Fixture","elements":[{"type":"text","name":"answer","label":"Answer"}]}`,
+	}, event("E-dialog", "dialog.opened")))
+	// The deactivated tier's own dialog, opened before it was deactivated.
+	// Deactivation does not close it, so ownership alone would admit its owner;
+	// the workspace check is what refuses a deactivated account the dialog
+	// operations, and this is what lets the matrix see that check.
+	seed("deactivated dialog", repository.CreateDialog(ctx, domain.Dialog{
+		ID: fixtureDeactivatedDialogID, WorkspaceID: "T1", UserID: "U-gone", AppID: fixtureAppID, CreatedAt: at,
+		Payload: `{"callback_id":"fixture","title":"Fixture","elements":[{"type":"text","name":"answer","label":"Answer"}]}`,
+	}, event("E-deactivated-dialog", "dialog.opened")))
 	// A live huddle in the seeded conversation, started by the holder so the
 	// operations that act on "the huddle I am in" have one to find.
 	if _, _, err := repository.StartHuddle(ctx, domain.Call{
@@ -821,14 +862,21 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	// RemoveReaction on the holder's name answers a caller who has that reaction
 	// — the holder, who succeeds — differently from a caller below conversation
 	// membership, who is refused at authorizeConversation, while AddReaction with
-	// a name the holder has not used still succeeds. A pin and a star are keyed by
-	// (message, user) with no name, so the single seeded message cannot carry a
+	// a name the holder has not used still succeeds. A pin is keyed by (message,
+	// user) with no name, so the single seeded message cannot carry a
 	// holder-owned pin for RemovePin to find without making AddPin answer "already
 	// exists" for the same holder — the probe hands both the one timestamp — so
-	// RemovePin and RemoveStar stay a documented residue rather than being driven.
+	// RemovePin stays a documented residue rather than being driven.
 	seed("holder reaction", repository.AddReaction(ctx, domain.Reaction{
 		Message: fixtureMessageID, Name: fixtureHolderReaction, UserID: "U-owner", CreatedAt: at,
 	}, event("E-holder-reaction", "reaction.added")))
+	// A star is keyed the same way, but AddStar is driven in its channel form
+	// (see fixtureArgument), so the holder can own a star on the message for
+	// RemoveStar to remove without AddStar colliding with it.
+	seed("holder star", repository.AddStar(ctx, domain.Star{
+		Message:      domain.Message{ID: fixtureMessageID, WorkspaceID: "T1", Conversation: "C1"},
+		Conversation: "C1", UserID: "U-owner", CreatedAt: at,
+	}, event("E-holder-star", "star.added")))
 	if _, _, err := repository.CreateSavedItem(ctx, domain.SavedItem{
 		ID: fixtureSavedItemID, WorkspaceID: "T1", UserID: "U-member", MessageID: fixtureMessageID,
 		Conversation: "C1", State: domain.SavedItemInProgress, CreatedAt: at, UpdatedAt: at,
@@ -930,7 +978,10 @@ const (
 	fixtureFileID          domain.FileID          = "F-file"
 	fixtureWorkflowID      domain.WorkflowID      = "F-workflow"
 	fixtureAppID           domain.AppID           = "F-app"
-	fixtureHuddleID        domain.CallID          = "F-huddle"
+	fixtureDialogID        domain.DialogID        = "F-dialog"
+	// fixtureDeactivatedDialogID is the deactivated tier's own dialog.
+	fixtureDeactivatedDialogID domain.DialogID = "F-deactivated-dialog"
+	fixtureHuddleID            domain.CallID   = "F-huddle"
 
 	fixtureSharedInviteID    domain.SharedInviteID      = "F-invite"
 	fixtureApprovedInviteID  domain.SharedInviteID      = "F-approved-invite"

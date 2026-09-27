@@ -34,7 +34,7 @@ func TestMessageStepPostsAndCarriesTheRunOn(t *testing.T) {
 	if run.Status != domain.WorkflowRunCompleted {
 		t.Fatalf("run status = %q, want completed — a built-in step has nothing left to wait for", run.Status)
 	}
-	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	page, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestConsecutiveMessageStepsBothRun(t *testing.T) {
 	if run.Status != domain.WorkflowRunCompleted {
 		t.Fatalf("run status = %q, want completed once both built-in steps ran", run.Status)
 	}
-	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	page, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestMessageStepQuotesRunInputs(t *testing.T) {
 	if _, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{"service":"checkout"}`, "interpolated"); err != nil {
 		t.Fatal(err)
 	}
-	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	page, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestMessageStepKeepsAnUnresolvableReferenceVisible(t *testing.T) {
 	if _, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "unresolved"); err != nil {
 		t.Fatal(err)
 	}
-	page, err := repository.ListMessages(ctx, "C1", domain.PageRequest{Limit: 20})
+	page, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
 	if err != nil {
 		t.Fatal(err)
 	}

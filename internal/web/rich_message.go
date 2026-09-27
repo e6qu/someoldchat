@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
@@ -71,6 +72,30 @@ type messageActionView struct {
 	Dispatch           bool
 	AccessibilityLabel string
 	Tone               string
+	// Style is a button's Block Kit style, "primary" or "danger".
+	Style string
+	// MinLength and MaxLength are a text input's min_length/max_length.
+	MinLength int
+	MaxLength int
+	// MinValue, MaxValue and Step are a number input's min_value, max_value
+	// and is_decimal_allowed ("any" for decimals, "1" otherwise).
+	MinValue string
+	MaxValue string
+	Step     string
+	// DecimalAllowed is a number input's is_decimal_allowed.
+	DecimalAllowed bool
+	// DateTimeUnix is a datetimepicker value in Unix seconds. Value then
+	// holds the same instant in UTC for a client without script; the
+	// browser rewrites it in the viewer's own time zone.
+	DateTimeUnix string
+	// DispatchOn lists when a dispatching input sends block_actions:
+	// "enter" (on_enter_pressed), "character" (on_character_entered), or
+	// "change" for a control with no text to type.
+	DispatchOn string
+	// FileTypes and MaxFiles are a file_input's filetypes (extensions,
+	// lower case, no dot; empty accepts any file) and max_files (1-10).
+	FileTypes []string
+	MaxFiles  int
 }
 
 type messageActionOptionView struct {
@@ -1101,6 +1126,10 @@ func actionElementList(value any, blockID string) []messageActionView {
 			if action.Text == "" {
 				action.Text = "Action"
 			}
+			// Block Kit's two button styles; anything else is the default.
+			if style := strings.TrimSpace(stringValue(element["style"])); style == "primary" || style == "danger" {
+				action.Style = style
+			}
 		case "static_select", "overflow":
 			action.Control = "select"
 			action.Text = textObjectValue(element["placeholder"])
@@ -1158,7 +1187,10 @@ func actionElementList(value any, blockID string) []messageActionView {
 		case "datetimepicker":
 			action.Control = "datetime"
 			action.Text = textObjectValue(element["placeholder"])
-			action.Value = strings.TrimSpace(stringValue(element["initial_date_time"]))
+			// initial_date_time is a Unix timestamp in seconds, a JSON number.
+			if seconds, ok := element["initial_date_time"].(float64); ok {
+				action.setDateTime(strconv.FormatInt(int64(seconds), 10))
+			}
 		case "plain_text_input":
 			action.Control = "text"
 			action.Text = textObjectValue(element["placeholder"])
@@ -1167,18 +1199,50 @@ func actionElementList(value any, blockID string) []messageActionView {
 			if action.Multiline {
 				action.Control = "textarea"
 			}
+			action.MinLength = boundedInt(element["min_length"], 0, 3000)
+			action.MaxLength = boundedInt(element["max_length"], 0, 3000)
+			action.DispatchOn = textDispatchTriggers(element)
+		case "rich_text_input":
+			action.Control = "richtext"
+			action.Text = textObjectValue(element["placeholder"])
+			action.Value = richTextPlain(element["initial_value"])
+			action.DispatchOn = textDispatchTriggers(element)
+		case "file_input":
+			// A modal's file_input: the member attaches files that stay
+			// private to them, and the app receives them with the submission.
+			action.Control = "file"
+			action.Text = textObjectValue(element["placeholder"])
+			action.MaxFiles = boundedInt(element["max_files"], 1, 10)
+			if action.MaxFiles == 0 {
+				action.MaxFiles = 10
+			}
+			for _, fileType := range stringList(element["filetypes"]) {
+				if fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), "."); fileType != "" {
+					action.FileTypes = append(action.FileTypes, fileType)
+				}
+			}
 		case "email_text_input":
 			action.Control = "email"
 			action.Text = textObjectValue(element["placeholder"])
 			action.Value = stringValue(element["initial_value"])
+			action.DispatchOn = textDispatchTriggers(element)
 		case "url_text_input":
 			action.Control = "url"
 			action.Text = textObjectValue(element["placeholder"])
 			action.Value = stringValue(element["initial_value"])
+			action.DispatchOn = textDispatchTriggers(element)
 		case "number_input":
 			action.Control = "number"
 			action.Text = textObjectValue(element["placeholder"])
 			action.Value = stringValue(element["initial_value"])
+			action.DecimalAllowed, _ = element["is_decimal_allowed"].(bool)
+			action.Step = "1"
+			if action.DecimalAllowed {
+				action.Step = "any"
+			}
+			action.MinValue = strings.TrimSpace(stringValue(element["min_value"]))
+			action.MaxValue = strings.TrimSpace(stringValue(element["max_value"]))
+			action.DispatchOn = textDispatchTriggers(element)
 		case "users_select", "conversations_select", "channels_select":
 			action.Control = "select"
 			action.Text = textObjectValue(element["placeholder"])
@@ -1231,6 +1295,93 @@ func actionElementList(value any, blockID string) []messageActionView {
 		result = append(result, action)
 	}
 	return result
+}
+
+// setDateTime records a datetimepicker value given in Unix seconds.
+func (action *messageActionView) setDateTime(unix string) {
+	seconds, err := strconv.ParseInt(strings.TrimSpace(unix), 10, 64)
+	if err != nil {
+		action.Value, action.DateTimeUnix = unix, ""
+		return
+	}
+	action.DateTimeUnix = strconv.FormatInt(seconds, 10)
+	action.Value = time.Unix(seconds, 0).UTC().Format(dateTimeLocalLayout)
+}
+
+// dateTimeLocalLayout is the value format of an <input type=datetime-local>.
+const dateTimeLocalLayout = "2006-01-02T15:04"
+
+func boundedInt(value any, minimum, maximum int) int {
+	number, ok := value.(float64)
+	if !ok || number < float64(minimum) || number > float64(maximum) {
+		return 0
+	}
+	return int(number)
+}
+
+// textDispatchTriggers reads dispatch_action_config.trigger_actions_on. Slack
+// dispatches a text input on Enter unless the app asks otherwise.
+func textDispatchTriggers(element map[string]any) string {
+	config, _ := element["dispatch_action_config"].(map[string]any)
+	triggers := stringList(config["trigger_actions_on"])
+	if len(triggers) == 0 {
+		return "enter"
+	}
+	var result []string
+	for _, trigger := range triggers {
+		switch trigger {
+		case "on_enter_pressed":
+			result = append(result, "enter")
+		case "on_character_entered":
+			result = append(result, "character")
+		}
+	}
+	if len(result) == 0 {
+		return "enter"
+	}
+	return strings.Join(result, " ")
+}
+
+// richTextPlain flattens a rich_text object into the text a plain editor can
+// show: every text, link, emoji, and mention leaf in order, sections joined by
+// newlines.
+func richTextPlain(value any) string {
+	var builder strings.Builder
+	var walk func(any)
+	walk = func(node any) {
+		switch node := node.(type) {
+		case []any:
+			for _, child := range node {
+				walk(child)
+			}
+		case map[string]any:
+			switch stringValue(node["type"]) {
+			case "text":
+				builder.WriteString(stringValue(node["text"]))
+			case "link":
+				if text := stringValue(node["text"]); text != "" {
+					builder.WriteString(text)
+				} else {
+					builder.WriteString(stringValue(node["url"]))
+				}
+			case "emoji":
+				builder.WriteString(":" + stringValue(node["name"]) + ":")
+			case "user":
+				builder.WriteString("<@" + stringValue(node["user_id"]) + ">")
+			case "channel":
+				builder.WriteString("<#" + stringValue(node["channel_id"]) + ">")
+			case "rich_text_section", "rich_text_preformatted", "rich_text_quote":
+				if builder.Len() != 0 && !strings.HasSuffix(builder.String(), "\n") {
+					builder.WriteString("\n")
+				}
+				walk(node["elements"])
+			default:
+				walk(node["elements"])
+			}
+		}
+	}
+	walk(value)
+	return builder.String()
 }
 
 func actionElementOptions(element map[string]any) []messageActionOptionView {

@@ -141,11 +141,317 @@ func (x *DialogMutationResponse) GetOk() bool {
 	return false
 }
 
+type Dialog struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId       string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId            string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId             string                 `protobuf:"bytes,4,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Payload           string                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
+	Errors            map[string]string      `protobuf:"bytes,6,rep,name=errors,proto3" json:"errors,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	CreatedAtUnixNano int64                  `protobuf:"varint,7,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *Dialog) Reset() {
+	*x = Dialog{}
+	mi := &file_sameoldchat_chat_v1_dialogs_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Dialog) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Dialog) ProtoMessage() {}
+
+func (x *Dialog) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_dialogs_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Dialog.ProtoReflect.Descriptor instead.
+func (*Dialog) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_dialogs_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Dialog) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Dialog) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *Dialog) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *Dialog) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *Dialog) GetPayload() string {
+	if x != nil {
+		return x.Payload
+	}
+	return ""
+}
+
+func (x *Dialog) GetErrors() map[string]string {
+	if x != nil {
+		return x.Errors
+	}
+	return nil
+}
+
+func (x *Dialog) GetCreatedAtUnixNano() int64 {
+	if x != nil {
+		return x.CreatedAtUnixNano
+	}
+	return 0
+}
+
+type CurrentDialogRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CurrentDialogRequest) Reset() {
+	*x = CurrentDialogRequest{}
+	mi := &file_sameoldchat_chat_v1_dialogs_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CurrentDialogRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CurrentDialogRequest) ProtoMessage() {}
+
+func (x *CurrentDialogRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_dialogs_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CurrentDialogRequest.ProtoReflect.Descriptor instead.
+func (*CurrentDialogRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_dialogs_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *CurrentDialogRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CurrentDialogRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+type SubmitDialogRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	DialogId       string                 `protobuf:"bytes,4,opt,name=dialog_id,json=dialogId,proto3" json:"dialog_id,omitempty"`
+	// values maps element names to what the member entered; a missing or
+	// empty value is an element left empty.
+	Values          map[string]string `protobuf:"bytes,5,rep,name=values,proto3" json:"values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	ResponseBaseUrl string            `protobuf:"bytes,6,opt,name=response_base_url,json=responseBaseUrl,proto3" json:"response_base_url,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *SubmitDialogRequest) Reset() {
+	*x = SubmitDialogRequest{}
+	mi := &file_sameoldchat_chat_v1_dialogs_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitDialogRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitDialogRequest) ProtoMessage() {}
+
+func (x *SubmitDialogRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_dialogs_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitDialogRequest.ProtoReflect.Descriptor instead.
+func (*SubmitDialogRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_dialogs_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SubmitDialogRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SubmitDialogRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SubmitDialogRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *SubmitDialogRequest) GetDialogId() string {
+	if x != nil {
+		return x.DialogId
+	}
+	return ""
+}
+
+func (x *SubmitDialogRequest) GetValues() map[string]string {
+	if x != nil {
+		return x.Values
+	}
+	return nil
+}
+
+func (x *SubmitDialogRequest) GetResponseBaseUrl() string {
+	if x != nil {
+		return x.ResponseBaseUrl
+	}
+	return ""
+}
+
+type CancelDialogRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId  string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	DialogId        string                 `protobuf:"bytes,4,opt,name=dialog_id,json=dialogId,proto3" json:"dialog_id,omitempty"`
+	ResponseBaseUrl string                 `protobuf:"bytes,5,opt,name=response_base_url,json=responseBaseUrl,proto3" json:"response_base_url,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CancelDialogRequest) Reset() {
+	*x = CancelDialogRequest{}
+	mi := &file_sameoldchat_chat_v1_dialogs_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelDialogRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelDialogRequest) ProtoMessage() {}
+
+func (x *CancelDialogRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_dialogs_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelDialogRequest.ProtoReflect.Descriptor instead.
+func (*CancelDialogRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_dialogs_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CancelDialogRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CancelDialogRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *CancelDialogRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *CancelDialogRequest) GetDialogId() string {
+	if x != nil {
+		return x.DialogId
+	}
+	return ""
+}
+
+func (x *CancelDialogRequest) GetResponseBaseUrl() string {
+	if x != nil {
+		return x.ResponseBaseUrl
+	}
+	return ""
+}
+
 var File_sameoldchat_chat_v1_dialogs_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_dialogs_proto_rawDesc = "" +
 	"\n" +
-	"!sameoldchat/chat/v1/dialogs.proto\x12\x13sameoldchat.chat.v1\"\x9f\x01\n" +
+	"!sameoldchat/chat/v1/dialogs.proto\x12\x13sameoldchat.chat.v1\x1a\x1fsameoldchat/chat/v1/views.proto\"\x9f\x01\n" +
 	"\x11OpenDialogRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
@@ -154,10 +460,43 @@ const file_sameoldchat_chat_v1_dialogs_proto_rawDesc = "" +
 	"\apayload\x18\x04 \x01(\tR\apayload\x12\x15\n" +
 	"\x06app_id\x18\x05 \x01(\tR\x05appId\"(\n" +
 	"\x16DialogMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2s\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xb2\x02\n" +
+	"\x06Dialog\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x15\n" +
+	"\x06app_id\x18\x04 \x01(\tR\x05appId\x12\x18\n" +
+	"\apayload\x18\x05 \x01(\tR\apayload\x12?\n" +
+	"\x06errors\x18\x06 \x03(\v2'.sameoldchat.chat.v1.Dialog.ErrorsEntryR\x06errors\x12/\n" +
+	"\x14created_at_unix_nano\x18\a \x01(\x03R\x11createdAtUnixNano\x1a9\n" +
+	"\vErrorsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"R\n" +
+	"\x14CurrentDialogRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"\xcc\x02\n" +
+	"\x13SubmitDialogRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1b\n" +
+	"\tdialog_id\x18\x04 \x01(\tR\bdialogId\x12L\n" +
+	"\x06values\x18\x05 \x03(\v24.sameoldchat.chat.v1.SubmitDialogRequest.ValuesEntryR\x06values\x12*\n" +
+	"\x11response_base_url\x18\x06 \x01(\tR\x0fresponseBaseUrl\x1a9\n" +
+	"\vValuesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc3\x01\n" +
+	"\x13CancelDialogRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1b\n" +
+	"\tdialog_id\x18\x04 \x01(\tR\bdialogId\x12*\n" +
+	"\x11response_base_url\x18\x05 \x01(\tR\x0fresponseBaseUrl2\x99\x03\n" +
 	"\x0eDialogsService\x12a\n" +
 	"\n" +
-	"OpenDialog\x12&.sameoldchat.chat.v1.OpenDialogRequest\x1a+.sameoldchat.chat.v1.DialogMutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"OpenDialog\x12&.sameoldchat.chat.v1.OpenDialogRequest\x1a+.sameoldchat.chat.v1.DialogMutationResponse\x12W\n" +
+	"\rCurrentDialog\x12).sameoldchat.chat.v1.CurrentDialogRequest\x1a\x1b.sameoldchat.chat.v1.Dialog\x12d\n" +
+	"\fSubmitDialog\x12(.sameoldchat.chat.v1.SubmitDialogRequest\x1a*.sameoldchat.chat.v1.ViewInteractionResult\x12e\n" +
+	"\fCancelDialog\x12(.sameoldchat.chat.v1.CancelDialogRequest\x1a+.sameoldchat.chat.v1.DialogMutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_dialogs_proto_rawDescOnce sync.Once
@@ -171,19 +510,34 @@ func file_sameoldchat_chat_v1_dialogs_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_dialogs_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_dialogs_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_sameoldchat_chat_v1_dialogs_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_sameoldchat_chat_v1_dialogs_proto_goTypes = []any{
 	(*OpenDialogRequest)(nil),      // 0: sameoldchat.chat.v1.OpenDialogRequest
 	(*DialogMutationResponse)(nil), // 1: sameoldchat.chat.v1.DialogMutationResponse
+	(*Dialog)(nil),                 // 2: sameoldchat.chat.v1.Dialog
+	(*CurrentDialogRequest)(nil),   // 3: sameoldchat.chat.v1.CurrentDialogRequest
+	(*SubmitDialogRequest)(nil),    // 4: sameoldchat.chat.v1.SubmitDialogRequest
+	(*CancelDialogRequest)(nil),    // 5: sameoldchat.chat.v1.CancelDialogRequest
+	nil,                            // 6: sameoldchat.chat.v1.Dialog.ErrorsEntry
+	nil,                            // 7: sameoldchat.chat.v1.SubmitDialogRequest.ValuesEntry
+	(*ViewInteractionResult)(nil),  // 8: sameoldchat.chat.v1.ViewInteractionResult
 }
 var file_sameoldchat_chat_v1_dialogs_proto_depIdxs = []int32{
-	0, // 0: sameoldchat.chat.v1.DialogsService.OpenDialog:input_type -> sameoldchat.chat.v1.OpenDialogRequest
-	1, // 1: sameoldchat.chat.v1.DialogsService.OpenDialog:output_type -> sameoldchat.chat.v1.DialogMutationResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	6, // 0: sameoldchat.chat.v1.Dialog.errors:type_name -> sameoldchat.chat.v1.Dialog.ErrorsEntry
+	7, // 1: sameoldchat.chat.v1.SubmitDialogRequest.values:type_name -> sameoldchat.chat.v1.SubmitDialogRequest.ValuesEntry
+	0, // 2: sameoldchat.chat.v1.DialogsService.OpenDialog:input_type -> sameoldchat.chat.v1.OpenDialogRequest
+	3, // 3: sameoldchat.chat.v1.DialogsService.CurrentDialog:input_type -> sameoldchat.chat.v1.CurrentDialogRequest
+	4, // 4: sameoldchat.chat.v1.DialogsService.SubmitDialog:input_type -> sameoldchat.chat.v1.SubmitDialogRequest
+	5, // 5: sameoldchat.chat.v1.DialogsService.CancelDialog:input_type -> sameoldchat.chat.v1.CancelDialogRequest
+	1, // 6: sameoldchat.chat.v1.DialogsService.OpenDialog:output_type -> sameoldchat.chat.v1.DialogMutationResponse
+	2, // 7: sameoldchat.chat.v1.DialogsService.CurrentDialog:output_type -> sameoldchat.chat.v1.Dialog
+	8, // 8: sameoldchat.chat.v1.DialogsService.SubmitDialog:output_type -> sameoldchat.chat.v1.ViewInteractionResult
+	1, // 9: sameoldchat.chat.v1.DialogsService.CancelDialog:output_type -> sameoldchat.chat.v1.DialogMutationResponse
+	6, // [6:10] is the sub-list for method output_type
+	2, // [2:6] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_dialogs_proto_init() }
@@ -191,13 +545,14 @@ func file_sameoldchat_chat_v1_dialogs_proto_init() {
 	if File_sameoldchat_chat_v1_dialogs_proto != nil {
 		return
 	}
+	file_sameoldchat_chat_v1_views_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_dialogs_proto_rawDesc), len(file_sameoldchat_chat_v1_dialogs_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

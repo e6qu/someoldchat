@@ -1,18 +1,38 @@
 import base64
+import http.client
 import io
 import json
 import os
+import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from slack_sdk.oauth import AuthorizeUrlGenerator
+from slack_sdk.oauth.installation_store import FileInstallationStore, Installation
+from slack_sdk.oauth.state_store import FileOAuthStateStore
+
+# The fixture enforces Slack's rate-limiting contract, as production does, so
+# these clients retry a 429 after its Retry-After the way a real app is
+# configured to. Without the handler the pinned client surfaces the first 429.
+from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
+from slack_sdk.http_retry import default_retry_handlers
+
+
+class WebClient(WebClient):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("retry_handlers", default_retry_handlers() + [RateLimitErrorRetryHandler(max_retry_count=10)])
+        super().__init__(*args, **kwargs)
 
 
 client = WebClient(
     token=os.environ.get("SAMEOLDCHAT_API_TOKEN", "xoxb-test"),
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
 )
+# The user token: reminders, snooze, identity, photo and stars are methods
+# Slack serves to user tokens only.
 reminder_client = WebClient(
     token="xoxp-reminder-qualification",
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
@@ -450,11 +470,21 @@ added_call = client.calls_add(
     desktop_app_join_url="https://example.com/call-desktop",
     title="Qualification call",
     date_start=int(time.time()),
+    users=[
+        {"slack_id": "U1"},
+        {"external_id": "qualification-guest", "display_name": "Qualification Guest", "avatar_url": "https://example.com/guest.png"},
+    ],
 )
 assert added_call["ok"] is True
 call_id = added_call["call"]["id"]
 call_info = client.calls_info(id=call_id)
 assert call_info["ok"] is True
+assert {"slack_id": "U1"} in call_info["call"]["users"], call_info
+assert {
+    "external_id": "qualification-guest",
+    "display_name": "Qualification Guest",
+    "avatar_url": "https://example.com/guest.png",
+} in call_info["call"]["users"], call_info
 updated_call = client.calls_update(id=call_id, title="Updated qualification call")
 assert updated_call["ok"] is True
 added_call_participant = client.calls_participants_add(id=call_id, users=[{"slack_id": "U2"}])
@@ -495,9 +525,13 @@ assert removed_attachments["message"].get("attachments", []) == []
 assert removed_attachments["message"]["text"] == "python rich update fallback"
 assert client.chat_delete(channel="C1", ts=rich_for_update["ts"])["ok"] is True
 
-conversation = client.conversations_info(channel="C1")
+conversation = client.conversations_info(channel="C1", include_num_members=True)
 assert conversation["ok"] is True
 assert conversation["channel"]["id"] == "C1"
+assert conversation["channel"]["is_member"] is True
+assert conversation["channel"]["is_general"] is True
+assert isinstance(conversation["channel"]["num_members"], int)
+assert isinstance(conversation["channel"]["topic"]["last_set"], int)
 members = client.conversations_members(channel="C1", limit=1)
 assert members["ok"] is True
 assert members["members"] == ["U1"]
@@ -511,12 +545,19 @@ invited = client.conversations_invite(channel="C1", users="U2")
 assert invited["ok"] is True
 force_invited = client.conversations_invite(channel="C1", users="U-missing,U3", force=True)
 assert force_invited["ok"] is True
-kicked = client.conversations_kick(channel="C1", user="U2")
-assert kicked["ok"] is True
+# C1 is the workspace's required channel (set above), which nobody can be
+# removed from, exactly as Slack refuses a kick from #general.
+try:
+    client.conversations_kick(channel="C1", user="U2")
+    raise AssertionError("a member was removed from the required channel")
+except SlackApiError as error:
+    assert error.response["error"] == "cant_kick_from_general"
 private_invitation_channel = client.conversations_create(name="sdk-private-invitation", is_private=True)
 assert private_invitation_channel["ok"] is True
 private_invited = client.conversations_invite(channel=private_invitation_channel["channel"]["id"], users="U2")
 assert private_invited["ok"] is True
+kicked = client.conversations_kick(channel=private_invitation_channel["channel"]["id"], user="U2")
+assert kicked["ok"] is True
 left = client.conversations_leave(channel="C2")
 assert left["ok"] is True
 assert client.admin_conversations_convertToPrivate(channel_id="C2")["ok"] is True
@@ -569,6 +610,24 @@ revoked_public_file = client.files_revokePublicURL(file=file_id)
 assert revoked_public_file["ok"] is True
 deleted_file = client.files_delete(file=file_id)
 assert deleted_file["ok"] is True
+
+# files_upload_v2 is the SDK's current upload path: getUploadURLExternal, a
+# POST of the bytes to the returned upload_url, then completeUploadExternal.
+# Every URL it hands back is fetched verbatim, so each must be absolute on the
+# origin the client reached, and url_private must serve the bytes.
+api_origin = "{0.scheme}://{0.netloc}".format(urllib.parse.urlparse(client.base_url))
+uploaded_v2 = client.files_upload_v2(content="sdk upload v2", filename="sdk-upload-v2.txt", title="SDK upload v2")
+assert uploaded_v2["ok"] is True
+uploaded_v2_file = uploaded_v2["files"][0]
+for field in ("url_private", "url_private_download", "permalink"):
+    assert uploaded_v2_file[field].startswith(api_origin + "/"), (field, uploaded_v2_file[field])
+assert uploaded_v2_file["mimetype"] == "text/plain"
+download_request = urllib.request.Request(uploaded_v2_file["url_private"], headers={"Authorization": "Bearer " + client.token})
+with urllib.request.urlopen(download_request) as downloaded:
+    assert downloaded.status == 200
+    assert downloaded.read() == b"sdk upload v2"
+assert client.files_info(file=uploaded_v2_file["id"])["comments"] == []
+assert client.files_delete(file=uploaded_v2_file["id"])["ok"] is True
 remote_file = client.files_remote_add(
     external_id="remote-qualification",
     title="Remote qualification",
@@ -624,13 +683,13 @@ assert client.chat_delete(channel="C1", ts=scheduled_root["ts"])["ok"] is True
 dnd_info = client.dnd_info()
 assert dnd_info["ok"] is True
 assert dnd_info["dnd_enabled"] is False
-dnd_snooze = client.dnd_setSnooze(num_minutes=5)
+dnd_snooze = reminder_client.dnd_setSnooze(num_minutes=5)
 assert dnd_snooze["ok"] is True
 assert dnd_snooze["snooze_enabled"] is True
-dnd_end_snooze = client.dnd_endSnooze()
+dnd_end_snooze = reminder_client.dnd_endSnooze()
 assert dnd_end_snooze["ok"] is True
 assert dnd_end_snooze["snooze_enabled"] is False
-dnd_end = client.dnd_endDnd()
+dnd_end = reminder_client.dnd_endDnd()
 assert dnd_end["ok"] is True
 dnd_team = client.dnd_teamInfo(users="U1")
 assert dnd_team["ok"] is True
@@ -651,14 +710,22 @@ try:
     raise AssertionError("reminders.add accepted another user for a user token")
 except SlackApiError as error:
     assert error.response["error"] == "cannot_add_others"
+# Slack's documented natural-language forms are read; a recurring one is
+# reported as recurring, and an undocumented phrasing is cannot_parse.
+phrased = reminder_client.reminders_add(text="documented natural language", time="in 15 minutes")
+assert phrased["ok"] is True
+assert phrased["reminder"]["time"] > time.time() + 14 * 60
+recurring_reminder = reminder_client.reminders_add(text="weekly sync", time="every Thursday at 9am")
+assert recurring_reminder["ok"] is True
+assert recurring_reminder["reminder"]["recurring"] is True
 try:
-    reminder_client.reminders_add(text="documented natural language", time="in 15 minutes")
-    raise AssertionError("known natural-language reminder gap unexpectedly disappeared")
+    reminder_client.reminders_add(text="undocumented phrasing", time="whenever")
+    raise AssertionError("reminders.add accepted a phrase it cannot read")
 except SlackApiError as error:
     assert error.response["error"] == "cannot_parse"
 reminders = reminder_client.reminders_list()
 assert reminders["ok"] is True
-assert len(reminders["reminders"]) == 1
+assert len(reminders["reminders"]) == 3
 reminder_info = reminder_client.reminders_info(reminder=reminder["reminder"]["id"])
 assert reminder_info["ok"] is True
 assert reminder_info["reminder"]["id"] == reminder["reminder"]["id"]
@@ -699,8 +766,9 @@ assert admin_usergroup_channels["ok"] is True
 assert len(admin_usergroup_channels["channels"]) == 1
 assert admin_usergroup_channels["channels"][0]["id"] == "C1"
 assert client.admin_usergroups_removeChannels(usergroup_id=usergroup_id, channel_ids=["C1"])["ok"] is True
-updated_usergroup = client.usergroups_update(usergroup=usergroup_id, name="Updated qualification group")
+updated_usergroup = client.usergroups_update(usergroup=usergroup_id, name="Updated qualification group", channels="C1")
 assert updated_usergroup["ok"] is True
+assert updated_usergroup["usergroup"]["prefs"]["channels"] == ["C1"]
 updated_usergroup_users = client.usergroups_users_update(usergroup=usergroup_id, users="U1")
 assert updated_usergroup_users["ok"] is True
 usergroup_users = client.usergroups_users_list(usergroup=usergroup_id)
@@ -717,6 +785,8 @@ assert enabled_usergroup["ok"] is True
 user = client.users_info(user="U1")
 assert user["ok"] is True
 assert user["user"]["id"] == "U1"
+assert isinstance(user["user"]["is_bot"], bool)
+assert user["user"]["profile"]["image_48"].startswith("http://127.0.0.1:18080/")
 profile = client.users_profile_get(user="U1")
 assert profile["ok"] is True
 assert profile["profile"]["display_name"] == "alice"
@@ -724,12 +794,12 @@ assert profile["profile"]["display_name"] == "alice"
 # bytes and refuses a stream that is not the image it claims to be.
 image = io.BytesIO(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="))
 image.name = "qualification.png"
-photo = client.users_setPhoto(image=image)
+photo = reminder_client.users_setPhoto(image=image)
 assert photo["ok"] is True
-deleted_photo = client.users_deletePhoto()
+deleted_photo = reminder_client.users_deletePhoto()
 assert deleted_photo["ok"] is True
 
-root = client.chat_postMessage(channel="C1", text="thread root")
+root = client.chat_postMessage(channel="C1", text="thread root <https://example.com/qualification>")
 assert root["ok"] is True
 unfurled = client.chat_unfurl(
     channel="C1",
@@ -776,18 +846,22 @@ assert lifecycle_info["ok"] is True
 assert lifecycle_info["channel"]["name"] == "qualification-renamed"
 assert lifecycle_info["channel"]["topic"]["value"] == "qualification topic"
 assert lifecycle_info["channel"]["purpose"]["value"] == "qualification purpose"
+assert lifecycle_info["channel"]["creator"] == "U1"
+assert lifecycle_info["channel"]["created"] > 0
+assert lifecycle_info["channel"]["topic"]["creator"] == "U1"
+assert lifecycle_info["channel"]["topic"]["last_set"] > 0
 
 me_message = client.chat_meMessage(channel="C1", text="qualification me message")
 assert me_message["ok"] is True
 ephemeral = client.chat_postEphemeral(channel="C1", user="U1", text="ephemeral qualification")
 assert ephemeral["ok"] is True
 assert isinstance(ephemeral["message_ts"], str)
-starred = client.stars_add(channel="C1", timestamp=root["ts"])
+starred = reminder_client.stars_add(channel="C1", timestamp=root["ts"])
 assert starred["ok"] is True
-stars = client.stars_list(limit=10)
+stars = reminder_client.stars_list(limit=10)
 assert stars["ok"] is True
 assert len(stars["items"]) == 1
-unstarred = client.stars_remove(channel="C1", timestamp=root["ts"])
+unstarred = reminder_client.stars_remove(channel="C1", timestamp=root["ts"])
 assert unstarred["ok"] is True
 permalink = client.chat_getPermalink(channel="C1", message_ts=root["ts"])
 assert permalink["ok"] is True
@@ -797,6 +871,8 @@ assert user_reactions["ok"] is True
 team = client.team_info()
 assert team["ok"] is True
 assert team["team"]["id"] == "T1"
+assert team["team"]["domain"] != ""
+assert team["team"]["icon"]["image_34"].startswith("http")
 team_profile = client.team_profile_get()
 assert team_profile["ok"] is True
 assert team_profile["profile"]["fields"] == []
@@ -804,7 +880,7 @@ emoji = client.emoji_list(include_categories=True)
 assert emoji["ok"] is True
 assert emoji["categories_version"] == "097705020bcf82331c9ef10df3425aad15f5043c"
 assert any(category["name"] == "Smileys & Emotion" and "grinning" in category["emoji_names"] for category in emoji["categories"])
-identity_result = client.users_identity()
+identity_result = reminder_client.users_identity()
 assert identity_result["ok"] is True
 assert identity_result["user"]["id"] == "U1"
 by_email = client.users_lookupByEmail(email="alice@example.com")
@@ -812,6 +888,7 @@ assert by_email["ok"] is True
 assert by_email["user"]["id"] == "U1"
 presence = client.users_getPresence(user="U1")
 assert presence["ok"] is True
+assert isinstance(presence["manual_away"], bool)
 set_presence = client.users_setPresence(presence="away")
 assert set_presence["ok"] is True
 profile_set = client.users_profile_set(profile={"status_text": "qualification", "status_emoji": ":wave:", "status_expiration": 4102444800})
@@ -832,6 +909,10 @@ assert already_closed["already_closed"] is True
 reopened_direct = client.conversations_open(users="U2")
 assert reopened_direct["ok"] is True
 assert reopened_direct["channel"]["id"] == direct["channel"]["id"]
+assert direct["channel"]["id"].startswith("D")
+already_open_direct = client.conversations_open(users="U2", return_im=True)
+assert already_open_direct["already_open"] is True
+assert already_open_direct["channel"]["user"] == "U2"
 group_direct = client.conversations_open(users="U2,U3")
 assert group_direct["ok"] is True
 canonical_group_direct = client.conversations_open(users="U3,U2")
@@ -880,6 +961,55 @@ assert client.api_call(
 assert client.api_call("admin.users.session.reset", params={"user_id": "U2"})["ok"] is True
 assert client.admin_users_remove(team_id="T1", user_id="U2")["ok"] is True
 
+# The message object as history, replies, pins and reactions return it,
+# read through the official client exactly as an app written against Slack
+# reads it. Every absolute URL is on the origin the client was pointed at.
+api_origin = os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/").rstrip("/")
+api_origin = api_origin[: -len("/api")] if api_origin.endswith("/api") else api_origin
+assert identity["url"] == api_origin + "/"
+contract_blocks = [{"type": "section", "text": {"type": "plain_text", "text": "contract block"}}]
+contract_root = client.chat_postMessage(channel="#general", text="contract root", blocks=contract_blocks)
+assert contract_root["channel"] == "C1"
+bot_message = contract_root["message"]
+assert bot_message["bot_id"] == "B1" and bot_message["team"] == "T1"
+assert bot_message["bot_profile"]["id"] == "B1" and bot_message["bot_profile"]["app_id"] == "A1"
+quiet = client.chat_postMessage(channel="C1", text="contract quiet reply", thread_ts=contract_root["ts"])
+loud = client.chat_postMessage(channel="C1", text="contract loud reply", thread_ts=contract_root["ts"], reply_broadcast=True)
+nested = client.chat_postMessage(channel="C1", text="contract reply to a reply", thread_ts=quiet["ts"])
+assert nested["message"]["thread_ts"] == contract_root["ts"]
+assert client.reactions_add(channel="C1", timestamp=contract_root["ts"], name="eyes")["ok"] is True
+assert client.pins_add(channel="C1", timestamp=contract_root["ts"])["ok"] is True
+window = client.conversations_history(channel="C1", latest=contract_root["ts"], inclusive=True, limit=1)
+assert [message["ts"] for message in window["messages"]] == [contract_root["ts"]]
+parent = window["messages"][0]
+assert parent["thread_ts"] == contract_root["ts"]
+assert parent["reply_count"] == 3 and parent["reply_users"] == ["U1"] and parent["reply_users_count"] == 1
+assert parent["latest_reply"] == nested["ts"]
+assert parent["reactions"] == [{"name": "eyes", "users": ["U1"], "count": 1}]
+assert parent["pinned_to"] == ["C1"]
+assert parent["blocks"][0]["text"]["text"] == "contract block"
+recent = [message["text"] for message in client.conversations_history(channel="C1", oldest=contract_root["ts"])["messages"]]
+assert recent == ["contract loud reply"], recent
+whole_thread = client.conversations_replies(channel="C1", ts=quiet["ts"])
+assert [message["ts"] for message in whole_thread["messages"]] == [contract_root["ts"], quiet["ts"], loud["ts"], nested["ts"]]
+pinned_items = [item for item in client.pins_list(channel="C1")["items"] if item["message"]["ts"] == contract_root["ts"]]
+assert len(pinned_items) == 1 and pinned_items[0]["message"]["text"] == "contract root"
+assert pinned_items[0]["message"]["permalink"].startswith(api_origin + "/archives/C1/p")
+reacted = client.reactions_get(channel="C1", timestamp=contract_root["ts"])
+assert reacted["type"] == "message" and reacted["channel"] == "C1" and reacted["message"]["text"] == "contract root"
+assert client.chat_getPermalink(channel="C1", message_ts=contract_root["ts"])["permalink"].startswith(api_origin + "/archives/C1/p")
+kept = client.chat_update(channel="C1", ts=contract_root["ts"], text="contract root edited")
+assert kept["message"]["blocks"][0]["text"]["text"] == "contract block"
+try:
+    client.chat_update(channel="C1", ts=quiet["ts"], text="")
+except SlackApiError as error:
+    assert error.response["error"] == "no_text"
+else:
+    raise AssertionError("an update that empties a text-only message was accepted")
+assert client.users_list(limit=0)["ok"] is True
+assert client.conversations_history(channel="C1", limit=0)["ok"] is True
+assert client.pins_remove(channel="C1", timestamp=contract_root["ts"])["ok"] is True
+
 try:
     client.api_test(error="synthetic")
 except SlackApiError as error:
@@ -894,5 +1024,85 @@ assert revoked["revoked"] is False
 uninstall_client = WebClient(token="xoxp-uninstall-python", base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"))
 uninstalled = uninstall_client.apps_uninstall(client_id="uninstall-python", client_secret="uninstall-secret")
 assert uninstalled["ok"] is True
+
+
+
+# An app installed from nothing through slack_sdk.oauth, the pieces a Bolt
+# OAuth flow is built from: the state store and URL generator start the
+# install, the fixture approves the authorize URL as U1 through the service
+# call the consent page makes, and oauth.v2.access redeems the code into an
+# Installation the installation store keeps.
+oauth_directory = tempfile.mkdtemp()
+state_store = FileOAuthStateStore(expiration_seconds=300, base_dir=oauth_directory)
+installation_store = FileInstallationStore(base_dir=oauth_directory)
+oauth_client = WebClient(base_url=client.base_url)
+
+
+def install(scopes, user_scopes, redirect_uri=None):
+    generator = AuthorizeUrlGenerator(
+        client_id="install-client",
+        scopes=scopes,
+        user_scopes=user_scopes,
+        redirect_uri=redirect_uri,
+        authorization_url=api_origin + "/qualification/authorize",
+    )
+    state = state_store.issue()
+    authorize_url = urllib.parse.urlparse(generator.generate(state))
+    connection = http.client.HTTPConnection(authorize_url.hostname, authorize_url.port)
+    connection.request("GET", authorize_url.path + "?" + authorize_url.query)
+    approved = connection.getresponse()
+    approved.read()
+    assert approved.status == 302, approved.status
+    callback = urllib.parse.parse_qs(urllib.parse.urlparse(approved.getheader("Location")).query)
+    assert state_store.consume(callback["state"][0]) is True
+    arguments = {"client_id": "install-client", "client_secret": "install-secret", "code": callback["code"][0]}
+    if redirect_uri is not None:
+        arguments["redirect_uri"] = redirect_uri
+    response = oauth_client.oauth_v2_access(**arguments)
+    assert response["ok"] is True
+    installer = response.get("authed_user") or {}
+    bot_token = response.get("access_token")
+    installation = Installation(
+        app_id=response["app_id"],
+        enterprise_id=(response.get("enterprise") or {}).get("id"),
+        team_id=response["team"]["id"],
+        team_name=response["team"]["name"],
+        bot_token=bot_token,
+        bot_id=WebClient(token=bot_token, base_url=client.base_url).auth_test()["bot_id"] if bot_token else None,
+        bot_user_id=response.get("bot_user_id"),
+        bot_scopes=response.get("scope"),
+        user_id=installer["id"],
+        user_token=installer.get("access_token"),
+        user_scopes=installer.get("scope"),
+        is_enterprise_install=response.get("is_enterprise_install"),
+        token_type=response.get("token_type"),
+    )
+    installation_store.save(installation)
+    return installation
+
+
+first_install = install(["chat:write"], ["search:read"], "https://example.com/install")
+assert first_install.team_id == "T1"
+assert first_install.team_name
+assert first_install.user_id == "U1"
+assert first_install.user_token.startswith("xoxp-")
+assert first_install.bot_token.startswith("xoxb-")
+stored_bot = installation_store.find_bot(enterprise_id=None, team_id="T1")
+assert stored_bot.bot_token == first_install.bot_token
+assert WebClient(token=stored_bot.bot_token, base_url=client.base_url).auth_test()["user_id"] == first_install.bot_user_id
+# A reinstall that leaves the redirect implied keeps the same bot user.
+reinstall = install(["chat:write"], [])
+assert reinstall.bot_user_id == first_install.bot_user_id
+assert reinstall.bot_id == first_install.bot_id
+# A user-scope-only install is redeemable and carries no bot.
+user_install = install([], ["search:read"])
+assert user_install.bot_token is None
+assert user_install.user_id == "U1"
+assert WebClient(token=user_install.user_token, base_url=client.base_url).auth_test()["user_id"] == "U1"
+try:
+    oauth_client.oauth_v2_access(client_id="install-client", client_secret="wrong", code="unused")
+    raise AssertionError("a wrong client secret was accepted")
+except SlackApiError as error:
+    assert error.response["error"] == "bad_client_secret"
 
 print("python-slack-sdk qualification passed")

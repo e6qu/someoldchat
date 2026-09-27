@@ -119,7 +119,7 @@ func TestPrivateConversationAccessGroupsAreEnforced(t *testing.T) {
 		}
 	}
 
-	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "Security", "security", "")
+	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "Security", "security", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,14 +154,14 @@ func TestUserGroupMutationsRequireWorkspaceAdmin(t *testing.T) {
 	ctx := context.Background()
 	_, messages := twoMemberWorkspace(t)
 
-	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "Security", "security", "")
+	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "Security", "security", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	refusals := map[string]error{}
-	_, refusals["CreateUserGroup"] = messages.CreateUserGroup(ctx, "T1", "U2", "Rogue", "rogue", "")
-	_, refusals["UpdateUserGroup"] = messages.UpdateUserGroup(ctx, "T1", "U2", group.ID, "Seized", "", "")
+	_, refusals["CreateUserGroup"] = messages.CreateUserGroup(ctx, "T1", "U2", "Rogue", "rogue", "", nil)
+	_, refusals["UpdateUserGroup"] = messages.UpdateUserGroup(ctx, "T1", "U2", group.ID, "Seized", "", "", nil)
 	_, refusals["SetUserGroupEnabled"] = messages.SetUserGroupEnabled(ctx, "T1", "U2", group.ID, false)
 	_, refusals["SetUserGroupUsers"] = messages.SetUserGroupUsers(ctx, "T1", "U2", group.ID, []domain.UserID{"U2"})
 	refusals["AddUserGroupChannels"] = messages.AddUserGroupChannels(ctx, "T1", "U2", group.ID, []domain.ConversationID{"C1"})
@@ -238,7 +238,7 @@ func TestOperationsThatDeclareNotInChannelRequireMembership(t *testing.T) {
 
 	// Reading a public channel still does not require membership, and joining
 	// makes every one of the operations above available.
-	if _, err := messages.History(ctx, "T1", "U2", "C1", domain.PageRequest{Limit: 10}); err != nil {
+	if _, err := messages.History(ctx, "T1", "U2", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}}); err != nil {
 		t.Fatalf("reading a public channel now requires membership: %v", err)
 	}
 	if err := s.SeedConversationMember("C1", "U2"); err != nil {
@@ -449,7 +449,7 @@ func TestCreateListRefusesACopyAboveTheRecordCap(t *testing.T) {
 	// Nothing was written: the refusal happens before the list is created, so no
 	// half-built list is left behind — and there is no DeleteList to remove one —
 	// and list.created was never published for the copy.
-	records, err := messages.ListEventsAfter(ctx, "T1", 0, 10000)
+	records, err := messages.Store.ListEventsAfter(ctx, "T1", 0, 10000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,14 +497,14 @@ func TestRoleAndSettingRefusalsCarryAClassifiedSentinel(t *testing.T) {
 func TestConversationAccessGroupEventsRemainDeliverable(t *testing.T) {
 	ctx := context.Background()
 	_, messages := twoMemberWorkspace(t)
-	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "Security", "security", "")
+	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "Security", "security", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := messages.AdminAddConversationAccessGroup(ctx, "T1", "U1", "CPRIV", group.ID); err != nil {
 		t.Fatal(err)
 	}
-	records, err := messages.ListEventsAfter(ctx, "T1", 0, 100)
+	records, err := messages.Store.ListEventsAfter(ctx, "T1", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

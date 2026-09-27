@@ -108,7 +108,7 @@ func TestWhoCanPostBlockedMessageDoesNotPersist(t *testing.T) {
 	ctx, m, s := postingWorld(t)
 	setWhoCanPost(t, ctx, m, domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{domain.ConversationPosterAdmins}})
 	mustNotPost(t, ctx, m, "Umember")
-	page, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 100})
+	page, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 100}})
 	if err != nil {
 		t.Fatal(err)
 	}

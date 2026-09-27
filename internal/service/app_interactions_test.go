@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -79,7 +80,7 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	repository := memory.New()
 	for _, seed := range []func() error{
 		func() error {
-			return repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Test", Domain: "test"})
+			return repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Test"})
 		},
 		func() error { return repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}) },
 		func() error {
@@ -134,10 +135,10 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	mu.Unlock()
 	assertSlackInteractionSignature(t, signingSecret, slash.body, slash.timestamp, slash.signature)
 	for field, want := range map[string]string{
-		"api_app_id": "A1", "team_id": "T1", "team_domain": "test",
+		"api_app_id": "A1", "team_id": "T1", "team_domain": "t1",
 		"channel_id": "C1", "channel_name": "general", "user_id": "U1",
 		"user_name": "alice", "command": "/deploy", "text": "ask <@U1> in <#C1|general> <https://example.com/runbook>",
-		"token": verificationToken,
+		"token": verificationToken, "is_enterprise_install": "false",
 	} {
 		if got := slash.form.Get(field); got != want {
 			t.Errorf("slash field %s=%q, want %q", field, got, want)
@@ -147,12 +148,12 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	if triggerID == "" || !strings.HasPrefix(slash.form.Get("response_url"), "https://chat.example.test/app-response/") {
 		t.Fatalf("slash capabilities trigger=%q response_url=%q", triggerID, slash.form.Get("response_url"))
 	}
-	openedView, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Deploy"},"submit":{"type":"plain_text","text":"Deploy"},"blocks":[{"type":"input","block_id":"answer_block","label":{"type":"plain_text","text":"Environment"},"element":{"type":"plain_text_input","action_id":"answer"}}]}`)
+	openedView, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Deploy"},"submit":{"type":"plain_text","text":"Deploy"},"blocks":[{"type":"input","block_id":"answer_block","label":{"type":"plain_text","text":"Environment"},"element":{"type":"plain_text_input","action_id":"answer"}}]}`, "")
 	if err != nil {
 		t.Fatalf("consume trigger: %v", err)
 	}
-	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Replay"},"blocks":[]}`); err != ErrInvalidTrigger {
-		t.Fatalf("trigger replay error=%v, want %v", err, ErrInvalidTrigger)
+	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Replay"},"blocks":[]}`, ""); err != ErrTriggerExchanged {
+		t.Fatalf("trigger replay error=%v, want %v", err, ErrTriggerExchanged)
 	}
 
 	blocks := `[{"type":"actions","block_id":"deployment","elements":[{"type":"static_select","action_id":"view_build","placeholder":{"type":"plain_text","text":"View build"},"options":[{"text":{"type":"plain_text","text":"Build 842"},"value":"842"}]}]}]`
@@ -173,7 +174,11 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 		Type        string `json:"type"`
 		APIAppID    string `json:"api_app_id"`
 		ResponseURL string `json:"response_url"`
-		Actions     []struct {
+		Team        struct {
+			ID     string `json:"id"`
+			Domain string `json:"domain"`
+		} `json:"team"`
+		Actions []struct {
 			Type           string `json:"type"`
 			ActionID       string `json:"action_id"`
 			BlockID        string `json:"block_id"`
@@ -190,6 +195,12 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	}
 	if err := json.Unmarshal([]byte(actionRequest.form.Get("payload")), &actionPayload); err != nil {
 		t.Fatal(err)
+	}
+	// A workspace seeded without a subdomain is addressed by its folded
+	// identifier on every surface, exactly as team.info reports it; the
+	// payload used to carry an empty domain.
+	if actionPayload.Team.ID != "T1" || actionPayload.Team.Domain != "t1" {
+		t.Fatalf("block action team=%+v, want T1/t1", actionPayload.Team)
 	}
 	if actionPayload.Type != "block_actions" || actionPayload.APIAppID != "A1" || len(actionPayload.Actions) != 1 ||
 		actionPayload.Actions[0].Type != "static_select" || actionPayload.Actions[0].ActionID != "view_build" ||
@@ -262,9 +273,11 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	assertSlackInteractionSignature(t, signingSecret, badSubmission.body, badSubmission.timestamp, badSubmission.signature)
 	assertSlackInteractionSignature(t, signingSecret, goodSubmission.body, goodSubmission.timestamp, goodSubmission.signature)
 	var submittedPayload struct {
-		Type     string `json:"type"`
-		APIAppID string `json:"api_app_id"`
-		View     struct {
+		Type         string `json:"type"`
+		APIAppID     string `json:"api_app_id"`
+		TriggerID    string `json:"trigger_id"`
+		ResponseURLs []any  `json:"response_urls"`
+		View         struct {
 			ID              string `json:"id"`
 			AppID           string `json:"app_id"`
 			PrivateMetadata string `json:"private_metadata"`
@@ -278,6 +291,14 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	}
 	if err := json.Unmarshal([]byte(goodSubmission.form.Get("payload")), &submittedPayload); err != nil {
 		t.Fatal(err)
+	}
+	// An app opens a follow-up modal from a submission with its trigger_id,
+	// and Slack always sends response_urls, empty when no input asked for one.
+	if submittedPayload.TriggerID == "" || submittedPayload.ResponseURLs == nil || len(submittedPayload.ResponseURLs) != 0 {
+		t.Fatalf("view submission trigger_id=%q response_urls=%v: %s", submittedPayload.TriggerID, submittedPayload.ResponseURLs, goodSubmission.form.Get("payload"))
+	}
+	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", submittedPayload.TriggerID, `{"type":"modal","title":{"type":"plain_text","text":"Done"},"blocks":[]}`, ""); err != nil {
+		t.Fatalf("the submission's trigger_id did not open a view: %v", err)
 	}
 	if submittedPayload.Type != "view_submission" || submittedPayload.APIAppID != "A1" ||
 		submittedPayload.View.ID != string(openedView.ID) || submittedPayload.View.AppID != "A1" ||
@@ -326,6 +347,26 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 		suggestionPayload.Container.ChannelID != "C1" || suggestionPayload.Message["blocks"] == nil {
 		t.Fatalf("block suggestion payload=%s", optionsRequest.form.Get("payload"))
 	}
+	// A workspace member outside the channel may not load the options: the
+	// member above is answered for the very same message, so this refusal is
+	// about who is asking, and the app must not be asked on their behalf.
+	if err := repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "outsider"}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	requestsBefore := len(requests)
+	mu.Unlock()
+	if _, err := messages.LoadAppOptions(ctx, "T1", "U2", "C1", domain.AppOptionQuery{
+		AppID: "A1", MessageID: externalMessage.ID, BlockID: "project", ActionID: "project_select", Value: "prod",
+	}, "https://chat.example.test"); !errors.Is(err, ErrNotInConversation) {
+		t.Fatalf("a non-member loading a channel message's external options: err=%v, want %v", err, ErrNotInConversation)
+	}
+	mu.Lock()
+	requestsAfter := len(requests)
+	mu.Unlock()
+	if requestsAfter != requestsBefore {
+		t.Fatalf("a refused non-member's option load still reached the app: %d requests, want %d", requestsAfter, requestsBefore)
+	}
 
 	feedbackBlocks := `[{"type":"context_actions","block_id":"answer-feedback","elements":[{"type":"feedback_buttons","action_id":"feedback","positive_button":{"text":{"type":"plain_text","text":"Good"},"value":"positive"},"negative_button":{"text":{"type":"plain_text","text":"Bad"},"value":"negative"}}]}]`
 	feedbackMessage, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "UBOT", "C1", "Answer", feedbackBlocks, "", "", "", "A1")
@@ -364,13 +405,83 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 		t.Fatal(err)
 	}
 	responseToken := strings.TrimPrefix(responseURL.Path, "/app-response/")
+	// A body that can never be applied is refused before a use is spent:
+	// every one of the URL's uses is still available below.
+	for body, want := range map[string]error{
+		`not json`:                       ErrAppResponsePayloadInvalid,
+		`{"text":`:                       ErrAppResponsePayloadInvalid,
+		`{"blocks":{"type":"divider"}}`:  ErrAppResponsePayloadInvalid,
+		`{}`:                             ErrAppResponseNoText,
+		`{"response_type":"in_channel"}`: ErrAppResponseNoText,
+	} {
+		if err := messages.HandleAppResponse(ctx, responseToken, body); !errors.Is(err, want) {
+			t.Fatalf("response body %q error=%v, want %v", body, err, want)
+		}
+	}
 	for index := 0; index < appResponseUses; index++ {
 		if err := messages.HandleAppResponse(ctx, responseToken, `{"response_type":"in_channel","text":"late response"}`); err != nil {
 			t.Fatalf("response URL use %d: %v", index+1, err)
 		}
 	}
-	if err := messages.HandleAppResponse(ctx, responseToken, `{"response_type":"in_channel","text":"exhausted"}`); err != ErrInvalidAppResponse {
-		t.Fatalf("exhausted response URL error=%v, want %v", err, ErrInvalidAppResponse)
+	if err := messages.HandleAppResponse(ctx, responseToken, `{"response_type":"in_channel","text":"exhausted"}`); !errors.Is(err, ErrAppResponseURLUsed) {
+		t.Fatalf("exhausted response URL error=%v, want %v", err, ErrAppResponseURLUsed)
+	}
+	if err := messages.HandleAppResponse(ctx, "never-issued", `{"text":"hello"}`); !errors.Is(err, ErrAppResponseURLExpired) {
+		t.Fatalf("unknown response URL error=%v, want %v", err, ErrAppResponseURLExpired)
+	}
+
+	// A message shortcut on a person's message: the message has no app, and
+	// Slack omits app_id rather than sending an empty one.
+	human, err := messages.Post(ctx, "T1", "U1", "C1", "a person wrote this", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.DispatchAppShortcut(ctx, "T1", "U1", "C1", "A1", "attach_deployment", human.ID, "https://chat.example.test"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	humanShortcut := requests[len(requests)-1]
+	mu.Unlock()
+	var humanPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(humanShortcut.form.Get("payload")), &humanPayload); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := humanPayload.Message["app_id"]; present || humanPayload.Message["user"] != "U1" {
+		t.Fatalf("human message shortcut payload=%s", humanShortcut.form.Get("payload"))
+	}
+}
+
+// Slack names the channel a slash command came from by its own name only for
+// a public channel; the other conversation kinds have fixed or derived names
+// that apps branch on.
+func TestSlashCommandChannelNameFollowsSlackForEveryConversationKind(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1"})
+	for _, user := range []domain.User{{ID: "U1", WorkspaceID: "T1", Name: "carol"}, {ID: "U2", WorkspaceID: "T1", Name: "alice"}, {ID: "U3", WorkspaceID: "T1", Name: "bob"}} {
+		repository.SeedUser(user)
+	}
+	repository.SeedConversation(domain.Conversation{ID: "G1", WorkspaceID: "T1", Name: "group", Kind: domain.ConversationTypeMPIM})
+	for _, member := range []domain.UserID{"U1", "U2", "U3"} {
+		repository.SeedConversationMember("G1", member)
+	}
+	messages := Messages{Store: repository}
+	for _, test := range []struct {
+		conversation domain.Conversation
+		want         string
+	}{
+		{domain.Conversation{ID: "C1", Name: "general"}, "general"},
+		{domain.Conversation{ID: "C2", Name: "general", Kind: domain.ConversationTypePublic}, "general"},
+		{domain.Conversation{ID: "C3", Name: "secret", Kind: domain.ConversationTypePrivate}, "privategroup"},
+		{domain.Conversation{ID: "D1", Name: "direct", Kind: domain.ConversationTypeIM}, "directmessage"},
+		{domain.Conversation{ID: "G1", Name: "group", Kind: domain.ConversationTypeMPIM}, "mpdm-alice--bob--carol-1"},
+	} {
+		got, err := messages.slashCommandChannelName(ctx, test.conversation)
+		if err != nil || got != test.want {
+			t.Errorf("%s channel_name=%q err=%v, want %q", test.conversation.ID, got, err, test.want)
+		}
 	}
 }
 
@@ -489,8 +600,8 @@ func TestSocketModeInteractionsQueueSlackEnvelopesAndApplyAcknowledgementPayload
 	if err := repository.AppendEvent(ctx, unsubscribed); err != nil {
 		t.Fatal(err)
 	}
-	if record, _, _, found, err := messages.ClaimAppEvent(ctx, "A1", "socket", "socket-filter", time.Minute); err != nil || found {
-		t.Fatalf("unsubscribed Socket Mode event leaked: record=%+v found=%v err=%v", record, found, err)
+	if recordClaim, found, err := messages.ClaimAppEvent(ctx, "A1", "socket", "socket-filter", time.Minute); err != nil || found {
+		t.Fatalf("unsubscribed Socket Mode event leaked: record=%+v found=%v err=%v", recordClaim.Record, found, err)
 	}
 
 	if err := messages.DispatchSlashCommand(ctx, "T1", "U1", "C1", "", "/deploy", "production", "https://chat.example.test"); err != nil {
@@ -510,7 +621,7 @@ func TestSocketModeInteractionsQueueSlackEnvelopesAndApplyAcknowledgementPayload
 		!strings.HasPrefix(slackString(slashPayload["response_url"]), "https://chat.example.test/app-response/") {
 		t.Fatalf("slash payload=%s", slash.Payload)
 	}
-	openedModal, err := messages.OpenView(ctx, "T1", "UBOT", "A1", slackString(slashPayload["trigger_id"]), `{"type":"modal","title":{"type":"plain_text","text":"Socket modal"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","block_id":"name","label":{"type":"plain_text","text":"Name"},"element":{"type":"plain_text_input","action_id":"name_input"}},{"type":"actions","block_id":"preview","elements":[{"type":"button","action_id":"preview_button","text":{"type":"plain_text","text":"Preview"},"value":"current"}]}]}`)
+	openedModal, err := messages.OpenView(ctx, "T1", "UBOT", "A1", slackString(slashPayload["trigger_id"]), `{"type":"modal","title":{"type":"plain_text","text":"Socket modal"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","block_id":"name","label":{"type":"plain_text","text":"Name"},"element":{"type":"plain_text_input","action_id":"name_input"}},{"type":"actions","block_id":"preview","elements":[{"type":"button","action_id":"preview_button","text":{"type":"plain_text","text":"Preview"},"value":"current"}]}]}`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +730,7 @@ func TestSocketModeInteractionsQueueSlackEnvelopesAndApplyAcknowledgementPayload
 	}
 
 	privateBlocks := `[{"type":"actions","block_id":"private","elements":[{"type":"button","action_id":"confirm","text":{"type":"plain_text","text":"Confirm"},"value":"yes"}]}]`
-	privateMessage, err := messages.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "UBOT", "C1", "U1", "Private deployment", privateBlocks, "", "A1")
+	privateMessage, err := messages.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "UBOT", "C1", "U1", "Private deployment", privateBlocks, "", "A1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -829,6 +940,32 @@ func TestParseAppOptionsEnforcesSlackOptionContracts(t *testing.T) {
 	}
 }
 
+// A dialog_suggestion answer uses the legacy dialog shape: plain label and
+// value strings, not Block Kit text objects.
+func TestParseDialogOptionsEnforcesSlackDialogOptionContracts(t *testing.T) {
+	options, err := parseDialogOptions([]byte(`{"option_groups":[{"label":"Hosts","options":[{"label":"Build host","value":"build-1"}]}]}`))
+	if err != nil || len(options) != 1 || options[0].Text != "Build host" || options[0].Value != "build-1" || options[0].Group != "Hosts" {
+		t.Fatalf("valid options=%+v err=%v", options, err)
+	}
+	if options, err := parseDialogOptions([]byte(`{"options":[]}`)); err != nil || len(options) != 0 {
+		t.Fatalf("no matches options=%+v err=%v", options, err)
+	}
+	for name, body := range map[string]string{
+		"mixed response shapes": `{"options":[{"label":"One","value":"one"}],"option_groups":[{"label":"Group","options":[]}]}`,
+		"block kit text":        `{"options":[{"text":{"type":"plain_text","text":"One"},"value":"one"}]}`,
+		"missing value":         `{"options":[{"label":"One"}]}`,
+		"label over 75":         `{"options":[{"label":"` + strings.Repeat("l", 76) + `","value":"one"}]}`,
+		"group without label":   `{"option_groups":[{"options":[{"label":"One","value":"one"}]}]}`,
+		"empty object":          `{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseDialogOptions([]byte(body)); err != ErrInvalidAppResponse {
+				t.Fatalf("error=%v, want %v", err, ErrInvalidAppResponse)
+			}
+		})
+	}
+}
+
 func TestOnlyAuthoredDispatchableBlockActionsCanBeSent(t *testing.T) {
 	blocks := `[{"type":"actions","block_id":"actions","elements":[{"type":"button","action_id":"run","text":{"type":"plain_text","text":"Run"}}]},{"type":"input","block_id":"quiet","label":{"type":"plain_text","text":"Draft"},"element":{"type":"plain_text_input","action_id":"draft"}},{"type":"input","block_id":"live","dispatch_action":true,"label":{"type":"plain_text","text":"Filter"},"element":{"type":"plain_text_input","action_id":"filter"}}]`
 	if !blocksContainDispatchableAction(blocks, "actions", "run", "button") {
@@ -842,6 +979,49 @@ func TestOnlyAuthoredDispatchableBlockActionsCanBeSent(t *testing.T) {
 	}
 	if !blocksContainDispatchableAction(blocks, "live", "filter", "plain_text_input") {
 		t.Fatal("an input block with dispatch_action was not dispatchable")
+	}
+	// An empty identifier names nothing. It used to match the first block of a
+	// legacy surface that also lacked one.
+	unnamed := `[{"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"Run"}}]}]`
+	if blocksContainDispatchableAction(unnamed, "", "", "button") || blocksContainAction(unnamed, "", "", "button") {
+		t.Fatal("an empty block_id/action_id pair was dispatchable")
+	}
+}
+
+// Slack names every block and interactive element an app leaves unnamed, and
+// the interaction that element later produces is addressed by those names. A
+// message posted without them must therefore be stored with them and be
+// clickable through them.
+func TestUnnamedMessageBlocksAreStoredAddressable(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	repository.SeedConversationMember("C1", "U1")
+	posted, err := (Messages{Store: repository}).PostWithBlocks(ctx, "T1", "U1", "C1", "Deploy?",
+		`[{"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"Run"},"value":"go"}]}]`, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.GetMessage(ctx, posted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blocks []struct {
+		BlockID  string `json:"block_id"`
+		Elements []struct {
+			ActionID string `json:"action_id"`
+		} `json:"elements"`
+	}
+	if err := json.Unmarshal([]byte(stored.Blocks), &blocks); err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 || blocks[0].BlockID == "" || len(blocks[0].Elements) != 1 || blocks[0].Elements[0].ActionID == "" {
+		t.Fatalf("stored blocks carry no identifiers: %s", stored.Blocks)
+	}
+	if !blocksContainDispatchableAction(stored.Blocks, blocks[0].BlockID, blocks[0].Elements[0].ActionID, "button") {
+		t.Fatalf("the generated identifiers do not address the button: %s", stored.Blocks)
 	}
 }
 

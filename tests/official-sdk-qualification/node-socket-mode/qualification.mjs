@@ -212,12 +212,19 @@ try {
     throw new Error(`Socket Mode options returned HTTP ${response.status}: ${await response.text()}`);
   }
   await options;
-  assert.deepEqual(await response.json(), [{
+  const loaded = await response.json();
+  // Every loaded option is signed for the element it was loaded into — a
+  // message's external select as well as a view's — so the chosen option's
+  // text can be vouched for when the member picks it.
+  assert.equal(loaded.length, 1);
+  assert.match(loaded[0].Token, /^[A-Za-z0-9_-]{20,}$/);
+  assert.deepEqual({ ...loaded[0], Token: undefined }, {
     Text: "Production API",
     Value: "api-prod",
     Description: "Primary service",
     Group: "Projects",
-  }]);
+    Token: undefined,
+  });
 } finally {
   await interactions.disconnect();
 }

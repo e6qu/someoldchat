@@ -19,17 +19,22 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	EventsService_ListEventsAfter_FullMethodName = "/sameoldchat.chat.v1.EventsService/ListEventsAfter"
-	EventsService_ClaimAppEvent_FullMethodName   = "/sameoldchat.chat.v1.EventsService/ClaimAppEvent"
-	EventsService_AckAppEvent_FullMethodName     = "/sameoldchat.chat.v1.EventsService/AckAppEvent"
-	EventsService_ReleaseAppEvent_FullMethodName = "/sameoldchat.chat.v1.EventsService/ReleaseAppEvent"
+	EventsService_ListEventsAfter_FullMethodName     = "/sameoldchat.chat.v1.EventsService/ListEventsAfter"
+	EventsService_LatestEventSequence_FullMethodName = "/sameoldchat.chat.v1.EventsService/LatestEventSequence"
+	EventsService_ClaimAppEvent_FullMethodName       = "/sameoldchat.chat.v1.EventsService/ClaimAppEvent"
+	EventsService_AckAppEvent_FullMethodName         = "/sameoldchat.chat.v1.EventsService/AckAppEvent"
+	EventsService_ReleaseAppEvent_FullMethodName     = "/sameoldchat.chat.v1.EventsService/ReleaseAppEvent"
 )
 
 // EventsServiceClient is the client API for EventsService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type EventsServiceClient interface {
+	// ListEventsAfter reads the journal as one member (user_id) or one app
+	// (app_id) may see it. A request naming neither is refused: the unfiltered
+	// workspace journal is not part of this boundary.
 	ListEventsAfter(ctx context.Context, in *EventsRequest, opts ...grpc.CallOption) (*EventsResponse, error)
+	LatestEventSequence(ctx context.Context, in *LatestEventSequenceRequest, opts ...grpc.CallOption) (*LatestEventSequenceResponse, error)
 	ClaimAppEvent(ctx context.Context, in *AppEventClaimRequest, opts ...grpc.CallOption) (*AppEventLease, error)
 	AckAppEvent(ctx context.Context, in *AppEventAckRequest, opts ...grpc.CallOption) (*AppEventMutationResponse, error)
 	ReleaseAppEvent(ctx context.Context, in *AppEventReleaseRequest, opts ...grpc.CallOption) (*AppEventMutationResponse, error)
@@ -47,6 +52,16 @@ func (c *eventsServiceClient) ListEventsAfter(ctx context.Context, in *EventsReq
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EventsResponse)
 	err := c.cc.Invoke(ctx, EventsService_ListEventsAfter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eventsServiceClient) LatestEventSequence(ctx context.Context, in *LatestEventSequenceRequest, opts ...grpc.CallOption) (*LatestEventSequenceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LatestEventSequenceResponse)
+	err := c.cc.Invoke(ctx, EventsService_LatestEventSequence_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +102,11 @@ func (c *eventsServiceClient) ReleaseAppEvent(ctx context.Context, in *AppEventR
 // All implementations should embed UnimplementedEventsServiceServer
 // for forward compatibility.
 type EventsServiceServer interface {
+	// ListEventsAfter reads the journal as one member (user_id) or one app
+	// (app_id) may see it. A request naming neither is refused: the unfiltered
+	// workspace journal is not part of this boundary.
 	ListEventsAfter(context.Context, *EventsRequest) (*EventsResponse, error)
+	LatestEventSequence(context.Context, *LatestEventSequenceRequest) (*LatestEventSequenceResponse, error)
 	ClaimAppEvent(context.Context, *AppEventClaimRequest) (*AppEventLease, error)
 	AckAppEvent(context.Context, *AppEventAckRequest) (*AppEventMutationResponse, error)
 	ReleaseAppEvent(context.Context, *AppEventReleaseRequest) (*AppEventMutationResponse, error)
@@ -102,6 +121,9 @@ type UnimplementedEventsServiceServer struct{}
 
 func (UnimplementedEventsServiceServer) ListEventsAfter(context.Context, *EventsRequest) (*EventsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListEventsAfter not implemented")
+}
+func (UnimplementedEventsServiceServer) LatestEventSequence(context.Context, *LatestEventSequenceRequest) (*LatestEventSequenceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method LatestEventSequence not implemented")
 }
 func (UnimplementedEventsServiceServer) ClaimAppEvent(context.Context, *AppEventClaimRequest) (*AppEventLease, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClaimAppEvent not implemented")
@@ -146,6 +168,24 @@ func _EventsService_ListEventsAfter_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(EventsServiceServer).ListEventsAfter(ctx, req.(*EventsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EventsService_LatestEventSequence_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LatestEventSequenceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EventsServiceServer).LatestEventSequence(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EventsService_LatestEventSequence_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EventsServiceServer).LatestEventSequence(ctx, req.(*LatestEventSequenceRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -214,6 +254,10 @@ var EventsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListEventsAfter",
 			Handler:    _EventsService_ListEventsAfter_Handler,
+		},
+		{
+			MethodName: "LatestEventSequence",
+			Handler:    _EventsService_LatestEventSequence_Handler,
 		},
 		{
 			MethodName: "ClaimAppEvent",

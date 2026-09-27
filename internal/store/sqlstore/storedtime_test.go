@@ -127,7 +127,7 @@ func TestSQLiteMessageOrderIsChronologicalAcrossTrailingZeroFractions(t *testing
 		}
 	}
 
-	page, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: len(instants) + 1})
+	page, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: len(instants) + 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestSQLiteMessageOrderIsChronologicalAcrossTrailingZeroFractions(t *testing
 	seen := make([]domain.MessageID, 0, len(instants))
 	request := domain.PageRequest{Limit: 1}
 	for {
-		single, err := s.ListMessages(ctx, "C1", request)
+		single, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: request})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -185,12 +185,16 @@ func TestSQLiteUnreadCountIncludesMessagesAfterATrailingZeroCursor(t *testing.T)
 	}
 	defer s.Close()
 	seedConversationFixture(t, ctx, s)
+	// The messages are another member's: a member's own posts are never unread.
+	if err := s.SeedUser(ctx, domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}); err != nil {
+		t.Fatal(err)
+	}
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	read := base.Add(500 * time.Millisecond)
 	unread := base.Add(550 * time.Millisecond)
 	for index, instant := range []time.Time{read, unread} {
-		message := domain.Message{ID: domain.MessageID(fmt.Sprintf("M%d", index)), WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "hello", CreatedAt: instant}
+		message := domain.Message{ID: domain.MessageID(fmt.Sprintf("M%d", index)), WorkspaceID: "T1", Conversation: "C1", AuthorID: "U2", Text: "hello", CreatedAt: instant}
 		event := events.Event{ID: domain.EventID(fmt.Sprintf("E%d", index)), WorkspaceID: "T1", Topic: "message.created", Payload: string(message.ID), CreatedAt: instant}
 		if err := s.CreateMessage(ctx, message, event, ""); err != nil {
 			t.Fatal(err)
@@ -353,7 +357,7 @@ func TestSQLiteStoredTimestampMigrationRewritesLegacyRows(t *testing.T) {
 			t.Fatalf("migrated timestamp %q is not fixed width", value)
 		}
 	}
-	page, err := second.ListMessages(ctx, "C1", domain.PageRequest{Limit: len(instants) + 1})
+	page, err := second.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: len(instants) + 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -759,7 +763,7 @@ func TestSQLiteMessageInstantCannotOutrunItsOwnTimestamp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stored, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	stored, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(stored.Messages) != 1 {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
@@ -840,7 +844,7 @@ func TestSQLiteMigrationRepairsMessageInstantsWrittenBeforeTruncation(t *testing
 		t.Fatal(err)
 	}
 
-	stored, err := migrated.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	stored, err := migrated.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(stored.Messages) != 1 {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}

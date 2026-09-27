@@ -54,6 +54,51 @@ func (r PageRequest) PageAfter(createdAt time.Time, id MessageID, cursorAt time.
 	return createdAt.After(cursorAt) || (createdAt.Equal(cursorAt) && string(id) > string(cursorID))
 }
 
+// MessageWindow is the `oldest`/`latest`/`inclusive` window Slack declares on
+// conversations.history and conversations.replies. A zero bound is unbounded.
+//
+// It is part of the store read rather than a filter applied to a fetched page.
+// Filtering after the fact answered `latest=<ts>&inclusive=true&limit=1` with an
+// empty page, because the one row fetched was the newest message rather than
+// the one the window named, and `has_more` then described the unfiltered scan.
+type MessageWindow struct {
+	Oldest    time.Time
+	Latest    time.Time
+	Inclusive bool
+}
+
+// Contains reports whether an instant falls inside the window. Every profile
+// decides membership here or with the equivalent SQL predicate.
+func (w MessageWindow) Contains(at time.Time) bool {
+	if !w.Oldest.IsZero() && (at.Before(w.Oldest) || (at.Equal(w.Oldest) && !w.Inclusive)) {
+		return false
+	}
+	if !w.Latest.IsZero() && (at.After(w.Latest) || (at.Equal(w.Latest) && !w.Inclusive)) {
+		return false
+	}
+	return true
+}
+
+// HistoryRequest is one page of a conversation's history.
+//
+// RootsOnly is Slack's conversations.history contract: a thread reply is not
+// channel history unless it was also broadcast to the channel. The first-party
+// timeline and the Web API both read with it; a caller that needs every row —
+// retention, direct-history copies — leaves it false.
+type HistoryRequest struct {
+	Page      PageRequest
+	Window    MessageWindow
+	RootsOnly bool
+}
+
+// ThreadRequest is one page of a thread. The window narrows the replies; the
+// root is always the first row of the first page, which is what
+// conversations.replies answers whatever window the caller supplies.
+type ThreadRequest struct {
+	Page   PageRequest
+	Window MessageWindow
+}
+
 type ConversationType string
 
 const (
@@ -151,10 +196,31 @@ type ListPage struct {
 	HasMore    bool
 }
 
+// UserReactionPage is one page of reactions.list. It pages by reacted
+// message, not by reaction row: Items holds every reaction row of up to Limit
+// messages, so a message a member reacted to more than once is never split
+// across pages (and never listed on two of them). Paging by row did both.
 type UserReactionPage struct {
 	Items      []UserReaction
 	NextCursor Cursor
 	HasMore    bool
+}
+
+// UserReactionCursorKey is the keyset position after one reacted message: its
+// fixed-width creation instant and its identifier.
+func UserReactionCursorKey(message Message) string {
+	return string(NewStoredTime(message.CreatedAt)) + "\x00" + string(message.ID)
+}
+
+// ParseUserReactionCursorKey reads a position UserReactionCursorKey minted.
+// A cursor minted when pages were cut by reaction row carries the reaction's
+// name and user after the message; it resumes after that whole message.
+func ParseUserReactionCursorKey(key string) (string, MessageID, bool) {
+	parts := strings.Split(key, "\x00")
+	if (len(parts) != 2 && len(parts) != 4) || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], MessageID(parts[1]), true
 }
 
 type messageCursor struct {

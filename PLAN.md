@@ -418,6 +418,15 @@ delivery time — the plaintext is never persisted. An app installed before this
 change issued no retrievable token, so its callbacks omit the field until it
 reinstalls, matching the one-way nature of the hashes it was installed under.
 
+The function-scoped interactivity pass replaces that sealed copy of the app's
+ordinary bot token (schema 190 drops `app_bot_tokens`): `function_executed`
+now carries an execution-scoped `xwfp-` token minted once per execution, which
+authenticates as the app's bot only while its execution runs. Messages and
+views created with it record the execution, and their `block_actions`,
+`view_submission` and `view_closed` carry `function_data`, the token, and
+`interactivity`, so Bolt's `complete()`/`fail()` work inside action and view
+handlers.
+
 The staged-editing pass then lets a published workflow keep executing its
 published revision while its owner edits a draft. A non-publish update keeps
 the head row published and lets Version diverge from PublishedVersion — the

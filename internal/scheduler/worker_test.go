@@ -43,7 +43,7 @@ func TestWorkerPostsDueMessageExactlyOnceAcrossClaimReplay(t *testing.T) {
 	if err != nil || count != 0 {
 		t.Fatalf("replay run count=%d err=%v", count, err)
 	}
-	page, err := store.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	page, err := store.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "due" {
 		t.Fatalf("messages=%+v err=%v", page.Messages, err)
 	}
@@ -81,7 +81,7 @@ func TestWorkerDeliversScheduledFileOnlyMessageAfterUploadTicketExpiry(t *testin
 	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 1 {
 		t.Fatalf("run count=%d err=%v", count, err)
 	}
-	history, err := target.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	history, err := target.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || history.Messages[0].Text != "" ||
 		len(history.Messages[0].Files) != 1 || history.Messages[0].Files[0].ID != domain.FileID(upload.ID) {
 		t.Fatalf("history=%+v err=%v", history, err)
@@ -124,7 +124,7 @@ func TestWorkerExecutesEveryWorkspaceAndPreservesThreadAndAppAttribution(t *test
 	}
 	for _, workspace := range []domain.WorkspaceID{"T1", "T2"} {
 		channel := domain.ConversationID("C-" + string(workspace))
-		page, err := source.ListMessages(ctx, channel, domain.PageRequest{Limit: 10})
+		page, err := source.ListMessages(ctx, channel, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 		if err != nil || len(page.Messages) != 2 {
 			t.Fatalf("%s messages=%+v err=%v", workspace, page.Messages, err)
 		}
@@ -169,8 +169,8 @@ type lateRenewalFailureSource struct {
 	releaseRenewal  chan struct{}
 }
 
-func (s *lateRenewalFailureSource) CreateScheduledMessagePost(ctx context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event) error {
-	err := s.Store.CreateScheduledMessagePost(ctx, id, message, event)
+func (s *lateRenewalFailureSource) CreateScheduledMessagePost(ctx context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event, companions ...events.Event) error {
+	err := s.Store.CreateScheduledMessagePost(ctx, id, message, event, companions...)
 	<-s.renewStarted
 	close(s.postingReturned)
 	return err
@@ -260,7 +260,7 @@ func TestRunOnceCompletesTheBatchAroundAnItemThatCannotBePosted(t *testing.T) {
 	if count != 2 {
 		t.Fatalf("processed=%d err=%v, want the posted and terminally failed items handled", count, err)
 	}
-	page, err := store.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	page, err := store.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ type failingPostLateRenewalSource struct {
 	releaseRenewal  chan struct{}
 }
 
-func (s *failingPostLateRenewalSource) CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event) error {
+func (s *failingPostLateRenewalSource) CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event, ...events.Event) error {
 	<-s.renewStarted
 	close(s.postingReturned)
 	return errScheduledPostFailed

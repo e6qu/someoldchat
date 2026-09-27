@@ -64,7 +64,7 @@ func TestMemoryStoreConcurrentMessageLoad(t *testing.T) {
 	seen := make(map[domain.MessageID]struct{}, expectedTotal)
 	var cursor domain.Cursor
 	for len(seen) < expectedTotal {
-		page, err := repository.ListMessages(ctx, conversation, domain.PageRequest{Limit: pageSize, Cursor: cursor})
+		page, err := repository.ListMessages(ctx, conversation, domain.HistoryRequest{Page: domain.PageRequest{Limit: pageSize, Cursor: cursor}})
 		if err != nil {
 			t.Fatalf("list messages: %v", err)
 		}

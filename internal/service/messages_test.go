@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -104,7 +105,7 @@ func TestCompleteReminderDistinguishesOthersAndRecurring(t *testing.T) {
 	due := time.Now().UTC().Add(time.Hour)
 
 	// A member's own one-off reminder completes.
-	own, err := messages.AddReminder(ctx, "T1", "U1", "U1", "water the plants", due)
+	own, err := messages.AddReminder(ctx, "T1", "U1", "U1", "water the plants", domain.ReminderSchedule{Due: due})
 	if err != nil {
 		t.Fatalf("add own reminder: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestCompleteReminderDistinguishesOthersAndRecurring(t *testing.T) {
 	}
 
 	// A reminder U1 sets for U2 belongs to U2; U1 cannot complete it.
-	forOther, err := messages.AddReminder(ctx, "T1", "U1", "U2", "call the vet", due)
+	forOther, err := messages.AddReminder(ctx, "T1", "U1", "U2", "call the vet", domain.ReminderSchedule{Due: due})
 	if err != nil {
 		t.Fatalf("add reminder for U2: %v", err)
 	}
@@ -125,11 +126,35 @@ func TestCompleteReminderDistinguishesOthersAndRecurring(t *testing.T) {
 		t.Fatalf("U2 reminder after refusal: complete=%v err=%v", outstanding.CompleteAt, infoErr)
 	}
 
-	// A recurring reminder cannot be marked complete. AddReminder never mints one,
-	// so it is written directly — the store carries the recurring flag and column.
-	recurring := domain.Reminder{WorkspaceID: "T1", ID: "Rm-standup", Creator: "U1", User: "U1", Text: "daily standup", Time: due, Recurring: true}
-	if err := s.CreateReminder(ctx, recurring, events.Event{ID: "E-recur", WorkspaceID: "T1", Topic: "reminder.created", CreatedAt: time.Now().UTC()}); err != nil {
-		t.Fatalf("seed recurring reminder: %v", err)
+	// A reminder U2 set for themselves is not U1's to see: completing it is
+	// not_found, as reminders.info and reminders.delete answer, rather than
+	// cannot_complete_others confirming that it exists.
+	private, err := messages.AddReminder(ctx, "T1", "U2", "U2", "private errand", domain.ReminderSchedule{Due: due})
+	if err != nil {
+		t.Fatalf("add U2's own reminder: %v", err)
+	}
+	if err := messages.CompleteReminder(ctx, "T1", "U1", private.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("complete a stranger's reminder error = %v, want %v", err, store.ErrNotFound)
+	}
+
+	// U1's list carries U1's own reminders and the one U1 set for U2, and not
+	// U2's private one.
+	listed, err := messages.Reminders(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[domain.ReminderID]bool{}
+	for _, reminder := range listed.Reminders {
+		seen[reminder.ID] = true
+	}
+	if !seen[own.ID] || !seen[forOther.ID] || seen[private.ID] {
+		t.Fatalf("U1's reminders = %+v", listed.Reminders)
+	}
+
+	// A recurring reminder cannot be marked complete.
+	recurring, err := messages.AddReminder(ctx, "T1", "U1", "U1", "daily standup", domain.ReminderSchedule{Due: due, Recurrence: domain.ReminderDaily, TimeZone: "Europe/Paris"})
+	if err != nil || !recurring.Recurring || recurring.Recurrence != domain.ReminderDaily || recurring.TimeZone != "Europe/Paris" {
+		t.Fatalf("add recurring reminder = %+v err=%v", recurring, err)
 	}
 	if err := messages.CompleteReminder(ctx, "T1", "U1", recurring.ID); !errors.Is(err, ErrReminderRecurring) {
 		t.Fatalf("complete recurring reminder error = %v, want %v", err, ErrReminderRecurring)
@@ -151,7 +176,7 @@ func TestPostMessageRejectsArchivedConversation(t *testing.T) {
 	if _, err := (Messages{Store: s}).Post(context.Background(), "T1", "U1", "C1", "hello", "", ""); !errors.Is(err, ErrConversationAlreadyArchived) {
 		t.Fatalf("Post error = %v, want %v", err, ErrConversationAlreadyArchived)
 	}
-	messages, err := s.ListMessages(context.Background(), "C1", domain.PageRequest{Limit: 100})
+	messages, err := s.ListMessages(context.Background(), "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 100}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,11 +586,25 @@ func TestViewsAreTypedDurableAndHashChecked(t *testing.T) {
 	seedInteractionTrigger(t, s, "trigger-2")
 	messages := Messages{Store: s}
 	ctx := context.Background()
-	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"First"},"blocks":[]}`)
+	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"First"},"submit":{"type":"plain_text","text":"Save"},"blocks":[{"type":"input","label":{"type":"plain_text","text":"Name"},"element":{"type":"plain_text_input"}}]}`, "")
 	if err != nil || opened.RootViewID != opened.ID || opened.Hash == "" {
 		t.Fatalf("opened=%+v err=%v", opened, err)
 	}
-	pushed, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-2", `{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`)
+	// The unnamed input is stored with the block_id and action_id Slack would
+	// assign, which is what its view_submission state is keyed by.
+	var openedPayload struct {
+		Blocks []struct {
+			BlockID string `json:"block_id"`
+			Element struct {
+				ActionID string `json:"action_id"`
+			} `json:"element"`
+		} `json:"blocks"`
+	}
+	if err := json.Unmarshal([]byte(opened.Payload), &openedPayload); err != nil || len(openedPayload.Blocks) != 1 ||
+		openedPayload.Blocks[0].BlockID == "" || openedPayload.Blocks[0].Element.ActionID == "" {
+		t.Fatalf("opened view payload has no identifiers: %s err=%v", opened.Payload, err)
+	}
+	pushed, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-2", `{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`, "")
 	if err != nil || pushed.RootViewID != opened.RootViewID || pushed.PreviousViewID != opened.ID {
 		t.Fatalf("pushed=%+v err=%v", pushed, err)
 	}
@@ -576,8 +615,66 @@ func TestViewsAreTypedDurableAndHashChecked(t *testing.T) {
 	if _, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"modal"}`, opened.Hash); err == nil {
 		t.Fatal("stale view hash unexpectedly succeeded")
 	}
-	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal"}`); !errors.Is(err, ErrInvalidTrigger) {
-		t.Fatalf("replayed trigger error=%v, want %v", err, ErrInvalidTrigger)
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal"}`, ""); !errors.Is(err, ErrInvalidView) {
+		t.Fatalf("malformed view error=%v, want %v", err, ErrInvalidView)
+	}
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`, ""); !errors.Is(err, ErrTriggerExchanged) {
+		t.Fatalf("replayed trigger error=%v, want %v", err, ErrTriggerExchanged)
+	}
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "unknown", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`, ""); !errors.Is(err, ErrInvalidTrigger) {
+		t.Fatalf("unknown trigger error=%v, want %v", err, ErrInvalidTrigger)
+	}
+	// A malformed view must not spend the trigger, and a Home view cannot be
+	// opened, pushed, or reached by updating a modal.
+	seedInteractionTrigger(t, s, "trigger-3")
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, ErrInvalidView) {
+		t.Fatalf("home via views.open error=%v, want %v", err, ErrInvalidView)
+	}
+	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"x"},"blocks":[{"type":"bogus"}]}`, ""); !errors.Is(err, ErrInvalidView) {
+		t.Fatalf("invalid block error=%v, want %v", err, ErrInvalidView)
+	}
+	if _, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, ErrInvalidView) {
+		t.Fatalf("modal->home update error=%v, want %v", err, ErrInvalidView)
+	}
+	third, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"Third"},"blocks":[]}`, "")
+	if err != nil || third.PreviousViewID != pushed.ID {
+		t.Fatalf("third=%+v err=%v", third, err)
+	}
+	seedInteractionTrigger(t, s, "trigger-4")
+	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-4", `{"type":"modal","title":{"type":"plain_text","text":"Fourth"},"blocks":[]}`, ""); !errors.Is(err, ErrViewPushLimit) {
+		t.Fatalf("fourth push error=%v, want %v", err, ErrViewPushLimit)
+	}
+}
+
+// Slack keeps what a user entered across views.update when the replacement
+// keeps the element's block_id and action_id; entries for removed or retyped
+// elements are dropped.
+func TestViewUpdateCarriesStateForSurvivingElements(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedHomeApp(t, s, "A1")
+	seedInteractionTrigger(t, s, "trigger-1")
+	messages := Messages{Store: s}
+	ctx := context.Background()
+	input := func(block, action, kind string) string {
+		return `{"type":"input","block_id":"` + block + `","label":{"type":"plain_text","text":"L"},"element":{"type":"` + kind + `","action_id":"` + action + `"}}`
+	}
+	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"x"},"submit":{"type":"plain_text","text":"Go"},"blocks":[`+input("keep", "a", "plain_text_input")+`,`+input("gone", "b", "plain_text_input")+`,`+input("retyped", "c", "plain_text_input")+`]}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened.State = `{"values":{"keep":{"a":{"type":"plain_text_input","value":"typed"}},"gone":{"b":{"type":"plain_text_input","value":"lost"}},"retyped":{"c":{"type":"plain_text_input","value":"lost"}}}}`
+	opened, err = s.UpdateView(ctx, opened, "", events.Event{ID: "E-state", WorkspaceID: "T1", ActorID: "U1", Topic: "view.updated", Payload: `{"view_id":"x"}`, CreatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"modal","title":{"type":"plain_text","text":"x"},"submit":{"type":"plain_text","text":"Go"},"blocks":[`+input("keep", "a", "plain_text_input")+`,`+input("retyped", "c", "number_input")+`,{"type":"section","text":{"type":"mrkdwn","text":"added"}}]}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.State != `{"values":{"keep":{"a":{"type":"plain_text_input","value":"typed"}}}}` {
+		t.Fatalf("carried state = %s", updated.State)
 	}
 }
 
@@ -671,7 +768,7 @@ func TestDialogOpenValidatesAndPersistsPayload(t *testing.T) {
 	seedInteractionTrigger(t, s, "trigger-1")
 	seedInteractionTrigger(t, s, "trigger-2")
 	messages := Messages{Store: s}
-	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-1", `{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`); err != nil {
+	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-1", `{"callback_id":"callback","title":"Title","elements":[{"type":"text","name":"summary","label":"Summary"}]}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-2", `{"callback_id":"callback","title":"Title"}`); err != ErrInvalidDialog {
@@ -957,7 +1054,7 @@ func TestConversationAccessGroupsNormalizeAndPersist(t *testing.T) {
 	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", Kind: domain.ConversationTypePrivate})
 	messages := Messages{Store: s}
-	group, err := messages.CreateUserGroup(context.Background(), "T1", "U1", "Engineering", "engineering", "")
+	group, err := messages.CreateUserGroup(context.Background(), "T1", "U1", "Engineering", "engineering", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1054,7 +1151,7 @@ func TestUnfurlPersistsNormalizedMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := messages.Unfurl(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), map[string]string{"https://example.com": " {\"title\": \"Example\"} "})
+	updated, err := messages.Unfurl(context.Background(), "T1", "U1", "", "C1", domain.NewMessageTimestamp(message.CreatedAt), map[string]string{"https://example.com": " {\"title\": \"Example\"} "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1064,6 +1161,23 @@ func TestUnfurlPersistsNormalizedMetadata(t *testing.T) {
 	loaded, err := s.GetMessage(context.Background(), message.ID)
 	if err != nil || loaded.Unfurls["https://example.com"] != `{"title":"Example"}` {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
+	}
+
+	// Any member of the conversation may unfurl - the app is rarely the
+	// author - but a non-member may not, and neither may anyone unfurl a URL
+	// the message does not contain.
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1"})
+	s.SeedConversationMember("C1", "U2")
+	timestamp := domain.NewMessageTimestamp(message.CreatedAt)
+	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "", "C1", timestamp, map[string]string{"https://example.com": `{"title":"Again"}`}); err != nil {
+		t.Fatalf("member unfurl err=%v", err)
+	}
+	if _, err := messages.Unfurl(context.Background(), "T1", "U3", "", "C1", timestamp, map[string]string{"https://example.com": `{"title":"X"}`}); !errors.Is(err, ErrNotInConversation) {
+		t.Fatalf("non-member unfurl err=%v", err)
+	}
+	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "", "C1", timestamp, map[string]string{"https://other.example": `{"title":"X"}`}); !errors.Is(err, ErrCannotUnfurlURL) {
+		t.Fatalf("foreign URL unfurl err=%v", err)
 	}
 }
 
@@ -1156,12 +1270,43 @@ func TestCustomEmojiLifecycleNormalizesAndPersists(t *testing.T) {
 	if err := messages.AdminRenameEmoji(ctx, "T1", "U1", "hello", "greeting"); err != nil {
 		t.Fatal(err)
 	}
+	// The rename carried the alias along with the name, and the uploader and
+	// upload time admin.emoji.list reports were recorded.
+	values, err = messages.Emojis(ctx, "T1", "U1")
+	if err != nil || len(values) != 2 || values[0].Name != "greeting" || values[0].AliasFor != "shipit" ||
+		values[1].CreatedBy != "U1" || values[1].CreatedAt.IsZero() {
+		t.Fatalf("renamed values=%+v err=%v", values, err)
+	}
+	// An alias may name a built-in emoji, as Slack's `:thumbsup_all:` does.
+	if err := messages.AdminAddEmojiAlias(ctx, "T1", "U1", "yes", "thumbsup"); err != nil {
+		t.Fatalf("AdminAddEmojiAlias(built-in) error=%v", err)
+	}
+	before, err := messages.EmojiRevision(ctx, "T1", "U1")
+	if err != nil || before.IsZero() {
+		t.Fatalf("revision=%v err=%v", before, err)
+	}
+	// Removing an emoji removes the aliases that point at it; the alias of the
+	// built-in emoji is untouched, and the revision moves.
+	time.Sleep(time.Millisecond)
 	if err := messages.AdminRemoveEmoji(ctx, "T1", "U1", "shipit"); err != nil {
 		t.Fatal(err)
 	}
 	values, err = messages.Emojis(ctx, "T1", "U1")
-	if err != nil || len(values) != 1 || values[0].Name != "greeting" {
+	if err != nil || len(values) != 1 || values[0].Name != "yes" || values[0].AliasFor != "thumbsup" {
 		t.Fatalf("final values=%+v err=%v", values, err)
+	}
+	after, err := messages.EmojiRevision(ctx, "T1", "U1")
+	if err != nil || !after.After(before) {
+		t.Fatalf("revision after removal=%v before=%v err=%v", after, before, err)
+	}
+	removed := false
+	for _, event := range s.Outbox() {
+		if event.Topic == "emoji.removed" && strings.Contains(event.Payload, `"greeting"`) {
+			removed = true
+		}
+	}
+	if !removed {
+		t.Fatalf("the emoji.removed event did not name the removed alias: %+v", s.Outbox())
 	}
 }
 
@@ -1188,7 +1333,7 @@ func TestUserGroupChannelMembershipLifecycle(t *testing.T) {
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	messages := Messages{Store: s}
 	ctx := context.Background()
-	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "Engineering", "engineering", "")
+	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "Engineering", "engineering", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1311,18 +1456,28 @@ func TestCallLifecycleNormalizesParticipants(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
 	messages := Messages{Store: s}
-	value, err := messages.AddCall(context.Background(), "T1", "U1", "external", "", "https://call.example", "", "demo", time.Time{}, []domain.UserID{"U2", "U1", "U2"})
+	guest := domain.ExternalCallParticipant{ExternalID: "guest-1", DisplayName: "Guest", AvatarURL: "https://call.example/guest.png"}
+	value, err := messages.AddCall(context.Background(), "T1", "U1", "external", "", "https://call.example", "", "demo", time.Time{},
+		[]domain.CallParticipant{{SlackID: "U2"}, {SlackID: "U1"}, {SlackID: "U2"}, {External: guest}, {External: guest}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(value.Participants) != 2 || value.Participants[0] != "U1" || value.Participants[1] != "U2" {
-		t.Fatalf("participants=%v", value.Participants)
+	if len(value.Participants) != 2 || value.Participants[0] != "U1" || value.Participants[1] != "U2" ||
+		len(value.ExternalParticipants) != 1 || value.ExternalParticipants[0] != guest {
+		t.Fatalf("participants=%v external=%v", value.Participants, value.ExternalParticipants)
 	}
-	if err := messages.RemoveCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.UserID{"U2"}); err != nil {
+	// An entry that names both a member and an external participant, or
+	// neither, is not a participant.
+	for _, invalid := range []domain.CallParticipant{{}, {SlackID: "U1", External: guest}} {
+		if err := messages.AddCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.CallParticipant{invalid}); !errors.Is(err, ErrInvalidCall) {
+			t.Fatalf("AddCallParticipants(%+v) error=%v", invalid, err)
+		}
+	}
+	if err := messages.RemoveCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.CallParticipant{{SlackID: "U2"}, {External: domain.ExternalCallParticipant{ExternalID: "guest-1"}}}); err != nil {
 		t.Fatal(err)
 	}
 	value, err = messages.GetCall(context.Background(), "T1", "U1", value.ID)
-	if err != nil || len(value.Participants) != 1 || value.Participants[0] != "U1" {
+	if err != nil || len(value.Participants) != 1 || value.Participants[0] != "U1" || len(value.ExternalParticipants) != 0 {
 		t.Fatalf("call=%+v err=%v", value, err)
 	}
 	if err := messages.EndCall(context.Background(), "T1", "U1", value.ID, 42); err != nil {
@@ -1475,7 +1630,7 @@ func TestEphemeralMessageIsDurableAndRecipientScoped(t *testing.T) {
 	if err != nil || len(hidden) != 0 {
 		t.Fatalf("non-recipient ephemerals=%+v err=%v", hidden, err)
 	}
-	if _, err := (Messages{Store: s}).PostEphemeral(context.Background(), "T1", "U1", "C1", "U3", "secret"); err != store.ErrNotFound {
+	if _, err := (Messages{Store: s}).PostEphemeral(context.Background(), "T1", "U1", "C1", "U3", "secret"); !errors.Is(err, ErrRecipientNotInConversation) {
 		t.Fatalf("foreign recipient err=%v", err)
 	}
 	records, err := s.ListEventsAfter(context.Background(), "T1", 0, 10)
@@ -1497,7 +1652,7 @@ func TestPostMessagePersistsMessage(t *testing.T) {
 	if message.Text != "hello" || message.ID == "" {
 		t.Fatalf("unexpected message: %+v", message)
 	}
-	got, err := s.ListMessages(context.Background(), "C1", domain.PageRequest{Limit: 10})
+	got, err := s.ListMessages(context.Background(), "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(got.Messages) != 1 {
 		t.Fatalf("messages = %+v, err = %v", got, err)
 	}
@@ -1509,15 +1664,15 @@ func TestPostWithBlocksPersistsNormalizedPayload(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("C1", "U1")
-	message, err := (Messages{Store: s}).PostWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [ { "type": "section" } ] `, "", "")
+	message, err := (Messages{Store: s}).PostWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [ { "type": "section", "block_id": "b1", "text": { "type": "mrkdwn", "text": "hi" } } ] `, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if message.Text != "" || message.Blocks != `[{"type":"section"}]` {
+	if message.Text != "" || message.Blocks != `[{"type":"section","block_id":"b1","text":{"type":"mrkdwn","text":"hi"}}]` {
 		t.Fatalf("unexpected message: %+v", message)
 	}
-	updated, err := (Messages{Store: s}).UpdateWithBlocks(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), "updated", `[{"type":"divider"}]`)
-	if err != nil || updated.Text != "updated" || updated.Blocks != `[{"type":"divider"}]` {
+	updated, err := (Messages{Store: s}).UpdateWithBlocks(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), "updated", `[{"type":"divider","block_id":"b2"}]`)
+	if err != nil || updated.Text != "updated" || updated.Blocks != `[{"type":"divider","block_id":"b2"}]` {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
 }
@@ -1583,7 +1738,7 @@ func TestReplyStoresSlackThreadTimestamp(t *testing.T) {
 	if reply.ThreadTimestamp != thread {
 		t.Fatalf("thread timestamp=%q, want %q", reply.ThreadTimestamp, thread)
 	}
-	page, err := messages.Replies(context.Background(), "T1", "U1", "C1", thread, domain.PageRequest{Limit: 10})
+	page, err := messages.Replies(context.Background(), "T1", "U1", "C1", thread, domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 2 || page.Messages[0].ID != root.ID || page.Messages[1].ID != reply.ID {
 		t.Fatalf("replies=%+v err=%v", page, err)
 	}
@@ -1973,11 +2128,11 @@ func TestScheduleMessageWithBlocksPersistsNormalizedPayload(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("C1", "U1")
-	value, err := (Messages{Store: s}).ScheduleMessageWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [{"type":"divider"}] `, time.Now().UTC().Add(time.Hour))
+	value, err := (Messages{Store: s}).ScheduleMessageWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [{"type":"divider","block_id":"b1"}] `, time.Now().UTC().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.Text != "" || value.Blocks != `[{"type":"divider"}]` {
+	if value.Text != "" || value.Blocks != `[{"type":"divider","block_id":"b1"}]` {
 		t.Fatalf("scheduled=%+v", value)
 	}
 	page, err := (Messages{Store: s}).ScheduledMessages(context.Background(), "T1", "U1", "C1", domain.PageRequest{Limit: 10})
@@ -2203,7 +2358,7 @@ func TestScheduledComposerFilesSurviveTicketExpiryAndDeliverIdempotently(t *test
 	if err != nil || second.ID != first.ID {
 		t.Fatalf("retry delivery=%+v err=%v, want message %s", second, err, first.ID)
 	}
-	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || history.Messages[0].ID != first.ID {
 		t.Fatalf("delivery duplicated message: history=%+v err=%v", history, err)
 	}
@@ -2238,7 +2393,8 @@ func TestDirectConversationCloseKeepsMembershipHistoryAndCanonicalReopen(t *test
 		s.SeedUser(domain.User{ID: domain.UserID(fmt.Sprintf("U%d", index)), WorkspaceID: "T1"})
 	}
 	messages := Messages{Store: s}
-	direct, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	directOpening, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	direct := directOpening.Conversation
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2261,14 +2417,15 @@ func TestDirectConversationCloseKeepsMembershipHistoryAndCanonicalReopen(t *test
 			t.Fatalf("closed DM remained in current navigation: %+v", page)
 		}
 	}
-	history, err := messages.History(ctx, "T1", "U1", direct.ID, domain.PageRequest{Limit: 10})
+	history, err := messages.History(ctx, "T1", "U1", direct.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || history.Messages[0].ID != posted.ID {
 		t.Fatalf("closed history=%+v err=%v", history, err)
 	}
 	if err := messages.LeaveConversation(ctx, "T1", "U1", direct.ID); !errors.Is(err, store.ErrAlreadyExists) {
 		t.Fatalf("second close error=%v, want already closed", err)
 	}
-	reopened, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	reopenedOpening, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	reopened := reopenedOpening.Conversation
 	if err != nil || reopened.ID != direct.ID {
 		t.Fatalf("reopened=%+v err=%v, want %s", reopened, err, direct.ID)
 	}
@@ -2304,7 +2461,8 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 		s.SeedUser(domain.User{ID: id, WorkspaceID: "T1", Name: string(id)})
 	}
 	messages := Messages{Store: s}
-	source, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	sourceOpening, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	source := sourceOpening.Conversation
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2328,11 +2486,11 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 	if err != nil || len(targetMembers.Users) != 3 {
 		t.Fatalf("target members = %+v err=%v", targetMembers, err)
 	}
-	sourceHistory, err := messages.History(ctx, "T1", "U1", source.ID, domain.PageRequest{Limit: 10})
+	sourceHistory, err := messages.History(ctx, "T1", "U1", source.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(sourceHistory.Messages) != 2 {
 		t.Fatalf("source history = %+v err=%v", sourceHistory, err)
 	}
-	targetHistory, err := messages.History(ctx, "T1", "U1", expanded.ID, domain.PageRequest{Limit: 10})
+	targetHistory, err := messages.History(ctx, "T1", "U1", expanded.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(targetHistory.Messages) != 2 {
 		t.Fatalf("target history = %+v err=%v", targetHistory, err)
 	}
@@ -2347,7 +2505,7 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 	if converted.ID != expanded.ID || converted.Kind != domain.ConversationTypePrivate || converted.Name != "project-room" {
 		t.Fatalf("converted conversation = %+v", converted)
 	}
-	convertedHistory, err := messages.History(ctx, "T1", "U1", converted.ID, domain.PageRequest{Limit: 10})
+	convertedHistory, err := messages.History(ctx, "T1", "U1", converted.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(convertedHistory.Messages) != 3 {
 		t.Fatalf("converted history = %+v err=%v", convertedHistory, err)
 	}
@@ -2363,7 +2521,7 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 	if err != nil {
 		t.Fatal(err)
 	}
-	emptyHistory, err := messages.History(ctx, "T1", "U1", noHistory.ID, domain.PageRequest{Limit: 10})
+	emptyHistory, err := messages.History(ctx, "T1", "U1", noHistory.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(emptyHistory.Messages) != 1 || !strings.Contains(emptyHistory.Messages[0].Text, "added <@U4>") {
 		t.Fatalf("history-free expansion = %+v err=%v", emptyHistory, err)
 	}
@@ -2401,15 +2559,15 @@ func TestPostEphemeralWithBlocksPersistsNormalizedEvent(t *testing.T) {
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("C1", "U1")
 	s.SeedConversationMember("C1", "U2")
-	value, err := (Messages{Store: s}).PostEphemeralWithBlocks(context.Background(), "T1", "U1", "C1", "U2", "", ` [{"type":"divider"}] `)
+	value, err := (Messages{Store: s}).PostEphemeralWithBlocks(context.Background(), "T1", "U1", "C1", "U2", "", ` [{"type":"divider","block_id":"b1"}] `)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.Text != "" || value.Blocks != `[{"type":"divider"}]` {
+	if value.Text != "" || value.Blocks != `[{"type":"divider","block_id":"b1"}]` {
 		t.Fatalf("ephemeral=%+v", value)
 	}
 	records, err := s.ListEventsAfter(context.Background(), "T1", 0, 10)
-	if err != nil || len(records) != 1 || !strings.Contains(records[0].Event.Payload, `"blocks":"[{\"type\":\"divider\"}]"`) {
+	if err != nil || len(records) != 1 || !strings.Contains(records[0].Event.Payload, `"blocks":"[{\"type\":\"divider\",\"block_id\":\"b1\"}]"`) {
 		t.Fatalf("events=%+v err=%v", records, err)
 	}
 }
@@ -2431,7 +2589,7 @@ func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
 	if err != nil || updated.Attachments != `[{"text":"updated"}]` {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
-	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "")
+	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "", "")
 	if err != nil || ephemeral.Attachments != `[{"text":"attachment"}]` {
 		t.Fatalf("ephemeral=%+v err=%v", ephemeral, err)
 	}
@@ -2551,10 +2709,10 @@ func TestEveryMessageWriteUsesOneStructuredBodyLimit(t *testing.T) {
 	if _, err := messages.ScheduleMessageWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("schedule oversized body err=%v", err)
 	}
-	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", ""); !errors.Is(err, ErrInvalidEphemeral) {
+	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", ""); !errors.Is(err, ErrInvalidEphemeral) {
 		t.Fatalf("ephemeral oversized body err=%v", err)
 	}
-	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{
+	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{
 		"https://example.test": `{"text":"` + strings.Repeat("x", MaxMessageBodyBytes) + `"}`,
 	}); !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("unfurl oversized body err=%v", err)
@@ -2602,7 +2760,7 @@ func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 	if err != nil || len(metadata.SharedChannels) != 1 || metadata.SharedChannels[0] != "C1" {
 		t.Fatalf("metadata=%+v err=%v", metadata, err)
 	}
-	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err := messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks != "" || len(page.Messages[0].Files) != 1 || page.Messages[0].Files[0].ID != file.ID {
 		t.Fatalf("published messages=%+v err=%v", page.Messages, err)
 	}
@@ -2659,7 +2817,7 @@ func TestDeletingTheSharingMessageEndsTheShareAndAnnouncesIt(t *testing.T) {
 	if _, err := messages.FileInfo(ctx, "T1", "U2", file.ID); err != nil {
 		t.Fatalf("a member of the channel it was shared into cannot read the file: %v", err)
 	}
-	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err := messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 {
 		t.Fatalf("messages=%+v err=%v", page.Messages, err)
 	}
@@ -2744,7 +2902,7 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	if err != nil || len(files) != 2 || files[0].Title != "First" || files[1].Title != "Second" {
 		t.Fatalf("files=%+v err=%v", files, err)
 	}
-	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err := messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Blocks == "" || len(page.Messages[0].Files) != 2 || page.Messages[0].Files[0].ID != files[0].ID || page.Messages[0].Files[1].ID != files[1].ID {
 		t.Fatalf("messages=%+v err=%v", page.Messages, err)
 	}
@@ -2755,7 +2913,7 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	if _, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: first.ID}, {ID: second.ID}}, []domain.ConversationID{"C2"}, "wrong destination", "", ""); !errors.Is(err, ErrInvalidExternalUpload) {
 		t.Fatalf("completed tickets reused in another channel: %v", err)
 	}
-	page, err = messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	page, err = messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 {
 		t.Fatalf("duplicate messages=%+v err=%v", page.Messages, err)
 	}
@@ -2791,7 +2949,7 @@ func TestDraftOwnedUploadRemainsCompletableAfterTicketWindow(t *testing.T) {
 	if err != nil || len(files) != 1 {
 		t.Fatalf("files=%+v err=%v", files, err)
 	}
-	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 1 || history.Messages[0].Text != "finished" {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
@@ -3154,5 +3312,29 @@ func TestListingTeamUsersRefusesAnUnsupportedRoleAsAWorkspaceError(t *testing.T)
 		if _, err := messages.AdminTeamUsers(ctx, "T1", "U1", role, domain.PageRequest{Limit: 10}); err != nil {
 			t.Fatalf("listing %s: %v", role, err)
 		}
+	}
+}
+
+// TestSetUserProfileStoresTitlePronounsAndAKnownTimezone pins PROFILE-01's
+// stored identity: title and pronouns are kept trimmed, a time zone must be one
+// the host can resolve (so a profile's local time is never silently wrong),
+// and an unknown zone is refused rather than stored.
+func TestSetUserProfileStoresTitlePronounsAndAKnownTimezone(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	messages := Messages{Store: s}
+	user, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{Title: " Staff Engineer ", Pronouns: " they/them ", Timezone: "America/New_York"})
+	if err != nil || user.Profile.Title != "Staff Engineer" || user.Profile.Pronouns != "they/them" || user.Profile.Timezone != "America/New_York" {
+		t.Fatalf("user=%+v err=%v", user.Profile, err)
+	}
+	for _, zone := range []string{"Mars/Olympus_Mons", "Local"} {
+		if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{Timezone: zone}); !errors.Is(err, ErrInvalidProfile) {
+			t.Fatalf("zone %q err=%v, want ErrInvalidProfile", zone, err)
+		}
+	}
+	stored, err := s.GetUser(context.Background(), "U1")
+	if err != nil || stored.Profile.Timezone != "America/New_York" {
+		t.Fatalf("a refused zone replaced the stored one: %+v err=%v", stored.Profile, err)
 	}
 }

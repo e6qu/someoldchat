@@ -296,6 +296,13 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoConversation, decodeProtoConversation),
 		},
+		"DirectOpening": {
+			sample: &domain.DirectOpening{},
+			prepare: func(filled any) {
+				filled.(*domain.DirectOpening).Conversation.Kind = domain.ConversationTypeIM
+			},
+			through: through(encodeProtoDirectOpening, decodeProtoDirectOpening),
+		},
 		"ConversationPage": {
 			sample: &domain.ConversationPage{},
 			prepare: func(filled any) {
@@ -466,7 +473,9 @@ func conversionCases() map[string]conversionCase {
 		"OAuthAuthorization":        {sample: &domain.OAuthAuthorization{}, through: through(encodeProtoOAuthAuthorization, decodeProtoOAuthAuthorization)},
 		"Reaction":                  {sample: &domain.Reaction{}, through: through(encodeProtoReaction, decodeProtoReaction)},
 		"UserReactionPage":          {sample: &domain.UserReactionPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoUserReactionPage, decodeProtoUserReactionPage)},
-		"Pin":                       {sample: &domain.Pin{}, through: through(encodeProtoPin, decodeProtoPin)},
+		"Pin":                       {sample: &domain.Pin{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoPin, decodeProtoPin)},
+		"MessageWindow":             {sample: &domain.MessageWindow{}, through: through(encodeProtoMessageWindow, decodeProtoMessageWindow)},
+		"MessageAnnotation":         {sample: &domain.MessageAnnotation{}, through: through(encodeProtoMessageAnnotation, decodeProtoMessageAnnotation)},
 		"Star":                      {sample: &domain.Star{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoStar, decodeProtoStar)},
 		"SavedItem": {
 			sample:  &domain.SavedItem{},
@@ -609,19 +618,20 @@ func conversionCases() map[string]conversionCase {
 		"SocketModeInteraction": {sample: &domain.SocketModeInteraction{}, through: through(func(value domain.SocketModeInteraction) *chatv1.SocketModeInteraction {
 			return encodeProtoSocketModeInteraction(value, true)
 		}, decodeProtoSocketModeInteraction)},
-		"Bot":                  {sample: &domain.Bot{}, through: through(encodeProtoBot, decodeProtoBot)},
-		"InviteRequest":        {sample: &domain.InviteRequest{}, through: throughInfallible(encodeProtoInviteRequest, decodeProtoInviteRequest)},
-		"RoleAssignment":       {sample: &domain.RoleAssignment{}, through: throughInfallible(encodeProtoRoleAssignment, decodeProtoRoleAssignment)},
-		"AuthPolicyEntity":     {sample: &domain.AuthPolicyEntity{}, through: throughInfallible(encodeProtoAuthPolicyEntity, decodeProtoAuthPolicyEntity)},
-		"SessionSettings":      {sample: &domain.SessionSettings{}, through: throughInfallible(encodeProtoSessionSettings, decodeProtoSessionSettings)},
-		"InformationBarrier":   {sample: &domain.InformationBarrier{}, through: throughInfallible(encodeProtoBarrier, decodeProtoBarrier)},
-		"AppConfig":            {sample: &domain.AppConfig{}, through: throughInfallible(encodeProtoAppConfig, decodeProtoAppConfig)},
-		"LinkedObject":         {sample: &domain.LinkedObject{}, through: throughInfallible(encodeProtoLinkedObject, decodeProtoLinkedObject)},
-		"AppActivity":          {sample: &domain.AppActivity{}, through: throughInfallible(encodeProtoAppActivity, decodeProtoAppActivity)},
-		"AppActivityPage":      {sample: &domain.AppActivityPage{}, through: throughInfallible(encodeProtoAppActivityPage, decodeProtoAppActivityPage)},
-		"AnalyticsRow":         {sample: &domain.AnalyticsRow{}, through: throughInfallible(encodeProtoAnalyticsRow, decodeProtoAnalyticsRow)},
-		"AnomalyAllowList":     {sample: &domain.AnomalyAllowList{}, through: throughInfallible(encodeProtoAnomalyAllowList, decodeProtoAnomalyAllowList)},
-		"WorkflowStepResponse": {sample: &domain.WorkflowStepResponse{}, through: throughInfallible(encodeProtoWorkflowStepResponse, decodeProtoWorkflowStepResponse)},
+		"Bot":                   {sample: &domain.Bot{}, through: through(encodeProtoBot, decodeProtoBot)},
+		"ViewInteractionResult": {sample: &domain.ViewInteractionResult{}, through: through(encodeProtoViewInteractionResult, decodeProtoViewInteractionResult)},
+		"InviteRequest":         {sample: &domain.InviteRequest{}, through: throughInfallible(encodeProtoInviteRequest, decodeProtoInviteRequest)},
+		"RoleAssignment":        {sample: &domain.RoleAssignment{}, through: throughInfallible(encodeProtoRoleAssignment, decodeProtoRoleAssignment)},
+		"AuthPolicyEntity":      {sample: &domain.AuthPolicyEntity{}, through: throughInfallible(encodeProtoAuthPolicyEntity, decodeProtoAuthPolicyEntity)},
+		"SessionSettings":       {sample: &domain.SessionSettings{}, through: throughInfallible(encodeProtoSessionSettings, decodeProtoSessionSettings)},
+		"InformationBarrier":    {sample: &domain.InformationBarrier{}, through: throughInfallible(encodeProtoBarrier, decodeProtoBarrier)},
+		"AppConfig":             {sample: &domain.AppConfig{}, through: throughInfallible(encodeProtoAppConfig, decodeProtoAppConfig)},
+		"LinkedObject":          {sample: &domain.LinkedObject{}, through: throughInfallible(encodeProtoLinkedObject, decodeProtoLinkedObject)},
+		"AppActivity":           {sample: &domain.AppActivity{}, through: throughInfallible(encodeProtoAppActivity, decodeProtoAppActivity)},
+		"AppActivityPage":       {sample: &domain.AppActivityPage{}, through: throughInfallible(encodeProtoAppActivityPage, decodeProtoAppActivityPage)},
+		"AnalyticsRow":          {sample: &domain.AnalyticsRow{}, through: throughInfallible(encodeProtoAnalyticsRow, decodeProtoAnalyticsRow)},
+		"AnomalyAllowList":      {sample: &domain.AnomalyAllowList{}, through: throughInfallible(encodeProtoAnomalyAllowList, decodeProtoAnomalyAllowList)},
+		"WorkflowStepResponse":  {sample: &domain.WorkflowStepResponse{}, through: throughInfallible(encodeProtoWorkflowStepResponse, decodeProtoWorkflowStepResponse)},
 		"ExternalAuthToken": {
 			sample:  &domain.ExternalAuthToken{},
 			through: throughInfallible(encodeProtoExternalAuthToken, decodeProtoExternalAuthToken),
@@ -655,7 +665,7 @@ func conversionCases() map[string]conversionCase {
 		// encodeProtoPinPage left all 271 tests in this package green, and
 		// pins.list would have lost pagination in the distributed composition
 		// while the monolith kept it.
-		"PinPage": {sample: &pinPage{}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
+		"PinPage": {sample: &pinPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			value := filled.(*pinPage)
 			wire := encodeProtoPinPage(value.Pins, value.NextCursor, value.HasMore)
 			decoded, err := decodeProtoPinPage(wire)
@@ -666,12 +676,12 @@ func conversionCases() map[string]conversionCase {
 		}},
 		"StarPage": {sample: &starPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			value := filled.(*starPage)
-			wire := encodeProtoStarPage(value.Stars, value.NextCursor, value.HasMore)
+			wire := encodeProtoStarPage(domain.StarPage{Stars: value.Stars, NextCursor: value.NextCursor, HasMore: value.HasMore, Total: value.Total})
 			decoded, err := decodeProtoStarPage(wire)
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
-			return &starPage{Stars: decoded.Stars, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire, nil
+			return &starPage{Stars: decoded.Stars, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore, Total: decoded.Total}, wire, nil
 		}},
 		"ReactionPage": {sample: &reactionPage{}, through: func(t *testing.T, filled any) (any, proto.Message, error) {
 			value := filled.(*reactionPage)
@@ -720,6 +730,7 @@ type starPage struct {
 	Stars      []domain.Star
 	NextCursor domain.Cursor
 	HasMore    bool
+	Total      int
 }
 
 type reactionPage struct {

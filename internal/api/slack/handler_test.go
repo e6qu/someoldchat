@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -121,11 +122,10 @@ func TestAppsConnectionsOpenUsesAppTokenAndCreatesSingleUseConnection(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: store}, userAuth)
+	handler, err := NewHandler(service.Messages{Store: store}, userAuth, WithAppAuthenticator(appAuth), WithSocketMode(socketmode.Service{Store: store}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.ConfigureSocketMode(socketmode.Service{Store: store, Host: "example.test"}, appAuth)
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	request := httptest.NewRequest(http.MethodPost, "/api/apps.connections.open", nil)
@@ -206,7 +206,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeAdminBarriersRead, auth.ScopeAdminBarriersWrite, auth.ScopeAdminAnalyticsRead, auth.ScopeAuditLogsRead, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeGroupsHistory, auth.ScopeIMHistory, auth.ScopeMPIMHistory, auth.ScopeGroupsRead, auth.ScopeIMRead, auth.ScopeMPIMRead, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeAdminBarriersRead, auth.ScopeAdminBarriersWrite, auth.ScopeAdminAnalyticsRead, auth.ScopeAuditLogsRead, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -230,6 +230,30 @@ func testHandlerWithStoredTokenAuth(scopes ...auth.Scope) (http.Handler, *memory
 }
 
 func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store) {
+	return testFixtureAs(stored, domain.TokenBot, scopes...)
+}
+
+// testUserHandlerWithStore is the shared fixture with `token` as U1's user
+// token rather than the app's bot token, for the methods Slack serves to user
+// tokens only.
+func testUserHandlerWithStore() (http.Handler, *memory.Store) {
+	return testFixtureAs(false, domain.TokenUser, defaultTestScopes()...)
+}
+
+func testFixtureAs(stored bool, tokenType domain.TokenType, scopes ...auth.Scope) (http.Handler, *memory.Store) {
+	h, s := testHandlerValueAs(stored, tokenType, scopes...)
+	mux := http.NewServeMux()
+	h.Register(mux)
+	return mux, s
+}
+
+// testHandlerValue is testFixture before registration, for a test that has to
+// configure the Handler itself — mounting a limiter, for one.
+func testHandlerValue(stored bool, scopes ...auth.Scope) (Handler, *memory.Store) {
+	return testHandlerValueAs(stored, domain.TokenBot, scopes...)
+}
+
+func testHandlerValueAs(stored bool, tokenType domain.TokenType, scopes ...auth.Scope) (Handler, *memory.Store) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
@@ -296,8 +320,12 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 		names = append(names, string(scope))
 	}
 	var authenticator auth.Authenticator
+	botID := domain.BotID("B1")
+	if tokenType == domain.TokenUser {
+		botID = ""
+	}
 	if stored {
-		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: names}); err != nil {
+		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: botID, TokenType: tokenType, Scopes: names}); err != nil {
 			panic(err)
 		}
 		value, err := auth.NewStored(s)
@@ -306,7 +334,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 		}
 		authenticator = value
 	} else {
-		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: granted})
+		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: botID, TokenType: tokenType, Scopes: granted})
 		if err != nil {
 			panic(err)
 		}
@@ -316,9 +344,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 	if err != nil {
 		panic(err)
 	}
-	mux := http.NewServeMux()
-	h.Register(mux)
-	return mux, s
+	return h, s
 }
 
 func TestListDownloadStreamsCSVAndPreservesArchiveOption(t *testing.T) {
@@ -465,7 +491,7 @@ func TestAdminUsersSessionInvalidateRevokesSession(t *testing.T) {
 }
 
 func TestDoNotDisturbEndClearsEnabledState(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	if err := store.SetDoNotDisturb(context.Background(), domain.DoNotDisturb{WorkspaceID: "T1", UserID: "U1", Enabled: true}, events.Event{ID: "event-dnd-enabled", WorkspaceID: "T1", ActorID: "U1", Topic: "user.dnd_enabled", Payload: "U1", CreatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -528,20 +554,53 @@ func TestOAuthV2ResponseIncludesIncomingWebhook(t *testing.T) {
 		AccessToken: "xoxb-1", AppID: "A1", WorkspaceID: "T1", UserID: "Ubot", InstallerID: "U1",
 		TokenType: domain.TokenBot, Scopes: []string{"incoming-webhook"},
 		IncomingWebhookChannel: "C1", IncomingWebhookChannelName: "general", IncomingWebhookID: "WH1",
-		IncomingWebhookURL:       "https://hooks.slack.com/services/T1/A1/whsec_abc",
-		IncomingWebhookConfigURL: "https://hooks.slack.com/services/T1/A1",
+		IncomingWebhookPath:       "/services/T1/A1/whsec_abc",
+		IncomingWebhookConfigPath: "/app/apps/A1",
 	}
-	hook, ok := oauthV2TokenResponse(token, false)["incoming_webhook"].(map[string]any)
+	// The coordinates are this deployment's: an app configured with only a
+	// base URL must never be handed Slack's own hooks host.
+	hook, ok := oauthV2TokenResponse("https://chat.example/base", token, false)["incoming_webhook"].(map[string]any)
 	if !ok {
 		t.Fatal("bot install with a webhook carried no incoming_webhook")
 	}
 	if hook["channel"] != "#general" || hook["channel_id"] != domain.ConversationID("C1") ||
-		hook["url"] != "https://hooks.slack.com/services/T1/A1/whsec_abc" ||
-		hook["configuration_url"] != "https://hooks.slack.com/services/T1/A1" {
+		hook["url"] != "https://chat.example/base/services/T1/A1/whsec_abc" ||
+		hook["configuration_url"] != "https://chat.example/base/app/apps/A1" {
 		t.Fatalf("incoming_webhook = %+v", hook)
 	}
-	if _, present := oauthV2TokenResponse(domain.OAuthToken{TokenType: domain.TokenBot}, false)["incoming_webhook"]; present {
+	if _, present := oauthV2TokenResponse("https://chat.example", domain.OAuthToken{TokenType: domain.TokenBot}, false)["incoming_webhook"]; present {
 		t.Fatal("a token with no webhook still carried an incoming_webhook")
+	}
+}
+
+// The configured public URL wins over the request's Host header, which a
+// proxy may rewrite and a client may forge, and an already-absolute value from
+// an older chat process passes through unchanged during a rolling deploy.
+func TestPublicBaseURLPrefersTheConfiguredURL(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/oauth.v2.access", nil)
+	request.Host = "internal:8080"
+	var handler Handler
+	if got := handler.origin(request); got != "http://internal:8080" {
+		t.Fatalf("unconfigured base URL=%q", got)
+	}
+	if err := handler.SetPublicURL("https://chat.example/"); err != nil {
+		t.Fatal(err)
+	}
+	if got := handler.origin(request); got != "https://chat.example" {
+		t.Fatalf("configured base URL=%q", got)
+	}
+	// An empty value is "not configured": it clears the URL back to the
+	// request's origin, which is how slack.Mount passes an unset flag.
+	if err := handler.SetPublicURL(""); err != nil || handler.origin(request) != "http://internal:8080" {
+		t.Fatalf("clearing the public URL: err=%v origin=%q", err, handler.origin(request))
+	}
+	for _, invalid := range []string{"chat.example", "ftp://chat.example", "https://chat.example/?q=1"} {
+		if err := (&Handler{}).SetPublicURL(invalid); err == nil {
+			t.Errorf("SetPublicURL(%q) accepted", invalid)
+		}
+	}
+	if got := originURL("https://chat.example", "https://legacy.example/services/T1/A1/s"); got != "https://legacy.example/services/T1/A1/s" {
+		t.Fatalf("absolute value rewritten to %q", got)
 	}
 }
 
@@ -616,15 +675,21 @@ func TestBotIdentityAndEventAuthorizationsUseTheirRequiredTokenTypes(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: s}, authenticator)
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator, WithAppAuthenticator(appAuthenticator))
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.ConfigureSocketMode(socketmode.Service{}, appAuthenticator)
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	eventContext, err := events.EventContext("A1", events.Record{Sequence: 1, Event: event})
+	record := events.Record{Sequence: 1, Event: event}
+	eventContext, err := events.EventContext("A1", record, event.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A record that fans out gives each callback its own event_id, and the
+	// event_context each one carries must resolve to the same record.
+	fannedOutContext, err := events.EventContext("A1", record, events.SlackEventID(record, 1, 2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,6 +700,7 @@ func TestBotIdentityAndEventAuthorizationsUseTheirRequiredTokenTypes(t *testing.
 	}{
 		{"/api/auth.test", "xoxb-test", []string{`"user_id":"Ubot"`, `"bot_id":"B1"`, `"is_enterprise_install":false`}},
 		{"/api/apps.event.authorizations.list?event_context=" + url.QueryEscape(eventContext), "xapp-test", []string{`"user_id":"Ubot"`, `"is_bot":true`, `"user_id":"U1"`, `"is_bot":false`}},
+		{"/api/apps.event.authorizations.list?event_context=" + url.QueryEscape(fannedOutContext), "xapp-test", []string{`"user_id":"Ubot"`, `"is_bot":true`}},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		request.Header.Set("Authorization", "Bearer "+test.token)
@@ -835,7 +901,7 @@ func TestTeamPreferencesListReturnsEnforcedWorkspacePolicies(t *testing.T) {
 }
 
 func TestIntegrationLogsHTTPExposeActorAttribution(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/api/team.integrationLogs?token=token&app_id=A1&team_id=Tother", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/team.integrationLogs?token=token&app_id=A1&team_id=Tother&count=25", nil)
 	response := httptest.NewRecorder()
 	testHandler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -847,11 +913,16 @@ func TestIntegrationLogsHTTPExposeActorAttribution(t *testing.T) {
 			AppID  string `json:"app_id"`
 			UserID string `json:"user_id"`
 		} `json:"logs"`
+		Paging struct {
+			Count, Page, Pages, Total int
+		} `json:"paging"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.OK || len(body.Logs) != 1 || body.Logs[0].AppID != "A1" || body.Logs[0].UserID != "U1" {
+	// paging.count is the page size requested, not the length of this page.
+	if !body.OK || len(body.Logs) != 1 || body.Logs[0].AppID != "A1" || body.Logs[0].UserID != "U1" ||
+		body.Paging.Count != 25 || body.Paging.Total != 1 || body.Paging.Pages != 1 {
 		t.Fatalf("unexpected body: %s", response.Body)
 	}
 }
@@ -881,7 +952,9 @@ func TestViewsHTTPExposeDurableOpenPushUpdateAndPublish(t *testing.T) {
 	if err := json.Unmarshal(opened.Body.Bytes(), &openedBody); err != nil || openedBody.View.ID == "" || openedBody.View.Hash == "" {
 		t.Fatalf("open body=%s err=%v", opened.Body, err)
 	}
-	pushed := form("/api/views.push", url.Values{"trigger_id": {"trigger-2"}, "view": {`{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`}})
+	// A function receives an interactivity_pointer rather than a trigger_id;
+	// views.push (and views.open) accept it for the same trigger.
+	pushed := form("/api/views.push", url.Values{"interactivity_pointer": {"trigger-2"}, "view": {`{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`}})
 	if pushed.Code != http.StatusOK || !strings.Contains(pushed.Body.String(), openedBody.View.ID) {
 		t.Fatalf("push status=%d body=%s", pushed.Code, pushed.Body)
 	}
@@ -982,6 +1055,56 @@ func TestFunctionsCompleteErrorHTTPValidatesAndCompletes(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+}
+
+// TestExecutionScopedTokenPostsForAndCompletesOnlyItsExecution drives the
+// xwfp- token function_executed hands an app: a message posted with it
+// belongs to its execution, it may complete that execution and no other, and
+// it stops authenticating (token_expired) once the execution has ended.
+func TestExecutionScopedTokenPostsForAndCompletesOnlyItsExecution(t *testing.T) {
+	handler, repository := testHandlerWithStoredTokenAuth(defaultTestScopes()...)
+	seedFunctionExecution(t, repository, "FxHTTPA")
+	seedFunctionExecution(t, repository, "FxHTTPB")
+	if _, err := repository.IssueFunctionExecutionToken(context.Background(), domain.FunctionExecutionToken{
+		WorkspaceID: "T1", ExecutionID: "FxHTTPA", AppID: "A1", CallbackID: "callback", UserID: "U1", BotID: "B1",
+		Scopes: auth.AllScopes(), Ciphertext: "sealed", CreatedAt: time.Now().UTC(),
+	}, domain.HashToken("xwfp-http")); err != nil {
+		t.Fatal(err)
+	}
+	call := func(path string, values url.Values) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(values.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer xwfp-http")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var body map[string]any
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body)
+		}
+		return body
+	}
+	posted := call("/api/chat.postMessage", url.Values{"channel": {"C1"}, "text": {"Approve?"}})
+	if posted["ok"] != true {
+		t.Fatalf("post with the execution token=%v", posted)
+	}
+	created, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(posted["ts"].(string)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := repository.GetMessageByCreatedAt(context.Background(), "C1", created)
+	if err != nil || message.FunctionExecution() != "FxHTTPA" || message.PostingBot() != "B1" {
+		t.Fatalf("posted message execution=%q bot=%q err=%v", message.FunctionExecution(), message.PostingBot(), err)
+	}
+	if denied := call("/api/functions.completeSuccess", url.Values{"function_execution_id": {"FxHTTPB"}, "outputs": {`{}`}}); denied["error"] != "access_denied" {
+		t.Fatalf("completing another execution=%v, want access_denied", denied)
+	}
+	if completed := call("/api/functions.completeSuccess", url.Values{"function_execution_id": {"FxHTTPA"}, "outputs": {`{}`}}); completed["ok"] != true {
+		t.Fatalf("completing its own execution=%v", completed)
+	}
+	if expired := call("/api/chat.postMessage", url.Values{"channel": {"C1"}, "text": {"late"}}); expired["error"] != "token_expired" {
+		t.Fatalf("post after the execution ended=%v, want token_expired", expired)
 	}
 }
 
@@ -1207,17 +1330,58 @@ func TestCurrentWorkflowPermissionFeaturedAndStepMethodsAreDurable(t *testing.T)
 	}
 }
 
+// dialog.open refuses a dialog its app could never receive the submission
+// of — no interactivity request URL and no Socket Mode — with Slack's
+// app_missing_action_url, without spending the trigger.
 func TestDialogOpenHTTP(t *testing.T) {
 	handler, store := testHandlerWithStore()
 	seedHTTPInteractionTrigger(t, store, "trigger-http")
-	values := url.Values{"trigger_id": {"trigger-http"}, "dialog": {`{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`}}
-	req := httptest.NewRequest(http.MethodPost, "/api/dialog.open", strings.NewReader(values.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Authorization", "Bearer token")
-	result := httptest.NewRecorder()
-	handler.ServeHTTP(result, req)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+	open := func() *httptest.ResponseRecorder {
+		values := url.Values{"trigger_id": {"trigger-http"}, "dialog": {`{"callback_id":"callback","title":"Title","elements":[{"type":"text","name":"summary","label":"Summary"}]}`}}
+		req := httptest.NewRequest(http.MethodPost, "/api/dialog.open", strings.NewReader(values.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "Bearer token")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+	if result := open(); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"error":"app_missing_action_url"`) {
+		t.Fatalf("no request URL: status=%d body=%s", result.Code, result.Body)
+	}
+	enableFixtureInteractivity(t, store)
+	if result := open(); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
 		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+}
+
+// enableFixtureInteractivity gives the fixture app an interactivity request
+// URL, which dialog.open requires.
+func enableFixtureInteractivity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	ctx := context.Background()
+	app, revision, err := target.GetApp(ctx, "A1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(revision.Manifest), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	settings, _ := manifest["settings"].(map[string]any)
+	if settings == nil {
+		settings = map[string]any{}
+		manifest["settings"] = settings
+	}
+	settings["interactivity"] = map[string]any{"is_enabled": true, "request_url": "https://app.example.test/interactivity"}
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	app.ManifestVersion++
+	app.UpdatedAt = now
+	if err := target.UpdateApp(ctx, app, domain.AppManifestRevision{AppID: app.ID, Version: app.ManifestVersion, Manifest: string(encoded), CreatedBy: app.OwnerID, CreatedAt: now}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1314,7 +1478,8 @@ func TestCallsLifecycle(t *testing.T) {
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"title":"Updated call"`) {
 		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body)
 	}
-	participantsAdd := httptest.NewRequest(http.MethodPost, "/api/calls.participants.add", strings.NewReader("id="+response.Call.ID+"&users=U2"))
+	externalUsers := url.QueryEscape(`[{"slack_id":"U2"},{"external_id":"guest-1","display_name":"Guest","avatar_url":"https://call.example/guest.png"}]`)
+	participantsAdd := httptest.NewRequest(http.MethodPost, "/api/calls.participants.add", strings.NewReader("id="+response.Call.ID+"&users="+externalUsers))
 	participantsAdd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	participantsAdd.Header.Set("Authorization", "Bearer token")
 	participantsAdded := httptest.NewRecorder()
@@ -1328,6 +1493,27 @@ func TestCallsLifecycle(t *testing.T) {
 	handler.ServeHTTP(got, info)
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), response.Call.ID) {
 		t.Fatalf("info status=%d body=%s", got.Code, got.Body)
+	}
+	// Slack's Call object lists participants as objects, not bare IDs; an
+	// external participant keeps its provider-given name and avatar.
+	var infoBody struct {
+		Call struct {
+			Users []map[string]string `json:"users"`
+		} `json:"call"`
+	}
+	if err := json.Unmarshal(got.Body.Bytes(), &infoBody); err != nil || len(infoBody.Call.Users) != 2 ||
+		infoBody.Call.Users[0]["slack_id"] != "U2" ||
+		infoBody.Call.Users[1]["external_id"] != "guest-1" || infoBody.Call.Users[1]["display_name"] != "Guest" ||
+		infoBody.Call.Users[1]["avatar_url"] != "https://call.example/guest.png" {
+		t.Fatalf("info users=%s err=%v", got.Body, err)
+	}
+	malformed := httptest.NewRequest(http.MethodPost, "/api/calls.participants.add", strings.NewReader("id="+response.Call.ID+"&users=%5B%7B"))
+	malformed.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	malformed.Header.Set("Authorization", "Bearer token")
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, malformed)
+	if rejected.Code != http.StatusOK || !strings.Contains(rejected.Body.String(), `"error":"invalid_arguments"`) {
+		t.Fatalf("malformed users status=%d body=%s", rejected.Code, rejected.Body)
 	}
 	participants := httptest.NewRequest(http.MethodPost, "/api/calls.participants.remove", strings.NewReader("id="+response.Call.ID+"&users=U2"))
 	participants.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1393,20 +1579,65 @@ func TestTeamBillableInfoUsesDurableMembershipState(t *testing.T) {
 }
 
 func TestAccessLogsRequireAdminAndExposeRecordedAccess(t *testing.T) {
-	handler := testHandler()
-	request := httptest.NewRequest(http.MethodGet, "/api/users.info?user=U1", nil)
-	request.Header.Set("Authorization", "Bearer token")
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("recorded request status=%d body=%s", response.Code, response.Body)
+	handler, s := testHandlerWithStore()
+	port := 40000
+	get := func(path string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer token")
+		request.Header.Set("User-Agent", "access-log-test")
+		// Each request arrives from a different ephemeral source port.
+		port++
+		request.RemoteAddr = "192.0.2.10:" + strconv.Itoa(port)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
 	}
-	logs := httptest.NewRequest(http.MethodGet, "/api/team.accessLogs", nil)
-	logs.Header.Set("Authorization", "Bearer token")
-	result := httptest.NewRecorder()
-	handler.ServeHTTP(result, logs)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"user_id":"U1"`) {
-		t.Fatalf("logs status=%d body=%s", result.Code, result.Body)
+	for range 3 {
+		if response := get("/api/users.info?user=U1"); response.Code != http.StatusOK {
+			t.Fatalf("recorded request status=%d body=%s", response.Code, response.Body)
+		}
+	}
+	result := get("/api/team.accessLogs?count=10")
+	var body struct {
+		OK     bool `json:"ok"`
+		Logins []struct {
+			UserID    string `json:"user_id"`
+			IP        string `json:"ip"`
+			UserAgent string `json:"user_agent"`
+			Count     int    `json:"count"`
+			DateFirst int64  `json:"date_first"`
+			DateLast  int64  `json:"date_last"`
+		} `json:"logins"`
+		Paging struct {
+			Count, Page, Pages, Total int
+		} `json:"paging"`
+	}
+	if err := json.Unmarshal(result.Body.Bytes(), &body); err != nil || !body.OK {
+		t.Fatalf("logs status=%d body=%s err=%v", result.Code, result.Body, err)
+	}
+	// One row per member, address (without its port) and user agent, counting
+	// every access; paging.count is the page size asked for.
+	var found bool
+	for _, login := range body.Logins {
+		if login.UserID == "U1" && login.UserAgent == "access-log-test" {
+			found = true
+			if login.IP != "192.0.2.10" || login.Count < 3 || login.DateFirst == 0 || login.DateLast < login.DateFirst {
+				t.Fatalf("aggregated login=%+v", login)
+			}
+		}
+	}
+	if !found || body.Paging.Count != 10 || body.Paging.Page != 1 || body.Paging.Total != len(body.Logins) || body.Paging.Pages != 1 {
+		t.Fatalf("logins=%s", result.Body)
+	}
+	if result := get("/api/team.accessLogs?page=101"); !strings.Contains(result.Body.String(), `"error":"over_pagination_limit"`) {
+		t.Fatalf("page 101=%s", result.Body)
+	}
+	// Every member's addresses and devices are an administrator's to read.
+	if err := s.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleMember); err != nil {
+		t.Fatal(err)
+	}
+	if result := get("/api/team.accessLogs"); !strings.Contains(result.Body.String(), `"ok":false`) {
+		t.Fatalf("member read the access logs: %s", result.Body)
 	}
 }
 
@@ -1946,8 +2177,26 @@ func TestAdminUsersRemoveDeactivatesUser(t *testing.T) {
 	info.Header.Set("Authorization", "Bearer token")
 	after := httptest.NewRecorder()
 	handler.ServeHTTP(after, info)
-	if after.Code != http.StatusOK || !strings.Contains(after.Body.String(), `"error":"user_not_found"`) {
+	// Slack keeps a deactivated member in the directory: users.info answers
+	// it with deleted:true rather than user_not_found, and users.list lists it.
+	if after.Code != http.StatusOK || !strings.Contains(after.Body.String(), `"ok":true`) || !strings.Contains(after.Body.String(), `"deleted":true`) || !strings.Contains(after.Body.String(), `"id":"U2"`) {
 		t.Fatalf("removed user status=%d body=%s", after.Code, after.Body)
+	}
+	list := httptest.NewRequest(http.MethodGet, "/api/users.list", nil)
+	list.Header.Set("Authorization", "Bearer token")
+	listed := httptest.NewRecorder()
+	handler.ServeHTTP(listed, list)
+	if !strings.Contains(listed.Body.String(), `"deleted":true`) || !strings.Contains(listed.Body.String(), `"id":"U2"`) {
+		t.Fatalf("users.list omits the deactivated member: %s", listed.Body)
+	}
+	// A deactivated account cannot be invited back into a conversation.
+	invite := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C1&users=U2"))
+	invite.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	invite.Header.Set("Authorization", "Bearer token")
+	invited := httptest.NewRecorder()
+	handler.ServeHTTP(invited, invite)
+	if !strings.Contains(invited.Body.String(), `"error":"user_not_found"`) {
+		t.Fatalf("a deactivated member was invited: %s", invited.Body)
 	}
 	token, err := store.LookupToken(context.Background(), "user-two-token")
 	if err != nil || !token.Revoked {
@@ -3039,15 +3288,15 @@ func TestGetPermalink(t *testing.T) {
 	if err := json.NewDecoder(posted.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	permalink := httptest.NewRequest(http.MethodGet, "/api/chat.getPermalink?channel=C1&message_ts="+response.TS, nil)
+	permalink := httptest.NewRequest(http.MethodGet, "https://chat.example.test/api/chat.getPermalink?channel=C1&message_ts="+response.TS, nil)
 	permalink.Header.Set("Authorization", "Bearer token")
 	result := httptest.NewRecorder()
 	handler.ServeHTTP(result, permalink)
-	// The permalink is Slack's shape on THIS deployment's origin. It used to
-	// name sameoldchat.local, a host that exists nowhere, so every permalink
-	// this product handed out was unfollowable; the path is now served by
+	// The permalink is Slack's shape, absolute on THIS deployment's origin.
+	// It used to name sameoldchat.local, a host that exists nowhere, and then
+	// a bare path, which no SDK can follow; the path is served by
 	// internal/web's /archives route.
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"permalink":"/archives/C1/p`) {
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"permalink":"https://chat.example.test/archives/C1/p`) {
 		t.Fatalf("permalink status=%d body=%s", result.Code, result.Body)
 	}
 	if strings.Contains(result.Body.String(), "sameoldchat.local") {
@@ -3271,7 +3520,7 @@ func TestInviteConversationUsesCurrentTokenAndChannelScopeMatrix(t *testing.T) {
 		repository.SeedConversation(domain.Conversation{ID: "C-private-scope", WorkspaceID: "T1", Name: "private-scope", Kind: domain.ConversationTypePrivate})
 		repository.SeedConversationMember("C-private-scope", "U1")
 		response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C-private-scope&users=U2")
-		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"error":"missing_scope"`) || !strings.Contains(response.Body.String(), `"needed":"groups:write"`) {
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"error":"missing_scope"`) || !strings.Contains(response.Body.String(), `"needed":"groups:write,groups:write.invites"`) {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body)
 		}
 	})
@@ -3352,7 +3601,15 @@ func TestPostMessageRejectsArchivedChannelWithSlackCode(t *testing.T) {
 
 func TestChatUnfurlPersistsMetadata(t *testing.T) {
 	handler := testHandler()
-	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text=link"))
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/chat.unfurl", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, request)
+		return result
+	}
+	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text="+url.QueryEscape("see <https://example.com> and https://example.org/b?x=1&y=2")))
 	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	post.Header.Set("Authorization", "Bearer token")
 	posted := httptest.NewRecorder()
@@ -3363,13 +3620,53 @@ func TestChatUnfurlPersistsMetadata(t *testing.T) {
 	if err := json.NewDecoder(posted.Body).Decode(&body); err != nil || body.TS == "" {
 		t.Fatalf("post body=%s err=%v", posted.Body, err)
 	}
-	unfurl := httptest.NewRequest(http.MethodPost, "/api/chat.unfurl", strings.NewReader("channel=C1&ts="+body.TS+"&unfurls=%7B%22https%3A%2F%2Fexample.com%22%3A%7B%22title%22%3A%22Example%22%7D%7D"))
-	unfurl.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	unfurl.Header.Set("Authorization", "Bearer token")
-	result := httptest.NewRecorder()
-	handler.ServeHTTP(result, unfurl)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"unfurls":{"https://example.com":{"title":"Example"}}`) {
+	unfurls := func(value string) string { return url.QueryEscape(value) }
+	// The success schema is exactly {"ok":true}.
+	if result := call("channel=C1&ts=" + body.TS + "&unfurls=" + unfurls(`{"https://example.com":{"title":"Example"}}`)); result.Code != http.StatusOK || strings.TrimSpace(result.Body.String()) != `{"ok":true}` {
 		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+	// A second call names the message by unfurl_id, and adds a preview for
+	// another URL without dropping the first.
+	unfurlID := url.QueryEscape("C1." + body.TS)
+	if result := call("source=conversations_history&unfurl_id=" + unfurlID + "&unfurls=" + unfurls(`{"https://example.org/b?x=1&y=2":{"title":"B"}}`)); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+		t.Fatalf("unfurl_id status=%d body=%s", result.Code, result.Body)
+	}
+	history := httptest.NewRequest(http.MethodGet, "/api/conversations.history?channel=C1&limit=1", nil)
+	history.Header.Set("Authorization", "Bearer token")
+	read := httptest.NewRecorder()
+	handler.ServeHTTP(read, history)
+	// Slack returns an app unfurl as an attachment of the message, marked
+	// is_app_unfurl and naming its link, in the order the links appear; a
+	// message object has no unfurls member.
+	var page struct {
+		Messages []struct {
+			Attachments []struct {
+				Title        string `json:"title"`
+				AppUnfurlURL string `json:"app_unfurl_url"`
+				IsAppUnfurl  bool   `json:"is_app_unfurl"`
+			} `json:"attachments"`
+			Unfurls json.RawMessage `json:"unfurls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(read.Body.Bytes(), &page); err != nil || len(page.Messages) != 1 {
+		t.Fatalf("history=%s err=%v", read.Body, err)
+	}
+	unfurled := page.Messages[0]
+	if unfurled.Unfurls != nil || len(unfurled.Attachments) != 2 ||
+		unfurled.Attachments[0].Title != "Example" || unfurled.Attachments[0].AppUnfurlURL != "https://example.com" || !unfurled.Attachments[0].IsAppUnfurl ||
+		unfurled.Attachments[1].Title != "B" || unfurled.Attachments[1].AppUnfurlURL != "https://example.org/b?x=1&y=2" || !unfurled.Attachments[1].IsAppUnfurl {
+		t.Fatalf("history after two unfurls=%s", read.Body)
+	}
+	// A URL the message does not contain cannot be unfurled, and neither can a
+	// composer unfurl, which names no posted message.
+	for _, rejected := range []string{
+		"channel=C1&ts=" + body.TS + "&unfurls=" + unfurls(`{"https://elsewhere.example":{"title":"X"}}`),
+		"source=composer&unfurl_id=" + unfurlID + "&unfurls=" + unfurls(`{"https://example.com":{"title":"X"}}`),
+		"channel=C1&ts=1.000001&unfurls=" + unfurls(`{"https://example.com":{"title":"X"}}`),
+	} {
+		if result := call(rejected); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"error":"cannot_unfurl_url"`) {
+			t.Fatalf("%s: status=%d body=%s", rejected, result.Code, result.Body)
+		}
 	}
 }
 
@@ -3739,7 +4036,7 @@ func userSearchHandler(t *testing.T, repository *memory.Store) http.Handler {
 
 func TestFileMessageResponseMatchesSlackFileShareShape(t *testing.T) {
 	created := time.Unix(1_700_000_000, 0).UTC()
-	response := messageResponse(domain.Message{
+	response := messageResponse("http://chat.test", domain.Message{
 		ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", CreatedAt: created,
 		Files: []domain.File{{ID: "F1", WorkspaceID: "T1", Uploader: "U1", Name: "report.txt", Title: "Report", MIMEType: "text/plain", Size: 12, CreatedAt: created, SharedChannels: []domain.ConversationID{"C1"}}},
 	})
@@ -3748,7 +4045,7 @@ func TestFileMessageResponseMatchesSlackFileShareShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(encoded)
-	for _, expected := range []string{`"subtype":"file_share"`, `"upload":true`, `"files":[`, `"id":"F1"`, `"mode":"hosted"`, `"url_private":"/api/files/F1"`, `"channels":["C1"]`} {
+	for _, expected := range []string{`"subtype":"file_share"`, `"upload":true`, `"files":[`, `"id":"F1"`, `"mode":"hosted"`, `"url_private":"http://chat.test/api/files/F1"`, `"permalink":"http://chat.test/app/files/F1"`, `"filetype":"text"`, `"pretty_type":"Plain Text"`, `"channels":["C1"]`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("file share response is missing %s: %s", expected, body)
 		}
@@ -4020,14 +4317,55 @@ func TestAdminEmojiLifecycle(t *testing.T) {
 	list.Header.Set("Authorization", "Bearer token")
 	listed := httptest.NewRecorder()
 	handler.ServeHTTP(listed, list)
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"hello":"alias:shipit"`) {
-		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body)
+	// admin.emoji.list answers objects, not emoji.list's strings: the Java
+	// SDK's admin Emoji model failed to decode a bare URL.
+	var adminList struct {
+		OK    bool `json:"ok"`
+		Emoji map[string]struct {
+			URL         string `json:"url"`
+			DateCreated int64  `json:"date_created"`
+			UploadedBy  string `json:"uploaded_by"`
+		} `json:"emoji"`
+		ResponseMetadata struct {
+			NextCursor string `json:"next_cursor"`
+		} `json:"response_metadata"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &adminList); err != nil || listed.Code != http.StatusOK || !adminList.OK ||
+		adminList.Emoji["hello"].URL != "alias:shipit" || adminList.Emoji["shipit"].URL != "https://cdn.example/shipit.png" ||
+		adminList.Emoji["shipit"].DateCreated == 0 || adminList.Emoji["shipit"].UploadedBy == "" {
+		t.Fatalf("list status=%d body=%s err=%v", listed.Code, listed.Body, err)
+	}
+	// limit=1 pages by name and hands back a cursor for the rest.
+	first := call("admin.emoji.list", "limit=1")
+	adminList.Emoji = nil
+	if err := json.Unmarshal(first.Body.Bytes(), &adminList); err != nil || len(adminList.Emoji) != 1 || adminList.Emoji["hello"].URL == "" || adminList.ResponseMetadata.NextCursor == "" {
+		t.Fatalf("first page=%s err=%v", first.Body, err)
+	}
+	second := call("admin.emoji.list", "limit=1&cursor="+adminList.ResponseMetadata.NextCursor)
+	adminList.Emoji = nil
+	if err := json.Unmarshal(second.Body.Bytes(), &adminList); err != nil || len(adminList.Emoji) != 1 || adminList.Emoji["shipit"].URL == "" || adminList.ResponseMetadata.NextCursor != "" {
+		t.Fatalf("second page=%s err=%v", second.Body, err)
+	}
+	// emoji.list's cache_ts is Slack's seconds.micros and moves with the set.
+	cacheTS := func() string {
+		var body struct {
+			CacheTS string `json:"cache_ts"`
+		}
+		_ = json.Unmarshal(call("emoji.list", "").Body.Bytes(), &body)
+		return body.CacheTS
+	}
+	before := cacheTS()
+	if !regexp.MustCompile(`^[1-9][0-9]*\.[0-9]{6}$`).MatchString(before) {
+		t.Fatalf("cache_ts=%q", before)
 	}
 	if res := call("admin.emoji.rename", "name=hello&new_name=greeting"); res.Code != http.StatusOK {
 		t.Fatalf("rename status=%d body=%s", res.Code, res.Body)
 	}
 	if res := call("admin.emoji.remove", "name=shipit"); res.Code != http.StatusOK {
 		t.Fatalf("remove status=%d body=%s", res.Code, res.Body)
+	}
+	if after := cacheTS(); after == before {
+		t.Fatalf("cache_ts did not move after a removal: %q", after)
 	}
 }
 
@@ -4182,7 +4520,8 @@ func TestUsersIdentity(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/users.identity", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
-	testHandler().ServeHTTP(res, req)
+	handler, _ := testUserHandlerWithStore()
+	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"user":{"id":"U1","name":"alice"}`) || !strings.Contains(res.Body.String(), `"team":{"id":"T1"}`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
@@ -4192,7 +4531,8 @@ func TestUsersDeletePhoto(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/users.deletePhoto", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
-	testHandler().ServeHTTP(res, req)
+	handler, _ := testUserHandlerWithStore()
+	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || res.Body.String() != "{\"ok\":true}\n" {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
@@ -4216,21 +4556,38 @@ func TestUsersSetPhotoAcceptsOfficialMultipartField(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	for _, contentType := range []string{"image/png", "application/octet-stream"} {
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	jpeg := []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01")
+	for _, test := range []struct {
+		contentType string
+		content     []byte
+		want        string
+	}{
+		// A real signature: the profile service sniffs the bytes and refuses a
+		// stream whose content disagrees with the declared type, which is the
+		// upload half of the stored-XSS repair.
+		{"image/png", png, `"ok":true`},
+		// What Web API 8 emits for a Buffer.
+		{"application/octet-stream", png, `"ok":true`},
+		// What slack-api-client 1.49.0 labels every photo, whatever its
+		// format; it used to be taken for PNG, so a JPEG was refused.
+		{"imageData/*", jpeg, `"ok":true`},
+		{"imageData/*", png, `"ok":true`},
+		// Bytes that are no allow-listed image, or that contradict their
+		// declared type, are the pinned bad_image.
+		{"imageData/*", []byte("<svg onload=alert(1)>"), `"error":"bad_image"`},
+		{"image/png", jpeg, `"error":"bad_image"`},
+	} {
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
 		part, err := writer.CreatePart(textproto.MIMEHeader{
-			"Content-Disposition": {`form-data; name="image"; filename="photo.png"`},
-			"Content-Type":        {contentType},
+			"Content-Disposition": {`form-data; name="image"; filename="photo"`},
+			"Content-Type":        {test.contentType},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		// A real PNG signature: the profile service sniffs the bytes and refuses a
-		// stream whose content disagrees with the declared type, which is the upload
-		// half of the stored-XSS repair. The octet-stream case is what Web API 8
-		// emits for a Buffer.
-		if _, err := part.Write([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")); err != nil {
+		if _, err := part.Write(test.content); err != nil {
 			t.Fatal(err)
 		}
 		if err := writer.Close(); err != nil {
@@ -4241,8 +4598,8 @@ func TestUsersSetPhotoAcceptsOfficialMultipartField(t *testing.T) {
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 		result := httptest.NewRecorder()
 		mux.ServeHTTP(result, req)
-		if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
-			t.Fatalf("content-type=%s status=%d body=%s", contentType, result.Code, result.Body)
+		if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), test.want) {
+			t.Fatalf("content-type=%s status=%d body=%s, want %s", test.contentType, result.Code, result.Body, test.want)
 		}
 	}
 }
@@ -4274,7 +4631,7 @@ func TestUsersSetActiveAndAdminTeamRoleLists(t *testing.T) {
 }
 
 func TestDoNotDisturbLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler, _ := testUserHandlerWithStore()
 	info := httptest.NewRequest(http.MethodGet, "/api/dnd.info", nil)
 	info.Header.Set("Authorization", "Bearer token")
 	infoResult := httptest.NewRecorder()
@@ -4480,6 +4837,20 @@ func TestUserProfileSetSingleFieldNameValueForm(t *testing.T) {
 		t.Fatalf("name/value display_name: status=%d body=%s", set.Code, set.Body)
 	}
 
+	// Title and pronouns are standard fields Slack's profile carries, stored
+	// and echoed through both forms of the request.
+	title := post(url.Values{"name": {"title"}, "value": {"Staff Engineer"}}.Encode())
+	if title.Code != http.StatusOK || !strings.Contains(title.Body.String(), `"title":"Staff Engineer"`) {
+		t.Fatalf("name/value title: status=%d body=%s", title.Code, title.Body)
+	}
+	object := post(url.Values{"profile": {`{"pronouns":"she/her","title":"Principal Engineer"}`}}.Encode())
+	if object.Code != http.StatusOK || !strings.Contains(object.Body.String(), `"title":"Principal Engineer"`) || !strings.Contains(object.Body.String(), `"pronouns":"she/her"`) {
+		t.Fatalf("profile object title/pronouns: status=%d body=%s", object.Code, object.Body)
+	}
+	if envelope := decodeEnvelope(t, post(url.Values{"name": {"title"}, "value": {strings.Repeat("t", 151)}}.Encode())); envelope.OK || envelope.Error != "invalid_profile" {
+		t.Fatalf("an overlong title body=%+v, want invalid_profile", envelope)
+	}
+
 	// A custom field through name/value, keyed by field id.
 	custom := post(url.Values{"name": {"Xf01"}, "value": {"she/her"}}.Encode())
 	if custom.Code != http.StatusOK || !strings.Contains(custom.Body.String(), `"Xf01"`) || !strings.Contains(custom.Body.String(), `"she/her"`) {
@@ -4598,15 +4969,18 @@ func TestConversationsOpenReusesDirectConversation(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer token")
 	first := httptest.NewRecorder()
 	handler.ServeHTTP(first, request)
-	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"is_im":true`) {
+	// Without return_im Slack answers with the IM's identifier alone, and a
+	// new IM's identifier is D-prefixed.
+	if first.Code != http.StatusOK || !strings.HasPrefix(first.Body.String(), `{"channel":{"id":"D`) || strings.Contains(first.Body.String(), `already_open`) {
 		t.Fatalf("first status=%d body=%s", first.Code, first.Body)
 	}
-	secondRequest := httptest.NewRequest(http.MethodPost, "/api/conversations.open", strings.NewReader("users=U2"))
+	secondRequest := httptest.NewRequest(http.MethodPost, "/api/conversations.open", strings.NewReader("users=U2&return_im=true"))
 	secondRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	secondRequest.Header.Set("Authorization", "Bearer token")
 	second := httptest.NewRecorder()
 	handler.ServeHTTP(second, secondRequest)
-	if second.Code != http.StatusOK {
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"already_open":true`) || !strings.Contains(second.Body.String(), `"no_op":true`) ||
+		!strings.Contains(second.Body.String(), `"is_im":true`) || !strings.Contains(second.Body.String(), `"user":"U2"`) || !strings.Contains(second.Body.String(), `"priority":0`) {
 		t.Fatalf("second status=%d body=%s", second.Code, second.Body)
 	}
 	var firstBody, secondBody struct {
@@ -4760,8 +5134,17 @@ func TestLeavePublicConversation(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"channel":"C1"`) {
+	if res.Code != http.StatusOK || res.Body.String() != `{"ok":true}`+"\n" {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+	// Leaving again is not an error: the pinned success schema reports it.
+	again := httptest.NewRequest(http.MethodPost, "/api/conversations.leave", strings.NewReader("channel=C1"))
+	again.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	again.Header.Set("Authorization", "Bearer token")
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, again)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"not_in_channel":true`) || !strings.Contains(res.Body.String(), `"ok":true`) {
+		t.Fatalf("second leave status=%d body=%s", res.Code, res.Body)
 	}
 }
 
@@ -5007,7 +5390,8 @@ func TestScheduleMessageFormAcceptsBlocksWithoutFallbackText(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	testHandler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"blocks":[{"type":"divider"}]`) {
+	// The divider comes back with the block_id Slack assigns an unnamed block.
+	if res.Code != http.StatusOK || !regexp.MustCompile(`"blocks":\[\{"block_id":"[A-Z2-7]{5,}","type":"divider"\}\]`).MatchString(res.Body.String()) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
 }
@@ -5052,7 +5436,7 @@ func TestScheduleMessagePreservesCurrentSlackMessageOptionsUntilDelivery(t *test
 	if scheduled["ok"] != true || id == "" {
 		t.Fatalf("schedule response=%v", scheduled)
 	}
-	item, err := backing.ClaimScheduledMessageForCredential(context.Background(), "T1", domain.HashToken("token"), domain.ScheduledMessageID(id), "delivery", time.Minute)
+	item, err := backing.ClaimScheduledMessageForCredential(context.Background(), "T1", domain.ScheduledMessageOwner("T1", "U1", "A1", "B1"), domain.ScheduledMessageID(id), "delivery", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5091,11 +5475,21 @@ func TestScheduleMessageRejectsMarkdownConflictsAndInvalidBooleans(t *testing.T)
 	}
 }
 
-func TestScheduledMessageAPIIsScopedToTheExactBearerToken(t *testing.T) {
+func TestScheduledMessageAPIIsScopedToTheSchedulingIdentity(t *testing.T) {
 	handler, store := testHandlerWithStoredTokenAuth(auth.ScopeChatWrite)
-	store.SeedToken(context.Background(), "other-token", domain.TokenRecord{
+	// A rotated token of the same bot, a different app's bot, and a user
+	// token of the same member and app.
+	store.SeedToken(context.Background(), "rotated-token", domain.TokenRecord{
 		WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1",
 		TokenType: "bot", Scopes: []string{string(auth.ScopeChatWrite)},
+	})
+	store.SeedToken(context.Background(), "foreign-bot-token", domain.TokenRecord{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A9", BotID: "B9",
+		TokenType: "bot", Scopes: []string{string(auth.ScopeChatWrite)},
+	})
+	store.SeedToken(context.Background(), "user-token", domain.TokenRecord{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A1",
+		TokenType: "user", Scopes: []string{string(auth.ScopeChatWrite)},
 	})
 	call := func(token, path, body string) map[string]any {
 		t.Helper()
@@ -5115,7 +5509,7 @@ func TestScheduledMessageAPIIsScopedToTheExactBearerToken(t *testing.T) {
 	}
 	postAt := time.Now().UTC().Add(time.Hour).Unix()
 	scheduled := call("token", "/api/chat.scheduleMessage", url.Values{
-		"channel": {"C1"}, "text": {"token-owned"}, "post_at": {strconv.FormatInt(postAt, 10)},
+		"channel": {"C1"}, "text": {"bot-owned"}, "post_at": {strconv.FormatInt(postAt, 10)},
 	}.Encode())
 	id, _ := scheduled["scheduled_message_id"].(string)
 	if scheduled["ok"] != true || id == "" {
@@ -5125,21 +5519,46 @@ func TestScheduledMessageAPIIsScopedToTheExactBearerToken(t *testing.T) {
 	if scheduled["post_at"] != strconv.FormatInt(postAt, 10) || message["bot_id"] != "B1" || message["type"] != "delayed_message" || message["subtype"] != "bot_message" {
 		t.Fatalf("schedule response lost Slack post_at or bot attribution: %v", scheduled)
 	}
-	otherPage := call("other-token", "/api/chat.scheduledMessages.list", "")
-	if items, _ := otherPage["scheduled_messages"].([]any); otherPage["ok"] != true || len(items) != 0 {
-		t.Fatalf("another token saw scheduled messages: %v", otherPage)
-	}
-	otherDelete := call("other-token", "/api/chat.deleteScheduledMessage", url.Values{
-		"channel": {"C1"}, "scheduled_message_id": {id},
-	}.Encode())
-	if otherDelete["error"] != "invalid_scheduled_message_id" {
-		t.Fatalf("another token deleted the schedule: %v", otherDelete)
+	// Neither another app's bot nor a user token sees or deletes the bot's
+	// schedule.
+	for _, token := range []string{"foreign-bot-token", "user-token"} {
+		page := call(token, "/api/chat.scheduledMessages.list", "")
+		if items, _ := page["scheduled_messages"].([]any); page["ok"] != true || len(items) != 0 {
+			t.Fatalf("%s saw the bot's scheduled messages: %v", token, page)
+		}
+		deleted := call(token, "/api/chat.deleteScheduledMessage", url.Values{
+			"channel": {"C1"}, "scheduled_message_id": {id},
+		}.Encode())
+		if deleted["error"] != "invalid_scheduled_message_id" {
+			t.Fatalf("%s deleted the bot's schedule: %v", token, deleted)
+		}
 	}
 	ownerPage := call("token", "/api/chat.scheduledMessages.list", url.Values{
 		"oldest": {strconv.FormatInt(postAt-1, 10)}, "latest": {strconv.FormatInt(postAt+1, 10)},
 	}.Encode())
 	if items, _ := ownerPage["scheduled_messages"].([]any); ownerPage["ok"] != true || len(items) != 1 {
 		t.Fatalf("creating token could not list its schedule: %v", ownerPage)
+	}
+	// A filter naming no visible channel is invalid_channel, and a post_at
+	// that is not a whole Unix time is invalid_time.
+	if unknown := call("token", "/api/chat.scheduledMessages.list", "channel=CNOPE"); unknown["error"] != "invalid_channel" {
+		t.Fatalf("unknown channel filter=%v", unknown)
+	}
+	for _, bad := range []string{"soon", "1700000000.5", "-5"} {
+		if rejected := call("token", "/api/chat.scheduleMessage", url.Values{"channel": {"C1"}, "text": {"x"}, "post_at": {bad}}.Encode()); rejected["error"] != "invalid_time" {
+			t.Fatalf("post_at=%q answered %v", bad, rejected)
+		}
+	}
+	// A rotated token of the same bot still owns the schedule: Slack scopes
+	// it to the bot, and a token hash lost it on every rotation.
+	rotatedPage := call("rotated-token", "/api/chat.scheduledMessages.list", "")
+	if items, _ := rotatedPage["scheduled_messages"].([]any); rotatedPage["ok"] != true || len(items) != 1 {
+		t.Fatalf("a rotated token lost the bot's schedule: %v", rotatedPage)
+	}
+	if deleted := call("rotated-token", "/api/chat.deleteScheduledMessage", url.Values{
+		"channel": {"C1"}, "scheduled_message_id": {id},
+	}.Encode()); deleted["ok"] != true {
+		t.Fatalf("a rotated token could not delete the bot's schedule: %v", deleted)
 	}
 }
 
@@ -5149,7 +5568,7 @@ func TestPostEphemeralAcceptsBlocksWithoutFallbackText(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	testHandler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"blocks":[{"type":"divider"}]`) {
+	if res.Code != http.StatusOK || !regexp.MustCompile(`"blocks":\[\{"block_id":"[A-Z2-7]{5,}","type":"divider"\}\]`).MatchString(res.Body.String()) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
 }
@@ -5178,7 +5597,7 @@ func TestPostMessageJSONAcceptsStructuredArrays(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
-	for _, want := range []string{`"blocks":[{"type":"section"`, `"attachments":[{"text":"from attachments"}]`} {
+	for _, want := range []string{`"blocks":[{"block_id":`, `"text":{"text":"from blocks","type":"plain_text"},"type":"section"}]`, `"attachments":[{"text":"from attachments"}]`} {
 		if !strings.Contains(res.Body.String(), want) {
 			t.Fatalf("response does not contain %q: %s", want, res.Body)
 		}
@@ -5190,7 +5609,7 @@ func TestDecodeJSONFieldsPreservesStructuredArrayArguments(t *testing.T) {
 		"blocks":[{"type":"divider"}],
 		"attachments":[{"text":"attachment"}],
 		"files":[{"id":"F1","title":"report"}]
-	}`))
+	}`), normalizeJSONField)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5302,6 +5721,10 @@ func TestExternalUploadHTTPBatchCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Mounted the way production mounts it. The upload URL is outside /api/,
+	// and a limiter-fronted Register once left it answering 404 while this test,
+	// registered without a limiter, passed.
+	handler.Limiter = NewRateLimiter()
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	create := func(name string, content string, sdkMultipart bool) string {
@@ -5446,5 +5869,288 @@ func TestMessageResponseCarriesEditedAndSubtype(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("history did not contain the narrated message: %s", read.Body)
+	}
+}
+
+// The methods Slack serves to user tokens only answer a bot token with the
+// code their contract names, before touching anything.
+func TestUserTokenOnlyMethodsRefuseABotToken(t *testing.T) {
+	handler, _ := testHandlerWithStore()
+	for _, item := range []struct{ path, form, want string }{
+		{"/api/dnd.setSnooze", "num_minutes=5", "user_is_bot"},
+		{"/api/dnd.endSnooze", "", "user_is_bot"},
+		{"/api/dnd.endDnd", "", "user_is_bot"},
+		{"/api/users.identity", "", "user_is_bot"},
+		{"/api/users.deletePhoto", "", "user_is_bot"},
+		{"/api/stars.add", "channel=C1", "user_is_bot"},
+		{"/api/stars.remove", "channel=C1", "user_is_bot"},
+		{"/api/stars.list", "", "user_is_bot"},
+		{"/api/search.messages", "query=x", "not_allowed_token_type"},
+		{"/api/search.files", "query=x", "not_allowed_token_type"},
+		{"/api/search.all", "query=x", "not_allowed_token_type"},
+	} {
+		if code := errorCode(t, postForm(handler, item.path, item.form)); code != item.want {
+			t.Errorf("%s with a bot token: want %q, got %q", item.path, item.want, code)
+		}
+	}
+}
+
+// dnd.endSnooze with no snooze running is snooze_not_active and emits
+// nothing; a snooze past a day is too_long; another member's DND state omits
+// the snooze fields, which are the caller's own.
+func TestDoNotDisturbSnoozeContracts(t *testing.T) {
+	handler, store := testUserHandlerWithStore()
+	before := len(store.Outbox())
+	if code := errorCode(t, postForm(handler, "/api/dnd.endSnooze", "")); code != "snooze_not_active" {
+		t.Fatalf("endSnooze with no snooze: %q", code)
+	}
+	for _, event := range store.Outbox()[before:] {
+		if strings.HasPrefix(event.Topic, "user.dnd") {
+			t.Fatalf("an inactive endSnooze emitted %s", event.Topic)
+		}
+	}
+	if code := errorCode(t, postForm(handler, "/api/dnd.setSnooze", "num_minutes=1441")); code != "too_long" {
+		t.Fatalf("setSnooze 1441: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/dnd.setSnooze", "num_minutes=10")); code != "" {
+		t.Fatalf("setSnooze 10: %q", code)
+	}
+	own := getAPI(handler, "/api/dnd.info")
+	if !strings.Contains(own.Body.String(), `"snooze_enabled":true`) {
+		t.Fatalf("own dnd.info=%s", own.Body)
+	}
+	other := getAPI(handler, "/api/dnd.info?user=U2")
+	if !strings.Contains(other.Body.String(), `"ok":true`) || strings.Contains(other.Body.String(), "snooze_") {
+		t.Fatalf("another member's dnd.info=%s", other.Body)
+	}
+	var team struct {
+		Users map[string]map[string]any `json:"users"`
+	}
+	if err := json.Unmarshal(getAPI(handler, "/api/dnd.teamInfo?users=U1,U2").Body.Bytes(), &team); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := team.Users["U1"]["snooze_enabled"]; !ok {
+		t.Fatalf("teamInfo omitted the caller's snooze: %+v", team.Users)
+	}
+	if _, ok := team.Users["U2"]["snooze_enabled"]; ok {
+		t.Fatalf("teamInfo disclosed another member's snooze: %+v", team.Users)
+	}
+	if code := errorCode(t, postForm(handler, "/api/dnd.endSnooze", "")); code != "" {
+		t.Fatalf("endSnooze of an active snooze: %q", code)
+	}
+}
+
+// highlight=true wraps each matched term in Slack's private-use markers.
+func TestSearchHighlightUsesSlacksMarkers(t *testing.T) {
+	for _, item := range []struct {
+		text  string
+		terms []string
+		want  string
+	}{
+		{"Deploy the deployment", []string{"deploy"}, "\ue000Deploy\ue001 the \ue000deploy\ue001ment"},
+		{"ab abc", []string{"ab", "abc"}, "\ue000ab\ue001 \ue000abc\ue001"},
+		{"nothing here", []string{"deploy"}, "nothing here"},
+	} {
+		if got := highlightSearchText(item.text, item.terms); got != item.want {
+			t.Errorf("highlight(%q, %q) = %q, want %q", item.text, item.terms, got, item.want)
+		}
+	}
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	repository.SeedConversationMember("C1", "U1")
+	if _, err := (service.Messages{Store: repository}).Post(context.Background(), "T1", "U1", "C1", "Deploying the release", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	handler := userSearchHandler(t, repository)
+	body := getAPIWithToken(handler, "/api/search.messages?query=depl*&highlight=true", "user-token").Body.String()
+	if !strings.Contains(body, "\"text\":\"\ue000Depl\ue001oying the release\"") {
+		t.Fatalf("highlighted search=%s", body)
+	}
+	plain := getAPIWithToken(handler, "/api/search.messages?query=depl*", "user-token").Body.String()
+	if !strings.Contains(plain, `"text":"Deploying the release"`) {
+		t.Fatalf("unhighlighted search=%s", plain)
+	}
+}
+
+// stars.add with only a channel stars the channel; removing a star that is
+// not there is not_starred; an unknown channel is channel_not_found; and the
+// legacy count/page paging describes the whole set.
+func TestStarsChannelItemsErrorsAndPaging(t *testing.T) {
+	handler, _ := testUserHandlerWithStore()
+	var timestamps []string
+	for _, text := range []string{"one", "two", "three"} {
+		var posted struct {
+			TS string `json:"ts"`
+		}
+		if err := json.Unmarshal(postForm(handler, "/api/chat.postMessage", "channel=C1&text="+text).Body.Bytes(), &posted); err != nil || posted.TS == "" {
+			t.Fatalf("post %s: %v", text, err)
+		}
+		timestamps = append(timestamps, posted.TS)
+		if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=C1&timestamp="+posted.TS)); code != "" {
+			t.Fatalf("stars.add message: %q", code)
+		}
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=C1")); code != "" {
+		t.Fatalf("stars.add channel: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=C1")); code != "already_starred" {
+		t.Fatalf("stars.add channel twice: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.add", "channel=CNOPE&timestamp="+timestamps[0])); code != "channel_not_found" {
+		t.Fatalf("stars.add unknown channel: %q", code)
+	}
+	var list struct {
+		OK     bool             `json:"ok"`
+		Items  []map[string]any `json:"items"`
+		Paging struct {
+			PerPage int `json:"per_page"`
+			Page    int `json:"page"`
+			Pages   int `json:"pages"`
+			Total   int `json:"total"`
+		} `json:"paging"`
+	}
+	if err := json.Unmarshal(getAPI(handler, "/api/stars.list?count=3&page=2").Body.Bytes(), &list); err != nil || !list.OK {
+		t.Fatalf("stars.list: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0]["type"] != "channel" || list.Items[0]["channel"] != "C1" ||
+		list.Paging.PerPage != 3 || list.Paging.Page != 2 || list.Paging.Pages != 2 || list.Paging.Total != 4 {
+		t.Fatalf("stars.list page 2=%+v", list)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1")); code != "" {
+		t.Fatalf("stars.remove channel: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1")); code != "not_starred" {
+		t.Fatalf("stars.remove channel twice: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1&timestamp="+timestamps[0])); code != "" {
+		t.Fatalf("stars.remove message: %q", code)
+	}
+	if code := errorCode(t, postForm(handler, "/api/stars.remove", "channel=C1&timestamp="+timestamps[0])); code != "not_starred" {
+		t.Fatalf("stars.remove message twice: %q", code)
+	}
+}
+
+// usergroups.* name a taken name or handle, an invalid handle, a member who is
+// not in the workspace, and a caller who may not manage groups.
+func TestUserGroupValidationAndPermissionCodes(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	var created struct {
+		Usergroup struct {
+			ID     string `json:"id"`
+			Handle string `json:"handle"`
+		} `json:"usergroup"`
+	}
+	if err := json.Unmarshal(postForm(handler, "/api/usergroups.create", "name=Front+End&handle=frontend").Body.Bytes(), &created); err != nil || created.Usergroup.ID == "" {
+		t.Fatalf("create: %v", err)
+	}
+	var derived struct {
+		Usergroup struct {
+			Handle string `json:"handle"`
+		} `json:"usergroup"`
+	}
+	if err := json.Unmarshal(postForm(handler, "/api/usergroups.create", "name=Site+Reliability!").Body.Bytes(), &derived); err != nil || derived.Usergroup.Handle != "site-reliability" {
+		t.Fatalf("derived handle=%+v err=%v", derived, err)
+	}
+	for _, item := range []struct{ path, form, want string }{
+		{"/api/usergroups.create", "name=front+end&handle=other", "name_already_exists"},
+		{"/api/usergroups.create", "name=Other&handle=frontend", "handle_already_exists"},
+		{"/api/usergroups.create", "name=Other&handle=Front+End!", "invalid_arg_name"},
+		{"/api/usergroups.update", "usergroup=" + created.Usergroup.ID + "&handle=site-reliability", "handle_already_exists"},
+		{"/api/usergroups.update", "usergroup=" + created.Usergroup.ID + "&name=Site+Reliability!", "name_already_exists"},
+		{"/api/usergroups.users.update", "usergroup=" + created.Usergroup.ID + "&users=U1,UNOBODY", "invalid_users"},
+	} {
+		if code := errorCode(t, postForm(handler, item.path, item.form)); code != item.want {
+			t.Errorf("%s %s: want %q, got %q", item.path, item.form, item.want, code)
+		}
+	}
+	// Renaming a group to its own name, in another case, is not a collision.
+	if code := errorCode(t, postForm(handler, "/api/usergroups.update", "usergroup="+created.Usergroup.ID+"&name=FRONT+END&handle=frontend")); code != "" {
+		t.Fatalf("self rename: %q", code)
+	}
+	if err := store.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleMember); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct{ path, form, want string }{
+		{"/api/usergroups.create", "name=Another", "permission_denied"},
+		{"/api/usergroups.update", "usergroup=" + created.Usergroup.ID + "&name=Renamed", "permission_denied"},
+		{"/api/usergroups.disable", "usergroup=" + created.Usergroup.ID, "permission_denied"},
+		{"/api/usergroups.enable", "usergroup=" + created.Usergroup.ID, "no_permission"},
+		{"/api/usergroups.users.update", "usergroup=" + created.Usergroup.ID + "&users=U1", "permission_denied"},
+	} {
+		if code := errorCode(t, postForm(handler, item.path, item.form)); code != item.want {
+			t.Errorf("member %s: want %q, got %q", item.path, item.want, code)
+		}
+	}
+}
+
+// team.profile.get's visibility argument filters hidden fields in or out.
+func TestTeamProfileGetFiltersByVisibility(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	now := time.Now().UTC()
+	for _, definition := range []domain.ProfileFieldDefinition{
+		{WorkspaceID: "T1", ID: "Xf1", Label: "Title", Type: domain.ProfileFieldText, CreatedAt: now},
+		{WorkspaceID: "T1", ID: "Xf2", Label: "Salary band", Type: domain.ProfileFieldText, IsHidden: true, Ordering: 1, CreatedAt: now},
+	} {
+		if err := store.SetWorkspaceProfileField(context.Background(), definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	labels := func(query string) []string {
+		var body struct {
+			OK      bool   `json:"ok"`
+			Error   string `json:"error"`
+			Profile struct {
+				Fields []struct {
+					Label string `json:"label"`
+				} `json:"fields"`
+			} `json:"profile"`
+		}
+		if err := json.Unmarshal(getAPI(handler, "/api/team.profile.get"+query).Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if !body.OK {
+			return []string{"error:" + body.Error}
+		}
+		result := []string{}
+		for _, field := range body.Profile.Fields {
+			result = append(result, field.Label)
+		}
+		return result
+	}
+	for query, want := range map[string]string{
+		"":                    "Title,Salary band",
+		"?visibility=all":     "Title,Salary band",
+		"?visibility=visible": "Title",
+		"?visibility=hidden":  "Salary band",
+		"?visibility=secret":  "error:invalid_arg_name",
+	} {
+		if got := strings.Join(labels(query), ","); got != want {
+			t.Errorf("team.profile.get%s = %q, want %q", query, got, want)
+		}
+	}
+}
+
+// users.identity widens with each identity scope the token holds.
+func TestUsersIdentityFollowsItsScopes(t *testing.T) {
+	basic, _ := testFixtureAs(false, domain.TokenUser, auth.ScopeIdentityBasic)
+	body := getAPI(basic, "/api/users.identity").Body.String()
+	if !strings.Contains(body, `"user":{"id":"U1","name":"alice"}`) || !strings.Contains(body, `"team":{"id":"T1"}`) {
+		t.Fatalf("basic identity=%s", body)
+	}
+	full, store := testFixtureAs(false, domain.TokenUser, auth.ScopeIdentityBasic, auth.ScopeIdentityEmail, auth.ScopeIdentityAvatar, auth.ScopeIdentityTeam)
+	if err := store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test", Domain: "testing"}); err != nil {
+		t.Fatal(err)
+	}
+	var identity struct {
+		User map[string]any `json:"user"`
+		Team map[string]any `json:"team"`
+	}
+	if err := json.Unmarshal(getAPI(full, "/api/users.identity").Body.Bytes(), &identity); err != nil {
+		t.Fatal(err)
+	}
+	if _, hasPhoto := identity.User["image_192"]; identity.User["email"] != "alice@example.com" || !hasPhoto || identity.Team["name"] != "test" || identity.Team["domain"] != "testing" {
+		t.Fatalf("full identity=%+v", identity)
 	}
 }

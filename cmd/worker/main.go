@@ -22,6 +22,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/scheduler"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/slackapp"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 )
 
 // exitConfiguration and exitRuntime separate "the operator gave us something
@@ -67,6 +68,10 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// restarting process, while an endlessly retrying one looks healthy while the
 	// outbox never drains.
 	failureBudget := flags.Int("max-consecutive-failures", 20, "consecutive failed poll cycles tolerated before the worker exits")
+	// slack-events delivery builds each callback here, and every URL in it — a
+	// file's url_private, a member's image — is built on the deployment's
+	// public URL: the same -auth-public-url the HTTP process is given.
+	publicURL := flags.String("auth-public-url", os.Getenv("SAMEOLDCHAT_AUTH_PUBLIC_URL"), "public URL clients reach this deployment on; slack-events callbacks build every absolute URL on it (HTTPS, or an explicit loopback URL for development)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -90,7 +95,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			logger.Error("record delivery requires a workspace and delivery URL")
 			return exitConfiguration
 		}
-		if ignored := explicitlySet(flags, "app-id", "signing-secret", "app-credential-key-hex"); len(ignored) != 0 {
+		if ignored := explicitlySet(flags, "app-id", "signing-secret", "app-credential-key-hex", "auth-public-url"); len(ignored) != 0 {
 			logger.Error("record delivery cannot honour Slack application settings", "ignored", strings.Join(ignored, ", "), "hint", "use -delivery-format slack-events")
 			return exitConfiguration
 		}
@@ -115,14 +120,21 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		return exitConfiguration
 	}
 	var appCredentialKey []byte
+	origin := ""
 	if *deliveryFormat == "slack-events" {
 		appCredentialKey, err = secretbox.ParseKeyHex(*appCredentialKeyHex)
 		if err != nil {
 			logger.Error("slack-events delivery requires a valid application credential key")
 			return exitConfiguration
 		}
+		if strings.TrimSpace(*publicURL) == "" {
+			logger.Warn("no -auth-public-url: URLs in Slack event callbacks are origin-relative")
+		} else if origin, err = slackobject.ParsePublicURL(*publicURL); err != nil {
+			logger.Error("invalid -auth-public-url", "error", err)
+			return exitConfiguration
+		}
 	}
-	runtime, err := localchat.Open(ctx, localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, AppCredentialKey: appCredentialKey})
+	runtime, err := localchat.Open(ctx, localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, AppCredentialKey: appCredentialKey, PublicURL: origin})
 	if err != nil {
 		logger.Error("open worker store", "error", err)
 		return exitRuntime
@@ -147,7 +159,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			return exitConfiguration
 		}
 	} else {
-		appEventProcessor = slackapp.EventProcessor{Store: runtime.Store, AppCredentialKey: appCredentialKey, Owner: *owner, Lease: *lease}
+		appEventProcessor = slackapp.EventProcessor{Store: runtime.Store, AppCredentialKey: appCredentialKey, PublicURL: origin, Owner: *owner, Lease: *lease}
 	}
 	// Scheduled delivery is a product worker, not an outbox-format feature.
 	// slack-events is the multi-workspace production mode, so an empty workspace

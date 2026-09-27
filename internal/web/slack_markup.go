@@ -209,11 +209,7 @@ func renderMarkdownInline(text string) string {
 // SDKs. Every app-controlled byte is escaped before it reaches the returned
 // trusted template fragment; only this renderer supplies tags and attributes.
 func renderSlackMrkdwn(text string) template.HTML {
-	return renderSlackMrkdwnWithEmoji(text, nil)
-}
-
-func renderSlackMrkdwnWithEmoji(text string, customEmoji map[string]string) template.HTML {
-	return renderSlackMrkdwnMarking(text, customEmoji, nil)
+	return renderSlackMrkdwnMarking(text, nil, nil)
 }
 
 // renderSlackMrkdwnMarking renders a message body and marks the search terms
@@ -223,7 +219,135 @@ func renderSlackMrkdwnWithEmoji(text string, customEmoji map[string]string) temp
 // already-escaped text.
 func renderSlackMrkdwnMarking(text string, customEmoji map[string]string, terms []string) template.HTML {
 	text = decodeSlackEntities(text)
-	return template.HTML(renderSlackInlineMarking(text, customEmoji, terms)) // #nosec G203 -- the renderer escapes every literal and validates every URL.
+	return template.HTML(renderSlackBlocks(text, customEmoji, terms)) // #nosec G203 -- the renderer escapes every literal and validates every URL.
+}
+
+// renderSlackBlocks is the block level of Slack's mrkdwn: fenced code, quotes
+// and the bullet/number lines Slack's own client writes as a list's fallback
+// text. Everything else is inline prose, one line per <br>.
+//
+// It emits no raw newline outside a <pre>. The message body is displayed with
+// white-space:pre-wrap so a member's runs of spaces survive, and a newline
+// beside each <br> — which the renderer used to write — was rendered as a
+// second line break, double-spacing every multi-line message.
+//
+// A body that is nothing but prose is returned as bare inline markup, so a
+// caller placing it inside a label or a link is unaffected by the block pass.
+func renderSlackBlocks(text string, customEmoji map[string]string, terms []string) string {
+	var output strings.Builder
+	for offset := 0; offset < len(text); {
+		start := strings.Index(text[offset:], "```")
+		if start < 0 {
+			renderSlackProse(&output, text[offset:], customEmoji, terms)
+			break
+		}
+		start += offset
+		end := strings.Index(text[start+3:], "```")
+		if end < 0 {
+			// An unclosed fence is literal text, as it is in Slack.
+			renderSlackProse(&output, text[offset:], customEmoji, terms)
+			break
+		}
+		end += start + 3
+		renderSlackProse(&output, strings.TrimSuffix(text[offset:start], "\n"), customEmoji, terms)
+		output.WriteString("<pre><code>")
+		output.WriteString(html.EscapeString(strings.Trim(text[start+3:end], "\n")))
+		output.WriteString("</code></pre>")
+		offset = end + 3
+		if offset < len(text) && text[offset] == '\n' {
+			offset++
+		}
+	}
+	return output.String()
+}
+
+// slackListItem reports whether a line is one item of the list fallback text
+// Slack's composer writes: "• item" (or a nested "◦ item") for a bulleted
+// list and "1. item" for a numbered one. A hyphen is not a list in mrkdwn.
+func slackListItem(line string) (tag, body string, ok bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	for _, bullet := range []string{"• ", "◦ ", "▪ "} {
+		if strings.HasPrefix(trimmed, bullet) {
+			return "ul", trimmed[len(bullet):], true
+		}
+	}
+	digits := 0
+	for digits < len(trimmed) && digits < 4 && trimmed[digits] >= '0' && trimmed[digits] <= '9' {
+		digits++
+	}
+	if digits > 0 && strings.HasPrefix(trimmed[digits:], ". ") {
+		return "ol", trimmed[digits+2:], true
+	}
+	return "", "", false
+}
+
+// renderSlackProse renders the text between fences. Consecutive quote lines
+// become one <blockquote>, and ">>>" quotes everything after it, as in Slack.
+func renderSlackProse(output *strings.Builder, text string, customEmoji map[string]string, terms []string) {
+	if text == "" {
+		return
+	}
+	lines := strings.Split(text, "\n")
+	inline := func(line string) string { return renderSlackInlineMarking(line, customEmoji, terms) }
+	for index := 0; index < len(lines); {
+		line := lines[index]
+		switch {
+		case strings.HasPrefix(line, ">>>"):
+			rest := append([]string{strings.TrimPrefix(strings.TrimPrefix(line, ">>>"), " ")}, lines[index+1:]...)
+			output.WriteString("<blockquote>")
+			for position, quoted := range rest {
+				if position > 0 {
+					output.WriteString("<br>")
+				}
+				output.WriteString(inline(quoted))
+			}
+			output.WriteString("</blockquote>")
+			return
+		case strings.HasPrefix(line, ">"):
+			output.WriteString("<blockquote>")
+			for first := true; index < len(lines) && strings.HasPrefix(lines[index], ">") && !strings.HasPrefix(lines[index], ">>>"); index++ {
+				if !first {
+					output.WriteString("<br>")
+				}
+				first = false
+				output.WriteString(inline(strings.TrimPrefix(strings.TrimPrefix(lines[index], ">"), " ")))
+			}
+			output.WriteString("</blockquote>")
+			continue
+		}
+		if tag, _, ok := slackListItem(line); ok {
+			output.WriteString("<" + tag + ">")
+			for index < len(lines) {
+				itemTag, body, isItem := slackListItem(lines[index])
+				if !isItem || itemTag != tag {
+					break
+				}
+				output.WriteString("<li>")
+				output.WriteString(inline(body))
+				output.WriteString("</li>")
+				index++
+			}
+			output.WriteString("</" + tag + ">")
+			continue
+		}
+		// A run of prose lines, joined by line breaks. The run ends at the
+		// next quote or list, which starts a block of its own, so no break is
+		// written before it.
+		for first := true; index < len(lines); index++ {
+			current := lines[index]
+			if strings.HasPrefix(current, ">") {
+				break
+			}
+			if _, _, isItem := slackListItem(current); isItem {
+				break
+			}
+			if !first {
+				output.WriteString("<br>")
+			}
+			first = false
+			output.WriteString(inline(current))
+		}
+	}
 }
 
 func decodeSlackEntities(text string) string {
@@ -232,14 +356,6 @@ func decodeSlackEntities(text string) string {
 	// literal and cannot smuggle markup into the renderer.
 	replacer := strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">")
 	return replacer.Replace(text)
-}
-
-func renderSlackInline(text string) string {
-	return renderSlackInlineWithEmoji(text, nil)
-}
-
-func renderSlackInlineWithEmoji(text string, customEmoji map[string]string) string {
-	return renderSlackInlineMarking(text, customEmoji, nil)
 }
 
 // renderSlackInlineMarking is the renderer with search terms threaded through
@@ -251,7 +367,7 @@ func renderSlackInlineMarking(text string, customEmoji map[string]string, terms 
 	for offset := 0; offset < len(text); {
 		switch text[offset] {
 		case '\n':
-			output.WriteString("<br>\n")
+			output.WriteString("<br>")
 			offset++
 		case '\\':
 			if offset+1 < len(text) && strings.ContainsRune(`\*_~`+"`", rune(text[offset+1])) {
@@ -326,10 +442,20 @@ func renderSlackInlineMarking(text string, customEmoji map[string]string, terms 
 				continue
 			}
 			if emoji, ok := slackemoji.Lookup(name); ok {
+				glyph := slackemoji.Unicode(emoji)
+				// Slack writes a skin tone as a second code straight after the
+				// first, ":wave::skin-tone-3:"; it modifies the glyph rather
+				// than printing as text.
+				if rest := text[end+1:]; strings.HasPrefix(rest, ":skin-tone-") && len(rest) >= len(":skin-tone-2:") && rest[len(":skin-tone-2:")-1] == ':' {
+					if toned, ok := slackemoji.ReactionUnicode(name + ":" + rest[:len(":skin-tone-2:")-1]); ok {
+						glyph = toned
+						end += len(":skin-tone-2:")
+					}
+				}
 				output.WriteString(`<span class="standard-emoji" role="img" aria-label=":`)
 				output.WriteString(html.EscapeString(name))
 				output.WriteString(`:">`)
-				output.WriteString(html.EscapeString(slackemoji.Unicode(emoji)))
+				output.WriteString(html.EscapeString(glyph))
 				output.WriteString(`</span>`)
 				offset = end + 1
 				continue
@@ -389,10 +515,6 @@ func validEmojiCode(name string) bool {
 	return true
 }
 
-func renderSlackReference(raw string) (string, bool) {
-	return renderSlackReferenceMarking(raw, nil)
-}
-
 // renderSlackReferenceMarking marks the visible label of a reference and never
 // its target. A member searching for a word they can see in a link should find
 // it emphasised; the href is machinery, and marking it would put a tag inside
@@ -404,17 +526,40 @@ func renderSlackReferenceMarking(raw string, terms []string) (string, bool) {
 	label = strings.TrimSpace(label)
 	switch {
 	case strings.HasPrefix(target, "@"):
+		// A member mention opens that person, as it does in Slack. The
+		// renderer does not know who is reading, so the viewer's own
+		// mentions are flagged afterwards by markSelfMentions, keyed on
+		// data-user-id.
+		id := strings.TrimPrefix(target, "@")
 		if label == "" {
-			label = "@" + strings.TrimPrefix(target, "@")
+			label = "@" + id
 		}
-		return `<span class="slack-mention">` + markTerms(label, terms) + `</span>`, true
+		if !slackIdentifier(id) {
+			return `<span class="slack-mention">` + markTerms(label, terms) + `</span>`, true
+		}
+		return `<a class="slack-mention" href="/app/members?q=` + html.EscapeString(url.QueryEscape(strings.TrimPrefix(label, "@"))) + `" data-user-id="` + id + `">` + markTerms(label, terms) + `</a>`, true
 	case strings.HasPrefix(target, "#"):
+		id := strings.TrimPrefix(target, "#")
 		if label == "" {
-			label = "#" + strings.TrimPrefix(target, "#")
+			label = "#" + id
 		} else if !strings.HasPrefix(label, "#") {
 			label = "#" + label
 		}
-		return `<span class="slack-mention">` + markTerms(label, terms) + `</span>`, true
+		if !slackIdentifier(id) {
+			return `<span class="slack-mention">` + markTerms(label, terms) + `</span>`, true
+		}
+		return `<a class="slack-mention" href="/app?channel=` + id + `">` + markTerms(label, terms) + `</a>`, true
+	case strings.HasPrefix(target, "!date^"):
+		// A formatted date is text, not a mention.
+		if label == "" {
+			label = slackSpecialReferenceLabel(target)
+		}
+		return `<span class="slack-date">` + markTerms(label, terms) + `</span>`, true
+	case target == "!here" || target == "!channel" || target == "!everyone":
+		if label == "" {
+			label = slackSpecialReferenceLabel(target)
+		}
+		return `<span class="slack-mention mention-broadcast">` + markTerms(label, terms) + `</span>`, true
 	case strings.HasPrefix(target, "!"):
 		if label == "" {
 			label = slackSpecialReferenceLabel(target)
@@ -429,6 +574,88 @@ func renderSlackReferenceMarking(raw string, terms []string) (string, bool) {
 		}
 		return "", false
 	}
+}
+
+// slackIdentifier accepts the shape of a Slack user or conversation ID, the
+// only thing a mention writes into its href and data attribute unescaped.
+func slackIdentifier(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'A' || character > 'Z') && (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '_' && character != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// markSelfMentions flags the viewer's own mentions in rendered message markup,
+// which the stylesheet highlights the way Slack does. The renderer escapes
+// every quote in literal text, so the attribute it matches can only be one the
+// renderer wrote on a mention.
+func markSelfMentions(rendered template.HTML, viewer string) template.HTML {
+	if viewer == "" || !slackIdentifier(viewer) {
+		return rendered
+	}
+	needle := `data-user-id="` + viewer + `"`
+	if !strings.Contains(string(rendered), needle) {
+		return rendered
+	}
+	return template.HTML(strings.ReplaceAll(string(rendered), needle, needle+` data-self="true"`)) // #nosec G203 -- adds a fixed attribute beside one the renderer wrote.
+}
+
+// jumbomojiLimit is the largest number of emoji Slack still enlarges when a
+// message is nothing else.
+const jumbomojiLimit = 23
+
+// jumbomoji reports whether a message body is only emoji codes — at most
+// jumbomojiLimit of them, each one a standard or workspace emoji — which Slack
+// displays enlarged.
+func jumbomoji(text string, customEmoji map[string]string) bool {
+	text = strings.TrimSpace(text)
+	count := 0
+	for text != "" {
+		if text[0] == ' ' || text[0] == '\n' || text[0] == '\t' {
+			text = text[1:]
+			continue
+		}
+		if text[0] != ':' {
+			return false
+		}
+		end := strings.IndexByte(text[1:], ':')
+		if end < 1 {
+			return false
+		}
+		name := text[1 : end+1]
+		text = text[end+2:]
+		if strings.HasPrefix(name, "skin-tone-") && count > 0 {
+			continue
+		}
+		if _, ok := slackemoji.Lookup(name); !ok && customEmoji[strings.ToLower(name)] == "" {
+			return false
+		}
+		count++
+		if count > jumbomojiLimit {
+			return false
+		}
+	}
+	return count > 0
+}
+
+// mentionsViewer reports whether a message's source text mentions the viewer
+// directly or through @here, @channel or @everyone — the messages Slack
+// highlights in the timeline.
+func mentionsViewer(text, viewer string) bool {
+	if viewer != "" && (strings.Contains(text, "<@"+viewer+">") || strings.Contains(text, "<@"+viewer+"|")) {
+		return true
+	}
+	for _, broadcast := range []string{"<!here", "<!channel", "<!everyone"} {
+		if strings.Contains(text, broadcast+">") || strings.Contains(text, broadcast+"|") {
+			return true
+		}
+	}
+	return false
 }
 
 func slackSpecialReferenceLabel(target string) string {

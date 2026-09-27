@@ -81,6 +81,17 @@ func TestMapServiceErrorNamesEveryTransportRelevantSentinel(t *testing.T) {
 		"ErrLeaseHeld":     "outbox lease contention is retried by the worker, never returned to an API caller",
 		"ErrLeaseExpired":  "outbox lease expiry is retried by the worker, never returned to an API caller",
 		"ErrLeaseConflict": "outbox lease conflict is retried by the worker, never returned to an API caller",
+		// response_url is a web route, not a Web API method: these reach only
+		// the web handler's appResponseFailure, which names each of them.
+		"ErrAppResponsePayloadInvalid": "returned only by HandleAppResponse, answered by the web /app-response route",
+		"ErrAppResponseNoText":         "returned only by HandleAppResponse, answered by the web /app-response route",
+		"ErrAppResponseURLUsed":        "returned only by HandleAppResponse, answered by the web /app-response route",
+		"ErrAppResponseURLExpired":     "returned only by HandleAppResponse, answered by the web /app-response route",
+		"ErrCapabilityExpired":         "UseAppResponseURL's refusal, translated by HandleAppResponse to ErrAppResponseURLExpired",
+		// file_input values come only from the first-party modal submit and
+		// block action, whose web handler names it (modalInteractionError).
+		"ErrViewFilesInvalid":    "returned only for a first-party modal's file_input, answered by the web /app/view routes",
+		"ErrCapabilityExhausted": "UseAppResponseURL's refusal, translated by HandleAppResponse to ErrAppResponseURLUsed",
 	}
 	missing := make([]string, 0)
 	for _, pkg := range []struct {
@@ -200,6 +211,7 @@ func pinnedErrorCodes(t *testing.T) map[string]struct{} {
 func recordedNonPinnedCodes() map[string]string {
 	return map[string]string{
 		// Surfaces the pinned snapshot does not describe, or that declare no enum.
+		"ratelimited":                    "Slack's 429 code for a method's rate-limit tier, which the pinned snapshot does not enumerate per method; python-slack-sdk retries apps.connections.open and rtm.connect only on it (see rate-limit-codes in specs/compatibility.yaml)",
 		"cant_delete_primary_owner":      "the pinned snapshot declares no owner-protection code for admin.users.*; this names the real cause rather than reporting a permission failure the actor does not have",
 		"canvas_not_found":               "canvases.* is absent from the pinned snapshot",
 		"channel_canvas_already_exists":  "current conversations.canvases.create singular-resource conflict; absent from the legacy OpenAPI snapshot",
@@ -226,9 +238,14 @@ func recordedNonPinnedCodes() map[string]string {
 		"token_not_found":                "apps.auth.external.* is absent from the pinned snapshot; an external credential that does not exist is neither an app nor a user",
 		"app_not_found":                  "admin.apps.* declares no error enum",
 		"usergroup_not_found":            "no pinned enum declares a subteam-not-found code, not even no_such_subteam",
-		"view_not_found":                 "views.* declares no error enum",
 		"invalid_view":                   "views.* declares no error enum",
+		"invalid_blocks":                 "current chat.postMessage, chat.postEphemeral, chat.update, chat.scheduleMessage, and incoming-webhook references name it for blocks that are not valid Block Kit; absent from the legacy method enums",
 		"hash_conflict":                  "views.* declares no error enum",
+		"invalid_trigger_id":             "views.* declares no error enum; current views.open and views.push references name it for an unknown trigger",
+		"exchanged_trigger_id":           "views.* declares no error enum; current views.open and views.push references name it for a trigger already used",
+		"expired_trigger_id":             "views.* declares no error enum; current views.open and views.push references name it for a trigger older than three seconds",
+		"push_limit_reached":             "views.* declares no error enum; current views.push reference names it for a stack already holding three views",
+		"duplicate_external_id":          "views.* declares no error enum; current views.open, views.push and views.update references name it for a reused external_id",
 		"file_storage_unavailable":       "blob-store outage; no pinned enum declares a storage-outage code",
 		// OAuth 2.0 / OpenID Connect codes, governed by RFC 6749 rather than the
 		// Slack snapshot. oauth.* and openid.connect.* declare no error enum.
@@ -249,7 +266,6 @@ func recordedNonPinnedCodes() map[string]string {
 		"not_enabled":                    "current views.publish method reference; returned when the app's Home tab is not enabled and absent from the legacy OpenAPI snapshot",
 		"app_not_hosted":                 "current apps.datastore.* method references; absent from the legacy OpenAPI snapshot",
 		"datastore_error":                "current apps.datastore.* structured validation error; absent from the legacy OpenAPI snapshot",
-		"as_user_not_supported":          "current chat.postMessage no longer accepts as_user for modern apps; absent from the legacy method enum",
 		"markdown_text_conflict":         "current message methods reject simultaneous text and markdown_text; absent from the legacy method enum",
 		"metadata_must_be_sent_from_app": "current Slack metadata contract requires an app identity; absent from the legacy method enum",
 		// Incoming webhooks answer plain text on hooks.slack.com, not a Web API method.
@@ -280,6 +296,13 @@ func recordedNonPinnedCodes() map[string]string {
 		"error_invalid_channels":         "current workflows.featured.list method reference",
 		"error_modifying_workflows":      "current workflows.featured.add, remove, and set method references",
 		"unknown_workflow_id":            "current functions.workflows.steps.list method reference",
+		// Slack answers a usergroups.create/update that takes a name or handle
+		// another group already uses with these codes; the pinned snapshot's
+		// enums declare only permission_denied and user_is_restricted, and the
+		// alternative - succeeding with a duplicate - is what this used to do.
+		"name_already_exists":   "usergroups.create and usergroups.update: the name is taken by another group",
+		"handle_already_exists": "usergroups.create and usergroups.update: the handle is taken by another group",
+		"invalid_users":         "usergroups.users.update: a named member is not in the workspace; the snapshot's enum declares no code for it, and usergroup_not_found named the wrong missing thing",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so
@@ -475,6 +498,8 @@ func perOperationExemptions() map[string]map[string]string {
 		"/users.conversations":        {"team_not_found": workspaceUnreadable},
 		"/users.deletePhoto":          {"user_not_found": "the enum declares no missing-user code, though the operation is defined entirely in terms of a user"},
 		"/users.profile.set":          {"user_not_found": "the enum declares reserved_name, invalid_profile and profile_set_failed but no missing-user code"},
+		"/stars.add":                  {"user_is_bot": "stars.* serve user tokens only; stars.list declares user_is_bot for a bot token and the snapshot's stars.add enum omits it"},
+		"/stars.remove":               {"user_is_bot": "stars.* serve user tokens only; stars.list declares user_is_bot for a bot token and the snapshot's stars.remove enum omits it"},
 		"/files.upload":               {"fatal_error": "the enum declares no server-side failure code; /users.setPhoto, which shares this spool, declares fatal_error", "file_not_found": "the enum declares no not-found code for the workspace the upload is written to"},
 		"/admin.conversations.search": {"fatal_error": "this enum is one of the short admin.* lists and declares no server-side failure code"},
 	}

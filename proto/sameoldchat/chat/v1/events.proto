@@ -40,6 +40,22 @@ message EventsRequest {
 
 message EventsResponse {
   repeated EventRecord records = 1;
+  // The last journal sequence a user-scoped read examined, visible or not, so
+  // a live stream resumes past records its reader may not see instead of
+  // re-reading them on every poll. Zero from a server that predates the field;
+  // the client then falls back to the last record it was given.
+  uint64 scanned_through = 2;
+}
+
+// LatestEventSequenceRequest asks where a new live stream for one member opens:
+// the journal head at this moment.
+message LatestEventSequenceRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message LatestEventSequenceResponse {
+  uint64 sequence = 1;
 }
 
 message AppEventClaimRequest {
@@ -49,11 +65,17 @@ message AppEventClaimRequest {
   int64 lease_nanos = 4;
 }
 
+// AppEventLease is one claimed record with its own delivery state. attempt and
+// retry_reason describe this record's earlier deliveries only; they are not an
+// app-wide position.
 message AppEventLease {
   EventRecord record = 1;
   int32 attempt = 2;
   string retry_reason = 3;
   bool found = 4;
+  // The event_ids of this record's fanned-out callbacks the app already
+  // accepted; a retry re-posts only the others.
+  repeated string delivered_event_ids = 5;
 }
 
 message AppEventAckRequest {
@@ -70,6 +92,12 @@ message AppEventReleaseRequest {
   uint64 sequence = 4;
   string retry_reason = 5;
   int64 retry_at_unix_nano = 6;
+  // A failure on this side of the delivery, which does not count as an
+  // attempt. False, the value an older peer sends, is a delivery the app
+  // failed — the only kind of release that peer could make.
+  bool internal_failure = 7;
+  // Replaces the record's set of accepted callbacks.
+  repeated string delivered_event_ids = 8;
 }
 
 message AppEventMutationResponse {
@@ -77,7 +105,11 @@ message AppEventMutationResponse {
 }
 
 service EventsService {
+  // ListEventsAfter reads the journal as one member (user_id) or one app
+  // (app_id) may see it. A request naming neither is refused: the unfiltered
+  // workspace journal is not part of this boundary.
   rpc ListEventsAfter(EventsRequest) returns (EventsResponse);
+  rpc LatestEventSequence(LatestEventSequenceRequest) returns (LatestEventSequenceResponse);
   rpc ClaimAppEvent(AppEventClaimRequest) returns (AppEventLease);
   rpc AckAppEvent(AppEventAckRequest) returns (AppEventMutationResponse);
   rpc ReleaseAppEvent(AppEventReleaseRequest) returns (AppEventMutationResponse);

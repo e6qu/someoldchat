@@ -71,6 +71,29 @@ func deletingAConversationRemovesEverythingItOwns(t *testing.T, open opener) {
 	if err := f.repository.SetConversationsExcludedFromAI(ctx, f.workspaceID, []domain.ConversationID{f.channelID}, true, f.event("ai-exclude", "channel.ai_exclusion_set", string(f.channelID))); err != nil {
 		t.Fatalf("seed AI exclusion: %v", err)
 	}
+	// An invitation lands in the invitee's Activity keyed by the conversation
+	// alone, with no message. The SQL profiles removed Activity rows only by
+	// message, so this one outlived the channel it invited the member to.
+	invitee := domain.UserID("U-invitee-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: invitee, WorkspaceID: f.workspaceID, Email: "invitee-" + f.suffix + "@example.com", Name: "invitee"}); err != nil {
+		t.Fatalf("seed invitee: %v", err)
+	}
+	invitation := f.event("invite", "member.joined", string(f.channelID))
+	invitation.ActorID = f.userID
+	if err := f.repository.InviteConversationMembers(ctx, f.channelID, []domain.UserID{invitee}, invitation); err != nil {
+		t.Fatalf("seed invitation: %v", err)
+	}
+	invitationActivity := func() int {
+		t.Helper()
+		page, err := f.repository.ListActivity(ctx, f.workspaceID, invitee, domain.ActivityQuery{Page: domain.PageRequest{Limit: 50}})
+		if err != nil {
+			t.Fatalf("list the invitee's activity: %v", err)
+		}
+		return len(page.Items)
+	}
+	if invitationActivity() != 1 {
+		t.Fatal("the invitation did not reach the invitee's Activity")
+	}
 
 	// The delete must now succeed rather than fail on a foreign key.
 	if err := f.repository.DeleteConversation(ctx, f.workspaceID, f.channelID, f.event("delete", "conversation.deleted", string(f.channelID))); err != nil {
@@ -108,5 +131,8 @@ func deletingAConversationRemovesEverythingItOwns(t *testing.T, open opener) {
 	}
 	if followed {
 		t.Fatal("thread follow survived delete")
+	}
+	if remaining := invitationActivity(); remaining != 0 {
+		t.Fatalf("the invitation to a deleted conversation is still in Activity (%d items)", remaining)
 	}
 }

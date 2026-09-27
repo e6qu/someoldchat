@@ -180,6 +180,17 @@ public final class Qualification {
             require(methods.adminEmojiAddAlias(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiAddAliasRequest.builder()
                             .name("qualified-alias").aliasFor("qualified").build()).isOk(), "admin.emoji.addAlias failed");
+            // admin.emoji.list answers an object per emoji; the client's
+            // strict admin Emoji model cannot decode emoji.list's bare URLs.
+            com.slack.api.methods.response.admin.emoji.AdminEmojiListResponse addedEmoji = methods.adminEmojiList(
+                    com.slack.api.methods.request.admin.emoji.AdminEmojiListRequest.builder().limit(1000).build());
+            require(addedEmoji.isOk() && addedEmoji.getEmoji() != null
+                            && addedEmoji.getEmoji().get("qualified") != null
+                            && "https://example.com/qualified.png".equals(addedEmoji.getEmoji().get("qualified").getUrl())
+                            && addedEmoji.getEmoji().get("qualified").getDateCreated() != null
+                            && addedEmoji.getEmoji().get("qualified-alias") != null
+                            && "alias:qualified".equals(addedEmoji.getEmoji().get("qualified-alias").getUrl()),
+                    "admin.emoji.list after add failed: " + addedEmoji);
             require(methods.adminEmojiRename(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiRenameRequest.builder()
                             .name("qualified").newName("qualified-renamed").build()).isOk(), "admin.emoji.rename failed");
@@ -421,13 +432,24 @@ public final class Qualification {
                             .desktopAppJoinUrl("https://example.com/call-desktop")
                             .title("Qualification call")
                             .dateStart((int) (System.currentTimeMillis() / 1000))
+                            .users(java.util.List.of(
+                                    com.slack.api.model.CallParticipant.builder().slackId("U1").build(),
+                                    com.slack.api.model.CallParticipant.builder().externalId("qualification-guest")
+                                            .displayName("Qualification Guest").avatarUrl("https://example.com/guest.png").build()))
                             .build());
             require(addedCall.isOk() && addedCall.getCall() != null && addedCall.getCall().getId() != null,
                     "calls.add failed: " + addedCall.getError());
             String callId = addedCall.getCall().getId();
             com.slack.api.methods.response.calls.CallsInfoResponse callInfo = methods.callsInfo(
                     com.slack.api.methods.request.calls.CallsInfoRequest.builder().id(callId).build());
-            require(callInfo.isOk(), "calls.info failed: " + callInfo.getError());
+            // The Call model's users are CallParticipant objects; an external
+            // participant keeps the name and avatar the provider registered.
+            require(callInfo.isOk() && callInfo.getCall() != null && callInfo.getCall().getUsers() != null
+                            && callInfo.getCall().getUsers().stream().anyMatch(user -> "U1".equals(user.getSlackId()))
+                            && callInfo.getCall().getUsers().stream().anyMatch(user -> "qualification-guest".equals(user.getExternalId())
+                                    && "Qualification Guest".equals(user.getDisplayName())
+                                    && "https://example.com/guest.png".equals(user.getAvatarUrl())),
+                    "calls.info failed: " + callInfo);
             com.slack.api.methods.response.calls.CallsUpdateResponse updatedCall = methods.callsUpdate(
                     com.slack.api.methods.request.calls.CallsUpdateRequest.builder()
                             .id(callId).title("Updated qualification call").build());
@@ -472,9 +494,18 @@ public final class Qualification {
             ConversationsInfoResponse conversation = methods.conversationsInfo(
                     com.slack.api.methods.request.conversations.ConversationsInfoRequest.builder()
                             .channel("C1")
+                            .includeNumMembers(true)
                             .build());
             require(conversation.isOk() && conversation.getChannel() != null
                             && "C1".equals(conversation.getChannel().getId()), "conversations.info failed");
+            // The typed model reads the reader-relative and required fields;
+            // a missing one decodes as null rather than failing, so each is
+            // checked by value.
+            require(conversation.getChannel().isMember() && conversation.getChannel().isGeneral()
+                            && conversation.getChannel().getNumOfMembers() != null
+                            && conversation.getChannel().getTopic() != null
+                            && conversation.getChannel().getTopic().getCreator() != null,
+                    "conversations.info did not decode into the typed conversation model");
             ConversationsMembersResponse members = methods.conversationsMembers(
                     com.slack.api.methods.request.conversations.ConversationsMembersRequest.builder()
                             .channel("C1")
@@ -500,10 +531,13 @@ public final class Qualification {
                     com.slack.api.methods.request.conversations.ConversationsInviteRequest.builder()
                             .channel("C1").users(java.util.List.of("U-missing", "U3")).force(true).build());
             require(forceInvited.isOk(), "forced conversations.invite failed: " + forceInvited.getError());
-            com.slack.api.methods.response.conversations.ConversationsKickResponse kicked = methods.conversationsKick(
+            // C1 is the workspace's required channel (set above), which nobody
+            // can be removed from, exactly as Slack refuses a kick from #general.
+            com.slack.api.methods.response.conversations.ConversationsKickResponse generalKick = methods.conversationsKick(
                     com.slack.api.methods.request.conversations.ConversationsKickRequest.builder()
                             .channel("C1").user("U2").build());
-            require(kicked.isOk(), "conversations.kick failed: " + kicked.getError());
+            require(!generalKick.isOk() && "cant_kick_from_general".equals(generalKick.getError()),
+                    "conversations.kick removed a member from the required channel: " + generalKick.getError());
             ConversationsCreateResponse privateInvitationChannel = methods.conversationsCreate(
                     com.slack.api.methods.request.conversations.ConversationsCreateRequest.builder()
                             .name("sdk-private-invitation")
@@ -518,6 +552,10 @@ public final class Qualification {
                                     .users(java.util.List.of("U2"))
                                     .build());
             require(privateInvited.isOk(), "private conversations.invite failed: " + privateInvited.getError());
+            com.slack.api.methods.response.conversations.ConversationsKickResponse kicked = methods.conversationsKick(
+                    com.slack.api.methods.request.conversations.ConversationsKickRequest.builder()
+                            .channel(privateInvitationChannel.getChannel().getId()).user("U2").build());
+            require(kicked.isOk(), "conversations.kick failed: " + kicked.getError());
             com.slack.api.methods.response.conversations.ConversationsLeaveResponse left = methods.conversationsLeave(
                     com.slack.api.methods.request.conversations.ConversationsLeaveRequest.builder().channel("C2").build());
             require(left.isOk(), "conversations.leave failed: " + left.getError());
@@ -690,13 +728,13 @@ public final class Qualification {
             com.slack.api.methods.response.dnd.DndInfoResponse dndInfo = methods.dndInfo(
                     com.slack.api.methods.request.dnd.DndInfoRequest.builder().build());
             require(dndInfo.isOk() && !dndInfo.isDndEnabled(), "dnd.info failed: " + dndInfo.getError());
-            com.slack.api.methods.response.dnd.DndSetSnoozeResponse dndSnooze = methods.dndSetSnooze(
+            com.slack.api.methods.response.dnd.DndSetSnoozeResponse dndSnooze = reminderMethods.dndSetSnooze(
                     com.slack.api.methods.request.dnd.DndSetSnoozeRequest.builder().numMinutes(5).build());
             require(dndSnooze.isOk() && dndSnooze.isSnoozeEnabled(), "dnd.setSnooze failed: " + dndSnooze.getError());
-            com.slack.api.methods.response.dnd.DndEndSnoozeResponse dndEndSnooze = methods.dndEndSnooze(
+            com.slack.api.methods.response.dnd.DndEndSnoozeResponse dndEndSnooze = reminderMethods.dndEndSnooze(
                     com.slack.api.methods.request.dnd.DndEndSnoozeRequest.builder().build());
             require(dndEndSnooze.isOk(), "dnd.endSnooze failed: " + dndEndSnooze.getError());
-            com.slack.api.methods.response.dnd.DndEndDndResponse dndEnd = methods.dndEndDnd(
+            com.slack.api.methods.response.dnd.DndEndDndResponse dndEnd = reminderMethods.dndEndDnd(
                     com.slack.api.methods.request.dnd.DndEndDndRequest.builder().build());
             require(dndEnd.isOk(), "dnd.endDnd failed: " + dndEnd.getError());
             com.slack.api.methods.response.dnd.DndTeamInfoResponse dndTeam = methods.dndTeamInfo(
@@ -725,14 +763,28 @@ public final class Qualification {
                             .text("not another user's reminder").time("300").user("U2").build());
             require(!otherUserReminder.isOk() && "cannot_add_others".equals(otherUserReminder.getError()),
                     "reminders.add accepted another user for a user token");
+            // Slack's documented natural-language forms are read; a recurring
+            // one is reported as recurring, and anything else is cannot_parse.
             com.slack.api.methods.response.reminders.RemindersAddResponse naturalLanguageReminder = reminderMethods.remindersAdd(
                     com.slack.api.methods.request.reminders.RemindersAddRequest.builder()
                             .text("documented natural language").time("in 15 minutes").build());
-            require(!naturalLanguageReminder.isOk() && "cannot_parse".equals(naturalLanguageReminder.getError()),
-                    "known reminders.add natural-language gap was not reported");
+            require(naturalLanguageReminder.isOk() && naturalLanguageReminder.getReminder() != null
+                            && naturalLanguageReminder.getReminder().getTime() > System.currentTimeMillis() / 1000 + 14 * 60,
+                    "reminders.add in 15 minutes failed: " + naturalLanguageReminder.getError());
+            com.slack.api.methods.response.reminders.RemindersAddResponse recurringReminder = reminderMethods.remindersAdd(
+                    com.slack.api.methods.request.reminders.RemindersAddRequest.builder()
+                            .text("weekly sync").time("every Thursday at 9am").build());
+            require(recurringReminder.isOk() && recurringReminder.getReminder() != null
+                            && recurringReminder.getReminder().isRecurring(),
+                    "reminders.add every Thursday failed: " + recurringReminder.getError());
+            com.slack.api.methods.response.reminders.RemindersAddResponse unparseableReminder = reminderMethods.remindersAdd(
+                    com.slack.api.methods.request.reminders.RemindersAddRequest.builder()
+                            .text("undocumented phrasing").time("whenever").build());
+            require(!unparseableReminder.isOk() && "cannot_parse".equals(unparseableReminder.getError()),
+                    "reminders.add accepted a phrase it cannot read");
             com.slack.api.methods.response.reminders.RemindersListResponse reminders = reminderMethods.remindersList(
                     com.slack.api.methods.request.reminders.RemindersListRequest.builder().build());
-            require(reminders.isOk() && reminders.getReminders() != null && reminders.getReminders().size() == 1,
+            require(reminders.isOk() && reminders.getReminders() != null && reminders.getReminders().size() == 3,
                     "reminders.list failed: " + reminders.getError());
             com.slack.api.methods.response.reminders.RemindersInfoResponse reminderInfo = reminderMethods.remindersInfo(
                     com.slack.api.methods.request.reminders.RemindersInfoRequest.builder().reminder(reminderId).build());
@@ -799,6 +851,10 @@ public final class Qualification {
             UsersInfoResponse user = methods.usersInfo(
                     com.slack.api.methods.request.users.UsersInfoRequest.builder().user("U1").build());
             require(user.isOk() && user.getUser() != null && "U1".equals(user.getUser().getId()), "users.info failed");
+            require(user.getUser().getUpdated() != null && user.getUser().getTz() != null
+                            && user.getUser().getProfile().getImage48() != null
+                            && user.getUser().getProfile().getImage48().startsWith("http"),
+                    "users.info did not decode into the typed user model");
             UsersProfileGetResponse profile = methods.usersProfileGet(
                     com.slack.api.methods.request.users.profile.UsersProfileGetRequest.builder().user("U1").build());
             require(profile.isOk() && profile.getProfile() != null
@@ -808,20 +864,20 @@ public final class Qualification {
             // the bytes and refuses a stream that is not the image it claims to be.
             java.nio.file.Files.write(image.toPath(), java.util.Base64.getDecoder().decode(
                     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="));
-            com.slack.api.methods.response.users.UsersSetPhotoResponse photo = methods.usersSetPhoto(
+            com.slack.api.methods.response.users.UsersSetPhotoResponse photo = reminderMethods.usersSetPhoto(
                     com.slack.api.methods.request.users.UsersSetPhotoRequest.builder().image(image).build());
             if (!image.delete()) {
                 throw new IllegalStateException("could not delete temporary qualification image");
             }
             require(photo.isOk(), "users.setPhoto failed: " + photo.getError());
-            com.slack.api.methods.response.users.UsersDeletePhotoResponse deletedPhoto = methods.usersDeletePhoto(
+            com.slack.api.methods.response.users.UsersDeletePhotoResponse deletedPhoto = reminderMethods.usersDeletePhoto(
                     com.slack.api.methods.request.users.UsersDeletePhotoRequest.builder().build());
             require(deletedPhoto.isOk(), "users.deletePhoto failed: " + deletedPhoto.getError());
 
             ChatPostMessageResponse root = methods.chatPostMessage(
                     com.slack.api.methods.request.chat.ChatPostMessageRequest.builder()
                             .channel("C1")
-                            .text("thread root")
+                            .text("thread root <https://example.com/qualification>")
                             .build());
             require(root.isOk(), "thread root failed: " + root.getError());
             com.slack.api.methods.response.chat.ChatUnfurlResponse unfurled = methods.chatUnfurl(
@@ -926,7 +982,11 @@ public final class Qualification {
             require(lifecycleInfo.isOk() && lifecycleInfo.getChannel() != null
                             && "qualification-renamed".equals(lifecycleInfo.getChannel().getName())
                             && "qualification topic".equals(lifecycleInfo.getChannel().getTopic().getValue())
-                            && "qualification purpose".equals(lifecycleInfo.getChannel().getPurpose().getValue()),
+                            && "qualification purpose".equals(lifecycleInfo.getChannel().getPurpose().getValue())
+                            && "U1".equals(lifecycleInfo.getChannel().getCreator())
+                            && lifecycleInfo.getChannel().getCreated() != null && lifecycleInfo.getChannel().getCreated() > 0
+                            && "U1".equals(lifecycleInfo.getChannel().getTopic().getCreator())
+                            && lifecycleInfo.getChannel().getTopic().getLastSet() != null && lifecycleInfo.getChannel().getTopic().getLastSet() > 0,
                     "conversation lifecycle state mismatch");
 
             ChatMeMessageResponse meMessage = methods.chatMeMessage(
@@ -940,15 +1000,15 @@ public final class Qualification {
                             .channel("C1").user("U1").text("ephemeral qualification").build());
             require(ephemeral.isOk() && ephemeral.getMessageTs() != null,
                     "chat.postEphemeral failed: " + ephemeral.getError());
-            com.slack.api.methods.response.stars.StarsAddResponse starred = methods.starsAdd(
+            com.slack.api.methods.response.stars.StarsAddResponse starred = reminderMethods.starsAdd(
                     com.slack.api.methods.request.stars.StarsAddRequest.builder()
                             .channel("C1").timestamp(root.getTs()).build());
             require(starred.isOk(), "stars.add failed: " + starred.getError());
-            com.slack.api.methods.response.stars.StarsListResponse stars = methods.starsList(
+            com.slack.api.methods.response.stars.StarsListResponse stars = reminderMethods.starsList(
                     com.slack.api.methods.request.stars.StarsListRequest.builder().limit(10).build());
             require(stars.isOk() && stars.getItems() != null && stars.getItems().size() == 1,
                     "stars.list failed: " + stars.getError());
-            com.slack.api.methods.response.stars.StarsRemoveResponse unstarred = methods.starsRemove(
+            com.slack.api.methods.response.stars.StarsRemoveResponse unstarred = reminderMethods.starsRemove(
                     com.slack.api.methods.request.stars.StarsRemoveRequest.builder()
                             .channel("C1").timestamp(root.getTs()).build());
             require(unstarred.isOk(), "stars.remove failed: " + unstarred.getError());
@@ -965,6 +1025,9 @@ public final class Qualification {
             TeamInfoResponse team = methods.teamInfo(
                     com.slack.api.methods.request.team.TeamInfoRequest.builder().build());
             require(team.isOk() && team.getTeam() != null && "T1".equals(team.getTeam().getId()), "team.info failed");
+            require(team.getTeam().getDomain() != null && !team.getTeam().getDomain().isEmpty()
+                            && team.getTeam().getIcon() != null && team.getTeam().getIcon().getImage34() != null,
+                    "team.info did not decode into the typed team model");
             com.slack.api.methods.response.team.profile.TeamProfileGetResponse teamProfile = methods.teamProfileGet(
                     com.slack.api.methods.request.team.profile.TeamProfileGetRequest.builder().build());
             require(teamProfile.isOk() && teamProfile.getProfile() != null
@@ -980,7 +1043,7 @@ public final class Qualification {
                                     "Smileys & Emotion".equals(category.getName())
                                             && category.getEmojiNames().contains("grinning")),
                     "emoji.list categories failed: " + emoji.getError());
-            UsersIdentityResponse identityResult = methods.usersIdentity(
+            UsersIdentityResponse identityResult = reminderMethods.usersIdentity(
                     com.slack.api.methods.request.users.UsersIdentityRequest.builder().build());
             require(identityResult.isOk() && identityResult.getUser() != null
                             && "U1".equals(identityResult.getUser().getId()), "users.identity failed");

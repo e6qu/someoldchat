@@ -9,19 +9,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
 )
 
+// directKeySeparator joins the parts of a direct conversation key. It is the
+// ASCII unit separator rather than NUL: PostgreSQL text rejects a NUL byte, so
+// a NUL-joined key made every direct message fail to open on that profile.
+const directKeySeparator = "\x1f"
+
+// DirectConversationKey is the canonical identity of a direct conversation:
+// its workspace and its exact, order-independent member set.
 func DirectConversationKey(workspaceID WorkspaceID, members []UserID) string {
 	values := make([]string, 0, len(members))
 	for _, member := range members {
 		values = append(values, string(member))
 	}
 	sort.Strings(values)
-	return string(workspaceID) + "\x00" + strings.Join(values, "\x00")
+	return string(workspaceID) + directKeySeparator + strings.Join(values, directKeySeparator)
 }
 
 type Workspace struct {
@@ -150,7 +159,17 @@ type BillableInfo struct {
 }
 
 type UserProfile struct {
-	DisplayName      string
+	DisplayName string
+	// Title and Pronouns are the member-editable standard fields Slack's
+	// profile carries beside the display name ("Title", "Pronouns").
+	Title    string
+	Pronouns string
+	// Timezone is the member's IANA zone, which Slack reports on the user
+	// object as tz and uses for a profile's "local time". It travels with the
+	// profile because every member-editable fact about a member already does;
+	// empty means unknown, which is rendered as no local time rather than a
+	// guessed UTC.
+	Timezone         string
 	StatusText       string
 	StatusEmoji      string
 	StatusExpiration time.Time
@@ -195,6 +214,40 @@ type User struct {
 	// login record and carries no session identity.
 	LastActiveAt time.Time
 	Deleted      bool
+	// Updated is when the member's record — identity, profile, status, or
+	// activation — last changed. It is zero for a record last written before
+	// schema 181, which kept no such instant.
+	Updated time.Time
+
+	// The fields below are not stored with the user. The service derives them
+	// from the member's workspace membership and from the bot, if any, the
+	// account belongs to, because Slack's user object reports both.
+
+	// BotID and AppID name the bot and app a bot user belongs to; both are
+	// empty for a person.
+	BotID BotID
+	AppID AppID
+	// Role, Restricted and UltraRestricted are the member's workspace role and
+	// guest tier.
+	Role            WorkspaceRole
+	Restricted      bool
+	UltraRestricted bool
+}
+
+// SlackDomain is the workspace's subdomain as Slack reports it. A workspace
+// created through admin.teams.create names one; a workspace seeded or migrated
+// without one is addressed by its lower-cased identifier, which is unique where
+// a name is not. team.info reported an empty domain for every such workspace.
+func (w Workspace) SlackDomain() string {
+	if value := strings.TrimSpace(w.Domain); value != "" {
+		return value
+	}
+	return strings.ToLower(string(w.ID))
+}
+
+// IsBot reports whether the account is an app's bot user rather than a person.
+func (u User) IsBot() bool {
+	return u.BotID != ""
 }
 
 type AdminUser struct {
@@ -213,6 +266,10 @@ type CustomEmoji struct {
 	Name        string
 	URL         string
 	AliasFor    string
+	// CreatedAt and CreatedBy are admin.emoji.list's date_created and
+	// uploaded_by. Rows written before they were recorded carry zero values.
+	CreatedAt time.Time
+	CreatedBy UserID
 }
 
 type Presence string
@@ -318,10 +375,29 @@ type Call struct {
 	// Participants are the people currently in the call, not everyone who ever
 	// was. Someone who leaves is removed; the record of their having been there
 	// is the huddle.joined and huddle.left pair in the durable journal.
-	Participants    []UserID
-	StartedAt       time.Time
-	EndedAt         time.Time
-	DurationSeconds int64
+	Participants []UserID
+	// ExternalParticipants are the people in an app-registered call who have
+	// no account here: Slack's calls API names them by the provider's
+	// external_id with a display name and avatar. A huddle never has any.
+	ExternalParticipants []ExternalCallParticipant
+	StartedAt            time.Time
+	EndedAt              time.Time
+	DurationSeconds      int64
+}
+
+// ExternalCallParticipant is a calls-API participant identified by the call
+// provider rather than by a member ID.
+type ExternalCallParticipant struct {
+	ExternalID  string
+	DisplayName string
+	AvatarURL   string
+}
+
+// CallParticipant is one entry of a calls-API `users` list: either a member
+// (SlackID) or an external participant, never both.
+type CallParticipant struct {
+	SlackID  UserID
+	External ExternalCallParticipant
 }
 
 // Active reports whether the call is still running.
@@ -342,8 +418,14 @@ type View struct {
 	Hash           string
 	RootViewID     ViewID
 	PreviousViewID ViewID
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// FunctionExecutionID is the function execution whose execution-scoped
+	// token opened or pushed the view. It is fixed when the view is created:
+	// Slack routes the view's view_submission and view_closed with that
+	// execution's function_data, and an update does not move a view to
+	// another execution.
+	FunctionExecutionID WorkflowStepID
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type ViewInteractionResult struct {
@@ -520,8 +602,14 @@ type Dialog struct {
 	ID          DialogID
 	WorkspaceID WorkspaceID
 	UserID      UserID
-	Payload     string
-	CreatedAt   time.Time
+	// AppID is the app that opened the dialog and receives its
+	// dialog_submission and dialog_cancellation.
+	AppID   AppID
+	Payload string
+	// Errors are the per-element messages ({name: error}) the app answered
+	// the last submission with; the dialog stays open showing them.
+	Errors    map[string]string
+	CreatedAt time.Time
 }
 
 type Bot struct {
@@ -592,10 +680,13 @@ type OAuthCode struct {
 }
 
 type OAuthToken struct {
-	AccessToken            string
-	ClientID               string
-	AppID                  AppID
-	WorkspaceID            WorkspaceID
+	AccessToken string
+	ClientID    string
+	AppID       AppID
+	WorkspaceID WorkspaceID
+	// WorkspaceName is the installing workspace's name, which oauth.v2.access
+	// reports as team.name and oauth.access as team_name.
+	WorkspaceName          string
 	UserID                 UserID
 	InstallerID            UserID
 	BotID                  BotID
@@ -613,11 +704,16 @@ type OAuthToken struct {
 	// webhook and the oauth.v2.access response hands its coordinates back, the
 	// one time the app ever sees the URL. IncomingWebhookChannel travels from the
 	// consumed code; the rest are the freshly created hook.
+	//
+	// The two paths are relative to the deployment's public base URL, which only
+	// the HTTP boundary knows; it makes them absolute for the response. Minting
+	// an absolute URL here used to hard-code Slack's own host, so an app posted
+	// its webhook to hooks.slack.com instead of this deployment.
 	IncomingWebhookChannel     ConversationID
 	IncomingWebhookChannelName string
 	IncomingWebhookID          IncomingWebhookID
-	IncomingWebhookURL         string
-	IncomingWebhookConfigURL   string
+	IncomingWebhookPath        string
+	IncomingWebhookConfigPath  string
 }
 
 // OAuthRefreshGrant is the durable, one-time capability behind a rotating
@@ -739,6 +835,45 @@ type TokenRecord struct {
 	TokenType   TokenType
 	ExpiresAt   time.Time
 	Revoked     bool
+	// FunctionExecutionID names the function execution an execution-scoped
+	// bot token (xwfp-) was issued for. It is empty for every other token.
+	// Messages posted and views opened with such a token belong to that
+	// execution, and the token expires the moment the execution ends.
+	FunctionExecutionID WorkflowStepID
+}
+
+// FileAccessGrant lets one user read a file that is shared nowhere they can
+// see. Slack grants an app read access to the files a member attaches in a
+// modal's file_input: the app's bot user receives the grant when the files
+// are handed to it, so files.info and url_private work with its bot token
+// while the file stays private to the member who uploaded it.
+type FileAccessGrant struct {
+	FileID      FileID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	GrantedAt   time.Time
+}
+
+// FunctionExecutionToken is the execution-scoped bot credential Slack sends
+// an app as bot_access_token with function_executed and with every
+// interaction that comes from what the execution posted or opened. It acts as
+// the app's bot, with the bot's scopes, for one execution only: it is minted
+// once per execution (a redelivered function_executed carries the same one),
+// sealed so the platform can hand it out again with later interactions, and
+// it stops authenticating when the execution completes, fails, or is
+// cancelled, or when the app loses its bot installation.
+type FunctionExecutionToken struct {
+	WorkspaceID WorkspaceID
+	ExecutionID WorkflowStepID
+	AppID       AppID
+	// CallbackID is the function's callback_id, which function_data names.
+	CallbackID string
+	UserID     UserID
+	BotID      BotID
+	Scopes     []string
+	// Ciphertext is the token sealed with the application credential key.
+	Ciphertext string
+	CreatedAt  time.Time
 }
 
 type AppTokenRecord struct {
@@ -795,6 +930,20 @@ type WorkspaceSession struct {
 	UserID    UserID
 	CreatedAt time.Time
 	ExpiresAt time.Time
+}
+
+// ScheduledMessageOwner is the identity a scheduled message belongs to for
+// chat.scheduledMessages.list and chat.deleteScheduledMessage: the app's bot
+// for a bot token, and the member together with the app for a user token (a
+// first-party session is a user with no app). Slack scopes those methods to
+// who scheduled the message, not to the bytes of one token, so a rotated or
+// reissued token of the same bot or user keeps its schedules. It used to be the
+// hash of the exact bearer token, which lost every schedule on rotation.
+func ScheduledMessageOwner(workspace WorkspaceID, user UserID, app AppID, bot BotID) string {
+	if bot != "" {
+		return HashToken("scheduled-owner\x00bot\x00" + string(workspace) + "\x00" + string(app) + "\x00" + string(bot))
+	}
+	return HashToken("scheduled-owner\x00user\x00" + string(workspace) + "\x00" + string(user) + "\x00" + string(app))
 }
 
 func HashToken(token string) string {
@@ -933,6 +1082,59 @@ type Conversation struct {
 	// from the other.
 	IsExtShared        bool
 	IsPendingExtShared bool
+	// Created and CreatorID record when and by whom the conversation was made.
+	// They are zero for a conversation created before schema 180, which kept no
+	// record of either; nothing reconstructs them because any guess (the first
+	// message, the first member) would be a different fact wearing their name.
+	Created   time.Time
+	CreatorID UserID
+	// Who last set the topic and the purpose, and when. Slack reports both
+	// with the value; an unset one is the empty user at the zero instant.
+	TopicSetBy   UserID
+	TopicSetAt   time.Time
+	PurposeSetBy UserID
+	PurposeSetAt time.Time
+
+	// The fields below are not stored. They are derived for one reader when a
+	// conversation is returned through the service, because each is a fact
+	// about the conversation relative to the workspace or to the reader rather
+	// than about the conversation itself.
+
+	// IsMember reports whether the reader belongs to the conversation.
+	IsMember bool
+	// IsGeneral reports that the conversation is one of the workspace's
+	// required channels: the ones a member cannot leave and nobody can
+	// archive, which is exactly what Slack's #general is.
+	IsGeneral bool
+	// NumMembers is how many people belong to the conversation.
+	NumMembers int
+	// DirectUserID is, for a one-to-one DM, the participant who is not the
+	// reader, or the reader themselves for a self-DM.
+	DirectUserID UserID
+	// DirectUserDeleted reports that DirectUserID has been deactivated.
+	DirectUserDeleted bool
+	// GroupDirectHandle is Slack's name for a group DM, derived from its
+	// participants' usernames (mpdm-alice--bob--carol-1). It is separate from
+	// Name because a group DM's stored name is either a placeholder or the
+	// label its members gave it, and first-party clients show that instead.
+	GroupDirectHandle string
+}
+
+// DirectOpening is the result of opening a direct conversation: the
+// conversation, and whether it was already open for the caller before the
+// request, which conversations.open reports as already_open.
+type DirectOpening struct {
+	Conversation Conversation
+	AlreadyOpen  bool
+}
+
+// ConversationText is a channel topic or purpose as it is written: the value,
+// who set it, and when. The three travel together so that a store cannot record
+// a new value while keeping the previous setter.
+type ConversationText struct {
+	Value string
+	SetBy UserID
+	SetAt time.Time
 }
 
 // SharedInviteStatus is the state machine CONNECT-02 requires. Approval and
@@ -1177,6 +1379,56 @@ func (c Conversation) IsDirectOrGroup() bool {
 	return c.Kind == ConversationTypeIM || c.Kind == ConversationTypeMPIM
 }
 
+// SlackChannelType is the channel_type the Events API puts on a message
+// event: Slack's legacy vocabulary, where a private channel is a "group" and a
+// multi-person direct message is an "mpim". Apps route on it — Bolt's
+// Assistant middleware only handles message events whose channel_type is "im".
+func (c Conversation) SlackChannelType() string {
+	switch c.Kind.OrPublic() {
+	case ConversationTypeIM:
+		return "im"
+	case ConversationTypeMPIM:
+		return "mpim"
+	case ConversationTypePrivate:
+		return "group"
+	}
+	return "channel"
+}
+
+// DirectKindFor is the kind of a direct conversation holding this many people,
+// the caller included: a self-DM or a one-to-one is an IM, anything larger a
+// group DM.
+func DirectKindFor(members int) ConversationType {
+	if members <= 2 {
+		return ConversationTypeIM
+	}
+	return ConversationTypeMPIM
+}
+
+// ValidDirectMemberCount reports whether a direct conversation of this kind may
+// hold this many members. An IM holds its two participants, or one person
+// writing to themselves; a group DM holds at least three. Both stores check it
+// so that neither accepts a membership the other would refuse.
+func ValidDirectMemberCount(kind ConversationType, members int) bool {
+	switch kind {
+	case ConversationTypeIM:
+		return members == 1 || members == 2
+	case ConversationTypeMPIM:
+		return members >= 3
+	}
+	return false
+}
+
+// DirectConversationIDPrefix is the first letter of a new direct conversation's
+// identifier. Slack gives IMs D-prefixed identifiers and group DMs the
+// C/G space channels use, and official SDKs model a D identifier as a DM.
+func DirectConversationIDPrefix(kind ConversationType) string {
+	if kind == ConversationTypeIM {
+		return "D"
+	}
+	return "C"
+}
+
 // PrivateFlag reports the value the stored is_private column carries for this
 // kind. A one-to-one and a group are private as well as a private channel, so
 // every reader of the old boolean keeps its exact meaning.
@@ -1237,8 +1489,11 @@ const (
 	NotificationMute     NotificationLevel = "mute"
 )
 
+// ValidWorkspaceDefault is Slack's three workspace triggers: all new
+// messages, direct messages and mentions (and keywords), or nothing. Nothing
+// silences notifications, not Activity: mentions and DMs are still recorded.
 func (level NotificationLevel) ValidWorkspaceDefault() bool {
-	return level == NotificationAll || level == NotificationMentions
+	return level == NotificationAll || level == NotificationMentions || level == NotificationMute
 }
 
 func (level NotificationLevel) ValidConversationOverride() bool {
@@ -1858,13 +2113,30 @@ type Pin struct {
 	Message   MessageID
 	UserID    UserID
 	CreatedAt time.Time
+	// Item is the pinned message as it reads now. pins.list returns the
+	// whole message object; carrying only the identifier made every caller
+	// either answer `{"id": ...}` or make a read per pin.
+	Item Message
 }
 
+// Star is a legacy stars.* item: a starred message, or - when Message is the
+// zero value - a starred channel.
 type Star struct {
 	Message      Message
 	Conversation ConversationID
 	UserID       UserID
 	CreatedAt    time.Time
+}
+
+// IsChannel reports whether the star is on a channel rather than a message.
+func (s Star) IsChannel() bool { return s.Message.ID == "" }
+
+// StarPage is one page of a member's stars and how many they have in all.
+type StarPage struct {
+	Stars      []Star
+	NextCursor Cursor
+	HasMore    bool
+	Total      int
 }
 
 type SavedItemState string
@@ -1965,6 +2237,23 @@ type File struct {
 	CreatedAt      time.Time
 	Deleted        bool
 	SharedChannels []ConversationID
+	// Shares are the live messages that carry the file, as files.info
+	// reports them. Only files.info reads them, so every other file value
+	// leaves them empty rather than paying a join per file.
+	Shares []FileShare
+}
+
+// FileShare is one message that shared a file into a conversation: an entry
+// of the file object's shares map in Slack's files.info.
+type FileShare struct {
+	Conversation     ConversationID
+	ConversationName string
+	// Private places the share under shares.private: a private channel, a
+	// direct message, or a group direct message.
+	Private         bool
+	Timestamp       MessageTimestamp
+	ThreadTimestamp MessageTimestamp
+	SharedBy        UserID
 }
 
 // IsSnippet reports whether this file is an inline text/code snippet rather than
@@ -1973,8 +2262,12 @@ func (f File) IsSnippet() bool {
 	return strings.TrimSpace(f.FileType) != ""
 }
 
-// Mode is the Slack file mode: a snippet the member typed, or a hosted upload.
+// Mode is the Slack file mode: a snippet the member typed, a hosted upload, or
+// the tombstone a deleted file leaves behind.
 func (f File) Mode() string {
+	if f.Deleted {
+		return "tombstone"
+	}
 	if f.IsSnippet() {
 		return "snippet"
 	}
@@ -2331,9 +2624,25 @@ type Reminder struct {
 	Creator     UserID
 	User        UserID
 	Text        string
-	Time        time.Time
-	CompleteAt  time.Time
-	Recurring   bool
+	// Time is when the reminder next comes due; a recurring reminder's Time
+	// moves to its next occurrence each time it is delivered.
+	Time       time.Time
+	CompleteAt time.Time
+	// Recurring is Slack's flag; Recurrence, TimeZone and RecurrenceAnchor
+	// say how a recurring reminder recurs ("every Thursday" in the member's
+	// zone, positioned by its first occurrence).
+	Recurring        bool
+	Recurrence       ReminderRecurrence
+	TimeZone         string
+	RecurrenceAnchor time.Time
+}
+
+// ReminderSchedule is when a reminders.add reminder comes due and whether,
+// and in which zone, it recurs.
+type ReminderSchedule struct {
+	Due        time.Time
+	Recurrence ReminderRecurrence
+	TimeZone   string
 }
 
 type ReminderPage struct {
@@ -2685,9 +2994,14 @@ type AppAuthorization struct {
 	Scopes      []string
 }
 
-// AppEventCursor is the durable delivery position for one app transport. It is
-// intentionally payload-free: administration can explain queue progress and
-// retry state without exposing event bodies from installed workspaces.
+// AppEventCursor summarises the durable delivery state of one app transport.
+// It is intentionally payload-free: administration can explain queue progress
+// and retry state without exposing event bodies from installed workspaces.
+//
+// Delivery state is kept per record, so this is a summary: every record at or
+// below AcknowledgedSequence is settled; InFlight* names the earliest record a
+// worker holds a lease on; Retry* describes the earliest record waiting for a
+// retry; Pending counts the records claimed but not yet settled.
 type AppEventCursor struct {
 	AppID                AppID
 	Surface              string
@@ -2697,6 +3011,7 @@ type AppEventCursor struct {
 	RetryAt              time.Time
 	RetryCount           int
 	RetryReason          string
+	Pending              int
 }
 
 // AppDeliveryHealth is the developer-facing projection of an app's configured
@@ -3174,6 +3489,18 @@ type AppBlockAction struct {
 	ActionID  string
 	Type      string
 	Value     string
+	// ChosenOptions reports the text of the options chosen in an
+	// external_select or multi_external_select, each with the Token the
+	// service issued when it was loaded (AppOption.Token). Text without a
+	// valid token is never sent to the app.
+	ChosenOptions []AppChosenOption
+}
+
+// AppChosenOption is an external-select option a client says it chose.
+type AppChosenOption struct {
+	Value string
+	Text  string
+	Token string
 }
 
 // AppViewBlockAction is an interaction with an element rendered inside a
@@ -3189,11 +3516,14 @@ type AppViewBlockAction struct {
 }
 
 // AppOptionQuery identifies one external_select or multi_external_select
-// element. Exactly one of MessageID and ViewID is set.
+// element, or one legacy dialog select with data_source "external". Exactly
+// one of MessageID, ViewID and DialogID is set; a dialog element's name is
+// both its BlockID and its ActionID.
 type AppOptionQuery struct {
 	AppID     AppID
 	MessageID MessageID
 	ViewID    ViewID
+	DialogID  DialogID
 	BlockID   string
 	ActionID  string
 	Value     string
@@ -3204,6 +3534,11 @@ type AppOption struct {
 	Value       string
 	Description string
 	Group       string
+	// Token vouches for Text within the view or message the option was
+	// loaded for: the client returns it with a chosen option so the service
+	// can put the option's text in view_submission and block_actions
+	// payloads, as Slack does, without trusting text the browser made up.
+	Token string
 }
 
 type AppShortcut struct {
@@ -3465,7 +3800,12 @@ type Message struct {
 	Metadata        string
 	StreamState     string
 	ThreadTimestamp MessageTimestamp
-	CreatedAt       time.Time
+	// ReplyBroadcast marks a thread reply that was also sent to the channel.
+	// It is a column, not part of StreamState, because history pages on it:
+	// conversations.history lists roots and broadcast replies, and a flag
+	// buried in a JSON blob cannot be part of a keyset read.
+	ReplyBroadcast bool
+	CreatedAt      time.Time
 	// EditedAt and EditedBy record the last edit. Slack's message object
 	// carries an `edited` sub-object, and clients render "(edited)" from it.
 	// The edit instant used to live only on the outbox event, so the fact was
@@ -3532,6 +3872,57 @@ type ThreadSummary struct {
 	ReplyCount   int
 	Participants []UserID
 	LastReplyAt  time.Time
+	// Subscribed reports whether the reader follows the thread. It is the
+	// only per-reader fact in the summary, which is why the service, not the
+	// repository, fills it.
+	Subscribed bool
+}
+
+// ReactionSummary is one emoji's row of Slack's `reactions` array: who reacted
+// with it, in the order they did, and how many.
+type ReactionSummary struct {
+	Name  string
+	Users []UserID
+	Count int
+}
+
+// SummarizeReactions groups reaction rows into Slack's `reactions` array.
+// Emoji appear in the order each was first used and users in the order they
+// reacted, ties broken by name and user so the result is a function of the
+// rows alone. Every storage profile builds the array here, so they cannot
+// disagree about its order.
+func SummarizeReactions(reactions []Reaction) []ReactionSummary {
+	ordered := slices.Clone(reactions)
+	slices.SortStableFunc(ordered, func(left, right Reaction) int {
+		if compared := left.CreatedAt.Compare(right.CreatedAt); compared != 0 {
+			return compared
+		}
+		if compared := strings.Compare(left.Name, right.Name); compared != 0 {
+			return compared
+		}
+		return strings.Compare(string(left.UserID), string(right.UserID))
+	})
+	index := make(map[string]int, len(ordered))
+	result := make([]ReactionSummary, 0, len(ordered))
+	for _, reaction := range ordered {
+		position, seen := index[reaction.Name]
+		if !seen {
+			position = len(result)
+			index[reaction.Name] = position
+			result = append(result, ReactionSummary{Name: reaction.Name})
+		}
+		result[position].Users = append(result[position].Users, reaction.UserID)
+		result[position].Count++
+	}
+	return result
+}
+
+// MessageAnnotation is what a message carries beside its content in every
+// Slack read that returns it: its reactions, grouped by emoji in the order each
+// emoji first appeared, and whether it is pinned to its conversation.
+type MessageAnnotation struct {
+	Reactions []ReactionSummary
+	Pinned    bool
 }
 
 // FollowedThread is one row of Slack's Threads view: a thread the member
@@ -3596,12 +3987,51 @@ type MessageStreamState struct {
 	ChunkBlocks     []json.RawMessage `json:"chunk_blocks,omitempty"`
 	Warnings        []string          `json:"warnings,omitempty"`
 	MarkdownText    bool              `json:"markdown_text,omitempty"`
-	ReplyBroadcast  bool              `json:"reply_broadcast,omitempty"`
-	Parse           string            `json:"parse,omitempty"`
-	MrkdwnDisabled  bool              `json:"mrkdwn_disabled,omitempty"`
-	LinkNames       bool              `json:"link_names,omitempty"`
-	UnfurlLinks     *bool             `json:"unfurl_links,omitempty"`
-	UnfurlMedia     *bool             `json:"unfurl_media,omitempty"`
+	// ReplyBroadcast carries the flag on a scheduled message until it is
+	// delivered. A delivered message records it in Message.ReplyBroadcast;
+	// rows written before that column existed were migrated from here.
+	ReplyBroadcast bool   `json:"reply_broadcast,omitempty"`
+	Parse          string `json:"parse,omitempty"`
+	MrkdwnDisabled bool   `json:"mrkdwn_disabled,omitempty"`
+	LinkNames      bool   `json:"link_names,omitempty"`
+	UnfurlLinks    *bool  `json:"unfurl_links,omitempty"`
+	UnfurlMedia    *bool  `json:"unfurl_media,omitempty"`
+	// FunctionExecutionID records that the message was posted with a
+	// function execution's token. Like the bot identity it is provenance the
+	// posting credential supplies: block_actions from the message carry that
+	// execution's function_data.
+	FunctionExecutionID WorkflowStepID `json:"function_execution_id,omitempty"`
+}
+
+// PostingBot is the bot a message was posted as: the bot a bot token
+// authenticated, which the service records in the stream state of every
+// bot-token post. A message a person posted with a user token issued to an
+// app carries that app's app_id but no bot, exactly as on Slack — clients such
+// as python-slack-sdk's RTM client drop every event whose bot_id is their own,
+// so naming the app's bot on a user-token post hid it from the very app that
+// posted it. Every projection (Web API, Events API, RTM) reads the bot here.
+func (m Message) PostingBot() BotID {
+	if m.StreamState == "" {
+		return ""
+	}
+	var state MessageStreamState
+	if json.Unmarshal([]byte(m.StreamState), &state) != nil {
+		return ""
+	}
+	return state.BotID
+}
+
+// FunctionExecution is the function execution whose token posted the
+// message, or empty for every other message.
+func (m Message) FunctionExecution() WorkflowStepID {
+	if m.StreamState == "" {
+		return ""
+	}
+	var state MessageStreamState
+	if json.Unmarshal([]byte(m.StreamState), &state) != nil {
+		return ""
+	}
+	return state.FunctionExecutionID
 }
 
 // MessagePostRequest is the complete current chat.postMessage payload after
@@ -3631,6 +4061,16 @@ type MessagePostRequest struct {
 	// lifecycle mutations set their own. A caller cannot choose an arbitrary
 	// value — postMessageAs refuses one the vocabulary does not define.
 	Subtype MessageSubtype
+	// BotID is the posting token's bot identity. A bot token's message
+	// carries it as `bot_id`, and readers resolve `bot_profile` from it.
+	BotID BotID
+	// WritePublic is the chat:write.public grant: a bot holding it may post
+	// to a public channel without joining it. It never reaches a private
+	// channel or a direct conversation.
+	WritePublic bool
+	// FunctionExecutionID is the execution an execution-scoped token posted
+	// for (TokenRecord.FunctionExecutionID).
+	FunctionExecutionID WorkflowStepID
 }
 
 // MessagePatch preserves the difference between an omitted Slack field and a
@@ -3644,8 +4084,26 @@ type MessagePatch struct {
 	Attachments *string
 }
 
+// NoStructuredContent reports whether a normalized blocks or attachments value
+// carries nothing: absent, or the empty array. Both storage profiles persist an
+// absent attachment list as "[]", so a message read back never compares equal
+// to "" — which is how chat.update with text="" used to blank a message whose
+// only content was its text instead of answering no_text.
+func NoStructuredContent(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == "" || value == "[]"
+}
+
+// NormalizeBlocks validates and compacts a message's blocks and fills in the
+// block_id and action_id values Slack generates when an app leaves them out
+// (see AssignBlockIdentifiers). Every message write path calls it, so a stored
+// message is always addressable by interactions.
 func NormalizeBlocks(raw []byte) (string, error) {
-	return normalizeJSONArrayObjects(raw, "blocks")
+	normalized, err := normalizeJSONArrayObjects(raw, "blocks")
+	if err != nil || normalized == "" {
+		return normalized, err
+	}
+	return assignMessageBlockIdentifiers(normalized)
 }
 
 func NormalizeAttachments(raw []byte) (string, error) {
@@ -3679,6 +4137,24 @@ func normalizeJSONArrayObjects(raw []byte, name string) (string, error) {
 	return compact.String(), nil
 }
 
+// NewUnfurlID names the posted message whose links a link_shared event asks
+// an app to unfurl. chat.unfurl accepts it, with source=conversations_history,
+// in place of channel and ts. Slack treats the value as opaque; this one is the
+// conversation and the message timestamp joined by a dot, which neither part's
+// leading segment can contain.
+func NewUnfurlID(conversation ConversationID, timestamp MessageTimestamp) string {
+	return string(conversation) + "." + string(timestamp)
+}
+
+// ParseUnfurlID reverses NewUnfurlID.
+func ParseUnfurlID(value string) (ConversationID, MessageTimestamp, bool) {
+	conversation, timestamp, found := strings.Cut(strings.TrimSpace(value), ".")
+	if !found || conversation == "" || timestamp == "" {
+		return "", "", false
+	}
+	return ConversationID(conversation), MessageTimestamp(timestamp), true
+}
+
 func NormalizeUnfurls(values map[string]string) (map[string]string, error) {
 	result := make(map[string]string, len(values))
 	for key, raw := range values {
@@ -3708,7 +4184,10 @@ type EphemeralMessage struct {
 	Blocks       string
 	Attachments  string
 	Timestamp    MessageTimestamp
-	CreatedAt    time.Time
+	// ThreadTimestamp places the ephemeral message in a thread, as
+	// chat.postEphemeral's thread_ts does; empty is the channel.
+	ThreadTimestamp MessageTimestamp
+	CreatedAt       time.Time
 }
 
 // WorkspaceAnalytics is the shape of the administration dashboard: counts a
@@ -3790,13 +4269,39 @@ type ChannelActivity struct {
 	Messages       int
 }
 
+// AccessLog is one row of team.accessLogs: every access by one member from
+// one IP address with one user agent, aggregated. Slack reports each such
+// combination once with how many times it was seen and when first and last;
+// recording a row per request answered the same login thousands of times.
 type AccessLog struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
 	Username    string
-	CreatedAt   time.Time
-	IP          string
-	UserAgent   string
+	// FirstAt and CreatedAt are date_first and date_last.
+	FirstAt   time.Time
+	CreatedAt time.Time
+	Count     int64
+	IP        string
+	UserAgent string
+}
+
+// AccessLogPage is one page of the aggregated access log and the size of the
+// whole log it pages through.
+type AccessLogPage struct {
+	Logins  []AccessLog
+	Total   int
+	HasMore bool
+}
+
+// AccessLogIP is the address an access is attributed to: the host part of a
+// remote address, without the ephemeral source port that made every request
+// from one machine look like a different address.
+func AccessLogIP(remoteAddr string) string {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
 }
 
 type IntegrationLog struct {

@@ -35,12 +35,15 @@ type Store struct {
 	externalInvitePermissions map[domain.ConversationID]map[domain.WorkspaceID]bool
 	sharedInvites             map[domain.SharedInviteID]domain.SharedInvite
 
-	conversationOrg               map[domain.ConversationID]bool
-	closedDirects                 map[string]struct{}
-	inviteRequests                map[domain.InviteRequestID]domain.InviteRequest
-	appApprovals                  map[domain.AppID]domain.AppApproval
-	appInstallations              map[string]domain.AppInstallation
-	appBotTokens                  map[string]string
+	conversationOrg  map[domain.ConversationID]bool
+	closedDirects    map[string]struct{}
+	inviteRequests   map[domain.InviteRequestID]domain.InviteRequest
+	appApprovals     map[domain.AppID]domain.AppApproval
+	appInstallations map[string]domain.AppInstallation
+	// appInstallers is the member whose code redemption last installed each
+	// app, keyed like appInstallations; the SQL profile keeps it in
+	// app_installations.installer_id.
+	appInstallers                 map[string]domain.UserID
 	apps                          map[domain.AppID]domain.App
 	appManifestRevisions          map[domain.AppID][]domain.AppManifestRevision
 	appTriggers                   map[string]domain.AppTrigger
@@ -70,9 +73,14 @@ type Store struct {
 	socketInteractions            map[string]domain.SocketModeInteraction
 	socketCursors                 map[domain.AppID]uint64
 	appEventCursors               map[string]memoryAppEventCursor
+	appEventDeliveries            map[string]map[uint64]*memoryAppEventDelivery
 	appDeliveryAttempts           map[string][]domain.AppDeliveryAttempt
 	memberships                   map[domain.ConversationID]map[domain.UserID]struct{}
 	tokens                        map[string]domain.TokenRecord
+	// functionExecutionTokens holds execution-scoped tokens by the hash of
+	// their plaintext; functionExecutionTokenHashes indexes them by execution.
+	functionExecutionTokens       map[string]domain.FunctionExecutionToken
+	functionExecutionTokenHashes  map[domain.WorkflowStepID]string
 	appTokens                     map[string]domain.AppTokenRecord
 	sessions                      map[string]domain.SessionRecord
 	oidcLogoutTokens              map[string]time.Time
@@ -107,6 +115,7 @@ type Store struct {
 	remoteFileShares              map[domain.FileID][]domain.ConversationID
 	dnd                           map[domain.UserID]domain.DoNotDisturb
 	stars                         map[domain.UserID]map[domain.MessageID]domain.Star
+	channelStars                  map[domain.UserID]map[domain.ConversationID]domain.Star
 	savedItems                    map[domain.SavedItemID]domain.SavedItem
 	bookmarks                     map[domain.BookmarkID]domain.Bookmark
 	reminders                     map[domain.ReminderID]domain.Reminder
@@ -122,6 +131,7 @@ type Store struct {
 	userGroups                    map[domain.UserGroupID]domain.UserGroup
 	calls                         map[domain.CallID]domain.Call
 	emojis                        map[string]domain.CustomEmoji
+	emojiRevisions                map[domain.WorkspaceID]time.Time
 	canvases                      map[domain.CanvasID]domain.Canvas
 	canvasAccess                  map[string]domain.CanvasAccess
 	canvasRevisions               map[domain.CanvasID][]domain.CanvasRevision
@@ -152,6 +162,8 @@ type Store struct {
 	appDatastoreItems             map[string]domain.AppDatastoreItem
 	externalUploads               map[domain.ExternalUploadID]domain.ExternalUpload
 	fileShares                    map[domain.FileID][]domain.ConversationID
+	// fileGrants holds read grants by file, then by grantee.
+	fileGrants map[domain.FileID]map[domain.UserID]domain.FileAccessGrant
 }
 
 var _ store.Store = (*Store)(nil)
@@ -191,41 +203,65 @@ func (s *Store) InviteToHuddle(_ context.Context, event events.Event) error {
 func (s *Store) RecordAccess(_ context.Context, value domain.AccessLog) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	value.FirstAt, value.CreatedAt = value.FirstAt.Truncate(time.Second).UTC(), value.CreatedAt.Truncate(time.Second).UTC()
+	if value.FirstAt.IsZero() {
+		value.FirstAt = value.CreatedAt
+	}
+	if value.Count <= 0 {
+		value.Count = 1
+	}
+	for index, existing := range s.accessLogs {
+		if existing.WorkspaceID == value.WorkspaceID && existing.UserID == value.UserID && existing.IP == value.IP && existing.UserAgent == value.UserAgent {
+			existing.Count += value.Count
+			existing.Username = value.Username
+			if value.CreatedAt.After(existing.CreatedAt) {
+				existing.CreatedAt = value.CreatedAt
+			}
+			s.accessLogs[index] = existing
+			return nil
+		}
+	}
 	s.accessLogs = append(s.accessLogs, value)
 	return nil
 }
-func (s *Store) ListAccessLogs(_ context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
+
+func (s *Store) ListAccessLogs(_ context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) (domain.AccessLogPage, error) {
 	if limit <= 0 || limit > 1000 || page <= 0 {
-		return nil, false, store.InvalidArgument("access log page parameters are invalid")
+		return domain.AccessLogPage{}, store.InvalidArgument("access log page parameters are invalid")
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	values := make([]domain.AccessLog, 0, limit+1)
+	matched := make([]domain.AccessLog, 0)
+	for _, value := range s.accessLogs {
+		if value.WorkspaceID != workspace || (!before.IsZero() && value.FirstAt.After(before)) {
+			continue
+		}
+		matched = append(matched, value)
+	}
+	// The SQL store's order: most recently seen first, then most recently
+	// first seen, then by member, address and user agent.
+	sort.Slice(matched, func(left, right int) bool {
+		a, b := matched[left], matched[right]
+		switch {
+		case !a.CreatedAt.Equal(b.CreatedAt):
+			return a.CreatedAt.After(b.CreatedAt)
+		case !a.FirstAt.Equal(b.FirstAt):
+			return a.FirstAt.After(b.FirstAt)
+		case a.UserID != b.UserID:
+			return a.UserID < b.UserID
+		case a.IP != b.IP:
+			return a.IP < b.IP
+		default:
+			return a.UserAgent < b.UserAgent
+		}
+	})
+	result := domain.AccessLogPage{Logins: []domain.AccessLog{}, Total: len(matched)}
 	start := (page - 1) * limit
-	matched := 0
-	for index := len(s.accessLogs) - 1; index >= 0; index-- {
-		value := s.accessLogs[index]
-		if value.WorkspaceID != workspace || (!before.IsZero() && value.CreatedAt.After(before)) {
-			continue
-		}
-		if matched < start {
-			matched++
-			continue
-		}
-		if len(values) == limit+1 {
-			break
-		}
-		values = append(values, value)
-		matched++
+	for position := start; position < len(matched) && position < start+limit; position++ {
+		result.Logins = append(result.Logins, matched[position])
 	}
-	if len(values) == 0 {
-		return []domain.AccessLog{}, false, nil
-	}
-	hasMore := len(values) > limit
-	if hasMore {
-		values = values[:limit]
-	}
-	return values, hasMore, nil
+	result.HasMore = start+limit < len(matched)
+	return result, nil
 }
 
 type memoryLease struct {
@@ -233,14 +269,23 @@ type memoryLease struct {
 	Expires time.Time
 }
 
+// memoryAppEventCursor is an app transport's journal position: every record
+// at or below Sequence has been handed to delivery, and those not yet settled
+// are in appEventDeliveries.
 type memoryAppEventCursor struct {
-	Sequence       uint64
-	LeasedSequence uint64
-	LeaseOwner     string
-	LeaseUntil     time.Time
-	RetryAt        time.Time
-	RetryCount     int
-	RetryReason    string
+	Sequence uint64
+}
+
+// memoryAppEventDelivery is one claimed, unsettled record's own lease and
+// retry state, mirroring the SQL app_event_deliveries row.
+type memoryAppEventDelivery struct {
+	Sequence    uint64
+	LeaseOwner  string
+	LeaseUntil  time.Time
+	RetryAt     time.Time
+	Attempt     int
+	RetryReason string
+	Delivered   []string
 }
 
 func New() *Store {
@@ -258,6 +303,7 @@ func New() *Store {
 		incomingWebhooks:              make(map[domain.IncomingWebhookID]domain.IncomingWebhook),
 		appDatastoreItems:             make(map[string]domain.AppDatastoreItem),
 		appInstallations:              make(map[string]domain.AppInstallation),
+		appInstallers:                 make(map[string]domain.UserID),
 		apps:                          make(map[domain.AppID]domain.App),
 		appManifestRevisions:          make(map[domain.AppID][]domain.AppManifestRevision),
 		appTriggers:                   make(map[string]domain.AppTrigger),
@@ -302,9 +348,12 @@ func New() *Store {
 		socketInteractions:            make(map[string]domain.SocketModeInteraction),
 		socketCursors:                 make(map[domain.AppID]uint64),
 		appEventCursors:               make(map[string]memoryAppEventCursor),
+		appEventDeliveries:            make(map[string]map[uint64]*memoryAppEventDelivery),
 		appDeliveryAttempts:           make(map[string][]domain.AppDeliveryAttempt),
 		memberships:                   make(map[domain.ConversationID]map[domain.UserID]struct{}),
 		tokens:                        make(map[string]domain.TokenRecord),
+		functionExecutionTokens:       make(map[string]domain.FunctionExecutionToken),
+		functionExecutionTokenHashes:  make(map[domain.WorkflowStepID]string),
 		appTokens:                     make(map[string]domain.AppTokenRecord),
 		sessions:                      make(map[string]domain.SessionRecord),
 		oidcLogoutTokens:              make(map[string]time.Time),
@@ -336,6 +385,7 @@ func New() *Store {
 		remoteFileShares:              make(map[domain.FileID][]domain.ConversationID),
 		dnd:                           make(map[domain.UserID]domain.DoNotDisturb),
 		stars:                         make(map[domain.UserID]map[domain.MessageID]domain.Star),
+		channelStars:                  make(map[domain.UserID]map[domain.ConversationID]domain.Star),
 		savedItems:                    make(map[domain.SavedItemID]domain.SavedItem),
 		reminders:                     make(map[domain.ReminderID]domain.Reminder),
 		reminderDelivery:              make(map[domain.ReminderID]time.Time),
@@ -350,6 +400,7 @@ func New() *Store {
 		userGroups:                    make(map[domain.UserGroupID]domain.UserGroup),
 		calls:                         make(map[domain.CallID]domain.Call),
 		emojis:                        make(map[string]domain.CustomEmoji),
+		emojiRevisions:                make(map[domain.WorkspaceID]time.Time),
 		bookmarks:                     make(map[domain.BookmarkID]domain.Bookmark),
 		canvases:                      make(map[domain.CanvasID]domain.Canvas),
 		canvasAccess:                  make(map[string]domain.CanvasAccess),
@@ -357,6 +408,7 @@ func New() *Store {
 		canvasComments:                make(map[domain.CanvasCommentID]domain.CanvasComment),
 		listItemComments:              make(map[domain.ListItemCommentID]domain.ListItemComment),
 		listItemFiles:                 make(map[domain.ListItemFileID]domain.ListItemFile),
+		fileGrants:                    make(map[domain.FileID]map[domain.UserID]domain.FileAccessGrant),
 		roleAssignments:               make(map[string]domain.RoleAssignment),
 		authPolicyEntities:            make(map[string]domain.AuthPolicyEntity),
 		sessionSettings:               make(map[string]domain.SessionSettings),
@@ -370,7 +422,6 @@ func New() *Store {
 		workspaceProfileFields:        make(map[string]domain.ProfileFieldDefinition),
 		userProfileFieldValues:        make(map[string]map[domain.ProfileFieldID]domain.UserProfileFieldValue),
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
-		appBotTokens:                  make(map[string]string),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
 	}
 }
@@ -904,6 +955,38 @@ func (s *Store) FileReadableViaListItem(_ context.Context, workspace domain.Work
 	return false, nil
 }
 
+func (s *Store) GrantFileAccess(_ context.Context, grants []domain.FileAccessGrant) error {
+	for _, grant := range grants {
+		if grant.FileID == "" || grant.WorkspaceID == "" || grant.UserID == "" || grant.GrantedAt.IsZero() {
+			return store.InvalidArgument("invalid file access grant")
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, grant := range grants {
+		if file, exists := s.files[grant.FileID]; !exists || file.WorkspaceID != grant.WorkspaceID {
+			return store.ErrNotFound
+		}
+	}
+	for _, grant := range grants {
+		if s.fileGrants[grant.FileID] == nil {
+			s.fileGrants[grant.FileID] = make(map[domain.UserID]domain.FileAccessGrant)
+		}
+		if _, exists := s.fileGrants[grant.FileID][grant.UserID]; !exists {
+			grant.GrantedAt = grant.GrantedAt.UTC()
+			s.fileGrants[grant.FileID][grant.UserID] = grant
+		}
+	}
+	return nil
+}
+
+func (s *Store) FileReadableViaGrant(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, fileID domain.FileID) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	grant, exists := s.fileGrants[fileID][user]
+	return exists && grant.WorkspaceID == workspace, nil
+}
+
 func (s *Store) ListCanvasComments(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.CanvasID, request domain.PageRequest) (domain.CanvasCommentPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.CanvasCommentPage{}, err
@@ -1109,9 +1192,31 @@ func (s *Store) AddEmoji(_ context.Context, value domain.CustomEmoji, event even
 	if _, exists := s.emojis[key]; exists {
 		return store.ErrAlreadyExists
 	}
+	if !value.CreatedAt.IsZero() {
+		value.CreatedAt = time.Unix(value.CreatedAt.Unix(), 0).UTC()
+	}
 	s.emojis[key] = value
+	s.touchEmojiRevisionLocked(value.WorkspaceID, event.CreatedAt)
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+// touchEmojiRevisionLocked mirrors the SQL store's custom_emoji_revisions:
+// microsecond precision, and never moving backwards.
+func (s *Store) touchEmojiRevisionLocked(workspace domain.WorkspaceID, at time.Time) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	at = time.UnixMicro(at.UnixMicro()).UTC()
+	if at.After(s.emojiRevisions[workspace]) {
+		s.emojiRevisions[workspace] = at
+	}
+}
+
+func (s *Store) EmojiRevision(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.emojiRevisions[workspace], nil
 }
 
 func (s *Store) ListEmojis(_ context.Context, workspace domain.WorkspaceID) ([]domain.CustomEmoji, error) {
@@ -1127,6 +1232,8 @@ func (s *Store) ListEmojis(_ context.Context, workspace domain.WorkspaceID) ([]d
 	return result, nil
 }
 
+// RemoveEmoji removes a custom emoji together with every alias that points at
+// it, as the SQL store does.
 func (s *Store) RemoveEmoji(_ context.Context, workspace domain.WorkspaceID, name string, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1135,10 +1242,18 @@ func (s *Store) RemoveEmoji(_ context.Context, workspace domain.WorkspaceID, nam
 		return store.ErrNotFound
 	}
 	delete(s.emojis, key)
+	for aliasKey, value := range s.emojis {
+		if value.WorkspaceID == workspace && value.AliasFor == name {
+			delete(s.emojis, aliasKey)
+		}
+	}
+	s.touchEmojiRevisionLocked(workspace, event.CreatedAt)
 	s.outbox = append(s.outbox, event)
 	return nil
 }
 
+// RenameEmoji renames a custom emoji and retargets the aliases that pointed at
+// the old name, as the SQL store does.
 func (s *Store) RenameEmoji(_ context.Context, workspace domain.WorkspaceID, oldName, newName string, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1153,6 +1268,13 @@ func (s *Store) RenameEmoji(_ context.Context, workspace domain.WorkspaceID, old
 	value.Name = newName
 	s.emojis[newKey] = value
 	delete(s.emojis, oldKey)
+	for aliasKey, alias := range s.emojis {
+		if alias.WorkspaceID == workspace && alias.AliasFor == oldName {
+			alias.AliasFor = newName
+			s.emojis[aliasKey] = alias
+		}
+	}
+	s.touchEmojiRevisionLocked(workspace, event.CreatedAt)
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -1181,6 +1303,15 @@ func (s *Store) SeedWorkspace(workspace domain.Workspace) error {
 // second seed with Deleted: false undid an administrative deactivation. Only an
 // e-mail that is still unset is filled in, because no other writer can attach an
 // address to an already seeded identity.
+// secondsInstant is the resolution a user's Updated instant is kept at: the SQL
+// repositories store Unix seconds, so this one must not remember more.
+func secondsInstant(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Time{}
+	}
+	return value.UTC().Truncate(time.Second)
+}
+
 func (s *Store) SeedUser(user domain.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1214,6 +1345,7 @@ func (s *Store) SeedUser(user domain.User) error {
 			s.users[user.ID] = existing
 		}
 	} else {
+		user.Updated = secondsInstant(user.Updated)
 		s.users[user.ID] = user
 	}
 	key := string(user.WorkspaceID) + "\x00" + string(user.ID)
@@ -1281,13 +1413,78 @@ func (s *Store) LookupToken(_ context.Context, token string) (domain.TokenRecord
 	defer s.mu.RUnlock()
 	record, ok := s.tokens[domain.HashToken(token)]
 	if !ok {
-		return domain.TokenRecord{}, store.ErrNotFound
+		execution, isExecution := s.functionExecutionTokens[domain.HashToken(token)]
+		if !isExecution {
+			return domain.TokenRecord{}, store.ErrNotFound
+		}
+		record = s.functionExecutionTokenRecordLocked(execution)
 	}
 	if expiration, exists := s.userExpirations[record.UserID]; exists && !expiration.IsZero() && !expiration.After(time.Now().UTC()) {
 		return domain.TokenRecord{}, store.ErrNotFound
 	}
 	record.Scopes = append([]string(nil), record.Scopes...)
 	return record, nil
+}
+
+// functionExecutionTokenRecordLocked is the TokenRecord an execution-scoped
+// token resolves to: the app's bot, expired once its execution stopped
+// running and revoked once the app holds no live bot token.
+func (s *Store) functionExecutionTokenRecordLocked(execution domain.FunctionExecutionToken) domain.TokenRecord {
+	record := domain.TokenRecord{
+		WorkspaceID: execution.WorkspaceID, UserID: execution.UserID, AppID: execution.AppID, BotID: execution.BotID,
+		Scopes: append([]string(nil), execution.Scopes...), TokenType: domain.TokenBot, FunctionExecutionID: execution.ExecutionID,
+	}
+	step, exists := s.workflowSteps[execution.ExecutionID]
+	switch {
+	case !exists || step.WorkspaceID != execution.WorkspaceID:
+		record.ExpiresAt = execution.CreatedAt
+	case step.Status != domain.WorkflowStepExecuting:
+		record.ExpiresAt = step.UpdatedAt
+	}
+	now := time.Now().UTC()
+	record.Revoked = true
+	for _, token := range s.tokens {
+		if token.AppID == execution.AppID && token.WorkspaceID == execution.WorkspaceID && token.TokenType.IsBot() &&
+			!token.Revoked && (token.ExpiresAt.IsZero() || token.ExpiresAt.After(now)) {
+			record.Revoked = false
+			break
+		}
+	}
+	return record
+}
+
+func (s *Store) IssueFunctionExecutionToken(_ context.Context, value domain.FunctionExecutionToken, tokenHash string) (domain.FunctionExecutionToken, error) {
+	if value.WorkspaceID == "" || value.ExecutionID == "" || value.AppID == "" || value.UserID == "" || value.Ciphertext == "" || strings.TrimSpace(tokenHash) == "" || value.CreatedAt.IsZero() {
+		return domain.FunctionExecutionToken{}, store.InvalidArgument("invalid function execution token")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, exists := s.functionExecutionTokenHashes[value.ExecutionID]; exists {
+		return cloneFunctionExecutionToken(s.functionExecutionTokens[existing]), nil
+	}
+	if _, exists := s.functionExecutionTokens[tokenHash]; exists {
+		return domain.FunctionExecutionToken{}, store.ErrAlreadyExists
+	}
+	value.Scopes = domain.NormalizeScopes(value.Scopes)
+	value.CreatedAt = value.CreatedAt.UTC()
+	s.functionExecutionTokens[tokenHash] = cloneFunctionExecutionToken(value)
+	s.functionExecutionTokenHashes[value.ExecutionID] = tokenHash
+	return cloneFunctionExecutionToken(value), nil
+}
+
+func (s *Store) GetFunctionExecutionToken(_ context.Context, workspace domain.WorkspaceID, executionID domain.WorkflowStepID) (domain.FunctionExecutionToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	hash, exists := s.functionExecutionTokenHashes[executionID]
+	if !exists || s.functionExecutionTokens[hash].WorkspaceID != workspace {
+		return domain.FunctionExecutionToken{}, store.ErrNotFound
+	}
+	return cloneFunctionExecutionToken(s.functionExecutionTokens[hash]), nil
+}
+
+func cloneFunctionExecutionToken(value domain.FunctionExecutionToken) domain.FunctionExecutionToken {
+	value.Scopes = append([]string(nil), value.Scopes...)
+	return value
 }
 
 func (s *Store) ListAppAuthorizations(_ context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) ([]domain.AppAuthorization, error) {
@@ -1842,6 +2039,7 @@ func (s *Store) createUserLocked(user domain.User, membership domain.WorkspaceMe
 	if user.Presence == "" {
 		user.Presence = domain.PresenceAuto
 	}
+	user.Updated = secondsInstant(user.Updated)
 	s.users[user.ID] = user
 	s.members[string(user.WorkspaceID)+"\x00"+string(user.ID)] = membership
 	if event != nil {
@@ -1888,6 +2086,7 @@ func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.Workspac
 		profile.ActiveScheduledStatusID = ""
 	}
 	user.Profile = profile
+	user.Updated = secondsInstant(changes[0].CreatedAt)
 	s.users[userID] = user
 	s.outbox = append(s.outbox, changes...)
 	return user, nil
@@ -1952,6 +2151,7 @@ func (s *Store) ExpireUserStatus(_ context.Context, workspaceID domain.Workspace
 	user.Profile.StatusEmoji = ""
 	user.Profile.StatusExpiration = time.Time{}
 	user.Profile.ActiveScheduledStatusID = ""
+	user.Updated = secondsInstant(now)
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return true, nil
@@ -2094,6 +2294,7 @@ func (s *Store) ActivateScheduledStatus(_ context.Context, workspaceID domain.Wo
 		user.Profile.StatusEmoji = value.StatusEmoji
 		user.Profile.StatusExpiration = value.EndsAt
 		user.Profile.ActiveScheduledStatusID = value.ID
+		user.Updated = secondsInstant(now)
 		s.users[userID] = user
 	}
 	s.outbox = append(s.outbox, event)
@@ -3054,6 +3255,7 @@ func (s *Store) ExpireUserAccount(_ context.Context, workspaceID domain.Workspac
 		return false, nil
 	}
 	user.Deleted = true
+	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
 	key := string(workspaceID) + "\x00" + string(userID)
 	if membership, exists := s.members[key]; exists {
@@ -3086,6 +3288,7 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 		return store.ErrNotFound
 	}
 	user.Deleted = deleted
+	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
 	key := string(workspaceID) + "\x00" + string(userID)
 	membership, exists := s.members[key]
@@ -3129,6 +3332,7 @@ func (s *Store) AssignUser(_ context.Context, workspaceID domain.WorkspaceID, us
 		}
 	}
 	user.Deleted = false
+	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
 	membership.Active = true
 	s.members[key] = membership
@@ -3424,7 +3628,7 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 	if _, exists := s.conversations[conversation.ID]; exists {
 		return store.ErrAlreadyExists
 	}
-	if !conversation.IsDirectOrGroup() || len(members) < 2 {
+	if !domain.ValidDirectMemberCount(conversation.Kind, len(members)) {
 		return store.InvalidArgument("invalid direct conversation")
 	}
 	wantedKey := domain.DirectConversationKey(conversation.WorkspaceID, members)
@@ -3651,6 +3855,7 @@ func (s *Store) insertCommittedMessageLocked(message domain.Message) {
 		}
 	}
 	s.createMessageActivityLocked(message)
+	s.advanceAuthorReadCursorLocked(message)
 }
 
 func directOpenKey(workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) string {
@@ -3734,28 +3939,28 @@ func (s *Store) RenameConversation(_ context.Context, conversation domain.Conver
 	return value, nil
 }
 
-func (s *Store) SetConversationTopic(_ context.Context, conversation domain.ConversationID, topic string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
+func (s *Store) SetConversationTopic(_ context.Context, conversation domain.ConversationID, topic domain.ConversationText, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	value.Topic = topic
+	value.Topic, value.TopicSetBy, value.TopicSetAt = topic.Value, topic.SetBy, topic.SetAt
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
 	s.appendConversationNotices(notices)
 	return value, nil
 }
 
-func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.ConversationID, purpose string, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
+func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.ConversationID, purpose domain.ConversationText, event events.Event, notices ...domain.Message) (domain.Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	value.Purpose = purpose
+	value.Purpose, value.PurposeSetBy, value.PurposeSetAt = purpose.Value, purpose.SetBy, purpose.SetAt
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
 	s.appendConversationNotices(notices)
@@ -3784,6 +3989,9 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 	}
 	if value.IsDirectOrGroup() {
 		return store.ErrInvalidConversationType
+	}
+	for _, stars := range s.channelStars {
+		delete(stars, conversation)
 	}
 	for _, message := range s.messages[conversation] {
 		delete(s.reactions, message.ID)
@@ -4268,27 +4476,6 @@ func (s *Store) CreateAppInstallation(_ context.Context, value domain.AppInstall
 	return nil
 }
 
-func (s *Store) SetAppBotToken(_ context.Context, appID domain.AppID, workspace domain.WorkspaceID, tokenCiphertext string, written ...events.Event) error {
-	if appID == "" || workspace == "" || tokenCiphertext == "" {
-		return store.InvalidArgument("invalid app bot token")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.appBotTokens[string(appID)+"\x00"+string(workspace)] = tokenCiphertext
-	s.outbox = append(s.outbox, written...)
-	return nil
-}
-
-func (s *Store) GetAppBotTokenCiphertext(_ context.Context, appID domain.AppID, workspace domain.WorkspaceID) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ciphertext, ok := s.appBotTokens[string(appID)+"\x00"+string(workspace)]
-	if !ok {
-		return "", store.ErrNotFound
-	}
-	return ciphertext, nil
-}
-
 func (s *Store) ListAppInstallations(_ context.Context, appID domain.AppID) ([]domain.AppInstallation, error) {
 	if appID == "" {
 		return nil, store.ErrInvalidAppApproval
@@ -4544,6 +4731,8 @@ func (s *Store) UpdateView(_ context.Context, value domain.View, expectedHash st
 	}
 	value.CreatedAt = current.CreatedAt
 	value.UpdatedAt = value.UpdatedAt.UTC()
+	// A view belongs to the execution that created it for its whole life.
+	value.FunctionExecutionID = current.FunctionExecutionID
 	if value.UserID == "" {
 		value.UserID = current.UserID
 	}
@@ -4775,6 +4964,11 @@ func (s *Store) DeleteWorkflow(_ context.Context, workspace domain.WorkspaceID, 
 				s.workflowSteps[stepID] = step
 			}
 			delete(s.workflowSteps, stepID)
+			// The execution's token goes with it.
+			if hash, exists := s.functionExecutionTokenHashes[stepID]; exists {
+				delete(s.functionExecutionTokens, hash)
+				delete(s.functionExecutionTokenHashes, stepID)
+			}
 		}
 	}
 	for triggerID, trigger := range s.workflowTriggers {
@@ -5325,7 +5519,65 @@ func (s *Store) GetDialog(_ context.Context, workspace domain.WorkspaceID, id do
 	if !exists || value.WorkspaceID != workspace {
 		return domain.Dialog{}, store.ErrNotFound
 	}
-	return value, nil
+	return cloneDialog(value), nil
+}
+
+func (s *Store) GetCurrentDialog(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.Dialog, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var current domain.Dialog
+	found := false
+	for _, value := range s.dialogs {
+		if value.WorkspaceID != workspace || value.UserID != user {
+			continue
+		}
+		if !found || value.CreatedAt.After(current.CreatedAt) || (value.CreatedAt.Equal(current.CreatedAt) && value.ID > current.ID) {
+			current, found = value, true
+		}
+	}
+	if !found {
+		return domain.Dialog{}, store.ErrNotFound
+	}
+	return cloneDialog(current), nil
+}
+
+func (s *Store) SetDialogErrors(_ context.Context, value domain.Dialog, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.dialogs[value.ID]
+	if !exists || current.WorkspaceID != value.WorkspaceID || current.UserID != value.UserID {
+		return store.ErrNotFound
+	}
+	current.Errors = make(map[string]string, len(value.Errors))
+	for name, message := range value.Errors {
+		current.Errors[name] = message
+	}
+	s.dialogs[value.ID] = current
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) DeleteDialog(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.DialogID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.dialogs[id]
+	if !exists || current.WorkspaceID != workspace || current.UserID != user {
+		return store.ErrNotFound
+	}
+	delete(s.dialogs, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func cloneDialog(value domain.Dialog) domain.Dialog {
+	if value.Errors != nil {
+		copied := make(map[string]string, len(value.Errors))
+		for name, message := range value.Errors {
+			copied[name] = message
+		}
+		value.Errors = copied
+	}
+	return value
 }
 
 func (s *Store) CreateBot(_ context.Context, value domain.Bot) error {
@@ -5354,12 +5606,44 @@ func (s *Store) GetBot(_ context.Context, workspace domain.WorkspaceID, id domai
 func (s *Store) GetBotByApp(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID) (domain.Bot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, value := range s.bots {
-		if value.WorkspaceID == workspace && value.AppID == appID && !value.Deleted {
-			return value, nil
-		}
+	if value, found := s.appBotLocked(workspace, appID); found {
+		return value, nil
 	}
 	return domain.Bot{}, store.ErrNotFound
+}
+
+// appBotLocked is the app's live bot in a workspace. Databases written before
+// installs reused their bot can hold several; the lowest id is the answer on
+// every profile (the SQL one orders by id), not whichever the map yields.
+func (s *Store) appBotLocked(workspace domain.WorkspaceID, appID domain.AppID) (domain.Bot, bool) {
+	var chosen domain.Bot
+	found := false
+	for _, value := range s.bots {
+		if value.WorkspaceID == workspace && value.AppID == appID && !value.Deleted && (!found || value.ID < chosen.ID) {
+			chosen, found = value, true
+		}
+	}
+	return chosen, found
+}
+
+func (s *Store) GetBotByUser(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.Bot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var found domain.Bot
+	for _, value := range s.bots {
+		if value.WorkspaceID != workspace || value.UserID != user {
+			continue
+		}
+		// The same order the SQL repositories use: a live bot before a
+		// deleted one, then by identifier.
+		if found.ID == "" || (!value.Deleted && found.Deleted) || (value.Deleted == found.Deleted && value.ID < found.ID) {
+			found = value
+		}
+	}
+	if found.ID == "" {
+		return domain.Bot{}, store.ErrNotFound
+	}
+	return found, nil
 }
 
 func migrationKey(workspace domain.WorkspaceID, id domain.UserID) string {
@@ -5856,8 +6140,11 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	codeHash := domain.HashToken(code)
 	stored, exists := s.oauthCodes[codeHash]
 	grant := stored.grant
-	if !exists || !stored.expiresAt.After(now) || grant.ClientID != clientID || grant.RedirectURI != redirect {
+	if !exists || !stored.expiresAt.After(now) || grant.ClientID != clientID {
 		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	if !store.OAuthRedirectMatches(grant.RedirectURI, redirect) {
+		return domain.OAuthToken{}, store.ErrOAuthRedirectMismatch
 	}
 	if !domain.VerifyPKCE(grant.CodeChallenge, grant.CodeChallengeMethod, token.CodeVerifier) {
 		return domain.OAuthToken{}, store.ErrNotFound
@@ -5865,6 +6152,10 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	tokenType := domain.TokenType(strings.TrimSpace(string(token.TokenType)))
 	if tokenType == "" {
 		tokenType = domain.TokenUser
+	}
+	tokenType, accessToken, token, err := store.OAuthGrantIssue(grant, tokenType, accessToken, token)
+	if err != nil {
+		return domain.OAuthToken{}, err
 	}
 	subjectID := grant.UserID
 	var tokenBotID domain.BotID
@@ -5921,6 +6212,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	}
 	installation.Enabled = true
 	s.appInstallations[installationKey] = installation
+	s.appInstallers[installationKey] = grant.UserID
 	delete(s.oauthCodes, codeHash)
 	s.tokens[accessHash] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: subjectID, AppID: client.AppID, BotID: tokenBotID, Scopes: append([]string(nil), tokenScopes...), TokenType: tokenType, ExpiresAt: token.ExpiresAt}
 	if rotating {
@@ -5943,6 +6235,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	token.AppID = client.AppID
 	token.ClientID = clientID
 	token.WorkspaceID = grant.WorkspaceID
+	token.WorkspaceName = s.workspaces[grant.WorkspaceID].Name
 	token.UserID = subjectID
 	token.InstallerID = grant.UserID
 	token.BotID = tokenBotID
@@ -5988,7 +6281,7 @@ func (s *Store) ExchangeOAuthRefreshToken(_ context.Context, clientID, secret, o
 	s.oauthRefreshGrants[nextRefreshHash] = next
 	s.tokens[nextAccessHash] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, AppID: grant.AppID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType, ExpiresAt: expiresAt}
 	s.enforceOAuthActiveTokenLimit(next)
-	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt, ClientID: clientID, AppID: grant.AppID, WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, InstallerID: grant.InstallerID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType}, nil
+	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt, ClientID: clientID, AppID: grant.AppID, WorkspaceID: grant.WorkspaceID, WorkspaceName: s.workspaces[grant.WorkspaceID].Name, UserID: grant.UserID, InstallerID: grant.InstallerID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType}, nil
 }
 
 func (s *Store) LookupOAuthRefreshToken(_ context.Context, clientID, refreshToken string) (domain.OAuthRefreshGrant, error) {
@@ -6029,7 +6322,11 @@ func (s *Store) ExchangeOAuthAccessToken(_ context.Context, clientID, secret, ol
 		return domain.OAuthToken{}, store.ErrAlreadyExists
 	}
 	legacyKey := "legacy:" + oldAccessHash
-	legacy := domain.OAuthRefreshGrant{TokenHash: legacyKey, AccessTokenHash: oldAccessHash, ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, UserID: record.UserID, InstallerID: record.UserID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType, CreatedAt: now.Add(-time.Nanosecond), Revoked: true}
+	installer := record.UserID
+	if record.TokenType.IsBot() {
+		installer = s.appInstallers[appInstallationKey(record.AppID, record.WorkspaceID)]
+	}
+	legacy := domain.OAuthRefreshGrant{TokenHash: legacyKey, AccessTokenHash: oldAccessHash, ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, UserID: record.UserID, InstallerID: installer, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType, CreatedAt: now.Add(-time.Nanosecond), Revoked: true}
 	next := legacy
 	next.TokenHash = nextRefreshHash
 	next.AccessTokenHash = nextAccessHash
@@ -6039,7 +6336,7 @@ func (s *Store) ExchangeOAuthAccessToken(_ context.Context, clientID, secret, ol
 	s.oauthRefreshGrants[legacyKey] = legacy
 	s.oauthRefreshGrants[nextRefreshHash] = next
 	s.tokens[nextAccessHash] = domain.TokenRecord{WorkspaceID: record.WorkspaceID, UserID: record.UserID, AppID: record.AppID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType, ExpiresAt: expiresAt}
-	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt, ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, UserID: record.UserID, InstallerID: record.UserID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType}, nil
+	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt, ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, WorkspaceName: s.workspaces[record.WorkspaceID].Name, UserID: record.UserID, InstallerID: installer, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType}, nil
 }
 
 func (s *Store) enforceOAuthActiveTokenLimit(current domain.OAuthRefreshGrant) {
@@ -6223,6 +6520,12 @@ func (s *Store) RecordSocketModeResponse(_ context.Context, value domain.SocketM
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cutoff := time.Now().UTC().Add(-store.SocketModeAcknowledgedRetention)
+	for key, stored := range s.socketResponses {
+		if stored.AppID == value.AppID && !stored.AcknowledgedAt.IsZero() && stored.AcknowledgedAt.Before(cutoff) {
+			delete(s.socketResponses, key)
+		}
+	}
 	key := socketModeResponseKey(value.AppID, value.EnvelopeID)
 	if existing, ok := s.socketResponses[key]; ok {
 		if existing.Payload != value.Payload {
@@ -6466,6 +6769,12 @@ func (s *Store) AckSocketModeInteraction(_ context.Context, appID domain.AppID, 
 	value.LeaseOwner = ""
 	value.LeaseExpiresAt = time.Time{}
 	s.socketInteractions[envelopeID] = value
+	cutoff := now.Add(-store.SocketModeAcknowledgedRetention)
+	for key, stored := range s.socketInteractions {
+		if stored.AppID == appID && !stored.AcknowledgedAt.IsZero() && stored.AcknowledgedAt.Before(cutoff) {
+			delete(s.socketInteractions, key)
+		}
+	}
 	return nil
 }
 
@@ -6750,6 +7059,12 @@ func (s *Store) sweepFilesLocked(request domain.RetentionSweepRequest) []domain.
 	for _, blob := range expired {
 		delete(s.files, blob.FileID)
 		delete(s.fileShares, blob.FileID)
+		delete(s.fileGrants, blob.FileID)
+		for id, link := range s.listItemFiles {
+			if link.FileID == blob.FileID {
+				delete(s.listItemFiles, id)
+			}
+		}
 		for id, comment := range s.fileComments {
 			if comment.File == blob.FileID {
 				delete(s.fileComments, id)
@@ -7008,7 +7323,7 @@ func (s *Store) ListFollowedThreads(_ context.Context, workspace domain.Workspac
 			if message.CreatedAt.After(thread.LastReplyAt) {
 				thread.LastReplyAt = message.CreatedAt
 			}
-			if message.CreatedAt.After(readAt) {
+			if message.CreatedAt.After(readAt) && message.AuthorID != user {
 				thread.UnreadReplies++
 			}
 		}
@@ -7327,6 +7642,19 @@ func (s *Store) SetThreadFollowed(_ context.Context, workspace domain.WorkspaceI
 	return nil
 }
 
+// FollowedThreadRoots mirrors the SQL profile's one-read answer.
+func (s *Store) FollowedThreadRoots(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[domain.MessageTimestamp]bool, len(roots))
+	for _, root := range roots {
+		if s.threadFollows[threadFollowKey(workspace, user, conversation, root)] {
+			result[root] = true
+		}
+	}
+	return result, nil
+}
+
 func (s *Store) ThreadSummaries(_ context.Context, conversation domain.ConversationID, roots []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error) {
 	summaries := make(map[domain.MessageTimestamp]domain.ThreadSummary, len(roots))
 	if conversation == "" || len(roots) == 0 {
@@ -7433,6 +7761,39 @@ func (s *Store) setReadCursorLocked(cursor domain.ReadCursor, readAt time.Time, 
 		}
 	}
 	s.outbox = append(s.outbox, event)
+}
+
+// advanceAuthorReadCursorLocked is the memory twin of the SQL profiles'
+// advanceAuthorReadCursorTx: posting into a conversation reads it up to the
+// posted message, as Slack does. See the SQL note for why a thread reply does
+// not move the cursor and why no second event is journalled.
+func (s *Store) advanceAuthorReadCursorLocked(message domain.Message) {
+	if !authorPostAdvancesReadCursor(message) {
+		return
+	}
+	key := readCursorKey(message.WorkspaceID, message.AuthorID, message.Conversation)
+	if current, ok := s.readCursors[key]; ok {
+		if readAt, err := domain.ParseMessageTimestamp(current.LastRead); err == nil && !message.CreatedAt.Truncate(time.Microsecond).After(readAt.Truncate(time.Microsecond)) {
+			return
+		}
+	}
+	cursor := domain.ReadCursor{WorkspaceID: message.WorkspaceID, UserID: message.AuthorID, Conversation: message.Conversation, LastRead: domain.NewMessageTimestamp(message.CreatedAt), UpdatedAt: message.CreatedAt.UTC()}
+	s.readCursors[key] = cursor
+	for id, item := range s.activityItems {
+		if item.WorkspaceID == cursor.WorkspaceID && item.UserID == cursor.UserID && item.Conversation == cursor.Conversation && item.ReadAt.IsZero() && !item.OccurredAt.After(message.CreatedAt) {
+			item.ReadAt = cursor.UpdatedAt
+			s.activityItems[id] = item
+		}
+	}
+}
+
+// authorPostAdvancesReadCursor is the rule both profiles share: a message the
+// conversation shows at top level (a root, or a reply also sent to the
+// channel) reads the conversation for its author. A plain thread reply does
+// not, because replying in a thread says nothing about the channel messages
+// posted since the member last looked at it.
+func authorPostAdvancesReadCursor(message domain.Message) bool {
+	return message.AuthorID != "" && (message.ThreadTimestamp == "" || message.ReplyBroadcast)
 }
 
 // LatestMessageTimestamps reports the newest undeleted message in each named
@@ -7946,9 +8307,22 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				continue
 			}
 		}
+		_, viewerMember := s.memberships[conversation.ID][user]
+		_, subjectMember := s.memberships[conversation.ID][memberUser]
+		// Naming a member narrows every type, public channels included:
+		// users.conversations lists what someone belongs to, not what they
+		// could read.
+		if request.MemberUserID != "" && !subjectMember {
+			continue
+		}
+		conversation.IsMember = viewerMember
+		conversation.NumMembers = 0
+		for member := range s.memberships[conversation.ID] {
+			if account, exists := s.users[member]; exists && !account.Deleted {
+				conversation.NumMembers++
+			}
+		}
 		if conversation.Kind.OrPublic() != domain.ConversationTypePublic {
-			_, viewerMember := s.memberships[conversation.ID][user]
-			_, subjectMember := s.memberships[conversation.ID][memberUser]
 			if !viewerMember || !subjectMember {
 				continue
 			}
@@ -7971,13 +8345,13 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				// monotonic and breaks for imported pre-2001 timestamps. Both sides are
 				// truncated to the microsecond the wire format carries so the SQL
 				// repositories and this one count the same messages.
-				if !message.Deleted && message.CreatedAt.Truncate(time.Microsecond).After(lastRead.Truncate(time.Microsecond)) {
+				if !message.Deleted && message.AuthorID != user && message.CreatedAt.Truncate(time.Microsecond).After(lastRead.Truncate(time.Microsecond)) {
 					conversation.UnreadCount++
 				}
 			}
 		} else {
 			for _, message := range s.messages[conversation.ID] {
-				if !message.Deleted {
+				if !message.Deleted && message.AuthorID != user {
 					conversation.UnreadCount++
 				}
 			}
@@ -8040,22 +8414,37 @@ func (s *Store) IsConversationMember(_ context.Context, conversation domain.Conv
 	return ok, nil
 }
 
+func (s *Store) DirectParticipants(_ context.Context, conversation domain.ConversationID) ([]domain.UserID, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.conversations[conversation]
+	if !ok || !value.IsDirectOrGroup() {
+		return nil, store.ErrNotFound
+	}
+	participants := make([]domain.UserID, 0, len(s.memberships[conversation]))
+	for member := range s.memberships[conversation] {
+		participants = append(participants, member)
+	}
+	slices.Sort(participants)
+	return participants, nil
+}
+
 // CreateMessage applies the same normalization and referential checks the SQL
 // repositories enforce. Skipping them meant a payload rejected on SQLite was
 // persisted verbatim here, an empty attachments field read back as "" instead of
 // "[]", a duplicate message identifier silently inserted a second row, and a
 // message could reference a conversation that does not exist.
-func (s *Store) CreateMessage(_ context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+func (s *Store) CreateMessage(_ context.Context, message domain.Message, event events.Event, idempotencyKey string, companions ...events.Event) error {
 	message, err := normalizeMessage(message)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.createMessageLocked(message, event, idempotencyKey)
+	return s.createMessageLocked(message, event, idempotencyKey, companions...)
 }
 
-func (s *Store) CreateScheduledMessagePost(_ context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event) error {
+func (s *Store) CreateScheduledMessagePost(_ context.Context, id domain.ScheduledMessageID, message domain.Message, event events.Event, companions ...events.Event) error {
 	message, err := normalizeMessage(message)
 	if err != nil {
 		return err
@@ -8067,7 +8456,7 @@ func (s *Store) CreateScheduledMessagePost(_ context.Context, id domain.Schedule
 		scheduled.WorkspaceID != message.WorkspaceID || scheduled.Author != message.AuthorID || scheduled.Channel != message.Conversation {
 		return store.ErrNotFound
 	}
-	return s.createMessageLocked(message, event, string(id))
+	return s.createMessageLocked(message, event, string(id), companions...)
 }
 
 func normalizeMessage(message domain.Message) (domain.Message, error) {
@@ -8095,12 +8484,13 @@ func normalizeMessage(message domain.Message) (domain.Message, error) {
 	return message, nil
 }
 
-func (s *Store) createMessageLocked(message domain.Message, event events.Event, idempotencyKey string) error {
+func (s *Store) createMessageLocked(message domain.Message, event events.Event, idempotencyKey string, companions ...events.Event) error {
 	message, err := s.prepareMessageLocked(message, idempotencyKey)
 	if err != nil {
 		return err
 	}
 	s.commitMessageLocked(message, event, idempotencyKey)
+	s.outbox = append(s.outbox, companions...)
 	return nil
 }
 
@@ -8167,6 +8557,7 @@ func (s *Store) commitMessageLocked(message domain.Message, event events.Event, 
 		}
 	}
 	s.createMessageActivityLocked(message)
+	s.advanceAuthorReadCursorLocked(message)
 	s.outbox = append(s.outbox, event)
 	if idempotencyKey != "" {
 		key := idempotencyKeyFor(message.WorkspaceID, message.AuthorID, idempotencyKey)
@@ -8582,32 +8973,56 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 	if err != nil {
 		return domain.UserReactionPage{}, err
 	}
+	position := ""
+	if after != "" {
+		created, message, ok := domain.ParseUserReactionCursorKey(after)
+		if !ok {
+			return domain.UserReactionPage{}, store.InvalidArgument("invalid user reaction cursor")
+		}
+		position = created + "\x00" + string(message)
+	}
 	s.mu.RLock()
 	values := make([]domain.UserReaction, 0, request.Limit+1)
 	for conversationID, messages := range s.messages {
+		// The SQL repositories list a reaction in a private conversation only
+		// while the reactor is still a member. Without the same rule here a
+		// member who left, or was removed from, a private channel kept reading
+		// the text of every message they had reacted to in it.
+		if !s.memberMayReadLocked(conversationID, user) {
+			continue
+		}
 		for _, message := range messages {
 			if message.WorkspaceID != workspace {
+				continue
+			}
+			if position != "" && domain.UserReactionCursorKey(message) <= position {
 				continue
 			}
 			for _, reaction := range s.reactions[message.ID] {
 				if reaction.UserID != user {
 					continue
 				}
-				item := domain.UserReaction{Conversation: conversationID, Message: s.cloneMessage(message), Reaction: reaction}
-				if after == "" || userReactionKey(item) > after {
-					values = appendSorted(values, item, request.Limit+1, func(left, right domain.UserReaction) bool { return userReactionKey(left) < userReactionKey(right) })
-				}
+				values = append(values, domain.UserReaction{Conversation: conversationID, Message: s.cloneMessage(message), Reaction: reaction})
 			}
 		}
 	}
 	s.mu.RUnlock()
-	hasMore := len(values) > request.Limit
-	if hasMore {
-		values = values[:request.Limit]
+	sort.Slice(values, func(left, right int) bool { return userReactionKey(values[left]) < userReactionKey(values[right]) })
+	// A page is Limit messages with every reaction row of each.
+	page := domain.UserReactionPage{Items: make([]domain.UserReaction, 0, len(values))}
+	messages := 0
+	for _, value := range values {
+		if len(page.Items) == 0 || page.Items[len(page.Items)-1].Message.ID != value.Message.ID {
+			messages++
+			if messages > request.Limit {
+				page.HasMore = true
+				break
+			}
+		}
+		page.Items = append(page.Items, value)
 	}
-	page := domain.UserReactionPage{Items: values, HasMore: hasMore}
-	if hasMore {
-		page.NextCursor, err = domain.NewListCursor(userReactionKey(values[len(values)-1]))
+	if page.HasMore {
+		page.NextCursor, err = domain.NewListCursor(domain.UserReactionCursorKey(page.Items[len(page.Items)-1].Message))
 		if err != nil {
 			return domain.UserReactionPage{}, err
 		}
@@ -8615,13 +9030,29 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 	return page, nil
 }
 
-// userReactionKey is an ordering key AND a keyset cursor, compared with plain
-// string comparison. It must therefore use the fixed-width encoding, exactly as
-// the SQL repositories do: time.RFC3339Nano strips trailing zeros, so ".12Z"
-// sorts after ".123456Z" and the cursor minted from the earlier row skips the
-// later ones on the next page.
+// memberMayReadLocked is the SQL repositories' visibility predicate for a
+// conversation's content in a personal listing: a public conversation is
+// readable by any workspace member, a private one (including direct and group
+// direct messages) only by its current members, and a conversation that no
+// longer exists by nobody — the SQL join drops it.
+func (s *Store) memberMayReadLocked(conversationID domain.ConversationID, user domain.UserID) bool {
+	conversation, exists := s.conversations[conversationID]
+	if !exists {
+		return false
+	}
+	if !conversation.PrivateFlag() {
+		return true
+	}
+	_, member := s.memberships[conversationID][user]
+	return member
+}
+
+// userReactionKey orders reaction rows by message, then reaction, compared
+// with plain string comparison. It must therefore use the fixed-width
+// encoding, exactly as the SQL repositories do: time.RFC3339Nano strips
+// trailing zeros, so ".12Z" sorts after ".123456Z".
 func userReactionKey(value domain.UserReaction) string {
-	return string(domain.NewStoredTime(value.Message.CreatedAt)) + "\x00" + string(value.Message.ID) + "\x00" + value.Reaction.Name + "\x00" + string(value.Reaction.UserID)
+	return domain.UserReactionCursorKey(value.Message) + "\x00" + value.Reaction.Name + "\x00" + string(value.Reaction.UserID)
 }
 
 func pinKey(pin domain.Pin) string { return string(pin.Message) + "\x00" + string(pin.UserID) }
@@ -8669,7 +9100,11 @@ func (s *Store) ListPins(_ context.Context, conversation domain.ConversationID, 
 	}
 	values := make([]domain.Pin, 0, request.Limit+1)
 	for _, message := range s.messages[conversation] {
+		if message.Deleted {
+			continue
+		}
 		for _, pin := range s.pins[message.ID] {
+			pin.Item = s.cloneMessage(message)
 			if after == "" || pinKey(pin) > after {
 				values = appendSorted(values, pin, request.Limit+1, func(left, right domain.Pin) bool { return pinKey(left) < pinKey(right) })
 			}
@@ -8692,13 +9127,36 @@ func (s *Store) ListPins(_ context.Context, conversation domain.ConversationID, 
 // starKey is an ordering key AND a keyset cursor. See userReactionKey: the
 // variable-width encoding reordered stars.list and made the next page skip
 // every row whose fraction was a strict extension of the cursor's.
+// starKey orders stars the way the SQL store does: by when they were made,
+// then by message ID, or "channel:" and the channel for a channel star.
 func starKey(value domain.Star) string {
-	return string(domain.NewStoredTime(value.CreatedAt)) + "\x00" + string(value.Message.ID)
+	return string(domain.NewStoredTime(value.CreatedAt)) + "\x00" + starItemKey(value)
+}
+
+func starItemKey(value domain.Star) string {
+	if value.IsChannel() {
+		return "channel:" + string(value.Conversation)
+	}
+	return string(value.Message.ID)
 }
 
 func (s *Store) AddStar(_ context.Context, star domain.Star, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if star.IsChannel() {
+		if _, ok := s.conversations[star.Conversation]; !ok {
+			return store.ErrNotFound
+		}
+		if s.channelStars[star.UserID] == nil {
+			s.channelStars[star.UserID] = make(map[domain.ConversationID]domain.Star)
+		}
+		if _, exists := s.channelStars[star.UserID][star.Conversation]; exists {
+			return store.ErrAlreadyExists
+		}
+		s.channelStars[star.UserID][star.Conversation] = star
+		s.outbox = append(s.outbox, event)
+		return nil
+	}
 	message, err := s.messageLocked(star.Message.ID)
 	if err != nil {
 		return err
@@ -8718,6 +9176,14 @@ func (s *Store) AddStar(_ context.Context, star domain.Star, event events.Event)
 func (s *Store) RemoveStar(_ context.Context, star domain.Star, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if star.IsChannel() {
+		if _, exists := s.channelStars[star.UserID][star.Conversation]; !exists {
+			return store.ErrNotFound
+		}
+		delete(s.channelStars[star.UserID], star.Conversation)
+		s.outbox = append(s.outbox, event)
+		return nil
+	}
 	if _, err := s.messageLocked(star.Message.ID); err != nil {
 		return err
 	}
@@ -8729,36 +9195,57 @@ func (s *Store) RemoveStar(_ context.Context, star domain.Star, event events.Eve
 	return nil
 }
 
-func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error) {
+func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.StarPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
-		return nil, "", false, err
+		return domain.StarPage{}, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	values := make([]domain.Star, 0, request.Limit+1)
+	page := domain.StarPage{Stars: make([]domain.Star, 0, request.Limit+1)}
+	less := func(left, right domain.Star) bool { return starKey(left) < starKey(right) }
 	for _, star := range s.stars[user] {
-		if star.Message.WorkspaceID != workspace || star.Message.Deleted || (after != "" && starKey(star) <= after) {
+		// The star holds the message as it was when starred; the SQL
+		// repositories join the message as it is now, so an edit or a deletion
+		// since then must show here too.
+		current, err := s.messageLocked(star.Message.ID)
+		if err != nil {
+			continue
+		}
+		star.Message = current
+		if star.Message.WorkspaceID != workspace || star.Message.Deleted || !s.memberMayReadLocked(star.Message.Conversation, user) {
+			continue
+		}
+		page.Total++
+		if after != "" && starKey(star) <= after {
 			continue
 		}
 		star.Message = s.cloneMessage(star.Message)
-		values = appendSorted(values, star, request.Limit+1, func(left, right domain.Star) bool { return starKey(left) < starKey(right) })
+		page.Stars = appendSorted(page.Stars, star, request.Limit+1, less)
 	}
-	hasMore := len(values) > request.Limit
-	if hasMore {
-		values = values[:request.Limit]
+	for conversationID, star := range s.channelStars[user] {
+		conversation, ok := s.conversations[conversationID]
+		if !ok || conversation.WorkspaceID != workspace || !s.memberMayReadLocked(conversationID, user) {
+			continue
+		}
+		page.Total++
+		if after != "" && starKey(star) <= after {
+			continue
+		}
+		page.Stars = appendSorted(page.Stars, star, request.Limit+1, less)
 	}
-	var next domain.Cursor
-	if hasMore {
-		next, err = domain.NewListCursor(starKey(values[len(values)-1]))
+	page.HasMore = len(page.Stars) > request.Limit
+	if page.HasMore {
+		page.Stars = page.Stars[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(starKey(page.Stars[len(page.Stars)-1]))
 		if err != nil {
-			return nil, "", false, err
+			return domain.StarPage{}, err
 		}
 	}
-	return values, next, hasMore, nil
+	return page, nil
 }
 
 func savedItemKey(value domain.SavedItem) string {
@@ -8993,6 +9480,11 @@ func (s *Store) CreateReminder(_ context.Context, reminder domain.Reminder, even
 	if _, exists := s.reminders[reminder.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	// The SQL column defaults to UTC; a reminder written without a zone reads
+	// back the same on both profiles.
+	if reminder.TimeZone == "" {
+		reminder.TimeZone = "UTC"
+	}
 	s.reminders[reminder.ID] = reminder
 	s.outbox = append(s.outbox, event)
 	return nil
@@ -9030,7 +9522,7 @@ func (s *Store) ListReminders(_ context.Context, workspace domain.WorkspaceID, u
 	defer s.mu.RUnlock()
 	values := make([]domain.Reminder, 0, request.Limit+1)
 	for _, reminder := range s.reminders {
-		if reminder.WorkspaceID != workspace || reminder.User != user || string(reminder.ID) <= after {
+		if reminder.WorkspaceID != workspace || (reminder.User != user && reminder.Creator != user) || string(reminder.ID) <= after {
 			continue
 		}
 		values = appendSorted(values, reminder, request.Limit+1, func(left, right domain.Reminder) bool { return left.ID < right.ID })
@@ -9097,17 +9589,24 @@ func (s *Store) DueReminders(_ context.Context, workspace domain.WorkspaceID, no
 	return values, nil
 }
 
-func (s *Store) MarkReminderDelivered(_ context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt time.Time, event events.Event) (bool, error) {
+func (s *Store) MarkReminderDelivered(_ context.Context, workspace domain.WorkspaceID, id domain.ReminderID, deliveredAt, next time.Time, event events.Event) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Losing the claim and never having existed are the same answer here: the
 	// worker only claims what it has just read as due, and either way it must
 	// not deliver. Telling them apart would cost a read no caller wants.
 	reminder, exists := s.reminders[id]
-	if !exists || reminder.WorkspaceID != workspace || !s.reminderDelivery[id].IsZero() {
+	if !exists || reminder.WorkspaceID != workspace || !s.reminderDelivery[id].IsZero() || reminder.Time.After(deliveredAt) {
 		return false, nil
 	}
-	s.reminderDelivery[id] = deliveredAt.UTC()
+	if next.IsZero() {
+		s.reminderDelivery[id] = deliveredAt.UTC()
+	} else {
+		// A recurring reminder moves to its next occurrence; the claim is the
+		// move, as the SQL store's is.
+		reminder.Time = next.UTC().Truncate(time.Second)
+		s.reminders[id] = reminder
+	}
 	// The notice and the Activity row are written with the claim, so a member
 	// cannot be marked reminded without being shown the reminder.
 	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, reminder.User)
@@ -9991,8 +10490,23 @@ func (s *Store) CreateUserGroup(_ context.Context, value domain.UserGroup, event
 	if s.userGroupHandleTakenLocked(value.WorkspaceID, value.Handle, value.ID) {
 		return store.ErrAlreadyExists
 	}
+	if err := s.userGroupChannelsBelongLocked(value.WorkspaceID, value.Channels); err != nil {
+		return err
+	}
 	s.userGroups[value.ID] = cloneUserGroup(value)
 	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+// userGroupChannelsBelongLocked is the check the SQL repositories make before
+// writing a group's default channels: each is a conversation of the workspace.
+func (s *Store) userGroupChannelsBelongLocked(workspace domain.WorkspaceID, channels []domain.ConversationID) error {
+	for _, channel := range channels {
+		conversation, exists := s.conversations[channel]
+		if !exists || conversation.WorkspaceID != workspace {
+			return store.ErrNotFound
+		}
+	}
 	return nil
 }
 
@@ -10054,8 +10568,10 @@ func (s *Store) UpdateUserGroup(_ context.Context, value domain.UserGroup, event
 	if s.userGroupHandleTakenLocked(value.WorkspaceID, value.Handle, value.ID) {
 		return store.ErrAlreadyExists
 	}
+	if err := s.userGroupChannelsBelongLocked(value.WorkspaceID, value.Channels); err != nil {
+		return err
+	}
 	value.Users = append([]domain.UserID(nil), current.Users...)
-	value.Channels = append([]domain.ConversationID(nil), current.Channels...)
 	s.userGroups[value.ID] = cloneUserGroup(value)
 	s.outbox = append(s.outbox, event)
 	return nil
@@ -10103,11 +10619,8 @@ func (s *Store) SetUserGroupChannels(_ context.Context, workspace domain.Workspa
 	if !ok || value.WorkspaceID != workspace {
 		return store.ErrNotFound
 	}
-	for _, channel := range channels {
-		conversation, exists := s.conversations[channel]
-		if !exists || conversation.WorkspaceID != workspace {
-			return store.ErrNotFound
-		}
+	if err := s.userGroupChannelsBelongLocked(workspace, channels); err != nil {
+		return err
 	}
 	value.Channels = append([]domain.ConversationID(nil), channels...)
 	value.UpdatedBy = actor
@@ -10119,6 +10632,7 @@ func (s *Store) SetUserGroupChannels(_ context.Context, workspace domain.Workspa
 
 func cloneCall(value domain.Call) domain.Call {
 	value.Participants = append([]domain.UserID(nil), value.Participants...)
+	value.ExternalParticipants = append([]domain.ExternalCallParticipant(nil), value.ExternalParticipants...)
 	return value
 }
 
@@ -10269,7 +10783,7 @@ func (s *Store) EndCall(_ context.Context, workspace domain.WorkspaceID, id doma
 	return nil
 }
 
-func (s *Store) SetCallParticipants(_ context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, event events.Event) error {
+func (s *Store) SetCallParticipants(_ context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, externals []domain.ExternalCallParticipant, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.calls[id]
@@ -10277,6 +10791,7 @@ func (s *Store) SetCallParticipants(_ context.Context, workspace domain.Workspac
 		return store.ErrNotFound
 	}
 	value.Participants = append([]domain.UserID(nil), users...)
+	value.ExternalParticipants = append([]domain.ExternalCallParticipant(nil), externals...)
 	s.calls[id] = value
 	s.outbox = append(s.outbox, event)
 	return nil
@@ -10354,7 +10869,7 @@ func (s *Store) SetFileDescription(_ context.Context, workspace domain.Workspace
 	return nil
 }
 
-func (s *Store) DeleteFile(_ context.Context, id domain.FileID, event events.Event) error {
+func (s *Store) DeleteFile(_ context.Context, id domain.FileID, emitted ...events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	file, ok := s.files[id]
@@ -10363,7 +10878,7 @@ func (s *Store) DeleteFile(_ context.Context, id domain.FileID, event events.Eve
 	}
 	file.Deleted = true
 	s.files[id] = file
-	s.outbox = append(s.outbox, event)
+	s.outbox = append(s.outbox, emitted...)
 	return nil
 }
 
@@ -10439,22 +10954,59 @@ func (s *Store) ListFiles(_ context.Context, workspace domain.WorkspaceID, reque
 	return page, nil
 }
 
+func (s *Store) ListFileShares(_ context.Context, id domain.FileID) ([]domain.FileShare, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	type carried struct {
+		share     domain.FileShare
+		createdAt time.Time
+		message   domain.MessageID
+	}
+	var found []carried
+	for conversationID, values := range s.messages {
+		conversation := s.conversations[conversationID]
+		for _, message := range values {
+			if message.Deleted || !slices.ContainsFunc(message.Files, func(file domain.File) bool { return file.ID == id }) {
+				continue
+			}
+			found = append(found, carried{share: domain.FileShare{
+				Conversation: conversationID, ConversationName: conversation.Name, Private: conversation.PrivateFlag(),
+				Timestamp: domain.NewMessageTimestamp(message.CreatedAt), ThreadTimestamp: message.ThreadTimestamp, SharedBy: message.AuthorID,
+			}, createdAt: message.CreatedAt, message: message.ID})
+		}
+	}
+	sort.Slice(found, func(left, right int) bool {
+		if !found[left].createdAt.Equal(found[right].createdAt) {
+			return found[left].createdAt.Before(found[right].createdAt)
+		}
+		if found[left].share.Conversation != found[right].share.Conversation {
+			return found[left].share.Conversation < found[right].share.Conversation
+		}
+		return found[left].message < found[right].message
+	})
+	shares := make([]domain.FileShare, 0, len(found))
+	for _, value := range found {
+		shares = append(shares, value.share)
+	}
+	return shares, nil
+}
+
 func (s *Store) ListVisibleFiles(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.FilePage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+	if err := store.CheckPage(request); err != nil {
 		return domain.FilePage{}, err
 	}
-	after, err := domain.DecodeListCursor(request.Cursor)
+	after, err := store.DecodeFileCursor(request.Cursor)
 	if err != nil {
 		return domain.FilePage{}, err
 	}
 	s.mu.RLock()
 	values := make([]domain.File, 0, request.Limit+1)
 	for _, file := range s.files {
-		if file.WorkspaceID != workspace || file.Deleted || (after != "" && string(file.ID) <= after) || !s.fileVisibleToUser(file, user) {
+		if file.WorkspaceID != workspace || file.Deleted || !after.Precedes(file) || !s.fileVisibleToUser(file, user) {
 			continue
 		}
 		file.SharedChannels = append([]domain.ConversationID(nil), s.fileShares[file.ID]...)
-		values = appendSorted(values, file, request.Limit+1, func(left, right domain.File) bool { return left.ID < right.ID })
+		values = appendSorted(values, file, request.Limit+1, store.NewerFileFirst)
 	}
 	s.mu.RUnlock()
 	hasMore := len(values) > request.Limit
@@ -10463,7 +11015,7 @@ func (s *Store) ListVisibleFiles(_ context.Context, workspace domain.WorkspaceID
 	}
 	page := domain.FilePage{Files: values, HasMore: hasMore}
 	if hasMore {
-		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+		page.NextCursor, err = store.NewFileCursor(values[len(values)-1])
 	}
 	return page, err
 }
@@ -10792,7 +11344,7 @@ func (s *Store) messageLocked(id domain.MessageID) (domain.Message, error) {
 	return domain.Message{}, store.ErrNotFound
 }
 
-func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event events.Event) error {
+func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event events.Event, companions ...events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	values := s.messages[message.Conversation]
@@ -10802,6 +11354,7 @@ func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event e
 			values[index] = message
 			s.messages[message.Conversation] = values
 			s.outbox = append(s.outbox, event)
+			s.outbox = append(s.outbox, companions...)
 			return nil
 		}
 	}
@@ -10970,9 +11523,24 @@ func validAppEventSurface(surface string) bool {
 	return surface == "http" || surface == "socket"
 }
 
-func (s *Store) ClaimAppEvent(_ context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {
+// appEventRecordEligible reports whether the journal record at index belongs
+// to an app whose installations are described by workspaces (enabled) and
+// uninstalled (disabled): an installed workspace's record, or the uninstall
+// announcement of a workspace that removed the app.
+func appEventRecordEligible(event events.Event, workspaces, uninstalled map[domain.WorkspaceID]struct{}) bool {
+	if store.InternalTopic(event.Topic) {
+		return false
+	}
+	if _, installed := workspaces[event.WorkspaceID]; installed {
+		return true
+	}
+	_, wasInstalled := uninstalled[event.WorkspaceID]
+	return wasInstalled && event.Topic == "app.uninstalled"
+}
+
+func (s *Store) ClaimAppEvent(_ context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.AppEventClaim, bool, error) {
 	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || lease <= 0 {
-		return events.Record{}, 0, "", false, store.InvalidArgument("app event claim fields are invalid")
+		return events.AppEventClaim{}, false, store.InvalidArgument("app event claim fields are invalid")
 	}
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -10987,33 +11555,62 @@ func (s *Store) ClaimAppEvent(_ context.Context, appID domain.AppID, surface, ow
 		}
 	}
 	if len(workspaces) == 0 && len(uninstalled) == 0 {
-		return events.Record{}, 0, "", false, store.ErrNotFound
+		return events.AppEventClaim{}, false, store.ErrNotFound
 	}
 	key := appEventCursorKey(appID, surface)
-	cursor := s.appEventCursors[key]
-	if cursor.LeasedSequence != 0 && cursor.LeaseUntil.After(now) {
-		return events.Record{}, 0, "", false, nil
+	deliveries := s.appEventDeliveries[key]
+	// A released record whose retry is due comes first, lowest sequence first,
+	// so a retried record is not starved by a busy journal. A record whose
+	// worker died is due once its lease lapses.
+	due := make([]uint64, 0, len(deliveries))
+	for sequence, delivery := range deliveries {
+		if !delivery.LeaseUntil.After(now) && !delivery.RetryAt.After(now) {
+			due = append(due, sequence)
+		}
 	}
-	if cursor.RetryAt.After(now) {
-		return events.Record{}, 0, "", false, nil
-	}
-	for index, event := range s.outbox {
-		sequence := uint64(index + 1)
-		if sequence <= cursor.Sequence || store.InternalTopic(event.Topic) {
+	slices.Sort(due)
+	for _, sequence := range due {
+		delivery := deliveries[sequence]
+		index := int(sequence) - 1
+		if index < 0 || index >= len(s.outbox) || !appEventRecordEligible(s.outbox[index], workspaces, uninstalled) {
+			// The record left the app's reach while it waited — the workspace
+			// uninstalled the app — so there is nothing left to retry.
+			delete(deliveries, sequence)
 			continue
 		}
-		if _, installed := workspaces[event.WorkspaceID]; !installed {
-			if _, wasInstalled := uninstalled[event.WorkspaceID]; !wasInstalled || event.Topic != "app.uninstalled" {
-				continue
-			}
-		}
-		cursor.LeasedSequence = sequence
-		cursor.LeaseOwner = owner
-		cursor.LeaseUntil = now.Add(lease)
-		s.appEventCursors[key] = cursor
-		return events.Record{Sequence: sequence, Event: event}, cursor.RetryCount, cursor.RetryReason, true, nil
+		delivery.LeaseOwner = owner
+		delivery.LeaseUntil = now.Add(lease)
+		return events.AppEventClaim{
+			Record: events.Record{Sequence: sequence, Event: s.outbox[index]}, Attempt: delivery.Attempt,
+			RetryReason: delivery.RetryReason, Delivered: slices.Clone(delivery.Delivered),
+		}, true, nil
 	}
-	return events.Record{}, 0, "", false, nil
+	cursor := s.appEventCursors[key]
+	for index, event := range s.outbox {
+		sequence := uint64(index + 1)
+		if sequence <= cursor.Sequence || !appEventRecordEligible(event, workspaces, uninstalled) {
+			continue
+		}
+		cursor.Sequence = sequence
+		s.appEventCursors[key] = cursor
+		if deliveries == nil {
+			deliveries = make(map[uint64]*memoryAppEventDelivery)
+			s.appEventDeliveries[key] = deliveries
+		}
+		deliveries[sequence] = &memoryAppEventDelivery{Sequence: sequence, LeaseOwner: owner, LeaseUntil: now.Add(lease)}
+		return events.AppEventClaim{Record: events.Record{Sequence: sequence, Event: event}}, true, nil
+	}
+	return events.AppEventClaim{}, false, nil
+}
+
+// leasedAppEventLocked returns the delivery owner holds for sequence, or
+// ErrLeaseConflict when the lease is someone else's or has lapsed.
+func (s *Store) leasedAppEventLocked(key, owner string, sequence uint64, now time.Time) (*memoryAppEventDelivery, error) {
+	delivery, exists := s.appEventDeliveries[key][sequence]
+	if !exists || delivery.LeaseOwner != owner || !delivery.LeaseUntil.After(now) {
+		return nil, store.ErrLeaseConflict
+	}
+	return delivery, nil
 }
 
 func (s *Store) AckAppEvent(_ context.Context, appID domain.AppID, surface, owner string, sequence uint64) error {
@@ -11024,24 +11621,13 @@ func (s *Store) AckAppEvent(_ context.Context, appID domain.AppID, surface, owne
 	key := appEventCursorKey(appID, surface)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cursor, exists := s.appEventCursors[key]
-	if !exists || cursor.LeasedSequence != sequence || cursor.LeaseOwner != owner {
-		return store.ErrLeaseConflict
+	delivery, err := s.leasedAppEventLocked(key, owner, sequence, now)
+	if err != nil {
+		return err
 	}
-	if !cursor.LeaseUntil.After(now) {
-		return store.ErrLeaseConflict
-	}
-	attempt := cursor.RetryCount + 1
-	cursor.Sequence = sequence
-	cursor.LeasedSequence = 0
-	cursor.LeaseOwner = ""
-	cursor.LeaseUntil = time.Time{}
-	cursor.RetryAt = time.Time{}
-	cursor.RetryCount = 0
-	cursor.RetryReason = ""
-	s.appEventCursors[key] = cursor
+	delete(s.appEventDeliveries[key], sequence)
 	s.recordAppDeliveryAttemptLocked(key, domain.AppDeliveryAttempt{
-		AppID: appID, Surface: surface, Sequence: sequence, Attempt: attempt, Delivered: true, AttemptedAt: now,
+		AppID: appID, Surface: surface, Sequence: sequence, Attempt: delivery.Attempt + 1, Delivered: true, AttemptedAt: now,
 	})
 	return nil
 }
@@ -11074,50 +11660,71 @@ func (s *Store) ListAppDeliveryAttempts(_ context.Context, appID domain.AppID, s
 	return attempts, nil
 }
 
-func (s *Store) ReleaseAppEvent(_ context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string, retryAt time.Time) error {
-	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 || strings.TrimSpace(reason) == "" || retryAt.IsZero() {
+func (s *Store) ReleaseAppEvent(_ context.Context, appID domain.AppID, surface, owner string, sequence uint64, release events.AppEventRelease) error {
+	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 || !release.Valid() {
 		return store.InvalidArgument("app event release fields are invalid")
 	}
 	now := time.Now().UTC()
 	key := appEventCursorKey(appID, surface)
+	reason := strings.TrimSpace(release.Reason)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cursor, exists := s.appEventCursors[key]
-	if !exists || cursor.LeasedSequence != sequence || cursor.LeaseOwner != owner {
-		return store.ErrLeaseConflict
+	delivery, err := s.leasedAppEventLocked(key, owner, sequence, now)
+	if err != nil {
+		return err
 	}
-	if !cursor.LeaseUntil.After(now) {
-		return store.ErrLeaseConflict
+	attempt := delivery.Attempt + 1
+	delivery.LeaseOwner = ""
+	delivery.LeaseUntil = time.Time{}
+	delivery.RetryAt = release.RetryAt.UTC()
+	delivery.Delivered = events.NormalizeDelivered(release.Delivered)
+	if !release.Internal {
+		delivery.Attempt++
+		delivery.RetryReason = reason
 	}
-	attempt := cursor.RetryCount + 1
-	cursor.LeasedSequence = 0
-	cursor.LeaseOwner = ""
-	cursor.LeaseUntil = time.Time{}
-	cursor.RetryAt = retryAt.UTC()
-	cursor.RetryCount++
-	cursor.RetryReason = strings.TrimSpace(reason)
-	s.appEventCursors[key] = cursor
 	s.recordAppDeliveryAttemptLocked(key, domain.AppDeliveryAttempt{
-		AppID: appID, Surface: surface, Sequence: sequence, Attempt: attempt, Delivered: false, Reason: strings.TrimSpace(reason), AttemptedAt: now,
+		AppID: appID, Surface: surface, Sequence: sequence, Attempt: attempt, Delivered: false, Reason: reason, AttemptedAt: now,
 	})
 	return nil
 }
 
+// GetAppEventCursor summarises an app transport's delivery state: the
+// position below which every record is settled, the earliest record in
+// flight, and the earliest record waiting for a retry.
 func (s *Store) GetAppEventCursor(_ context.Context, appID domain.AppID, surface string) (domain.AppEventCursor, error) {
 	if appID == "" || !validAppEventSurface(surface) {
 		return domain.AppEventCursor{}, store.InvalidArgument("app ID and event surface are required")
 	}
+	now := time.Now().UTC()
+	key := appEventCursorKey(appID, surface)
 	s.mu.RLock()
-	cursor, exists := s.appEventCursors[appEventCursorKey(appID, surface)]
-	s.mu.RUnlock()
+	defer s.mu.RUnlock()
+	cursor, exists := s.appEventCursors[key]
 	if !exists {
 		return domain.AppEventCursor{}, store.ErrNotFound
 	}
-	return domain.AppEventCursor{
-		AppID: appID, Surface: surface, AcknowledgedSequence: cursor.Sequence,
-		InFlightSequence: cursor.LeasedSequence, InFlightUntil: cursor.LeaseUntil,
-		RetryAt: cursor.RetryAt, RetryCount: cursor.RetryCount, RetryReason: cursor.RetryReason,
-	}, nil
+	summary := domain.AppEventCursor{AppID: appID, Surface: surface, AcknowledgedSequence: cursor.Sequence}
+	var inFlight, waiting *memoryAppEventDelivery
+	for _, delivery := range s.appEventDeliveries[key] {
+		if delivery.Sequence <= summary.AcknowledgedSequence {
+			summary.AcknowledgedSequence = delivery.Sequence - 1
+		}
+		if delivery.LeaseUntil.After(now) {
+			if inFlight == nil || delivery.Sequence < inFlight.Sequence {
+				inFlight = delivery
+			}
+		} else if waiting == nil || delivery.Sequence < waiting.Sequence {
+			waiting = delivery
+		}
+	}
+	summary.Pending = len(s.appEventDeliveries[key])
+	if inFlight != nil {
+		summary.InFlightSequence, summary.InFlightUntil = inFlight.Sequence, inFlight.LeaseUntil
+	}
+	if waiting != nil {
+		summary.RetryAt, summary.RetryCount, summary.RetryReason = waiting.RetryAt, waiting.Attempt, waiting.RetryReason
+	}
+	return summary, nil
 }
 
 func (s *Store) ClaimEvents(ctx context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) ([]events.Record, error) {
@@ -11227,7 +11834,8 @@ func (s *Store) AckEvents(_ context.Context, owner string, sequences []uint64) e
 // The page boundary is decided by domain.PageRequest.PageAfter, the same
 // predicate the SQL profiles put in their WHERE clause, so the two profiles
 // cannot disagree about which row a cursor excludes.
-func (s *Store) ListMessages(_ context.Context, conversation domain.ConversationID, request domain.PageRequest) (domain.MessagePage, error) {
+func (s *Store) ListMessages(_ context.Context, conversation domain.ConversationID, history domain.HistoryRequest) (domain.MessagePage, error) {
+	request := history.Page
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if err := store.CheckPage(request); err != nil {
@@ -11243,26 +11851,27 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 			return domain.MessagePage{}, err
 		}
 	}
+	listed := func(message domain.Message) bool {
+		if message.Deleted || !history.Window.Contains(message.CreatedAt) {
+			return false
+		}
+		if history.RootsOnly && message.ThreadTimestamp != "" && !message.ReplyBroadcast {
+			return false
+		}
+		return request.Cursor == "" || request.PageAfter(message.CreatedAt, message.ID, createdAt, id)
+	}
 	window := make([]domain.Message, 0, request.Limit+1)
 	if request.Descending {
 		for index := len(values) - 1; index >= 0 && len(window) <= request.Limit; index-- {
-			if values[index].Deleted {
-				continue
+			if listed(values[index]) {
+				window = append(window, s.cloneMessage(values[index]))
 			}
-			if request.Cursor != "" && !request.PageAfter(values[index].CreatedAt, values[index].ID, createdAt, id) {
-				continue
-			}
-			window = append(window, s.cloneMessage(values[index]))
 		}
 	} else {
 		for index := 0; index < len(values) && len(window) <= request.Limit; index++ {
-			if values[index].Deleted {
-				continue
+			if listed(values[index]) {
+				window = append(window, s.cloneMessage(values[index]))
 			}
-			if request.Cursor != "" && !request.PageAfter(values[index].CreatedAt, values[index].ID, createdAt, id) {
-				continue
-			}
-			window = append(window, s.cloneMessage(values[index]))
 		}
 	}
 	hasMore := len(window) > request.Limit
@@ -11278,6 +11887,33 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 		page.NextCursor = cursor
 	}
 	return page, nil
+}
+
+// MessageAnnotations mirrors the SQL profile: one pass over the named
+// messages, reactions grouped by domain.SummarizeReactions.
+func (s *Store) MessageAnnotations(_ context.Context, conversation domain.ConversationID, ids []domain.MessageID) (map[domain.MessageID]domain.MessageAnnotation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[domain.MessageID]domain.MessageAnnotation, len(ids))
+	inConversation := make(map[domain.MessageID]bool, len(s.messages[conversation]))
+	for _, message := range s.messages[conversation] {
+		inConversation[message.ID] = true
+	}
+	for _, id := range ids {
+		if !inConversation[id] {
+			continue
+		}
+		reactions := make([]domain.Reaction, 0, len(s.reactions[id]))
+		for _, reaction := range s.reactions[id] {
+			reactions = append(reactions, reaction)
+		}
+		pinned := len(s.pins[id]) > 0
+		if len(reactions) == 0 && !pinned {
+			continue
+		}
+		result[id] = domain.MessageAnnotation{Reactions: domain.SummarizeReactions(reactions), Pinned: pinned}
+	}
+	return result, nil
 }
 
 func (s *Store) ListAuthoredMessages(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.MessagePage, error) {
@@ -11457,7 +12093,8 @@ func (s *Store) messageSavedBy(message domain.MessageID, user domain.UserID) boo
 	return false
 }
 
-func (s *Store) ListThreadMessages(_ context.Context, conversation domain.ConversationID, timestamp domain.MessageTimestamp, request domain.PageRequest) (domain.MessagePage, error) {
+func (s *Store) ListThreadMessages(_ context.Context, conversation domain.ConversationID, timestamp domain.MessageTimestamp, thread domain.ThreadRequest) (domain.MessagePage, error) {
+	request := thread.Page
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.MessagePage{}, err
 	}
@@ -11472,10 +12109,12 @@ func (s *Store) ListThreadMessages(_ context.Context, conversation domain.Conver
 		if message.Deleted {
 			continue
 		}
-		if (message.ThreadTimestamp == "" && domain.NewMessageTimestamp(message.CreatedAt) == timestamp) || message.ThreadTimestamp == timestamp {
-			if request.Cursor == "" || !threadMessageBeforeOrEqual(message, startTime, startID, startRoot, timestamp) {
-				values = appendSorted(values, s.cloneMessage(message), request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
-			}
+		root := message.ThreadTimestamp == "" && domain.NewMessageTimestamp(message.CreatedAt) == timestamp
+		if !root && (message.ThreadTimestamp != timestamp || !thread.Window.Contains(message.CreatedAt)) {
+			continue
+		}
+		if request.Cursor == "" || !threadMessageBeforeOrEqual(message, startTime, startID, startRoot, timestamp) {
+			values = appendSorted(values, s.cloneMessage(message), request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
 		}
 	}
 	window := values

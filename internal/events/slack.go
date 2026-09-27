@@ -30,16 +30,56 @@ const targetAppIDField = "target_app_id"
 // non-secret identity; the API still authenticates the app-level token and
 // verifies that the referenced event belongs to that app before returning
 // authorization subjects.
-func EventContext(appID string, record Record) (string, error) {
+//
+// eventID is the event_id of the callback the context accompanies: the
+// record's own identifier unless the record fans out (see SlackEventID).
+func EventContext(appID string, record Record, eventID domain.EventID) (string, error) {
 	if err := checkRecord(record, appID); err != nil {
 		return "", err
 	}
-	value := strings.TrimSpace(appID) + "\x00" + strconv.FormatUint(record.Sequence, 10) + "\x00" + string(record.Event.ID)
+	if !EventIDBelongsToRecord(eventID, record.Event.ID) {
+		return "", fmt.Errorf("%w: event_id %q does not belong to record %q", ErrEventIncomplete, eventID, record.Event.ID)
+	}
+	value := strings.TrimSpace(appID) + "\x00" + strconv.FormatUint(record.Sequence, 10) + "\x00" + string(eventID)
 	return "EC" + base64.RawURLEncoding.EncodeToString([]byte(value)), nil
 }
 
+// SlackEventID is the event_id of inner event index out of count built from
+// one record. Slack gives every callback its own event_id and apps deduplicate
+// retries on it, so a record that fans out into several inner events — one
+// member_joined_channel per invited user, for example — must not hand them all
+// the same identifier, or an app that deduplicates discards every event after
+// the first. The identifier is derived rather than random so a retry of the
+// same inner event carries the event_id it was first delivered with.
+func SlackEventID(record Record, index, count int) domain.EventID {
+	if count <= 1 {
+		return record.Event.ID
+	}
+	return domain.EventID(string(record.Event.ID) + "-" + strconv.Itoa(index))
+}
+
+// EventIDBelongsToRecord reports whether eventID is an event_id SlackEventID
+// derives from recordID: the record's own identifier, or that identifier with a
+// fan-out index suffix.
+func EventIDBelongsToRecord(eventID, recordID domain.EventID) bool {
+	if recordID == "" {
+		return false
+	}
+	if eventID == recordID {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(string(eventID), string(recordID)+"-")
+	if !ok || suffix == "" {
+		return false
+	}
+	index, err := strconv.Atoi(suffix)
+	return err == nil && index >= 0 && strconv.Itoa(index) == suffix
+}
+
 // ParseEventContext decodes an EventContext. Callers must still compare the
-// returned app and event identity with authenticated, app-visible state.
+// returned app and event identity with authenticated, app-visible state. The
+// returned event ID is the callback's event_id; EventIDBelongsToRecord relates
+// it to the record stored at the returned sequence.
 func ParseEventContext(value string) (string, uint64, domain.EventID, error) {
 	value = strings.TrimSpace(value)
 	if !strings.HasPrefix(value, "EC") {
@@ -154,6 +194,26 @@ func itemEvent(eventType string, withReaction bool) builder {
 		required = append(required, "reaction")
 	}
 	return func(delivered Delivered, _ Surface) ([]Inner, error) {
+		// A star may be on a channel rather than a message; its item is then
+		// {"type":"channel","channel":...} with no ts. Only a star can be.
+		if timestamp, _ := delivered.Field("ts"); timestamp == "" && !withReaction && strings.HasPrefix(eventType, "star_") {
+			values, err := stringFields(delivered, "channel_id", "user_id")
+			if err != nil {
+				return nil, err
+			}
+			item, err := encodeObject(map[string]json.RawMessage{
+				payloadTypeField: mustEncodeString("channel"),
+				"channel":        mustEncodeString(values["channel_id"]),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrPayloadFieldInvalid, err)
+			}
+			inner, err := newInner(eventType, delivered, String("user", values["user_id"]), JSON("item", item))
+			if err != nil {
+				return nil, err
+			}
+			return []Inner{inner}, nil
+		}
 		values, err := stringFields(delivered, required...)
 		if err != nil {
 			return nil, err
@@ -477,12 +537,12 @@ func SlackInner(topic string, delivered Delivered, surface Surface) ([]Inner, er
 //
 // Slack's current authorizations replacement is emitted from the app-specific
 // authorization projection. Generic durable records never contain it.
-func eventCallback(record Record, appID string, inner Inner) (map[string]json.RawMessage, error) {
+func eventCallback(record Record, appID string, inner Inner, eventID domain.EventID) (map[string]json.RawMessage, error) {
 	encoded, err := inner.Encode()
 	if err != nil {
 		return nil, fmt.Errorf("%w: Slack inner event cannot be encoded: %v", ErrPayloadMalformed, err)
 	}
-	eventContext, err := EventContext(appID, record)
+	eventContext, err := EventContext(appID, record, eventID)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +550,7 @@ func eventCallback(record Record, appID string, inner Inner) (map[string]json.Ra
 		"type":          mustEncodeString("event_callback"),
 		"team_id":       mustEncodeString(string(record.Event.WorkspaceID)),
 		"api_app_id":    mustEncodeString(appID),
-		"event_id":      mustEncodeString(string(record.Event.ID)),
+		"event_id":      mustEncodeString(string(eventID)),
 		"event_context": mustEncodeString(eventContext),
 		"event_time":    json.RawMessage(strconv.FormatInt(record.Event.CreatedAt.Unix(), 10)),
 		"event":         json.RawMessage(encoded),
@@ -554,8 +614,8 @@ func SlackEventBodies(record Record, appID string) ([][]byte, error) {
 		return nil, err
 	}
 	bodies := make([][]byte, 0, len(inners))
-	for _, inner := range inners {
-		envelope, err := eventCallback(record, strings.TrimSpace(appID), inner)
+	for index, inner := range inners {
+		envelope, err := eventCallback(record, strings.TrimSpace(appID), inner, SlackEventID(record, index, len(inners)))
 		if err != nil {
 			return nil, err
 		}
@@ -590,7 +650,8 @@ type SocketModeEnvelope struct {
 // Envelope identity: a record that becomes one envelope keeps the event ID, so
 // the identifier an operator correlates on is the record's own. A record that
 // fans out cannot — the identifiers must be distinct for the acknowledgement
-// map to work — so each envelope is suffixed with its index.
+// map to work — so each envelope is suffixed with its index, and each payload
+// carries its own event_id (SlackEventID) for the same reason.
 func SocketModeEnvelopes(record Record, appID string) ([]SocketModeEnvelope, error) {
 	if err := checkRecord(record, appID); err != nil {
 		return nil, err
@@ -605,7 +666,7 @@ func SocketModeEnvelopes(record Record, appID string) ([]SocketModeEnvelope, err
 	}
 	envelopes := make([]SocketModeEnvelope, 0, len(inners))
 	for index, inner := range inners {
-		payload, err := eventCallback(record, strings.TrimSpace(appID), inner)
+		payload, err := eventCallback(record, strings.TrimSpace(appID), inner, SlackEventID(record, index, len(inners)))
 		if err != nil {
 			return nil, err
 		}
@@ -810,7 +871,11 @@ func emojiChanged(subtype string) builder {
 			if err != nil {
 				return nil, err
 			}
-			fields = append(fields, Strings("names", []string{values["name"]}))
+			names := []string{values["name"]}
+			if removed, ok := delivered.Strings("names"); ok && len(removed) > 0 {
+				names = removed
+			}
+			fields = append(fields, Strings("names", names))
 		case "rename":
 			values, err := stringFields(delivered, "old_name", "new_name")
 			if err != nil {
@@ -1013,6 +1078,20 @@ func filePublic(delivered Delivered, _ Surface) ([]Inner, error) {
 	return []Inner{inner}, nil
 }
 
+// fileDeleted renders Slack's file_deleted: the deleted file's id and nothing
+// else, since the file can no longer be read.
+func fileDeleted(delivered Delivered, _ Surface) ([]Inner, error) {
+	values, err := stringFields(delivered, "file_id")
+	if err != nil {
+		return nil, err
+	}
+	inner, err := newInner("file_deleted", delivered, String("file_id", values["file_id"]))
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
 // projectedMessage carries the per-app message projection through to the
 // surface. The body in the payload was written by
 // service.projectMessageSnapshot after conversation visibility was proved;
@@ -1041,12 +1120,28 @@ func projectedMessage(delivered Delivered, surface Surface) ([]Inner, error) {
 	if mentioned && surface != SurfaceRTM && inner.Type() == "message" {
 		mention := make(map[string]json.RawMessage, len(inner.fields))
 		for name, value := range inner.fields {
-			mention[name] = value
+			// channel_type belongs to the message event; Slack's app_mention
+			// does not carry it.
+			if name != "channel_type" {
+				mention[name] = value
+			}
 		}
 		mention[payloadTypeField] = mustEncodeString("app_mention")
 		inners = append(inners, Inner{fields: mention})
 	}
 	return inners, nil
+}
+
+// projectedLinkShared carries the per-app link_shared projection through to
+// the surface. The body is written by service.PrepareAppEvent after the app's
+// unfurl domains, scope and conversation visibility were applied; a record
+// that was not projected names no links for this app and is withheld.
+func projectedLinkShared(delivered Delivered, _ Surface) ([]Inner, error) {
+	inner, ok := slackShaped("link.shared", delivered)
+	if !ok || inner.Type() != "link_shared" {
+		return nil, nil
+	}
+	return []Inner{inner}, nil
 }
 
 // appLifecycleEvent renders the app lifecycle frames, whose meaning lives in

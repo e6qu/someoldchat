@@ -35,6 +35,8 @@ type remoteFileView struct {
 }
 
 type remoteFilesData struct {
+	// Shell is the workspace frame the page renders inside.
+	Shell       shellView
 	CSRFToken   string
 	Notice      string
 	Channel     string
@@ -46,8 +48,8 @@ type remoteFilesData struct {
 }
 
 const remoteFilesMarkup = `{{define "title"}}Remote files · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0;font-size:16px}
+{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+.bar h1{margin:0;font-size:16px}
 .layout{width:min(940px,calc(100% - 32px));margin:28px auto 56px}
 .heading h2,.heading p{margin:0}.heading p{color:var(--muted);font-size:13px;margin-top:4px}
 .remote-list{display:grid;gap:12px;margin-top:18px}
@@ -60,9 +62,9 @@ const remoteFilesMarkup = `{{define "title"}}Remote files · SameOldChat{{end}}
 .remote-actions label{display:grid;gap:4px;font-size:12px}
 .empty{color:var(--muted)}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Remote files</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
-<div class="heading"><h2>Remote files</h2><p>Files an app registered with this workspace. The contents stay with the app that hosts them; SameOldChat keeps the link and the preview.</p></div>
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + `` + localTimeScript + `{{end}}
+{{define "content"}}{{template "shell-open" .Shell}}<main class="layout">
+<div class="heading"><h1>Remote files</h1><p>Files an app registered with this workspace. The contents stay with the app that hosts them; SameOldChat keeps the link and the preview.</p></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 <div class="remote-list">
 {{range .Files}}
@@ -91,7 +93,7 @@ const remoteFilesMarkup = `{{define "title"}}Remote files · SameOldChat{{end}}
 {{end}}
 </div>
 {{if .MoreURL}}<p><a href="{{.MoreURL}}">Show more remote files</a></p>{{end}}
-</main>{{end}}`
+</main>{{template "shell-close" .Shell}}{{end}}`
 
 var remoteFilesTemplate = mustPage(remoteFilesMarkup)
 
@@ -143,6 +145,7 @@ func (h Handler) remoteFiles(w http.ResponseWriter, r *http.Request) {
 	if page.NextCursor != "" {
 		data.MoreURL = "/app/remote-files?channel=" + url.QueryEscape(channel) + "&before=" + url.QueryEscape(string(page.NextCursor))
 	}
+	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationMore})
 	h.writeHTML(w, remoteFilesTemplate, data, http.StatusOK, "remote file rendering unavailable")
 }
 

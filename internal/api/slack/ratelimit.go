@@ -16,11 +16,25 @@ import (
 )
 
 // RateLimiter enforces the Web API rate-limiting contract this transport
-// never had: HTTP 429 with a Retry-After header and the pinned `rate_limited`
-// error code. The mechanism is what official SDKs key on — python-slack-sdk's
+// never had: HTTP 429 with a Retry-After header and Slack's error code. The
+// mechanism is what official SDKs key on — python-slack-sdk's
 // RateLimitErrorRetryHandler, node-slack-sdk's rateLimitedErrorRetryHandler
 // and the Java SDK all read status 429 plus Retry-After — so without it their
 // retry behavior was untestable against this product.
+//
+// The code in the body is two different Slack codes, and clients read it:
+//
+//   - A method's tier budget answers `ratelimited` (writeRateLimited). That is
+//     the code python-slack-sdk 3.43.0 compares against before it waits out
+//     Retry-After and retries apps.connections.open (SocketModeClient) and
+//     rtm.connect (rtm_v2.RTMClient); any other code is raised as a failure,
+//     so answering `rate_limited` here turned a transient limit into a crashed
+//     Socket Mode app.
+//   - chat.postMessage's per-channel posting allowance answers `rate_limited`
+//     (writePostingLimited), the posting-limit error the pinned OpenAPI
+//     document declares for chat.postMessage, chat.meMessage,
+//     chat.scheduleMessage and chat.update ("Application has posted too many
+//     messages").
 //
 // Grounding and recorded boundaries (see the rate-limiting deviations in
 // specs/compatibility.yaml):
@@ -93,13 +107,32 @@ func (l *RateLimiter) Middleware(next http.Handler) http.Handler {
 		if method == "chat.postMessage" {
 			if channel, ok := postedChannel(r); ok {
 				if retryAfter, limited := l.take("channel\x00"+channel+"\x00"+credential, postMessageBurst, postMessagePerSecond); limited {
-					writeRateLimited(w, retryAfter)
+					writePostingLimited(w, retryAfter)
 					return
 				}
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// limitedIncomingWebhook applies Slack's documented incoming-webhook allowance
+// — one message per second per webhook, short bursts tolerated — before the
+// webhook handler runs. The webhook URL is the webhook's identity, so the
+// bucket is keyed by a hash of the path: the path carries the secret, and the
+// limiter must not hold it in plain text. Incoming webhooks answer in plain
+// text, so a limited delivery answers 429 with Retry-After and the plain-text
+// body `rate_limited`, which is what the official WebhookClient retry handlers
+// key on. A Handler without a limiter serves unlimited, like the Web API.
+func (h Handler) limitedIncomingWebhook(w http.ResponseWriter, r *http.Request) {
+	if h.Limiter != nil {
+		if retryAfter, limited := h.Limiter.take("webhook\x00"+domain.HashToken(r.URL.Path), postMessageBurst, postMessagePerSecond); limited {
+			w.Header().Set("Retry-After", retryAfterSeconds(retryAfter))
+			writePlain(w, http.StatusTooManyRequests, "rate_limited")
+			return
+		}
+	}
+	h.incomingWebhook(w, r)
 }
 
 // take draws one token from the named bucket, reporting how long the caller
@@ -144,9 +177,8 @@ func (l *RateLimiter) sweep(now time.Time) {
 // Form-carried tokens deliberately fall to the address bucket: reading the
 // body here would tax every request to serve a legacy authentication shape.
 func rateLimitCredential(r *http.Request) string {
-	header := strings.TrimSpace(r.Header.Get("Authorization"))
-	if token, ok := strings.CutPrefix(header, "Bearer "); ok && strings.TrimSpace(token) != "" {
-		return domain.HashToken(strings.TrimSpace(token))
+	if token := headerToken(r); token != "" {
+		return domain.HashToken(token)
 	}
 	// r.RemoteAddr is the peer the listener accepted, the same identity the
 	// access log records; a forwarded-for header is spoofable and is not
@@ -204,14 +236,27 @@ func readCloserWithRest(read []byte, rest io.ReadCloser) io.ReadCloser {
 	}{io.MultiReader(bytes.NewReader(read), rest), rest}
 }
 
-// writeRateLimited is the one Slack failure whose handling official SDKs key
-// on at the HTTP layer: status 429 and Retry-After, with the pinned
-// rate_limited code in the body for callers that read it there.
+// writeRateLimited answers a method budget: status 429 and Retry-After, which
+// official SDKs key on at the HTTP layer, and Slack's ratelimited in the body
+// for the clients that read it there (see RateLimiter).
 func writeRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	w.Header().Set("Retry-After", retryAfterSeconds(retryAfter))
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "ratelimited"})
+}
+
+// writePostingLimited answers chat.postMessage's per-channel posting allowance
+// with the posting-limit code the pinned document declares for it.
+func writePostingLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	w.Header().Set("Retry-After", retryAfterSeconds(retryAfter))
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "rate_limited"})
+}
+
+// retryAfterSeconds renders a wait as the whole, positive number of seconds
+// Retry-After carries.
+func retryAfterSeconds(retryAfter time.Duration) string {
 	seconds := int(math.Ceil(retryAfter.Seconds()))
 	if seconds < 1 {
 		seconds = 1
 	}
-	w.Header().Set("Retry-After", strconv.Itoa(seconds))
-	writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "rate_limited"})
+	return strconv.Itoa(seconds)
 }

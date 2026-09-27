@@ -4,13 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/url"
-	"path/filepath"
 	"strings"
 
+	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
-	"github.com/sameoldchat/sameoldchat/internal/secretbox"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -27,9 +26,12 @@ type AppEventProjectionStore interface {
 	GetConversation(context.Context, domain.ConversationID) (domain.Conversation, error)
 	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
-	// GetAppBotTokenCiphertext returns the sealed bot access token a
-	// function_executed dispatch includes for the receiving app.
-	GetAppBotTokenCiphertext(context.Context, domain.AppID, domain.WorkspaceID) (string, error)
+	// GetApp reads the receiving app's current manifest: a link.shared record
+	// reaches the app only for the links its unfurl domains claim.
+	GetApp(context.Context, domain.AppID) (domain.App, domain.AppManifestRevision, error)
+	// IssueFunctionExecutionToken mints (once) the execution-scoped token a
+	// function_executed dispatch hands the receiving app.
+	IssueFunctionExecutionToken(context.Context, domain.FunctionExecutionToken, string) (domain.FunctionExecutionToken, error)
 }
 
 type UserEventProjectionStore interface {
@@ -137,7 +139,16 @@ func cloneStringMap(value map[string]string) map[string]string {
 // PrepareUserEvent hydrates content-bearing RTM records only after proving the
 // connected user belongs to the conversation. The journal itself deliberately
 // carries identifiers, not private message text.
-func PrepareUserEvent(ctx context.Context, state UserEventProjectionStore, workspaceID domain.WorkspaceID, userID domain.UserID, record events.Record) (events.Record, bool, error) {
+func PrepareUserEvent(ctx context.Context, state UserEventProjectionStore, origin string, workspaceID domain.WorkspaceID, userID domain.UserID, record events.Record) (events.Record, bool, error) {
+	prepared, visible, err := prepareUserEvent(ctx, state, origin, workspaceID, userID, record)
+	if err != nil || !visible {
+		return prepared, visible, err
+	}
+	prepared, err = absoluteEventUser(origin, prepared)
+	return prepared, err == nil, err
+}
+
+func prepareUserEvent(ctx context.Context, state UserEventProjectionStore, origin string, workspaceID domain.WorkspaceID, userID domain.UserID, record events.Record) (events.Record, bool, error) {
 	if state == nil || workspaceID == "" || userID == "" {
 		return events.Record{}, false, store.InvalidArgument("user event projection requires a store, workspace, and user")
 	}
@@ -163,7 +174,7 @@ func PrepareUserEvent(ctx context.Context, state UserEventProjectionStore, works
 		if err != nil || !member {
 			return record, member, err
 		}
-		return projectMessageSnapshot(ctx, state, record, snapshot, "")
+		return projectMessageSnapshot(ctx, state, origin, record, snapshot, "")
 	}
 	delivered, err := events.Deliverable(record.Event)
 	if err != nil {
@@ -190,15 +201,58 @@ func PrepareUserEvent(ctx context.Context, state UserEventProjectionStore, works
 	if err != nil || !member {
 		return record, member, err
 	}
-	return projectMessageEvent(ctx, state, record, message, "")
+	return projectMessageEvent(ctx, state, origin, record, message, "")
 }
 
 // PrepareAppEvent returns a Slack-shaped copy of a content-bearing app event
 // and whether this app may receive it. Identifier-only records for other topics
 // pass through unchanged to the central events translator. The credential key
-// opens the sealed bot access token a function_executed dispatch includes, so
-// the token is decrypted only at delivery time, never persisted in plaintext.
-func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, credentialKey []byte, appID domain.AppID, record events.Record) (events.Record, bool, error) {
+// seals the execution-scoped token a function_executed dispatch includes, so
+// the token is never persisted in plaintext.
+//
+// origin is the deployment's public URL (slackobject.Origin). Every URL the
+// projected event carries — a file's url_private, a user's image_* — is built
+// on it; with no public URL configured they stay origin-relative, which
+// docs/operations.md records.
+func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, credentialKey []byte, origin string, appID domain.AppID, record events.Record) (events.Record, bool, error) {
+	prepared, visible, err := prepareAppEvent(ctx, state, credentialKey, origin, appID, record)
+	if err != nil || !visible {
+		return prepared, visible, err
+	}
+	prepared, err = absoluteEventUser(origin, prepared)
+	return prepared, err == nil, err
+}
+
+// absoluteEventUser resolves the image URLs of the user object a user.* record
+// snapshots (events.UserChangePayload stores them origin-relative). A record
+// without one passes through untouched.
+func absoluteEventUser(origin string, record events.Record) (events.Record, error) {
+	if origin == "" || !strings.HasPrefix(record.Event.Topic, "user.") {
+		return record, nil
+	}
+	delivered, err := events.Deliverable(record.Event)
+	if err != nil {
+		// The transports own the malformed-record policy and its diagnostics.
+		return record, nil
+	}
+	user, exists := delivered.Object["user"]
+	if !exists {
+		return record, nil
+	}
+	resolved, err := slackobject.AbsoluteUser(origin, user)
+	if err != nil {
+		return record, nil
+	}
+	delivered.Object["user"] = resolved
+	encoded, err := delivered.Encode()
+	if err != nil {
+		return events.Record{}, err
+	}
+	record.Event.Payload = encoded
+	return record, nil
+}
+
+func prepareAppEvent(ctx context.Context, state AppEventProjectionStore, credentialKey []byte, origin string, appID domain.AppID, record events.Record) (events.Record, bool, error) {
 	if state == nil || appID == "" {
 		return events.Record{}, false, store.InvalidArgument("app event projection requires a store and app")
 	}
@@ -238,11 +292,13 @@ func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, credent
 		// the payload keeps it addressed to the uninstalled app alone.
 		return record, true, nil
 	case "message.created", "message.changed", "message.deleted":
-		return prepareAppMessageEvent(ctx, state, authorizations, record)
+		return prepareAppMessageEvent(ctx, state, origin, authorizations, record)
 	case "file.created", "file.shared", "file.unshared":
-		return prepareAppFileEvent(ctx, state, authorizations, record)
+		return prepareAppFileEvent(ctx, state, origin, authorizations, record)
 	case "function_executed":
 		return prepareFunctionExecutedEvent(ctx, state, credentialKey, appID, authorizations, record)
+	case linkSharedTopic:
+		return prepareAppLinkSharedEvent(ctx, state, appID, authorizations, record)
 	default:
 		if channelID, scoped := eventChannelID(record.Event); scoped && !publicConversationLifecycleEvent(record.Event) {
 			authorizations, err = visibleAppAuthorizations(ctx, state, authorizations, channelID)
@@ -292,14 +348,18 @@ func prepareFunctionExecutedEvent(ctx context.Context, state AppEventProjectionS
 		events.String("function_execution_id", string(snapshot.FunctionExecutionID)),
 		events.String("workflow_execution_id", string(snapshot.WorkflowRunID)),
 	}
-	// Slack sends the receiving app's bot access token with every
-	// function_executed callback so the app can call back. The token is sealed
-	// at issuance and opened only here, at delivery time; an app that issued no
-	// bot token (older hash-only installations) simply omits the field.
-	if ciphertext, err := state.GetAppBotTokenCiphertext(ctx, snapshot.AppID, record.Event.WorkspaceID); err == nil && ciphertext != "" {
-		if token, err := secretbox.Open(credentialKey, appBotTokenAssociatedData(snapshot.AppID, record.Event.WorkspaceID), ciphertext); err == nil && token != "" {
-			fields = append(fields, events.String("bot_access_token", token))
+	// Slack sends every function_executed callback an execution-scoped bot
+	// token (xwfp-) as bot_access_token: the app calls back with it, and what
+	// it posts or opens with it belongs to this execution. It acts as the
+	// app's bot, so an app without a bot installation receives none. The
+	// credential key is generated at startup whenever it is not configured, so
+	// only a unit test that never delivers lacks one.
+	if bot, exists := botAuthorization(authorizations); exists && len(credentialKey) == 32 {
+		token, err := issueFunctionExecutionToken(ctx, state, credentialKey, bot, snapshot.FunctionExecutionID, functionCallbackID(snapshot.Function), record.Event.CreatedAt)
+		if err != nil {
+			return events.Record{}, false, err
 		}
+		fields = append(fields, events.String("bot_access_token", token))
 	}
 	projected, err := events.New(record.Event.ID, record.Event.WorkspaceID, record.Event.ActorID,
 		events.NewPayload("function_executed", fields...), record.Event.CreatedAt)
@@ -311,10 +371,14 @@ func prepareFunctionExecutedEvent(ctx context.Context, state AppEventProjectionS
 	return withEventAuthorizations(record, authorizations)
 }
 
-// appBotTokenAssociatedData binds an app's sealed bot access token to the
-// app/workspace pair it was issued for.
-func appBotTokenAssociatedData(appID domain.AppID, workspaceID domain.WorkspaceID) string {
-	return "app_bot_token:" + string(appID) + ":" + string(workspaceID)
+// botAuthorization is the app's bot installation among its authorizations.
+func botAuthorization(authorizations []domain.AppAuthorization) (domain.AppAuthorization, bool) {
+	for _, value := range authorizations {
+		if value.TokenType.IsBot() && value.UserID != "" {
+			return value, true
+		}
+	}
+	return domain.AppAuthorization{}, false
 }
 
 func scopedAppAuthorizations(ctx context.Context, state AppEventProjectionStore, event events.Event, authorizations []domain.AppAuthorization) ([]domain.AppAuthorization, error) {
@@ -368,7 +432,7 @@ func appEventRequiredScopes(ctx context.Context, state AppEventProjectionStore, 
 	case strings.HasPrefix(event.Topic, "workspace."):
 		return []string{"team:read"}, nil
 	case strings.HasPrefix(event.Topic, "link."):
-		return []string{"links:read"}, nil
+		return []string{string(auth.ScopeLinksRead)}, nil
 	}
 	channelID, scoped := eventChannelID(event)
 	if !scoped {
@@ -432,7 +496,7 @@ func eventChannelID(event events.Event) (domain.ConversationID, bool) {
 	return domain.ConversationID(value), ok && value != ""
 }
 
-func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, authorizations []domain.AppAuthorization, record events.Record) (events.Record, bool, error) {
+func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, origin string, authorizations []domain.AppAuthorization, record events.Record) (events.Record, bool, error) {
 	snapshot, snapshotted, err := decodeMessageEventSnapshot(record.Event)
 	if err != nil {
 		return events.Record{}, false, err
@@ -446,7 +510,7 @@ func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, 
 			return record, false, err
 		}
 		record, _, _ = withEventAuthorizations(record, authorizations)
-		return projectMessageSnapshot(ctx, state, record, snapshot, appBotUserID(authorizations))
+		return projectMessageSnapshot(ctx, state, origin, record, snapshot, appBotUserID(authorizations))
 	}
 	delivered, err := events.Deliverable(record.Event)
 	if err != nil {
@@ -471,15 +535,11 @@ func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, 
 		return record, false, err
 	}
 	record, _, _ = withEventAuthorizations(record, authorizations)
-	return projectMessageEvent(ctx, state, record, message, appBotUserID(authorizations))
+	return projectMessageEvent(ctx, state, origin, record, message, appBotUserID(authorizations))
 }
 
-type messageEventProjectionStore interface {
-	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
-}
-
-func projectMessageEvent(ctx context.Context, state any, record events.Record, message domain.Message, botUserID domain.UserID) (events.Record, bool, error) {
-	return projectMessageSnapshot(ctx, state, record, messageEventSnapshot{Current: message}, botUserID)
+func projectMessageEvent(ctx context.Context, state any, origin string, record events.Record, message domain.Message, botUserID domain.UserID) (events.Record, bool, error) {
+	return projectMessageSnapshot(ctx, state, origin, record, messageEventSnapshot{Current: message}, botUserID)
 }
 
 // appBotUserID names the receiving app's bot member, when the app has one:
@@ -495,17 +555,17 @@ func appBotUserID(authorizations []domain.AppAuthorization) domain.UserID {
 	return ""
 }
 
-func projectMessageSnapshot(ctx context.Context, state any, record events.Record, snapshot messageEventSnapshot, botUserID domain.UserID) (events.Record, bool, error) {
+func projectMessageSnapshot(ctx context.Context, state any, origin string, record events.Record, snapshot messageEventSnapshot, botUserID domain.UserID) (events.Record, bool, error) {
 	switch record.Event.Topic {
 	case "message.changed":
 		if snapshot.Previous == nil {
 			return events.Record{}, false, events.ErrPayloadFieldInvalid
 		}
-		current, err := appEventMessage(ctx, state, snapshot.Current)
+		current, err := appEventMessage(ctx, state, origin, snapshot.Current)
 		if err != nil {
 			return events.Record{}, false, err
 		}
-		previous, err := appEventMessage(ctx, state, *snapshot.Previous)
+		previous, err := appEventMessage(ctx, state, origin, *snapshot.Previous)
 		if err != nil {
 			return events.Record{}, false, err
 		}
@@ -520,17 +580,22 @@ func projectMessageSnapshot(ctx context.Context, state any, record events.Record
 		if _, recorded := current["edited"]; !recorded {
 			current["edited"] = map[string]any{"user": record.Event.ActorID, "ts": editedAt}
 		}
+		// The outer ts is the change's own timestamp, as Slack sends it; the
+		// edited message's ts is inside `message`.
 		body := map[string]any{
 			"type": "message", "subtype": "message_changed", "hidden": true,
-			"channel": snapshot.Current.Conversation, "ts": string(domain.NewMessageTimestamp(snapshot.Current.CreatedAt)),
+			"channel": snapshot.Current.Conversation, "ts": editedAt,
 			"event_ts": editedAt, "message": current, "previous_message": previous,
+		}
+		if err := setChannelType(ctx, state, body, snapshot.Current.Conversation); err != nil {
+			return events.Record{}, false, err
 		}
 		return encodeProjectedEvent(record, body)
 	case "message.deleted":
 		if snapshot.Previous == nil {
 			return events.Record{}, false, events.ErrPayloadFieldInvalid
 		}
-		previous, err := appEventMessage(ctx, state, *snapshot.Previous)
+		previous, err := appEventMessage(ctx, state, origin, *snapshot.Previous)
 		if err != nil {
 			return events.Record{}, false, err
 		}
@@ -540,11 +605,14 @@ func projectMessageSnapshot(ctx context.Context, state any, record events.Record
 			"type": "message", "subtype": "message_deleted", "hidden": true,
 			"channel":    snapshot.Previous.Conversation,
 			"deleted_ts": string(domain.NewMessageTimestamp(snapshot.Previous.CreatedAt)),
-			"event_ts":   deletedAt, "previous_message": previous,
+			"ts":         deletedAt, "event_ts": deletedAt, "previous_message": previous,
+		}
+		if err := setChannelType(ctx, state, body, snapshot.Previous.Conversation); err != nil {
+			return events.Record{}, false, err
 		}
 		return encodeProjectedEvent(record, body)
 	default:
-		body, err := appEventMessage(ctx, state, snapshot.Current)
+		body, err := appEventMessage(ctx, state, origin, snapshot.Current)
 		if err != nil {
 			return events.Record{}, false, err
 		}
@@ -553,11 +621,38 @@ func projectMessageSnapshot(ctx context.Context, state any, record events.Record
 		if botUserID != "" && strings.Contains(snapshot.Current.Text, "<@"+string(botUserID)+">") {
 			body["app_mentioned"] = true
 		}
+		if err := setChannelType(ctx, state, body, snapshot.Current.Conversation); err != nil {
+			return events.Record{}, false, err
+		}
 		return encodeProjectedEvent(record, body)
 	}
 }
 
-func appEventMessage(ctx context.Context, state any, message domain.Message) (map[string]any, error) {
+type conversationReader interface {
+	GetConversation(context.Context, domain.ConversationID) (domain.Conversation, error)
+}
+
+// setChannelType adds the Events API channel_type to an outer message event.
+// AppEventProjectionStore always reads conversations; a narrower projection
+// store that cannot leaves the field out. A conversation that has since
+// disappeared leaves it out too rather than failing delivery.
+func setChannelType(ctx context.Context, state any, body map[string]any, conversationID domain.ConversationID) error {
+	conversations, ok := state.(conversationReader)
+	if !ok {
+		return nil
+	}
+	conversation, err := conversations.GetConversation(ctx, conversationID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	body["channel_type"] = conversation.SlackChannelType()
+	return nil
+}
+
+func appEventMessage(ctx context.Context, state any, origin string, message domain.Message) (map[string]any, error) {
 	timestamp := string(domain.NewMessageTimestamp(message.CreatedAt))
 	body := map[string]any{
 		"type": "message", "channel": message.Conversation, "user": message.AuthorID,
@@ -574,13 +669,9 @@ func appEventMessage(ctx context.Context, state any, message domain.Message) (ma
 	}
 	if message.AppID != "" {
 		body["app_id"] = message.AppID
-		if bots, ok := state.(messageEventProjectionStore); ok {
-			if bot, botErr := bots.GetBotByApp(ctx, message.WorkspaceID, message.AppID); botErr == nil {
-				body["bot_id"] = bot.ID
-			} else if !errors.Is(botErr, store.ErrNotFound) {
-				return nil, botErr
-			}
-		}
+	}
+	if bot := message.PostingBot(); bot != "" {
+		body["bot_id"] = bot
 	}
 	if message.Blocks != "" {
 		body["blocks"] = json.RawMessage(message.Blocks)
@@ -594,7 +685,7 @@ func appEventMessage(ctx context.Context, state any, message domain.Message) (ma
 	if len(message.Files) > 0 {
 		files := make([]map[string]any, 0, len(message.Files))
 		for _, file := range message.Files {
-			files = append(files, appEventFile(file))
+			files = append(files, appEventFile(origin, file))
 		}
 		body["subtype"] = "file_share"
 		body["upload"] = true
@@ -612,7 +703,7 @@ func encodeProjectedEvent(record events.Record, body map[string]any) (events.Rec
 	return record, true, nil
 }
 
-func prepareAppFileEvent(ctx context.Context, state AppEventProjectionStore, authorizations []domain.AppAuthorization, record events.Record) (events.Record, bool, error) {
+func prepareAppFileEvent(ctx context.Context, state AppEventProjectionStore, origin string, authorizations []domain.AppAuthorization, record events.Record) (events.Record, bool, error) {
 	snapshot, snapshotted, err := decodeFileEventSnapshot(record.Event)
 	if err != nil {
 		return events.Record{}, false, err
@@ -636,7 +727,7 @@ func prepareAppFileEvent(ctx context.Context, state AppEventProjectionStore, aut
 		case "file.unshared":
 			body["type"] = "file_unshared"
 		default:
-			body = map[string]any{"type": "file_created", "file": appEventFile(snapshot.File), "event_ts": string(domain.NewMessageTimestamp(record.Event.CreatedAt))}
+			body = map[string]any{"type": "file_created", "file": appEventFile(origin, snapshot.File), "event_ts": string(domain.NewMessageTimestamp(record.Event.CreatedAt))}
 		}
 		return encodeProjectedEvent(record, body)
 	}
@@ -666,7 +757,7 @@ func prepareAppFileEvent(ctx context.Context, state AppEventProjectionStore, aut
 		return record, false, nil
 	}
 	record, _, _ = withEventAuthorizations(record, authorizations)
-	body := map[string]any{"type": "file_created", "file": appEventFile(file), "event_ts": string(domain.NewMessageTimestamp(record.Event.CreatedAt))}
+	body := map[string]any{"type": "file_created", "file": appEventFile(origin, file), "event_ts": string(domain.NewMessageTimestamp(record.Event.CreatedAt))}
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return events.Record{}, false, err
@@ -753,19 +844,9 @@ func deliveredString(delivered events.Delivered, name string) (string, error) {
 	return value, nil
 }
 
-func appEventFile(file domain.File) map[string]any {
-	fileType := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.Name)), ".")
-	value := map[string]any{
-		"id": file.ID, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(),
-		"name": file.Name, "title": file.Title, "mimetype": file.MIMEType,
-		"filetype": fileType, "pretty_type": strings.ToUpper(fileType), "user": file.Uploader,
-		"editable": false, "size": file.Size, "mode": "hosted", "is_external": false,
-		"external_type": "", "is_public": file.PublicToken != "", "public_url_shared": file.PublicToken != "",
-		"display_as_bot": false,
-	}
-	if !file.Deleted {
-		value["url_private"] = "/api/files/" + url.PathEscape(string(file.ID))
-		value["url_private_download"] = "/api/files/" + url.PathEscape(string(file.ID))
-	}
-	return value
+// appEventFile is the file object an event carries: files.info's own, on the
+// deployment's origin, so an app downloads url_private exactly as it would
+// from a Web API read.
+func appEventFile(origin string, file domain.File) map[string]any {
+	return slackobject.File(origin, file)
 }

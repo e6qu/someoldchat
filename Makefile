@@ -113,6 +113,9 @@ test-transport-load:
 # Deletes each authorization guard in internal/service in turn and requires a
 # suite to notice. Its own target because each guard is a separate compile and
 # suite run, and there are hundreds; -timeout is raised for the same reason.
+# SAMEOLDCHAT_MUTATION_ONLY=OpA,OpB judges only the named operations (as the
+# survivor report prints them) and fails on any of them surviving instead of
+# applying the whole-service ceiling.
 test-mutation:
 	SAMEOLDCHAT_MUTATION=1 GOCACHE=$(GOCACHE) go test ./tests/mutation -count=1 -timeout=180m
 
@@ -141,6 +144,7 @@ test-fuzz:
 	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzReminderTimeNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
 	GOCACHE=$(GOCACHE) go test ./internal/socketmode -run '^$$' -fuzz FuzzEncodeEventMatchesDeliverability -fuzztime=25000x -parallel=1 -timeout=2m
 	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzNoRouteAnswersFiveHundred -fuzztime=15000x -parallel=1 -timeout=10m
+	GOCACHE=$(GOCACHE) go test ./internal/web -run '^$$' -fuzz FuzzMarkingPreservesTheText -fuzztime=25000x -parallel=1 -timeout=2m
 
 generate:
 	$(MAKE) proto-tools
@@ -380,4 +384,4 @@ clean:
 		deploy/ecs-scale-zero/.activator.zip deploy/ecs-scale-zero/__pycache__
 
 run:
-	GOCACHE=$(GOCACHE) go run ./cmd/server -chat-mode local -store memory -api-token xoxb-dev -session-token dev-session
+	GOCACHE=$(GOCACHE) go run ./cmd/server -chat-mode local -store memory -blob-dir $(CURDIR)/.cache/dev-blobs -api-token xoxb-dev -session-token dev-session

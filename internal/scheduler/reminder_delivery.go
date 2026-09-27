@@ -18,7 +18,7 @@ import (
 type ReminderDeliverySource interface {
 	DueReminders(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.Reminder, error)
 	EarliestReminder(context.Context, domain.WorkspaceID) (time.Time, error)
-	MarkReminderDelivered(context.Context, domain.WorkspaceID, domain.ReminderID, time.Time, events.Event) (bool, error)
+	MarkReminderDelivered(context.Context, domain.WorkspaceID, domain.ReminderID, time.Time, time.Time, events.Event) (bool, error)
 }
 
 type ReminderDeliveryWorker struct {
@@ -54,7 +54,14 @@ func (w ReminderDeliveryWorker) RunOnceAt(ctx context.Context, workspaceID domai
 			failures = errors.Join(failures, err)
 			continue
 		}
-		claimed, err := w.Source.MarkReminderDelivered(ctx, reminder.WorkspaceID, reminder.ID, now, event)
+		// A recurring reminder moves to its next occurrence rather than being
+		// retired; it used to be delivered once and never again.
+		next, err := nextRecurrence(reminder.Recurrence, reminder.TimeZone, reminder.RecurrenceAnchor, reminder.Time, now)
+		if err != nil {
+			failures = errors.Join(failures, err)
+			continue
+		}
+		claimed, err := w.Source.MarkReminderDelivered(ctx, reminder.WorkspaceID, reminder.ID, now, next, event)
 		if err != nil {
 			failures = errors.Join(failures, err)
 			continue

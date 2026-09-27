@@ -125,7 +125,7 @@ func TestPromotedProducerPayloadsTranslateEndToEnd(t *testing.T) {
 
 	// User groups: creation snapshots the subteam object, membership changes
 	// speak in deltas.
-	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "oncall", "", "Handles incidents")
+	group, err := messages.CreateUserGroup(ctx, "T1", "U1", "oncall", "", "Handles incidents", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,10 +201,10 @@ func TestPromotedEventsHonorScopeAndLifecycleVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 1, Event: dndEvent}); err != nil || !visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 1, Event: dndEvent}); err != nil || !visible {
 		t.Fatalf("dnd:read app visible=%v err=%v", visible, err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A2", events.Record{Sequence: 1, Event: dndEvent}); err != nil || visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A2", events.Record{Sequence: 1, Event: dndEvent}); err != nil || visible {
 		t.Fatalf("users:read must not admit dnd_updated: visible=%v err=%v", visible, err)
 	}
 
@@ -212,10 +212,10 @@ func TestPromotedEventsHonorScopeAndLifecycleVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 2, Event: renameEvent}); err != nil || !visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 2, Event: renameEvent}); err != nil || !visible {
 		t.Fatalf("team:read app visible=%v err=%v", visible, err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A2", events.Record{Sequence: 2, Event: renameEvent}); err != nil || visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A2", events.Record{Sequence: 2, Event: renameEvent}); err != nil || visible {
 		t.Fatalf("team_rename without team:read: visible=%v err=%v", visible, err)
 	}
 
@@ -225,7 +225,7 @@ func TestPromotedEventsHonorScopeAndLifecycleVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A1", events.Record{Sequence: 3, Event: createdEvent}); err != nil || !visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 3, Event: createdEvent}); err != nil || !visible {
 		t.Fatalf("public channel_created hidden from channels:read app: visible=%v err=%v", visible, err)
 	}
 
@@ -235,7 +235,7 @@ func TestPromotedEventsHonorScopeAndLifecycleVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "A2", events.Record{Sequence: 4, Event: privateRename}); err != nil || visible {
+	if _, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A2", events.Record{Sequence: 4, Event: privateRename}); err != nil || visible {
 		t.Fatalf("private rename leaked to a bot outside the room: visible=%v err=%v", visible, err)
 	}
 }
@@ -286,7 +286,7 @@ func TestAppMentionIsDerivedForTheMentionedAppOnly(t *testing.T) {
 	}
 	bodiesFor := func(appID domain.AppID) []string {
 		t.Helper()
-		prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, appID, posted)
+		prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", appID, posted)
 		if err != nil || !visible {
 			t.Fatalf("%s visible=%v err=%v", appID, visible, err)
 		}
@@ -318,16 +318,16 @@ func TestAppMentionIsDerivedForTheMentionedAppOnly(t *testing.T) {
 	}
 }
 
-// TestAppInstallCommitsTheInstalledEvent: sealing the freshly issued bot
-// token and announcing app_installed commit together, and the announcement is
-// routed to the installed app alone.
+// TestAppInstallCommitsTheInstalledEvent: issuing a bot token announces
+// app_installed, routed to the installed app alone. It does not depend on
+// the application credential key.
 func TestAppInstallCommitsTheInstalledEvent(t *testing.T) {
 	ctx := context.Background()
 	state := memory.New()
 	state.SeedWorkspace(domain.Workspace{ID: "T1"})
 	state.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
-	messages := Messages{Store: state, AppCredentialKey: []byte("0123456789abcdef0123456789abcdef")}
-	if err := messages.recordAppBotToken(ctx, "A1", "T1", "xoxb-plain", "U1"); err != nil {
+	messages := Messages{Store: state}
+	if err := messages.announceAppInstalled(ctx, "A1", "T1", "U1"); err != nil {
 		t.Fatal(err)
 	}
 	records, err := state.ListEventsAfter(ctx, "T1", 0, 10)
@@ -386,7 +386,8 @@ func TestUninstallAnnouncementReachesTheOpenSocket(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		record, _, _, claimed, err := messages.ClaimAppEvent(ctx, "A1", "socket", "conn-1", time.Minute)
+		recordClaim, claimed, err := messages.ClaimAppEvent(ctx, "A1", "socket", "conn-1", time.Minute)
+		record := recordClaim.Record
 		if err != nil {
 			t.Fatal(err)
 		}

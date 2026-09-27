@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -98,7 +99,6 @@ func TestHandledFailuresAreHTTP200WithAPinnedErrorCode(t *testing.T) {
 		{"unknown reminder", http.MethodPost, "/api/reminders.info", "reminder=Rnope", "not_found"},
 		{"missing reaction item", http.MethodPost, "/api/reactions.add", "name=tada", "no_item_specified"},
 		{"missing pin item", http.MethodPost, "/api/pins.add", "", "no_item_specified"},
-		{"missing star item", http.MethodPost, "/api/stars.add", "", "no_item_specified"},
 		{"missing emoji name", http.MethodPost, "/api/reactions.add", "channel=C1&timestamp=1700000000.000000", "invalid_name"},
 		{"malformed timestamp", http.MethodPost, "/api/reactions.add", "channel=C1&timestamp=not-a-ts&name=tada", "bad_timestamp"},
 		{"missing channel to join", http.MethodPost, "/api/conversations.join", "", "channel_not_found"},
@@ -107,6 +107,12 @@ func TestHandledFailuresAreHTTP200WithAPinnedErrorCode(t *testing.T) {
 		{"missing users to open", http.MethodPost, "/api/conversations.open", "", "users_list_not_supplied"},
 		{"missing usergroup", http.MethodGet, "/api/usergroups.users.list", "", "invalid_arg_name"},
 		{"missing call id", http.MethodPost, "/api/calls.update", "title=x", "invalid_arg_name"},
+	}
+	// stars.* serve user tokens only, so its missing-item answer is asked
+	// of U1's user token.
+	userHandler, _ := testUserHandlerWithStore()
+	if envelope := decodeEnvelope(t, callAPI(t, userHandler, http.MethodPost, "/api/stars.add", "")); envelope.OK || envelope.Error != "no_item_specified" {
+		t.Errorf("missing star item: body=%+v, want ok=false error=\"no_item_specified\"", envelope)
 	}
 	for _, testCase := range cases {
 		response := callAPI(t, handler, testCase.method, testCase.path, testCase.body)
@@ -238,10 +244,15 @@ func TestOutOfRangeLimitIsAHandledArgumentErrorNotAStoreFailure(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &list); err != nil || !list.OK {
 		t.Fatalf("create status=%d body=%s", created.Code, created.Body)
 	}
-	response := callAPI(t, handler, http.MethodPost, "/api/slackLists.items.list", "list_id="+url.QueryEscape(list.List.ID)+"&limit=0")
+	response := callAPI(t, handler, http.MethodPost, "/api/slackLists.items.list", "list_id="+url.QueryEscape(list.List.ID)+"&limit=-1")
 	envelope := decodeEnvelope(t, response)
 	if envelope.OK || envelope.Error != "invalid_arg_name" {
-		t.Fatalf("limit=0: body=%+v, want ok=false error=invalid_arg_name", envelope)
+		t.Fatalf("limit=-1: body=%+v, want ok=false error=invalid_arg_name", envelope)
+	}
+	// limit=0 is Slack's "use the default", and it is what the official
+	// SDKs send for an unset limit.
+	if envelope := decodeEnvelope(t, callAPI(t, handler, http.MethodPost, "/api/slackLists.items.list", "list_id="+url.QueryEscape(list.List.ID)+"&limit=0")); !envelope.OK {
+		t.Fatalf("limit=0: body=%+v, want ok=true (the default)", envelope)
 	}
 	// An oversized limit is clamped, which is what Slack does, rather than rejected.
 	clamped := callAPI(t, handler, http.MethodPost, "/api/slackLists.items.list", "list_id="+url.QueryEscape(list.List.ID)+"&limit=5000")
@@ -428,7 +439,7 @@ func decodeFilesList(t *testing.T, handler http.Handler, query string) []string 
 // stars.list dropped the store's cursor and emitted an invented `spill` key, so a
 // workspace with more stars than one page could never be read past page one.
 func TestStarsListEmitsTheCursorThatReachesPageTwo(t *testing.T) {
-	handler, _ := testHandlerWithStore()
+	handler, _ := testUserHandlerWithStore()
 	for _, text := range []string{"one", "two"} {
 		posted := callAPI(t, handler, http.MethodPost, "/api/chat.postMessage", "channel=C1&text="+text)
 		var body struct {
@@ -597,7 +608,7 @@ func TestFilesUploadSharesIntoChannels(t *testing.T) {
 	}
 	// The initial comment landed as a message carrying the file in each channel.
 	for _, channel := range []domain.ConversationID{"C1", "C2"} {
-		page, listErr := s.ListMessages(ctx, channel, domain.PageRequest{Limit: 10})
+		page, listErr := s.ListMessages(ctx, channel, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 		if listErr != nil {
 			t.Fatal(listErr)
 		}
@@ -801,8 +812,14 @@ func TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse(t *testing.
 	if created.Reminder.Time < time.Now().Unix() {
 		t.Fatalf("time=300 stored %d, which is in the past", created.Reminder.Time)
 	}
-	if envelope := decodeEnvelope(t, callAPI(t, handler, http.MethodPost, "/api/reminders.add", "text=standup&time=in+15+minutes")); envelope.Error != "cannot_parse" {
-		t.Fatalf("natural language time: body=%+v, want cannot_parse", envelope)
+	// The phrases Slack documents are read; anything else is cannot_parse.
+	if envelope := decodeEnvelope(t, callAPI(t, handler, http.MethodPost, "/api/reminders.add", "text=standup&time=in+15+minutes")); !envelope.OK {
+		t.Fatalf("natural language time: body=%+v", envelope)
+	}
+	for _, phrase := range []string{"whenever", "in 15 fortnights", "every blue moon", "yesterday"} {
+		if envelope := decodeEnvelope(t, callAPI(t, handler, http.MethodPost, "/api/reminders.add", "text=standup&time="+url.QueryEscape(phrase))); envelope.Error != "cannot_parse" {
+			t.Fatalf("time=%q: body=%+v, want cannot_parse", phrase, envelope)
+		}
 	}
 }
 
@@ -976,7 +993,14 @@ func TestIncomingWebhookRejectsEverySecretItDidNotIssue(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &hook); err != nil || !hook.OK {
 		t.Fatalf("create status=%d body=%s", created.Code, created.Body)
 	}
-	secret := hook.IncomingWebhook.URL[strings.LastIndex(hook.IncomingWebhook.URL, "/")+1:]
+	// The issued URL is on this deployment — the host the request reached, as
+	// no public URL is configured — and it is the very route that accepts the
+	// post. It used to name hooks.slack.com, which an app would post to.
+	issued, err := url.Parse(hook.IncomingWebhook.URL)
+	if err != nil || issued.Scheme != "http" || issued.Host != "example.com" || !strings.HasPrefix(issued.Path, "/services/T1/A1/") {
+		t.Fatalf("issued webhook URL %q is not on this deployment", hook.IncomingWebhook.URL)
+	}
+	secret := issued.Path[strings.LastIndex(issued.Path, "/")+1:]
 	post := func(path, body string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
@@ -984,8 +1008,26 @@ func TestIncomingWebhookRejectsEverySecretItDidNotIssue(t *testing.T) {
 		handler.ServeHTTP(response, request)
 		return response
 	}
-	if response := post("/services/T1/A1/"+secret, `{"text":"hello"}`); response.Code != http.StatusOK || response.Body.String() != "ok" {
+	if response := post(issued.Path, `{"text":"hello"}`); response.Code != http.StatusOK || response.Body.String() != "ok" {
 		t.Fatalf("valid webhook status=%d body=%s", response.Code, response.Body)
+	}
+	// Slack also takes the message as the payload field of a form, which is
+	// what `curl --data-urlencode payload=...` and older integrations send.
+	postForm := func(path, body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if response := postForm(issued.Path, url.Values{"payload": {`{"text":"from a form"}`}}.Encode()); response.Code != http.StatusOK || response.Body.String() != "ok" {
+		t.Fatalf("form-encoded webhook status=%d body=%s", response.Code, response.Body)
+	}
+	if response := postForm(issued.Path, "text=no+payload+field"); response.Code != http.StatusBadRequest || response.Body.String() != "invalid_payload" {
+		t.Fatalf("form without payload status=%d body=%s, want 400 invalid_payload", response.Code, response.Body)
+	}
+	if response := post(issued.Path, `{"text":"a"}`+strings.Repeat(" ", 1<<20)); response.Code != http.StatusBadRequest || response.Body.String() != "invalid_payload" {
+		t.Fatalf("oversized webhook status=%d body=%s, want 400 invalid_payload", response.Code, response.Body)
 	}
 	rejections := map[string]string{
 		"wrong secret":      "/services/T1/A1/" + secret + "-wrong",
@@ -1080,6 +1122,39 @@ func TestAPITestEchoesTheSameErrorForJSONAndForm(t *testing.T) {
 	}
 }
 
+// api.test echoes its arguments on success too — it echoed them only beside a
+// forced error, so `{"ok":true}` answered every SDK smoke test that asserts
+// its arguments came back — and a JSON body's nested values are echoed as
+// structure rather than refused as non-scalar arguments. The credential is
+// never echoed.
+func TestAPITestEchoesItsArguments(t *testing.T) {
+	handler, _ := testHandlerWithStore()
+	decode := func(response *httptest.ResponseRecorder) map[string]any {
+		t.Helper()
+		var body map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("body=%s", response.Body)
+		}
+		return body
+	}
+	form := decode(callAPI(t, handler, http.MethodPost, "/api/api.test?q=1", "foo=bar&token=secret"))
+	if form["ok"] != true || !reflect.DeepEqual(form["args"], map[string]any{"foo": "bar", "q": "1"}) {
+		t.Fatalf("form echo=%v", form)
+	}
+	nested := decode(callJSON(t, handler, "/api/api.test", `{"foo":{"a":[1,true]},"n":2,"s":"x"}`))
+	want := map[string]any{"foo": map[string]any{"a": []any{float64(1), true}}, "n": float64(2), "s": "x"}
+	if nested["ok"] != true || !reflect.DeepEqual(nested["args"], want) {
+		t.Fatalf("JSON echo=%v", nested)
+	}
+	failed := decode(callAPI(t, handler, http.MethodGet, "/api/api.test?error=my_error&foo=bar", ""))
+	if failed["ok"] != false || failed["error"] != "my_error" || !reflect.DeepEqual(failed["args"], map[string]any{"error": "my_error", "foo": "bar"}) {
+		t.Fatalf("forced error echo=%v", failed)
+	}
+	if bare := decode(callAPI(t, handler, http.MethodPost, "/api/api.test", "")); bare["ok"] != true || bare["args"] != nil {
+		t.Fatalf("argument-less echo=%v", bare)
+	}
+}
+
 // users.profile.set rejected a profile whose only field was a documented boolean,
 // because the boolean was parsed and then dropped before the emptiness check.
 func TestProfileBooleansAreNotRejectedAsUnknownFields(t *testing.T) {
@@ -1117,11 +1192,11 @@ func TestListItemDeleteRefusesAListInTheSingleIDField(t *testing.T) {
 // A non-threaded message used to serialise as `"thread_ts": ""`, which the
 // strictly typed SDK models parse as a timestamp.
 func TestMessageResponseOmitsAnEmptyThreadTimestamp(t *testing.T) {
-	plain := messageResponse(domain.Message{AuthorID: "U1", Text: "hi", CreatedAt: time.Unix(1700000000, 0).UTC()})
+	plain := messageResponse("http://chat.test", domain.Message{AuthorID: "U1", Text: "hi", CreatedAt: time.Unix(1700000000, 0).UTC()})
 	if _, present := plain["thread_ts"]; present {
 		t.Errorf("thread_ts present on a non-threaded message: %v", plain)
 	}
-	threaded := messageResponse(domain.Message{AuthorID: "U1", Text: "hi", ThreadTimestamp: "1700000000.000000", CreatedAt: time.Unix(1700000001, 0).UTC()})
+	threaded := messageResponse("http://chat.test", domain.Message{AuthorID: "U1", Text: "hi", ThreadTimestamp: "1700000000.000000", CreatedAt: time.Unix(1700000001, 0).UTC()})
 	if threaded["thread_ts"] != domain.MessageTimestamp("1700000000.000000") {
 		t.Errorf("thread_ts missing on a threaded message: %v", threaded)
 	}
@@ -1154,20 +1229,6 @@ func TestParseIDListUnderstandsBothDocumentedListForms(t *testing.T) {
 	}
 	if got := parseIDList[domain.UserID](``); len(got) != 0 {
 		t.Errorf("empty = %v", got)
-	}
-}
-
-func TestParseSlackTimestampRejectsWhatIsNotATimestamp(t *testing.T) {
-	if value, ok := parseSlackTimestamp("1700000000.000123"); !ok || value != 1700000000000123 {
-		t.Errorf("value=%d ok=%v", value, ok)
-	}
-	if value, ok := parseSlackTimestamp("1700000000"); !ok || value != 1700000000000000 {
-		t.Errorf("value=%d ok=%v", value, ok)
-	}
-	for _, raw := range []string{"", "abc", "-1", "1700000000.1234567", "1700000000.abc"} {
-		if _, ok := parseSlackTimestamp(raw); ok {
-			t.Errorf("parseSlackTimestamp(%q) accepted", raw)
-		}
 	}
 }
 

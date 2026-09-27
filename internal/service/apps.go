@@ -535,41 +535,73 @@ func (m Messages) AppHome(ctx context.Context, workspaceID domain.WorkspaceID, u
 // OpenAppHome records the user journey Slack exposes as app_home_opened. The
 // event is addressed to exactly one app, includes the app's DM channel, and
 // includes the current view only after views.publish has created one.
+//
+// It is for the user opening the tab. A client re-reading the Home after an
+// action or a live update calls AppHome instead, so an app is not told the
+// tab was opened when the user merely stayed on it.
 func (m Messages) OpenAppHome(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.InstalledApp, domain.View, error) {
 	app, view, err := m.AppHome(ctx, workspaceID, userID, appID)
 	if err != nil || app.BotUserID == "" {
 		return app, view, err
 	}
-	conversation, err := m.OpenConversation(ctx, workspaceID, userID, []domain.UserID{app.BotUserID})
-	if err != nil {
+	if _, err := m.recordAppHomeOpened(ctx, workspaceID, userID, app, "home", view); err != nil {
 		return domain.InstalledApp{}, domain.View{}, err
 	}
+	return app, view, nil
+}
+
+// OpenAppMessages opens the member's direct conversation with an app's bot
+// from the app's Messages tab and records app_home_opened with tab
+// "messages", as Slack does for that tab. Slack sends no view for it.
+func (m Messages) OpenAppMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.Conversation, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.Conversation{}, err
+	}
+	snapshot, parsed, err := m.installedApp(ctx, workspaceID, appID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if !parsed.MessagesTabEnabled {
+		return domain.Conversation{}, store.ErrNotFound
+	}
+	bot, err := m.Store.GetBotByApp(ctx, workspaceID, snapshot.App.ID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.recordAppHomeOpened(ctx, workspaceID, userID, installedAppProjection(snapshot.App, parsed, bot.UserID), "messages", domain.View{})
+}
+
+func (m Messages) recordAppHomeOpened(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, app domain.InstalledApp, tab string, view domain.View) (domain.Conversation, error) {
+	opening, err := m.OpenConversation(ctx, workspaceID, userID, []domain.UserID{app.BotUserID})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	conversation := opening.Conversation
 	fields := []events.Field{
 		events.String("target_app_id", string(app.ID)),
 		events.String("user_id", string(userID)),
 		events.String("channel_id", string(conversation.ID)),
-		events.String("tab", "home"),
+		events.String("tab", tab),
 	}
 	if view.ID != "" {
 		interactionView, renderErr := appInteractionView(view)
 		if renderErr != nil {
-			return domain.InstalledApp{}, domain.View{}, renderErr
+			return domain.Conversation{}, renderErr
 		}
 		encoded, renderErr := json.Marshal(interactionView)
 		if renderErr != nil {
-			return domain.InstalledApp{}, domain.View{}, renderErr
+			return domain.Conversation{}, renderErr
 		}
 		fields = append(fields, events.JSON("view", string(encoded)))
 	}
-	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, events.NewPayload("app.home_opened", fields...), now)
+	event, err := newEvent(workspaceID, userID, events.NewPayload("app.home_opened", fields...), time.Now().UTC())
 	if err != nil {
-		return domain.InstalledApp{}, domain.View{}, err
+		return domain.Conversation{}, err
 	}
 	if err := m.Store.AppendEvent(ctx, event); err != nil {
-		return domain.InstalledApp{}, domain.View{}, err
+		return domain.Conversation{}, err
 	}
-	return app, view, nil
+	return conversation, nil
 }
 
 func installedAppProjection(app domain.App, parsed appmanifest.Parsed, botUserID domain.UserID) domain.InstalledApp {
@@ -867,29 +899,36 @@ func (m Messages) AuthorizeOAuth(ctx context.Context, request domain.OAuthAuthor
 			return domain.OAuthAuthorization{}, err
 		}
 		now := time.Now().UTC()
-		botUser = domain.User{ID: botUserID, WorkspaceID: authorization.WorkspaceID, Name: authorization.AppName, RealName: authorization.AppName, Presence: domain.PresenceAuto}
+		botUser = domain.User{ID: botUserID, WorkspaceID: authorization.WorkspaceID, Name: authorization.AppName, RealName: authorization.AppName, Presence: domain.PresenceAuto, Updated: now}
 		bot = domain.Bot{ID: botID, WorkspaceID: authorization.WorkspaceID, AppID: authorization.AppID, UserID: botUserID, Name: authorization.AppName, UpdatedAt: now}
 		authorization.BotID = botID
 		authorization.BotUserID = botUserID
 	}
 	grant := domain.OAuthCode{
-		Code:                   code,
-		ClientID:               authorization.ClientID,
-		WorkspaceID:            authorization.WorkspaceID,
-		UserID:                 authorization.UserID,
-		Scopes:                 append(append([]string(nil), authorization.BotScopes...), authorization.UserScopes...),
-		BotID:                  authorization.BotID,
-		BotUserID:              authorization.BotUserID,
-		BotScopes:              authorization.BotScopes,
-		UserScopes:             authorization.UserScopes,
-		RedirectURI:            authorization.RedirectURI,
+		Code:        code,
+		ClientID:    authorization.ClientID,
+		WorkspaceID: authorization.WorkspaceID,
+		UserID:      authorization.UserID,
+		Scopes:      append(append([]string(nil), authorization.BotScopes...), authorization.UserScopes...),
+		BotID:       authorization.BotID,
+		BotUserID:   authorization.BotUserID,
+		BotScopes:   authorization.BotScopes,
+		UserScopes:  authorization.UserScopes,
+		// The grant keeps the redirect_uri as the request named it, empty
+		// when the request relied on the app's single configured URL: the
+		// exchange must repeat a named one and may omit an implied one.
+		RedirectURI:            strings.TrimSpace(request.RedirectURI),
 		IncomingWebhookChannel: authorization.IncomingWebhookChannel,
 		CodeChallenge:          authorization.CodeChallenge,
 		CodeChallengeMethod:    authorization.CodeChallengeMethod,
 	}
-	if err := m.Store.CreateOAuthAuthorization(ctx, botUser, bot, grant); err != nil {
+	granted, err := m.Store.CreateOAuthAuthorization(ctx, botUser, bot, grant)
+	if err != nil {
 		return domain.OAuthAuthorization{}, err
 	}
+	// A reinstall grants to the bot the app already has in the workspace.
+	authorization.BotID = granted.BotID
+	authorization.BotUserID = granted.BotUserID
 	authorization.Code = code
 	return authorization, nil
 }

@@ -154,7 +154,7 @@ func TestWorkflowBuilderPublishesTriggersAndStartsADurableRun(t *testing.T) {
 		t.Fatalf("create=%d: %s", created.Code, created.Body)
 	}
 	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
-	if !regexp.MustCompile(`^/app/workflows/Wf[0-9a-f]+$`).MatchString(workflowURL) {
+	if !regexp.MustCompile(`^/app/workflows/Wf[0-9A-Z]+$`).MatchString(workflowURL) {
 		t.Fatalf("workflow location=%q", created.Header().Get("Location"))
 	}
 	page := get(t, mux, workflowURL)
@@ -179,7 +179,7 @@ func TestWorkflowBuilderPublishesTriggersAndStartsADurableRun(t *testing.T) {
 	}
 	page = get(t, mux, triggered.Header().Get("Location"))
 	requireContains(t, "workflow trigger", page.Body.String(), "Start incident triage", "link · enabled", "Run", "Disable")
-	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9a-f]+/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9A-Z]+/triggers/(Ft[0-9A-Z]+)/run`).FindStringSubmatch(page.Body.String())
 	key := regexp.MustCompile(`name="idempotency_key" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
 	if len(trigger) != 2 || len(key) != 2 {
 		t.Fatalf("run form missing: %s", page.Body)
@@ -192,7 +192,7 @@ func TestWorkflowBuilderPublishesTriggersAndStartsADurableRun(t *testing.T) {
 		t.Fatalf("run=%d: %s", started.Code, started.Body)
 	}
 	runURL := started.Header().Get("Location")
-	if !regexp.MustCompile(`^/app/workflows/runs/Wx[0-9a-f]+$`).MatchString(runURL) {
+	if !regexp.MustCompile(`^/app/workflows/runs/Wx[0-9A-Z]+$`).MatchString(runURL) {
 		t.Fatalf("run location=%q", runURL)
 	}
 	runPage := get(t, mux, runURL)
@@ -289,8 +289,8 @@ func TestWorkflowBuilderConfiguresScheduledWebhookAndEventTriggers(t *testing.T)
 		t.Fatalf("webhook trigger=%d: %s", hooked.Code, hooked.Body)
 	}
 	page = get(t, mux, hooked.Header().Get("Location"))
-	requireContains(t, "webhook trigger", page.Body.String(), "Deploy hook", "Webhook URL", "/services/triggers/T1/")
-	invokePath := regexp.MustCompile(`(/services/triggers/T1/Ft[0-9a-f]+/[0-9a-f]+)`).FindString(page.Body.String())
+	requireContains(t, "webhook trigger", page.Body.String(), "Deploy hook", "Webhook URL", "http://example.com/services/triggers/T1/")
+	invokePath := regexp.MustCompile(`(/services/triggers/T1/Ft[0-9A-Z]+/[0-9a-f]+)`).FindString(page.Body.String())
 	if invokePath == "" {
 		t.Fatalf("webhook URL not rendered: %s", page.Body)
 	}
@@ -318,7 +318,7 @@ func TestWorkflowBuilderConfiguresScheduledWebhookAndEventTriggers(t *testing.T)
 	}
 	version := regexp.MustCompile(`name="version" value="(\d+)"`).FindStringSubmatch(message)
 	config := regexp.MustCompile(`name="config" value="([^"]+)"`).FindStringSubmatch(message)
-	triggerID := regexp.MustCompile(`triggers/(Ft[0-9a-f]+)"`).FindStringSubmatch(message)
+	triggerID := regexp.MustCompile(`triggers/(Ft[0-9A-Z]+)"`).FindStringSubmatch(message)
 	if len(version) != 2 || len(config) != 2 || len(triggerID) != 2 {
 		t.Fatalf("message trigger form incomplete: %s", message)
 	}
@@ -473,7 +473,7 @@ func TestWorkflowBuilderShowsRunActivityToTheOwner(t *testing.T) {
 		"_csrf": {csrf}, "title": {"Start incident triage"}, "type": {"link"},
 	}.Encode(), false)
 	page = get(t, mux, triggered.Header().Get("Location"))
-	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9a-f]+/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9A-Z]+/triggers/(Ft[0-9A-Z]+)/run`).FindStringSubmatch(page.Body.String())
 	key := regexp.MustCompile(`name="idempotency_key" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
 	if len(trigger) != 2 || len(key) != 2 {
 		t.Fatalf("run form missing: %s", page.Body)
@@ -486,7 +486,7 @@ func TestWorkflowBuilderShowsRunActivityToTheOwner(t *testing.T) {
 	}
 	page = get(t, mux, workflowURL)
 	requireContains(t, "running activity", page.Body.String(), "Run activity", "<b>1</b> running", "Start incident triage", `data-activity-run`)
-	runLink := regexp.MustCompile(`href="(/app/workflows/runs/Wx[0-9a-f]+)"`).FindStringSubmatch(page.Body.String())
+	runLink := regexp.MustCompile(`href="(/app/workflows/runs/Wx[0-9A-Z]+)"`).FindStringSubmatch(page.Body.String())
 	if len(runLink) != 2 {
 		t.Fatalf("activity run link missing: %s", page.Body)
 	}
@@ -522,7 +522,7 @@ func TestWorkflowBuilderRunsFormAndButtonSteps(t *testing.T) {
 		"_csrf": {csrf}, "title": {"Run"}, "type": {"link"},
 	}.Encode(), false)
 	page := get(t, mux, triggered.Header().Get("Location"))
-	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9a-f]+/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9A-Z]+/triggers/(Ft[0-9A-Z]+)/run`).FindStringSubmatch(page.Body.String())
 	key := regexp.MustCompile(`name="idempotency_key" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
 	if len(trigger) != 2 || len(key) != 2 {
 		t.Fatalf("run form missing: %s", page.Body)
@@ -623,7 +623,7 @@ func TestWorkflowBuilderExportsRunsAndFormResponsesAsCSV(t *testing.T) {
 		"_csrf": {csrf}, "title": {"Run"}, "type": {"link"},
 	}.Encode(), false)
 	page := get(t, mux, triggered.Header().Get("Location"))
-	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9a-f]+/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9A-Z]+/triggers/(Ft[0-9A-Z]+)/run`).FindStringSubmatch(page.Body.String())
 	key := regexp.MustCompile(`name="idempotency_key" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
 	started := postForm(t, mux, workflowURL+"/triggers/"+trigger[1]+"/run", url.Values{
 		"_csrf": {csrf}, "idempotency_key": {key[1]},
@@ -846,7 +846,7 @@ func TestWorkflowPermissionsPanelControlsFindUseAndCopy(t *testing.T) {
 	page := get(t, mux, workflowURL)
 	requireContains(t, "owner page", page.Body.String(),
 		"Workflow permissions", "Who can find this workflow", "Who can use this workflow", "Who can copy this workflow")
-	trigger := regexp.MustCompile(`/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	trigger := regexp.MustCompile(`/triggers/(Ft[0-9A-Z]+)/run`).FindStringSubmatch(page.Body.String())
 	if len(trigger) != 2 {
 		t.Fatalf("owner page has no run form: %s", page.Body)
 	}

@@ -141,7 +141,12 @@ The RTM WebSocket endpoint follows Slack's published legacy RTM protocol:
 successful ping messages return a `pong`, preserve scalar fields, and copy a
 positive client `id` into `reply_to`; nested ping fields fail as invalid input.
 The endpoint also rejects messages larger than 16 kilobytes at the WebSocket
-boundary. See [Slack's RTM protocol](https://api.slack.com/legacy/rtm) for the
+boundary. The server pings every RTM socket every ten seconds and closes one
+that answers neither that ping nor the next, and every write is bounded by a
+deadline, so a vanished or stalled client does not hold its stream. The URL
+`rtm.connect` returns follows the origin the client called it on: `wss://`
+when the request arrived over TLS or carries `X-Forwarded-Proto: https`.
+See [Slack's RTM protocol](https://api.slack.com/legacy/rtm) for the
 upstream wire contract.
 
 ### Socket Mode
@@ -149,19 +154,61 @@ upstream wire contract.
 Socket Mode uses an app-level token with the `connections:write` scope. The
 `apps.connections.open` method creates a short-lived, single-use connection
 lease and returns a WebSocket URL. The WebSocket consumes that lease, sends a
-`hello` message, and acknowledges each valid received envelope by returning
-its `envelope_id`. A missing envelope identifier closes the connection with a
-protocol error. Approved app installations identify the workspaces whose
-durable outbox events can be delivered. The last acknowledged event sequence
-is stored per app, so a replacement process resumes after the last confirmed
-event instead of depending on process memory. The implementation allows up to
-ten active connections per app. Each active connection renews its durable
-lease and releases it when the WebSocket closes. Each connection uses a
-bounded one-event-at-a-time delivery loop; the client must acknowledge an
-event before the next event is sent.
+`hello` message carrying `num_connections`, `connection_info.app_id` and
+`debug_info`, and acknowledges each valid received envelope by returning its
+`envelope_id`. A missing envelope identifier closes the connection with a
+protocol error; an acknowledgement for an envelope the connection no longer
+holds (a late or duplicate one) is ignored. Approved app installations
+identify the workspaces whose durable outbox events can be delivered. The last
+acknowledged event sequence is stored per app, so a replacement process
+resumes after the last confirmed event instead of depending on process memory.
+The implementation allows up to ten active connections per app; an eleventh
+`apps.connections.open` is answered with HTTP 429, `Retry-After`, and
+`ratelimited`, which official clients retry. Each active connection renews
+its durable lease and releases it when the WebSocket closes.
 
-Response payloads are accepted only for known event envelopes and must be
-valid JSON. The HTTP process records each response durably by app identifier
+The connection URL follows the origin the client called
+`apps.connections.open` on, so no configuration is needed behind a
+TLS-terminating proxy that sets `X-Forwarded-Proto`. Two settings override it:
+
+- `-socket-host` / `SAMEOLDCHAT_SOCKET_HOST` names the public `host:port`
+  every connection URL uses, for deployments that serve `/socket-mode` on a
+  different host from the Web API.
+- `-socket-tls` / `SAMEOLDCHAT_SOCKET_TLS=1` selects `wss://`. With
+  `-socket-host` it chooses the scheme; without it, it forces `wss://` behind a
+  proxy that terminates TLS without sending `X-Forwarded-Proto`.
+
+`terraform/ecs-runtime` exports `SAMEOLDCHAT_SOCKET_TLS=1`, because its public
+URL is required to be HTTPS and its caller-owned ingress may not send
+`X-Forwarded-Proto`; the host still follows the request. The
+WebSocket upgrade accepts any `Origin` (the single-use ticket is the
+credential), and a request that cannot be upgraded does not spend the ticket.
+
+Delivery is claimed, not polled: after every acknowledgement the connection
+claims the next envelope at once. Interaction envelopes (slash commands,
+shortcuts, block actions, view submissions, options) are delivered
+concurrently, up to ten unacknowledged per connection. Event delivery state is
+kept per record — lease, attempt count, retry reason, and the envelopes already
+acknowledged — so a record waiting for its retry does not hold back the records
+after it, and an app's connections lease different records at once. Each
+connection holds one event record in flight at a time; this is a recorded
+deviation from Slack, which delivers events concurrently on a connection. A
+record that fans out into several envelopes is retried only for the envelopes
+the app did not acknowledge. An envelope that is
+not acknowledged within thirty seconds goes back to the queue without closing
+the connection and is re-sent with `retry_attempt` and `retry_reason`
+(`timeout`); a first delivery carries `retry_attempt: 0` and an empty
+`retry_reason`. Retries follow Slack's Events API schedule — immediately, after
+one minute, after five minutes — and after the third retry the envelope is
+dropped and logged at error level. A dropped event is recorded in the app's
+delivery-attempt history as delivered, because the store has no separate
+outcome for it.
+
+Response payloads are accepted only for envelopes the connection holds and
+must be a JSON object. An absent or `null` payload is a plain acknowledgement,
+and so is `{}` on an event envelope, which several official SDKs attach to
+every acknowledgement; on an interaction `{}` is still a response (an empty
+option list, or a modal closed). The HTTP process records each response durably by app identifier
 and envelope identifier before it advances the event cursor. Replaying the
 same response is idempotent; replaying the envelope with different payload
 bytes fails with a state conflict. The response record is the explicit handoff
@@ -173,7 +220,10 @@ The response record is an input journal, not an implicit retry or a hidden
 fallback. The reusable response processor claims records with an owner and a
 lease, invokes an explicitly supplied handler, acknowledges each successful
 record, and releases failed records at an explicit retry time. A crash before
-acknowledgement leaves the record reclaimable after the lease expires. The
+acknowledgement leaves the record reclaimable after the lease expires.
+Acknowledged response and interaction rows are kept for 24 hours, so a replayed
+acknowledgement stays idempotent, and are then pruned on the write path in both
+storage profiles. The
 processor claims one response at a time and renews its lease while the handler
 runs. It does not guess application-specific response semantics or run an
 unbounded retry loop. See this section and the compatibility ledger for the
@@ -206,17 +256,35 @@ complete and allowed on the Events API surface, and signs each resulting
 `event_callback` body.
 Topics with no safe Slack representation are acknowledged without being sent;
 malformed or incomplete typed payloads are permanent producer failures rather
-than retry loops. A record may fan out into several deliveries (for example,
-one `member_joined_channel` event per invited user), each with a distinct
-idempotency key. The request includes `X-Slack-Request-Timestamp`,
-`X-Slack-Signature`, and that key as `Idempotency-Key`.
+than retry loops. A record may fan out into several callbacks (for example,
+one `member_joined_channel` event per invited user), each with its own stable
+`event_id`, which is what Slack apps deduplicate on. Each request carries
+`X-Slack-Request-Timestamp` and `X-Slack-Signature`; a retry adds
+`X-Slack-Retry-Num` and `X-Slack-Retry-Reason`. (The `record` format instead
+sends the event ID as `Idempotency-Key`.)
+
+Delivery state is kept per record, not per app. A callback an app fails is
+retried on Slack's schedule — immediately, after one minute, after five
+minutes — and then dropped, while the app's later events keep being delivered.
+A record that fans out is retried only for the callbacks the app did not
+accept. A failure on this side of the delivery, such as a storage read that
+could not project the event, is retried after a few seconds without spending
+one of the app's retries, and its reason is recorded in the app's delivery
+history but never sent to the app. Each cycle delivers up to 32 records per
+app, stops taking more for an app after about a second, and serves up to eight
+apps concurrently, so one slow endpoint does not delay another app. Every
+claimed record carries its own `-lease`, so several workers can share an app.
 
 The same process executes due scheduled messages and first-party Later/channel
 reminders in both delivery formats. `record` is explicitly workspace-scoped;
 `slack-events` claims due schedules and reminders across every workspace.
-Scheduled records retain the creating credential's
-one-way hash, app/bot attribution, thread parent, and terminal delivered or
-failed state. Permanent posting failures are recorded once rather than retried
+Scheduled records retain their owner, app/bot attribution, thread parent, and
+terminal delivered or failed state. The owner is the identity that scheduled
+the message — the app's bot for a bot token, the member and app for a user
+token, the member alone for the first-party client — not the bytes of one
+token, so `chat.scheduledMessages.list` and `chat.deleteScheduledMessage`
+keep working after a token is rotated or reissued, while another app's token
+still sees nothing. Permanent posting failures are recorded once rather than retried
 forever; transient failures retain their fenced lease and retry path.
 
 When workers are stopped as part of a lifecycle profile, configure both
@@ -226,11 +294,11 @@ worker publishes the fenced minimum of scheduled-message and reminder due
 times. Supplying only one coordinate is a configuration error. The ECS module
 keeps its worker always on, so it does not require this optional publication.
 
-Schema 102 cannot reconstruct the exact bearer credential or app identity for
-schedules created by an older release, because the old schema never stored
-either value. Those records remain pending and execute under their original
-author, but they are intentionally absent from exact-token list/delete results.
-New records are fully token-isolated and attributed.
+Schedules created before schema 102 never recorded an app or bot. Schema 186
+rekeys every schedule to its owner from the author, app, and bot it carries,
+so those older records belong to their author with no app: they execute under
+their original author and list and cancel through the author's first-party
+session, but not through an app's token.
 
 The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/),
 [Slack's request-signing guide](https://docs.slack.dev/authentication/verifying-requests-from-slack/),
@@ -242,6 +310,35 @@ Malformed Socket Mode event payloads are closed as protocol errors; the server
 does not synthesize a replacement payload from an internal topic and string.
 The Real Time Messaging event stream applies the same rule and rejects invalid
 or type-less JSON event payloads.
+
+## Public URL
+
+`-auth-public-url` / `SAMEOLDCHAT_AUTH_PUBLIC_URL` is the one statement of
+where clients reach a deployment, and every process that builds a URL a client
+follows reads it:
+
+- `sameoldchat-server` builds the Web API's absolute URLs and the web
+  client's links on it, and in local composition the chat service it hosts
+  builds event payloads on it too.
+- `sameoldchat-chatd` builds the Events API, Socket Mode and RTM payloads in
+  distributed composition, so it takes the same flag.
+- `sameoldchat-worker -delivery-format slack-events` builds the HTTP Events API
+  callbacks, so it takes the same flag; record delivery refuses it.
+
+The URLs an event carries — a shared file's `url_private`,
+`url_private_download` and `permalink`, and the `image_*` of the user object in
+`team_join`, `user_change`, `user_profile_changed` and `user_status_changed` —
+are built on it, exactly as `files.info` and `users.info` build theirs. Journal
+records store those URLs origin-relative and are resolved when an event is
+delivered, so a changed public URL applies to every later delivery.
+
+Without a public URL the Web API builds its URLs on the origin of each request
+(see [Files](files.md#absolute-urls)), but an event has no request to take an
+origin from, so its URLs stay origin-relative and each process that builds
+events logs a warning at startup. A listen address is deliberately not used as
+a fallback: it names a local interface or an internal port behind a proxy, not
+an address a client can reach. Set the public URL on every deployment an app
+connects to.
 
 ## Snapshot retention and verification
 

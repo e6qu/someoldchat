@@ -10,54 +10,63 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
-func (s *Store) CreateOAuthAuthorization(_ context.Context, botUser domain.User, bot domain.Bot, code domain.OAuthCode) error {
+func (s *Store) CreateOAuthAuthorization(_ context.Context, botUser domain.User, bot domain.Bot, code domain.OAuthCode) (domain.OAuthCode, error) {
 	if code.Code == "" || code.ClientID == "" || code.WorkspaceID == "" || code.UserID == "" {
-		return store.InvalidArgument("invalid oauth authorization")
+		return domain.OAuthCode{}, store.InvalidArgument("invalid oauth authorization")
 	}
 	withBot := len(domain.NormalizeScopes(code.BotScopes)) != 0
 	if withBot && (botUser.ID == "" || botUser.WorkspaceID != code.WorkspaceID || bot.ID == "" || bot.WorkspaceID != code.WorkspaceID || bot.UserID != botUser.ID || bot.UpdatedAt.IsZero() || strings.TrimSpace(bot.Name) == "") {
-		return store.InvalidArgument("invalid oauth bot authorization")
+		return domain.OAuthCode{}, store.InvalidArgument("invalid oauth bot authorization")
 	}
 	if !withBot && (botUser.ID != "" || bot.ID != "" || code.BotID != "" || code.BotUserID != "") {
-		return store.InvalidArgument("unexpected oauth bot authorization")
+		return domain.OAuthCode{}, store.InvalidArgument("unexpected oauth bot authorization")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	client, exists := s.oauthClients[code.ClientID]
 	if !exists || withBot && client.AppID != bot.AppID {
-		return store.ErrNotFound
+		return domain.OAuthCode{}, store.ErrNotFound
 	}
 	if withBot && (code.BotID != bot.ID || code.BotUserID != botUser.ID) {
-		return store.InvalidArgument("oauth bot does not match grant")
+		return domain.OAuthCode{}, store.InvalidArgument("oauth bot does not match grant")
 	}
 	if workspace, exists := s.workspaces[code.WorkspaceID]; !exists || workspace.ID == "" {
-		return store.ErrNotFound
+		return domain.OAuthCode{}, store.ErrNotFound
 	}
 	if user, exists := s.users[code.UserID]; !exists || user.WorkspaceID != code.WorkspaceID || user.Deleted {
-		return store.ErrNotFound
+		return domain.OAuthCode{}, store.ErrNotFound
 	}
 	codeHash := domain.HashToken(code.Code)
 	if _, exists := s.oauthCodes[codeHash]; exists {
-		return store.ErrAlreadyExists
+		return domain.OAuthCode{}, store.ErrAlreadyExists
 	}
 	if withBot {
-		if _, exists := s.users[botUser.ID]; exists {
-			return store.ErrAlreadyExists
+		// An app has one bot per workspace. A reinstall, or a second
+		// authorization before the first is redeemed, grants to the bot the
+		// app already has there; only a first install creates one.
+		if existing, found := s.appBotLocked(code.WorkspaceID, client.AppID); found {
+			code.BotID, code.BotUserID = existing.ID, existing.UserID
+		} else {
+			if _, exists := s.users[botUser.ID]; exists {
+				return domain.OAuthCode{}, store.ErrAlreadyExists
+			}
+			if _, exists := s.bots[bot.ID]; exists {
+				return domain.OAuthCode{}, store.ErrAlreadyExists
+			}
+			botUser.Presence = domain.PresenceAuto
+			botUser.Updated = secondsInstant(botUser.Updated)
+			s.users[botUser.ID] = botUser
+			s.members[string(code.WorkspaceID)+"\x00"+string(botUser.ID)] = domain.WorkspaceMembership{WorkspaceID: code.WorkspaceID, UserID: botUser.ID, Role: domain.WorkspaceRoleMember, Active: true}
+			s.bots[bot.ID] = bot
 		}
-		if _, exists := s.bots[bot.ID]; exists {
-			return store.ErrAlreadyExists
-		}
-		botUser.Presence = domain.PresenceAuto
-		s.users[botUser.ID] = botUser
-		s.members[string(code.WorkspaceID)+"\x00"+string(botUser.ID)] = domain.WorkspaceMembership{WorkspaceID: code.WorkspaceID, UserID: botUser.ID, Role: domain.WorkspaceRoleMember, Active: true}
-		s.bots[bot.ID] = bot
 	}
 	code.Scopes = domain.NormalizeScopes(code.Scopes)
 	code.BotScopes = domain.NormalizeScopes(code.BotScopes)
 	code.UserScopes = domain.NormalizeScopes(code.UserScopes)
+	granted := code
 	code.Code = codeHash
 	s.oauthCodes[codeHash] = memoryOAuthCode{grant: code, expiresAt: time.Now().UTC().Add(store.OAuthCodeLifetime)}
-	return nil
+	return granted, nil
 }
 
 func (s *Store) CreateAppConfigurationToken(_ context.Context, accessToken, refreshToken string, value domain.AppConfigurationToken) error {
@@ -274,8 +283,14 @@ func (s *Store) ConsumeAppTrigger(_ context.Context, tokenHash string, appID dom
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, exists := s.appTriggers[tokenHash]
-	if !exists || value.AppID != appID || !value.ExpiresAt.After(now) || !value.ConsumedAt.IsZero() {
+	if !exists || value.AppID != appID {
 		return domain.AppTrigger{}, store.ErrNotFound
+	}
+	if !value.ConsumedAt.IsZero() {
+		return domain.AppTrigger{}, store.ErrTriggerExchanged
+	}
+	if !value.ExpiresAt.After(now) {
+		return domain.AppTrigger{}, store.ErrTriggerExpired
 	}
 	value.ConsumedAt = now
 	s.appTriggers[tokenHash] = value
@@ -287,8 +302,14 @@ func (s *Store) UseAppResponseURL(_ context.Context, tokenHash string) (domain.A
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, exists := s.appResponseURLs[tokenHash]
-	if !exists || !value.ExpiresAt.After(now) || value.UsesRemaining <= 0 {
+	if !exists {
 		return domain.AppResponseURL{}, store.ErrNotFound
+	}
+	if !value.ExpiresAt.After(now) {
+		return domain.AppResponseURL{}, store.ErrCapabilityExpired
+	}
+	if value.UsesRemaining <= 0 {
+		return domain.AppResponseURL{}, store.ErrCapabilityExhausted
 	}
 	value.UsesRemaining--
 	s.appResponseURLs[tokenHash] = value

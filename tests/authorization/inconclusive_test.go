@@ -18,7 +18,6 @@ func inconclusiveStanding() map[string]struct{} {
 		"AssistantSearchContext":             {},
 		"DispatchViewBlockAction":            {},
 		"GetWorkflowPermission":              {},
-		"ListEventsAfter":                    {},
 		"ListFeaturedWorkflows":              {},
 		"ListUserEventsAfter":                {},
 		"LoadAppOptions":                     {},
@@ -44,4 +43,4 @@ func inconclusiveStanding() map[string]struct{} {
 }
 
 // inconclusiveStandingCeiling is how blind the probe is allowed to be.
-const inconclusiveStandingCeiling = 29
+const inconclusiveStandingCeiling = 28

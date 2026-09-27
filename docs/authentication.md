@@ -14,6 +14,31 @@ It rejects unknown source names, incomplete GitHub email configuration, empty
 scope entries, and duplicate source names during startup. It does not select a
 different source when the selected source is unavailable.
 
+## Web API tokens and scopes
+
+A Web API token is presented as `Authorization: Bearer <token>` (the scheme is
+case-insensitive) or, for the methods Slack allows it on, as a `token` form
+field. Every authenticated response carries `X-OAuth-Scopes`, the scopes the
+token holds, and `X-Accepted-OAuth-Scopes`, the scopes the method accepts.
+
+Conversation methods take the scope matching the conversation's type, as in
+Slack: `channels:*` for public channels, `groups:*` for private channels,
+`im:*` for direct messages and `mpim:*` for group direct messages, with
+`*:history` for `conversations.history`/`replies`, `*:read` for
+`conversations.info`/`members`/`list` and `users.conversations`, and the
+write scopes for the mutators (a bot token manages public channels with
+`channels:manage`, a user token with `channels:write`). A token holding none of
+a method's family is refused with `missing_scope` naming the whole family;
+`conversations.list` narrows its listing to the requested types the token can
+read. Upgrading changes what an existing grant reaches: a stored token whose
+grant names only the `channels:` scopes used to read private channels and
+direct messages and now reaches public channels only, so an app that needs the
+others must request the per-type scopes and be reinstalled. The seeded
+`-api-token` is created with the member role's scopes, which include them, but
+seeding never rewrites an existing token, so a durable development database
+seeded before the upgrade keeps the old grant until the token is rotated (a
+new `-api-token` value) or the database is recreated.
+
 ## Configuration
 
 The server command accepts these credentials and settings:
@@ -44,6 +69,18 @@ credential is supplied, the workspace, lookup user, public HTTPS URL, and
 32-byte state key are required. GitHub login also requires the GitHub email
 endpoint, which the server configures as `https://api.github.com/user/emails`.
 
+`-auth-public-url` is also the origin of every absolute URL the Slack Web API
+emits: file downloads (`url_private`, `permalink_public`), the v2 upload URL,
+the OAuth authorize URL, message permalinks (`chat.getPermalink` and the
+`permalink` of search matches, pins and reactions), and `auth.test`'s `url`.
+Official SDKs follow those URLs as given, so a deployment behind a proxy —
+where the request's `Host` is the upstream name — should set it to the address
+clients use, even without an identity provider. Without it the URLs are built
+on the origin of each request; see [Files](files.md#absolute-urls). The same
+value is the origin of the URLs in event payloads, which `sameoldchat-chatd`
+and the `slack-events` worker also take; see
+[Public URL](operations.md#public-url).
+
 For container deployment, `SAMEOLDCHAT_API_TOKEN`,
 `SAMEOLDCHAT_SESSION_TOKEN`, `SAMEOLDCHAT_AUTH_STATE_KEY_HEX`,
 `SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX`,
@@ -66,9 +103,13 @@ gain control-plane authority as a side effect. A workspace with real identities
 administers itself through them, never through a token every holder shares.
 
 The application credential key must decode to exactly 32 bytes. It encrypts
-developer-app signing secrets at rest and is required for durable local storage
-or the separate `sameoldchat-chatd` process; losing it prevents Events API,
-interactivity, and slash-command requests from being signed.
+developer-app signing secrets and verification tokens at rest, and the
+execution-scoped (`xwfp-`) bot tokens handed to workflow functions, which are
+sent again with every interaction from what an execution posted or opened. It
+is required for durable local storage or the separate `sameoldchat-chatd`
+process; losing it prevents Events API, interactivity, and slash-command
+requests from being signed, and function-scoped interactions of executions
+still running from carrying their token.
 `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` optionally scopes SameOldChat's own session
 cookies to a parent DNS hostname used only by this SameOldChat deployment. It
 must never be set to a parent shared with unrelated relying applications;
@@ -191,15 +232,18 @@ the supplied verified email, creates durable workspace membership, and accepts
 only the `member` or `admin` role. It does not create a password or bypass the
 configured authorization source.
 
-The internal administration endpoints are:
+The internal administration endpoints are first-party routes of the web client,
+not Slack Web API methods, so they live under the page they serve rather than
+in the Web API's `/api/` namespace (which answers `unknown_method` for these
+names):
 
 ```text
-GET  /api/admin.auth.methods.list
-POST /api/admin.auth.methods.set
-GET  /api/admin.auth.users.list
-POST /api/admin.auth.users.invite
-POST /api/admin.auth.users.create
-POST /api/admin.auth.users.set
+GET  /app/admin/auth/methods.list
+POST /app/admin/auth/methods.set
+GET  /app/admin/auth/users.list
+POST /app/admin/auth/users.invite
+POST /app/admin/auth/users.create
+POST /app/admin/auth/users.set
 ```
 
 The user list accepts `limit` from 1 through 100 and an opaque `cursor`. It

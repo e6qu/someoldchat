@@ -23,6 +23,7 @@ import (
 	chatgrpc "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc"
 	"github.com/sameoldchat/sameoldchat/internal/observability"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
@@ -89,6 +90,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// bootstrap_admin_email inert and left administrator sign-in unreachable.
 	bootstrapAdminEmail := flags.String("bootstrap-admin-email", os.Getenv("SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL"), "email address of the initial workspace administrator")
 	appCredentialKeyHex := flags.String("app-credential-key-hex", os.Getenv("SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX"), "AES-256 key used to encrypt application signing credentials")
+	// The chat service builds the Events API, Socket Mode and RTM payloads, and
+	// every URL in them — a file's url_private, a member's image — is built on
+	// the deployment's public URL. It is the same -auth-public-url the HTTP
+	// process is given; see docs/operations.md.
+	publicURL := flags.String("auth-public-url", os.Getenv("SAMEOLDCHAT_AUTH_PUBLIC_URL"), "public URL clients reach this deployment on; every absolute URL in an event payload is built on it (HTTPS, or an explicit loopback URL for development)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -126,6 +132,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("parse dqlite cluster", "error", err)
 		return exitConfiguration
 	}
+	origin, err := eventOrigin(logger, *publicURL)
+	if err != nil {
+		logger.Error("invalid -auth-public-url", "error", err)
+		return exitConfiguration
+	}
 	if *appToken != "" || *appID != "" {
 		if *appToken == "" || *appID == "" {
 			logger.Error("Socket Mode requires both app token and app ID")
@@ -143,7 +154,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("durable storage requires an application credential key")
 		return exitConfiguration
 	}
-	runtime, err := localchat.Open(ctx, localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: *bootstrapAdminEmail, AppCredentialKey: appCredentialKey})
+	runtime, err := localchat.Open(ctx, localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: *bootstrapAdminEmail, AppCredentialKey: appCredentialKey, PublicURL: origin})
 	if err != nil {
 		logger.Error("open local chat", "error", err)
 		return exitRuntime
@@ -348,4 +359,16 @@ func refuseSelfIssuedClientAuthority(certificate tls.Certificate, clientCAs *x50
 		return nil
 	}
 	return errors.New("this server's own certificate would be accepted as a client certificate; issue clients from a separate authority and give -tls-client-ca only that authority")
+}
+
+// eventOrigin validates the public URL event payloads are built on. None is
+// not a fault — a development deployment reaches files through the Web API,
+// whose URLs follow the request — but the payloads then carry origin-relative
+// URLs, which an operator should know before an app reports them.
+func eventOrigin(logger *slog.Logger, value string) (string, error) {
+	if strings.TrimSpace(value) == "" {
+		logger.Warn("no -auth-public-url: URLs in event payloads are origin-relative")
+		return "", nil
+	}
+	return slackobject.ParsePublicURL(value)
 }

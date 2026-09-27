@@ -134,8 +134,8 @@ func TestAppInteractionCapabilitiesAreOneUseAndBounded(t *testing.T) {
 	if got, err := s.ConsumeAppTrigger(ctx, trigger.TokenHash, "A1"); err != nil || got.ConsumedAt.IsZero() {
 		t.Fatalf("trigger=%+v err=%v", got, err)
 	}
-	if _, err := s.ConsumeAppTrigger(ctx, trigger.TokenHash, "A1"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("trigger replay error=%v, want %v", err, store.ErrNotFound)
+	if _, err := s.ConsumeAppTrigger(ctx, trigger.TokenHash, "A1"); !errors.Is(err, store.ErrTriggerExchanged) {
+		t.Fatalf("trigger replay error=%v, want %v", err, store.ErrTriggerExchanged)
 	}
 	for remaining := 4; remaining >= 0; remaining-- {
 		got, err := s.UseAppResponseURL(ctx, response.TokenHash)
@@ -143,7 +143,7 @@ func TestAppInteractionCapabilitiesAreOneUseAndBounded(t *testing.T) {
 			t.Fatalf("response use remaining=%d value=%+v err=%v", remaining, got, err)
 		}
 	}
-	if _, err := s.UseAppResponseURL(ctx, response.TokenHash); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.UseAppResponseURL(ctx, response.TokenHash); !errors.Is(err, store.ErrCapabilityExhausted) || !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("exhausted response error=%v, want %v", err, store.ErrNotFound)
 	}
 
@@ -158,10 +158,10 @@ func TestAppInteractionCapabilitiesAreOneUseAndBounded(t *testing.T) {
 	if err := s.CreateAppInteractionCapabilities(ctx, expired, expiredResponse); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ConsumeAppTrigger(ctx, expired.TokenHash, "A1"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("expired trigger error=%v, want %v", err, store.ErrNotFound)
+	if _, err := s.ConsumeAppTrigger(ctx, expired.TokenHash, "A1"); !errors.Is(err, store.ErrTriggerExpired) {
+		t.Fatalf("expired trigger error=%v, want %v", err, store.ErrTriggerExpired)
 	}
-	if _, err := s.UseAppResponseURL(ctx, expiredResponse.TokenHash); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.UseAppResponseURL(ctx, expiredResponse.TokenHash); !errors.Is(err, store.ErrCapabilityExpired) {
 		t.Fatalf("expired response error=%v, want %v", err, store.ErrNotFound)
 	}
 }

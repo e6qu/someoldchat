@@ -17,53 +17,77 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/bearer"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 type Scope string
 
+// ScopeChatWritePublic lets a bot post to a public channel it has not joined.
+// chat:write does not grant it, and it never reaches a private channel or a
+// direct conversation.
+const ScopeChatWritePublic Scope = "chat:write.public"
+
 const (
-	ScopeChatWrite               Scope = "chat:write"
-	ScopeChatWriteCustomize      Scope = "chat:write.customize"
-	ScopeIncomingWebhook         Scope = "incoming-webhook"
-	ScopeChannelsHistory         Scope = "channels:history"
-	ScopeUsersRead               Scope = "users:read"
-	ScopeUsersReadEmail          Scope = "users:read.email"
-	ScopeUsersWrite              Scope = "users:write"
-	ScopeUsersProfileRead        Scope = "users.profile:read"
-	ScopeUsersProfileWrite       Scope = "users.profile:write"
-	ScopeChannelsRead            Scope = "channels:read"
-	ScopeChannelsJoin            Scope = "channels:join"
-	ScopeChannelsWrite           Scope = "channels:write"
-	ScopeChannelsManage          Scope = "channels:manage"
-	ScopeChannelsWriteInvites    Scope = "channels:write.invites"
-	ScopeGroupsWrite             Scope = "groups:write"
-	ScopeGroupsWriteInvites      Scope = "groups:write.invites"
-	ScopeIMWrite                 Scope = "im:write"
-	ScopeMPIMWrite               Scope = "mpim:write"
-	ScopeReactionsWrite          Scope = "reactions:write"
-	ScopeReactionsRead           Scope = "reactions:read"
-	ScopePinsWrite               Scope = "pins:write"
-	ScopePinsRead                Scope = "pins:read"
-	ScopeBookmarksRead           Scope = "bookmarks:read"
-	ScopeBookmarksWrite          Scope = "bookmarks:write"
-	ScopeSearchRead              Scope = "search:read"
-	ScopeFilesWrite              Scope = "files:write"
-	ScopeFilesRead               Scope = "files:read"
-	ScopeRemoteFilesRead         Scope = "remote_files:read"
-	ScopeRemoteFilesWrite        Scope = "remote_files:write"
-	ScopeRemoteFilesShare        Scope = "remote_files:share"
-	ScopeCanvasesRead            Scope = "canvases:read"
-	ScopeCanvasesWrite           Scope = "canvases:write"
-	ScopeListsRead               Scope = "lists:read"
-	ScopeListsWrite              Scope = "lists:write"
-	ScopeTeamRead                Scope = "team:read"
-	ScopeTeamPreferencesRead     Scope = "team.preferences:read"
-	ScopeEmojiRead               Scope = "emoji:read"
-	ScopeAuthorizationsRead      Scope = "authorizations:read"
+	ScopeChatWrite          Scope = "chat:write"
+	ScopeChatWriteCustomize Scope = "chat:write.customize"
+	ScopeIncomingWebhook    Scope = "incoming-webhook"
+	ScopeChannelsHistory    Scope = "channels:history"
+	// Slack grants reading a conversation per conversation type: the history
+	// of a private channel, a direct message and a group direct message each
+	// needs its own scope, and channels:history reaches public channels only.
+	ScopeGroupsHistory     Scope = "groups:history"
+	ScopeIMHistory         Scope = "im:history"
+	ScopeMPIMHistory       Scope = "mpim:history"
+	ScopeUsersRead         Scope = "users:read"
+	ScopeUsersReadEmail    Scope = "users:read.email"
+	ScopeUsersWrite        Scope = "users:write"
+	ScopeUsersProfileRead  Scope = "users.profile:read"
+	ScopeUsersProfileWrite Scope = "users.profile:write"
+	ScopeChannelsRead      Scope = "channels:read"
+	// The per-type counterparts of channels:read for conversation metadata,
+	// membership and listing.
+	ScopeGroupsRead           Scope = "groups:read"
+	ScopeIMRead               Scope = "im:read"
+	ScopeMPIMRead             Scope = "mpim:read"
+	ScopeChannelsJoin         Scope = "channels:join"
+	ScopeChannelsWrite        Scope = "channels:write"
+	ScopeChannelsManage       Scope = "channels:manage"
+	ScopeChannelsWriteInvites Scope = "channels:write.invites"
+	ScopeGroupsWrite          Scope = "groups:write"
+	ScopeGroupsWriteInvites   Scope = "groups:write.invites"
+	ScopeIMWrite              Scope = "im:write"
+	ScopeMPIMWrite            Scope = "mpim:write"
+	ScopeReactionsWrite       Scope = "reactions:write"
+	ScopeReactionsRead        Scope = "reactions:read"
+	ScopePinsWrite            Scope = "pins:write"
+	ScopePinsRead             Scope = "pins:read"
+	ScopeBookmarksRead        Scope = "bookmarks:read"
+	ScopeBookmarksWrite       Scope = "bookmarks:write"
+	ScopeSearchRead           Scope = "search:read"
+	ScopeFilesWrite           Scope = "files:write"
+	ScopeFilesRead            Scope = "files:read"
+	ScopeRemoteFilesRead      Scope = "remote_files:read"
+	ScopeRemoteFilesWrite     Scope = "remote_files:write"
+	ScopeRemoteFilesShare     Scope = "remote_files:share"
+	ScopeCanvasesRead         Scope = "canvases:read"
+	ScopeCanvasesWrite        Scope = "canvases:write"
+	ScopeListsRead            Scope = "lists:read"
+	ScopeListsWrite           Scope = "lists:write"
+	ScopeTeamRead             Scope = "team:read"
+	ScopeTeamPreferencesRead  Scope = "team.preferences:read"
+	ScopeEmojiRead            Scope = "emoji:read"
+	ScopeAuthorizationsRead   Scope = "authorizations:read"
+	// links:read receives link_shared, the event an app's unfurl domains
+	// raise (pinned AsyncAPI x-scopes-required); links:write answers it with
+	// chat.unfurl.
+	ScopeLinksRead               Scope = "links:read"
 	ScopeLinksWrite              Scope = "links:write"
 	ScopeIdentityBasic           Scope = "identity.basic"
+	ScopeIdentityEmail           Scope = "identity.email"
+	ScopeIdentityAvatar          Scope = "identity.avatar"
+	ScopeIdentityTeam            Scope = "identity.team"
 	ScopeRTMStream               Scope = "rtm:stream"
 	ScopeConnectionsWrite        Scope = "connections:write"
 	ScopeDatastoreRead           Scope = "datastore:read"
@@ -134,6 +158,10 @@ type Principal struct {
 	CredentialHash string
 	TokenType      domain.TokenType
 	Scopes         map[Scope]struct{}
+	// FunctionExecutionID is set for an execution-scoped bot token (xwfp-):
+	// what the principal posts or opens belongs to that function execution,
+	// and it may complete only that execution.
+	FunctionExecutionID domain.WorkflowStepID
 }
 
 func (p Principal) HasScope(scope Scope) bool { _, ok := p.Scopes[scope]; return ok }
@@ -449,7 +477,7 @@ func multipartBoundary(r *http.Request) string {
 // therefore scanned through a bounded, replayable prefix so the body the
 // handler sees is byte-for-byte the body that arrived.
 func requestToken(r *http.Request) string {
-	if token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")); token != "" {
+	if token, ok := bearer.Token(r.Header.Get("Authorization")); ok {
 		return token
 	}
 	if boundary := multipartBoundary(r); boundary != "" && r.Body != nil && r.MultipartForm == nil {
@@ -507,14 +535,21 @@ var allScopes = []Scope{
 	ScopeConversationsConnectManage,
 	ScopeChatWrite,
 	ScopeChatWriteCustomize,
+	ScopeChatWritePublic,
 	ScopeIncomingWebhook,
 	ScopeChannelsHistory,
+	ScopeGroupsHistory,
+	ScopeIMHistory,
+	ScopeMPIMHistory,
 	ScopeUsersRead,
 	ScopeUsersReadEmail,
 	ScopeUsersWrite,
 	ScopeUsersProfileRead,
 	ScopeUsersProfileWrite,
 	ScopeChannelsRead,
+	ScopeGroupsRead,
+	ScopeIMRead,
+	ScopeMPIMRead,
 	ScopeChannelsJoin,
 	ScopeChannelsWrite,
 	ScopeChannelsManage,
@@ -543,8 +578,12 @@ var allScopes = []Scope{
 	ScopeTeamPreferencesRead,
 	ScopeEmojiRead,
 	ScopeAuthorizationsRead,
+	ScopeLinksRead,
 	ScopeLinksWrite,
 	ScopeIdentityBasic,
+	ScopeIdentityEmail,
+	ScopeIdentityAvatar,
+	ScopeIdentityTeam,
 	ScopeRTMStream,
 	ScopeConnectionsWrite,
 	ScopeDatastoreRead,
@@ -710,7 +749,7 @@ func (s Stored) Authenticate(r *http.Request) (Principal, error) {
 	for _, scope := range record.Scopes {
 		scopes[Scope(scope)] = struct{}{}
 	}
-	return Principal{WorkspaceID: record.WorkspaceID, UserID: record.UserID, AppID: record.AppID, BotID: record.BotID, CredentialHash: domain.HashToken(token), TokenType: record.TokenType, Scopes: scopes}, nil
+	return Principal{WorkspaceID: record.WorkspaceID, UserID: record.UserID, AppID: record.AppID, BotID: record.BotID, CredentialHash: domain.HashToken(token), TokenType: record.TokenType, Scopes: scopes, FunctionExecutionID: record.FunctionExecutionID}, nil
 }
 
 func NewStatic(token string, principal Principal) (Static, error) {

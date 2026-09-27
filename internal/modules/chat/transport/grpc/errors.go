@@ -72,10 +72,12 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_message", code: codes.InvalidArgument, sentinel: service.ErrInvalidMessage},
 	{key: "service.invalid_message_stream", code: codes.InvalidArgument, sentinel: service.ErrInvalidMessageStream},
 	{key: "service.invalid_stream_chunks", code: codes.InvalidArgument, sentinel: service.ErrInvalidStreamChunks},
+	{key: "service.view_files_invalid", code: codes.InvalidArgument, sentinel: service.ErrViewFilesInvalid},
 	{key: "service.missing_stream_recipient_team", code: codes.InvalidArgument, sentinel: service.ErrMissingStreamRecipientTeam},
 	{key: "service.missing_stream_recipient_user", code: codes.InvalidArgument, sentinel: service.ErrMissingStreamRecipientUser},
 	{key: "service.invalid_timestamp", code: codes.InvalidArgument, sentinel: service.ErrInvalidTimestamp},
 	{key: "service.invalid_conversation", code: codes.InvalidArgument, sentinel: service.ErrInvalidConversation},
+	{key: "service.conversation_text_too_long", code: codes.InvalidArgument, sentinel: service.ErrConversationTextTooLong},
 	{key: "service.invalid_workspace", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkspace},
 	{key: "service.invalid_conversation_prefs", code: codes.InvalidArgument, sentinel: service.ErrInvalidConversationPrefs},
 	{key: "service.invalid_reaction", code: codes.InvalidArgument, sentinel: service.ErrInvalidReaction},
@@ -98,6 +100,14 @@ var errorClasses = []errorClass{
 	// cannot_complete_others rather than a generic not_found.
 	{key: "service.reminder_recurring", code: codes.FailedPrecondition, sentinel: service.ErrReminderRecurring},
 	{key: "service.reminder_owned_by_other", code: codes.PermissionDenied, sentinel: service.ErrReminderOwnedByOther},
+	{key: "service.snooze_not_active", code: codes.FailedPrecondition, sentinel: service.ErrSnoozeNotActive},
+	{key: "service.snooze_too_long", code: codes.InvalidArgument, sentinel: service.ErrSnoozeTooLong},
+	{key: "service.reminder_unparseable", code: codes.InvalidArgument, sentinel: service.ErrReminderUnparseable},
+	{key: "service.not_starred", code: codes.FailedPrecondition, sentinel: service.ErrNotStarred},
+	{key: "service.user_group_name_taken", code: codes.AlreadyExists, sentinel: service.ErrUserGroupNameTaken},
+	{key: "service.user_group_handle_taken", code: codes.AlreadyExists, sentinel: service.ErrUserGroupHandleTaken},
+	{key: "service.invalid_user_group_users", code: codes.InvalidArgument, sentinel: service.ErrInvalidUserGroupUsers},
+	{key: "service.cannot_unfurl_url", code: codes.FailedPrecondition, sentinel: service.ErrCannotUnfurlURL},
 	{key: "service.scheduled_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeInPast},
 	{key: "service.scheduled_time_too_far", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeTooFar},
 	{key: "service.scheduled_too_many", code: codes.ResourceExhausted, sentinel: service.ErrScheduledTooMany},
@@ -132,10 +142,12 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_trigger_config", code: codes.InvalidArgument, sentinel: service.ErrInvalidTriggerConfig},
 	{key: "service.automation_entities_empty", code: codes.InvalidArgument, sentinel: service.ErrAutomationEntitiesEmpty},
 	{key: "service.invalid_dialog", code: codes.InvalidArgument, sentinel: service.ErrInvalidDialog},
+	{key: "service.app_missing_action_url", code: codes.FailedPrecondition, sentinel: service.ErrAppMissingActionURL},
 	{key: "service.invalid_bot", code: codes.InvalidArgument, sentinel: service.ErrInvalidBot},
 	{key: "service.invalid_migration", code: codes.InvalidArgument, sentinel: service.ErrInvalidMigration},
 	{key: "service.invalid_oauth", code: codes.InvalidArgument, sentinel: service.ErrInvalidOAuth},
 	{key: "service.invalid_oauth_client", code: codes.InvalidArgument, sentinel: service.ErrInvalidOAuthClient},
+	{key: "service.bad_oauth_client_secret", code: codes.InvalidArgument, sentinel: service.ErrBadOAuthClientSecret},
 	{key: "service.oauth_app_mismatch", code: codes.PermissionDenied, sentinel: service.ErrOAuthAppMismatch},
 	{key: "service.invalid_integration_logs", code: codes.InvalidArgument, sentinel: service.ErrInvalidIntegrationLogs},
 	{key: "service.invalid_list", code: codes.InvalidArgument, sentinel: service.ErrInvalidList},
@@ -148,15 +160,30 @@ var errorClasses = []errorClass{
 	{key: "service.app_not_distributable", code: codes.InvalidArgument, sentinel: service.ErrAppNotDistributable},
 	{key: "service.invalid_external_auth_provider", code: codes.InvalidArgument, sentinel: service.ErrInvalidExternalAuthProvider},
 	{key: "service.external_auth_connection", code: codes.FailedPrecondition, sentinel: service.ErrExternalAuthConnection},
+	// The response_url refusals. The two URL states are NotFound, as the HTTP
+	// boundary answers them 404.
+	{key: "service.app_response_payload_invalid", code: codes.InvalidArgument, sentinel: service.ErrAppResponsePayloadInvalid},
+	{key: "service.invalid_blocks", code: codes.InvalidArgument, sentinel: service.ErrInvalidBlocks},
+	{key: "service.app_response_no_text", code: codes.InvalidArgument, sentinel: service.ErrAppResponseNoText},
+	{key: "service.app_response_url_used", code: codes.NotFound, sentinel: service.ErrAppResponseURLUsed},
+	{key: "service.app_response_url_expired", code: codes.NotFound, sentinel: service.ErrAppResponseURLExpired},
 	{key: "service.invalid_app_response", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppResponse},
 	{key: "service.invalid_datastore_item", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreItem},
 	{key: "service.invalid_datastore_query", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreQuery},
+	{key: "service.trigger_exchanged", code: codes.InvalidArgument, sentinel: service.ErrTriggerExchanged},
+	{key: "service.trigger_expired", code: codes.InvalidArgument, sentinel: service.ErrTriggerExpired},
 	{key: "service.invalid_trigger", code: codes.InvalidArgument, sentinel: service.ErrInvalidTrigger},
 	{key: "service.slash_command_in_thread", code: codes.InvalidArgument, sentinel: service.ErrSlashCommandInThread},
 	// The generic member of the class closes it, and it restores a bare
 	// InvalidArgument: a peer that sent no detail still yields an
 	// invalid-argument classification (HTTP 400) rather than codes.Unavailable
 	// (HTTP 503, which asks a caller to retry a request that can never succeed).
+	// A body shorter or longer than its declared size is the uploader's
+	// mistake. UploadExternalFile names it ErrInvalidExternalUpload; the other
+	// blob writers return it unchanged, so it needs its own class to stay a
+	// client error in both compositions.
+	{key: "blob.size_mismatch", code: codes.InvalidArgument, sentinel: blob.ErrSizeMismatch},
+	{key: "store.oauth_redirect_mismatch", code: codes.InvalidArgument, sentinel: store.ErrOAuthRedirectMismatch},
 	{key: "store.invalid_argument", code: codes.InvalidArgument, sentinel: store.ErrInvalidArgument, restoresCode: true},
 
 	// Configuration tokens authenticate a developer rather than an installed
@@ -201,6 +228,7 @@ var errorClasses = []errorClass{
 	{key: "store.bookmark_limit", code: codes.ResourceExhausted, sentinel: store.ErrBookmarkLimit},
 	{key: "store.scheduled_message_limit", code: codes.ResourceExhausted, sentinel: store.ErrScheduledMessageLimit},
 	{key: "store.scheduled_status_limit", code: codes.ResourceExhausted, sentinel: store.ErrScheduledStatusLimit},
+	{key: "service.view_push_limit", code: codes.ResourceExhausted, sentinel: service.ErrViewPushLimit},
 
 	// Authorisation and preconditions. service.ErrNotWorkspaceAdmin shares
 	// codes.PermissionDenied with service.ErrMessageNotOwned and stays
@@ -226,6 +254,9 @@ var errorClasses = []errorClass{
 	{key: "service.conversation_not_archived", code: codes.FailedPrecondition, sentinel: service.ErrConversationNotArchived},
 	{key: "service.cannot_archive_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotArchiveDefault},
 	{key: "service.cannot_leave_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotLeaveDefault},
+	{key: "service.cannot_kick_from_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotKickFromDefault},
+	{key: "service.cannot_kick_self", code: codes.FailedPrecondition, sentinel: service.ErrCannotKickSelf},
+	{key: "service.conversation_archived", code: codes.FailedPrecondition, sentinel: service.ErrConversationArchived},
 	// Not being in the conversation is the refusal behind not_in_channel: the
 	// caller is a workspace member and the conversation exists, so it is neither
 	// an absence nor a permission failure.
@@ -242,6 +273,10 @@ var errorClasses = []errorClass{
 	{key: "service.app_not_hosted", code: codes.FailedPrecondition, sentinel: service.ErrAppNotHosted},
 	{key: "service.function_not_running", code: codes.FailedPrecondition, sentinel: service.ErrFunctionNotRunning},
 	{key: "service.message_not_streaming", code: codes.FailedPrecondition, sentinel: service.ErrMessageNotStreaming},
+	// The recipient exists or does not, but either way cannot see the
+	// conversation; that is a precondition on the recipient, not an absence
+	// of the conversation the caller named.
+	{key: "service.recipient_not_in_conversation", code: codes.FailedPrecondition, sentinel: service.ErrRecipientNotInConversation},
 	{key: "service.message_already_deleted", code: codes.FailedPrecondition, sentinel: service.ErrMessageAlreadyDeleted, restoresCode: true},
 
 	// Absence. blob.ErrNotFound is distinct from store.ErrNotFound and reaches a
@@ -252,13 +287,17 @@ var errorClasses = []errorClass{
 	// codes.Unavailable in the other.
 	{key: "blob.not_found", code: codes.NotFound, sentinel: blob.ErrNotFound},
 	{key: "service.automation_user_not_found", code: codes.NotFound, sentinel: service.ErrAutomationUserNotFound},
+	{key: "service.user_not_found", code: codes.NotFound, sentinel: service.ErrUserNotFound},
 	{key: "service.automation_channel_not_found", code: codes.NotFound, sentinel: service.ErrAutomationChannelNotFound},
 	{key: "service.automation_team_not_found", code: codes.NotFound, sentinel: service.ErrAutomationTeamNotFound},
 	{key: "service.automation_org_not_found", code: codes.NotFound, sentinel: service.ErrAutomationOrgNotFound},
 	{key: "service.workflow_function_not_found", code: codes.NotFound, sentinel: service.ErrWorkflowFunctionNotFound},
 	{key: "service.webhook_trigger_secret", code: codes.NotFound, sentinel: service.ErrWebhookTriggerSecret},
 	{key: "service.slash_command_not_found", code: codes.NotFound, sentinel: service.ErrSlashCommandNotFound},
+	{key: "service.thread_not_found", code: codes.NotFound, sentinel: service.ErrThreadNotFound},
 	{key: "service.app_datastore_not_found", code: codes.NotFound, sentinel: service.ErrAppDatastoreNotFound},
+	{key: "store.trigger_exchanged", code: codes.NotFound, sentinel: store.ErrTriggerExchanged},
+	{key: "store.trigger_expired", code: codes.NotFound, sentinel: store.ErrTriggerExpired},
 	{key: "store.not_found", code: codes.NotFound, sentinel: store.ErrNotFound, restoresCode: true},
 
 	// Corrupt stored data and events a producer could not build. codes.Internal

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -200,15 +201,15 @@ func TestSocketModeResponseRenewalKeepsSlowLeaseOwned(t *testing.T) {
 	if err := s.RecordSocketModeResponse(ctx, response); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-1", 1, 30*time.Millisecond)
+	claimed, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-1", 1, 200*time.Millisecond)
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claimed=%+v err=%v", claimed, err)
 	}
-	time.Sleep(10 * time.Millisecond)
-	if err := s.RenewSocketModeResponses(ctx, "worker-1", claimed, 100*time.Millisecond); err != nil {
+	time.Sleep(20 * time.Millisecond)
+	if err := s.RenewSocketModeResponses(ctx, "worker-1", claimed, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(30 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 	if replacement, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-2", 1, time.Minute); err != nil || len(replacement) != 0 {
 		t.Fatalf("renewed response was reclaimed=%+v err=%v", replacement, err)
 	}
@@ -280,8 +281,12 @@ func TestConversationUnreadCountFollowsReadCursor(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	// Another member's message: a member's own posts are never unread to them.
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
 	created := time.Unix(1700000000, 123456789).UTC()
-	if err := s.CreateMessage(ctx, domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "unread", CreatedAt: created}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
+	if err := s.CreateMessage(ctx, domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U2", Text: "unread", CreatedAt: created}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
 	page, err := s.ListConversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 10})
@@ -396,15 +401,16 @@ func TestStarsAreDurableAndPaged(t *testing.T) {
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1"})
 	s.SeedConversationMember("C1", "U1")
 	created := time.Unix(300, 0).UTC()
-	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section"}]`, CreatedAt: created}
+	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section","block_id":"b1"}]`, CreatedAt: created}
 	if err := s.CreateMessage(ctx, message, events.Event{ID: "message-1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AddStar(ctx, domain.Star{Message: message, Conversation: "C1", UserID: "U1", CreatedAt: created}, events.Event{ID: "star-1", WorkspaceID: "T1", Topic: "star.added", Payload: "M1", CreatedAt: created}); err != nil {
 		t.Fatal(err)
 	}
-	stars, next, more, err := s.ListStars(ctx, "T1", "U1", domain.PageRequest{Limit: 1})
-	if err != nil || len(stars) != 1 || stars[0].Message.ID != "M1" || stars[0].Message.Blocks != message.Blocks || more || next != "" {
+	page, err := s.ListStars(ctx, "T1", "U1", domain.PageRequest{Limit: 1})
+	stars, next, more := page.Stars, page.NextCursor, page.HasMore
+	if err != nil || len(stars) != 1 || stars[0].Message.ID != "M1" || stars[0].Message.Blocks != message.Blocks || more || next != "" || page.Total != 1 {
 		t.Fatalf("stars=%+v next=%q more=%v err=%v", stars, next, more, err)
 	}
 }
@@ -447,18 +453,26 @@ func TestRemindersAreDurableAndCompletable(t *testing.T) {
 func TestAccessLogsPaginationDoesNotMaterializeHistory(t *testing.T) {
 	ctx := context.Background()
 	s := New()
+	// Four addresses, so four aggregate rows; a repeat of the first address
+	// counts into its row instead of adding a fifth.
 	for index := 0; index < 4; index++ {
-		if err := s.RecordAccess(ctx, domain.AccessLog{WorkspaceID: "T1", UserID: "U1", CreatedAt: time.Unix(int64(index+1), 0).UTC()}); err != nil {
+		if err := s.RecordAccess(ctx, domain.AccessLog{WorkspaceID: "T1", UserID: "U1", IP: "10.0.0." + strconv.Itoa(index), CreatedAt: time.Unix(int64(index+1), 0).UTC()}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	values, more, err := s.ListAccessLogs(ctx, "T1", time.Time{}, 2, 1)
-	if err != nil || len(values) != 2 || !more || values[0].CreatedAt.Unix() != 4 || values[1].CreatedAt.Unix() != 3 {
-		t.Fatalf("first page=%+v more=%v err=%v", values, more, err)
+	if err := s.RecordAccess(ctx, domain.AccessLog{WorkspaceID: "T1", UserID: "U1", IP: "10.0.0.0", CreatedAt: time.Unix(10, 0).UTC()}); err != nil {
+		t.Fatal(err)
 	}
-	values, more, err = s.ListAccessLogs(ctx, "T1", time.Time{}, 2, 2)
-	if err != nil || len(values) != 2 || more || values[0].CreatedAt.Unix() != 2 || values[1].CreatedAt.Unix() != 1 {
-		t.Fatalf("second page=%+v more=%v err=%v", values, more, err)
+	page, err := s.ListAccessLogs(ctx, "T1", time.Time{}, 2, 1)
+	values := page.Logins
+	if err != nil || len(values) != 2 || !page.HasMore || page.Total != 4 || values[0].IP != "10.0.0.0" || values[0].Count != 2 ||
+		values[0].FirstAt.Unix() != 1 || values[0].CreatedAt.Unix() != 10 || values[1].CreatedAt.Unix() != 4 {
+		t.Fatalf("first page=%+v err=%v", page, err)
+	}
+	page, err = s.ListAccessLogs(ctx, "T1", time.Time{}, 2, 2)
+	values = page.Logins
+	if err != nil || len(values) != 2 || page.HasMore || values[0].CreatedAt.Unix() != 3 || values[1].CreatedAt.Unix() != 2 {
+		t.Fatalf("second page=%+v err=%v", page, err)
 	}
 }
 
@@ -567,7 +581,7 @@ func TestExternalUploadBatchPreflightsEveryMessageBeforeMutation(t *testing.T) {
 			t.Fatalf("file %s leaked after rollback: %v", completion.ID, err)
 		}
 	}
-	history, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 0 {
 		t.Fatalf("first message leaked=%+v err=%v", history, err)
 	}

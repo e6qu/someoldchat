@@ -46,7 +46,8 @@ func TestSQLiteAppEventDeliveryCursorSurvivesRestart(t *testing.T) {
 	if err := repository.AppendEvent(ctx, event); err != nil {
 		t.Fatal(err)
 	}
-	claimed, _, _, found, err := repository.ClaimAppEvent(ctx, "A1", "socket", "worker", time.Minute)
+	claimedClaim, found, err := repository.ClaimAppEvent(ctx, "A1", "socket", "worker", time.Minute)
+	claimed := claimedClaim.Record
 	if err != nil || !found {
 		t.Fatalf("claim=%+v found=%v err=%v", claimed, found, err)
 	}
@@ -54,7 +55,7 @@ func TestSQLiteAppEventDeliveryCursorSurvivesRestart(t *testing.T) {
 		t.Fatalf("claimed private payload=%q want %q", claimed.Event.PrivatePayload, event.PrivatePayload)
 	}
 	retryAt := now.Add(time.Minute)
-	if err := repository.ReleaseAppEvent(ctx, "A1", "socket", "worker", claimed.Sequence, "connection_closed", retryAt); err != nil {
+	if err := repository.ReleaseAppEvent(ctx, "A1", "socket", "worker", claimed.Sequence, events.AppEventRelease{Reason: "connection_closed", RetryAt: retryAt}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.Close(); err != nil {
@@ -122,11 +123,12 @@ func TestSQLiteAppDeliveryAttemptsAreNewestFirstAndBounded(t *testing.T) {
 	// immediately re-claimable, so only the newest attempts survive.
 	total := store.AppDeliveryAttemptRetention + 5
 	for i := 0; i < total; i++ {
-		claimed, _, _, found, err := repository.ClaimAppEvent(ctx, "A1", "socket", "worker", time.Minute)
+		claimedClaim, found, err := repository.ClaimAppEvent(ctx, "A1", "socket", "worker", time.Minute)
+		claimed := claimedClaim.Record
 		if err != nil || !found {
 			t.Fatalf("claim %d found=%v err=%v", i, found, err)
 		}
-		if err := repository.ReleaseAppEvent(ctx, "A1", "socket", "worker", claimed.Sequence, "connection_closed", now.Add(-time.Second)); err != nil {
+		if err := repository.ReleaseAppEvent(ctx, "A1", "socket", "worker", claimed.Sequence, events.AppEventRelease{Reason: "connection_closed", RetryAt: now.Add(-time.Second)}); err != nil {
 			t.Fatalf("release %d: %v", i, err)
 		}
 	}

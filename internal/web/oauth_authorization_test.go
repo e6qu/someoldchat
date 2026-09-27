@@ -194,7 +194,7 @@ func TestOAuthAuthorizationOffersAndBindsAnIncomingWebhookChannel(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token.IncomingWebhookURL == "" || token.IncomingWebhookChannel != "C1" || token.IncomingWebhookChannelName != "general" {
+	if token.IncomingWebhookPath == "" || token.IncomingWebhookChannel != "C1" || token.IncomingWebhookChannelName != "general" {
 		t.Fatalf("exchanged token webhook fields = %+v", token)
 	}
 	if member, _ := repository.IsConversationMember(ctx, "C1", token.UserID); !member {

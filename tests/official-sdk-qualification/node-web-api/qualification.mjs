@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import http from "node:http";
+import { InstallProvider } from "@slack/oauth";
 import { LogLevel, WebClient } from "@slack/web-api";
 
 const apiUrl = process.env.SAMEOLDCHAT_API_URL ?? "http://127.0.0.1:18080/api/";
@@ -8,6 +10,7 @@ const clientOptions = {
 	...(process.env.SAMEOLDCHAT_SDK_DEBUG === "1" ? { logLevel: LogLevel.DEBUG } : {}),
 };
 const client = new WebClient(token, clientOptions);
+const apiOrigin = new URL(apiUrl).origin;
 const reminderClient = new WebClient("xoxp-reminder-qualification", clientOptions);
 const workflowClient = new WebClient("xoxb-workflow-qualification", clientOptions);
 // The invited organization's own credential; see the Slack Connect walk below.
@@ -758,9 +761,12 @@ assert.deepEqual(removeAttachments.message.attachments ?? [], []);
 assert.equal(removeAttachments.message.text, "rich update fallback");
 assert.equal((await client.chat.delete({ channel: "C1", ts: richForUpdate.ts })).ok, true);
 
-const conversation = await client.conversations.info({ channel: "C1" });
+const conversation = await client.conversations.info({ channel: "C1", include_num_members: true });
 assert.equal(conversation.ok, true);
 assert.equal(conversation.channel.id, "C1");
+assert.equal(conversation.channel.is_member, true);
+assert.equal(conversation.channel.is_general, true);
+assert.equal(typeof conversation.channel.num_members, "number");
 const channelCanvas = await client.apiCall("conversations.canvases.create", {
 	channel_id: "C1",
 	title: "Channel canvas qualification",
@@ -788,8 +794,12 @@ const forceInvited = await client.conversations.invite({
 	force: true,
 });
 assert.equal(forceInvited.ok, true);
-const kicked = await client.conversations.kick({ channel: "C1", user: "U2" });
-assert.equal(kicked.ok, true);
+// C1 is the workspace's required channel (set above), which nobody can be
+// removed from, exactly as Slack refuses a kick from #general.
+await assert.rejects(
+	() => client.conversations.kick({ channel: "C1", user: "U2" }),
+	(error) => String(error).includes("cant_kick_from_general"),
+);
 const privateInvitationChannel = await client.conversations.create({
 	name: "sdk-private-invitation",
 	is_private: true,
@@ -800,6 +810,8 @@ const privateInvited = await client.conversations.invite({
 	users: "U2",
 });
 assert.equal(privateInvited.ok, true);
+const kicked = await client.conversations.kick({ channel: privateInvitationChannel.channel.id, user: "U2" });
+assert.equal(kicked.ok, true);
 const left = await client.conversations.leave({ channel: "C2" });
 assert.equal(left.ok, true);
 assert.equal((await client.admin.conversations.convertToPrivate({ channel_id: "C2" })).ok, true);
@@ -944,6 +956,15 @@ const uploadedFile = await client.filesUploadV2({
 assert.equal(uploadedFile.ok, true);
 const uploadedFileMetadata = uploadedFile.files[0].files[0];
 assert.equal(typeof uploadedFileMetadata.id, "string");
+// A file's URLs are fetched verbatim, so they must be absolute on the origin
+// the client reached, and url_private must serve the bytes to the bearer.
+for (const field of ["url_private", "url_private_download", "permalink"]) {
+	assert.equal(uploadedFileMetadata[field].startsWith(`${apiOrigin}/`), true, `${field}=${uploadedFileMetadata[field]}`);
+}
+assert.equal(uploadedFileMetadata.mimetype, "text/plain");
+const privateDownload = await fetch(uploadedFileMetadata.url_private, { headers: { Authorization: `Bearer ${token}` } });
+assert.equal(privateDownload.status, 200);
+assert.equal(await privateDownload.text(), "sdk upload");
 const files = await client.files.list({ count: 10 });
 assert.equal(files.ok, true);
 assert.equal(files.files.length, 2);
@@ -955,9 +976,14 @@ assert.equal(deletedComment.ok, true);
 const fileInfo = await client.files.info({ file: fileId });
 assert.equal(fileInfo.ok, true);
 assert.equal(fileInfo.file.id, fileId);
+assert.equal(fileInfo.file.url_private, uploadedFileMetadata.url_private);
+assert.deepEqual(fileInfo.comments, []);
 const publicFile = await client.files.sharedPublicURL({ file: fileId });
 assert.equal(publicFile.ok, true);
-assert.equal(typeof publicFile.permalink_public, "string");
+assert.equal(publicFile.permalink_public.startsWith(`${apiOrigin}/files/public/`), true);
+const publicDownload = await fetch(publicFile.permalink_public);
+assert.equal(publicDownload.status, 200);
+assert.equal(await publicDownload.text(), "sdk upload");
 const revokedPublicFile = await client.files.revokePublicURL({ file: fileId });
 assert.equal(revokedPublicFile.ok, true);
 const deletedFile = await client.files.delete({ file: fileId });
@@ -1021,13 +1047,13 @@ assert.equal((await client.chat.delete({ channel: "C1", ts: scheduledRoot.ts }))
 const dndInfo = await client.dnd.info();
 assert.equal(dndInfo.ok, true);
 assert.equal(dndInfo.dnd_enabled, false);
-const dndSnooze = await client.dnd.setSnooze({ num_minutes: 5 });
+const dndSnooze = await reminderClient.dnd.setSnooze({ num_minutes: 5 });
 assert.equal(dndSnooze.ok, true);
 assert.equal(dndSnooze.snooze_enabled, true);
-const dndEndSnooze = await client.dnd.endSnooze();
+const dndEndSnooze = await reminderClient.dnd.endSnooze();
 assert.equal(dndEndSnooze.ok, true);
 assert.equal(dndEndSnooze.snooze_enabled, false);
-const dndEnd = await client.dnd.endDnd();
+const dndEnd = await reminderClient.dnd.endDnd();
 assert.equal(dndEnd.ok, true);
 const dndTeam = await client.dnd.teamInfo();
 assert.equal(dndTeam.ok, true);
@@ -1064,13 +1090,21 @@ await assert.rejects(
 	reminderClient.reminders.add({ text: "not another user's reminder", time: 300, user: "U2" }),
 	(error) => error?.data?.error === "cannot_add_others",
 );
+// Slack's documented natural-language forms are read; a recurring one is
+// reported as recurring.
+const phrased = await reminderClient.reminders.add({ text: "documented natural language", time: "in 15 minutes" });
+assert.equal(phrased.ok, true);
+assert.ok(phrased.reminder.time > Date.now() / 1000 + 14 * 60);
+const recurringReminder = await reminderClient.reminders.add({ text: "weekly sync", time: "every Thursday at 9am" });
+assert.equal(recurringReminder.ok, true);
+assert.equal(recurringReminder.reminder.recurring, true);
 await assert.rejects(
-	reminderClient.reminders.add({ text: "documented natural language", time: "in 15 minutes" }),
+	reminderClient.reminders.add({ text: "undocumented phrasing", time: "whenever" }),
 	(error) => error?.data?.error === "cannot_parse",
 );
 const reminders = await reminderClient.reminders.list();
 assert.equal(reminders.ok, true);
-assert.equal(reminders.reminders.length, 1);
+assert.equal(reminders.reminders.length, 3);
 const reminderInfo = await reminderClient.reminders.info({ reminder: reminder.reminder.id });
 assert.equal(reminderInfo.ok, true);
 assert.equal(reminderInfo.reminder.id, reminder.reminder.id);
@@ -1117,8 +1151,10 @@ assert.equal((await client.admin.usergroups.removeChannels({ usergroup_id: userg
 const updatedUsergroup = await client.usergroups.update({
 	usergroup: usergroupId,
 	name: "Updated qualification group",
+	channels: "C1",
 });
 assert.equal(updatedUsergroup.ok, true);
+assert.deepEqual(updatedUsergroup.usergroup.prefs.channels, ["C1"]);
 const updatedUsergroupUsers = await client.usergroups.users.update({ usergroup: usergroupId, users: "U1" });
 assert.equal(updatedUsergroupUsers.ok, true);
 const usergroupUsers = await client.usergroups.users.list({ usergroup: usergroupId });
@@ -1135,6 +1171,8 @@ assert.equal(enabledUsergroup.ok, true);
 const user = await client.users.info({ user: "U1" });
 assert.equal(user.ok, true);
 assert.equal(user.user.id, "U1");
+assert.equal(typeof user.user.is_bot, "boolean");
+assert.ok(user.user.profile.image_48.startsWith("http://127.0.0.1:18080/"));
 const profile = await client.users.profile.get({ user: "U1" });
 assert.equal(profile.ok, true);
 assert.equal(profile.profile.display_name, "alice");
@@ -1144,12 +1182,12 @@ assert.equal(profile.profile.display_name, "alice");
 // uploaded document being served back from this origin. A fixture that sends a
 // lie asserts the product accepts one.
 const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64");
-const photo = await client.users.setPhoto({ image });
+const photo = await reminderClient.users.setPhoto({ image });
 assert.equal(photo.ok, true);
-const deletedPhoto = await client.users.deletePhoto();
+const deletedPhoto = await reminderClient.users.deletePhoto();
 assert.equal(deletedPhoto.ok, true);
 
-const root = await client.chat.postMessage({ channel: "C1", text: "thread root" });
+const root = await client.chat.postMessage({ channel: "C1", text: "thread root <https://example.com/qualification>" });
 assert.equal(root.ok, true);
 // Exercise Slack's current high-level ChatStreamer, not only raw method names.
 // It buffers fragments, starts on the first flush, appends against the returned
@@ -1232,18 +1270,21 @@ assert.equal(lifecycleInfo.ok, true);
 assert.equal(lifecycleInfo.channel.name, "qualification-renamed");
 assert.equal(lifecycleInfo.channel.topic.value, "qualification topic");
 assert.equal(lifecycleInfo.channel.purpose.value, "qualification purpose");
+assert.equal(lifecycleInfo.channel.creator, "U1");
+assert.equal(lifecycleInfo.channel.topic.creator, "U1");
+assert.ok(lifecycleInfo.channel.created > 0 && lifecycleInfo.channel.topic.last_set > 0);
 
 const meMessage = await client.chat.meMessage({ channel: "C1", text: "qualification me message" });
 assert.equal(meMessage.ok, true);
 const ephemeral = await client.chat.postEphemeral({ channel: "C1", user: "U1", text: "ephemeral qualification" });
 assert.equal(ephemeral.ok, true);
 assert.equal(typeof ephemeral.message_ts, "string");
-const starred = await client.stars.add({ channel: "C1", timestamp: root.ts });
+const starred = await reminderClient.stars.add({ channel: "C1", timestamp: root.ts });
 assert.equal(starred.ok, true);
-const stars = await client.stars.list({ limit: 10 });
+const stars = await reminderClient.stars.list({ limit: 10 });
 assert.equal(stars.ok, true);
 assert.equal(stars.items.length, 1);
-const unstarred = await client.stars.remove({ channel: "C1", timestamp: root.ts });
+const unstarred = await reminderClient.stars.remove({ channel: "C1", timestamp: root.ts });
 assert.equal(unstarred.ok, true);
 const permalink = await client.chat.getPermalink({ channel: "C1", message_ts: root.ts });
 assert.equal(permalink.ok, true);
@@ -1253,6 +1294,8 @@ assert.equal(userReactions.ok, true);
 const team = await client.team.info();
 assert.equal(team.ok, true);
 assert.equal(team.team.id, "T1");
+assert.notEqual(team.team.domain, "");
+assert.ok(team.team.icon.image_34.startsWith("http"));
 const teamProfile = await client.team.profile.get();
 assert.equal(teamProfile.ok, true);
 assert.deepEqual(teamProfile.profile.fields, []);
@@ -1260,7 +1303,7 @@ const emoji = await client.emoji.list({ include_categories: true });
 assert.equal(emoji.ok, true);
 assert.equal(emoji.categories_version, "097705020bcf82331c9ef10df3425aad15f5043c");
 assert.equal(emoji.categories.some((category) => category.name === "Smileys & Emotion" && category.emoji_names.includes("grinning")), true);
-const identityResult = await client.users.identity();
+const identityResult = await reminderClient.users.identity();
 assert.equal(identityResult.ok, true);
 assert.equal(identityResult.user.id, "U1");
 const byEmail = await client.users.lookupByEmail({ email: "alice@example.com" });
@@ -1268,6 +1311,7 @@ assert.equal(byEmail.ok, true);
 assert.equal(byEmail.user.id, "U1");
 const presence = await client.users.getPresence({ user: "U1" });
 assert.equal(presence.ok, true);
+assert.equal(typeof presence.manual_away, "boolean");
 const setPresence = await client.users.setPresence({ presence: "away" });
 assert.equal(setPresence.ok, true);
 const profileSet = await client.users.profile.set({ profile: { status_text: "qualification", status_emoji: ":wave:", status_expiration: 4102444800 } });
@@ -1288,6 +1332,10 @@ assert.equal(alreadyClosed.already_closed, true);
 const reopenedDirect = await client.conversations.open({ users: "U2" });
 assert.equal(reopenedDirect.ok, true);
 assert.equal(reopenedDirect.channel.id, direct.channel.id);
+assert.ok(direct.channel.id.startsWith("D"));
+const alreadyOpenDirect = await client.conversations.open({ users: "U2", return_im: true });
+assert.equal(alreadyOpenDirect.already_open, true);
+assert.equal(alreadyOpenDirect.channel.user, "U2");
 const groupDirect = await client.conversations.open({ users: "U2,U3" });
 assert.equal(groupDirect.ok, true);
 const canonicalGroupDirect = await client.conversations.open({ users: "U3,U2" });
@@ -1566,7 +1614,9 @@ const externalMessages = externalHistory.messages.filter((message) =>
 assert.equal(externalMessages.length, 1);
 assert.equal(externalMessages[0].text, "external upload");
 assert.equal(externalMessages[0].files[0].mode, "hosted");
-assert.equal(externalMessages[0].files[0].url_private, `/api/files/${externalUpload.file_id}`);
+// A file URL is absolute on the origin the client was pointed at; a
+// server-relative path is not something the SDK can download.
+assert.equal(externalMessages[0].files[0].url_private, `${apiOrigin}/api/files/${externalUpload.file_id}`);
 
 // The upload is single-use: completing it again must not mint a second file.
 const repeatedExternal = await client.files.completeUploadExternal({
@@ -1580,6 +1630,58 @@ assert.equal(repeatedHistory.messages.filter((message) =>
 	message.files?.some((file) => file.id === externalUpload.file_id)
 ).length, 1);
 
+// The message object as history, replies, pins and reactions return it,
+// read through the official client exactly as an app written against Slack
+// reads it.
+assert.equal(identity.url, `${apiOrigin}/`);
+const contractBlocks = [{ type: "section", text: { type: "plain_text", text: "node contract block" } }];
+const contractRoot = await client.chat.postMessage({ channel: "#general", text: "node contract root", blocks: contractBlocks });
+assert.equal(contractRoot.channel, "C1");
+assert.equal(contractRoot.message.bot_id, "B1");
+assert.equal(contractRoot.message.team, "T1");
+assert.equal(contractRoot.message.bot_profile.id, "B1");
+assert.equal(contractRoot.message.bot_profile.app_id, "A1");
+const contractQuiet = await client.chat.postMessage({ channel: "C1", text: "node quiet reply", thread_ts: contractRoot.ts });
+const contractLoud = await client.chat.postMessage({ channel: "C1", text: "node loud reply", thread_ts: contractRoot.ts, reply_broadcast: true });
+const contractNested = await client.chat.postMessage({ channel: "C1", text: "node reply to a reply", thread_ts: contractQuiet.ts });
+assert.equal(contractNested.message.thread_ts, contractRoot.ts);
+await client.reactions.add({ channel: "C1", timestamp: contractRoot.ts, name: "eyes" });
+await client.pins.add({ channel: "C1", timestamp: contractRoot.ts });
+const contractWindow = await client.conversations.history({ channel: "C1", latest: contractRoot.ts, inclusive: true, limit: 1 });
+assert.deepEqual(contractWindow.messages.map((message) => message.ts), [contractRoot.ts]);
+const contractParent = contractWindow.messages[0];
+assert.equal(contractParent.thread_ts, contractRoot.ts);
+assert.equal(contractParent.reply_count, 3);
+assert.deepEqual(contractParent.reply_users, ["U1"]);
+assert.equal(contractParent.reply_users_count, 1);
+assert.equal(contractParent.latest_reply, contractNested.ts);
+assert.deepEqual(contractParent.reactions, [{ name: "eyes", users: ["U1"], count: 1 }]);
+assert.deepEqual(contractParent.pinned_to, ["C1"]);
+const contractRecent = await client.conversations.history({ channel: "C1", oldest: contractRoot.ts });
+assert.deepEqual(contractRecent.messages.map((message) => message.text), ["node loud reply"]);
+assert.equal(contractRecent.messages[0].subtype, "thread_broadcast");
+const contractThread = await client.conversations.replies({ channel: "C1", ts: contractQuiet.ts });
+assert.deepEqual(contractThread.messages.map((message) => message.ts), [contractRoot.ts, contractQuiet.ts, contractLoud.ts, contractNested.ts]);
+const contractPins = (await client.pins.list({ channel: "C1" })).items.filter((item) => item.message?.ts === contractRoot.ts);
+assert.equal(contractPins.length, 1);
+assert.equal(contractPins[0].message.text, "node contract root");
+assert.equal(contractPins[0].message.permalink.startsWith(`${apiOrigin}/archives/C1/p`), true);
+const contractReactions = await client.reactions.get({ channel: "C1", timestamp: contractRoot.ts });
+assert.equal(contractReactions.type, "message");
+assert.equal(contractReactions.channel, "C1");
+assert.equal(contractReactions.message.text, "node contract root");
+const contractLink = await client.chat.getPermalink({ channel: "C1", message_ts: contractRoot.ts });
+assert.equal(contractLink.permalink.startsWith(`${apiOrigin}/archives/C1/p`), true);
+const contractEdited = await client.chat.update({ channel: "C1", ts: contractRoot.ts, text: "node contract root edited" });
+assert.equal(contractEdited.message.blocks[0].text.text, "node contract block");
+await assert.rejects(
+	client.chat.update({ channel: "C1", ts: contractQuiet.ts, text: "" }),
+	(error) => error?.data?.error === "no_text",
+);
+assert.equal((await client.users.list({ limit: 0 })).ok, true);
+assert.equal((await client.conversations.history({ channel: "C1", limit: 0 })).ok, true);
+await client.pins.remove({ channel: "C1", timestamp: contractRoot.ts });
+
 await assert.rejects(
 	client.api.test({ error: "synthetic" }),
 	(error) => error?.data?.ok === false && error.data.error === "synthetic",
@@ -1590,5 +1692,92 @@ assert.equal(revoked.revoked, false);
 const uninstallClient = new WebClient("xoxp-uninstall-node", { slackApiUrl: apiUrl });
 const uninstalled = await uninstallClient.apps.uninstall({ client_id: "uninstall-node", client_secret: "uninstall-secret" });
 assert.equal(uninstalled.ok, true);
+
+
+// An app installed from nothing through @slack/oauth's InstallProvider, as a
+// Bolt app's /slack/install and /slack/oauth_redirect do: the provider builds
+// the authorize URL, the fixture approves it as U1 through the service call
+// the consent page makes, and the provider redeems the code with
+// oauth.v2.access and stores the installation it decodes.
+const installations = new Map();
+const installer = new InstallProvider({
+	clientId: "install-client",
+	clientSecret: "install-secret",
+	stateSecret: "sdk-qualification-state",
+	authorizationUrl: `${apiOrigin}/qualification/authorize`,
+	clientOptions,
+	installationStore: {
+		storeInstallation: async (installation) => {
+			installations.set(installation.team.id, installation);
+		},
+		fetchInstallation: async (query) => installations.get(query.teamId),
+		deleteInstallation: async (query) => {
+			installations.delete(query.teamId);
+		},
+	},
+});
+async function install(options) {
+	let outcome;
+	const server = http.createServer((request, response) => {
+		if (request.url.startsWith("/slack/install")) {
+			installer.handleInstallPath(request, response, {}, options);
+			return;
+		}
+		installer.handleCallback(request, response, {
+			success: (installation) => {
+				outcome = { installation };
+				response.writeHead(200);
+				response.end();
+			},
+			failure: (error) => {
+				outcome = { error };
+				response.writeHead(500);
+				response.end();
+			},
+		});
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const local = `http://127.0.0.1:${server.address().port}`;
+	try {
+		const started = await fetch(`${local}/slack/install`, { redirect: "manual" });
+		const stateCookie = started.headers.get("set-cookie").split(";")[0];
+		const page = await started.text();
+		const authorizeUrl = started.headers.get("location") ?? page.match(/href="([^"]*qualification\/authorize[^"]*)"/)[1].replaceAll("&amp;", "&");
+		assert.equal(authorizeUrl.startsWith(`${apiOrigin}/qualification/authorize?`), true, authorizeUrl);
+		const approved = await fetch(authorizeUrl, { redirect: "manual" });
+		assert.equal(approved.status, 302);
+		const callback = new URL(approved.headers.get("location"));
+		const finished = await fetch(`${local}/slack/oauth_redirect${callback.search}`, { headers: { cookie: stateCookie } });
+		assert.equal(finished.status, 200, String(outcome?.error));
+		return outcome.installation;
+	} finally {
+		server.close();
+	}
+}
+const firstInstall = await install({ scopes: ["chat:write"], userScopes: ["search:read"], redirectUri: "https://example.com/install" });
+assert.equal(firstInstall.team.id, "T1");
+assert.equal(typeof firstInstall.team.name, "string");
+assert.notEqual(firstInstall.team.name, "");
+assert.equal(firstInstall.user.id, "U1");
+assert.equal(firstInstall.user.token.startsWith("xoxp-"), true);
+assert.equal(firstInstall.bot.token.startsWith("xoxb-"), true);
+const installedBot = await new WebClient(firstInstall.bot.token, clientOptions).auth.test();
+assert.equal(installedBot.user_id, firstInstall.bot.userId);
+assert.equal(installedBot.bot_id, firstInstall.bot.id);
+const authorized = await installer.authorize({ teamId: "T1", isEnterpriseInstall: false });
+assert.equal(authorized.botToken, firstInstall.bot.token);
+// A reinstall that leaves the redirect implied keeps the same bot user.
+const reinstall = await install({ scopes: ["chat:write"], userScopes: [] });
+assert.equal(reinstall.bot.userId, firstInstall.bot.userId);
+assert.equal(reinstall.bot.id, firstInstall.bot.id);
+// A user-scope-only install carries the installer's token and no bot.
+const userInstall = await install({ scopes: [], userScopes: ["search:read"] });
+assert.equal(userInstall.bot, undefined);
+assert.equal(userInstall.user.id, "U1");
+assert.equal(userInstall.user.token.startsWith("xoxp-"), true);
+assert.equal((await new WebClient(userInstall.user.token, clientOptions).auth.test()).user_id, "U1");
+// The provider surfaces a refused exchange: the wrong secret is named.
+const wrongSecret = await client.oauth.v2.access({ client_id: "install-client", client_secret: "wrong", code: "unused" }).catch((error) => error.data);
+assert.equal(wrongSecret.error, "bad_client_secret");
 
 console.log("node-web-api qualification passed");

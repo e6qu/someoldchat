@@ -128,7 +128,7 @@ func TestAnOversizedResponseIsNotRestoredAsADomainSentinel(t *testing.T) {
 			t.Fatalf("post %d: %v", index, err)
 		}
 	}
-	_, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 200})
+	_, err := remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 200}})
 	if err == nil {
 		t.Fatal("a page larger than the receive bound was accepted")
 	}
@@ -474,6 +474,30 @@ func TestAnObserverWithoutCollaboratorsIsInert(t *testing.T) {
 	remote, _ := serve(t, service.Messages{Store: target}, target, Observer{})
 	if _, err := remote.Post(context.Background(), "T1", "U1", "C1", "unobserved", "", ""); err != nil {
 		t.Fatalf("post with a zero observer: %v", err)
+	}
+}
+
+// The seam's event read used to answer a request naming neither a member nor
+// an app with the whole workspace journal — every record about every private
+// conversation — to any caller holding a client certificate. It is now the
+// member read, which refuses a caller it cannot place in the workspace; the
+// member's head is answered for a member only.
+func TestTheSeamServesNoUnfilteredJournal(t *testing.T) {
+	target := seededStore(t)
+	remote, connection := serve(t, service.Messages{Store: target}, target, Observer{})
+	client := chatv1.NewEventsServiceClient(connection)
+	if _, err := client.ListEventsAfter(context.Background(), &chatv1.EventsRequest{WorkspaceId: "T1", Limit: 10}); err == nil {
+		t.Fatal("a read naming no member was answered with the workspace journal")
+	}
+	head, err := remote.LatestEventSequence(context.Background(), "T1", "U1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := target.LatestEventSequence(context.Background(), "T1"); head != want {
+		t.Fatalf("head=%d, want %d", head, want)
+	}
+	if _, err := remote.LatestEventSequence(context.Background(), "T1", "U-stranger"); err == nil {
+		t.Fatal("a stranger was told the workspace's journal head")
 	}
 }
 
@@ -881,13 +905,13 @@ func (c *pageRecordingChat) observed() []int {
 	return append([]int(nil), c.records...)
 }
 
-func (c *pageRecordingChat) ListEventsAfter(_ context.Context, _ domain.WorkspaceID, _ uint64, limit int) ([]events.Record, error) {
+func (c *pageRecordingChat) ListAppEventsAfter(_ context.Context, _ domain.AppID, _ uint64, limit int) ([]events.Record, error) {
 	c.record(limit)
 	return nil, nil
 }
 
-func (c *pageRecordingChat) History(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, _ domain.ConversationID, page domain.PageRequest) (domain.MessagePage, error) {
-	c.record(page.Limit)
+func (c *pageRecordingChat) History(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, _ domain.ConversationID, history domain.HistoryRequest) (domain.MessagePage, error) {
+	c.record(history.Page.Limit)
 	return domain.MessagePage{}, nil
 }
 
@@ -907,10 +931,10 @@ func TestAPageLimitIsBoundedByATransportResourceLimit(t *testing.T) {
 	recorder := &pageRecordingChat{Service: service.Messages{Store: target}}
 	remote, _ := serve(t, recorder, target, Observer{})
 	ctx := context.Background()
-	if _, err := remote.ListEventsAfter(ctx, "T1", 0, math.MaxInt32); err != nil {
+	if _, err := remote.ListAppEventsAfter(ctx, "A1", 0, math.MaxInt32); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: math.MaxInt32}); err != nil {
+	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: math.MaxInt32}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, observed := range recorder.observed() {
@@ -921,10 +945,10 @@ func TestAPageLimitIsBoundedByATransportResourceLimit(t *testing.T) {
 	// A page a caller can really ask for crosses unchanged, so the clamp is not
 	// a second, invisible product limit.
 	before := len(recorder.observed())
-	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 201}); err != nil {
+	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 201}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := remote.ListEventsAfter(ctx, "T1", 0, 1000); err != nil {
+	if _, err := remote.ListAppEventsAfter(ctx, "A1", 0, 1000); err != nil {
 		t.Fatal(err)
 	}
 	ordinary := recorder.observed()[before:]
@@ -1032,5 +1056,30 @@ func TestAnUploadStreamThatNeverDeliversAByteIsBounded(t *testing.T) {
 	if _, err := stream.CloseAndRecv(); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("a stream that delivered no bytes in %d frames ended with %v (code %s), want a refusal",
 			maxEmptyUploadFrames+64, err, status.Code(err))
+	}
+}
+
+// withholdingChat answers a user-scoped journal read the way the projection
+// answers a reader who may see none of what it examined.
+type withholdingChat struct {
+	chatapi.Service
+}
+
+func (withholdingChat) ListUserEventsAfter(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, after uint64, _ int) (events.UserEventPage, error) {
+	return events.UserEventPage{Through: after + 42}, nil
+}
+
+// How far a user-scoped read examined crosses the seam. Without it the
+// distributed composition's live streams re-read every withheld record on
+// every poll even after the local composition stopped doing so.
+func TestAUserEventPageCarriesHowFarItExaminedAcrossTheSeam(t *testing.T) {
+	target := seededStore(t)
+	remote, _ := serve(t, withholdingChat{Service: service.Messages{Store: target}}, target, Observer{})
+	page, err := remote.ListUserEventsAfter(context.Background(), "T1", "U1", 8, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Records) != 0 || page.Through != 50 {
+		t.Fatalf("page=%+v, want no records through 50", page)
 	}
 }

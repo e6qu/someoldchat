@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -74,7 +75,8 @@ func TestInstalledAppDirectoryRendersPublishedHomeAndDispatchesActions(t *testin
 		`name="home_action" value="0"`, `name="view_id" value="`+string(published.ID)+`"`,
 		`action="/app/apps/A1/action?channel=Cdev"`, "Messages", "About",
 	)
-	record, _, _, found, err := messages.ClaimAppEvent(ctx, "A1", "socket", "home-events", time.Minute)
+	recordClaim, found, err := messages.ClaimAppEvent(ctx, "A1", "socket", "home-events", time.Minute)
+	record := recordClaim.Record
 	if err != nil || !found || record.Event.Topic != "app.home_opened" {
 		t.Fatalf("app_home_opened record=%+v found=%v err=%v", record, found, err)
 	}
@@ -122,4 +124,49 @@ func TestInstalledAppDirectoryRendersPublishedHomeAndDispatchesActions(t *testin
 		`"selected_option":{"text":{"emoji":true,"text":"Production","type":"plain_text"},"value":"production"}`,
 		`"state":{"values":{"environment":{"select_environment":`,
 	)
+	requireContains(t, "home action view state", interaction.Payload, `"view":{`, `"state":{"values":{"environment":`)
+
+	// The redirect back after the action and a live re-read are the user
+	// staying on the Home; only opening the tab is app_home_opened.
+	if back := get(t, mux, action.Header().Get("Location")); back.Code != http.StatusOK {
+		t.Fatalf("return to home status=%d", back.Code)
+	}
+	refreshRequest := httptest.NewRequest(http.MethodGet, "/app/apps/A1?channel=Cdev", nil)
+	addBrowserCookies(refreshRequest)
+	refreshRequest.Header.Set(appHomeRefreshHeader, "true")
+	refreshed := httptest.NewRecorder()
+	mux.ServeHTTP(refreshed, refreshRequest)
+	requireContains(t, "live home region", refreshed.Body.String(), `id="app-home-region"`, "Production releases")
+	if claim, found, err := messages.ClaimAppEvent(ctx, "A1", "socket", "home-events", time.Minute); err != nil || found {
+		t.Fatalf("re-reading the Home emitted %+v (err=%v)", claim.Record.Event, err)
+	}
+
+	// The Messages tab opens the bot DM and reports tab "messages".
+	opened := postForm(t, mux, "/app/apps/A1/messages", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if opened.Code != http.StatusSeeOther || !strings.Contains(opened.Header().Get("Location"), "channel=D") {
+		t.Fatalf("messages tab status=%d location=%q body=%s", opened.Code, opened.Header().Get("Location"), opened.Body)
+	}
+	recordClaim, found, err = messages.ClaimAppEvent(ctx, "A1", "socket", "home-events", time.Minute)
+	if err != nil || !found || recordClaim.Record.Event.Topic != "app.home_opened" {
+		t.Fatalf("messages tab event=%+v found=%v err=%v", recordClaim.Record, found, err)
+	}
+	envelopes, err = events.SocketModeEnvelopes(recordClaim.Record, "A1")
+	if err != nil || len(envelopes) != 1 {
+		t.Fatalf("messages tab envelopes=%d err=%v", len(envelopes), err)
+	}
+	encodedEnvelope, _ = json.Marshal(envelopes[0].Frame)
+	if json.Unmarshal(encodedEnvelope, &appHomeEnvelope) != nil || appHomeEnvelope.Payload.Event.Tab != "messages" {
+		t.Fatalf("messages tab envelope=%s", encodedEnvelope)
+	}
+}
+
+// The Home page listens for the app republishing it and re-renders only its
+// Home region; the script is covered by the workspace policy.
+func TestAppHomeRefreshesLiveWhenTheAppPublishes(t *testing.T) {
+	if !strings.Contains(appHomeLiveScript, "'view.published','view.updated'") || !strings.Contains(appHomeLiveScript, "getElementById('app-home-region')") {
+		t.Fatal("the Home live script does not listen for the publish topics or target the Home region")
+	}
+	if !strings.Contains(workspaceContentSecurityPolicy(), inlineScriptHashes(appHomeLiveScript)[0]) {
+		t.Fatal("the Home live script is not permitted by the workspace policy")
+	}
 }

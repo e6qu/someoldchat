@@ -18,10 +18,14 @@ retrieved_at: 2026-07-28T00:00:00Z
 # Event-surface coverage is method- and topic-specific. Node, Python, and Java
 # Socket Mode qualifications consume a real service-posted message that
 # internal/service hydrates and translates after installed-bot visibility is
-# proved; the Node RTM qualification does the same for the connected user.
-# Bolt callback suites still submit an independently constructed signed event
+# proved; the Node and Python RTM qualifications do the same for the connected
+# user.
+# Bolt callback suites mostly submit an independently constructed signed event
 # callback, so they qualify framework decoding and request authentication, not
-# producer translation. Immutable producer snapshots and bot/user perspective
+# producer translation. The exceptions are produced end to end: the Node Bolt
+# link_shared round trip, from a real post answered with chat.unfurl, and the
+# Node and Python Bolt custom-function round trip, whose function_executed and
+# block_actions come from a real workflow run and a real click. Immutable producer snapshots and bot/user perspective
 # filtering now cover message create/change/delete and file create/share;
 # file-unshare production and live-Slack differential outcomes remain outside
 # the qualified slice. See the events-api decision in specs/compatibility.yaml.
@@ -42,7 +46,27 @@ sdks:
     note: >-
       Includes apps.datastore CRUD and bulk methods through WebClient.apiCall;
       @slack/web-api 8.0.0 does not generate convenience methods for that
-      current Slack method family.
+      current Slack method family. Downloads url_private and permalink_public
+      through the absolute URLs file objects carry.
+  - id: node-oauth
+    ecosystem: npm
+    package: '@slack/oauth'
+    upstream: https://github.com/slackapi/node-slack-sdk
+    release: 4.0.0
+    revision: 70e15b8442745d215f9ae259a2c970b306aff51a
+    artifact: slack-oauth-4.0.0.tgz
+    sha256: 4cfc0b04698885a41a50e902cc57e0fa3cb08fa96b8a13d7d9e5f1d7c024abc4
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/node-web-api/qualification.mjs
+    note: >-
+      InstallProvider installs an app from nothing (install path, state
+      cookie, callback, oauth.v2.access, installation store, authorize), then
+      reinstalls with an implied redirect_uri and keeps the bot user, and
+      completes a user-scope-only install. The fixture's
+      /qualification/authorize stands in for the browser consent page by
+      approving through the same service call; the page itself is qualified by
+      the browser suite.
   - id: node-bolt
     ecosystem: npm
     package: '@slack/bolt'
@@ -55,9 +79,17 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
-      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      Event-surface suite. Every event reaches Bolt through the production
+      Events API processor (projection, subscription filter, signing).
+      reaction_added is translated from a record the fixture appends;
+      link_shared is produced by a real chat.postMessage sharing a link on the
+      app's unfurl domain, and the Bolt handler answers it with chat.unfurl by
+      unfurl_id and source, then reads the is_app_unfurl attachment back from
+      conversations.history. The custom-function round trip is produced end to
+      end: a workflow run emits function_executed with an execution-scoped
+      xwfp- token, Bolt's function listener posts a button with it, the
+      member's click reaches Bolt's action listener with function_data, and
+      complete() finishes the execution through functions.completeSuccess.
   - id: node-socket-mode
     ecosystem: npm
     package: '@slack/socket-mode'
@@ -100,6 +132,11 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    note: >-
+      Includes files_upload_v2 with a url_private download, and an install
+      from nothing through slack_sdk.oauth (state store, authorize URL
+      generator, oauth.v2.access, installation store), a reinstall that keeps
+      the bot user, and a user-scope-only install.
   - id: python-bolt
     ecosystem: pypi
     package: slack-bolt
@@ -112,9 +149,14 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
+      Event-surface suite. Its reaction_added envelope is planted by
       tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      from an internal record; that part qualifies the transport, not the event
+      surface. The custom-function round trip is produced end to end: a
+      workflow run emits function_executed with an execution-scoped xwfp-
+      token, Bolt's function listener posts a button with it, the member's
+      click reaches Bolt's action listener with function_data, and complete()
+      finishes the execution through functions.completeSuccess.
   - id: python-socket-mode
     ecosystem: pypi
     package: slack-sdk
@@ -129,6 +171,24 @@ sdks:
     note: >-
       Consumes and acknowledges a real message created through internal/service,
       projected only after installed-bot conversation visibility is proved.
+  - id: python-rtm
+    ecosystem: pypi
+    package: slack-sdk
+    upstream: https://github.com/slackapi/python-slack-sdk
+    release: 3.43.0
+    revision: 3a5cec2e79ebe58467c2c65781492a42938fdbfa
+    artifact: slack_sdk-3.43.0-py2.py3-none-any.whl
+    sha256: 4b6557c65577fc172f685af218b811f9f3b4909e24cddd839ada09565f10c585
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/python-rtm/qualification.py
+    note: >-
+      slack_sdk.rtm_v2.RTMClient opens the socket rtm.connect hands it and
+      consumes a real message a user token posted after the socket opened.
+      The client drops events whose bot_id is its own (learned from
+      auth.test), so the suite also posts as the bot and requires that post
+      to be filtered and the person's post, from a user token issued to the
+      same app, to carry no bot_id.
   - id: java-slack-api
     ecosystem: maven
     package: com.slack.api:slack-api-client
@@ -177,9 +237,17 @@ bolt:
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
-      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      Event-surface suite. Every event reaches Bolt through the production
+      Events API processor (projection, subscription filter, signing).
+      reaction_added is translated from a record the fixture appends;
+      link_shared is produced by a real chat.postMessage sharing a link on the
+      app's unfurl domain, and the Bolt handler answers it with chat.unfurl by
+      unfurl_id and source, then reads the is_app_unfurl attachment back from
+      conversations.history. The custom-function round trip is produced end to
+      end: a workflow run emits function_executed with an execution-scoped
+      xwfp- token, Bolt's function listener posts a button with it, the
+      member's click reaches Bolt's action listener with function_data, and
+      complete() finishes the execution through functions.completeSuccess.
   - id: bolt-python
     ecosystem: pypi
     package: slack-bolt
@@ -190,9 +258,14 @@ bolt:
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
+      Event-surface suite. Its reaction_added envelope is planted by
       tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      from an internal record; that part qualifies the transport, not the event
+      surface. The custom-function round trip is produced end to end: a
+      workflow run emits function_executed with an execution-scoped xwfp-
+      token, Bolt's function listener posts a button with it, the member's
+      click reaches Bolt's action listener with function_data, and complete()
+      finishes the execution through functions.completeSuccess.
   - id: bolt-java
     ecosystem: maven
     package: com.slack.api:bolt

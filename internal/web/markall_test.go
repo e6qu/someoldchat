@@ -24,8 +24,9 @@ func TestMarkAllReadClearsEveryConversation(t *testing.T) {
 	if err := s.SeedConversationMember("Csecond", "U1"); err != nil {
 		t.Fatal(err)
 	}
-	// A public channel the member can see but has not joined. It shows an unread
-	// badge in the sidebar, so "mark everything read" has to clear it too.
+	// A public channel the member can see but has not joined. It is not in the
+	// sidebar (Slack lists only joined conversations), but "mark everything
+	// read" still has to leave nothing unread behind.
 	if err := s.SeedConversation(domain.Conversation{ID: "Cunjoined", WorkspaceID: "T1", Name: "release-notes"}); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func TestMarkAllReadClearsEveryConversation(t *testing.T) {
 		}
 	}
 
-	if body := sidebar(t, mux); !strings.Contains(body, "unread messages") {
+	if body := sidebar(t, mux); !strings.Contains(body, "unread message") {
 		t.Fatal("nothing was unread before the test acted, so the assertion below would prove nothing")
 	}
 
@@ -54,7 +55,7 @@ func TestMarkAllReadClearsEveryConversation(t *testing.T) {
 		t.Fatalf("POST /app/read/all returned %d: %s", recorder.Code, recorder.Body)
 	}
 
-	if body := sidebar(t, mux); strings.Contains(body, "unread messages") {
+	if body := sidebar(t, mux); strings.Contains(body, "unread message") {
 		t.Errorf("a conversation still reports unread messages after marking everything read")
 	}
 }

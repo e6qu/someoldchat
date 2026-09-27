@@ -164,6 +164,32 @@ message ThreadSummary {
   int32 reply_count = 1;
   repeated string participants = 2;
   string last_reply_at = 3;
+  bool subscribed = 4;
+}
+
+message MessageAnnotationsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  repeated string message_ids = 4;
+}
+
+// ReactionSummary is one emoji's row of Slack's reactions array.
+message ReactionSummary {
+  string name = 1;
+  repeated string users = 2;
+  int32 count = 3;
+}
+
+// MessageAnnotation is what a message carries beside its content: reactions
+// and pin state.
+message MessageAnnotation {
+  repeated ReactionSummary reactions = 1;
+  bool pinned = 2;
+}
+
+message MessageAnnotationsResponse {
+  map<string, MessageAnnotation> annotations = 1;
 }
 
 message ThreadSummariesResponse {
@@ -189,6 +215,15 @@ message BlockActionRequest {
   string action_type = 6;
   string value = 7;
   string response_base_url = 8;
+  // chosen_options reports each external-select option the member chose
+  // with the text and token the service issued when it was loaded.
+  repeated ChosenOption chosen_options = 9;
+}
+
+message ChosenOption {
+  string value = 1;
+  string text = 2;
+  string token = 3;
 }
 
 message ViewBlockActionRequest {
@@ -215,6 +250,9 @@ message AppOptionQueryRequest {
   string action_id = 8;
   string value = 9;
   string response_base_url = 10;
+  // dialog_id names a legacy dialog whose select with data_source
+  // "external" is asking for options (dialog_suggestion).
+  string dialog_id = 11;
 }
 
 message AppOption {
@@ -222,6 +260,8 @@ message AppOption {
   string value = 2;
   string description = 3;
   string group = 4;
+  // token vouches for text when the option was loaded for a view.
+  string token = 5;
 }
 
 message AppOptionListResponse {
@@ -336,6 +376,7 @@ service InteractionsService {
   // ReadCursor message type for every later return in this service.
   rpc GetReadCursor(ReadCursorRequest) returns (ReadCursor);
   rpc ThreadSummaries(ThreadSummariesRequest) returns (ThreadSummariesResponse);
+  rpc MessageAnnotations(MessageAnnotationsRequest) returns (MessageAnnotationsResponse);
   rpc MessageAt(MessageAtRequest) returns (Message);
   rpc DispatchSlashCommand(SlashCommandRequest) returns (InteractionMutationResponse);
   rpc DispatchBlockAction(BlockActionRequest) returns (InteractionMutationResponse);

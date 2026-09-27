@@ -4,6 +4,8 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+import "sameoldchat/chat/v1/views.proto";
+
 message OpenDialogRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -16,6 +18,43 @@ message DialogMutationResponse {
   bool ok = 1;
 }
 
+message Dialog {
+  string id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  string app_id = 4;
+  string payload = 5;
+  map<string, string> errors = 6;
+  int64 created_at_unix_nano = 7;
+}
+
+message CurrentDialogRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message SubmitDialogRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string dialog_id = 4;
+  // values maps element names to what the member entered; a missing or
+  // empty value is an element left empty.
+  map<string, string> values = 5;
+  string response_base_url = 6;
+}
+
+message CancelDialogRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string dialog_id = 4;
+  string response_base_url = 5;
+}
+
 service DialogsService {
   rpc OpenDialog(OpenDialogRequest) returns (DialogMutationResponse);
+  rpc CurrentDialog(CurrentDialogRequest) returns (Dialog);
+  rpc SubmitDialog(SubmitDialogRequest) returns (ViewInteractionResult);
+  rpc CancelDialog(CancelDialogRequest) returns (DialogMutationResponse);
 }

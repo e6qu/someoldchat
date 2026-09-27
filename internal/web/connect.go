@@ -94,7 +94,7 @@ func (h Handler) connectMutation(w http.ResponseWriter, r *http.Request, scope a
 }
 
 func (h Handler) redirectConnect(w http.ResponseWriter, r *http.Request, channel domain.ConversationID, notice string) {
-	h.redirectMutation(w, r, "/app?channel="+url.QueryEscape(string(channel))+"&details=1&notice="+url.QueryEscape(notice))
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabSettings)+"&notice="+url.QueryEscape(notice))
 }
 
 func (h Handler) writeConnectError(w http.ResponseWriter, r *http.Request, err error, action string) {

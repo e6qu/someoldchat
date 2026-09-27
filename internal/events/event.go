@@ -16,6 +16,20 @@ type Source interface {
 	ListEventsAfter(context.Context, domain.WorkspaceID, uint64, int) ([]Record, error)
 }
 
+// UserEventPage is one read of the journal as a single reader may see it.
+//
+// Through is the last journal sequence the projection examined, whether or not
+// that record was visible. A reader resumes after Through rather than after the
+// last record it was given: records it may not see are still records it has
+// passed, and resuming from the last visible one made every poll re-read and
+// re-authorize the whole invisible tail — a busy private channel the reader is
+// not in cost one full scan per reader per poll, indefinitely. Through is never
+// below the request's own cursor.
+type UserEventPage struct {
+	Records []Record
+	Through uint64
+}
+
 // Authorization is one Slack Events API delivery perspective. It contains no
 // credential material; it is the non-secret subject/type projection included
 // in Slack's event_callback authorizations array.

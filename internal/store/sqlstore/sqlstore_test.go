@@ -658,7 +658,7 @@ func TestSQLiteDialogIsDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	value := domain.Dialog{ID: "D1", WorkspaceID: "T1", UserID: "U1", Payload: `{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`, CreatedAt: now}
+	value := domain.Dialog{ID: "D1", WorkspaceID: "T1", UserID: "U1", Payload: `{"callback_id":"callback","title":"Title","elements":[{"type":"text","name":"summary","label":"Summary"}]}`, CreatedAt: now}
 	if err := s.CreateDialog(ctx, value, events.Event{ID: "ED1", WorkspaceID: "T1", Topic: "dialog.opened", Payload: "D1", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
@@ -1197,7 +1197,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	if err != nil || stillGroup.Kind != domain.ConversationTypeMPIM || stillGroup.Name != "direct" {
 		t.Fatalf("conflicting conversion partially changed conversation=%+v err=%v", stillGroup, err)
 	}
-	beforeSuccess, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
+	beforeSuccess, err := s.ListMessages(ctx, "D2", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(beforeSuccess.Messages) != 2 {
 		t.Fatalf("conflicting conversion left a notice: history=%+v err=%v", beforeSuccess, err)
 	}
@@ -1221,7 +1221,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 	if err != nil || converted.Name != "project-room-2" || converted.Kind != domain.ConversationTypePrivate {
 		t.Fatalf("reopened conversion=%+v err=%v", converted, err)
 	}
-	history, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
+	history, err := s.ListMessages(ctx, "D2", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(history.Messages) != 3 || history.Messages[0].Text != original.Text || len(history.Messages[0].Files) != 1 {
 		t.Fatalf("reopened history=%+v err=%v", history, err)
 	}
@@ -1255,9 +1255,14 @@ func TestSQLiteAccessLogsAreBoundedAndDurable(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	values, hasMore, err := s.ListAccessLogs(ctx, "T1", time.Time{}, 2, 1)
-	if err != nil || len(values) != 2 || !hasMore {
-		t.Fatalf("values=%+v hasMore=%v err=%v", values, hasMore, err)
+	if err := s.RecordAccess(ctx, domain.AccessLog{WorkspaceID: "T1", UserID: "U1", Username: "alice", CreatedAt: created, IP: "192.0.2.1", UserAgent: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	// Three accesses from one address and agent are one row counted three
+	// times; the fourth, from another address, is its own row.
+	page, err := s.ListAccessLogs(ctx, "T1", time.Time{}, 1, 1)
+	if err != nil || len(page.Logins) != 1 || !page.HasMore || page.Total != 2 {
+		t.Fatalf("page=%+v err=%v", page, err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
@@ -1267,9 +1272,75 @@ func TestSQLiteAccessLogsAreBoundedAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	values, _, err = s.ListAccessLogs(ctx, "T1", time.Time{}, 10, 1)
-	if err != nil || len(values) != 3 {
-		t.Fatalf("durable values=%+v err=%v", values, err)
+	page, err = s.ListAccessLogs(ctx, "T1", time.Time{}, 10, 1)
+	if err != nil || len(page.Logins) != 2 || page.Total != 2 || page.HasMore {
+		t.Fatalf("durable page=%+v err=%v", page, err)
+	}
+	aggregated := page.Logins[0]
+	if aggregated.IP != "127.0.0.1" || aggregated.Count != 3 || !aggregated.FirstAt.Equal(created) || !aggregated.CreatedAt.Equal(created.Add(2*time.Second)) {
+		t.Fatalf("aggregated=%+v", aggregated)
+	}
+	// Only rows first seen by `before` are listed.
+	page, err = s.ListAccessLogs(ctx, "T1", created.Add(-time.Second), 10, 1)
+	if err != nil || len(page.Logins) != 0 || page.Total != 0 {
+		t.Fatalf("before page=%+v err=%v", page, err)
+	}
+}
+
+// Schema 185 folds the per-request access_logs rows into the aggregate,
+// removing the source port the IP used to carry, and drops the old table.
+func TestSchema185FoldsPerRequestAccessLogs(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "access-logs-legacy.db")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE access_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), username TEXT NOT NULL, created_at INTEGER NOT NULL, ip TEXT NOT NULL, user_agent TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for index, ip := range []string{"198.51.100.4:50001", "198.51.100.4:50002", "[2001:db8::1]:443", "198.51.100.4:50003"} {
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO access_logs(workspace_id, user_id, username, created_at, ip, user_agent) VALUES ('T1', 'U1', 'alice', ?, ?, 'agent')`, 1700000000+index, ip); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version >= 185`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (184, '')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	page, err := s.ListAccessLogs(ctx, "T1", time.Time{}, 10, 1)
+	if err != nil || page.Total != 2 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	byIP := map[string]domain.AccessLog{}
+	for _, login := range page.Logins {
+		byIP[login.IP] = login
+	}
+	if v4 := byIP["198.51.100.4"]; v4.Count != 3 || v4.FirstAt.Unix() != 1700000000 || v4.CreatedAt.Unix() != 1700000003 {
+		t.Fatalf("folded v4 row=%+v", v4)
+	}
+	if v6 := byIP["2001:db8::1"]; v6.Count != 1 {
+		t.Fatalf("folded v6 row=%+v", v6)
+	}
+	var legacy int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'access_logs'`).Scan(&legacy); err != nil || legacy != 0 {
+		t.Fatalf("legacy table remains=%d err=%v", legacy, err)
 	}
 }
 
@@ -1324,15 +1395,16 @@ func TestSQLiteStarsAreDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := time.Unix(300, 0).UTC()
-	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section"}]`, CreatedAt: created}
+	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section","block_id":"b1"}]`, CreatedAt: created}
 	if err := s.CreateMessage(ctx, message, events.Event{ID: "message-1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AddStar(ctx, domain.Star{Message: message, Conversation: "C1", UserID: "U1", CreatedAt: created}, events.Event{ID: "star-1", WorkspaceID: "T1", Topic: "star.added", Payload: "M1", CreatedAt: created}); err != nil {
 		t.Fatal(err)
 	}
-	stars, _, more, err := s.ListStars(ctx, "T1", "U1", domain.PageRequest{Limit: 1})
-	if err != nil || len(stars) != 1 || stars[0].Message.ID != "M1" || stars[0].Message.Blocks != message.Blocks || more {
+	page, err := s.ListStars(ctx, "T1", "U1", domain.PageRequest{Limit: 1})
+	stars, more := page.Stars, page.HasMore
+	if err != nil || len(stars) != 1 || stars[0].Message.ID != "M1" || stars[0].Message.Blocks != message.Blocks || more || page.Total != 1 {
 		t.Fatalf("stars=%+v more=%v err=%v", stars, more, err)
 	}
 }
@@ -1428,6 +1500,72 @@ func TestSQLiteProfileFieldsAreDurable(t *testing.T) {
 	}
 	if remaining, err := s.ListUserProfileFieldValues(ctx, "T1", "U1"); err != nil || len(remaining) != 0 {
 		t.Fatalf("values after field delete=%+v err=%v", remaining, err)
+	}
+}
+
+// Schema 186 rekeys each scheduled message from the token hash it was stored
+// under to the identity that scheduled it, including one from before schema
+// 102 that recorded no credential at all.
+func TestSchema186RekeysScheduledMessagesToTheirOwner(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "scheduled-owner.db")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	postAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	ids := map[string]domain.ScheduledMessageID{}
+	for _, row := range []struct{ name, credential, app, bot string }{
+		{"bot", "hash-of-a-bot-token", "A1", "B1"},
+		{"user", "hash-of-a-user-token", "A1", ""},
+		{"legacy", "", "", ""},
+	} {
+		id, err := domain.NewScheduledMessageID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[row.name] = id
+		value := domain.ScheduledMessage{WorkspaceID: "T1", ID: id, Channel: "C1", Author: "U1", AppID: domain.AppID(row.app), BotID: domain.BotID(row.bot),
+			CredentialHash: "placeholder", Text: row.name, PostAt: postAt, CreatedAt: postAt.Add(-time.Hour)}
+		if err := s.CreateScheduledMessage(ctx, value, events.Event{ID: domain.EventID("scheduled-" + row.name), WorkspaceID: "T1", Topic: "message.scheduled", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE scheduled_messages SET credential_hash = ? WHERE id = ?`, row.credential, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version >= 186`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (185, '')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for name, owner := range map[string]string{
+		"bot":    domain.ScheduledMessageOwner("T1", "U1", "A1", "B1"),
+		"user":   domain.ScheduledMessageOwner("T1", "U1", "A1", ""),
+		"legacy": domain.ScheduledMessageOwner("T1", "U1", "", ""),
+	} {
+		page, err := s.ListScheduledMessagesForCredential(ctx, "T1", domain.ScheduledMessageQuery{CredentialHash: owner, Page: domain.PageRequest{Limit: 10}})
+		if err != nil || len(page.Items) != 1 || page.Items[0].ID != ids[name] {
+			t.Fatalf("%s owner page=%+v err=%v", name, page, err)
+		}
 	}
 }
 
@@ -1791,7 +1929,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err := s.CreateMessage(context.Background(), want, events.Event{ID: "evt_1", WorkspaceID: "T1", Topic: "message.created", Payload: string(want.ID), CreatedAt: want.CreatedAt}, ""); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.ListMessages(context.Background(), "C1", domain.PageRequest{Limit: 10})
+	got, err := s.ListMessages(context.Background(), "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(got.Messages) != 1 {
 		t.Fatalf("got = %+v, err = %v", got, err)
 	}
@@ -1804,7 +1942,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err := s.CreateMessage(context.Background(), reply, events.Event{ID: "evt_reply", WorkspaceID: "T1", Topic: "message.created", Payload: string(reply.ID), CreatedAt: reply.CreatedAt}, ""); err != nil {
 		t.Fatal(err)
 	}
-	replies, err := s.ListThreadMessages(context.Background(), "C1", domain.NewMessageTimestamp(want.CreatedAt), domain.PageRequest{Limit: 10})
+	replies, err := s.ListThreadMessages(context.Background(), "C1", domain.NewMessageTimestamp(want.CreatedAt), domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(replies.Messages) != 2 || replies.Messages[0].ID != want.ID || replies.Messages[1].ID != reply.ID {
 		t.Fatalf("replies = %+v, err = %v", replies, err)
 	}
@@ -1867,8 +2005,12 @@ func TestSQLiteConversationUnreadCountFollowsReadCursor(t *testing.T) {
 	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
 		t.Fatal(err)
 	}
+	// Another member's message: a member's own posts are never unread to them.
+	if err := s.SeedUser(ctx, domain.User{ID: "U2", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
 	created := time.Now().UTC()
-	if err := s.CreateMessage(ctx, domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "unread", CreatedAt: created}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
+	if err := s.CreateMessage(ctx, domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U2", Text: "unread", CreatedAt: created}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
 	page, err := s.ListConversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 10})
@@ -2088,7 +2230,7 @@ func TestSQLiteMessageUnfurlsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	value := domain.Message{ID: "msg_unfurl", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "link", Blocks: `[{"type":"section","text":{"type":"plain_text","text":"hello"}}]`, CreatedAt: now, Unfurls: map[string]string{"https://example.com": `{"title":"Example"}`}}
+	value := domain.Message{ID: "msg_unfurl", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "link", Blocks: `[{"type":"section","block_id":"b1","text":{"type":"plain_text","text":"hello"}}]`, CreatedAt: now, Unfurls: map[string]string{"https://example.com": `{"title":"Example"}`}}
 	if err := s.CreateMessage(ctx, value, events.Event{ID: "evt_unfurl", WorkspaceID: "T1", Topic: "message.created", Payload: string(value.ID), CreatedAt: now}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -2204,7 +2346,7 @@ func TestSQLiteCommittedStateSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
-	page, err := second.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	page, err := second.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "durable" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
@@ -2354,13 +2496,16 @@ func TestSQLiteOutboxLeaseAndAck(t *testing.T) {
 	if renewed, err := s.ClaimEvents(ctx, "T1", "worker-2", 10, time.Minute); err != nil || len(renewed) != 0 {
 		t.Fatalf("renewed event was reclaimed=%v err=%v", renewed, err)
 	}
-	if err := s.ReleaseEvents(ctx, "worker-1", []uint64{claimed[0].Sequence}, time.Now().UTC().Add(5*time.Millisecond)); err != nil {
+	// The retry delay is generous so a loaded machine cannot pass it between
+	// the release and the claim that must still see the event withheld.
+	retryAt := time.Now().UTC().Add(500 * time.Millisecond)
+	if err := s.ReleaseEvents(ctx, "worker-1", []uint64{claimed[0].Sequence}, retryAt); err != nil {
 		t.Fatal(err)
 	}
 	if remaining, err := s.ClaimEvents(ctx, "T1", "worker-2", 10, time.Minute); err != nil || len(remaining) != 0 {
 		t.Fatalf("remaining=%v err=%v", remaining, err)
 	}
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(time.Until(retryAt) + 10*time.Millisecond)
 	reclaimed, err := s.ClaimEvents(ctx, "T1", "worker-2", 10, time.Minute)
 	if err != nil || len(reclaimed) != 1 {
 		t.Fatalf("reclaimed=%v err=%v", reclaimed, err)

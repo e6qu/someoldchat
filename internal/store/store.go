@@ -85,6 +85,14 @@ const MaxSearchHistoryEntries = 50
 // the metrics computed over them, match.
 const AppDeliveryAttemptRetention = 50
 
+// SocketModeAcknowledgedRetention is how long an acknowledged Socket Mode
+// response or interaction row is kept. Acknowledged rows were never deleted,
+// so every event an SDK acknowledged with a payload, and every interaction,
+// grew both tables for the life of the deployment. The window keeps a replayed
+// acknowledgement idempotent for far longer than any SDK retries one. Both
+// store profiles prune on the same write paths so their contents match.
+const SocketModeAcknowledgedRetention = 24 * time.Hour
+
 // The access levels a list or canvas grant can carry. They are the values the
 // service layer already writes through SetListAccess and SetCanvasAccess; naming
 // them here keeps the readers, the writers and the authorization decision that
@@ -176,15 +184,18 @@ func accessEntityRank(entityType domain.GrantEntity) int {
 }
 
 var (
-	ErrNotFound                  = errors.New("not found")
-	ErrLeaseConflict             = errors.New("outbox lease conflict")
-	ErrIdempotencyConflict       = errors.New("idempotency key already committed")
-	ErrAlreadyExists             = errors.New("already exists")
-	ErrInvalidArgument           = errors.New("invalid argument")
-	ErrInvalidConversationType   = errors.New("invalid conversation type")
-	ErrInvalidInviteRequest      = errors.New("invalid invite request")
-	ErrInvalidAppApproval        = errors.New("invalid app approval")
-	ErrConflict                  = errors.New("state conflict")
+	ErrNotFound                = errors.New("not found")
+	ErrLeaseConflict           = errors.New("outbox lease conflict")
+	ErrIdempotencyConflict     = errors.New("idempotency key already committed")
+	ErrAlreadyExists           = errors.New("already exists")
+	ErrInvalidArgument         = errors.New("invalid argument")
+	ErrInvalidConversationType = errors.New("invalid conversation type")
+	ErrInvalidInviteRequest    = errors.New("invalid invite request")
+	ErrInvalidAppApproval      = errors.New("invalid app approval")
+	ErrConflict                = errors.New("state conflict")
+	// ErrOAuthRedirectMismatch is a live authorization code redeemed with a
+	// redirect_uri other than the one its authorization named.
+	ErrOAuthRedirectMismatch     = errors.New("oauth redirect_uri does not match the authorization")
 	ErrBookmarkLimit             = errors.New("bookmark limit reached")
 	ErrScheduledMessageLimit     = errors.New("scheduled message channel window limit reached")
 	ErrScheduledStatusLimit      = errors.New("scheduled status limit reached")
@@ -206,6 +217,20 @@ var (
 	// classified error — AGENTS.md: handled errors must not become HTTP 500 —
 	// instead of as raw driver text.
 	ErrTransient = errors.New("transient storage failure")
+	// ErrTriggerExchanged and ErrTriggerExpired distinguish the two ways an
+	// existing interaction trigger stops being usable. Slack reports them as
+	// exchanged_trigger_id / expired_trigger_id (views.*) and
+	// trigger_exchanged / trigger_expired (dialog.open) rather than as an
+	// unknown trigger, which stays ErrNotFound.
+	ErrTriggerExchanged = errors.New("trigger already exchanged")
+	ErrTriggerExpired   = errors.New("trigger expired")
+	// ErrCapabilityExpired and ErrCapabilityExhausted refuse a bounded
+	// capability — a response_url — that exists but can no longer be used,
+	// because its lifetime ended or its uses ran out. Slack tells an app which
+	// (expired_url, used_url), so a store must too. Both wrap ErrNotFound: a
+	// caller that only asks whether the capability is usable keeps working.
+	ErrCapabilityExpired   = fmt.Errorf("capability expired: %w", ErrNotFound)
+	ErrCapabilityExhausted = fmt.Errorf("capability exhausted: %w", ErrNotFound)
 )
 
 // InvalidArgument classifies a malformed request as a caller mistake.
@@ -256,8 +281,26 @@ type Store interface {
 	// Activity in one write, so the notification and the durable record agree.
 	InviteToHuddle(context.Context, events.Event) error
 	RecordAccess(context.Context, domain.AccessLog) error
-	ListAccessLogs(context.Context, domain.WorkspaceID, time.Time, int, int) ([]domain.AccessLog, bool, error)
+	// RecordAccess counts one access into the row for its member, IP address
+	// and user agent, creating the row on the first access.
+	// ListAccessLogs pages those rows, most recently seen first, keeping only
+	// rows first seen at or before the given instant when it is not zero.
+	ListAccessLogs(context.Context, domain.WorkspaceID, time.Time, int, int) (domain.AccessLogPage, error)
+	// LookupToken resolves a bearer token. An execution-scoped token (see
+	// IssueFunctionExecutionToken) resolves too, as its app's bot with
+	// FunctionExecutionID set; once its execution is no longer running it
+	// reports ExpiresAt as the instant the execution ended, and it reports
+	// Revoked once the app holds no live bot token in the workspace.
 	LookupToken(context.Context, string) (domain.TokenRecord, error)
+	// IssueFunctionExecutionToken records the execution-scoped token for one
+	// function execution under the hash of its plaintext. An execution has at
+	// most one: when one is already recorded it is returned unchanged and the
+	// offered token is discarded, so a redelivered function_executed hands the
+	// app the token it was already given.
+	IssueFunctionExecutionToken(context.Context, domain.FunctionExecutionToken, string) (domain.FunctionExecutionToken, error)
+	// GetFunctionExecutionToken returns an execution's token, or ErrNotFound
+	// when function_executed has not yet been delivered for it.
+	GetFunctionExecutionToken(context.Context, domain.WorkspaceID, domain.WorkflowStepID) (domain.FunctionExecutionToken, error)
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppToken(context.Context, string, domain.AppTokenRecord) error
 	// RevokeAppTokens marks every token issued for an app revoked. Lookup already
@@ -502,8 +545,8 @@ type Store interface {
 	SetDirectConversationOpen(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, bool, events.Event) (bool, error)
 	CreateConversation(context.Context, domain.Conversation, domain.UserID, events.Event) error
 	RenameConversation(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
-	SetConversationTopic(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
-	SetConversationPurpose(context.Context, domain.ConversationID, string, events.Event, ...domain.Message) (domain.Conversation, error)
+	SetConversationTopic(context.Context, domain.ConversationID, domain.ConversationText, events.Event, ...domain.Message) (domain.Conversation, error)
+	SetConversationPurpose(context.Context, domain.ConversationID, domain.ConversationText, events.Event, ...domain.Message) (domain.Conversation, error)
 	SetConversationArchived(context.Context, domain.ConversationID, bool, events.Event) (domain.Conversation, error)
 	DeleteConversation(context.Context, domain.WorkspaceID, domain.ConversationID, events.Event) error
 	SetConversationAccessGroups(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.UserGroupID, events.Event) error
@@ -608,13 +651,6 @@ type Store interface {
 	// SetWorkflowManagers replaces a workflow's manager list independently of
 	// its versioned content.
 	SetWorkflowManagers(context.Context, domain.WorkspaceID, domain.WorkflowID, []domain.UserID, events.Event) error
-	// SetAppBotToken stores an app's bot access token as sealed ciphertext so a
-	// function_executed dispatch can include it, exactly as Slack sends
-	// bot_access_token to the app.
-	SetAppBotToken(context.Context, domain.AppID, domain.WorkspaceID, string, ...events.Event) error
-	// GetAppBotTokenCiphertext returns the sealed bot access token for an
-	// installed app, or ErrNotFound when the app has not issued one.
-	GetAppBotTokenCiphertext(context.Context, domain.AppID, domain.WorkspaceID) (string, error)
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
 	// SetWorkflowStatus takes a workflow in or out of service without touching
 	// what it says. It is deliberately not an edit: an administrator stopping a
@@ -649,6 +685,13 @@ type Store interface {
 	ListFeaturedWorkflows(context.Context, domain.WorkspaceID, []domain.ConversationID) ([]domain.FeaturedWorkflow, error)
 	CreateDialog(context.Context, domain.Dialog, events.Event) error
 	GetDialog(context.Context, domain.WorkspaceID, domain.DialogID) (domain.Dialog, error)
+	// GetCurrentDialog is the member's most recently opened dialog that is
+	// still open.
+	GetCurrentDialog(context.Context, domain.WorkspaceID, domain.UserID) (domain.Dialog, error)
+	// SetDialogErrors records the per-element errors an app answered a
+	// submission with; DeleteDialog closes a dialog on submission or cancel.
+	SetDialogErrors(context.Context, domain.Dialog, events.Event) error
+	DeleteDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.DialogID, events.Event) error
 	CreateBot(context.Context, domain.Bot) error
 	GetBot(context.Context, domain.WorkspaceID, domain.BotID) (domain.Bot, error)
 	CreateUserMigration(context.Context, domain.UserMigration, events.Event) error
@@ -694,7 +737,11 @@ type Store interface {
 	CreateOAuthClient(context.Context, domain.OAuthClient) error
 	GetOAuthClient(context.Context, string) (domain.OAuthClient, error)
 	CreateOAuthCode(context.Context, domain.OAuthCode) error
-	CreateOAuthAuthorization(context.Context, domain.User, domain.Bot, domain.OAuthCode) error
+	// CreateOAuthAuthorization stores a consented grant. When the grant has
+	// bot scopes and the app already has a live bot in the workspace, the grant
+	// names that bot and the candidate bot user and bot are not created; the
+	// returned grant carries the bot the code will redeem for.
+	CreateOAuthAuthorization(context.Context, domain.User, domain.Bot, domain.OAuthCode) (domain.OAuthCode, error)
 	ExchangeOAuthCode(context.Context, string, string, string, string, string, domain.OAuthToken) (domain.OAuthToken, error)
 	LookupOAuthRefreshToken(context.Context, string, string) (domain.OAuthRefreshGrant, error)
 	ExchangeOAuthRefreshToken(context.Context, string, string, string, string, string, time.Time) (domain.OAuthToken, error)
@@ -777,6 +824,9 @@ type Store interface {
 	AppendRetentionEvents(context.Context, domain.WorkspaceID, []events.Event) error
 	AddEmoji(context.Context, domain.CustomEmoji, events.Event) error
 	ListEmojis(context.Context, domain.WorkspaceID) ([]domain.CustomEmoji, error)
+	// EmojiRevision is when the workspace's custom emoji set last changed, or
+	// the zero time when it never has.
+	EmojiRevision(context.Context, domain.WorkspaceID) (time.Time, error)
 	RemoveEmoji(context.Context, domain.WorkspaceID, string, events.Event) error
 	RenameEmoji(context.Context, domain.WorkspaceID, string, string, events.Event) error
 	// AddConversationMember and its siblings accept the notice message the
@@ -793,6 +843,9 @@ type Store interface {
 	// fifty parents at a time, so this is deliberately batched: the
 	// per-parent alternative is fifty queries per page.
 	ThreadSummaries(context.Context, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)
+	// FollowedThreadRoots reports which of the named roots the member follows,
+	// in one read, for the `subscribed` flag a user token sees on a parent.
+	FollowedThreadRoots(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]bool, error)
 	GetReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	SetReadCursor(context.Context, domain.ReadCursor, events.Event) error
 	// SetReadCursors advances several read cursors in one transaction, with one
@@ -900,9 +953,21 @@ type Store interface {
 	// deleted. One number, so the header does not page an entire channel to
 	// print it.
 	CountConversationMembers(context.Context, domain.ConversationID) (int, error)
+	// ListConversations pages the conversations the reader may see. A request
+	// naming MemberUserID keeps only conversations that user belongs to, public
+	// channels included. Each conversation carries the reader's IsMember and its
+	// NumMembers, which a listing has to compute per row anyway and which would
+	// otherwise cost two more round trips per row.
 	ListConversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
 	SearchConversations(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.ConversationPage, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
+	// DirectParticipants lists everyone in a direct conversation, deactivated
+	// accounts included, in identifier order. ListConversationMembers leaves a
+	// deactivated account out, which is right for a member list and wrong for
+	// naming the person a DM is with: a DM whose partner left still is one.
+	// A conversation that is not direct has no participants in this sense and
+	// yields store.ErrNotFound.
+	DirectParticipants(context.Context, domain.ConversationID) ([]domain.UserID, error)
 	ListEventsAfter(context.Context, domain.WorkspaceID, uint64, int) ([]events.Record, error)
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
 	ListInstalledApps(context.Context) ([]domain.AppManifestSnapshot, error)
@@ -911,9 +976,24 @@ type Store interface {
 	ConsumeAppTrigger(context.Context, string, domain.AppID) (domain.AppTrigger, error)
 	UseAppResponseURL(context.Context, string) (domain.AppResponseURL, error)
 	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
-	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
-	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
-	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
+	// GetBotByUser returns the bot a bot user belongs to, including one whose
+	// app has since been uninstalled: the account is still a bot's, and its
+	// messages still are. A person has no bot and yields store.ErrNotFound.
+	GetBotByUser(context.Context, domain.WorkspaceID, domain.UserID) (domain.Bot, error)
+	// ClaimAppEvent leases the next record due for delivery to an app on one
+	// surface: a released record whose retry is due, else the next journal
+	// record after the app's position, which it advances. Each claimed record
+	// carries its own lease and retry state (events.AppEventClaim), so several
+	// records of one app can be in flight at once and a record waiting for a
+	// retry never holds back the records after it. found is false when nothing
+	// is due.
+	ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (claim events.AppEventClaim, found bool, err error)
+	// AckAppEvent finishes a claimed record: delivered, or deliberately
+	// dropped. It fails with ErrLeaseConflict when owner no longer holds it.
+	AckAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64) error
+	// ReleaseAppEvent returns a claimed record for a retry at release.RetryAt.
+	// Only a release that is not Internal counts as a delivery attempt.
+	ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, release events.AppEventRelease) error
 	GetAppEventCursor(context.Context, domain.AppID, string) (domain.AppEventCursor, error)
 	// ListAppDeliveryAttempts returns the retained delivery outcomes for an app's
 	// surface, newest first. It is the history behind AppDeliveryHealth, bounded to
@@ -926,7 +1006,12 @@ type Store interface {
 	ReleaseEvents(context.Context, string, []uint64, time.Time) error
 	GetMessageByCreatedAt(context.Context, domain.ConversationID, time.Time) (domain.Message, error)
 	GetIdempotentMessage(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.Message, error)
-	UpdateMessage(context.Context, domain.Message, events.Event) error
+	// UpdateMessage stores a changed message and journals the event announcing
+	// it, followed by any companion events, in one transaction. A companion is
+	// a second fact the same change establishes - link_shared for the links an
+	// edit adds - so it can neither be lost nor journalled for a change that
+	// did not commit.
+	UpdateMessage(context.Context, domain.Message, events.Event, ...events.Event) error
 	// DeleteMessage marks one message deleted and retracts the file shares that
 	// message was carrying. A file is visible to whoever can see a conversation
 	// it is shared into, and the share is a row of its own: without this, the
@@ -960,8 +1045,11 @@ type Store interface {
 	// the event from the instant it retries with, and no API surface can observe
 	// the sentinel. A fixture that hands the repository two colliding instants is
 	// in the same position as one that hands it two identical identifiers.
-	CreateMessage(context.Context, domain.Message, events.Event, string) error
-	CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event) error
+	//
+	// Companion events follow the announcement in the same transaction, as
+	// UpdateMessage's do: link_shared for the links the new message shares.
+	CreateMessage(context.Context, domain.Message, events.Event, string, ...events.Event) error
+	CreateScheduledMessagePost(context.Context, domain.ScheduledMessageID, domain.Message, events.Event, ...events.Event) error
 	CreateEphemeralMessage(context.Context, domain.EphemeralMessage, events.Event) error
 	GetEphemeralMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.EphemeralMessage, error)
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
@@ -989,10 +1077,22 @@ type Store interface {
 	// domain.PageRequest.PageAfter and both take NextCursor from the last row of
 	// the page. A cursor carries no direction, so one minted walking backwards
 	// resumes a forward walk from the same row.
-	ListMessages(context.Context, domain.ConversationID, domain.PageRequest) (domain.MessagePage, error)
+	//
+	// The request's window and RootsOnly are part of the same keyset read, so
+	// Limit, HasMore and NextCursor describe the rows the caller asked for: a
+	// window that holds one message answers that message with HasMore false,
+	// however many newer rows or thread replies lie outside it.
+	ListMessages(context.Context, domain.ConversationID, domain.HistoryRequest) (domain.MessagePage, error)
 	// ListThreadMessages has the same non-deleted history boundary as
-	// ListMessages, in chronological order.
-	ListThreadMessages(context.Context, domain.ConversationID, domain.MessageTimestamp, domain.PageRequest) (domain.MessagePage, error)
+	// ListMessages, in chronological order: the root first, then the replies
+	// inside the request's window.
+	ListThreadMessages(context.Context, domain.ConversationID, domain.MessageTimestamp, domain.ThreadRequest) (domain.MessagePage, error)
+	// MessageAnnotations reports, for each named message, its reactions grouped
+	// by emoji and whether it is pinned, in one read. A history page carries
+	// both on every message; asking per message was a query per row. An
+	// identifier that names no message of the conversation contributes
+	// nothing, so the read cannot disclose another channel's reactions.
+	MessageAnnotations(context.Context, domain.ConversationID, []domain.MessageID) (map[domain.MessageID]domain.MessageAnnotation, error)
 	ListAuthoredMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.MessagePage, error)
 	AddReaction(context.Context, domain.Reaction, events.Event) error
 	RemoveReaction(context.Context, domain.Reaction, events.Event) error
@@ -1003,7 +1103,9 @@ type Store interface {
 	ListPins(context.Context, domain.ConversationID, domain.PageRequest) ([]domain.Pin, domain.Cursor, bool, error)
 	AddStar(context.Context, domain.Star, events.Event) error
 	RemoveStar(context.Context, domain.Star, events.Event) error
-	ListStars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
+	// ListStars pages a member's message and channel stars together, oldest
+	// first, with the total across both.
+	ListStars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.StarPage, error)
 	CreateSavedItem(context.Context, domain.SavedItem, events.Event) (domain.SavedItem, bool, error)
 	GetSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID) (domain.SavedItem, error)
 	GetSavedItemByMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)
@@ -1023,6 +1125,8 @@ type Store interface {
 	// another member apart from one that does not exist. A reminder in a different
 	// workspace stays invisible (ErrNotFound), preserving tenant isolation.
 	ReminderInWorkspace(context.Context, domain.WorkspaceID, domain.ReminderID) (domain.Reminder, error)
+	// ListReminders lists the reminders for the member and those the member
+	// created for someone else.
 	ListReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
 	CompleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, time.Time, events.Event) error
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, events.Event) error
@@ -1035,7 +1139,9 @@ type Store interface {
 	// both somebody else winning it and the reminder not being there: the
 	// worker only claims what it has just read as due, and either way it must
 	// not deliver.
-	MarkReminderDelivered(context.Context, domain.WorkspaceID, domain.ReminderID, time.Time, events.Event) (bool, error)
+	// A recurring reminder is not retired by delivery: given its next
+	// occurrence, the claim moves its due time there instead.
+	MarkReminderDelivered(context.Context, domain.WorkspaceID, domain.ReminderID, time.Time, time.Time, events.Event) (bool, error)
 	// EarliestReminder is the next instant a reminder comes due, so a workspace
 	// that is asleep knows when to wake.
 	EarliestReminder(context.Context, domain.WorkspaceID) (time.Time, error)
@@ -1083,7 +1189,9 @@ type Store interface {
 	GetCall(context.Context, domain.WorkspaceID, domain.CallID) (domain.Call, error)
 	UpdateCall(context.Context, domain.Call, events.Event) error
 	EndCall(context.Context, domain.WorkspaceID, domain.CallID, int64, events.Event) error
-	SetCallParticipants(context.Context, domain.WorkspaceID, domain.CallID, []domain.UserID, events.Event) error
+	// SetCallParticipants replaces an app-registered call's member and
+	// external participants together.
+	SetCallParticipants(context.Context, domain.WorkspaceID, domain.CallID, []domain.UserID, []domain.ExternalCallParticipant, events.Event) error
 	// StartHuddle returns the conversation's active huddle, creating it only if
 	// there is none, and adds the caller to it either way. It is one atomic
 	// upsert because two people pressing start at the same moment must end up
@@ -1114,7 +1222,7 @@ type Store interface {
 	CompleteScheduledExternalUploads(context.Context, domain.ScheduledMessageID, []UploadedFile, []domain.ConversationID, []events.Event, PostedMessage) error
 	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, []events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
-	DeleteFile(context.Context, domain.FileID, events.Event) error
+	DeleteFile(context.Context, domain.FileID, ...events.Event) error
 	// SetFileDescription records what an image is, in words, for a reader who
 	// cannot see it. The uploader is part of the write rather than checked
 	// before it, so the permission cannot be lost between the check and the
@@ -1125,7 +1233,13 @@ type Store interface {
 	RevokeFilePublic(context.Context, domain.WorkspaceID, domain.FileID, events.Event) error
 	GetPublicFile(context.Context, string) (domain.File, error)
 	ListFiles(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.FilePage, error)
+	// ListVisibleFiles reads the files user may see newest first (created_at
+	// DESC, id DESC) with a FileCursor; see file_order.go.
 	ListVisibleFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FilePage, error)
+	// ListFileShares reads the live messages that carry a file, oldest first,
+	// with the conversation each one is in. It does not check who may read
+	// them; the caller filters by conversation access.
+	ListFileShares(context.Context, domain.FileID) ([]domain.FileShare, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearch) (domain.FilePage, error)
 	// SearchCanvases answers Slack's Canvases search tab. It applies exactly
 	// the visibility rule ListCanvases applies, because a search that matched
@@ -1237,6 +1351,12 @@ type Store interface {
 	// (conversation-share based) and the list-access model that lets a list
 	// reader download an attachment that was never shared into any channel.
 	FileReadableViaListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (bool, error)
+	// GrantFileAccess records durable read grants. Granting again is not an
+	// error; a grant disappears with its file.
+	GrantFileAccess(context.Context, []domain.FileAccessGrant) error
+	// FileReadableViaGrant reports whether the user holds a read grant on the
+	// file (see domain.FileAccessGrant).
+	FileReadableViaGrant(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (bool, error)
 	SetListAccess(context.Context, domain.ListAccess, events.Event) error
 	DeleteListAccess(context.Context, domain.ListAccess, events.Event) error
 	// GetListAccess resolves the effective access one user has to one list.

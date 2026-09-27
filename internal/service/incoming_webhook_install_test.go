@@ -52,7 +52,10 @@ func TestInstallWithIncomingWebhookMintsAWorkingHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token.IncomingWebhookURL == "" || token.IncomingWebhookChannel != "C1" || token.IncomingWebhookChannelName != "general" || token.IncomingWebhookID == "" {
+	// The service mints paths; the HTTP boundary puts this deployment's base
+	// URL in front of them. A host here would be a host the service guessed.
+	if !strings.HasPrefix(token.IncomingWebhookPath, "/services/T1/A1/") || token.IncomingWebhookConfigPath != "/app/apps/A1" ||
+		token.IncomingWebhookChannel != "C1" || token.IncomingWebhookChannelName != "general" || token.IncomingWebhookID == "" {
 		t.Fatalf("token webhook fields = %+v", token)
 	}
 	// The bot was added to the channel; otherwise the hook it posts through would
@@ -61,7 +64,7 @@ func TestInstallWithIncomingWebhookMintsAWorkingHook(t *testing.T) {
 		t.Fatalf("app bot in channel = %v err=%v, want true", member, err)
 	}
 	// The minted URL actually posts. Its last path segment is the secret.
-	parts := strings.Split(token.IncomingWebhookURL, "/")
+	parts := strings.Split(token.IncomingWebhookPath, "/")
 	secret := parts[len(parts)-1]
 	message, err := m.PostIncomingWebhook(ctx, "T1", "A1", secret, "from the hook", "", "", "")
 	if err != nil {
@@ -69,6 +72,10 @@ func TestInstallWithIncomingWebhookMintsAWorkingHook(t *testing.T) {
 	}
 	if message.Conversation != "C1" || message.Text != "from the hook" {
 		t.Fatalf("hook posted %+v", message)
+	}
+	// The hook posts as the app's bot, so the message names that bot.
+	if message.AppID != "A1" || message.PostingBot() != "B1" {
+		t.Fatalf("hook message app=%q bot=%q, want A1/B1", message.AppID, message.PostingBot())
 	}
 }
 
@@ -88,7 +95,7 @@ func TestInstallWithoutIncomingWebhookScopeMintsNoHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token.IncomingWebhookURL != "" || token.IncomingWebhookID != "" {
+	if token.IncomingWebhookPath != "" || token.IncomingWebhookID != "" {
 		t.Fatalf("a webhook was minted without the scope: %+v", token)
 	}
 	if member, _ := s.IsConversationMember(ctx, "C1", "Ubot"); member {
