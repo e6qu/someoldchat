@@ -1568,7 +1568,7 @@ func mustPage(markup string) *template.Template {
 }
 
 const pageStyle = `<style>
-.shell{height:100vh;display:grid;grid-template-rows:52px minmax(0,1fr)}
+.shell{height:100vh;display:grid;grid-template-rows:52px minmax(0,1fr);grid-template-columns:minmax(0,1fr)}
 .topbar{background:var(--chrome-top);color:var(--on-accent);display:flex;align-items:center;gap:12px;padding:0 16px;box-shadow:none}
 .search{position:relative;flex:1 1 auto;min-width:0;max-width:560px;margin:auto;display:flex;align-items:center;gap:8px;background:#ffffff2b;border:1px solid #ffffff8a;border-radius:7px;padding:4px 10px}
 .search input[name=q]{flex:1 1 auto;min-width:0;border:0;outline:0;background:transparent;color:var(--on-accent)}
