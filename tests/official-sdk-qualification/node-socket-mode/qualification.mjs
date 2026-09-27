@@ -217,6 +217,9 @@ try {
     Value: "api-prod",
     Description: "Primary service",
     Group: "Projects",
+    // The service signs option text only for a view's external select; a
+    // message's options carry no token.
+    Token: "",
   }]);
 } finally {
   await interactions.disconnect();
