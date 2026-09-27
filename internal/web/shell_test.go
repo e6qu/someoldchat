@@ -56,7 +56,7 @@ func TestEveryDestinationRendersInsideTheWorkspaceFrame(t *testing.T) {
 		}
 		body := response.Body.String()
 		requireContains(t, target.path, body,
-			`<nav class="rail" aria-label="Workspace">`,
+			`<nav class="rail" id="workspace-rail" aria-label="Workspace">`,
 			`id="workspace-search"`,
 			`id="conversation-switcher"`,
 			`id="keyboard-help"`,

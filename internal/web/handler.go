@@ -3221,7 +3221,7 @@ close();
 form.addEventListener('submit',close);
 document.addEventListener('pointerdown',function(event){if(!form.contains(event.target))close()});
 }
-var inputs=document.querySelectorAll('form.search input[name=q],#search-query');
+var inputs=document.querySelectorAll('#workspace-search,#search-query');
 for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 })();</script>`
 

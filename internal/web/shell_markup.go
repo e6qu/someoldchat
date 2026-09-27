@@ -135,12 +135,12 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
   <a role="menuitem" href="{{.With "/app/members"}}#profile" data-open-profile="{{.UserID}}">{{icon "user"}}<span>Profile</span></a>
   <a role="menuitem" href="{{.With "/app/preferences"}}" data-dialog-open="preferences">{{icon "gear"}}<span>Preferences</span></a>
   <hr role="separator">
-  <form class="menu-form" method="post" action="/app/session/revoke" role="none"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit" role="menuitem" data-shauth-sign-out aria-label="Sign out">{{icon "signout"}}<span>Sign out of {{.WorkspaceName}}</span></button></form>
+  <form class="menu-form" method="post" action="/app/session/revoke" role="none"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit" role="menuitem" data-shauth-sign-out>{{icon "signout"}}<span>Sign out of {{.WorkspaceName}}</span></button></form>
 </div>{{end}}
 
 {{define "self-avatar"}}<span class="self-avatar" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.UserInitial}}{{end}}<span class="presence-dot{{if .Away}} away{{end}}"></span></span>{{end}}
 
-{{define "shell-rail"}}<nav class="rail" aria-label="Workspace">
+{{define "shell-rail"}}<nav class="rail" id="workspace-rail" aria-label="Workspace">
   <details class="menu rail-workspace" data-menu>
     <summary class="rail-team" role="button" aria-haspopup="menu" aria-expanded="false" aria-label="{{.WorkspaceName}} workspace menu"><span class="team-icon" aria-hidden="true">{{.WorkspaceInitial}}</span></summary>
     {{template "workspace-menu" .}}
@@ -222,7 +222,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
 {{if .CanCreate}}<dialog class="shell-dialog create-channel" id="create-channel" aria-labelledby="create-channel-title">
   {{template "create-channel-form" .}}
 </dialog>{{end}}
-<p class="visually-hidden" id="shell-status" role="status" aria-live="polite"></p>{{end}}
+<div class="visually-hidden" id="shell-status" aria-live="polite" aria-atomic="true"></div>{{end}}
 
 {{define "status-form"}}<form class="status-form" method="post" action="/app/status" data-status-form>
   <div class="dialog-head"><h2 id="status-dialog-title" tabindex="-1">Set a status</h2><button class="dialog-close" type="button" data-dialog-close aria-label="Close status">{{icon "close"}}</button></div>
@@ -251,6 +251,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
 {{define "create-channel-form"}}<form class="create-channel-form" method="post" action="/app/conversation/create" data-stepped>
   <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
   <div class="dialog-head"><h2 id="create-channel-title" tabindex="-1">Create a channel</h2><button class="dialog-close" type="button" data-dialog-close aria-label="Close create a channel">{{icon "close"}}</button></div>
+  <p class="form-error dialog-error" role="alert" tabindex="-1" data-step-error hidden></p>
   <section class="dialog-body" data-step="1" aria-label="Step 1 of 3: Name">
     <label for="new-channel-name">Name</label>
     <div class="prefixed-input"><span class="prefix" aria-hidden="true">{{icon "hash"}}</span><input id="new-channel-name" type="text" name="name" maxlength="80" required placeholder="e.g. plan-budget" autocomplete="off" aria-describedby="new-channel-count new-channel-hint"><span class="char-count" id="new-channel-count" aria-live="polite">80</span></div>
