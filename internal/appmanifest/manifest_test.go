@@ -209,3 +209,29 @@ func TestParseRejectsUserOnlyScopesRequestedForTheBot(t *testing.T) {
 		t.Fatalf("bot read scopes: problems=%+v", problems)
 	}
 }
+
+func TestParseStoresValidatedUnfurlDomains(t *testing.T) {
+	parsed, problems := Parse(`{"display_information":{"name":"Links"},"features":{"unfurl_domains":["Example.com","docs.example.com","example.com"]}}`)
+	if len(problems) != 0 {
+		t.Fatalf("problems=%+v", problems)
+	}
+	if strings.Join(parsed.UnfurlDomains, ",") != "example.com,docs.example.com" {
+		t.Fatalf("unfurl domains=%q", parsed.UnfurlDomains)
+	}
+	for raw, pointer := range map[string]string{
+		`["https://example.com"]`:                                 "/features/unfurl_domains/0",
+		`["example.com","example.com/path"]`:                      "/features/unfurl_domains/1",
+		`["example.com:8443"]`:                                    "/features/unfurl_domains/0",
+		`["a.test","b.test","c.test","d.test","e.test","f.test"]`: "/features/unfurl_domains",
+		`"example.com"`:                                           "/features/unfurl_domains",
+	} {
+		_, problems := Parse(`{"display_information":{"name":"Links"},"features":{"unfurl_domains":` + raw + `}}`)
+		found := false
+		for _, problem := range problems {
+			found = found || problem.Pointer == pointer
+		}
+		if !found {
+			t.Errorf("%s: problems=%+v, want one at %s", raw, problems, pointer)
+		}
+	}
+}

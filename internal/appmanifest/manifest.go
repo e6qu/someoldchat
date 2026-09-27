@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
 const maxManifestBytes = 1 << 20
@@ -50,6 +52,10 @@ type Parsed struct {
 	AssistantView           *AgentView
 	Datastores              map[string]Datastore
 	Functions               map[string]Function
+	// UnfurlDomains are the lower-cased host names whose links this app
+	// unfurls: a message sharing a link on one of them, or on a subdomain of
+	// one, reaches the app as a link_shared event.
+	UnfurlDomains []string
 }
 
 type AgentView struct {
@@ -361,6 +367,7 @@ func Parse(raw string) (Parsed, []Error) {
 			})
 		}
 	}
+	unfurlDomains := parseUnfurlDomains(features, &problems)
 	functions := parseFunctions(document["functions"], &problems)
 	if len(functions) != 0 && functionRuntime == "" {
 		problems = append(problems, Error{Message: "function_runtime is required when functions are declared", Pointer: "/settings/function_runtime"})
@@ -413,7 +420,30 @@ func Parse(raw string) (Parsed, []Error) {
 		AssistantView:           assistantView,
 		Datastores:              datastores,
 		Functions:               functions,
+		UnfurlDomains:           unfurlDomains,
 	}, nil
+}
+
+// parseUnfurlDomains reads features.unfurl_domains: at most
+// domain.MaxUnfurlDomains bare host names. A scheme, path or port is refused
+// rather than stripped, because the developer who wrote one expected it to
+// narrow the match and it cannot.
+func parseUnfurlDomains(features map[string]any, problems *[]Error) []string {
+	const pointer = "/features/unfurl_domains"
+	values := stringSlice(features, "unfurl_domains", pointer, problems)
+	if len(values) > domain.MaxUnfurlDomains {
+		*problems = append(*problems, Error{Message: fmt.Sprintf("An app can register at most %d unfurl domains", domain.MaxUnfurlDomains), Pointer: pointer})
+	}
+	domains := make([]string, 0, len(values))
+	for index, value := range values {
+		normalized, valid := domain.NormalizeUnfurlDomain(value)
+		if !valid {
+			*problems = append(*problems, Error{Message: "Unfurl domain must be a domain name without a protocol, port or path", Pointer: fmt.Sprintf("%s/%d", pointer, index)})
+			continue
+		}
+		domains = append(domains, normalized)
+	}
+	return normalizedUnique(domains)
 }
 
 func parseFunctions(raw any, problems *[]Error) map[string]Function {
