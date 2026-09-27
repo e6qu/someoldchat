@@ -937,7 +937,7 @@ var File_sameoldchat_chat_v1_views_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_views_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/views.proto\x12\x13sameoldchat.chat.v1\x1a\x1esameoldchat/chat/v1/apps.proto\"\xba\x03\n" +
+	"\x1fsameoldchat/chat/v1/views.proto\x12\x13sameoldchat.chat.v1\x1a\x1esameoldchat/chat/v1/apps.proto\x1a'sameoldchat/chat/v1/conversations.proto\"\xba\x03\n" +
 	"\x04View\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -1019,7 +1019,7 @@ const file_sameoldchat_chat_v1_views_proto_rawDesc = "" +
 	"\x05clear\x18\x05 \x01(\bR\x05clear\x12*\n" +
 	"\x11response_base_url\x18\x06 \x01(\tR\x0fresponseBaseUrl\"&\n" +
 	"\x14ViewMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2\x9e\x06\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok2\xf9\x06\n" +
 	"\fViewsService\x12K\n" +
 	"\bOpenView\x12$.sameoldchat.chat.v1.OpenViewRequest\x1a\x19.sameoldchat.chat.v1.View\x12Q\n" +
 	"\vPublishView\x12'.sameoldchat.chat.v1.PublishViewRequest\x1a\x19.sameoldchat.chat.v1.View\x12K\n" +
@@ -1028,7 +1028,8 @@ const file_sameoldchat_chat_v1_views_proto_rawDesc = "" +
 	"UpdateView\x12&.sameoldchat.chat.v1.UpdateViewRequest\x1a\x19.sameoldchat.chat.v1.View\x12[\n" +
 	"\x10CurrentModalView\x12,.sameoldchat.chat.v1.CurrentModalViewRequest\x1a\x19.sameoldchat.chat.v1.View\x12T\n" +
 	"\aAppHome\x12#.sameoldchat.chat.v1.AppHomeRequest\x1a$.sameoldchat.chat.v1.AppHomeResponse\x12X\n" +
-	"\vOpenAppHome\x12#.sameoldchat.chat.v1.AppHomeRequest\x1a$.sameoldchat.chat.v1.AppHomeResponse\x12d\n" +
+	"\vOpenAppHome\x12#.sameoldchat.chat.v1.AppHomeRequest\x1a$.sameoldchat.chat.v1.AppHomeResponse\x12Y\n" +
+	"\x0fOpenAppMessages\x12#.sameoldchat.chat.v1.AppHomeRequest\x1a!.sameoldchat.chat.v1.Conversation\x12d\n" +
 	"\n" +
 	"SubmitView\x12*.sameoldchat.chat.v1.ViewSubmissionRequest\x1a*.sameoldchat.chat.v1.ViewInteractionResult\x12]\n" +
 	"\tCloseView\x12%.sameoldchat.chat.v1.CloseViewRequest\x1a).sameoldchat.chat.v1.ViewMutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
@@ -1060,6 +1061,7 @@ var file_sameoldchat_chat_v1_views_proto_goTypes = []any{
 	(*CloseViewRequest)(nil),        // 10: sameoldchat.chat.v1.CloseViewRequest
 	(*ViewMutationResponse)(nil),    // 11: sameoldchat.chat.v1.ViewMutationResponse
 	(*InstalledApp)(nil),            // 12: sameoldchat.chat.v1.InstalledApp
+	(*Conversation)(nil),            // 13: sameoldchat.chat.v1.Conversation
 }
 var file_sameoldchat_chat_v1_views_proto_depIdxs = []int32{
 	12, // 0: sameoldchat.chat.v1.AppHomeResponse.app:type_name -> sameoldchat.chat.v1.InstalledApp
@@ -1071,19 +1073,21 @@ var file_sameoldchat_chat_v1_views_proto_depIdxs = []int32{
 	5,  // 6: sameoldchat.chat.v1.ViewsService.CurrentModalView:input_type -> sameoldchat.chat.v1.CurrentModalViewRequest
 	6,  // 7: sameoldchat.chat.v1.ViewsService.AppHome:input_type -> sameoldchat.chat.v1.AppHomeRequest
 	6,  // 8: sameoldchat.chat.v1.ViewsService.OpenAppHome:input_type -> sameoldchat.chat.v1.AppHomeRequest
-	8,  // 9: sameoldchat.chat.v1.ViewsService.SubmitView:input_type -> sameoldchat.chat.v1.ViewSubmissionRequest
-	10, // 10: sameoldchat.chat.v1.ViewsService.CloseView:input_type -> sameoldchat.chat.v1.CloseViewRequest
-	0,  // 11: sameoldchat.chat.v1.ViewsService.OpenView:output_type -> sameoldchat.chat.v1.View
-	0,  // 12: sameoldchat.chat.v1.ViewsService.PublishView:output_type -> sameoldchat.chat.v1.View
-	0,  // 13: sameoldchat.chat.v1.ViewsService.PushView:output_type -> sameoldchat.chat.v1.View
-	0,  // 14: sameoldchat.chat.v1.ViewsService.UpdateView:output_type -> sameoldchat.chat.v1.View
-	0,  // 15: sameoldchat.chat.v1.ViewsService.CurrentModalView:output_type -> sameoldchat.chat.v1.View
-	7,  // 16: sameoldchat.chat.v1.ViewsService.AppHome:output_type -> sameoldchat.chat.v1.AppHomeResponse
-	7,  // 17: sameoldchat.chat.v1.ViewsService.OpenAppHome:output_type -> sameoldchat.chat.v1.AppHomeResponse
-	9,  // 18: sameoldchat.chat.v1.ViewsService.SubmitView:output_type -> sameoldchat.chat.v1.ViewInteractionResult
-	11, // 19: sameoldchat.chat.v1.ViewsService.CloseView:output_type -> sameoldchat.chat.v1.ViewMutationResponse
-	11, // [11:20] is the sub-list for method output_type
-	2,  // [2:11] is the sub-list for method input_type
+	6,  // 9: sameoldchat.chat.v1.ViewsService.OpenAppMessages:input_type -> sameoldchat.chat.v1.AppHomeRequest
+	8,  // 10: sameoldchat.chat.v1.ViewsService.SubmitView:input_type -> sameoldchat.chat.v1.ViewSubmissionRequest
+	10, // 11: sameoldchat.chat.v1.ViewsService.CloseView:input_type -> sameoldchat.chat.v1.CloseViewRequest
+	0,  // 12: sameoldchat.chat.v1.ViewsService.OpenView:output_type -> sameoldchat.chat.v1.View
+	0,  // 13: sameoldchat.chat.v1.ViewsService.PublishView:output_type -> sameoldchat.chat.v1.View
+	0,  // 14: sameoldchat.chat.v1.ViewsService.PushView:output_type -> sameoldchat.chat.v1.View
+	0,  // 15: sameoldchat.chat.v1.ViewsService.UpdateView:output_type -> sameoldchat.chat.v1.View
+	0,  // 16: sameoldchat.chat.v1.ViewsService.CurrentModalView:output_type -> sameoldchat.chat.v1.View
+	7,  // 17: sameoldchat.chat.v1.ViewsService.AppHome:output_type -> sameoldchat.chat.v1.AppHomeResponse
+	7,  // 18: sameoldchat.chat.v1.ViewsService.OpenAppHome:output_type -> sameoldchat.chat.v1.AppHomeResponse
+	13, // 19: sameoldchat.chat.v1.ViewsService.OpenAppMessages:output_type -> sameoldchat.chat.v1.Conversation
+	9,  // 20: sameoldchat.chat.v1.ViewsService.SubmitView:output_type -> sameoldchat.chat.v1.ViewInteractionResult
+	11, // 21: sameoldchat.chat.v1.ViewsService.CloseView:output_type -> sameoldchat.chat.v1.ViewMutationResponse
+	12, // [12:22] is the sub-list for method output_type
+	2,  // [2:12] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
 	2,  // [2:2] is the sub-list for extension extendee
 	0,  // [0:2] is the sub-list for field type_name
@@ -1095,6 +1099,7 @@ func file_sameoldchat_chat_v1_views_proto_init() {
 		return
 	}
 	file_sameoldchat_chat_v1_apps_proto_init()
+	file_sameoldchat_chat_v1_conversations_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

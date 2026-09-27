@@ -248,6 +248,8 @@ message AppOption {
   string value = 2;
   string description = 3;
   string group = 4;
+  // token vouches for text when the option was loaded for a view.
+  string token = 5;
 }
 
 message AppOptionListResponse {

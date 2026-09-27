@@ -217,6 +217,13 @@ var (
 	// classified error — AGENTS.md: handled errors must not become HTTP 500 —
 	// instead of as raw driver text.
 	ErrTransient = errors.New("transient storage failure")
+	// ErrTriggerExchanged and ErrTriggerExpired distinguish the two ways an
+	// existing interaction trigger stops being usable. Slack reports them as
+	// exchanged_trigger_id / expired_trigger_id (views.*) and
+	// trigger_exchanged / trigger_expired (dialog.open) rather than as an
+	// unknown trigger, which stays ErrNotFound.
+	ErrTriggerExchanged = errors.New("trigger already exchanged")
+	ErrTriggerExpired   = errors.New("trigger expired")
 	// ErrCapabilityExpired and ErrCapabilityExhausted refuse a bounded
 	// capability — a response_url — that exists but can no longer be used,
 	// because its lifetime ended or its uses ran out. Slack tells an app which
@@ -671,6 +678,13 @@ type Store interface {
 	ListFeaturedWorkflows(context.Context, domain.WorkspaceID, []domain.ConversationID) ([]domain.FeaturedWorkflow, error)
 	CreateDialog(context.Context, domain.Dialog, events.Event) error
 	GetDialog(context.Context, domain.WorkspaceID, domain.DialogID) (domain.Dialog, error)
+	// GetCurrentDialog is the member's most recently opened dialog that is
+	// still open.
+	GetCurrentDialog(context.Context, domain.WorkspaceID, domain.UserID) (domain.Dialog, error)
+	// SetDialogErrors records the per-element errors an app answered a
+	// submission with; DeleteDialog closes a dialog on submission or cancel.
+	SetDialogErrors(context.Context, domain.Dialog, events.Event) error
+	DeleteDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.DialogID, events.Event) error
 	CreateBot(context.Context, domain.Bot) error
 	GetBot(context.Context, domain.WorkspaceID, domain.BotID) (domain.Bot, error)
 	CreateUserMigration(context.Context, domain.UserMigration, events.Event) error

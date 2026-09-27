@@ -3925,24 +3925,39 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				messagesTab, err := chat.OpenAppMessages(ctx, "T1", "U1", "A1")
+				if err != nil {
+					return nil, err
+				}
 				dialogErr := chat.OpenDialog(ctx, "T1", "UBOT", "A1", "trigger_dialog",
 					`{"callback_id":"ticket","title":"File a ticket","elements":[{"type":"text","name":"summary","label":"Summary"}]}`)
 				// A dialog that is not a dialog is refused rather than stored,
 				// and the spent trigger is what makes the refusal observable:
 				// both compositions must reject the payload, not the trigger.
 				invalidDialogErr := chat.OpenDialog(ctx, "T1", "UBOT", "A1", "trigger_replay", `{"callback_id":"ticket"}`)
+				// The member the trigger belongs to sees the dialog, a submission
+				// that leaves a required element empty is refused before the app
+				// is asked, and cancelling closes it.
+				openDialog, currentErr := chat.CurrentDialog(ctx, "T1", "U1")
+				refused, submitErr := chat.SubmitDialog(ctx, "T1", "U1", "C1", openDialog.ID, map[string]string{}, "https://chat.example.test")
+				cancelErr := chat.CancelDialog(ctx, "T1", "U1", "C1", openDialog.ID, "https://chat.example.test")
+				_, afterCancelErr := chat.CurrentDialog(ctx, "T1", "U1")
 				return []any{
 					opened.Type, opened.ExternalID, opened.AppID, opened.UserID,
 					opened.Hash != "", opened.RootViewID == "", opened.PreviousViewID == "",
 					pushed.Type, pushed.RootViewID == opened.ID, pushed.PreviousViewID == opened.ID,
 					staleErr != nil, errors.Is(staleErr, storepkg.ErrConflict),
 					updated.ID == pushed.ID, updated.Hash != pushed.Hash, normalizeViewPayload(updated.Payload),
-					replayErr != nil, errors.Is(replayErr, service.ErrInvalidTrigger),
+					replayErr != nil, errors.Is(replayErr, service.ErrTriggerExchanged),
 					published.Type, published.UserID, normalizeViewPayload(published.Payload),
 					installed.ID, installed.Name, installed.HomeTabEnabled, normalizeViewPayload(home.Payload),
 					openedApp.ID, openedHome.Payload == home.Payload,
+					messagesTab.Kind, messagesTab.ID != "",
 					dialogErr == nil, invalidDialogErr != nil,
 					errors.Is(invalidDialogErr, service.ErrInvalidDialog),
+					currentErr == nil, openDialog.AppID, openDialog.UserID, openDialog.Payload != "",
+					submitErr == nil, refused.Errors["summary"], refused.Pending,
+					cancelErr == nil, errors.Is(afterCancelErr, storepkg.ErrNotFound),
 				}, nil
 			},
 		},

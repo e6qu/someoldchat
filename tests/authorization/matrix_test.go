@@ -357,6 +357,8 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureWorkflowID)
 	case reflect.TypeOf(domain.AppID("")):
 		return reflect.ValueOf(fixtureAppID)
+	case reflect.TypeOf(domain.DialogID("")):
+		return reflect.ValueOf(fixtureDialogID)
 	case reflect.TypeOf(domain.SharedInviteID("")):
 		// The operation decides which invitation it needs: approving and
 		// denying act on a pending one, revoking on an approved one. Handing
@@ -723,7 +725,7 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		VerificationTokenCiphertext: "fixture-verification-ciphertext",
 		ManifestVersion:             1, Distribution: "private", CreatedAt: at, UpdatedAt: at,
 	}, domain.AppManifestRevision{
-		AppID: fixtureAppID, Version: 1, CreatedBy: "U-member", Manifest: `{"display_information":{"name":"Fixture app"}}`, CreatedAt: at,
+		AppID: fixtureAppID, Version: 1, CreatedBy: "U-member", Manifest: `{"display_information":{"name":"Fixture app"},"features":{"app_home":{"messages_tab_enabled":true}}}`, CreatedAt: at,
 	}, domain.OAuthClient{
 		ID: "fixture-client", AppID: fixtureAppID, SecretHash: "fixture-client-secret-hash",
 	}))
@@ -734,6 +736,15 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	seed("app installation", repository.CreateAppInstallation(ctx, domain.AppInstallation{
 		AppID: fixtureAppID, WorkspaceID: "T1", Enabled: true, CreatedAt: at,
 	}))
+	// The app has a bot and a Messages tab, so opening the app's messages has
+	// a conversation to open; and the holder has a dialog the app opened, so
+	// the dialog operations have one to find.
+	seed("app bot user", repository.SeedUser(domain.User{ID: "U-fixture-bot", WorkspaceID: "T1", Name: "fixture-bot"}))
+	seed("app bot", repository.CreateBot(ctx, domain.Bot{ID: "F-bot", WorkspaceID: "T1", AppID: fixtureAppID, UserID: "U-fixture-bot", Name: "fixture-bot", UpdatedAt: at}))
+	seed("dialog", repository.CreateDialog(ctx, domain.Dialog{
+		ID: fixtureDialogID, WorkspaceID: "T1", UserID: "U-owner", AppID: fixtureAppID, CreatedAt: at,
+		Payload: `{"callback_id":"fixture","title":"Fixture","elements":[{"type":"text","name":"answer","label":"Answer"}]}`,
+	}, event("E-dialog", "dialog.opened")))
 	// A live huddle in the seeded conversation, started by the holder so the
 	// operations that act on "the huddle I am in" have one to find.
 	if _, _, err := repository.StartHuddle(ctx, domain.Call{
@@ -936,6 +947,7 @@ const (
 	fixtureFileID          domain.FileID          = "F-file"
 	fixtureWorkflowID      domain.WorkflowID      = "F-workflow"
 	fixtureAppID           domain.AppID           = "F-app"
+	fixtureDialogID        domain.DialogID        = "F-dialog"
 	fixtureHuddleID        domain.CallID          = "F-huddle"
 
 	fixtureSharedInviteID    domain.SharedInviteID      = "F-invite"

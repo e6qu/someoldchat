@@ -167,6 +167,9 @@ var liveEventTopics = []string{
 	"view.updated",
 	"view.submitted",
 	"view.closed",
+	"dialog.opened",
+	"dialog.updated",
+	"dialog.closed",
 	"huddle.started",
 	"huddle.joined",
 	"huddle.left",
@@ -1969,11 +1972,12 @@ const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox
               {{if eq $action.Control "button"}}<input type="hidden" name="value" value="{{$action.Value}}">{{if $action.Dispatch}}<button class="block-action{{if $action.Tone}} feedback-{{$action.Tone}}{{end}}" type="submit"{{if $action.AccessibilityLabel}} aria-label="{{$action.AccessibilityLabel}}"{{end}}>{{$action.Text}}</button>{{end}}
               {{else if eq $action.Control "date"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="date" name="value" value="{{$action.Value}}" required></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
               {{else if eq $action.Control "time"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="time" name="value" value="{{$action.Value}}" required></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
-              {{else if eq $action.Control "datetime"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="datetime-local" name="value" data-unix-seconds="true" required></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
+              {{else if eq $action.Control "datetime"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="datetime-local" name="value" value="{{$action.Value}}"{{if $action.DateTimeUnix}} data-unix="{{$action.DateTimeUnix}}"{{end}} data-unix-seconds="true" required><input type="hidden" name="timezone" data-browser-timezone value="UTC"></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
               {{else if eq $action.Control "radio"}}<fieldset class="block-action-options"><legend class="sr-only">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="radio" name="value" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}} required> {{$option.Text}}</label>{{end}}</fieldset>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
               {{else if eq $action.Control "checkbox"}}<fieldset class="block-action-options"><legend class="sr-only">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="checkbox" name="value" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}> {{$option.Text}}</label>{{end}}</fieldset>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
               {{else if eq $action.Control "external"}}<div class="external-select" data-app-options data-app-id="{{$message.AppID}}" data-message-id="{{$message.MessageID}}" data-block-id="{{$action.BlockID}}" data-action-id="{{$action.ActionID}}" data-channel="{{$message.Channel}}" data-min-query="{{$action.MinQueryLength}}"><label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="search" data-options-query placeholder="{{$action.Text}}" minlength="{{$action.MinQueryLength}}"></label><button class="block-action" type="button" data-options-load>Search</button><label><span class="sr-only">Results</span><select class="block-action block-action-select" name="value" data-options-results{{if $action.Multiple}} multiple{{end}}{{if not $action.Options}} disabled{{end}}>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label>{{if $action.Dispatch}}<button class="block-action" type="submit" data-options-choose{{if not $action.Options}} disabled{{end}}>Choose</button>{{end}}<p class="external-select-status" data-options-status role="status"></p><noscript>Dynamic options require JavaScript in this client.</noscript></div>
-              {{else if or (eq $action.Control "text") (eq $action.Control "textarea") (eq $action.Control "email") (eq $action.Control "url") (eq $action.Control "number")}}{{if eq $action.Control "textarea"}}<textarea class="block-action" name="value" placeholder="{{$action.Text}}">{{$action.Value}}</textarea>{{else}}<input class="block-action" type="{{$action.Control}}" name="value" value="{{$action.Value}}" placeholder="{{$action.Text}}">{{end}}{{if $action.Dispatch}}<button class="block-action" type="submit">Send</button>{{end}}
+              {{else if eq $action.Control "file"}}<p class="modal-hint modal-unsupported" role="note">{{$action.Text}} This client cannot attach files to app forms yet.</p>
+            {{else if or (eq $action.Control "text") (eq $action.Control "textarea") (eq $action.Control "richtext") (eq $action.Control "email") (eq $action.Control "url") (eq $action.Control "number")}}{{if or (eq $action.Control "textarea") (eq $action.Control "richtext")}}<textarea class="block-action" name="value" placeholder="{{$action.Text}}">{{$action.Value}}</textarea>{{else}}<input class="block-action" type="{{$action.Control}}" name="value" value="{{$action.Value}}" placeholder="{{$action.Text}}">{{end}}{{if $action.Dispatch}}<button class="block-action" type="submit">Send</button>{{end}}
               {{else}}<label><span class="sr-only">{{$action.Text}}</span><select class="block-action block-action-select" name="value"{{if $action.Multiple}} multiple{{end}} required>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}{{end}}
             {{if $action.Dispatch}}</form>{{else}}</div>{{end}}
           {{end}}</div>{{end}}
@@ -2110,7 +2114,7 @@ const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox
 
 var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
 {{define "styles"}}` + pageStyle + workspaceRefinements + `{{end}}
-{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + huddleMediaScript + `{{end}}
+{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
 <div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}">
@@ -2572,26 +2576,28 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
 {{if .Modal}}
 <div class="modal-backdrop">
   <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
-    <form id="modal-close-form" method="post" action="/app/view/close?channel={{.Channel}}">
-      <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.Modal.ID}}"><input type="hidden" name="clear" value="{{.Modal.ClearOnClose}}">
+    <form id="modal-close-form" method="post" action="{{if .Modal.Dialog}}/app/dialog/close{{else}}/app/view/close{{end}}?channel={{.Channel}}">
+      <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="{{if .Modal.Dialog}}dialog_id{{else}}view_id{{end}}" value="{{.Modal.ID}}"><input type="hidden" name="clear" value="{{.Modal.ClearOnClose}}">
     </form>
     <header class="modal-head"><div><h2 id="app-modal-title">{{.Modal.Title}}</h2><span class="modal-app">App modal</span></div><button class="modal-close-x" type="submit" form="modal-close-form" formnovalidate aria-label="Close {{.Modal.Title}}">×</button></header>
-    <form class="modal-form" method="post" action="/app/view/submit?channel={{.Channel}}">
-      <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.Modal.ID}}">
+    <form class="modal-form" method="post" action="{{if .Modal.Dialog}}/app/dialog/submit{{else}}/app/view/submit{{end}}?channel={{.Channel}}">
+      <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="{{if .Modal.Dialog}}dialog_id{{else}}view_id{{end}}" value="{{.Modal.ID}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC">
       <div class="modal-body">
       {{if .Modal.Error}}<p class="form-error" role="alert" tabindex="-1" autofocus>{{.Modal.Error}}</p>{{end}}
       {{range $block := .Modal.Blocks}}
         {{if $block.Input}}{{$input := $block.Input}}
-        <div class="modal-block modal-input">
+        <div class="modal-block modal-input"{{if $input.Dispatch}} data-dispatch-input="{{$input.Index}}" data-dispatch-on="{{$input.DispatchTriggers}}"{{end}}>
           {{if or (eq $input.Control "radio") (eq $input.Control "checkbox")}}<fieldset class="modal-options"{{if $block.Error}} aria-describedby="modal-error-{{$input.Index}}"{{end}}><legend class="modal-legend">{{$input.Label}}{{if $input.Optional}} <span class="modal-hint">(optional)</span>{{end}}</legend>
             {{range $option := $input.Options}}<label><input type="{{if eq $input.Control "radio"}}radio{{else}}checkbox{{end}}" name="input_{{$input.Index}}" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}{{if and (eq $input.Control "radio") (not $input.Optional)}} required{{end}}> <span>{{$option.Text}}</span></label>{{end}}
           </fieldset>
+          {{else if $input.Unsupported}}<p class="modal-legend" id="modal-input-{{$input.Index}}">{{$input.Label}}{{if $input.Optional}} <span class="modal-hint">(optional)</span>{{end}}</p><p class="modal-hint modal-unsupported" role="note">{{$input.Unsupported}}{{if not $input.Optional}} The app requires a value here, so this form cannot be submitted from this client.{{end}}</p>
           {{else}}<label for="modal-input-{{$input.Index}}">{{$input.Label}}{{if $input.Optional}} <span class="modal-hint">(optional)</span>{{end}}</label>
-            {{if eq $input.Control "textarea"}}<textarea id="modal-input-{{$input.Index}}" name="input_{{$input.Index}}" placeholder="{{$input.Placeholder}}"{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{$input.Value}}</textarea>
+            {{if or (eq $input.Control "textarea") (eq $input.Control "richtext")}}<textarea id="modal-input-{{$input.Index}}" name="input_{{$input.Index}}" placeholder="{{$input.Placeholder}}"{{if $input.MinLength}} minlength="{{$input.MinLength}}"{{end}}{{if $input.MaxLength}} maxlength="{{$input.MaxLength}}"{{end}}{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{$input.Value}}</textarea>
             {{else if eq $input.Control "external"}}<div class="external-select" data-app-options data-app-id="{{$.Modal.AppID}}" data-view-id="{{$.Modal.ID}}" data-block-id="{{$input.BlockID}}" data-action-id="{{$input.ActionID}}" data-channel="{{$.Channel}}" data-min-query="{{$input.MinQueryLength}}"><input id="modal-input-{{$input.Index}}" type="search" data-options-query placeholder="{{$input.Placeholder}}" minlength="{{$input.MinQueryLength}}"><button class="block-action" type="button" data-options-load>Search</button><select name="input_{{$input.Index}}" data-options-results{{if $input.Multiple}} multiple{{end}}{{if not $input.Optional}} required{{end}}{{if not $input.Options}} disabled{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{range $option := $input.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select><p class="external-select-status" data-options-status role="status"></p><noscript>Dynamic options require JavaScript in this client.</noscript></div>
             {{else if eq $input.Control "select"}}<select id="modal-input-{{$input.Index}}" name="input_{{$input.Index}}"{{if $input.Multiple}} multiple{{end}}{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}><option value=""{{if not $input.Optional}} disabled{{end}}>{{$input.Placeholder}}</option>{{range $option := $input.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select>
-            {{else}}<input id="modal-input-{{$input.Index}}" type="{{if eq $input.Control "date"}}date{{else if eq $input.Control "time"}}time{{else if eq $input.Control "datetime"}}datetime-local{{else if eq $input.Control "email"}}email{{else if eq $input.Control "url"}}url{{else if eq $input.Control "number"}}number{{else}}text{{end}}" name="input_{{$input.Index}}" value="{{$input.Value}}" placeholder="{{$input.Placeholder}}"{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{end}}
+            {{else}}<input id="modal-input-{{$input.Index}}" type="{{if eq $input.Control "date"}}date{{else if eq $input.Control "time"}}time{{else if eq $input.Control "datetime"}}datetime-local{{else if eq $input.Control "email"}}email{{else if eq $input.Control "url"}}url{{else if eq $input.Control "number"}}number{{else}}text{{end}}" name="input_{{$input.Index}}" value="{{$input.Value}}"{{if $input.DateTimeUnix}} data-unix="{{$input.DateTimeUnix}}"{{end}}{{if $input.MinLength}} minlength="{{$input.MinLength}}"{{end}}{{if $input.MaxLength}} maxlength="{{$input.MaxLength}}"{{end}}{{if eq $input.Control "number"}} step="{{$input.Step}}"{{if $input.MinValue}} min="{{$input.MinValue}}"{{end}}{{if $input.MaxValue}} max="{{$input.MaxValue}}"{{end}}{{end}} placeholder="{{$input.Placeholder}}"{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{end}}
           {{end}}
+          {{if and $input.Dispatch (not $input.Unsupported)}}<button class="block-action modal-dispatch" type="submit" name="modal_input_action" value="{{$input.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate aria-label="Send {{$input.Label}} to the app">Apply</button>{{end}}
           {{if $input.Hint}}<p class="modal-hint">{{$input.Hint}}</p>{{end}}{{if $block.Error}}<p class="modal-error" id="modal-error-{{$input.Index}}" role="alert">{{$block.Error}}</p>{{end}}
         </div>
         {{else if eq $block.Kind "divider"}}<hr class="modal-block divider">
@@ -2600,10 +2606,11 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             {{if eq $action.Control "button"}}<button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>{{$action.Text}}</button>
             {{else if eq $action.Control "date"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="date" name="action_{{$action.Index}}" value="{{$action.Value}}"></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
             {{else if eq $action.Control "time"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="time" name="action_{{$action.Index}}" value="{{$action.Value}}"></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
-            {{else if eq $action.Control "datetime"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="datetime-local" name="action_{{$action.Index}}" value="{{$action.Value}}"></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
+            {{else if eq $action.Control "datetime"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="datetime-local" name="action_{{$action.Index}}" value="{{$action.Value}}"{{if $action.DateTimeUnix}} data-unix="{{$action.DateTimeUnix}}"{{end}}></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
             {{else if eq $action.Control "radio"}}<fieldset class="block-action-options"><legend class="sr-only">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="radio" name="action_{{$action.Index}}" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}> {{$option.Text}}</label>{{end}}</fieldset><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
             {{else if eq $action.Control "checkbox"}}<fieldset class="block-action-options"><legend class="sr-only">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="checkbox" name="action_{{$action.Index}}" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}> {{$option.Text}}</label>{{end}}</fieldset><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
-            {{else if or (eq $action.Control "text") (eq $action.Control "textarea") (eq $action.Control "email") (eq $action.Control "url") (eq $action.Control "number")}}{{if eq $action.Control "textarea"}}<textarea class="block-action" name="action_{{$action.Index}}" placeholder="{{$action.Text}}">{{$action.Value}}</textarea>{{else}}<input class="block-action" type="{{$action.Control}}" name="action_{{$action.Index}}" value="{{$action.Value}}" placeholder="{{$action.Text}}">{{end}}<button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Send</button>
+            {{else if eq $action.Control "file"}}<p class="modal-hint modal-unsupported" role="note">{{$action.Text}} This client cannot attach files to app forms yet.</p>
+            {{else if or (eq $action.Control "text") (eq $action.Control "textarea") (eq $action.Control "richtext") (eq $action.Control "email") (eq $action.Control "url") (eq $action.Control "number")}}{{if or (eq $action.Control "textarea") (eq $action.Control "richtext")}}<textarea class="block-action" name="action_{{$action.Index}}" placeholder="{{$action.Text}}">{{$action.Value}}</textarea>{{else}}<input class="block-action" type="{{$action.Control}}" name="action_{{$action.Index}}" value="{{$action.Value}}" placeholder="{{$action.Text}}">{{end}}<button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Send</button>
             {{else if eq $action.Control "external"}}<div class="external-select" data-app-options data-app-id="{{$.Modal.AppID}}" data-view-id="{{$.Modal.ID}}" data-block-id="{{$action.BlockID}}" data-action-id="{{$action.ActionID}}" data-channel="{{$.Channel}}" data-min-query="{{$action.MinQueryLength}}"><label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="search" data-options-query placeholder="{{$action.Text}}" minlength="{{$action.MinQueryLength}}"></label><button class="block-action" type="button" data-options-load>Search</button><label><span class="sr-only">Results</span><select class="block-action block-action-select" name="action_{{$action.Index}}" data-options-results{{if $action.Multiple}} multiple{{end}}{{if not $action.Options}} disabled{{end}}>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" data-options-choose formnovalidate{{if not $action.Options}} disabled{{end}}>Choose</button><p class="external-select-status" data-options-status role="status"></p><noscript>Dynamic options require JavaScript in this client.</noscript></div>
             {{else}}<label><span class="sr-only">{{$action.Text}}</span><select class="block-action block-action-select" name="action_{{$action.Index}}"{{if $action.Multiple}} multiple{{end}}>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>{{end}}
           {{end}}</div>{{end}}
@@ -3514,6 +3521,11 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // composer's sending flag still waits for the end, because it guards against
 // sending the same text twice and the text is not cleared until the view
 // updates.
+//
+// A view.* or dialog.* record reloads the page so an app's views.open/update/
+// push or dialog.open shows at once, except a view.updated marked state_only: that record only saves
+// what the viewer entered (a block action or a submission), and reloading on
+// it would throw away focus and anything typed since.
 //
 // This explanation lives here rather than beside the code it describes: the
 // script's bytes are hashed for its Content-Security-Policy, html/template
@@ -4593,7 +4605,7 @@ var deliver=function(event){
 if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}
 try{document.dispatchEvent(new CustomEvent('sameoldchat:event',{detail:{type:event.type,data:event.data}}))}catch(error){}
 if(event.type==='huddle.signal'||event.type==='huddle.reaction')return;
-if(event.type.indexOf('view.')===0){window.location.reload();return}
+if(event.type.indexOf('view.')===0||event.type.indexOf('dialog.')===0){var viewFrame=null;try{viewFrame=JSON.parse(event.data)}catch(error){}if(viewFrame&&viewFrame.state_only)return;window.location.reload();return}
 var live=regions(false);
 if(!live.length){announce('New activity is available in this conversation.');return}
 scheduleRefresh();
@@ -4851,6 +4863,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/apps", h.workspaceApps)
 	mux.HandleFunc("GET /app/apps/{appID}", h.appHome)
 	mux.HandleFunc("POST /app/apps/{appID}/action", h.appHomeAction)
+	mux.HandleFunc("POST /app/apps/{appID}/messages", h.appMessages)
+	mux.HandleFunc("POST /app/dialog/submit", h.dialogSubmit)
+	mux.HandleFunc("POST /app/dialog/close", h.dialogClose)
 	mux.HandleFunc("GET /app/developer/apps", h.developerApps)
 	mux.HandleFunc("POST /app/developer/apps", h.reloadDeveloperApps)
 	mux.HandleFunc("POST /app/developer/apps/create", h.createDeveloperApp)
@@ -5749,6 +5764,24 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	if modalErr != nil && !errors.Is(modalErr, store.ErrNotFound) {
 		notices = append(notices, "An app modal is temporarily unavailable.")
+	}
+	// A legacy dialog (dialog.open) is shown with the modal machinery when no
+	// modal is open.
+	if modal == nil && errors.Is(modalErr, store.ErrNotFound) {
+		if dialog, dialogErr := h.Messages.CurrentDialog(r.Context(), principal.WorkspaceID, principal.UserID); dialogErr == nil {
+			failures := make(map[string]string, len(dialog.Errors)+len(state.ModalErrors))
+			for name, message := range dialog.Errors {
+				failures[name] = message
+			}
+			for name, message := range state.ModalErrors {
+				failures[name] = message
+			}
+			if modal, dialogErr = h.newDialogView(r.Context(), principal, dialog, failures, state.ModalSubmitted); dialogErr != nil {
+				notices = append(notices, "An app dialog could not be shown.")
+			}
+		} else if !errors.Is(dialogErr, store.ErrNotFound) {
+			notices = append(notices, "An app dialog is temporarily unavailable.")
+		}
 	}
 	if state.Notice != "" {
 		notices = append(notices, state.Notice)
@@ -11892,9 +11925,20 @@ func (h Handler) appInteraction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	value := fields["value"]
+	if strings.TrimSpace(fields["action_type"]) == "rich_text_input" {
+		// The service reports a rich text input as its rich_text object.
+		encoded, err := json.Marshal(richTextValue(value))
+		if err != nil {
+			h.writeMutationError(w, r, http.StatusBadRequest, "That app action could not be read", "Reload the conversation and try again.")
+			return
+		}
+		value = string(encoded)
+	}
 	if strings.TrimSpace(fields["action_type"]) == "datetimepicker" && strings.TrimSpace(value) != "" {
 		if _, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err != nil {
-			parsed, parseErr := time.ParseInLocation("2006-01-02T15:04", strings.TrimSpace(value), time.Local)
+			// Without script the browser posts its local wall time; the
+			// form's timezone field names the zone it was entered in.
+			parsed, parseErr := time.ParseInLocation(dateTimeLocalLayout, strings.TrimSpace(value), viewerLocation(map[string][]string{"timezone": {fields["timezone"]}}))
 			if parseErr != nil {
 				h.writeMutationError(w, r, http.StatusBadRequest, "That app action could not be read", "Choose a valid date and time.")
 				return
@@ -12031,6 +12075,8 @@ func appResponseFailure(err error) (int, string) {
 		return http.StatusBadRequest, "no_text"
 	case errors.Is(err, service.ErrAppResponsePayloadInvalid):
 		return http.StatusBadRequest, "invalid_payload"
+	case errors.Is(err, service.ErrInvalidBlocks):
+		return http.StatusBadRequest, "invalid_blocks"
 	case errors.Is(err, service.ErrAppResponseURLUsed):
 		return http.StatusNotFound, "used_url"
 	case errors.Is(err, service.ErrAppResponseURLExpired):
@@ -13049,7 +13095,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:

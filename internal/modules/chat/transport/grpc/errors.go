@@ -161,12 +161,15 @@ var errorClasses = []errorClass{
 	// The response_url refusals. The two URL states are NotFound, as the HTTP
 	// boundary answers them 404.
 	{key: "service.app_response_payload_invalid", code: codes.InvalidArgument, sentinel: service.ErrAppResponsePayloadInvalid},
+	{key: "service.invalid_blocks", code: codes.InvalidArgument, sentinel: service.ErrInvalidBlocks},
 	{key: "service.app_response_no_text", code: codes.InvalidArgument, sentinel: service.ErrAppResponseNoText},
 	{key: "service.app_response_url_used", code: codes.NotFound, sentinel: service.ErrAppResponseURLUsed},
 	{key: "service.app_response_url_expired", code: codes.NotFound, sentinel: service.ErrAppResponseURLExpired},
 	{key: "service.invalid_app_response", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppResponse},
 	{key: "service.invalid_datastore_item", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreItem},
 	{key: "service.invalid_datastore_query", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreQuery},
+	{key: "service.trigger_exchanged", code: codes.InvalidArgument, sentinel: service.ErrTriggerExchanged},
+	{key: "service.trigger_expired", code: codes.InvalidArgument, sentinel: service.ErrTriggerExpired},
 	{key: "service.invalid_trigger", code: codes.InvalidArgument, sentinel: service.ErrInvalidTrigger},
 	{key: "service.slash_command_in_thread", code: codes.InvalidArgument, sentinel: service.ErrSlashCommandInThread},
 	// The generic member of the class closes it, and it restores a bare
@@ -223,6 +226,7 @@ var errorClasses = []errorClass{
 	{key: "store.bookmark_limit", code: codes.ResourceExhausted, sentinel: store.ErrBookmarkLimit},
 	{key: "store.scheduled_message_limit", code: codes.ResourceExhausted, sentinel: store.ErrScheduledMessageLimit},
 	{key: "store.scheduled_status_limit", code: codes.ResourceExhausted, sentinel: store.ErrScheduledStatusLimit},
+	{key: "service.view_push_limit", code: codes.ResourceExhausted, sentinel: service.ErrViewPushLimit},
 
 	// Authorisation and preconditions. service.ErrNotWorkspaceAdmin shares
 	// codes.PermissionDenied with service.ErrMessageNotOwned and stays
@@ -290,6 +294,8 @@ var errorClasses = []errorClass{
 	{key: "service.slash_command_not_found", code: codes.NotFound, sentinel: service.ErrSlashCommandNotFound},
 	{key: "service.thread_not_found", code: codes.NotFound, sentinel: service.ErrThreadNotFound},
 	{key: "service.app_datastore_not_found", code: codes.NotFound, sentinel: service.ErrAppDatastoreNotFound},
+	{key: "store.trigger_exchanged", code: codes.NotFound, sentinel: store.ErrTriggerExchanged},
+	{key: "store.trigger_expired", code: codes.NotFound, sentinel: store.ErrTriggerExpired},
 	{key: "store.not_found", code: codes.NotFound, sentinel: store.ErrNotFound, restoresCode: true},
 
 	// Corrupt stored data and events a producer could not build. codes.Internal

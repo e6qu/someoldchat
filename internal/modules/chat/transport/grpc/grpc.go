@@ -3435,6 +3435,14 @@ func (r Remote) OpenAppHome(ctx context.Context, workspaceID domain.WorkspaceID,
 	return decodeProtoAppHome(out)
 }
 
+func (r Remote) OpenAppMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.Conversation, error) {
+	out, err := r.views.OpenAppMessages(ctx, &chatv1.AppHomeRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return decodeProtoConversation(out)
+}
+
 func decodeProtoAppHome(out *chatv1.AppHomeResponse) (domain.InstalledApp, domain.View, error) {
 	if out == nil {
 		return domain.InstalledApp{}, domain.View{}, errors.New("typed app home response is nil")
@@ -3485,13 +3493,7 @@ func (r Remote) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if err != nil {
 		return domain.ViewInteractionResult{}, err
 	}
-	result := domain.ViewInteractionResult{Pending: out.GetPending()}
-	if raw := strings.TrimSpace(out.GetErrorsJson()); raw != "" {
-		if err := json.Unmarshal([]byte(raw), &result.Errors); err != nil {
-			return domain.ViewInteractionResult{}, err
-		}
-	}
-	return result, nil
+	return decodeProtoViewInteractionResult(out)
 }
 
 func (r Remote) CloseView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, viewID domain.ViewID, clear bool, responseBaseURL string) error {
@@ -4325,6 +4327,49 @@ func (r Remote) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return nil
 }
 
+func (r Remote) CurrentDialog(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.Dialog, error) {
+	out, err := r.dialogs.CurrentDialog(ctx, &chatv1.CurrentDialogRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.Dialog{}, err
+	}
+	if out.GetId() == "" || out.GetWorkspaceId() == "" || out.GetUserId() == "" || out.GetPayload() == "" {
+		return domain.Dialog{}, errors.New("typed dialog response is incomplete")
+	}
+	value := domain.Dialog{
+		ID: domain.DialogID(out.GetId()), WorkspaceID: domain.WorkspaceID(out.GetWorkspaceId()), UserID: domain.UserID(out.GetUserId()),
+		AppID: domain.AppID(out.GetAppId()), Payload: out.GetPayload(), CreatedAt: optionalTimeFromUnixNano(out.GetCreatedAtUnixNano()),
+	}
+	if len(out.GetErrors()) != 0 {
+		value.Errors = out.GetErrors()
+	}
+	return value, nil
+}
+
+func (r Remote) SubmitDialog(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, dialogID domain.DialogID, values map[string]string, responseBaseURL string) (domain.ViewInteractionResult, error) {
+	out, err := r.dialogs.SubmitDialog(ctx, &chatv1.SubmitDialogRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+		DialogId: string(dialogID), Values: values, ResponseBaseUrl: responseBaseURL,
+	})
+	if err != nil {
+		return domain.ViewInteractionResult{}, err
+	}
+	return decodeProtoViewInteractionResult(out)
+}
+
+func (r Remote) CancelDialog(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, dialogID domain.DialogID, responseBaseURL string) error {
+	out, err := r.dialogs.CancelDialog(ctx, &chatv1.CancelDialogRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+		DialogId: string(dialogID), ResponseBaseUrl: responseBaseURL,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("dialog cancellation was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) BotInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, botID domain.BotID) (domain.Bot, error) {
 	out, err := r.bots.BotInfo(ctx, &chatv1.BotInfoRequest{WorkspaceId: string(workspaceID), UserId: string(userID), BotId: string(botID)})
 	if err != nil {
@@ -4862,7 +4907,7 @@ func (r Remote) LoadAppOptions(ctx context.Context, workspaceID domain.Workspace
 			return nil, errors.New("typed application option is incomplete")
 		}
 		options = append(options, domain.AppOption{
-			Text: option.GetText(), Value: option.GetValue(), Description: option.GetDescription(), Group: option.GetGroup(),
+			Text: option.GetText(), Value: option.GetValue(), Description: option.GetDescription(), Group: option.GetGroup(), Token: option.GetToken(),
 		})
 	}
 	return options, nil
@@ -7695,6 +7740,14 @@ func (s *Server) OpenAppHome(ctx context.Context, input *chatv1.AppHomeRequest) 
 	return encodeProtoAppHome(app, view), nil
 }
 
+func (s *Server) OpenAppMessages(ctx context.Context, input *chatv1.AppHomeRequest) (*chatv1.Conversation, error) {
+	conversation, err := s.implementation.OpenAppMessages(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversation(conversation), nil
+}
+
 func encodeProtoAppHome(app domain.InstalledApp, view domain.View) *chatv1.AppHomeResponse {
 	result := &chatv1.AppHomeResponse{App: encodeProtoInstalledApp(app), Published: view.ID != ""}
 	if result.Published {
@@ -7736,15 +7789,27 @@ func (s *Server) SubmitView(ctx context.Context, input *chatv1.ViewSubmissionReq
 	if err != nil {
 		return nil, mapError(err)
 	}
+	return encodeProtoViewInteractionResult(value), nil
+}
+
+func encodeProtoViewInteractionResult(value domain.ViewInteractionResult) *chatv1.ViewInteractionResult {
 	encodedErrors := ""
 	if len(value.Errors) != 0 {
-		encoded, err := json.Marshal(value.Errors)
-		if err != nil {
-			return nil, mapError(err)
-		}
+		// A map of strings to strings always encodes.
+		encoded, _ := json.Marshal(value.Errors)
 		encodedErrors = string(encoded)
 	}
-	return &chatv1.ViewInteractionResult{ErrorsJson: encodedErrors, Pending: value.Pending}, nil
+	return &chatv1.ViewInteractionResult{ErrorsJson: encodedErrors, Pending: value.Pending}
+}
+
+func decodeProtoViewInteractionResult(out *chatv1.ViewInteractionResult) (domain.ViewInteractionResult, error) {
+	result := domain.ViewInteractionResult{Pending: out.GetPending()}
+	if raw := strings.TrimSpace(out.GetErrorsJson()); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &result.Errors); err != nil {
+			return domain.ViewInteractionResult{}, err
+		}
+	}
+	return result, nil
 }
 
 func (s *Server) CloseView(ctx context.Context, input *chatv1.CloseViewRequest) (*chatv1.ViewMutationResponse, error) {
@@ -8331,6 +8396,39 @@ func (s *Server) ListFunctionWorkflowSteps(ctx context.Context, input *chatv1.Fu
 
 func (s *Server) OpenDialog(ctx context.Context, input *chatv1.OpenDialogRequest) (*chatv1.DialogMutationResponse, error) {
 	if err := s.implementation.OpenDialog(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetTriggerId(), input.GetPayload()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.DialogMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) CurrentDialog(ctx context.Context, input *chatv1.CurrentDialogRequest) (*chatv1.Dialog, error) {
+	value, err := s.implementation.CurrentDialog(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.Dialog{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), AppId: string(value.AppID),
+		Payload: value.Payload, Errors: value.Errors, CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt),
+	}, nil
+}
+
+func (s *Server) SubmitDialog(ctx context.Context, input *chatv1.SubmitDialogRequest) (*chatv1.ViewInteractionResult, error) {
+	value, err := s.implementation.SubmitDialog(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()), domain.DialogID(input.GetDialogId()),
+		input.GetValues(), input.GetResponseBaseUrl(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoViewInteractionResult(value), nil
+}
+
+func (s *Server) CancelDialog(ctx context.Context, input *chatv1.CancelDialogRequest) (*chatv1.DialogMutationResponse, error) {
+	if err := s.implementation.CancelDialog(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()), domain.DialogID(input.GetDialogId()), input.GetResponseBaseUrl(),
+	); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.DialogMutationResponse{Ok: true}, nil
@@ -9385,7 +9483,7 @@ func (s *Server) LoadAppOptions(ctx context.Context, input *chatv1.AppOptionQuer
 	out := &chatv1.AppOptionListResponse{Options: make([]*chatv1.AppOption, 0, len(options))}
 	for _, option := range options {
 		out.Options = append(out.Options, &chatv1.AppOption{
-			Text: option.Text, Value: option.Value, Description: option.Description, Group: option.Group,
+			Text: option.Text, Value: option.Value, Description: option.Description, Group: option.Group, Token: option.Token,
 		})
 	}
 	return out, nil

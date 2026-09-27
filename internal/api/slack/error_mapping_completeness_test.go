@@ -235,9 +235,14 @@ func recordedNonPinnedCodes() map[string]string {
 		"token_not_found":                "apps.auth.external.* is absent from the pinned snapshot; an external credential that does not exist is neither an app nor a user",
 		"app_not_found":                  "admin.apps.* declares no error enum",
 		"usergroup_not_found":            "no pinned enum declares a subteam-not-found code, not even no_such_subteam",
-		"view_not_found":                 "views.* declares no error enum",
 		"invalid_view":                   "views.* declares no error enum",
+		"invalid_blocks":                 "current chat.postMessage, chat.postEphemeral, chat.update, chat.scheduleMessage, and incoming-webhook references name it for blocks that are not valid Block Kit; absent from the legacy method enums",
 		"hash_conflict":                  "views.* declares no error enum",
+		"invalid_trigger_id":             "views.* declares no error enum; current views.open and views.push references name it for an unknown trigger",
+		"exchanged_trigger_id":           "views.* declares no error enum; current views.open and views.push references name it for a trigger already used",
+		"expired_trigger_id":             "views.* declares no error enum; current views.open and views.push references name it for a trigger older than three seconds",
+		"push_limit_reached":             "views.* declares no error enum; current views.push reference names it for a stack already holding three views",
+		"duplicate_external_id":          "views.* declares no error enum; current views.open, views.push and views.update references name it for a reused external_id",
 		"file_storage_unavailable":       "blob-store outage; no pinned enum declares a storage-outage code",
 		// OAuth 2.0 / OpenID Connect codes, governed by RFC 6749 rather than the
 		// Slack snapshot. oauth.* and openid.connect.* declare no error enum.

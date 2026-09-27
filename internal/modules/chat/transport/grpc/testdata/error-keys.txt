@@ -55,6 +55,7 @@ service.invalid_app_approval
 service.invalid_app_manifest
 service.invalid_app_response
 service.invalid_assistant_thread
+service.invalid_blocks
 service.invalid_bookmark
 service.invalid_bot
 service.invalid_call
@@ -130,12 +131,15 @@ service.slash_command_not_found
 service.snooze_not_active
 service.snooze_too_long
 service.thread_not_found
+service.trigger_exchanged
+service.trigger_expired
 service.trigger_type_restricted
 service.user_group_handle_taken
 service.user_group_name_taken
 service.user_is_restricted
 service.user_is_ultra_restricted
 service.user_not_found
+service.view_push_limit
 service.webhook_trigger_secret
 service.workflow_function_not_found
 service.workflow_permission_denied
@@ -155,3 +159,5 @@ store.scheduled_message_limit
 store.scheduled_status_limit
 store.socket_mode_connection_limit
 store.transient
+store.trigger_exchanged
+store.trigger_expired

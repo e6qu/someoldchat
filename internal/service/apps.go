@@ -535,42 +535,73 @@ func (m Messages) AppHome(ctx context.Context, workspaceID domain.WorkspaceID, u
 // OpenAppHome records the user journey Slack exposes as app_home_opened. The
 // event is addressed to exactly one app, includes the app's DM channel, and
 // includes the current view only after views.publish has created one.
+//
+// It is for the user opening the tab. A client re-reading the Home after an
+// action or a live update calls AppHome instead, so an app is not told the
+// tab was opened when the user merely stayed on it.
 func (m Messages) OpenAppHome(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.InstalledApp, domain.View, error) {
 	app, view, err := m.AppHome(ctx, workspaceID, userID, appID)
 	if err != nil || app.BotUserID == "" {
 		return app, view, err
 	}
+	if _, err := m.recordAppHomeOpened(ctx, workspaceID, userID, app, "home", view); err != nil {
+		return domain.InstalledApp{}, domain.View{}, err
+	}
+	return app, view, nil
+}
+
+// OpenAppMessages opens the member's direct conversation with an app's bot
+// from the app's Messages tab and records app_home_opened with tab
+// "messages", as Slack does for that tab. Slack sends no view for it.
+func (m Messages) OpenAppMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.Conversation, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.Conversation{}, err
+	}
+	snapshot, parsed, err := m.installedApp(ctx, workspaceID, appID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if !parsed.MessagesTabEnabled {
+		return domain.Conversation{}, store.ErrNotFound
+	}
+	bot, err := m.Store.GetBotByApp(ctx, workspaceID, snapshot.App.ID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.recordAppHomeOpened(ctx, workspaceID, userID, installedAppProjection(snapshot.App, parsed, bot.UserID), "messages", domain.View{})
+}
+
+func (m Messages) recordAppHomeOpened(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, app domain.InstalledApp, tab string, view domain.View) (domain.Conversation, error) {
 	opening, err := m.OpenConversation(ctx, workspaceID, userID, []domain.UserID{app.BotUserID})
 	if err != nil {
-		return domain.InstalledApp{}, domain.View{}, err
+		return domain.Conversation{}, err
 	}
 	conversation := opening.Conversation
 	fields := []events.Field{
 		events.String("target_app_id", string(app.ID)),
 		events.String("user_id", string(userID)),
 		events.String("channel_id", string(conversation.ID)),
-		events.String("tab", "home"),
+		events.String("tab", tab),
 	}
 	if view.ID != "" {
 		interactionView, renderErr := appInteractionView(view)
 		if renderErr != nil {
-			return domain.InstalledApp{}, domain.View{}, renderErr
+			return domain.Conversation{}, renderErr
 		}
 		encoded, renderErr := json.Marshal(interactionView)
 		if renderErr != nil {
-			return domain.InstalledApp{}, domain.View{}, renderErr
+			return domain.Conversation{}, renderErr
 		}
 		fields = append(fields, events.JSON("view", string(encoded)))
 	}
-	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, events.NewPayload("app.home_opened", fields...), now)
+	event, err := newEvent(workspaceID, userID, events.NewPayload("app.home_opened", fields...), time.Now().UTC())
 	if err != nil {
-		return domain.InstalledApp{}, domain.View{}, err
+		return domain.Conversation{}, err
 	}
 	if err := m.Store.AppendEvent(ctx, event); err != nil {
-		return domain.InstalledApp{}, domain.View{}, err
+		return domain.Conversation{}, err
 	}
-	return app, view, nil
+	return conversation, nil
 }
 
 func installedAppProjection(app domain.App, parsed appmanifest.Parsed, botUserID domain.UserID) domain.InstalledApp {

@@ -76,31 +76,56 @@ const workspaceAppsMarkup = `{{define "title"}}{{if .Selected}}{{.Selected.Name}
     <main class="apps-main">
     {{if .Selected}}
       <header class="apps-heading"><span class="app-avatar" aria-hidden="true">{{slice .Selected.Name 0 1}}</span><div><h1>{{.Selected.Name}}</h1><p>{{.Selected.BotDisplayName}}</p></div></header>
-      <nav class="app-tabs" aria-label="{{.Selected.Name}}"><a class="app-tab" href="/app/apps/{{.Selected.ID}}?channel={{.Channel}}&tab=home"{{if eq .Tab "home"}} aria-current="page"{{end}}>Home</a>{{if and .Selected.MessagesTabEnabled .Selected.BotUserID .CanMessage}}<form class="app-tab-form" method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="users" value="{{.Selected.BotUserID}}"><button class="app-tab" type="submit">Messages</button></form>{{end}}<a class="app-tab" href="/app/apps/{{.Selected.ID}}?channel={{.Channel}}&tab=about"{{if eq .Tab "about"}} aria-current="page"{{end}}>About</a></nav>
+      <nav class="app-tabs" aria-label="{{.Selected.Name}}"><a class="app-tab" href="/app/apps/{{.Selected.ID}}?channel={{.Channel}}&tab=home"{{if eq .Tab "home"}} aria-current="page"{{end}}>Home</a>{{if and .Selected.MessagesTabEnabled .Selected.BotUserID .CanMessage}}<form class="app-tab-form" method="post" action="/app/apps/{{.Selected.ID}}/messages"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="app-tab" type="submit">Messages</button></form>{{end}}<a class="app-tab" href="/app/apps/{{.Selected.ID}}?channel={{.Channel}}&tab=about"{{if eq .Tab "about"}} aria-current="page"{{end}}>About</a></nav>
       {{if .Notice}}<p class="notice app-notice" role="status">{{.Notice}}</p>{{end}}
       {{if eq .Tab "about"}}<section class="app-about"><h2>About {{.Selected.Name}}</h2>{{if .Selected.Description}}<p>{{.Selected.Description}}</p>{{else}}<p class="muted">This app has not provided a description.</p>{{end}}<dl><dt>App ID</dt><dd><code>{{.Selected.ID}}</code></dd><dt>Bot name</dt><dd>{{.Selected.BotDisplayName}}</dd></dl>{{if .Notice}}<p class="notice" role="status">{{if eq .Notice "connected"}}Your account was connected.{{else if eq .Notice "connect_failed"}}The account could not be connected. Try again.{{else}}{{.Notice}}{{end}}</p>{{end}}{{if .ExternalProviders}}<div class="external-connections"><h3>Connect an account</h3><p class="muted">{{.Selected.Name}} can act with an account you connect at these services.</p><ul class="external-provider-list">{{range .ExternalProviders}}<li><span class="external-provider-name">{{.Name}}</span><form method="post" action="/app/apps/external-auth/start"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="app_id" value="{{$.Selected.ID}}"><input type="hidden" name="provider" value="{{.Name}}"><button class="button secondary" type="submit">Connect {{.Name}}</button></form></li>{{end}}</ul></div>{{end}}</section>
-      {{else if .Published}}<form class="app-home" method="post" action="/app/apps/{{.Selected.ID}}/action?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.Home.ID}}">
+      {{else}}<p class="visually-hidden" id="app-home-live" role="status"></p><div id="app-home-region" data-app-home="{{.Selected.ID}}">{{if .Published}}<form class="app-home" method="post" action="/app/apps/{{.Selected.ID}}/action?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.Home.ID}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC">
         {{range $block := .Home.Blocks}}{{if eq $block.Kind "divider"}}<hr class="home-block divider">{{else}}<section class="home-block message-block {{$block.Kind}}">{{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else if $block.Text}}<div>{{$block.Text}}</div>{{end}}{{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}{{.}}{{else}}{{$field}}{{end}}</li>{{end}}</ul>{{end}}{{if $block.Table}}<div class="block-table-wrap"><table class="block-table">{{if $block.Caption}}<caption>{{$block.Caption}}</caption>{{end}}<tbody>{{range $rowIndex, $row := $block.Table}}<tr>{{range $cell := $row}}{{if and $block.HeaderRow (eq $rowIndex 0)}}<th scope="col">{{$cell}}</th>{{else}}<td>{{$cell}}</td>{{end}}{{end}}</tr>{{end}}</tbody></table></div>{{end}}{{if $block.ImageURL}}<img class="message-media" src="{{$block.ImageURL}}" alt="{{$block.ImageAlt}}" loading="lazy">{{end}}
           {{if $block.Actions}}<div class="home-actions" aria-label="App actions">{{range $action := $block.Actions}}
             {{if eq $action.Control "button"}}{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" formnovalidate>{{$action.Text}}</button>{{end}}
             {{else if eq $action.Control "date"}}<label><span class="visually-hidden">{{$action.Text}}</span><input class="block-action" type="date" name="action_{{$action.Index}}" value="{{$action.Value}}"></label>{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" formnovalidate>Choose</button>{{end}}
             {{else if eq $action.Control "time"}}<label><span class="visually-hidden">{{$action.Text}}</span><input class="block-action" type="time" name="action_{{$action.Index}}" value="{{$action.Value}}"></label>{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" formnovalidate>Choose</button>{{end}}
-            {{else if eq $action.Control "datetime"}}<label><span class="visually-hidden">{{$action.Text}}</span><input class="block-action" type="datetime-local" name="action_{{$action.Index}}" value="{{$action.Value}}"></label>{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" formnovalidate>Choose</button>{{end}}
+            {{else if eq $action.Control "datetime"}}<label><span class="visually-hidden">{{$action.Text}}</span><input class="block-action" type="datetime-local" name="action_{{$action.Index}}" value="{{$action.Value}}"{{if $action.DateTimeUnix}} data-unix="{{$action.DateTimeUnix}}"{{end}}></label>{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" formnovalidate>Choose</button>{{end}}
             {{else if eq $action.Control "radio"}}<fieldset class="block-action-options"><legend class="visually-hidden">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="radio" name="action_{{$action.Index}}" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}> {{$option.Text}}</label>{{end}}</fieldset>{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" formnovalidate>Choose</button>{{end}}
             {{else if eq $action.Control "checkbox"}}<fieldset class="block-action-options"><legend class="visually-hidden">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="checkbox" name="action_{{$action.Index}}" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}> {{$option.Text}}</label>{{end}}</fieldset>{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" formnovalidate>Choose</button>{{end}}
-            {{else if or (eq $action.Control "text") (eq $action.Control "textarea") (eq $action.Control "email") (eq $action.Control "url") (eq $action.Control "number")}}{{if eq $action.Control "textarea"}}<textarea class="block-action" name="action_{{$action.Index}}" placeholder="{{$action.Text}}">{{$action.Value}}</textarea>{{else}}<input class="block-action" type="{{$action.Control}}" name="action_{{$action.Index}}" value="{{$action.Value}}" placeholder="{{$action.Text}}">{{end}}{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" formnovalidate>Send</button>{{end}}
+            {{else if eq $action.Control "file"}}<p class="modal-hint modal-unsupported" role="note">{{$action.Text}} This client cannot attach files to app forms yet.</p>
+            {{else if or (eq $action.Control "text") (eq $action.Control "textarea") (eq $action.Control "richtext") (eq $action.Control "email") (eq $action.Control "url") (eq $action.Control "number")}}{{if or (eq $action.Control "textarea") (eq $action.Control "richtext")}}<textarea class="block-action" name="action_{{$action.Index}}" placeholder="{{$action.Text}}">{{$action.Value}}</textarea>{{else}}<input class="block-action" type="{{$action.Control}}" name="action_{{$action.Index}}" value="{{$action.Value}}" placeholder="{{$action.Text}}">{{end}}{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" formnovalidate>Send</button>{{end}}
             {{else if eq $action.Control "external"}}<div class="external-select" data-app-options data-app-id="{{$.Selected.ID}}" data-view-id="{{$.Home.ID}}" data-block-id="{{$action.BlockID}}" data-action-id="{{$action.ActionID}}" data-channel="{{$.Channel}}" data-min-query="{{$action.MinQueryLength}}"><label><span class="visually-hidden">{{$action.Text}}</span><input class="block-action" type="search" data-options-query placeholder="{{$action.Text}}" minlength="{{$action.MinQueryLength}}"></label><button class="block-action" type="button" data-options-load>Search</button><label><span class="visually-hidden">Results</span><select class="block-action block-action-select" name="action_{{$action.Index}}" data-options-results{{if $action.Multiple}} multiple{{end}}{{if not $action.Options}} disabled{{end}}>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label>{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" data-options-choose formnovalidate{{if not $action.Options}} disabled{{end}}>Choose</button>{{end}}<p class="external-select-status" data-options-status role="status"></p><noscript>Dynamic options require JavaScript in this client.</noscript></div>
             {{else}}<label><span class="visually-hidden">{{$action.Text}}</span><select class="block-action block-action-select" name="action_{{$action.Index}}"{{if $action.Multiple}} multiple{{end}}>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label>{{if $action.Dispatch}}<button class="block-action" type="submit" name="home_action" value="{{$action.Index}}" formnovalidate>Choose</button>{{end}}{{end}}
           {{end}}</div>{{end}}</section>{{end}}{{end}}
-      </form>{{else}}<section class="home-empty"><h2>Nothing here yet</h2><p class="muted">{{.Selected.Name}} has not published a Home view for you.</p></section>{{end}}
+      </form>{{else}}<section class="home-empty"><h2>Nothing here yet</h2><p class="muted">{{.Selected.Name}} has not published a Home view for you.</p></section>{{end}}</div>{{end}}
     {{else}}<header class="apps-heading"><div><h1>Apps</h1><p>Open an installed app’s Home tab or learn what it does.</p></div></header><section class="directory">{{range .Apps}}<a class="directory-card" href="/app/apps/{{.ID}}?channel={{$.Channel}}"><span class="app-avatar" aria-hidden="true">{{slice .Name 0 1}}</span><span><h2>{{.Name}}</h2><p>{{if .Description}}{{.Description}}{{else}}{{.BotDisplayName}}{{end}}</p></span></a>{{else}}<div class="home-empty"><h2>No apps installed</h2><p class="muted">Install an app through its OAuth flow to see it here.</p></div>{{end}}</section>{{end}}
     </main>
   </div>
 </div>
 {{end}}
-{{define "scripts"}}` + appOptionsScript + `{{end}}`
+{{define "scripts"}}` + appOptionsScript + viewInputScript + appHomeLiveScript + `{{end}}`
 
 var workspaceAppsTemplate = mustPage(workspaceAppsMarkup)
+
+// appHomeRefreshHeader marks a live re-read of an app Home, which must not be
+// reported to the app as the user opening the tab.
+const appHomeRefreshHeader = "X-SameOldChat-Home-Refresh"
+
+// appHomeLiveScript re-renders the Home region when the app publishes or
+// updates the viewer's Home (views.publish, views.update), as Slack's client
+// does. It waits while the viewer is editing a control inside the Home so a
+// live update never discards what they are typing, and says so in a status
+// region instead of moving focus. The explanation lives here because the
+// script's bytes are hashed for the Content-Security-Policy.
+const appHomeLiveScript = `<script>(function(){
+var region=document.getElementById('app-home-region');
+if(!region||!window.EventSource)return;
+var appID=region.getAttribute('data-app-home')||'';var live=document.getElementById('app-home-live');
+var busy=false,queued=false,timer=0;
+function editing(){var active=document.activeElement;return !!(active&&region.contains(active)&&active.matches('input,textarea,select'))}
+function refresh(){if(busy){queued=true;return}busy=true;
+fetch(window.location.pathname+window.location.search,{headers:{'` + appHomeRefreshHeader + `':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error();return response.text()}).then(function(html){var replacement=new DOMParser().parseFromString(html,'text/html').getElementById('app-home-region');if(!replacement)throw new Error();region.replaceWith(replacement);region=replacement;if(window.sameoldchatLocalizeViews)window.sameoldchatLocalizeViews(region);if(live)live.textContent='The app updated this Home.'}).catch(function(){if(live)live.textContent='This Home changed. Reload the page to see the update.'}).finally(function(){busy=false;if(queued){queued=false;schedule()}})}
+function schedule(){window.clearTimeout(timer);timer=window.setTimeout(function(){if(editing()){var resume=function(){region.removeEventListener('focusout',resume);schedule()};region.addEventListener('focusout',resume);return}refresh()},150)}
+function appOf(data){return data&&(data.app_id||(data.payload&&data.payload.app_id))||''}
+var stream=new EventSource('/events');
+['view.published','view.updated'].forEach(function(topic){stream.addEventListener(topic,function(event){var data=null;try{data=JSON.parse(event.data||'null')}catch(error){}var target=appOf(data);if(target&&target!==appID)return;schedule()})});
+})();</script>`
 
 func (h Handler) workspaceApps(w http.ResponseWriter, r *http.Request) {
 	principal, csrf, ok := h.developerPrincipal(w, r)
@@ -169,7 +194,15 @@ func (h Handler) renderWorkspaceApps(w http.ResponseWriter, r *http.Request, pri
 			h.writePageError(w, http.StatusNotFound, "This app has no Home tab", "Open its About tab instead.")
 			return
 		}
-		_, view, err := h.Messages.OpenAppHome(r.Context(), principal.WorkspaceID, principal.UserID, data.Selected.ID)
+		// app_home_opened reports the user opening the tab. Re-reading the
+		// Home after an action (the redirect carries notice=action_sent) or
+		// for a live update (appHomeLiveScript's refresh header) is the user
+		// staying on it, so those reads must not tell the app it was opened.
+		read := h.Messages.OpenAppHome
+		if r.Header.Get(appHomeRefreshHeader) != "" || r.URL.Query().Get("notice") == "action_sent" {
+			read = h.Messages.AppHome
+		}
+		_, view, err := read(r.Context(), principal.WorkspaceID, principal.UserID, data.Selected.ID)
 		if err != nil {
 			status := http.StatusServiceUnavailable
 			if errors.Is(err, store.ErrNotFound) {
@@ -226,13 +259,7 @@ func (h Handler) newHomeView(ctx context.Context, principal auth.Principal, valu
 			Caption: block.Caption, HeaderRow: block.HeaderRow,
 		}
 		for _, action := range block.Actions {
-			if actionState := persisted.Values[blockID][action.ActionID]; actionState != nil {
-				if values, ok := modalActionValues(action.Type, actionState); ok {
-					action.InitialValues = append([]string(nil), values...)
-					action.Value = firstValue(values)
-					markSelectedOptions(action.Options, values)
-				}
-			}
+			applyPersistedActionState(&action, persisted.Values[blockID][action.ActionID])
 			rendered.Actions = append(rendered.Actions, modalActionView{Index: actionIndex, messageActionView: action})
 			actionIndex++
 		}
@@ -241,13 +268,37 @@ func (h Handler) newHomeView(ctx context.Context, principal auth.Principal, valu
 	return result, nil
 }
 
+// appMessages is the app's Messages tab: it opens the direct conversation
+// with the app's bot and tells the app with app_home_opened (tab
+// "messages"), as Slack does when a member opens that tab.
+func (h Handler) appMessages(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "The app's messages could not be opened. Reload the page and try again."); !ok {
+		return
+	}
+	conversation, err := h.Messages.OpenAppMessages(r.Context(), principal.WorkspaceID, principal.UserID, domain.AppID(strings.TrimSpace(r.PathValue("appID"))))
+	if err != nil {
+		status, heading, reason := http.StatusServiceUnavailable, "The app's messages did not open", "Try again in a moment."
+		if errors.Is(err, store.ErrNotFound) {
+			status, heading, reason = http.StatusNotFound, "This app has no Messages tab", "It may have been removed from this workspace or turned the tab off."
+		}
+		h.writeMutationError(w, r, status, heading, reason)
+		return
+	}
+	http.Redirect(w, r, appURL(string(conversation.ID), "", "", "", ""), http.StatusSeeOther)
+}
+
 func (h Handler) appHomeAction(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	values, ok := h.decodeModalMutation(w, r)
+	values, ok := h.decodeModalMutation(w, r, "view_id")
 	if !ok {
 		return
 	}
@@ -287,7 +338,7 @@ func (h Handler) appHomeAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	selected := append([]string(nil), values[fmt.Sprintf("action_%d", action.Index)]...)
-	value, err := modalActionDispatchValue(action, selected)
+	value, err := modalActionDispatchValue(action, selected, viewerLocation(values))
 	if err != nil {
 		h.writeMutationError(w, r, http.StatusBadRequest, "Choose a valid value", "The app action was not sent.")
 		return

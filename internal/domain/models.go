@@ -586,8 +586,14 @@ type Dialog struct {
 	ID          DialogID
 	WorkspaceID WorkspaceID
 	UserID      UserID
-	Payload     string
-	CreatedAt   time.Time
+	// AppID is the app that opened the dialog and receives its
+	// dialog_submission and dialog_cancellation.
+	AppID   AppID
+	Payload string
+	// Errors are the per-element messages ({name: error}) the app answered
+	// the last submission with; the dialog stays open showing them.
+	Errors    map[string]string
+	CreatedAt time.Time
 }
 
 type Bot struct {
@@ -3455,6 +3461,11 @@ type AppOption struct {
 	Value       string
 	Description string
 	Group       string
+	// Token vouches for Text when the option was loaded for a view: the
+	// client returns it with a chosen option so the service can put the
+	// option's text in view_submission and block_actions payloads, as Slack
+	// does, without trusting text the browser made up.
+	Token string
 }
 
 type AppShortcut struct {

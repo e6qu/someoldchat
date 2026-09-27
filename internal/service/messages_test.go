@@ -615,8 +615,66 @@ func TestViewsAreTypedDurableAndHashChecked(t *testing.T) {
 	if _, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"modal"}`, opened.Hash); err == nil {
 		t.Fatal("stale view hash unexpectedly succeeded")
 	}
-	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal"}`); !errors.Is(err, ErrInvalidTrigger) {
-		t.Fatalf("replayed trigger error=%v, want %v", err, ErrInvalidTrigger)
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal"}`); !errors.Is(err, ErrInvalidView) {
+		t.Fatalf("malformed view error=%v, want %v", err, ErrInvalidView)
+	}
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`); !errors.Is(err, ErrTriggerExchanged) {
+		t.Fatalf("replayed trigger error=%v, want %v", err, ErrTriggerExchanged)
+	}
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "unknown", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`); !errors.Is(err, ErrInvalidTrigger) {
+		t.Fatalf("unknown trigger error=%v, want %v", err, ErrInvalidTrigger)
+	}
+	// A malformed view must not spend the trigger, and a Home view cannot be
+	// opened, pushed, or reached by updating a modal.
+	seedInteractionTrigger(t, s, "trigger-3")
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"home","blocks":[]}`); !errors.Is(err, ErrInvalidView) {
+		t.Fatalf("home via views.open error=%v, want %v", err, ErrInvalidView)
+	}
+	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"x"},"blocks":[{"type":"bogus"}]}`); !errors.Is(err, ErrInvalidView) {
+		t.Fatalf("invalid block error=%v, want %v", err, ErrInvalidView)
+	}
+	if _, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, ErrInvalidView) {
+		t.Fatalf("modal->home update error=%v, want %v", err, ErrInvalidView)
+	}
+	third, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"Third"},"blocks":[]}`)
+	if err != nil || third.PreviousViewID != pushed.ID {
+		t.Fatalf("third=%+v err=%v", third, err)
+	}
+	seedInteractionTrigger(t, s, "trigger-4")
+	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-4", `{"type":"modal","title":{"type":"plain_text","text":"Fourth"},"blocks":[]}`); !errors.Is(err, ErrViewPushLimit) {
+		t.Fatalf("fourth push error=%v, want %v", err, ErrViewPushLimit)
+	}
+}
+
+// Slack keeps what a user entered across views.update when the replacement
+// keeps the element's block_id and action_id; entries for removed or retyped
+// elements are dropped.
+func TestViewUpdateCarriesStateForSurvivingElements(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedHomeApp(t, s, "A1")
+	seedInteractionTrigger(t, s, "trigger-1")
+	messages := Messages{Store: s}
+	ctx := context.Background()
+	input := func(block, action, kind string) string {
+		return `{"type":"input","block_id":"` + block + `","label":{"type":"plain_text","text":"L"},"element":{"type":"` + kind + `","action_id":"` + action + `"}}`
+	}
+	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"x"},"submit":{"type":"plain_text","text":"Go"},"blocks":[`+input("keep", "a", "plain_text_input")+`,`+input("gone", "b", "plain_text_input")+`,`+input("retyped", "c", "plain_text_input")+`]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened.State = `{"values":{"keep":{"a":{"type":"plain_text_input","value":"typed"}},"gone":{"b":{"type":"plain_text_input","value":"lost"}},"retyped":{"c":{"type":"plain_text_input","value":"lost"}}}}`
+	opened, err = s.UpdateView(ctx, opened, "", events.Event{ID: "E-state", WorkspaceID: "T1", ActorID: "U1", Topic: "view.updated", Payload: `{"view_id":"x"}`, CreatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"modal","title":{"type":"plain_text","text":"x"},"submit":{"type":"plain_text","text":"Go"},"blocks":[`+input("keep", "a", "plain_text_input")+`,`+input("retyped", "c", "number_input")+`,{"type":"section","text":{"type":"mrkdwn","text":"added"}}]}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.State != `{"values":{"keep":{"a":{"type":"plain_text_input","value":"typed"}}}}` {
+		t.Fatalf("carried state = %s", updated.State)
 	}
 }
 
@@ -710,7 +768,7 @@ func TestDialogOpenValidatesAndPersistsPayload(t *testing.T) {
 	seedInteractionTrigger(t, s, "trigger-1")
 	seedInteractionTrigger(t, s, "trigger-2")
 	messages := Messages{Store: s}
-	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-1", `{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`); err != nil {
+	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-1", `{"callback_id":"callback","title":"Title","elements":[{"type":"text","name":"summary","label":"Summary"}]}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-2", `{"callback_id":"callback","title":"Title"}`); err != ErrInvalidDialog {
@@ -1606,11 +1664,11 @@ func TestPostWithBlocksPersistsNormalizedPayload(t *testing.T) {
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("C1", "U1")
-	message, err := (Messages{Store: s}).PostWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [ { "type": "section", "block_id": "b1" } ] `, "", "")
+	message, err := (Messages{Store: s}).PostWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [ { "type": "section", "block_id": "b1", "text": { "type": "mrkdwn", "text": "hi" } } ] `, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if message.Text != "" || message.Blocks != `[{"type":"section","block_id":"b1"}]` {
+	if message.Text != "" || message.Blocks != `[{"type":"section","block_id":"b1","text":{"type":"mrkdwn","text":"hi"}}]` {
 		t.Fatalf("unexpected message: %+v", message)
 	}
 	updated, err := (Messages{Store: s}).UpdateWithBlocks(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), "updated", `[{"type":"divider","block_id":"b2"}]`)

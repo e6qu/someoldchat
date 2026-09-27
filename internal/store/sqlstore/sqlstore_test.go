@@ -658,7 +658,7 @@ func TestSQLiteDialogIsDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	value := domain.Dialog{ID: "D1", WorkspaceID: "T1", UserID: "U1", Payload: `{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`, CreatedAt: now}
+	value := domain.Dialog{ID: "D1", WorkspaceID: "T1", UserID: "U1", Payload: `{"callback_id":"callback","title":"Title","elements":[{"type":"text","name":"summary","label":"Summary"}]}`, CreatedAt: now}
 	if err := s.CreateDialog(ctx, value, events.Event{ID: "ED1", WorkspaceID: "T1", Topic: "dialog.opened", Payload: "D1", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}

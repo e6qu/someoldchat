@@ -1556,13 +1556,38 @@ func publishedIntegrationRepositoryContract(t *testing.T, open opener) {
 		if err != nil || loadedStep.Status != domain.WorkflowStepCompleted || loadedStep.CreatedAt != now {
 			t.Fatalf("workflow=%+v err=%v", loadedStep, err)
 		}
-		dialog := domain.Dialog{ID: domain.DialogID("D-" + suffix), WorkspaceID: workspaceID, UserID: userID, Payload: `{"callback_id":"qualification"}`, CreatedAt: now}
+		dialog := domain.Dialog{ID: domain.DialogID("D-" + suffix), WorkspaceID: workspaceID, UserID: userID, AppID: "A-dialog", Payload: `{"callback_id":"qualification"}`, CreatedAt: now}
 		if err := repository.CreateDialog(ctx, dialog, event("dialog", "dialog.opened", string(dialog.ID))); err != nil {
 			t.Fatal(err)
 		}
 		loadedDialog, err := repository.GetDialog(ctx, workspaceID, dialog.ID)
-		if err != nil || loadedDialog.Payload != dialog.Payload || loadedDialog.UserID != userID {
+		if err != nil || loadedDialog.Payload != dialog.Payload || loadedDialog.UserID != userID || loadedDialog.AppID != "A-dialog" || len(loadedDialog.Errors) != 0 {
 			t.Fatalf("dialog=%+v err=%v", loadedDialog, err)
+		}
+		newer := dialog
+		newer.ID, newer.CreatedAt = domain.DialogID("D2-"+suffix), now.Add(time.Second)
+		if err := repository.CreateDialog(ctx, newer, event("dialog-newer", "dialog.opened", string(newer.ID))); err != nil {
+			t.Fatal(err)
+		}
+		current, err := repository.GetCurrentDialog(ctx, workspaceID, userID)
+		if err != nil || current.ID != newer.ID {
+			t.Fatalf("current dialog=%+v err=%v", current, err)
+		}
+		newer.Errors = map[string]string{"answer": "Say more"}
+		if err := repository.SetDialogErrors(ctx, newer, event("dialog-errors", "dialog.updated", string(newer.ID))); err != nil {
+			t.Fatal(err)
+		}
+		if current, err = repository.GetCurrentDialog(ctx, workspaceID, userID); err != nil || current.Errors["answer"] != "Say more" {
+			t.Fatalf("dialog errors=%+v err=%v", current, err)
+		}
+		if err := repository.DeleteDialog(ctx, workspaceID, userID, newer.ID, event("dialog-closed", "dialog.closed", string(newer.ID))); err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.DeleteDialog(ctx, workspaceID, userID, newer.ID, event("dialog-closed-again", "dialog.closed", string(newer.ID))); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("second close err=%v", err)
+		}
+		if current, err = repository.GetCurrentDialog(ctx, workspaceID, userID); err != nil || current.ID != dialog.ID {
+			t.Fatalf("dialog after close=%+v err=%v", current, err)
 		}
 	})
 

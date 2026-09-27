@@ -163,6 +163,7 @@ operations:
       - go-test:internal/api/slack:TestChatWritePublicPostsWithoutJoining
       - go-test:internal/api/slack:TestAsUserIsAcceptedFromAUserToken
       - go-test:internal/api/slack:TestReplyingToAReplyJoinsTheRootThread
+      - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
     deviations:
       - >-
         The full current payload is validated and persisted, but link-name
@@ -190,6 +191,7 @@ operations:
       - go-test:internal/api/slack:TestUpdateAndDeleteMessage
       - go-test:internal/api/slack:TestChatUpdateKeepsWhatItWasNotGiven
       - go-test:internal/api/slack:TestEditingSomebodyElsesMessageUsesSlacksCodes
+      - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
   - method: chat.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1068,6 +1070,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestPostEphemeralReturnsMessageTimestamp
       - go-test:internal/api/slack:TestPostEphemeralContract
+      - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
   - method: chat.scheduleMessage
     status: behavior-compatible
     provenance: slack-reference
@@ -1084,6 +1087,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestPostMessageResolvesNamesAndUsers
+      - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
     deviations:
       - markdown_text, metadata, reply_broadcast, parse, link_names, and unfurl controls are not implemented (as_user is read and ignored, as chat.postMessage does; a user token posts as its user, a bot token as its bot)
       - Web API rate limiting now answers 429 with Retry-After and ratelimited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
@@ -1118,6 +1122,11 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestDialogOpenHTTP
+      - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
+      - go-test:internal/web:TestLegacyDialogRendersSubmitsAndCancels
+    deviations:
+      - a select element with data_source "external" is shown with an explanation and no options, because the first-party client does not send dialog_suggestion; a required one blocks submission
+      - dialog.open does not answer app_missing_action_url for an app without an interactivity request URL; such a dialog renders, and its submission reports that the app cannot receive it
   - method: dnd.endDnd
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1449,21 +1458,26 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
+      - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
   - method: views.publish
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
+      - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
   - method: views.push
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
+      - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
   - method: views.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestViewsHTTPExposeDurableOpenPushUpdateAndPublish
+      - go-test:internal/api/slack:TestViewsMethodsNameEachFailureAsSlackDoes
+      - go-test:internal/api/slack:TestViewsUpdatePreservesEnteredState
   - method: workflows.stepCompleted
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -2171,6 +2185,7 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:internal/api/slack:TestBlocksValidateMatchesCurrentSlackResponseShapes
+      - go-test:internal/blockkit:TestValidateBlocksCoversSlackFileImagesCallsAndSectionFields
     deviations:
       - SameOldChat validates the current catalog it renders, but exact Slack validation messages, production rate limits, and controlled live-Slack outcomes remain unqualified.
   - method: chat.appendStream

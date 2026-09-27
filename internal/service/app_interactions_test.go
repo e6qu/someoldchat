@@ -152,8 +152,8 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	if err != nil {
 		t.Fatalf("consume trigger: %v", err)
 	}
-	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Replay"},"blocks":[]}`); err != ErrInvalidTrigger {
-		t.Fatalf("trigger replay error=%v, want %v", err, ErrInvalidTrigger)
+	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Replay"},"blocks":[]}`); err != ErrTriggerExchanged {
+		t.Fatalf("trigger replay error=%v, want %v", err, ErrTriggerExchanged)
 	}
 
 	blocks := `[{"type":"actions","block_id":"deployment","elements":[{"type":"static_select","action_id":"view_build","placeholder":{"type":"plain_text","text":"View build"},"options":[{"text":{"type":"plain_text","text":"Build 842"},"value":"842"}]}]}]`

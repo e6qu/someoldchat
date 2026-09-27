@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/blob"
+	"github.com/sameoldchat/sameoldchat/internal/blockkit"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
@@ -2639,6 +2640,12 @@ func viewPayload(payload string) (string, string, error) {
 	if viewType != "modal" && viewType != "home" {
 		return "", "", ErrInvalidView
 	}
+	// The same Block Kit invariants blocks.validate reports are enforced on
+	// every view write, so an app learns about a malformed view from the
+	// method that stored it rather than from a client that cannot render it.
+	if problems, err := blockkit.ValidateView(json.RawMessage(payload)); err != nil || len(problems) != 0 {
+		return "", "", ErrInvalidView
+	}
 	externalID, ok := fields["external_id"].(string)
 	if fields["external_id"] != nil && !ok {
 		return "", "", ErrInvalidView
@@ -2758,11 +2765,30 @@ func (m Messages) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.View{}, err
 	}
+	// A malformed view must not spend the trigger: Slack validates the
+	// arguments first, so the app can correct the view and retry within the
+	// trigger's lifetime.
+	if err := requireModalPayload(payload); err != nil {
+		return domain.View{}, err
+	}
 	trigger, err := m.consumeAppTrigger(ctx, workspaceID, appID, triggerID)
 	if err != nil {
 		return domain.View{}, err
 	}
 	return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, "", "", "", "view.opened")
+}
+
+// requireModalPayload admits only a well-formed modal: views.open and
+// views.push create modals, and a Home tab is published with views.publish.
+func requireModalPayload(payload string) error {
+	viewType, _, err := viewPayload(payload)
+	if err != nil {
+		return err
+	}
+	if viewType != "modal" {
+		return ErrInvalidView
+	}
+	return nil
 }
 
 // PublishView replaces the App Home surface a workspace member sees.
@@ -2786,8 +2812,13 @@ func (m Messages) PublishView(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.View{}, ErrAppHomeNotEnabled
 	}
 	user, err := m.Store.GetUser(ctx, target)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return domain.View{}, err
+	}
 	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
-		return domain.View{}, store.ErrNotFound
+		// Slack answers an unknown user_id as a rejected argument
+		// (invalid_arguments, "invalid `user_id`"), not as a missing view.
+		return domain.View{}, store.InvalidArgument("invalid `user_id`")
 	}
 	viewType, _, err := viewPayload(payload)
 	if err != nil || viewType != "home" {
@@ -2807,6 +2838,9 @@ func (m Messages) PushView(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.View{}, err
 	}
+	if err := requireModalPayload(payload); err != nil {
+		return domain.View{}, err
+	}
 	trigger, err := m.consumeAppTrigger(ctx, workspaceID, appID, triggerID)
 	if err != nil {
 		return domain.View{}, err
@@ -2821,7 +2855,7 @@ func (m Messages) PushView(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if depth, err := m.viewStackDepth(ctx, parent); err != nil {
 		return domain.View{}, err
 	} else if depth >= 3 {
-		return domain.View{}, ErrInvalidView
+		return domain.View{}, ErrViewPushLimit
 	}
 	return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, parent.RootViewID, parent.ID, "", "view.pushed")
 }
@@ -2895,6 +2929,12 @@ func (m Messages) updateView(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.View{}, err
 	}
+	// A view keeps its surface for life: a modal cannot become a Home tab
+	// through views.update, or it would leave the modal stack while still
+	// being addressed as a modal.
+	if viewType != current.Type {
+		return domain.View{}, ErrInvalidView
+	}
 	if externalID == "" {
 		externalID = current.ExternalID
 	}
@@ -2904,10 +2944,9 @@ func (m Messages) updateView(ctx context.Context, workspaceID domain.WorkspaceID
 		return domain.View{}, err
 	}
 	value := current
-	value.Type = viewType
 	value.ExternalID = externalID
 	value.Payload = payload
-	value.State = ""
+	value.State = carriedViewState(current.State, payload)
 	value.Errors = nil
 	value.Hash = viewHash(value.ID, value.Payload, now)
 	value.UpdatedAt = now
@@ -2917,6 +2956,69 @@ func (m Messages) updateView(ctx context.Context, workspaceID domain.WorkspaceID
 		return domain.View{}, err
 	}
 	return m.Store.UpdateView(ctx, value, expectedHash, event)
+}
+
+// carriedViewState keeps the entries of a view's state whose block_id and
+// action_id still name an element of the same type in the replacement
+// payload. Slack preserves what a user typed across views.update and
+// response_action "update" exactly this way, which is why apps are told to
+// keep block_id and action_id stable between versions of a view.
+func carriedViewState(state, payload string) string {
+	if strings.TrimSpace(state) == "" {
+		return ""
+	}
+	var previous struct {
+		Values map[string]map[string]map[string]any `json:"values"`
+	}
+	if json.Unmarshal([]byte(state), &previous) != nil || len(previous.Values) == 0 {
+		return ""
+	}
+	var view struct {
+		Blocks []map[string]any `json:"blocks"`
+	}
+	if json.Unmarshal([]byte(payload), &view) != nil {
+		return ""
+	}
+	elementTypes := make(map[[2]string]string)
+	for _, block := range view.Blocks {
+		blockID := strings.TrimSpace(stringValue(block["block_id"]))
+		var candidates []any
+		if elements, ok := block["elements"].([]any); ok {
+			candidates = append(candidates, elements...)
+		}
+		for _, name := range []string{"element", "accessory"} {
+			if element, ok := block[name].(map[string]any); ok {
+				candidates = append(candidates, element)
+			}
+		}
+		for _, raw := range candidates {
+			element, _ := raw.(map[string]any)
+			if actionID := strings.TrimSpace(stringValue(element["action_id"])); actionID != "" {
+				elementTypes[[2]string{blockID, actionID}] = strings.TrimSpace(stringValue(element["type"]))
+			}
+		}
+	}
+	carried := make(map[string]map[string]map[string]any)
+	for blockID, actions := range previous.Values {
+		for actionID, value := range actions {
+			elementType, exists := elementTypes[[2]string{blockID, actionID}]
+			if !exists || (stringValue(value["type"]) != "" && stringValue(value["type"]) != elementType) {
+				continue
+			}
+			if carried[blockID] == nil {
+				carried[blockID] = make(map[string]map[string]any)
+			}
+			carried[blockID][actionID] = value
+		}
+	}
+	if len(carried) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(map[string]any{"values": carried})
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 func (m Messages) deleteView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, current domain.View, clear bool, topic string) error {
@@ -3046,38 +3148,31 @@ func (m Messages) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
 	}
-	trigger, err := m.consumeAppTrigger(ctx, workspaceID, appID, triggerID)
+	// The dialog is validated before the trigger is spent, as a view is, so
+	// an app can correct it and retry within the trigger's lifetime.
+	payload = strings.TrimSpace(payload)
+	definition, err := ParseDialog(payload)
 	if err != nil {
 		return err
 	}
-	payload = strings.TrimSpace(payload)
-	var fields map[string]json.RawMessage
-	if payload == "" || json.Unmarshal([]byte(payload), &fields) != nil || fields == nil {
-		return ErrInvalidDialog
-	}
-	for _, name := range []string{"callback_id", "title", "elements"} {
-		if _, ok := fields[name]; !ok {
-			return ErrInvalidDialog
-		}
-	}
-	var callbackID, title string
-	if json.Unmarshal(fields["callback_id"], &callbackID) != nil || strings.TrimSpace(callbackID) == "" || json.Unmarshal(fields["title"], &title) != nil || strings.TrimSpace(title) == "" {
-		return ErrInvalidDialog
-	}
-	var elements []json.RawMessage
-	if json.Unmarshal(fields["elements"], &elements) != nil || len(elements) == 0 {
-		return ErrInvalidDialog
+	trigger, err := m.consumeAppTrigger(ctx, workspaceID, appID, triggerID)
+	if err != nil {
+		return err
 	}
 	id, err := domain.NewDialogID()
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, actor, events.NewPayload("dialog.opened", events.String("dialog_id", string(id)), events.String("callback_id", strings.TrimSpace(callbackID))), now)
+	value := domain.Dialog{ID: id, WorkspaceID: workspaceID, UserID: trigger.UserID, AppID: appID, Payload: payload, CreatedAt: now}
+	event, err := newEvent(workspaceID, actor, events.NewPayload("dialog.opened",
+		events.String("dialog_id", string(id)), events.String("callback_id", strings.TrimSpace(definition.CallbackID)),
+		events.String("app_id", string(appID)), events.String("user_id", string(trigger.UserID)),
+	), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.CreateDialog(ctx, domain.Dialog{ID: id, WorkspaceID: workspaceID, UserID: trigger.UserID, Payload: payload, CreatedAt: now}, event)
+	return m.Store.CreateDialog(ctx, value, event)
 }
 
 func (m Messages) BotInfo(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, botID domain.BotID) (domain.Bot, error) {
@@ -10144,6 +10239,9 @@ func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.Work
 	if err != nil || attachmentErr != nil || (text == "" && normalizedBlocks == "" && normalizedAttachments == "" && len(fileAttachments) == 0) || messageTextTooLong(text) || request.PostAt.IsZero() {
 		return domain.ScheduledMessage{}, ErrInvalidMessage
 	}
+	if err := validateMessageBlocks(normalizedBlocks); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
 	metadata := ""
 	if strings.TrimSpace(request.Metadata) != "" {
 		if request.AppID == "" {
@@ -10312,6 +10410,9 @@ func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 	if conversation == "" || recipientID == "" || (text == "" && domain.NoStructuredContent(normalizedBlocks) && domain.NoStructuredContent(normalizedAttachments)) || messageTextTooLong(text) || err != nil || attachmentErr != nil {
 		return domain.EphemeralMessage{}, ErrInvalidEphemeral
 	}
+	if err := validateMessageBlocks(normalizedBlocks); err != nil {
+		return domain.EphemeralMessage{}, err
+	}
 	// Slack names one outcome for a recipient who cannot see the message —
 	// user_not_in_channel — whether they are outside the channel or not a
 	// member of the workspace at all. Reporting store.ErrNotFound sent the
@@ -10422,14 +10523,20 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		return domain.Message{}, ErrInvalidMessage
 	}
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(request.Blocks))
+	if err != nil {
+		return domain.Message{}, ErrInvalidBlocks
+	}
 	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(request.Attachments))
-	if err != nil || attachmentErr != nil || strings.TrimSpace(string(request.Conversation)) == "" ||
+	if attachmentErr != nil || strings.TrimSpace(string(request.Conversation)) == "" ||
 		(strings.TrimSpace(request.Text) == "" && domain.NoStructuredContent(normalizedBlocks) && domain.NoStructuredContent(normalizedAttachments)) ||
 		messageTextTooLong(request.Text) || (request.MarkdownText && utf8.RuneCountInString(request.Text) > 12000) ||
 		(request.Parse != "" && request.Parse != "none" && request.Parse != "full") ||
 		(request.ReplyBroadcast && request.ThreadTimestamp == "") ||
 		!request.Subtype.Valid() {
 		return domain.Message{}, ErrInvalidMessage
+	}
+	if err := validateMessageBlocks(normalizedBlocks); err != nil {
+		return domain.Message{}, err
 	}
 	metadata := ""
 	if strings.TrimSpace(request.Metadata) != "" {
@@ -10616,7 +10723,7 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 	if patch.Blocks != nil {
 		message.Blocks, err = domain.NormalizeBlocks([]byte(*patch.Blocks))
 		if err != nil {
-			return domain.Message{}, ErrInvalidMessage
+			return domain.Message{}, ErrInvalidBlocks
 		}
 	}
 	if patch.Attachments != nil {
@@ -10629,6 +10736,11 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 		messageTextTooLong(message.Text) ||
 		(strings.TrimSpace(message.Text) == "" && domain.NoStructuredContent(message.Blocks) && domain.NoStructuredContent(message.Attachments)) {
 		return domain.Message{}, ErrInvalidMessage
+	}
+	if patch.Blocks != nil {
+		if err := validateMessageBlocks(message.Blocks); err != nil {
+			return domain.Message{}, err
+		}
 	}
 	// The edit is recorded on the message itself, not only on the event it
 	// emits. Slack's message object carries an `edited` sub-object, and every
@@ -10795,6 +10907,9 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
 	if err != nil {
 		return nil, ErrInvalidExternalUpload
+	}
+	if err := validateMessageBlocks(normalizedBlocks); err != nil {
+		return nil, err
 	}
 	values := make([]domain.ExternalUpload, len(completions))
 	for index, completion := range completions {
