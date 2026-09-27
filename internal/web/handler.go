@@ -502,28 +502,19 @@ type pageData struct {
 	MarkReadTimestamp string
 	AtLatest          bool
 	Notice            string
-	Error             string
-	Draft             string
-	DraftAttachments  []draftAttachmentView
-	DraftJSON         string
-	ScheduleAt        string
-	ComposeURL        string
-	DraftURL          string
-	ScheduleURL       string
-	UploadURL         string
-	StageUploadURL    string
 	TimelineURL       string
 	ThreadURL         string
 	ThreadFollowURL   string
 	FollowingThread   bool
-	GlobalShortcuts   []domain.AppShortcut
-	SlashCommands     []domain.AppShortcut
-	ComposerMembers   []memberView
-	ComposerGroups    []userGroupView
-	ComposerChannels  []conversationView
-	Apps              []domain.InstalledApp
-	Modal             *modalView
-	Details           *conversationDetailsView
+	// Composer is the conversation's composer and ThreadComposer the open
+	// thread's reply composer; see composer.go. ComposerDialogs carries the
+	// suggestion directory and the dialogs both of them share.
+	Composer        composerView
+	ThreadComposer  composerView
+	ComposerDialogs composerDialogsView
+	Apps            []domain.InstalledApp
+	Modal           *modalView
+	Details         *conversationDetailsView
 }
 
 type memberView struct {
@@ -1385,6 +1376,7 @@ button{cursor:pointer}
 a{color:var(--action)}
 :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .topbar :focus-visible,.sidebar :focus-visible,.bar :focus-visible{outline-color:var(--focus-chrome)}
+[hidden]{display:none!important}
 .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 .skip-link{position:absolute;left:8px;top:-48px;z-index:9;background:var(--panel-strong);color:var(--action);border:1px solid var(--line);border-radius:0 0 6px 6px;padding:8px 12px;text-decoration:none}
 .skip-link:focus{top:0}
@@ -1492,7 +1484,6 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .message-file{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
 .message-file-icon{display:grid;place-items:center;width:34px;height:34px;border-radius:6px;background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:800}
 .message-file-copy{display:grid;min-width:0}.message-file-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800}.message-file-meta{color:var(--muted);font-size:12px}
-.upload-form{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:7px 0}.upload-form label{display:grid;gap:3px;color:var(--muted);font-size:12px}.upload-form input{max-width:260px}
 .message-blocks,.message-attachments,.message-unfurls{display:grid;gap:8px;margin:8px 0}
 .message-block{white-space:pre-wrap;overflow-wrap:anywhere}
 .formatted-text{white-space:normal;overflow-wrap:anywhere}.formatted-text>:first-child{margin-top:0}.formatted-text>:last-child{margin-bottom:0}.formatted-text p{margin:0 0 8px}.formatted-text h1,.formatted-text h2,.formatted-text h3,.formatted-text h4,.formatted-text h5,.formatted-text h6{margin:12px 0 6px;line-height:1.25}.formatted-text ul,.formatted-text ol{margin:6px 0;padding-left:24px}.formatted-text blockquote{margin:6px 0;padding-left:12px;border-left:4px solid var(--line);color:var(--muted)}.formatted-text pre{max-width:100%;overflow:auto;margin:6px 0;padding:10px;border-radius:6px;background:var(--hover);white-space:pre}.formatted-text code{padding:1px 3px;border-radius:3px;background:var(--hover);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.formatted-text pre code{padding:0;background:transparent}.formatted-text a{color:var(--action)}.slack-mention{padding:1px 3px;border-radius:3px;background:color-mix(in srgb,var(--action) 15%,transparent);color:var(--action)}
@@ -1535,14 +1526,7 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .inline-form{display:inline-flex;gap:6px;align-items:center}
 .inline-form input[type=text]{width:130px;border:1px solid var(--field-line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:3px 6px}
 .empty{color:var(--muted);padding:26px;text-align:center}
-.composer-wrap{grid-area:composer;padding:8px 26px 18px}
 .live-status{margin:0 0 6px;min-height:18px;color:var(--muted);font-size:12px}
-.composer{border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:10px}
-.composer.is-error{border-color:var(--danger)}
-.composer textarea{width:100%;min-height:44px;resize:vertical;border:0;outline:0;background:transparent;color:var(--text)}
-.composer-toolbar{display:flex;align-items:center;flex:1 1 auto;flex-wrap:wrap;gap:2px;border:0;padding:0;margin:0;position:relative}
-.composer-tool,.composer-menu>summary{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:28px;border:0;border-radius:5px;background:transparent;color:var(--muted);font-weight:700;cursor:pointer;padding:0 7px}
-.composer-tool:hover,.composer-tool:focus-visible,.composer-menu>summary:hover,.composer-menu>summary:focus-visible{background:var(--panel);color:var(--text)}
 /* Slack keeps a channel's secondary actions behind one overflow control rather
    than spreading them across the header, so the header reads as the channel's
    name and topic first. */
@@ -1554,30 +1538,12 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .channel-overflow[open]>.channel-overflow-menu{position:absolute;z-index:7;right:0;top:30px;display:grid;gap:2px;min-width:200px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow);padding:5px}
 .channel-overflow-menu button{width:100%;border:0;border-radius:5px;background:transparent;color:var(--text);text-align:left;padding:6px 9px;cursor:pointer}
 .channel-overflow-menu button:hover,.channel-overflow-menu button:focus-visible{background:var(--hover)}
-.composer-menu{position:relative}
-.composer-menu>summary{list-style:none}
-.composer-menu>summary::-webkit-details-marker{display:none}
-.composer-popover{position:absolute;z-index:8;left:0;bottom:34px;min-width:210px;max-width:min(320px,80vw);max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
-.composer-popover button{display:flex;width:100%;gap:8px;align-items:center;border:0;border-radius:5px;background:transparent;color:var(--text);padding:7px 9px;text-align:left;cursor:pointer}
-.composer-popover button span,.mention-suggestions button span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.composer-popover button small,.mention-suggestions button small{margin-left:auto;color:var(--muted);white-space:nowrap}
-.composer-popover button:hover,.composer-popover button:focus-visible,.composer-popover button[aria-selected="true"]{background:var(--panel)}
-.emoji-grid{display:grid;grid-template-columns:repeat(6,36px);min-width:auto}
-.emoji-grid button{justify-content:center;font-size:18px;padding:5px}
-.mention-suggestions,.channel-suggestions,.emoji-suggestions,.slash-suggestions{position:absolute;z-index:9;left:8px;bottom:42px;min-width:220px;max-width:min(440px,85vw);max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
-.mention-suggestions button,.channel-suggestions button,.emoji-suggestions button,.slash-suggestions button{display:flex;width:100%;gap:8px;align-items:center;border:0;border-radius:5px;background:transparent;color:var(--text);padding:7px 9px;text-align:left;cursor:pointer}
-.slash-suggestions button{align-items:flex-start;gap:10px}.slash-suggestions strong{min-width:100px}.slash-suggestions small{display:block;color:var(--muted)}
-.mention-suggestions button:hover,.mention-suggestions button:focus-visible,.mention-suggestions button[aria-selected="true"],.channel-suggestions button:hover,.channel-suggestions button:focus-visible,.channel-suggestions button[aria-selected="true"],.emoji-suggestions button:hover,.emoji-suggestions button:focus-visible,.emoji-suggestions button[aria-selected="true"],.slash-suggestions button:hover,.slash-suggestions button:focus-visible,.slash-suggestions button[aria-selected="true"]{background:var(--panel)}
 .emoji-glyph,.custom-emoji{display:inline-block;width:20px;height:20px;object-fit:contain;vertical-align:-4px}.emoji-glyph,.standard-emoji{font-size:18px;line-height:20px;text-align:center}.reaction-emoji{display:inline-grid;min-width:20px;place-items:center}.reaction-picker-form{display:none}
 .emoji-picker-dialog{width:min(620px,calc(100vw - 28px));height:min(620px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.emoji-picker-dialog::backdrop{background:#0008}.emoji-picker-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.emoji-picker-head label{display:grid;gap:5px;font-weight:800}.emoji-picker-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.emoji-picker-close{align-self:end;border:0;background:transparent;color:var(--muted);font-size:22px}.emoji-picker-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,180px);gap:8px;padding:10px 14px 0}.emoji-picker-filters label{display:grid;gap:4px;color:var(--muted);font-size:12px;font-weight:700}.emoji-picker-filters select{min-width:0;border:1px solid var(--field-line);border-radius:6px;background:var(--panel);color:var(--text);padding:7px}.emoji-picker-status{margin:0;padding:9px 14px;color:var(--muted);font-size:12px}.emoji-picker-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:4px;margin:0;padding:0 10px 14px;list-style:none;overflow:auto;max-height:calc(100% - 174px)}.emoji-picker-results button{display:flex;width:100%;gap:7px;align-items:center;border:0;border-radius:6px;background:transparent;color:var(--text);padding:8px;text-align:left}.emoji-picker-results button:hover,.emoji-picker-results button:focus-visible,.emoji-picker-results button[aria-selected="true"]{background:var(--hover)}.emoji-picker-results small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .shortcut-browser{width:min(620px,calc(100vw - 28px));height:min(620px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.shortcut-browser::backdrop{background:#0008}.shortcut-browser-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.shortcut-browser-head label{display:grid;gap:5px;font-weight:800}.shortcut-browser-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.shortcut-browser-head button{align-self:end;border:0;background:transparent;color:var(--muted);font-size:22px}.shortcut-browser-results{display:grid;gap:4px;padding:10px;overflow:auto;max-height:calc(100% - 78px)}.shortcut-browser-results>button,.shortcut-browser-results form>button{display:grid;grid-template-columns:minmax(110px,auto) minmax(0,1fr);align-items:start;gap:12px;width:100%;border:0;border-radius:7px;background:transparent;color:var(--text);padding:10px;text-align:left}.shortcut-browser-results>button:hover,.shortcut-browser-results>button:focus-visible,.shortcut-browser-results form>button:hover,.shortcut-browser-results form>button:focus-visible{background:var(--hover)}.shortcut-browser-results span{display:grid;gap:2px}.shortcut-browser-results small{color:var(--muted)}.shortcut-browser-empty{padding:30px;text-align:center;color:var(--muted)}
 .clip-recorder{width:min(560px,calc(100vw - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:18px}.clip-recorder::backdrop{background:#0008}.clip-recorder h2{margin:0 0 6px;font-size:18px}.clip-recorder p{margin:0 0 14px;color:var(--muted)}.clip-recorder video{display:block;width:100%;max-height:min(360px,55vh);margin:0 0 14px;border-radius:9px;background:#111;object-fit:contain}.clip-recorder-actions{display:flex;justify-content:flex-end;gap:8px}.clip-recorder-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel);color:var(--text);padding:8px 12px;font-weight:800}.clip-recorder-actions .clip-stop{border-color:var(--danger);background:var(--danger);color:var(--on-strong)}
 .conversation-switcher{width:min(560px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}
 .conversation-switcher::backdrop{background:#0008}.switcher-head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.switcher-head label{flex:1}.switcher-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.switcher-close{border:0;background:transparent;color:var(--muted);font-size:20px}.switcher-results{list-style:none;margin:0;padding:8px;overflow:auto}.switcher-results a{display:flex;gap:8px;border-radius:6px;color:var(--text);padding:8px 10px;text-decoration:none}.switcher-results a:hover,.switcher-results a:focus-visible{background:var(--hover)}
-.upload-preview{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:5px 0 0;color:var(--muted);font-size:13px}.staged-file{display:inline-flex;align-items:center;gap:4px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}.staged-file button{padding:1px 4px}
-.composer-footer{display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap}
-.composer-tools{margin:0;color:var(--muted);font-size:13px}
-.send{border:0;border-radius:5px;background:var(--ok);color:var(--on-strong);font-weight:700;padding:7px 14px}
-.send-actions{display:flex;align-items:stretch;gap:2px}.schedule-menu{position:relative}.schedule-menu>summary{display:grid;place-items:center;height:100%;min-width:34px;border-radius:5px;background:var(--ok);color:var(--on-strong);cursor:pointer;list-style:none;font-weight:800}.schedule-menu>summary::-webkit-details-marker{display:none}.schedule-popover{position:absolute;z-index:10;right:0;bottom:38px;display:grid;gap:8px;width:min(310px,calc(100vw - 32px));padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);box-shadow:var(--shadow)}.schedule-popover label{display:grid;gap:5px;font-size:12px;font-weight:800}.schedule-popover input{width:100%;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 9px;font:inherit}.schedule-popover p{margin:0;color:var(--muted);font-size:12px}.schedule-popover button{border:0;border-radius:6px;background:var(--ok);color:var(--on-strong);padding:8px 11px;font-weight:800}.schedule-popover a{color:var(--action);font-size:12px;font-weight:700}
 .thread{grid-area:thread;min-height:0;border-left:1px solid var(--line);background:var(--panel);padding:16px 18px;overflow:auto}
 .thread h2{margin:0;font-size:16px}.thread-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px}.thread-heading form{margin:0}.thread-heading button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:6px 9px;font-weight:700}
 @media(max-width:800px){
@@ -1587,7 +1553,8 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .timeline,.composer-wrap,.channel-header{padding-left:12px;padding-right:12px}
 {{if .ThreadTimestamp}}.content{grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "thread" "composer"}
 .timeline-wrap{display:none}
-.thread{border-left:0;border-top:1px solid var(--line)}{{end}}
+.thread{border-left:0;border-top:1px solid var(--line)}
+.channel-composer-wrap>.composer-outbox,.channel-composer-wrap>.composer,.channel-composer-wrap>.composer-below{display:none}{{end}}
 }
 </style>`
 
@@ -1758,24 +1725,6 @@ const workspaceRefinements = `<style>
 .shortcut-list form{display:block}
 .shortcut-list button{display:block;width:100%;padding:7px 9px;text-align:left}
 .shortcut-list small{display:block;color:var(--muted);font-weight:400}
-.composer-shortcuts{position:relative}
-/* Attaching is a plus button at the head of the composer's own toolbar, where
-   Slack puts it.
-   
-   It was a disclosure sitting above the composer, and the reason given was that
-   the upload carries its own multipart form and HTML forbids a form inside a
-   form. That reason was about the FORM and not about the control: the form was
-   already never submitted natively when script is on, because
-   stageSelectedFiles builds FormData from it and fetches. So the form stays
-   where it is as the no-script fallback, and the button that opens it moved to
-   where it belongs, with the disclosure hidden once script takes over. Nothing
-   changed about how an upload is posted.
-   
-   The button is hidden until script reveals it, so a reader without script is
-   never offered a control that cannot work. */
-.composer-shortcuts summary{display:inline-flex;align-items:center;gap:6px;min-height:28px;width:max-content;cursor:pointer;padding:2px 8px;border-radius:6px;color:var(--muted);font-size:13px;font-weight:700}
-.composer-shortcuts summary:hover{background:var(--hover);color:var(--text)}
-.composer-shortcuts[open]>.shortcut-list{position:absolute;z-index:6;left:0;bottom:30px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow)}
 .message-actions .edit-message{width:min(420px,70vw)}
 .message-actions .edit-message textarea{width:min(320px,55vw);min-height:64px;resize:vertical;border:1px solid var(--field-line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:5px 7px}
 .message-actions .delete-message button{color:var(--danger);font-weight:700}
@@ -1796,15 +1745,6 @@ const workspaceRefinements = `<style>
 .section-menu label,.channel-menu label{display:grid;gap:3px;color:#f5eaf6;font-size:12px}
 .section-menu input[type=text],.channel-menu input[type=text]{min-width:0;border:1px solid #ffffff8a;border-radius:4px;background:#ffffff1f;color:#fff;padding:5px 6px}
 .section-menu button,.channel-menu button{border:0;border-radius:4px;background:#ffffff26;color:#fff;font-weight:700;padding:5px 8px;text-align:left;cursor:pointer;width:100%}
-.composer-wrap{background:var(--panel-strong);padding-top:7px;padding-bottom:12px}
-.composer-shortcuts{margin:0 0 4px 2px}
-.composer{border-color:var(--field-line);border-radius:9px;box-shadow:none;padding:8px 10px}
-.composer:focus-within{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
-.composer.is-dragging{border-color:var(--action);box-shadow:0 0 0 3px color-mix(in srgb,var(--action) 25%,transparent)}
-.composer textarea{min-height:44px}
-.composer-footer{border-top:1px solid var(--line);padding-top:7px;margin-top:6px}
-.composer-tools kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;background:var(--panel);font:11px/1.4 inherit}
-.send{min-width:70px}
 .conversation-gate{border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:18px}
 .conversation-gate-copy{min-width:0}
 .conversation-gate strong{display:block;margin-bottom:2px}
@@ -2117,9 +2057,9 @@ const messagesPartial = `{{define "icon-emoji"}}<svg class="action-icon" viewBox
 {{end}}
 {{end}}`
 
-var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
-{{define "styles"}}` + pageStyle + workspaceRefinements + `{{end}}
-{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + `{{end}}
+var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
+{{define "styles"}}` + pageStyle + workspaceRefinements + composerStyle + `{{end}}
+{{define "scripts"}}` + progressiveEnhancementScript + composerScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
 <div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}"{{if .CanonicalURL}} data-canonical-url="{{.CanonicalURL}}"{{end}}>
@@ -2149,15 +2089,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
     <p class="emoji-picker-status" id="emoji-picker-status" role="status">Choose an emoji.</p>
     <ul class="emoji-picker-results" id="emoji-picker-results" role="listbox" aria-label="Emoji results"></ul>
   </dialog>{{end}}
-  {{if and .CanPost (or .SlashCommands .GlobalShortcuts)}}<dialog class="shortcut-browser" id="shortcut-browser" aria-labelledby="shortcut-browser-title">
-    <div class="shortcut-browser-head"><label><span id="shortcut-browser-title">Shortcuts</span><input id="shortcut-browser-query" type="search" autocomplete="off" placeholder="Search shortcuts and commands"></label><button id="shortcut-browser-close" type="button" aria-label="Close shortcuts">×</button></div>
-    <div class="shortcut-browser-results" id="shortcut-browser-results">{{range .SlashCommands}}<button type="button" data-browser-command="{{.Command}}" data-shortcut-search="{{.Command}} {{.Description}} {{.UsageHint}} {{.AppName}}"><strong>{{.Command}}</strong><span>{{.Description}}{{if .UsageHint}}<small>{{.UsageHint}}</small>{{end}}{{if .AppName}}<small>{{.AppName}}</small>{{end}}</span></button>{{end}}{{range $shortcut := .GlobalShortcuts}}
-      <form method="post" action="/app/shortcut" hx-post="/app/shortcut" data-shortcut-search="{{$shortcut.Name}} {{$shortcut.Description}} {{$shortcut.AppName}}">
-        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="channel" value="{{$.Channel}}"><input type="hidden" name="app_id" value="{{$shortcut.AppID}}"><input type="hidden" name="callback_id" value="{{$shortcut.CallbackID}}">
-        <button type="submit"><strong>{{$shortcut.Name}}</strong><span>{{$shortcut.Description}}<small>{{$shortcut.AppName}}</small></span></button>
-      </form>{{end}}</div>
-    <p class="shortcut-browser-empty" id="shortcut-browser-empty" role="status" hidden>No matching shortcuts.</p>
-  </dialog>{{end}}
+  {{if .CanPost}}{{template "composer-dialogs" .ComposerDialogs}}{{end}}
   <dialog class="keyboard-help" id="keyboard-help" aria-labelledby="keyboard-help-title">
     <div class="keyboard-help-head">
       <h2 id="keyboard-help-title">Keyboard shortcuts</h2>
@@ -2178,12 +2110,6 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
     </div>
     <p class="keyboard-help-empty" id="keyboard-help-empty" role="status" hidden>No matching shortcuts.</p>
   </dialog>
-  {{if and .CanPost .CanUpload}}<dialog class="clip-recorder" id="clip-recorder" aria-labelledby="clip-recorder-title" aria-describedby="clip-recorder-status">
-    <h2 id="clip-recorder-title">Record a clip</h2>
-    <p id="clip-recorder-status" role="status" aria-live="polite">Choose an audio or video clip from the composer.</p>
-    <video id="clip-recorder-preview" autoplay muted playsinline hidden></video>
-    <div class="clip-recorder-actions"><button type="button" id="clip-recorder-cancel">Cancel</button><button class="clip-stop" type="button" id="clip-recorder-stop" disabled>Stop recording</button></div>
-  </dialog>{{end}}
   <div class="workspace">
     <aside class="sidebar" id="workspace-sidebar">
       <div>
@@ -2332,73 +2258,19 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
           {{if .Assistant.Status}}<p class="assistant-status" role="status">{{.Assistant.Status}}</p>{{end}}
           {{if .Assistant.Prompts}}<div class="assistant-prompts">
             {{if .Assistant.PromptsTitle}}<p class="assistant-prompts-title">{{.Assistant.PromptsTitle}}</p>{{end}}
-            {{range .Assistant.Prompts}}<form method="post" action="{{$.ComposeURL}}" hx-post="{{$.ComposeURL}}">
-              <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="text" value="{{.Message}}">
+            {{range .Assistant.Prompts}}<form method="post" action="{{$.ThreadComposer.ComposeURL}}" hx-post="{{$.ThreadComposer.ComposeURL}}">
+              <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="thread_ts" value="{{$.ThreadTimestamp}}"><input type="hidden" name="text" value="{{.Message}}">
               <button class="assistant-prompt" type="submit" title="{{.Message}}">{{.Title}}</button>
             </form>{{end}}
           </div>{{end}}
         </div>{{end}}
         <div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div>
+        {{if .CanPost}}<div class="composer-wrap thread-composer-wrap">{{template "composer" .ThreadComposer}}</div>{{end}}
       </aside>
       {{end}}
-      <div class="composer-wrap">
+      <div class="composer-wrap channel-composer-wrap">
         <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
-        {{if .CanPost}}
-        {{if .CanUpload}}<form class="upload-form" id="upload-form" method="post" action="{{.StageUploadURL}}" enctype="multipart/form-data" hidden>
-          <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-          <input type="hidden" id="upload-comment" name="text" value="{{.Draft}}">
-          <input type="hidden" id="upload-draft-attachments" name="draft_attachments" value="{{.DraftJSON}}">
-          <input id="upload-file" type="file" name="file" multiple aria-label="Files to attach">
-        </form>{{end}}
-        <div id="typing" data-typing="/app/typing?channel={{.Channel}}" data-channel="{{.Channel}}">{{template "typing" .Typing}}</div>
-        <form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.LatestURL}}" data-draft-url="{{.DraftURL}}">
-          <p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p>
-          {{if .CanUpload}}<p class="upload-preview" id="upload-preview" role="status">{{if .DraftAttachments}}{{range $index, $attachment := .DraftAttachments}}{{if $index}} · {{end}}{{$attachment.Name}}{{end}}{{end}}</p>
-          <button type="button" id="upload-clear" hidden>Remove staged files</button>{{end}}
-          <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-          <input type="hidden" name="timezone" data-browser-timezone value="UTC">
-          <input type="hidden" id="draft-attachments" name="draft_attachments" value="{{.DraftJSON}}">
-          <label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}</label>
-          <textarea id="text" name="text" maxlength="40000"{{if not .DraftAttachments}} required{{end}}{{if not .Error}} autofocus{{end}} role="combobox" aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter Control+B Meta+B Control+I Meta+I Control+Shift+X Meta+Shift+X" aria-autocomplete="list" aria-controls="mention-suggestions channel-suggestions emoji-suggestions slash-suggestions" aria-expanded="false" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
-          {{if or .ComposerMembers .ComposerGroups}}<div class="mention-suggestions" id="mention-suggestions" role="listbox" aria-label="Mention suggestions" hidden>{{range .ComposerMembers}}
-            <button type="button" role="option" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" data-mention-search="{{.Name}}"><span>@{{.Name}}{{if .IsSelf}} (you){{end}}</span><small>Person</small></button>{{end}}{{range .ComposerGroups}}
-            <button type="button" role="option" data-mention-group="{{.ID}}" data-mention-name="{{.Handle}}" data-mention-search="{{.Handle}} {{.Name}} {{.Description}}"><span>@{{.Handle}}</span><small>{{.Name}} · {{.MemberCount}} members</small></button>{{end}}
-          </div>{{end}}
-          {{if .ComposerChannels}}<div class="channel-suggestions" id="channel-suggestions" role="listbox" aria-label="Channel suggestions" hidden>{{range .ComposerChannels}}
-            <button type="button" role="option" data-channel-id="{{.ID}}" data-channel-name="{{.Name}}">#{{.Name}}</button>{{end}}
-          </div>{{end}}
-          <div class="emoji-suggestions" id="emoji-suggestions" role="listbox" aria-label="Emoji suggestions" hidden></div>
-          {{if .SlashCommands}}<div class="slash-suggestions" id="slash-suggestions" role="listbox" aria-label="Shortcuts and slash commands" hidden>{{range .SlashCommands}}
-            <button type="button" role="option" data-slash-command="{{.Command}}" data-slash-search="{{.Command}} {{.Description}} {{.UsageHint}} {{.AppName}}"><strong>{{.Command}}</strong><span>{{.Description}}{{if .UsageHint}} <small>{{.UsageHint}}</small>{{end}}{{if .AppName}}<small>{{.AppName}}</small>{{end}}</span></button>{{end}}
-          </div>{{end}}
-          {{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}">{{end}}
-          <div class="composer-footer">
-          <div class="composer-toolbar" role="toolbar" aria-label="Message formatting and insertions">
-            {{if or .CanUpload .SlashCommands .GlobalShortcuts}}<details class="composer-menu composer-plus"><summary role="button" aria-label="Attach a file or browse shortcuts" aria-controls="composer-plus-menu">＋</summary>
-              <div class="composer-popover" id="composer-plus-menu" aria-label="Attach and shortcuts">
-                {{if .CanUpload}}<button type="button" id="composer-attach" aria-controls="upload-file">Upload from computer</button>{{end}}
-                {{if or .SlashCommands .GlobalShortcuts}}<button type="button" id="open-shortcut-browser" aria-label="Browse shortcuts" aria-haspopup="dialog" aria-controls="shortcut-browser">Browse shortcuts</button>{{end}}
-              </div>
-            </details>{{end}}
-            <button class="composer-tool" type="button" data-wrap="*" aria-label="Bold" aria-controls="text"><strong>B</strong></button>
-            <button class="composer-tool" type="button" data-wrap="_" aria-label="Italic" aria-controls="text"><em>I</em></button>
-            <button class="composer-tool" type="button" data-wrap="~" aria-label="Strikethrough" aria-controls="text"><s>S</s></button>
-            <button class="composer-tool" type="button" data-wrap="&#96;" aria-label="Inline code" aria-controls="text">&lt;/&gt;</button>
-            <button class="composer-tool" type="button" data-insert="&lt;https://example.com|link text&gt;" data-select-offset="1" data-select-length="19" aria-label="Insert link" aria-controls="text">🔗</button>
-            <button class="composer-tool" type="button" data-open-emoji-picker data-emoji-target="composer" aria-label="Choose an emoji" aria-haspopup="dialog" aria-controls="emoji-picker-dialog">☺</button>
-            {{if .CanUpload}}<button class="composer-tool" type="button" data-record-clip="audio" aria-label="Record audio clip" aria-haspopup="dialog" aria-controls="clip-recorder">🎤</button>
-            <button class="composer-tool" type="button" data-record-clip="video" aria-label="Record video clip" aria-haspopup="dialog" aria-controls="clip-recorder">🎥</button>{{end}}
-            {{if or .ComposerMembers .ComposerGroups}}<details class="composer-menu"><summary role="button" aria-label="Mention a person or user group" aria-controls="mention-picker">@</summary>
-              <div class="composer-popover" id="mention-picker" role="menu" aria-label="People and user groups">{{range .ComposerMembers}}
-                <button type="button" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" data-mention-search="{{.Name}}" role="menuitem"><span>@{{.Name}}{{if .IsSelf}} (you){{end}}</span><small>Person</small></button>{{end}}{{range .ComposerGroups}}
-                <button type="button" data-mention-group="{{.ID}}" data-mention-name="{{.Handle}}" data-mention-search="{{.Handle}} {{.Name}} {{.Description}}" role="menuitem"><span>@{{.Handle}}</span><small>{{.Name}} · {{.MemberCount}} members</small></button>{{end}}
-              </div>
-            </details>{{end}}
-          </div>
-            <span class="composer-tools" id="composer-hint"><kbd>Enter</kbd> sends · <kbd>Shift</kbd> + <kbd>Enter</kbd> adds a line{{if .CanUpload}} · You can also paste or drop files into the composer.{{end}}</span>
-            <div class="send-actions"><button class="send" type="submit">Send</button><details class="schedule-menu"><summary role="button" aria-label="Schedule message">⌄</summary><div class="schedule-popover"><label for="schedule-at">Send date and time<input id="schedule-at" type="datetime-local" name="schedule_at" value="{{.ScheduleAt}}" data-schedule-at aria-describedby="schedule-time-help"></label><input type="hidden" name="post_at"><p id="schedule-time-help">The time uses your current browser time zone and must be within 120 days.</p><button type="submit" formaction="{{.ScheduleURL}}">Schedule message</button><a href="/app/drafts?channel={{.Channel}}&amp;tab=scheduled">View scheduled messages</a></div></details></div>
-          </div>
-        </form>
+        {{if .CanPost}}{{template "composer" .Composer}}
         {{else}}
         <section class="conversation-gate" aria-label="Conversation access">
           <div class="conversation-gate-copy">
@@ -3044,13 +2916,13 @@ describe();
 });
 })();</script>`
 
-const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end}}
+var notificationsMarkup = composerPartial + `{{define "title"}}Notifications · SameOldChat{{end}}
 {{define "styles"}}<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(760px,calc(100% - 28px));margin:24px auto 48px}.heading h2{margin:0 0 5px}.heading p{margin:0;color:var(--muted)}.settings{display:grid;gap:18px;margin-top:20px}.card{padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.card h3{margin:0 0 6px}.card>p{margin:0 0 14px;color:var(--muted)}.fields{display:grid;gap:12px}.fields label{display:grid;gap:6px;font-weight:700}.fields input[type=text],.fields input[type=number],.fields select{padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.check{display:flex!important;grid-template-columns:auto 1fr!important;align-items:start;gap:8px!important;font-weight:600!important}.actions{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.actions label{flex:1 1 180px}.actions button,.fields button{border:0;border-radius:6px;background:var(--action);color:var(--on-strong);padding:9px 12px;font-weight:800}.resume{background:var(--danger)!important}.exceptions{margin:0;padding:0;list-style:none;display:grid;gap:8px}.exceptions a{display:flex;justify-content:space-between;gap:10px;padding:11px;border:1px solid var(--line);border-radius:7px;color:var(--text);text-decoration:none}.exceptions span:last-child{color:var(--muted)}
 @media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 18px,760px);margin-top:16px}.card{padding:14px}.actions{display:grid}.actions label{width:100%}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + browserNotificationSettingScript + `{{end}}
+{{define "scripts"}}` + localTimeScript + browserNotificationSettingScript + composerScript + `{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Notifications</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
 <main class="layout"><div class="heading"><h2>Notification preferences</h2><p>Choose what needs your attention without changing what you can read.</p></div>{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 <div class="settings">
@@ -3063,6 +2935,7 @@ const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end
 <label class="check"><input type="checkbox" id="browser-notifications" name="browser_notifications" value="true"{{if .BrowserNotifications}} checked{{end}}> Show desktop notifications while SameOldChat is open in a tab</label>
 <p class="muted" id="browser-notification-state" aria-live="polite">{{.BrowserNotificationState}}</p>
 <button type="submit">Save workspace defaults</button></form></section>
+<section class="card" aria-labelledby="composing-preferences-heading"><h3 id="composing-preferences-heading">Advanced: composing messages</h3>{{template "composer-preferences"}}</section>
 <section class="card" aria-labelledby="notification-absent-heading"><h3 id="notification-absent-heading">Not delivered here</h3><p>These are absent rather than off, so you know to look elsewhere for them.</p><ul><li><strong>Push to a phone.</strong> There is no mobile application and no push service.</li><li><strong>E-mail.</strong> This deployment sends no mail at all.</li><li><strong>Sounds and notification schedules.</strong> Pausing above is the only schedule.</li></ul></section>
 <section class="card" aria-labelledby="schedule-heading"><h3 id="schedule-heading">Notification schedule</h3>
 <p>Choose the days and hours you allow notifications. Outside them nothing is delivered; Activity and messages are unaffected.</p>
@@ -3550,12 +3423,6 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // navigation, aborting it.
 var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
-var composer=document.getElementById('composer');
-var text=document.getElementById('text');
-var mentionSuggestions=document.getElementById('mention-suggestions');
-var channelSuggestions=document.getElementById('channel-suggestions');
-var emojiSuggestions=document.getElementById('emoji-suggestions');
-var slashSuggestions=document.getElementById('slash-suggestions');
 var emojiPicker=document.getElementById('emoji-picker-dialog');
 var emojiPickerQuery=document.getElementById('emoji-picker-query');
 var emojiPickerResults=document.getElementById('emoji-picker-results');
@@ -3563,28 +3430,8 @@ var emojiPickerStatus=document.getElementById('emoji-picker-status');
 var emojiPickerClose=document.getElementById('emoji-picker-close');
 var emojiPickerCategory=document.getElementById('emoji-picker-category');
 var emojiPickerTone=document.getElementById('emoji-picker-tone');
-var shortcutBrowser=document.getElementById('shortcut-browser');
-var shortcutBrowserQuery=document.getElementById('shortcut-browser-query');
-var shortcutBrowserResults=document.getElementById('shortcut-browser-results');
-var shortcutBrowserEmpty=document.getElementById('shortcut-browser-empty');
-var shortcutBrowserClose=document.getElementById('shortcut-browser-close');
-var shortcutBrowserOpen=document.getElementById('open-shortcut-browser');
-var uploadFile=document.getElementById('upload-file');
-var uploadPreview=document.getElementById('upload-preview');
-var uploadForm=document.getElementById('upload-form');
-var uploadComment=document.getElementById('upload-comment');
-var uploadDraftAttachments=document.getElementById('upload-draft-attachments');
-var draftAttachmentInput=document.getElementById('draft-attachments');
-var uploadClear=document.getElementById('upload-clear');
-var clipDialog=document.getElementById('clip-recorder');
-var clipTitle=document.getElementById('clip-recorder-title');
-var clipStatus=document.getElementById('clip-recorder-status');
-var clipPreview=document.getElementById('clip-recorder-preview');
-var clipStop=document.getElementById('clip-recorder-stop');
-var clipCancel=document.getElementById('clip-recorder-cancel');
 var search=document.getElementById('workspace-search');
 var activityLink=document.getElementById('activity-link');
-var errorBox=document.getElementById('composer-error');
 var actionBox=document.getElementById('action-feedback');
 var status=document.getElementById('live-status');
 var nav=document.getElementById('workspace-sidebar');
@@ -3606,182 +3453,20 @@ var inFlight=null;
 var scheduled=null;
 var appliedHTML=new WeakMap();
 var forcing=0;
-var draftTimer=null;
-var sending=false;
-var stagingFiles=false;
-var draftAttachments=[];
-try{draftAttachments=JSON.parse(draftAttachmentInput&&draftAttachmentInput.value||'[]');if(!Array.isArray(draftAttachments))draftAttachments=[]}catch(error){draftAttachments=[]}
 var streamState='';
-var mentionStart=-1;
-var channelStart=-1;
-var emojiStart=-1;
 var emojiRequest=null;
 var emojiTimer=null;
 var emojiPickerTarget='composer';
 var emojiReactionFormID='';
 var emojiPickerTrigger=null;
-var clipRecorder=null;
-var clipStream=null;
-var clipChunks=[];
-var clipCancelled=false;
-var clipLimitTimer=null;
-var clipElapsedTimer=null;
-var clipStartedAt=0;
-var clipTrigger=null;
-var clipGeneration=0;
-var draftKey=composer?'sameoldchat-draft:'+composer.getAttribute('action'):'';
 var applePlatform=/Mac|iPhone|iPad/.test(navigator.platform||'');
 function primaryShortcut(event){return applePlatform?event.metaKey&&!event.ctrlKey:event.ctrlKey&&!event.metaKey}
 function localize(root){if(window.sameoldchatLocalTimes)window.sameoldchatLocalTimes(root)}
 function announce(message){if(status)status.textContent=message}
-function showError(message,form){var box=form===composer?errorBox:actionBox;if(!box){window.alert(message);return}box.textContent=message;box.hidden=false;if(form===composer&&composer)composer.classList.add('is-error');box.scrollIntoView({block:'nearest'});box.focus()}
-function clearError(form){var box=form===composer?errorBox:actionBox;if(!box)return;box.textContent='';box.hidden=true;if(form===composer&&composer)composer.classList.remove('is-error')}
-function failure(error,form){var message=error&&error.message?String(error.message).trim():'';if(message.charAt(0)==='<')message='';if(message.length>200)message=message.slice(0,200);if(message)return message;return form===composer?'The request could not be completed. Your message was kept in the composer.':'The request could not be completed. Nothing was changed.'}
-function persistDraft(){
-if(!text||!draftKey)return;
-try{if(text.value)localStorage.setItem(draftKey,text.value);else localStorage.removeItem(draftKey)}catch(error){}
-if(draftTimer)window.clearTimeout(draftTimer);
-draftTimer=window.setTimeout(function(){saveDraftRemote(false)},450);
-}
-function persistDraftNow(){
-if(!text)return Promise.resolve();
-try{if(draftKey){if(text.value)localStorage.setItem(draftKey,text.value);else localStorage.removeItem(draftKey)}}catch(error){}
-return saveDraftRemote(false);
-}
-function saveDraftRemote(keepalive){
-if(!composer||!text)return Promise.resolve();
-var action=composer.getAttribute('data-draft-url');
-if(!action||!ownPath(action))return Promise.resolve();
-if(draftTimer){window.clearTimeout(draftTimer);draftTimer=null}
-var body=new URLSearchParams();
-var csrf=composer.querySelector('input[name="_csrf"]');
-var thread=composer.querySelector('input[name="thread_ts"]');
-body.set('_csrf',csrf?csrf.value:'');
-body.set('text',text.value);
-body.set('draft_attachments',JSON.stringify(draftAttachments));
-if(thread)body.set('thread_ts',thread.value);
-return fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin',keepalive:!!keepalive}).then(function(response){if(!response.ok)announce('Your draft has not been saved yet. Keep this tab open and try typing again.')}).catch(function(){announce('Your draft has not been saved yet. Keep this tab open and try typing again.')});
-}
-function replaceComposerRange(start,end,value,selectStart,selectEnd){
-if(!text)return;
-var before=text.value.slice(0,start);
-var suffix=text.value.slice(end);
-text.value=before+value+suffix;
-var first=typeof selectStart==='number'?start+selectStart:start+value.length;
-var last=typeof selectEnd==='number'?start+selectEnd:first;
-text.focus();
-text.setSelectionRange(first,last);
-persistDraft();
-text.dispatchEvent(new Event('input',{bubbles:true}));
-}
-function wrapComposerSelection(wrapper){
-if(!text)return;
-var start=text.selectionStart;
-var end=text.selectionEnd;
-var selected=text.value.slice(start,end);
-if(!selected)selected='text';
-replaceComposerRange(start,end,wrapper+selected+wrapper,wrapper.length,wrapper.length+selected.length);
-}
-function currentMention(){
-if(!text)return null;
-var cursor=text.selectionStart;
-var before=text.value.slice(0,cursor);
-var match=/(^|\s)@([^\s@<>]*)$/.exec(before);
-if(!match)return null;
-return{start:cursor-match[2].length-1,end:cursor,query:match[2].toLowerCase()};
-}
-function mentionOptions(){return mentionSuggestions?Array.prototype.slice.call(mentionSuggestions.querySelectorAll('[data-mention-user],[data-mention-group]')).filter(function(option){return !option.hidden}):[]}
-function hideMentions(){
-mentionStart=-1;
-if(mentionSuggestions)mentionSuggestions.hidden=true;
-if(text){text.setAttribute('aria-expanded','false');text.removeAttribute('aria-activedescendant')}
-}
-function updateMentions(){
-if(!mentionSuggestions||!text){hideMentions();return false}
-var mention=currentMention();
-if(!mention){hideMentions();return false}
-mentionStart=mention.start;
-var visible=0;
-var options=mentionSuggestions.querySelectorAll('[data-mention-user],[data-mention-group]');
-for(var index=0;index<options.length;index++){
-var search=(options[index].getAttribute('data-mention-search')||options[index].getAttribute('data-mention-name')||'').toLowerCase();
-var show=visible<8&&search.indexOf(mention.query)!==-1;
-options[index].hidden=!show;
-options[index].setAttribute('aria-selected',show&&visible===0?'true':'false');
-if(show){options[index].id='mention-option-'+visible;visible++}else{options[index].removeAttribute('id')}
-}
-mentionSuggestions.hidden=visible===0;
-text.setAttribute('aria-expanded',visible?'true':'false');
-if(visible)text.setAttribute('aria-activedescendant','mention-option-0');else text.removeAttribute('aria-activedescendant');
-return visible>0;
-}
-function chooseMention(option){
-if(!text||!option)return;
-var mention=currentMention();
-var start=mention?mention.start:mentionStart;
-if(start<0)start=text.selectionStart;
-var group=option.getAttribute('data-mention-group');
-var reference=group?'<!subteam^'+group+'>':'<@'+option.getAttribute('data-mention-user')+'>';
-replaceComposerRange(start,text.selectionStart,reference+' ',undefined,undefined);
-hideMentions();
-var details=option.closest('details');
-if(details)details.open=false;
-}
-function currentChannel(){
-if(!text)return null;
-var cursor=text.selectionStart;
-var before=text.value.slice(0,cursor);
-var match=/(^|\s)#([^\s#<>]*)$/.exec(before);
-if(!match)return null;
-return{start:cursor-match[2].length-1,end:cursor,query:match[2].toLowerCase()};
-}
-function channelOptions(){return channelSuggestions?Array.prototype.slice.call(channelSuggestions.querySelectorAll('[data-channel-id]')).filter(function(option){return !option.hidden}):[]}
-function hideChannels(){
-channelStart=-1;
-if(channelSuggestions)channelSuggestions.hidden=true;
-if(text){text.setAttribute('aria-expanded','false');text.removeAttribute('aria-activedescendant')}
-}
-function updateChannels(){
-if(!channelSuggestions||!text){hideChannels();return false}
-var channel=currentChannel();
-if(!channel){hideChannels();return false}
-channelStart=channel.start;
-var visible=0;
-var options=channelSuggestions.querySelectorAll('[data-channel-id]');
-for(var index=0;index<options.length;index++){
-var name=(options[index].getAttribute('data-channel-name')||'').toLowerCase();
-var show=visible<8&&name.indexOf(channel.query)!==-1;
-options[index].hidden=!show;
-options[index].setAttribute('aria-selected',show&&visible===0?'true':'false');
-if(show){options[index].id='channel-option-'+visible;visible++}else{options[index].removeAttribute('id')}
-}
-channelSuggestions.hidden=visible===0;
-text.setAttribute('aria-expanded',visible?'true':'false');
-if(visible)text.setAttribute('aria-activedescendant','channel-option-0');else text.removeAttribute('aria-activedescendant');
-return visible>0;
-}
-function chooseChannel(option){
-if(!text||!option)return;
-var channel=currentChannel();
-var start=channel?channel.start:channelStart;
-if(start<0)start=text.selectionStart;
-replaceComposerRange(start,text.selectionStart,'<#'+option.getAttribute('data-channel-id')+'> ',undefined,undefined);
-hideChannels();
-}
-function currentEmoji(){
-if(!text)return null;
-var cursor=text.selectionStart;
-var before=text.value.slice(0,cursor);
-var match=/(^|\s):([a-zA-Z0-9_+\-]*)$/.exec(before);
-if(!match)return null;
-return{start:cursor-match[2].length-1,end:cursor,query:match[2].toLowerCase()};
-}
+function showError(message){var box=actionBox;if(!box){window.alert(message);return}box.textContent=message;box.hidden=false;box.scrollIntoView({block:'nearest'});box.focus()}
+function clearError(){if(!actionBox)return;actionBox.textContent='';actionBox.hidden=true}
+function failure(error){var message=error&&error.message?String(error.message).trim():'';if(message.charAt(0)==='<')message='';if(message.length>200)message=message.slice(0,200);if(message)return message;return 'The request could not be completed. Nothing was changed.'}
 function emojiOptions(region){return region?Array.prototype.slice.call(region.querySelectorAll('[data-emoji-name]')).filter(function(option){return !option.hidden}):[]}
-function hideEmojiSuggestions(){
-emojiStart=-1;
-if(emojiSuggestions){emojiSuggestions.hidden=true;emojiSuggestions.textContent=''}
-if(text){text.setAttribute('aria-expanded','false');text.removeAttribute('aria-activedescendant')}
-}
 function emojiOption(option,index){
 var button=document.createElement('button');
 button.type='button';
@@ -3838,38 +3523,13 @@ if(statusNode)statusNode.textContent='Emoji could not be loaded. Try again.';
 return[];
 });
 }
-function updateEmojiSuggestions(){
-if(!emojiSuggestions||!text){hideEmojiSuggestions();return false}
-var emoji=currentEmoji();
-if(!emoji){hideEmojiSuggestions();return false}
-emojiStart=emoji.start;
-emojiSuggestions.hidden=false;
-if(emojiTimer)window.clearTimeout(emojiTimer);
-emojiTimer=window.setTimeout(function(){
-loadEmojiOptions(emoji.query,emojiSuggestions,null).then(function(values){
-if(!currentEmoji()){hideEmojiSuggestions();return}
-emojiSuggestions.hidden=values.length===0;
-text.setAttribute('aria-expanded',values.length?'true':'false');
-if(values.length){var first=emojiOptions(emojiSuggestions)[0];if(first){first.id='emoji-option-0';text.setAttribute('aria-activedescendant','emoji-option-0')}}else text.removeAttribute('aria-activedescendant');
-});
-},100);
-return true;
-}
-function chooseEmoji(option,inline){
+function chooseEmoji(option){
 if(!option)return;
 var name=option.getAttribute('data-emoji-name')||'';
 if(!name)return;
 try{var recent=JSON.parse(localStorage.getItem('sameoldchat-recent-emoji')||'[]');if(!Array.isArray(recent))recent=[];recent=recent.filter(function(value){return value!==name});recent.unshift(name);localStorage.setItem('sameoldchat-recent-emoji',JSON.stringify(recent.slice(0,24)))}catch(error){}
 var tone=option.hasAttribute('data-skin-tones')&&emojiPickerTone?emojiPickerTone.value:'';
 var reactionName=name+(tone?'::skin-tone-'+tone:'');
-if(inline&&text){
-var emoji=currentEmoji();
-var start=emoji?emoji.start:emojiStart;
-if(start<0)start=text.selectionStart;
-replaceComposerRange(start,text.selectionStart,':'+reactionName+': ',undefined,undefined);
-hideEmojiSuggestions();
-return;
-}
 if(emojiPickerTarget==='reaction'&&emojiReactionFormID){
 var reactionForm=document.getElementById(emojiReactionFormID);
 if(!reactionForm){if(emojiPicker&&emojiPicker.open)emojiPicker.close();announce('That message changed while the picker was open. Open its reaction picker again.');return}
@@ -3879,10 +3539,9 @@ if(emojiPicker&&emojiPicker.open)emojiPicker.close();
 if(typeof reactionForm.requestSubmit==='function')reactionForm.requestSubmit();else reactionForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
 return;
 }
-if(text){
-replaceComposerRange(text.selectionStart,text.selectionEnd,':'+reactionName+':',undefined,undefined);
+var glyph=option.querySelector('.emoji-glyph');var image=option.querySelector('img');
+try{document.dispatchEvent(new CustomEvent('sameoldchat:composer-emoji',{detail:{name:reactionName,glyph:glyph?glyph.textContent:'',image:image?image.getAttribute('src'):''}}))}catch(error){}
 if(emojiPicker&&emojiPicker.open)emojiPicker.close();
-}
 }
 function openEmojiPicker(control){
 if(!emojiPicker||typeof emojiPicker.showModal!=='function')return false;
@@ -3894,47 +3553,6 @@ if(!emojiPicker.open)emojiPicker.showModal();
 if(emojiPickerQuery){emojiPickerQuery.value='';emojiPickerQuery.focus()}
 loadEmojiOptions('',emojiPickerResults,emojiPickerStatus);
 return true;
-}
-function currentSlash(){
-if(!text||text.selectionStart!==text.selectionEnd)return null;
-var value=text.value.slice(0,text.selectionStart);
-if(!/^\/[^\s]*$/.test(value)||text.selectionStart!==text.value.length)return null;
-return{query:value.toLowerCase()};
-}
-function slashOptions(){return slashSuggestions?Array.prototype.slice.call(slashSuggestions.querySelectorAll('[data-slash-command]')).filter(function(option){return !option.hidden}):[]}
-function hideSlashes(){
-if(slashSuggestions)slashSuggestions.hidden=true;
-if(text){text.setAttribute('aria-expanded','false');text.removeAttribute('aria-activedescendant')}
-}
-function updateSlashes(){
-if(!slashSuggestions||!text){hideSlashes();return false}
-var slash=currentSlash();
-if(!slash){hideSlashes();return false}
-hideMentions();
-var visible=0;
-var options=slashSuggestions.querySelectorAll('[data-slash-command]');
-for(var index=0;index<options.length;index++){
-var search=(options[index].getAttribute('data-slash-search')||'').toLowerCase();
-var show=visible<10&&search.indexOf(slash.query)!==-1;
-options[index].hidden=!show;
-options[index].setAttribute('aria-selected',show&&visible===0?'true':'false');
-if(show){options[index].id='slash-option-'+visible;visible++}else{options[index].removeAttribute('id')}
-}
-slashSuggestions.hidden=visible===0;
-text.setAttribute('aria-expanded',visible?'true':'false');
-if(visible)text.setAttribute('aria-activedescendant','slash-option-0');else text.removeAttribute('aria-activedescendant');
-return visible>0;
-}
-function updateAutocomplete(){
-if(updateSlashes()){hideMentions();hideChannels();hideEmojiSuggestions();return}
-if(updateMentions()){hideChannels();hideEmojiSuggestions();return}
-if(updateChannels()){hideEmojiSuggestions();return}
-updateEmojiSuggestions();
-}
-function chooseSlash(option){
-if(!text||!option)return;
-replaceComposerRange(0,text.value.length,(option.getAttribute('data-slash-command')||'')+' ',undefined,undefined);
-hideSlashes();
 }
 function openSwitcher(){
 if(!switcher||typeof switcher.showModal!=='function')return false;
@@ -4075,36 +3693,10 @@ navigator.clipboard.writeText(absolute).then(function(){announce('Link copied.')
 }
 return;
 }
-var control=event.target.closest?event.target.closest('[data-wrap],[data-insert],[data-mention-user],[data-mention-group],[data-channel-id],[data-slash-command],[data-emoji-name],[data-open-emoji-picker]'):null;
+var control=event.target.closest?event.target.closest('[data-emoji-name],[data-open-emoji-picker]'):null;
 if(control&&control.hasAttribute('data-open-emoji-picker')){if(openEmojiPicker(control))event.preventDefault();return}
-if(control&&control.hasAttribute('data-emoji-name')){chooseEmoji(control,!!(emojiSuggestions&&emojiSuggestions.contains(control)));return}
-if(!control||!composer||!composer.contains(control)||!text)return;
-if(control.hasAttribute('data-mention-user')||control.hasAttribute('data-mention-group')){chooseMention(control);return}
-if(control.hasAttribute('data-channel-id')){chooseChannel(control);return}
-if(control.hasAttribute('data-slash-command')){chooseSlash(control);return}
-var start=text.selectionStart;
-var end=text.selectionEnd;
-var wrapper=control.getAttribute('data-wrap');
-if(wrapper!==null){
-wrapComposerSelection(wrapper);
-return;
-}
-var inserted=control.getAttribute('data-insert');
-if(inserted===null)return;
-var offset=parseInt(control.getAttribute('data-select-offset'),10);
-var length=parseInt(control.getAttribute('data-select-length'),10);
-replaceComposerRange(start,end,inserted,isNaN(offset)?undefined:offset,isNaN(offset)||isNaN(length)?undefined:offset+length);
-var details=control.closest('details');
-if(details)details.open=false;
+if(control&&control.hasAttribute('data-emoji-name')&&emojiPickerResults&&emojiPickerResults.contains(control)){chooseEmoji(control);return}
 });
-if(text&&composer){
-if(!text.value&&draftKey){try{var saved=localStorage.getItem(draftKey);if(saved)text.value=saved}catch(error){}}
-persistDraft();
-text.addEventListener('input',function(){persistDraft();updateAutocomplete()});
-text.addEventListener('click',updateAutocomplete);
-window.addEventListener('pagehide',function(){saveDraftRemote(true)});
-window.addEventListener('beforeunload',function(event){if(stagingFiles){event.preventDefault();event.returnValue=''}});
-}
 if(switcherQuery)switcherQuery.addEventListener('input',filterSwitcher);
 if(switcherClose)switcherClose.addEventListener('click',function(){switcher.close()});
 if(emojiPickerQuery)emojiPickerQuery.addEventListener('input',function(){
@@ -4126,7 +3718,7 @@ options[selected].scrollIntoView({block:'nearest'});
 options[selected].focus();
 return;
 }
-if(event.key==='Enter'){event.preventDefault();chooseEmoji(options[selected<0?0:selected],false)}
+if(event.key==='Enter'){event.preventDefault();chooseEmoji(options[selected<0?0:selected])}
 });
 if(emojiPickerResults)emojiPickerResults.addEventListener('keydown',function(event){
 var options=emojiOptions(emojiPickerResults);
@@ -4145,162 +3737,6 @@ if(emojiPicker)emojiPicker.addEventListener('close',function(){
 if(emojiPickerTrigger&&document.contains(emojiPickerTrigger))emojiPickerTrigger.focus();
 emojiPickerTarget='composer';emojiReactionFormID='';emojiPickerTrigger=null;
 });
-function filterShortcuts(){
-if(!shortcutBrowserResults)return;
-var query=(shortcutBrowserQuery.value||'').trim().toLowerCase();var shown=0;
-Array.prototype.forEach.call(shortcutBrowserResults.children,function(item){var search=(item.getAttribute('data-shortcut-search')||'').toLowerCase();var visible=!query||search.indexOf(query)!==-1;item.hidden=!visible;if(visible)shown++});
-if(shortcutBrowserEmpty)shortcutBrowserEmpty.hidden=shown!==0;
-}
-function closeShortcutBrowser(){if(shortcutBrowser&&shortcutBrowser.open)shortcutBrowser.close()}
-if(shortcutBrowserOpen)shortcutBrowserOpen.addEventListener('click',function(){shortcutBrowser.showModal();shortcutBrowserQuery.value='';filterShortcuts();shortcutBrowserQuery.focus()});
-if(shortcutBrowserQuery)shortcutBrowserQuery.addEventListener('input',filterShortcuts);
-if(shortcutBrowserClose)shortcutBrowserClose.addEventListener('click',closeShortcutBrowser);
-if(shortcutBrowserResults)shortcutBrowserResults.addEventListener('click',function(event){var choice=event.target.closest('[data-browser-command]');if(!choice)return;var command=choice.getAttribute('data-browser-command');var start=text.selectionStart;var end=text.selectionEnd;replaceComposerRange(start,end,command+' ',undefined,undefined);closeShortcutBrowser()});
-if(shortcutBrowser)shortcutBrowser.addEventListener('click',function(event){if(event.target===shortcutBrowser)closeShortcutBrowser()});
-if(shortcutBrowser)shortcutBrowser.addEventListener('close',function(){if(shortcutBrowserOpen)shortcutBrowserOpen.focus()});
-function formatFileSize(value){var size=value;var unit='B';if(size>=1048576){size=size/1048576;unit='MiB'}else if(size>=1024){size=size/1024;unit='KiB'}return(unit==='B'?size:String(Math.round(size*10)/10))+' '+unit}
-function syncDraftAttachments(){
-var encoded=JSON.stringify(draftAttachments);
-if(draftAttachmentInput)draftAttachmentInput.value=encoded;
-if(uploadDraftAttachments)uploadDraftAttachments.value=encoded;
-}
-function updateUploadPreview(){
-if(!uploadFile||!uploadPreview)return;
-var files=uploadFile.files?Array.prototype.slice.call(uploadFile.files):[];
-uploadPreview.textContent='';
-if(!draftAttachments.length&&!files.length){uploadPreview.textContent='';if(uploadClear)uploadClear.hidden=true;if(text)text.required=true;return}
-draftAttachments.forEach(function(file,index){
-var item=document.createElement('span');item.className='staged-file';item.appendChild(document.createTextNode((file.name||'Staged file')+' · '+formatFileSize(file.size||0)+' '));
-if(draftAttachments.length>1&&index>0){var earlier=document.createElement('button');earlier.type='button';earlier.setAttribute('data-move-draft-attachment',String(index));earlier.setAttribute('data-move-direction','-1');earlier.setAttribute('aria-label','Move '+(file.name||'staged file')+' earlier');earlier.textContent='←';item.appendChild(earlier)}
-if(draftAttachments.length>1&&index<draftAttachments.length-1){var later=document.createElement('button');later.type='button';later.setAttribute('data-move-draft-attachment',String(index));later.setAttribute('data-move-direction','1');later.setAttribute('aria-label','Move '+(file.name||'staged file')+' later');later.textContent='→';item.appendChild(later)}
-var remove=document.createElement('button');remove.type='button';remove.setAttribute('data-remove-draft-attachment',String(index));remove.setAttribute('aria-label','Remove '+(file.name||'staged file'));remove.textContent='Remove';item.appendChild(remove);uploadPreview.appendChild(item);
-});
-files.forEach(function(file){var item=document.createElement('span');item.className='staged-file';item.textContent=(file.name||'Pasted file')+' · '+formatFileSize(file.size)+(stagingFiles?' · uploading':'');uploadPreview.appendChild(item)});
-if(uploadClear)uploadClear.hidden=false;
-
-if(text)text.required=false;
-}
-function closeComposerPlus(){
-var menu=document.querySelector('.composer-plus');
-if(menu)menu.open=false;
-}
-function stageSelectedFiles(){
-if(!uploadForm||!uploadFile||!uploadFile.files||!uploadFile.files.length||stagingFiles)return Promise.resolve(false);
-if(draftAttachments.length+uploadFile.files.length>10){showError('A draft can contain up to ten staged files.',composer);return Promise.resolve(false)}
-stagingFiles=true;clearError(composer);updateUploadPreview();
-if(uploadComment)uploadComment.value=text?text.value:'';
-syncDraftAttachments();
-var body=new FormData(uploadForm);
-return fetch(uploadForm.getAttribute('action'),{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){
-if(!response.ok)return response.text().then(function(body){throw new Error(body)});
-return response.json();
-}).then(function(result){
-draftAttachments=result&&Array.isArray(result.attachments)?result.attachments:draftAttachments;
-syncDraftAttachments();uploadFile.value='';stagingFiles=false;updateUploadPreview();
-return persistDraftNow().then(function(){
-announce(draftAttachments.length===1?'One file is saved with this draft.':draftAttachments.length+' files are saved with this draft.');
-return true});
-}).catch(function(error){stagingFiles=false;updateUploadPreview();showError(failure(error,composer),composer);return false});
-}
-function stageFiles(fileList){
-if(!uploadFile||!fileList||!fileList.length)return false;
-if(!window.DataTransfer){announce('Choose pasted files with Attach files in this browser.');return false}
-var transfer=new DataTransfer();var existing=uploadFile.files?Array.prototype.slice.call(uploadFile.files):[];
-existing.concat(Array.prototype.slice.call(fileList)).slice(0,10).forEach(function(file){transfer.items.add(file)});
-uploadFile.files=transfer.files;updateUploadPreview();stageSelectedFiles();return true;
-}
-function clearClipTimers(){
-if(clipLimitTimer)window.clearTimeout(clipLimitTimer);
-if(clipElapsedTimer)window.clearInterval(clipElapsedTimer);
-clipLimitTimer=null;clipElapsedTimer=null;
-}
-function releaseClipStream(){
-if(clipStream){clipStream.getTracks().forEach(function(track){track.stop()});clipStream=null}
-if(clipPreview){clipPreview.pause();clipPreview.srcObject=null}
-}
-function clipClock(seconds){return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0')}
-function updateClipElapsed(kind){
-if(!clipStatus||!clipStartedAt)return;
-var elapsed=Math.min(300,Math.floor((Date.now()-clipStartedAt)/1000));
-clipStatus.textContent='Recording '+kind+' · '+clipClock(elapsed)+' / 5:00';
-}
-function supportedClipMime(kind){
-var choices=kind==='video'?['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/mp4']:['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'];
-for(var index=0;index<choices.length;index++)if(!MediaRecorder.isTypeSupported||MediaRecorder.isTypeSupported(choices[index]))return choices[index];
-return '';
-}
-function clipExtension(type){if(type.indexOf('mp4')!==-1)return'mp4';if(type.indexOf('ogg')!==-1)return'ogg';return'webm'}
-function closeClipDialog(){
-if(clipDialog&&clipDialog.open)clipDialog.close();
-}
-function cancelClip(){
-clipGeneration++;clipCancelled=true;clearClipTimers();
-if(clipRecorder&&clipRecorder.state!=='inactive'){clipRecorder.stop();return}
-releaseClipStream();closeClipDialog();
-}
-function startClip(kind,trigger){
-if(!clipDialog||!uploadFile)return;
-clearError(composer);
-if(!window.MediaRecorder||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){showError('This browser cannot record clips. Attach an audio or video file instead.',composer);return}
-var generation=++clipGeneration;
-clipTrigger=trigger;clipCancelled=false;clipChunks=[];clipRecorder=null;
-if(clipTitle)clipTitle.textContent=kind==='video'?'Record a video clip':'Record an audio clip';
-if(clipStatus)clipStatus.textContent=kind==='video'?'Requesting camera and microphone access…':'Requesting microphone access…';
-if(clipPreview){clipPreview.hidden=kind!=='video';clipPreview.srcObject=null}
-if(clipStop)clipStop.disabled=true;
-clipDialog.showModal();
-navigator.mediaDevices.getUserMedia(kind==='video'?{audio:true,video:true}:{audio:true}).then(function(stream){
-if(generation!==clipGeneration){stream.getTracks().forEach(function(track){track.stop()});return}
-clipStream=stream;
-if(kind==='video'&&clipPreview){clipPreview.srcObject=stream;clipPreview.play().catch(function(){})}
-var mime=supportedClipMime(kind);var options=mime?{mimeType:mime}:undefined;
-try{clipRecorder=new MediaRecorder(stream,options)}catch(error){releaseClipStream();closeClipDialog();showError('Recording could not start in this browser. Attach an audio or video file instead.',composer);return}
-clipRecorder.addEventListener('dataavailable',function(event){if(event.data&&event.data.size)clipChunks.push(event.data)});
-clipRecorder.addEventListener('error',function(){clipCancelled=true;showError('The clip recording failed. No attachment was added.',composer)});
-clipRecorder.addEventListener('stop',function(){
-clearClipTimers();releaseClipStream();
-var recorderType=clipRecorder&&clipRecorder.mimeType?clipRecorder.mimeType:mime;
-clipRecorder=null;closeClipDialog();
-if(clipCancelled||!clipChunks.length)return;
-var blob=new Blob(clipChunks,{type:recorderType});
-var stamp=new Date().toISOString().replace(/[:.]/g,'-');
-var file=new File([blob],kind+'-clip-'+stamp+'.'+clipExtension(recorderType),{type:recorderType,lastModified:Date.now()});
-if(stageFiles([file]))announce((kind==='video'?'Video':'Audio')+' clip staged. Add a message or send when ready.');
-else showError('The recorded clip could not be staged. Attach an audio or video file instead.',composer);
-});
-clipRecorder.start(1000);clipStartedAt=Date.now();
-if(clipStop)clipStop.disabled=false;
-updateClipElapsed(kind);
-clipElapsedTimer=window.setInterval(function(){updateClipElapsed(kind)},1000);
-clipLimitTimer=window.setTimeout(function(){if(clipRecorder&&clipRecorder.state!=='inactive'){announce('Five-minute clip limit reached.');clipRecorder.stop()}},300000);
-}).catch(function(error){
-if(generation!==clipGeneration)return;
-releaseClipStream();closeClipDialog();
-var denied=error&&(error.name==='NotAllowedError'||error.name==='SecurityError');
-showError(denied?'Microphone or camera permission was denied. Allow access or attach a file instead.':'The microphone or camera is unavailable. Attach an audio or video file instead.',composer);
-});
-}
-Array.prototype.forEach.call(document.querySelectorAll('[data-record-clip]'),function(button){button.addEventListener('click',function(){startClip(button.getAttribute('data-record-clip'),button)})});
-if(clipStop)clipStop.addEventListener('click',function(){if(clipRecorder&&clipRecorder.state!=='inactive')clipRecorder.stop()});
-if(clipCancel)clipCancel.addEventListener('click',cancelClip);
-if(clipDialog)clipDialog.addEventListener('cancel',function(event){event.preventDefault();cancelClip()});
-if(clipDialog)clipDialog.addEventListener('click',function(event){if(event.target===clipDialog)cancelClip()});
-if(clipDialog)clipDialog.addEventListener('close',function(){if(clipTrigger&&document.contains(clipTrigger))clipTrigger.focus();clipTrigger=null});
-if(uploadFile){uploadFile.addEventListener('change',function(){updateUploadPreview();stageSelectedFiles()});syncDraftAttachments();updateUploadPreview()}
-var composerAttach=document.getElementById('composer-attach');
-if(composerAttach&&uploadFile){composerAttach.addEventListener('click',function(){closeComposerPlus();uploadFile.click()})}
-var shortcutOpener=document.getElementById('open-shortcut-browser');
-if(shortcutOpener)shortcutOpener.addEventListener('click',closeComposerPlus);
-if(uploadForm)uploadForm.addEventListener('submit',function(event){event.preventDefault();stageSelectedFiles()});
-if(uploadClear)uploadClear.addEventListener('click',function(){uploadFile.value='';draftAttachments=[];syncDraftAttachments();updateUploadPreview();persistDraftNow().then(function(){announce('Staged files removed from the draft.')});if(text)text.focus()});
-if(uploadPreview)uploadPreview.addEventListener('click',function(event){var remove=event.target.closest('[data-remove-draft-attachment]');if(!remove)return;var index=Number(remove.getAttribute('data-remove-draft-attachment'));if(index<0||index>=draftAttachments.length)return;var name=draftAttachments[index].name||'Staged file';draftAttachments.splice(index,1);syncDraftAttachments();updateUploadPreview();persistDraftNow().then(function(){announce(name+' removed from the draft.')});if(text)text.focus()});
-if(uploadPreview)uploadPreview.addEventListener('click',function(event){var move=event.target.closest('[data-move-draft-attachment]');if(!move)return;var index=Number(move.getAttribute('data-move-draft-attachment'));var target=index+Number(move.getAttribute('data-move-direction'));if(index<0||index>=draftAttachments.length||target<0||target>=draftAttachments.length)return;var moved=draftAttachments[index];draftAttachments[index]=draftAttachments[target];draftAttachments[target]=moved;syncDraftAttachments();updateUploadPreview();persistDraftNow().then(function(){announce((moved.name||'Staged file')+' moved.')})});
-if(text&&uploadFile){
-text.addEventListener('paste',function(event){var files=event.clipboardData&&event.clipboardData.files;if(files&&files.length&&stageFiles(files))event.preventDefault()});
-composer.addEventListener('dragover',function(event){if(event.dataTransfer&&event.dataTransfer.types&&Array.prototype.indexOf.call(event.dataTransfer.types,'Files')!==-1){event.preventDefault();composer.classList.add('is-dragging')}});
-composer.addEventListener('dragleave',function(){composer.classList.remove('is-dragging')});
-composer.addEventListener('drop',function(event){composer.classList.remove('is-dragging');var files=event.dataTransfer&&event.dataTransfer.files;if(files&&files.length&&stageFiles(files))event.preventDefault()});
-}
 document.addEventListener('submit',function(event){
 var form=event.target.closest('form');
 if(!form||!form.hasAttribute('hx-post'))return;
@@ -4308,12 +3744,6 @@ var submitter=event.submitter;
 var action=submitter&&submitter.getAttribute('formaction')||form.getAttribute('hx-post');
 if(!ownPath(action))return;
 event.preventDefault();
-if(form===composer&&(stagingFiles||(uploadFile&&uploadFile.files&&uploadFile.files.length))){
-if(!stagingFiles)stageSelectedFiles();
-announce('Wait for the selected files to finish saving, then send again.');
-return;
-}
-if(form===composer){if(sending)return;sending=true;if(draftTimer){window.clearTimeout(draftTimer);draftTimer=null}}
 var activeMessage=document.activeElement&&document.activeElement.closest?document.activeElement.closest('.message'):null;
 var restoreMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):'';
 var quiet=form.getAttribute('data-quiet')==='true';
@@ -4322,17 +3752,16 @@ var unixInput=form.querySelector('[data-unix-seconds="true"]');
 if(unixInput&&unixInput.value){var unixMillis=new Date(unixInput.value).getTime();if(!isNaN(unixMillis))body.set('value',String(Math.floor(unixMillis/1000)))}
 var scheduleInput=form.querySelector('[data-schedule-at]');
 if(scheduleInput&&action.indexOf('/app/message/schedule')===0&&scheduleInput.value){var scheduleMillis=new Date(scheduleInput.value).getTime();if(!isNaN(scheduleMillis))body.set('post_at',String(Math.floor(scheduleMillis/1000)))}
-var sent=text?text.value:'';
 var button=submitter||form.querySelector('button[type=submit]');
 if(button)button.disabled=true;
 var releaseButton=function(){if(button)button.disabled=false};
-var release=function(){releaseButton();if(form===composer)sending=false};
-clearError(form);
+var release=releaseButton;
+clearError();
 fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){
 if(!response.ok)return response.text().then(function(body){throw new Error(body)});
 if(response.headers.get('X-SameOldChat-Draft-Cleanup')==='failed')announce('Your message was sent, but its old draft could not be cleared. Delete it from Drafts & sent.');
 var redirect=response.headers.get('HX-Redirect');
-if(redirect){if(form===composer&&text&&text.value===sent){text.value='';draftAttachments=[];syncDraftAttachments();persistDraft()}if(ownPath(redirect))window.location.assign(redirect);return null}
+if(redirect){if(ownPath(redirect))window.location.assign(redirect);return null}
 if(response.status===204)return '';
 return response.text();
 }).then(function(html){
@@ -4343,53 +3772,17 @@ if(html===''){return refresh(true).then(function(){
 if(restoreMessageID){var restored=Array.prototype.slice.call(document.querySelectorAll('.message')).find(function(item){return item.getAttribute('data-message-id')===restoreMessageID});focusMessage(restored)}
 announce('The conversation was updated.');
 })}
-var newest=form===composer?form.getAttribute('data-newest'):'';
-if(newest&&ownPath(newest)){
-window.location.assign(newest);
-return null;
-}
 var target=document.querySelector(form.getAttribute('hx-target'));
 if(!target)throw new Error('The page could not be updated. Reload to see the message.');
 target.insertAdjacentHTML('beforeend',html);
 appliedHTML.delete(target);
 localize(target);
-if(form===composer&&text){if(text.value===sent){text.value='';draftAttachments=[];syncDraftAttachments();persistDraft()}text.focus()}else{form.reset()}
+form.reset();
 toBottom(target);
 toBottom(document.getElementById('timeline'));
 return refresh(true);
-}).catch(function(error){showError(failure(error,form),form)}).then(release,release);
+}).catch(function(error){showError(failure(error))}).then(release,release);
 });
-if(text&&composer){text.addEventListener('keydown',function(event){
-var suggestions=slashSuggestions&&!slashSuggestions.hidden?slashSuggestions:mentionSuggestions&&!mentionSuggestions.hidden?mentionSuggestions:channelSuggestions&&!channelSuggestions.hidden?channelSuggestions:emojiSuggestions&&!emojiSuggestions.hidden?emojiSuggestions:null;
-if(suggestions){
-var options=suggestions===slashSuggestions?slashOptions():suggestions===mentionSuggestions?mentionOptions():suggestions===channelSuggestions?channelOptions():emojiOptions(emojiSuggestions);
-var selected=options.findIndex(function(option){return option.getAttribute('aria-selected')==='true'});
-if(event.key==='ArrowDown'||event.key==='ArrowUp'){
-event.preventDefault();
-if(options.length){if(selected<0)selected=0;else selected=event.key==='ArrowDown'?(selected+1)%options.length:(selected+options.length-1)%options.length;for(var optionIndex=0;optionIndex<options.length;optionIndex++){options[optionIndex].setAttribute('aria-selected',optionIndex===selected?'true':'false');options[optionIndex].removeAttribute('id')}options[selected].id='autocomplete-option-active';text.setAttribute('aria-activedescendant','autocomplete-option-active')}
-return;
-}
-if(event.key==='Escape'){event.preventDefault();if(suggestions===slashSuggestions)hideSlashes();else if(suggestions===mentionSuggestions)hideMentions();else if(suggestions===channelSuggestions)hideChannels();else hideEmojiSuggestions();return}
-if((event.key==='Enter'||event.key==='Tab')&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&options.length){event.preventDefault();if(suggestions===slashSuggestions)chooseSlash(options[selected<0?0:selected]);else if(suggestions===mentionSuggestions)chooseMention(options[selected<0?0:selected]);else if(suggestions===channelSuggestions)chooseChannel(options[selected<0?0:selected]);else chooseEmoji(options[selected<0?0:selected],true);return}
-}
-var formatKey=typeof event.key==='string'?event.key.toLowerCase():'';
-if(primaryShortcut(event)&&!event.altKey&&(formatKey==='b'||formatKey==='i'||(event.shiftKey&&formatKey==='x'))){
-event.preventDefault();
-wrapComposerSelection(formatKey==='b'?'*':formatKey==='i'?'_':'~');
-return;
-}
-if(event.key==='ArrowUp'&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&text.value===''){
-var target=composer.getAttribute('hx-target');
-var region=target&&target.charAt(0)==='#'?document.querySelector(target):document.getElementById('timeline');
-var items=messageItems(region);
-if(items.length){event.preventDefault();focusMessage(items[items.length-1]);return}
-}
-if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.metaKey||event.altKey||event.isComposing)return;
-event.preventDefault();
-if(sending)return;
-if(typeof composer.requestSubmit==='function'){composer.requestSubmit();return}
-composer.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
-})}
 var keyboardHelpDialog=document.getElementById('keyboard-help');
 var keyboardHelpQuery=document.getElementById('keyboard-help-query');
 var keyboardHelpEmpty=document.getElementById('keyboard-help-empty');
@@ -4424,7 +3817,7 @@ var keyboardHelpOpen=document.getElementById('open-keyboard-help');
 if(keyboardHelpOpen)keyboardHelpOpen.addEventListener('click',function(){openKeyboardHelp()});
 
 function sectionLandmarks(){
-return Array.prototype.slice.call(document.querySelectorAll('#workspace-sidebar,#workspace-search,#timeline,#thread-messages,#composer')).filter(function(node){return node&&node.offsetParent!==null||node===document.activeElement});
+return Array.prototype.slice.call(document.querySelectorAll('#workspace-sidebar,#workspace-search,#timeline,#thread-messages,#thread-composer,#composer')).filter(function(node){return node&&node.offsetParent!==null||node===document.activeElement});
 }
 function moveSection(backwards){
 var landmarks=sectionLandmarks();
@@ -4435,7 +3828,7 @@ for(var index=0;index<landmarks.length;index++){if(landmarks[index]===active||la
 if(current<0)current=backwards?0:landmarks.length-1;
 var next=backwards?(current+landmarks.length-1)%landmarks.length:(current+1)%landmarks.length;
 var target=landmarks[next];
-var focusable=target.matches('input,textarea,select,button,a[href]')?target:target.querySelector('input:not([type=hidden]),textarea,select,button,a[href],[tabindex="-1"]');
+var focusable=target.matches('input,textarea,select,button,a[href]')?target:target.querySelector('[contenteditable="true"]:not([hidden]),input:not([type=hidden]):not([hidden]),textarea:not([hidden]),select,button,a[href],[tabindex="-1"]');
 var destination=focusable||target;
 if(!destination.hasAttribute('tabindex')&&!destination.matches('input,textarea,select,button,a[href]'))destination.setAttribute('tabindex','-1');
 destination.focus();
@@ -4521,10 +3914,6 @@ if(laterLink&&ownPath(laterLink.getAttribute('href'))){event.preventDefault();wi
 if(primaryShortcut(event)&&!event.altKey&&event.key==='F6'){
 if(moveSection(event.shiftKey)){event.preventDefault();return}
 }
-if(primaryShortcut(event)&&!event.shiftKey&&!event.altKey&&key==='u'){
-var upload=document.querySelector('#composer input[type=file]');
-if(upload){event.preventDefault();upload.click();return}
-}
 var target=event.target;
 var editing=target&&(target.tagName==='INPUT'||target.tagName==='TEXTAREA'||target.isContentEditable);
 var focusedMessage=target&&target.closest?target.closest('.message'):null;
@@ -4573,9 +3962,9 @@ var pin=Array.prototype.slice.call(buttons).find(function(button){var label=butt
 if(pin){event.preventDefault();var form=pin.closest('form');if(form&&typeof form.requestSubmit==='function')form.requestSubmit(pin);else if(form)form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));return}
 }
 }
-if(event.key==='Escape'&&search&&document.activeElement===search&&text){
+if(event.key==='Escape'&&search&&document.activeElement===search&&window.sameoldchatComposer){
 event.preventDefault();
-text.focus();
+window.sameoldchatComposer.focus();
 return;
 }
 if(event.key==='Escape'&&(event.shiftKey||!editing)&&!document.querySelector('dialog[open]')&&!(nav&&nav.classList.contains('is-open'))){
@@ -4659,7 +4048,6 @@ if(typingRegion&&window.fetch&&typingRegion.getAttribute('data-channel')){
 var typingTiming=` + typingTimingLiteral() + `;
 var typingURL=typingRegion.getAttribute('data-typing')||'';
 var typingChannel=typingRegion.getAttribute('data-channel')||'';
-var typingCsrf=document.querySelector('#composer input[name=_csrf]');
 var typingSent=0;
 var typingClear=null;
 var typingPending=null;
@@ -4681,14 +4069,6 @@ try{frame=JSON.parse(event.data)}catch(error){return}
 if(!frame||frame.channel!==typingChannel)return;
 scheduleTyping();
 });
-if(text&&typingCsrf)text.addEventListener('input',function(){
-var now=Date.now();
-if(!text.value||now-typingSent<typingTiming.interval||!ownPath(typingURL))return;
-typingSent=now;
-var typingBody=new URLSearchParams();
-typingBody.set('_csrf',typingCsrf.value);
-fetch(typingURL,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body:typingBody.toString()}).catch(function(){});
-});
 }
 var activityCsrf=document.querySelector('#composer input[name=_csrf],form input[name=_csrf]');
 if(activityCsrf&&window.fetch){
@@ -4705,6 +4085,7 @@ beat();
 ['pointerdown','keydown','visibilitychange'].forEach(function(name){document.addEventListener(name,beat,{passive:true})});
 window.setInterval(beat,300000);
 }
+window.sameoldchatPage={refresh:refresh,localize:localize,announce:announce,focusMessage:focusMessage,messageItems:messageItems};
 var markRead=document.getElementById('mark-read');
 if(markRead)submitQuietly(markRead);
 var arrivedAt=null;
@@ -4719,7 +4100,7 @@ var clearArrival=function(){arrivedAt.classList.remove('is-arrival');['pointerdo
 toBottom(document.getElementById('timeline'));
 }
 var activeModal=document.querySelector('[aria-modal="true"]');
-if(activeModal){var modalFocus=activeModal.querySelector('input:not([type=hidden]),textarea,select,button');if(modalFocus)modalFocus.focus()}else if(arrivedAt&&arrivedAt.classList&&arrivedAt.classList.contains('message')){}else if(text)text.focus();
+if(activeModal){var modalFocus=activeModal.querySelector('input:not([type=hidden]),textarea,select,button');if(modalFocus)modalFocus.focus()}
 })();</script>`
 
 func liveEventTopicsLiteral() string {
@@ -5019,9 +4400,14 @@ func (h Handler) writeMutationError(w http.ResponseWriter, r *http.Request, stat
 // composerState carries a rejected submission back into the page so a failed
 // post keeps the text the user typed and says what went wrong.
 type composerState struct {
-	Draft          string
-	Attachments    []domain.DraftAttachment
-	ScheduleAt     string
+	Draft       string
+	Attachments []domain.DraftAttachment
+	ScheduleAt  string
+	// Thread marks a submission from the thread pane's reply composer, and
+	// Broadcast its "Also send to" choice, so the page shows the text again
+	// in the composer it came from.
+	Thread         bool
+	Broadcast      bool
 	Message        string
 	Notice         string
 	Status         int
@@ -5698,94 +5084,12 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	canJoin := !isMember && !conversation.Archived && conversation.Kind.OrPublic() == domain.ConversationTypePublic && principal.HasScope(auth.ScopeChannelsManage)
 	canPost := isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite)
-	var composerMembers []memberView
-	var composerGroups []userGroupView
-	var composerChannels []conversationView
+	canUpload := canPost && principal.HasScope(auth.ScopeFilesWrite)
+	var composerDialogs composerDialogsView
 	if canPost {
-		memberPage, memberErr := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: memberWindow})
-		if memberErr != nil {
-			notices = append(notices, "Mention suggestions are temporarily unavailable.")
-		} else {
-			composerMembers = make([]memberView, 0, len(memberPage.Users))
-			for _, user := range memberPage.Users {
-				if user.Deleted {
-					continue
-				}
-				name := displayName(user)
-				composerMembers = append(composerMembers, memberView{ID: string(user.ID), Name: name, AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
-			}
-			sort.Slice(composerMembers, func(left, right int) bool {
-				return strings.ToLower(composerMembers[left].Name) < strings.ToLower(composerMembers[right].Name)
-			})
-			if memberPage.HasMore {
-				notices = append(notices, "Mention suggestions show the first 100 conversation members.")
-			}
-		}
-		groupCursor := domain.Cursor("")
-		seenGroupCursors := make(map[domain.Cursor]struct{})
-		for {
-			if _, repeated := seenGroupCursors[groupCursor]; repeated {
-				notices = append(notices, "User group suggestions stopped at an invalid page boundary.")
-				composerGroups = nil
-				break
-			}
-			seenGroupCursors[groupCursor] = struct{}{}
-			groupPage, groupErr := h.Messages.ListUserGroups(r.Context(), principal.WorkspaceID, principal.UserID, false, domain.PageRequest{Limit: memberWindow, Cursor: groupCursor})
-			if groupErr != nil {
-				notices = append(notices, "User group suggestions are temporarily unavailable.")
-				composerGroups = nil
-				break
-			}
-			for _, group := range groupPage.Groups {
-				if !group.Enabled || !group.DeletedAt.IsZero() {
-					continue
-				}
-				composerGroups = append(composerGroups, userGroupView{
-					ID: string(group.ID), Name: group.Name, Handle: group.Handle,
-					Description: group.Description, MemberCount: len(group.Users),
-				})
-			}
-			if !groupPage.HasMore || groupPage.NextCursor == "" {
-				break
-			}
-			groupCursor = groupPage.NextCursor
-		}
-		sort.Slice(composerGroups, func(left, right int) bool {
-			return strings.ToLower(composerGroups[left].Handle) < strings.ToLower(composerGroups[right].Handle)
-		})
-		composerChannels, err = h.visibleChannelOptions(r.Context(), principal)
-		if err != nil {
-			notices = append(notices, "Channel suggestions are temporarily unavailable.")
-			composerChannels = nil
-		}
-	}
-	var globalShortcuts []domain.AppShortcut
-	var slashCommands []domain.AppShortcut
-	if canPost {
-		slashCommands = builtInSlashCommands()
-	}
-	if isMember && principal.HasScope(auth.ScopeChatWrite) && threadTimestamp == "" {
-		globalShortcuts, err = h.Messages.ListAppShortcuts(r.Context(), principal.WorkspaceID, principal.UserID, "global")
-		if err != nil {
-			notices = append(notices, "App shortcuts are temporarily unavailable.")
-		}
-		appCommands, commandErr := h.Messages.ListAppShortcuts(r.Context(), principal.WorkspaceID, principal.UserID, "slash")
-		if commandErr != nil {
-			notices = append(notices, "App slash commands are temporarily unavailable.")
-		} else {
-			builtIns := make(map[string]struct{}, len(slashCommands))
-			for _, command := range slashCommands {
-				builtIns[command.Command] = struct{}{}
-			}
-			for _, command := range appCommands {
-				if _, reserved := builtIns[command.Command]; !reserved {
-					slashCommands = append(slashCommands, command)
-				}
-			}
-			sort.Slice(slashCommands, func(left, right int) bool {
-				return slashCommands[left].Command < slashCommands[right].Command
-			})
-		}
+		directory, directoryNotices := h.composerDirectoryFor(r.Context(), principal, conversation)
+		notices = append(notices, directoryNotices...)
+		composerDialogs = composerDialogsView{Directory: directory, CSRFToken: csrfToken, Channel: string(channel), CanUpload: canUpload}
 	}
 	workspaceApps, appsErr := h.Messages.ListWorkspaceApps(r.Context(), principal.WorkspaceID, principal.UserID)
 	if appsErr != nil {
@@ -5838,17 +5142,6 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			notices = append(notices, "Conversation details are temporarily unavailable.")
 		}
 	}
-	if state.Draft == "" && len(state.Attachments) == 0 && isMember {
-		draft, draftErr := h.Messages.Draft(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp))
-		switch {
-		case draftErr == nil:
-			state.Draft = draft.Text
-			state.Attachments = draft.Attachments
-		case errors.Is(draftErr, store.ErrNotFound):
-		default:
-			notices = append(notices, "Your saved draft is temporarily unavailable.")
-		}
-	}
 	if isMember {
 		draftPage, draftErr := h.Messages.Drafts(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 1000, Descending: true})
 		if draftErr != nil {
@@ -5884,8 +5177,13 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		}
 	}
 
-	draftAttachments := newDraftAttachmentViews(state.Attachments)
-	draftJSON, _ := json.Marshal(draftAttachments)
+	mainComposer, threadComposer, composerNotices := h.composerViews(r.Context(), composerPageRequest{
+		Principal: principal, Conversation: conversation, ThreadTimestamp: threadTimestamp,
+		CSRFToken: csrfToken, ChannelName: channelName, ChannelPrefix: channelPrefix,
+		MemberCount: memberCount, CanUpload: canUpload, Member: isMember, AtLatest: history.AtLatest,
+		State: state,
+	})
+	notices = append(notices, composerNotices...)
 
 	data := pageData{
 		CanonicalURL:         canonicalPageURL(r, appURL(string(channel), threadTimestamp, "", "", "")),
@@ -5915,30 +5213,18 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		IsMember:             isMember,
 		CanPost:              canPost,
 		CanSchedule:          principal.HasScope(auth.ScopeChatWrite),
-		CanUpload:            isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite) && principal.HasScope(auth.ScopeFilesWrite),
+		CanUpload:            canUpload,
 		CanJoin:              canJoin,
 		CanCreate:            principal.HasScope(auth.ScopeChannelsManage),
 		Username:             username,
 		UserInitial:          initial(username),
 		AtLatest:             history.AtLatest,
 		Notice:               strings.Join(notices, " "),
-		Error:                state.Message,
-		Draft:                state.Draft,
-		DraftAttachments:     draftAttachments,
-		DraftJSON:            string(draftJSON),
-		ScheduleAt:           state.ScheduleAt,
-		ComposeURL:           mutationURL("/app/message", string(channel), "", threadTimestamp, ""),
-		DraftURL:             mutationURL("/app/draft", string(channel), "", threadTimestamp, ""),
-		ScheduleURL:          mutationURL("/app/message/schedule", string(channel), "", threadTimestamp, ""),
-		UploadURL:            mutationURL("/app/file", string(channel), "", threadTimestamp, ""),
-		StageUploadURL:       mutationURL("/app/file/stage", string(channel), "", threadTimestamp, ""),
 		TimelineURL:          fragmentURL(string(channel), "", string(before)),
 		ThreadURL:            fragmentURL(string(channel), threadTimestamp, ""),
-		GlobalShortcuts:      globalShortcuts,
-		SlashCommands:        slashCommands,
-		ComposerMembers:      composerMembers,
-		ComposerGroups:       composerGroups,
-		ComposerChannels:     composerChannels,
+		Composer:             mainComposer,
+		ThreadComposer:       threadComposer,
+		ComposerDialogs:      composerDialogs,
 		Apps:                 workspaceApps,
 		Modal:                modal,
 		Details:              details,
@@ -11142,7 +10428,19 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			err = h.Messages.DispatchSlashCommand(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(fields["thread_ts"]), command, commandText, h.responseBaseURL(r))
 		}
 	} else {
-		message, err = h.Messages.Post(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["text"], domain.MessageTimestamp(fields["thread_ts"]), "")
+		// The composer names each send with client_msg_id and a retry reuses
+		// it, so a send whose response was lost after it committed cannot post
+		// a second copy. reply_broadcast is the thread composer's "Also send
+		// to" checkbox; the service refuses it without a thread.
+		idempotencyKey := strings.TrimSpace(fields["client_msg_id"])
+		if !validClientMessageID(idempotencyKey) {
+			idempotencyKey = ""
+		}
+		thread := domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"]))
+		message, err = h.Messages.PostMessageAs(r.Context(), principal.WorkspaceID, principal.UserID, domain.MessagePostRequest{
+			Conversation: channel, Text: fields["text"], ThreadTimestamp: thread, IdempotencyKey: idempotencyKey,
+			ReplyBroadcast: thread != "" && fields["reply_broadcast"] == "true",
+		})
 	}
 	if err != nil {
 		status := http.StatusServiceUnavailable
@@ -11150,6 +10448,9 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, service.ErrInvalidMessage) {
 			status = http.StatusBadRequest
 			reason = "A message needs some text before it can be sent."
+			if over := utf8.RuneCountInString(fields["text"]) - service.MaxMessageTextRunes; over > 0 {
+				reason = fmt.Sprintf("This message is %d characters too long. Shorten it to send it.", over)
+			}
 		}
 		if errors.Is(err, service.ErrInvalidExternalUpload) {
 			status = http.StatusBadRequest
@@ -11157,11 +10458,18 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, auth.ErrMissingScope) {
 			status = http.StatusForbidden
-			reason = "Your session cannot share files, so the staged attachments were not sent."
+			reason = "Your session is not permitted to do that, so nothing was changed."
+			if len(draftAttachments) > 0 {
+				reason = "Your session cannot share files, so the staged attachments were not sent."
+			}
 		}
 		if errors.Is(err, service.ErrInvalidTimestamp) {
 			status = http.StatusBadRequest
 			reason = "That thread is not a message in this conversation."
+		}
+		if errors.Is(err, service.ErrThreadNotFound) {
+			status = http.StatusNotFound
+			reason = "That thread is no longer available, so the reply was not sent."
 		}
 		if errors.Is(err, service.ErrInvalidSearch) {
 			status = http.StatusBadRequest
@@ -11207,6 +10515,10 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusBadGateway
 			reason = "The app did not accept that command. Your command was not posted as a message."
 		}
+		var refusal slashCommandRefusal
+		if errors.As(err, &refusal) {
+			status, reason = refusal.Status, refusal.Reason
+		}
 		w.Header().Set("Vary", "HX-Request")
 		if r.Header.Get("HX-Request") == "true" {
 			// The composer renders this text next to the field and keeps the
@@ -11224,7 +10536,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			h.writePageError(w, status, "That message was not sent", reason)
 			return
 		}
-		h.renderApp(w, r, reader, composerState{Draft: fields["text"], Attachments: draftAttachments, Message: reason, Status: status})
+		h.renderApp(w, r, reader, composerState{Draft: fields["text"], Attachments: draftAttachments, Message: reason, Status: status, Thread: strings.TrimSpace(fields["thread_ts"]) != "", Broadcast: fields["reply_broadcast"] == "true"})
 		return
 	}
 	if cleanupErr := h.Messages.DeleteDraft(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"]))); cleanupErr != nil {
@@ -11233,8 +10545,14 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		// cleanup result without changing the mutation outcome.
 		w.Header().Set("X-SameOldChat-Draft-Cleanup", "failed")
 	}
+	// The page to return to is the one the member sent from: a reply returns
+	// to its thread, and the conversation composer keeps an open thread open.
+	returnThread := strings.TrimSpace(fields["thread_ts"])
+	if returnThread == "" {
+		returnThread = strings.TrimSpace(fields["view_thread"])
+	}
 	if len(draftAttachments) > 0 {
-		h.redirectMutation(w, r, h.viewURL(r, strings.TrimSpace(fields["thread_ts"])))
+		h.redirectMutation(w, r, h.viewURL(r, returnThread))
 		return
 	}
 	if isSlashCommand && message.ID == "" {
@@ -11267,7 +10585,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		h.writeFragment(w, list)
 		return
 	}
-	http.Redirect(w, r, h.viewURL(r, strings.TrimSpace(fields["thread_ts"])), http.StatusSeeOther)
+	http.Redirect(w, r, h.viewURL(r, returnThread), http.StatusSeeOther)
 }
 
 func (h Handler) saveDraft(w http.ResponseWriter, r *http.Request) {
@@ -11349,12 +10667,20 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	attachments, attachmentErr := draftAttachmentsFromJSON(fields["draft_attachments"])
 	if attachmentErr != nil {
-		h.writeScheduleMessageError(w, r, principal, fields["text"], nil, fields["schedule_at"], http.StatusBadRequest, "The staged files are no longer valid. Reload the conversation and stage them again.")
+		h.writeScheduleMessageError(w, r, principal, fields, nil, fields["schedule_at"], http.StatusBadRequest, "The staged files are no longer valid. Reload the conversation and stage them again.")
 		return
 	}
 	postAtUnix, parseErr := strconv.ParseInt(strings.TrimSpace(fields["post_at"]), 10, 64)
+	if strings.TrimSpace(fields["post_at"]) == "" {
+		// Without script the composer submits a suggested time or a custom
+		// local date and time with the browser zone field, not a computed
+		// instant, and the server resolves it.
+		if when, ok := scheduleTimeFromFields(fields, time.Now()); ok {
+			postAtUnix, parseErr = when.Unix(), nil
+		}
+	}
 	if parseErr != nil || postAtUnix <= 0 {
-		h.writeScheduleMessageError(w, r, principal, fields["text"], attachments, fields["schedule_at"], http.StatusBadRequest, "Choose a delivery date and time in your browser before scheduling the message.")
+		h.writeScheduleMessageError(w, r, principal, fields, attachments, fields["schedule_at"], http.StatusBadRequest, "Choose a delivery date and time in your browser before scheduling the message.")
 		return
 	}
 	channel := h.requestChannel(r)
@@ -11389,7 +10715,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, store.ErrNotFound):
 			status, reason = http.StatusNotFound, "That conversation or thread is no longer available."
 		}
-		h.writeScheduleMessageError(w, r, principal, fields["text"], attachments, fields["schedule_at"], status, reason)
+		h.writeScheduleMessageError(w, r, principal, fields, attachments, fields["schedule_at"], status, reason)
 		return
 	}
 	query := url.Values{"channel": {string(channel)}, "tab": {"scheduled"}, "scheduled": {"1"}}
@@ -11399,7 +10725,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, "/app/drafts?"+query.Encode())
 }
 
-func (h Handler) writeScheduleMessageError(w http.ResponseWriter, r *http.Request, principal auth.Principal, draft string, attachments []domain.DraftAttachment, scheduleAt string, status int, reason string) {
+func (h Handler) writeScheduleMessageError(w http.ResponseWriter, r *http.Request, principal auth.Principal, fields map[string]string, attachments []domain.DraftAttachment, scheduleAt string, status int, reason string) {
 	w.Header().Set("Vary", "HX-Request")
 	if r.Header.Get("HX-Request") == "true" {
 		secureHeaders(w, workspaceContentSecurityPolicy)
@@ -11411,7 +10737,7 @@ func (h Handler) writeScheduleMessageError(w http.ResponseWriter, r *http.Reques
 		h.writePageError(w, status, "That message was not scheduled", reason)
 		return
 	}
-	h.renderApp(w, r, reader, composerState{Draft: draft, Attachments: attachments, ScheduleAt: scheduleAt, Message: reason, Status: status})
+	h.renderApp(w, r, reader, composerState{Draft: fields["text"], Attachments: attachments, ScheduleAt: scheduleAt, Message: reason, Status: status, Thread: strings.TrimSpace(fields["thread_ts"]) != "", Broadcast: fields["reply_broadcast"] == "true"})
 }
 
 func (h Handler) updateScheduledMessage(w http.ResponseWriter, r *http.Request) {
@@ -11845,62 +11171,6 @@ func slashCommandInput(text string) (string, string, bool) {
 		return text, "", true
 	}
 	return text[:end], strings.TrimSpace(text[end:]), true
-}
-
-func builtInSlashCommands() []domain.AppShortcut {
-	return []domain.AppShortcut{
-		{AppName: "Slack", Name: "/mentions", Command: "/mentions", Description: "Open your mentions", Type: "slash"},
-		{AppName: "Slack", Name: "/people", Command: "/people", Description: "Open the people directory", Type: "slash"},
-		{AppName: "Slack", Name: "/remind", Command: "/remind", Description: "Set a channel reminder", UsageHint: "[#channel] [what] [when] or list", Type: "slash"},
-		{AppName: "Slack", Name: "/search", Command: "/search", Description: "Search messages", UsageHint: "[search terms]", Type: "slash"},
-		{AppName: "Slack", Name: "/shrug", Command: "/shrug", Description: "Add ¯\\_(ツ)_/¯ to your message", UsageHint: "[message]", Type: "slash"},
-	}
-}
-
-// dispatchBuiltInSlashCommand keeps Slack-owned commands ahead of installed
-// app commands. Only commands with a real first-party journey are listed and
-// handled here; the rest remain explicit gaps instead of decorative menu
-// entries that post a success-looking no-op.
-func (h Handler) dispatchBuiltInSlashCommand(ctx context.Context, principal auth.Principal, channel domain.ConversationID, thread domain.MessageTimestamp, command, text, timeZone string) (domain.Message, string, bool, error) {
-	switch strings.ToLower(command) {
-	case "/shrug":
-		body := strings.TrimSpace(text)
-		if body != "" {
-			body += " "
-		}
-		body += `¯\\\_(ツ)\_/¯`
-		message, err := h.Messages.Post(ctx, principal.WorkspaceID, principal.UserID, channel, body, thread, "")
-		return message, "", true, err
-	case "/search":
-		if strings.TrimSpace(text) == "" {
-			return domain.Message{}, "", true, service.ErrInvalidSearch
-		}
-		values := url.Values{"q": {strings.TrimSpace(text)}, "channel": {string(channel)}}
-		return domain.Message{}, "/app/search?" + values.Encode(), true, nil
-	case "/people":
-		return domain.Message{}, "/app/members", true, nil
-	case "/mentions":
-		return domain.Message{}, "/app/activity?channel=" + url.QueryEscape(string(channel)), true, nil
-	case "/remind":
-		if thread != "" {
-			return domain.Message{}, "", true, service.ErrSlashCommandInThread
-		}
-		if strings.EqualFold(strings.TrimSpace(text), "list") {
-			values := url.Values{"channel": {string(channel)}, "filter": {"channel-reminders"}}
-			return domain.Message{}, "/app/later?" + values.Encode(), true, nil
-		}
-		request, parseErr := h.channelReminderRequest(ctx, principal, channel, text, timeZone, time.Now().UTC())
-		if parseErr != nil {
-			return domain.Message{}, "", true, parseErr
-		}
-		if _, createErr := h.Messages.CreateLaterReminder(ctx, principal.WorkspaceID, principal.UserID, request); createErr != nil {
-			return domain.Message{}, "", true, createErr
-		}
-		values := url.Values{"channel": {string(channel)}, "filter": {"channel-reminders"}, "changed": {"reminder"}}
-		return domain.Message{}, "/app/later?" + values.Encode(), true, nil
-	default:
-		return domain.Message{}, "", false, nil
-	}
 }
 
 func (h Handler) channelReminderRequest(ctx context.Context, principal auth.Principal, currentChannel domain.ConversationID, input, timeZone string, now time.Time) (domain.LaterReminderRequest, error) {
@@ -12487,13 +11757,8 @@ func personalReminderRequest(fields map[string]string, now time.Time) (domain.La
 	preset := strings.TrimSpace(fields["preset"])
 	var due time.Time
 	switch preset {
-	case "20m":
-		due = now.Add(20 * time.Minute)
-	case "1h":
-		due = now.Add(time.Hour)
-	case "tomorrow":
-		local := now.In(location).AddDate(0, 0, 1)
-		due = time.Date(local.Year(), local.Month(), local.Day(), 9, 0, 0, 0, location)
+	case "20m", "1h", "tomorrow":
+		due, _ = presetLocalTime(preset, now, location)
 	case "", "custom":
 		date := strings.TrimSpace(fields["date"])
 		clock := strings.TrimSpace(fields["time"])
@@ -13184,7 +12449,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, composerScript, huddleMediaScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, viewInputScript, appHomeLiveScript, laterLiveScript, activityMarkup, notificationsMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:
