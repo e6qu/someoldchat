@@ -1016,7 +1016,8 @@ func TestThreadViewRendersTheThreadAndItsComposer(t *testing.T) {
 	}
 	body := response.Body.String()
 	requireContains(t, "thread view", body,
-		`<h2 id="thread-heading">Thread</h2>`,
+		`<h2 id="thread-heading" tabindex="-1">Thread</h2>`,
+		`aria-label="Close thread"`,
 		`id="thread-messages"`,
 		`name="thread_ts" value="`+timestamp+`"`,
 		`aria-label="Send now"`,
@@ -1361,8 +1362,9 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 		`<p class="channel-meta" title="Everything else">Everything else</p>`,
 	)
 	requireMissing(t, "workspace shell", body, "# Cdev", "Message #Cdev", ">U1<")
-	// The machine timestamp stays in datetime= while the reader sees a short time.
-	requireContains(t, "message time", body, `datetime="2023-11-14T22:13:20Z">Nov 14, 22:13 UTC<`)
+	// The machine timestamp stays in datetime= while the reader sees the clock
+	// time, with the full date and time as its tooltip, as in Slack.
+	requireContains(t, "message time", body, `datetime="2023-11-14T22:13:20Z" title="Tuesday, November 14th at 10:13:20 PM" data-format="time">10:13 PM<`)
 }
 
 // TestTimelineProjectsAuthorStatusBesideTheName covers status projection outside
@@ -1997,7 +1999,7 @@ func TestActivityShowsDurableMentionWithFiltersAndTriage(t *testing.T) {
 		"Bob Builder",
 		"Please review this",
 		"Added you to #launch-room.",
-		`class="slack-mention">@Ada Developer</span>`,
+		`">@Ada Developer</a>`,
 		`data-read-button`,
 		`data-clear-button`,
 	)
@@ -2305,7 +2307,8 @@ func TestNotificationPreferencesDNDConversationExceptionAndThreadFollowJourney(t
 	root := seedMessage(t, s, "Mfollow-root", "follow this thread", time.Now().UTC().Add(-time.Minute))
 	rootTimestamp := domain.NewMessageTimestamp(root.CreatedAt)
 	threadPage := get(t, mux, "/app?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp)))
-	requireContains(t, "thread author follows by default", threadPage.Body.String(), ">Following</button>", `aria-pressed="true"`)
+	// Slack keeps the follow toggle in the root message's menu.
+	requireContains(t, "thread author follows by default", threadPage.Body.String(), ">Turn off notifications for replies<", `name="followed" value="false"`)
 	unfollowed := postForm(t, mux, "/app/thread/follow?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp)), url.Values{
 		"_csrf": {auth.CSRFToken("session")}, "followed": {"false"},
 	}.Encode(), false)
@@ -2316,7 +2319,7 @@ func TestNotificationPreferencesDNDConversationExceptionAndThreadFollowJourney(t
 		t.Fatalf("followed after unfollow=%v err=%v", stored, err)
 	}
 	threadPage = get(t, mux, "/app?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp)))
-	requireContains(t, "thread unfollow persisted", threadPage.Body.String(), ">Follow thread</button>", `aria-pressed="false"`)
+	requireContains(t, "thread unfollow persisted", threadPage.Body.String(), ">Get notified about new replies<", `name="followed" value="true"`)
 	followed := postForm(t, mux, "/app/thread/follow?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp)), url.Values{
 		"_csrf": {auth.CSRFToken("session")}, "followed": {"true"},
 	}.Encode(), false)
@@ -2327,7 +2330,7 @@ func TestNotificationPreferencesDNDConversationExceptionAndThreadFollowJourney(t
 		t.Fatalf("followed=%v err=%v", stored, err)
 	}
 	threadPage = get(t, mux, "/app?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp)))
-	requireContains(t, "thread follow persisted", threadPage.Body.String(), ">Following</button>", `aria-pressed="true"`)
+	requireContains(t, "thread follow persisted", threadPage.Body.String(), ">Turn off notifications for replies<", `name="followed" value="false"`)
 }
 
 // TestNarrowNavigationKeepsConversationNamesReachable covers the responsive
@@ -2381,8 +2384,9 @@ func TestReactionsAndPinsAreRenderedAndReversible(t *testing.T) {
 		`aria-pressed="true"`,
 		":wave:",
 		`<span class="chip-count">1</span>`,
-		`<span class="pinned">Pinned</span>`,
-		">Unpin<",
+		`class="message-context pinned-label"`,
+		"Pinned by you",
+		">Un-pin from channel<",
 	)
 
 	removal := postForm(t, mux, "/app/reaction/remove?channel=Cdev&ts="+timestamp, "name=%3Awave%3A", true)
@@ -2413,13 +2417,13 @@ func TestComposerAndMessagesUseWorkspaceEmojiAndVisibleChannelReferences(t *test
 
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "emoji composer and rendering", body,
-		`id="emoji-picker-dialog"`,
-		`id="emoji-picker-category"`,
-		`id="emoji-picker-tone"`,
+		`id="emoji-picker"`,
+		`data-emoji-category="Recent"`,
+		`id="emoji-tone-options"`,
 		`data-kind="channel" data-id="Cdev" data-name="general"`,
 		`class="custom-emoji" src="https://cdn.example/party.png" alt=":party_parrot:"`,
 		`aria-label=":tada:"`,
-		`class="slack-mention">#general</span>`,
+		`class="slack-mention" href="/app?channel=Cdev">#general</a>`,
 	)
 	requireMissing(t, "rendered channel reference", body, `class="message-text">Ship it :party_parrot:`)
 
@@ -2441,7 +2445,7 @@ func TestComposerAndMessagesUseWorkspaceEmojiAndVisibleChannelReferences(t *test
 	}
 	reactionBody := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "custom reaction", reactionBody,
-		`aria-label="Remove your party_parrot reaction`,
+		`aria-label="You reacted with :party_parrot:. Remove your reaction"`,
 		`src="https://cdn.example/party.png" alt=":party_parrot:"`,
 	)
 
@@ -2471,7 +2475,9 @@ func TestOwnMessageCanBeEditedAndDeleted(t *testing.T) {
 	requireContains(t, "own message", body,
 		`aria-label="Edit message"`,
 		`action="/app/message/update?channel=Cdev&amp;ts=`+timestamp,
-		`aria-label="Delete message"`,
+		">Edit message<",
+		`data-delete-message="/app/message/delete?channel=Cdev&amp;ts=`+timestamp,
+		">Delete message…<",
 	)
 
 	updated := postForm(t, mux, "/app/message/update?channel=Cdev&ts="+timestamp, "text=after", true)
@@ -3441,7 +3447,7 @@ func TestReactionChipsAreNotControlsForAReaderWhoCannotReact(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
-	requireContains(t, "read-only chip", body, `<span class="chip" role="img" aria-label=":wave:, 1 reactions">`)
+	requireContains(t, "read-only chip", body, `<span class="chip" role="img" title="You reacted with :wave:" aria-label="You reacted with :wave:">`)
 	requireMissing(t, "read-only chip", body, `<button class="chip"`, `aria-label="Add reaction"`)
 }
 
@@ -4558,7 +4564,7 @@ func TestWorkspaceRendersStructuredMessagesWithoutDestructiveEditor(t *testing.T
 		`aria-label="Link previews"`,
 	)
 	requireMissing(t, "rich message", body, "notification fallback must not be repeated", `action="/app/message/update?channel=Cdev`)
-	requireContains(t, "rich message deletion", body, `action="/app/message/delete?channel=Cdev`)
+	requireContains(t, "rich message deletion", body, `data-delete-message="/app/message/delete?channel=Cdev`)
 }
 
 func TestWorkspaceDiscoversAndDispatchesInstalledAppShortcuts(t *testing.T) {
@@ -4738,7 +4744,7 @@ func TestWorkspaceRendersAndSubmitsSocketModeModals(t *testing.T) {
 	if err := s.AckSocketModeInteraction(ctx, "A1", interaction.EnvelopeID, "modal-client"); err != nil {
 		t.Fatal(err)
 	}
-	requireMissing(t, "closed modal", get(t, mux, "/app?channel=Cdev").Body.String(), `role="dialog"`, "Create release")
+	requireMissing(t, "closed modal", get(t, mux, "/app?channel=Cdev").Body.String(), `class="app-modal"`, "Create release")
 
 	view.ID, view.RootViewID = "Vclose", "Vclose"
 	view.Hash = "hash-close"
@@ -4804,7 +4810,7 @@ func TestProgressiveEnhancementHandlesRedirectResponses(t *testing.T) {
 	if !strings.Contains(progressiveEnhancementScript, "response.headers.get('HX-Redirect')") {
 		t.Fatal("progressive enhancement does not handle HX-Redirect")
 	}
-	if !strings.Contains(progressiveEnhancementScript, "if(response.status===204)return ''") {
+	if !strings.Contains(progressiveEnhancementScript, "if(response.status===204){") {
 		t.Fatal("progressive enhancement does not handle empty 204 responses")
 	}
 	// A composer's failures belong to that composer: its script handles its
@@ -5447,12 +5453,14 @@ func TestTimelineRendersSlackMessageChrome(t *testing.T) {
 		`(edited)`,
 		`class="thread-summary"`,
 		"2 replies",
-		"Also sent to the channel",
+		"replied to a thread: <a href=",
+		">a message with replies</a>",
 		`class="message system-message"`,
 		`data-subtype="channel_topic"`,
+		"set the channel topic: chrome topic",
 		"Copy link",
-		"Mark unread from here",
-		"Forward",
+		">Mark unread<",
+		`aria-label="Forward message"`,
 		`/archives/Cdev/p`,
 	)
 	// A system message carries no author chrome and no actions: it is not
@@ -5463,7 +5471,9 @@ func TestTimelineRendersSlackMessageChrome(t *testing.T) {
 	}
 	systemEnd := strings.Index(body[systemStart:], "</article>")
 	systemBlock := body[systemStart : systemStart+systemEnd]
-	requireMissing(t, "system message", systemBlock, "message-actions", "Add reaction", `class="avatar`)
+	requireMissing(t, "system message", systemBlock, "message-actions", "Add reaction", `class="avatar"`)
+	// Slack prints a notice as one compact line beside a small avatar.
+	requireContains(t, "system message", systemBlock, `class="avatar avatar-small"`, `<span class="author">Ada Developer</span> set the channel topic: chrome topic`)
 	// The keyboard contract advertises the two new one-key actions.
 	requireContains(t, "message shortcuts", body, "aria-keyshortcuts=", " F", " U")
 }

@@ -348,8 +348,11 @@ func TestConversationDetailsIsATabbedDialog(t *testing.T) {
 		`id="details-members" aria-labelledby="details-tab-members">`,
 		`id="details-about" aria-labelledby="details-tab-about" hidden>`,
 	)
-	if strings.Count(body, "<header") != 1 {
-		t.Fatalf("the page has %d header elements; only the top bar may be a banner", strings.Count(body, "<header"))
+	// A header inside a dialog, a sectioning root, is not a banner landmark;
+	// outside one, only the top bar may be.
+	outside := withoutDialogs(body)
+	if count := strings.Count(outside, "<header"); count != 1 {
+		t.Fatalf("the page has %d header elements outside dialogs; only the top bar may be a banner", count)
 	}
 	removed := postForm(t, mux, "/app/conversation/remove?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}, "user": {"U2"}}.Encode(), false)
 	if removed.Code != http.StatusSeeOther {
@@ -398,4 +401,20 @@ func TestBookmarksBarAndPinsTab(t *testing.T) {
 	pins := get(t, mux, "/app?channel=Cdev&tab=pins").Body.String()
 	requireContains(t, "pins tab", pins, `id="pins"`, "pin me please", `href="/app?channel=Cdev&amp;tab=pins" aria-current="page"`)
 	requireMissing(t, "pins tab", pins, `id="composer"`)
+}
+
+// withoutDialogs removes every <dialog> element, nested ones included, from
+// the inside out: each closing tag pairs with the last opening tag before it.
+func withoutDialogs(markup string) string {
+	for {
+		end := strings.Index(markup, "</dialog>")
+		if end < 0 {
+			return markup
+		}
+		start := strings.LastIndex(markup[:end], "<dialog")
+		if start < 0 {
+			return markup
+		}
+		markup = markup[:start] + markup[end+len("</dialog>"):]
+	}
 }

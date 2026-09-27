@@ -202,7 +202,7 @@ async function openMessageMenu(message) {
   // The control is an icon, so it is found by the name it carries for assistive
   // technology rather than by text on screen — which is the same name a screen
   // reader announces.
-  await message.locator('[aria-label="More actions"]').click();
+  await message.locator('summary[aria-label="More actions"]').click();
 }
 
 // A message's actions are offered when the message is pointed at or focused,
@@ -501,11 +501,17 @@ test('[NOTIFY-01 NOTIFY-02 NOTIFY-03 THREAD-02 A11Y-01] notification preferences
   await followDetails.getByRole('button', { name: 'Save notifications' }).click();
   const root = await postThroughTheAPI(request, `thread follow browser qualification ${Date.now()}`);
   await page.goto(`/app?channel=${CHANNEL}&thread=${encodeURIComponent(root.ts)}`);
-  await expect(page.getByRole('button', { name: 'Following' })).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', { name: 'Following' }).click();
-  await expect(page.getByRole('button', { name: 'Follow thread' })).toHaveAttribute('aria-pressed', 'false');
-  await page.getByRole('button', { name: 'Follow thread' }).click();
-  await expect(page.getByRole('button', { name: 'Following' })).toHaveAttribute('aria-pressed', 'true');
+  // Slack keeps the follow toggle in the root message's More actions menu, and
+  // changing it confirms in place rather than reloading the thread.
+  const threadRoot = page.locator('#thread-messages .message[data-thread-root]');
+  await openMessageMenu(threadRoot);
+  await threadRoot.getByRole('menuitem', { name: 'Turn off notifications for replies' }).click();
+  await expect(page.locator('#message-toast')).toHaveText("You won't be notified about new replies.");
+  await expect(threadRoot.getByRole('menuitem', { name: 'Get notified about new replies', includeHidden: true })).toHaveCount(1);
+  await openMessageMenu(threadRoot);
+  await threadRoot.getByRole('menuitem', { name: 'Get notified about new replies' }).click();
+  await expect(page.locator('#message-toast')).toHaveText("You'll be notified about new replies.");
+  await expect(threadRoot.getByRole('menuitem', { name: 'Turn off notifications for replies', includeHidden: true })).toHaveCount(1);
   await expectNoSeriousAccessibilityViolations(page);
 });
 
@@ -709,11 +715,14 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await page.keyboard.press('m');
   const reminderMenu = source.locator('[data-reminder-menu]');
   await expect(reminderMenu).toHaveAttribute('open', '');
-  await Promise.all([
-    page.waitForURL(/\/app\/later\?.*changed=reminder/),
-    reminderMenu.getByRole('button', { name: 'In 20 minutes' }).click(),
-  ]);
-  await expect(page.getByRole('status')).toHaveText('Reminder saved.');
+  const inTwenty = reminderMenu.getByRole('menuitem', { name: 'In 20 minutes' });
+  await expect(inTwenty).toBeFocused();
+  await inTwenty.click();
+  // Slack confirms the reminder where the member is instead of leaving the
+  // conversation.
+  await expect(page.locator('#message-toast')).toContainText("Got it! We'll remind you about this message");
+  await expect(page).toHaveURL(/\/app(\?|$)/);
+  await page.goto(`/app/later?channel=${CHANNEL}`);
   let reminder = page.locator('.later-item', { hasText: 'Message reminder' });
   await expect(reminder.getByRole('link', { name: 'View source message' })).toBeVisible();
   await expect(reminder.getByRole('button', { name: 'Mark complete' })).toBeVisible();
@@ -830,7 +839,9 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
   let download = null;
   for (let attempt = 0; attempt < 3 && !download; attempt += 1) {
     const arriving = page.waitForEvent('download', { timeout: 20000 }).catch(() => null);
-    await card.getByRole('link', { name: 'Download' }).click();
+    // A file card's actions are offered on hover, as Slack's are.
+    await card.hover();
+    await card.getByRole('link', { name: `Download ${title}` }).click();
     download = await arriving;
   }
   expect(download, 'the Download link produced no download in three attempts').toBeTruthy();
@@ -1221,14 +1232,14 @@ test('[APP-03 APP-07 MSG-01] JSON-authored blocks, attachments, and unfurls rend
   await expect(blockMessage.getByText('View build', { exact: true })).toHaveCount(0);
   await expect(blockMessage.locator('.message-text')).toHaveCount(0);
   await expect(blockMessage.getByText(`notification fallback ${stamp}`, { exact: true })).toHaveCount(0);
-  await expect(blockMessage.getByText('Edit', { exact: true })).toHaveCount(0);
+  await expect(blockMessage.getByText('Edit message', { exact: true })).toHaveCount(0);
   // Delete lives in the message's More actions menu. This test is about how
   // blocks render, so it asserts the control is offered rather than driving the
   // menu open: a block message reflows as its table and chart lay out, and
   // waiting for the toolbar to stop moving would be testing layout settling
   // rather than block rendering. The menu path itself is exercised where it
   // belongs, in the edit-and-delete journey.
-  await expect(blockMessage.getByText('Delete', { exact: true })).toHaveCount(1);
+  await expect(blockMessage.getByText('Delete message…', { exact: true })).toHaveCount(1);
 
   const currentBlockMessage = page.locator('.message', { hasText: currentBlockTitle });
   await expect(currentBlockMessage.locator('.message-block.alert.success')).toContainText('Validated against the current catalog');
@@ -1326,7 +1337,7 @@ test('[THREAD-01 THREAD-02] opening a thread renders the thread and its composer
   // cannot survive that: the scroll moves the pointer off the message, the
   // toolbar goes away, and every retry waits for something that is no longer
   // shown.
-  const menuOwner = thread.locator('.message').filter({ has: page.locator('[aria-label="More actions"]') }).first();
+  const menuOwner = thread.locator('.message').filter({ has: page.locator('summary[aria-label="More actions"]') }).first();
   await openMessageMenu(menuOwner);
   expect(await measure(), 'every action inside More actions must meet the 24px minimum target size').toEqual([]);
 });
@@ -1421,9 +1432,9 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
 
   await composer.press('End');
   await page.locator('#composer').getByRole('button', { name: 'Emoji' }).click();
-  const emojiPicker = page.getByRole('dialog', { name: 'Emoji' });
+  const emojiPicker = page.getByRole('dialog', { name: 'Emoji picker' });
   await expect(emojiPicker).toBeVisible();
-  const emojiSearch = emojiPicker.getByPlaceholder('Search emoji');
+  const emojiSearch = emojiPicker.getByPlaceholder('Search all emoji');
   await expect(emojiSearch).toBeFocused();
   await emojiSearch.fill('tada');
   await emojiPicker.getByRole('option', { name: ':tada:' }).click();
@@ -1431,7 +1442,7 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   await composer.press('Enter');
   const formatted = page.locator('.message').last();
   await expect(formatted.locator('strong')).toHaveText('format me');
-  await expect(formatted.locator('.standard-emoji[aria-label=":tada:"]')).toContainText('🎉');
+  await expect(formatted.locator('.message-text .standard-emoji[aria-label=":tada:"]')).toContainText('🎉');
 
   await composer.fill('@');
   const suggestions = page.getByRole('listbox', { name: 'Mention suggestions' });
@@ -1528,12 +1539,11 @@ test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions ho
   const secondMessage = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: secondText }) });
   // Up in an empty composer edits your own last message, as in Slack. These
   // messages are the member's own, so the editor opens on the newest.
-  const lastEditor = lastMessage.getByRole('textbox', { name: 'Edit your message' });
+  const lastEditor = lastMessage.getByRole('textbox', { name: 'Edit message' });
   await expect(lastEditor).toBeFocused();
-  await lastEditor.evaluate((node) => {
-    for (let details = node.closest('details'); details; details = details.parentElement && details.parentElement.closest('details')) details.open = false;
-    node.closest('.message').focus();
-  });
+  // Escape cancels the edit in place and returns focus to the message.
+  await lastEditor.press('Escape');
+  await expect(lastEditor).toBeHidden();
   await expect(lastMessage).toBeFocused();
 
   await page.keyboard.press('ArrowUp');
@@ -1545,29 +1555,30 @@ test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions ho
 
   await lastMessage.focus();
   await page.keyboard.press('p');
-  await expect(lastMessage.locator('.pinned')).toBeVisible();
+  await expect(lastMessage.locator('.pinned-label')).toHaveText('Pinned by you');
   await expect(lastMessage).toBeFocused();
 
   await page.keyboard.press('r');
-  const reactionPicker = page.getByRole('dialog', { name: 'Emoji' });
-  const reactionSearch = reactionPicker.getByPlaceholder('Search emoji');
+  const reactionPicker = page.getByRole('dialog', { name: 'Emoji picker' });
+  const reactionSearch = reactionPicker.getByPlaceholder('Search all emoji');
   await expect(reactionSearch).toBeFocused();
   await reactionSearch.fill('wave');
   const waveOption = reactionPicker.getByRole('option', { name: ':wave:' });
   await expect(waveOption).toBeVisible();
-  await reactionSearch.press('ArrowDown');
-  await expect(waveOption).toBeFocused();
+  // The search keeps focus and the arrows move the active option, as in a
+  // combobox; Enter chooses it.
+  await expect(waveOption).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');
-  await expect(lastMessage.getByRole('button', { name: /wave reaction/ })).toBeVisible();
+  await expect(lastMessage.getByRole('button', { name: /You reacted with :wave:/ })).toBeVisible();
+  await expect(reactionPicker).toBeHidden();
 
   await lastMessage.focus();
   await page.keyboard.press('e');
-  const editor = lastMessage.getByRole('textbox', { name: 'Edit your message' });
+  const editor = lastMessage.getByRole('textbox', { name: 'Edit message' });
   await expect(editor).toBeFocused();
-  await editor.evaluate((node) => {
-    node.closest('details').open = false;
-    node.closest('.message').focus();
-  });
+  await page.keyboard.press('Escape');
+  await expect(editor).toBeHidden();
+  await expect(lastMessage).toBeFocused();
 
   await page.keyboard.press('t');
   await expect(page).toHaveURL(new RegExp(`thread=${encodeURIComponent(last.ts)}`));
@@ -1580,7 +1591,12 @@ test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions ho
   const returned = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: lastText }) });
   await returned.focus();
   await page.keyboard.press('Delete');
-  await expect(returned.getByRole('button', { name: 'Delete this message' })).toBeFocused();
+  const confirm = page.getByRole('dialog', { name: 'Delete message' });
+  await expect(confirm).toContainText('Are you sure you want to delete this message? This cannot be undone.');
+  await expect(confirm.getByRole('button', { name: 'Delete', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(confirm).toBeHidden();
+  await expect(returned).toBeFocused();
 
   // The earlier messages are intentionally referenced so the journey proves
   // arrow navigation follows chronology rather than a coincidental last row.
@@ -1863,7 +1879,7 @@ test('[CONV-01 COMP-01] a public-channel preview can be joined and posted to', a
   await page.goto('/app');
   await expect(page.getByText('You are viewing #general', { exact: true })).toBeVisible();
   await expect(page.locator('form.composer')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Pin' })).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: 'Pin to channel', includeHidden: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Join channel' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Join channel' }).click();
@@ -1980,14 +1996,14 @@ test('[ACT-02 ACT-03] reactions and pins render and reverse in place', async ({ 
   const url = page.url();
 
   await target.hover();
-  await target.getByRole('button', { name: 'Add reaction' }).click();
-  const picker = page.getByRole('dialog', { name: 'Emoji' });
-  await picker.getByPlaceholder('Search emoji').fill('wave');
+  await target.locator('.message-actions').getByRole('button', { name: 'Add reaction' }).click();
+  const picker = page.getByRole('dialog', { name: 'Emoji picker' });
+  await picker.getByPlaceholder('Search all emoji').fill('wave');
   await picker.getByRole('option', { name: ':wave:' }).click();
 
-  const chip = target.locator('.reactions .chip');
+  const chip = target.locator('.reactions .chip[aria-pressed]');
   await expect(chip).toHaveCount(1);
-  await expect(chip.first()).toHaveAccessibleName(/Remove your wave reaction/);
+  await expect(chip.first()).toHaveAccessibleName(/You reacted with :wave:\. Remove your reaction/);
   await expect(chip.first()).toHaveAttribute('aria-pressed', 'true');
   // The mutation must not navigate: it used to answer HX-Redirect and lose the
   // current view.
@@ -2004,20 +2020,20 @@ test('[ACT-02 ACT-03] reactions and pins render and reverse in place', async ({ 
   // appears not to have taken, and the assertions are unchanged in strength.
   await expect(async () => {
     await chip.first().click();
-    await expect(target.locator('.reactions .chip')).toHaveCount(0, { timeout: 2000 });
+    await expect(target.locator('.reactions .chip[aria-pressed]')).toHaveCount(0, { timeout: 2000 });
   }).toPass({ timeout: 20000 });
 
   await expect(async () => {
     await target.hover();
     await openMessageMenu(target);
-    await target.getByRole('button', { name: 'Pin' }).click();
-    await expect(target.locator('.pinned')).toBeVisible({ timeout: 2000 });
+    await target.getByRole('menuitem', { name: 'Pin to channel' }).click();
+    await expect(target.locator('.pinned-label')).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 20000 });
   await expect(async () => {
     await target.hover();
     await openMessageMenu(target);
-    await target.getByRole('button', { name: 'Unpin' }).click();
-    await expect(target.locator('.pinned')).toHaveCount(0, { timeout: 2000 });
+    await target.getByRole('menuitem', { name: 'Un-pin from channel' }).click();
+    await expect(target.locator('.pinned-label')).toHaveCount(0, { timeout: 2000 });
   }).toPass({ timeout: 20000 });
 });
 
@@ -2033,19 +2049,23 @@ test('[MSG-03 MSG-04] a member can edit and delete their own message in place', 
 
   const target = page.locator('.message', { hasText: original });
   await openMessageMenu(target);
-  await target.getByText('Edit', { exact: true }).click();
-  const editor = target.getByRole('textbox', { name: 'Edit your message' });
+  await target.getByRole('menuitem', { name: 'Edit message' }).click();
+  const editor = target.getByRole('textbox', { name: 'Edit message' });
+  await expect(editor).toBeFocused();
+  await expect(target.locator('.message-content')).toBeHidden();
   const changed = `edited in browser ${Date.now()}`;
   await editor.fill(changed);
-  await target.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await target.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.message', { hasText: changed })).toHaveCount(1);
   await expect(page.locator('.message', { hasText: original })).toHaveCount(0);
 
   const changedTarget = page.locator('.message', { hasText: changed });
   await changedTarget.hover();
   await openMessageMenu(changedTarget);
-  await changedTarget.getByText('Delete', { exact: true }).click();
-  await changedTarget.getByRole('button', { name: 'Delete this message' }).click();
+  await changedTarget.getByRole('menuitem', { name: 'Delete message…' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Delete message' });
+  await expect(confirm.locator('[data-dialog-preview]')).toContainText(changed);
+  await confirm.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.locator('.message', { hasText: changed })).toHaveCount(0);
 });
 
@@ -2343,7 +2363,7 @@ test('[COMP-01 RESILIENCE-04] a failed send is kept as not sent and a refused on
   const target = page.locator('.message').last();
   await page.route('**/app/pin*', (route) => route.abort());
   await openMessageMenu(target);
-  await target.getByRole('button', { name: 'Pin' }).click();
+  await target.getByRole('menuitem', { name: /Pin to channel|Un-pin from channel/ }).click();
   const actionError = page.locator('#action-feedback');
   await expect(actionError).toBeVisible();
   await expect(unsent).toContainText(doomed);
@@ -3833,7 +3853,10 @@ test('[FILE-01 A11Y-01 A11Y-02] an uploaded image is shown and its uploader can 
   // was describing it too.
   await expect(image).toHaveAttribute('alt', title);
 
-  await card.getByRole('group').filter({ hasText: 'Add a description' }).locator('summary').click();
+  // The card's actions appear on hover; describing the image is in its menu.
+  await card.hover();
+  await card.getByRole('group', { name: `Actions for ${title}` }).locator('summary[aria-label^="More actions"]').click();
+  await card.locator('summary', { hasText: 'Add a description' }).click();
   await card.getByLabel('Describe this image for people who cannot see it').fill('A single dark pixel');
   await card.getByRole('button', { name: 'Save description' }).click();
   await expect(page.locator('#notice, .notice')).toContainText('Description saved');

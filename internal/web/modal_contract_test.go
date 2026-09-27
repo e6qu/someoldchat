@@ -120,7 +120,7 @@ func TestModalClosesAfterItsAppIsUninstalled(t *testing.T) {
 	if response.Code != http.StatusSeeOther {
 		t.Fatalf("close status=%d body=%s", response.Code, response.Body)
 	}
-	requireMissing(t, "closed modal", get(t, mux, "/app?channel=Cdev").Body.String(), `role="dialog"`)
+	requireMissing(t, "closed modal", get(t, mux, "/app?channel=Cdev").Body.String(), `class="app-modal"`)
 }
 
 // An option loaded through block_suggestion reports its text in the

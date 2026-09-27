@@ -220,7 +220,7 @@ type httptestResponse struct {
 // "&gt; " lines, which used to render as a literal ">".
 func TestMrkdwnBlockQuotesRender(t *testing.T) {
 	rendered := string(renderSlackMrkdwn("before\n&gt; quoted *line*\n&gt; second\nafter\n```\n> not a quote\n```"))
-	if !strings.Contains(rendered, `<blockquote class="message-quote">quoted <strong>line</strong><br>second</blockquote>`) {
+	if !strings.Contains(rendered, `<blockquote>quoted <strong>line</strong><br>second</blockquote>`) {
 		t.Fatalf("quote not rendered: %s", rendered)
 	}
 	if strings.Count(rendered, "<blockquote") != 1 || !strings.Contains(rendered, "&gt; not a quote") {

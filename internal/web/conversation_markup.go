@@ -153,7 +153,6 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
           {{if .Current.CanLeave}}<hr role="separator"><form class="menu-form" method="post" action="/app/conversation/leave?channel={{.Channel}}" role="none"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit" role="menuitem">{{icon "signout"}}<span>{{if .IsChannelKind}}Leave channel{{else}}Close conversation{{end}}</span></button></form>{{end}}
         </div>
       </details>
-      {{if .ThreadTimestamp}}<a class="header-link" href="/app?channel={{.Channel}}" data-close-thread>Back to channel</a>{{end}}
     </div>
   </div>
   <nav class="channel-tabs" aria-label="Conversation tabs">

@@ -53,8 +53,6 @@ const conversationShellStyle = `<style>
 .header-button>.icon+.icon{width:12px;height:12px}
 .header-button.is-live{border-color:var(--ok);color:var(--ok)}
 .channel-overflow>.header-button{padding:0 5px}
-.header-link{color:var(--muted);font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap}
-.header-link:hover{color:var(--text);text-decoration:underline}
 .channel-tabs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:0 16px}
 .channel-tabs>a{display:inline-flex;align-items:center;gap:6px;padding:6px 10px 8px;border-bottom:2px solid transparent;color:var(--muted);font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap}
 .channel-tabs>a .icon{width:15px;height:15px}
