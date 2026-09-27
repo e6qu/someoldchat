@@ -1399,7 +1399,7 @@ const themeBootstrap = `<script>(function(){var root=document.documentElement;va
 const themeToggleScript = `<script>(function(){var root=document.documentElement;var toggle=document.getElementById('theme-toggle');function apply(theme){root.setAttribute('data-theme',theme);root.setAttribute('data-theme-explicit','');if(toggle)toggle.setAttribute('aria-pressed',theme==='dark'?'true':'false')}apply(root.getAttribute('data-theme')==='dark'?'dark':'light');if(!toggle)return;toggle.addEventListener('click',function(){var next=root.getAttribute('data-theme')==='dark'?'light':'dark';apply(next);try{localStorage.setItem('sameoldchat-theme',next)}catch(error){}})})();</script>`
 
 const layoutMarkup = `<!doctype html>
-<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "title" .}}</title><style>` + sharedStyle + `</style>{{block "styles" .}}{{end}}` + themeBootstrap + `</head><body>{{template "content" .}}` + themeToggleScript + `{{block "scripts" .}}{{end}}</body></html>`
+<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "title" .Page}}</title><style>` + sharedStyle + `</style>{{block "styles" .Page}}{{end}}` + themeBootstrap + `</head><body{{with .EventHead}} data-event-head="{{.}}"{{end}}>{{template "content" .Page}}` + themeToggleScript + `{{block "scripts" .Page}}{{end}}</body></html>`
 
 // templateFunctions is deliberately tiny: it exists so a template cannot write
 // an aria-keyshortcuts value by hand. Every advertised chord is looked up in
@@ -2990,7 +2990,7 @@ var active=document.activeElement;var focusedRow=active&&active.closest?active.c
 fetch(window.location.pathname+window.location.search,{headers:{'X-SameOldChat-Activity-Refresh':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error();return response.text()}).then(function(html){var parsed=new DOMParser().parseFromString(html,'text/html');var replacement=parsed.getElementById('activity-feed');if(!replacement)throw new Error();feed.replaceWith(replacement);feed=replacement;Object.keys(selected).forEach(function(id){Array.prototype.forEach.call(feed.querySelectorAll('input[name=activity_id]'),function(input){if(input.value===id)input.checked=true})});syncRows(focusedID);if(focusedID){var row=rows[current];var target=row;if(focusedLabel){Array.prototype.some.call(row.querySelectorAll('[aria-label]'),function(candidate){if(candidate.getAttribute('aria-label')===focusedLabel){target=candidate;return true}return false})}target.focus({preventScroll:true});window.scrollTo(scrollX,scrollY)}if(liveStatus)liveStatus.textContent='Activity updated.'}).catch(function(){if(liveStatus)liveStatus.textContent='New activity is available. Reload to update the list.'}).finally(function(){refreshing=false;if(refreshQueued){refreshQueued=false;refreshActivity()}});
 }
 function scheduleActivityRefresh(){window.clearTimeout(refreshTimer);refreshTimer=window.setTimeout(refreshActivity,180)}
-if(window.EventSource){var cursor='';try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){}var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));activityTopics.forEach(function(topic){stream.addEventListener(topic,function(event){if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}scheduleActivityRefresh()})});stream.onerror=function(){if(liveStatus)liveStatus.textContent='Reconnecting to live Activity…'};stream.onopen=function(){if(liveStatus&&liveStatus.textContent==='Reconnecting to live Activity…')liveStatus.textContent='Live Activity resumed.'}}
+if(window.EventSource){var stream=` + liveStreamOpen + `;activityTopics.forEach(function(topic){stream.addEventListener(topic,scheduleActivityRefresh)});stream.onerror=function(){if(liveStatus)liveStatus.textContent='Reconnecting to live Activity…'};stream.onopen=function(){if(liveStatus&&liveStatus.textContent==='Reconnecting to live Activity…')liveStatus.textContent='Live Activity resumed.'}}
 })();</script>{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
@@ -3119,13 +3119,11 @@ var laterTemplate = mustPage(laterMarkup)
 // person's unsaved changes. Saving navigates anyway, which refreshes the page.
 const laterLiveScript = `<script>(function(){
 if(!window.EventSource)return;
-var cursor='';
-try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){cursor=''}
-var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));
+var stream=` + liveStreamOpen + `;
 var timezone='UTC';try{timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(error){}
 Array.prototype.forEach.call(document.querySelectorAll('[data-browser-timezone]'),function(input){input.value=timezone});
 ['saved_item.created','saved_item.changed','saved_item.removed','later_reminder.created','later_reminder.changed','later_reminder.completed','later_reminder.deleted','later_reminder.delivered','later_reminder.failed'].forEach(function(topic){
-stream.addEventListener(topic,function(event){if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}
+stream.addEventListener(topic,function(){
 if(document.querySelector('details[open]'))return;
 window.location.reload()});
 });
@@ -4598,11 +4596,8 @@ if(navToggle)navToggle.addEventListener('click',function(){setNav(!nav.classList
 if(navScrim)navScrim.addEventListener('click',function(){setNav(false,false);if(navToggle)navToggle.focus()});
 if(narrow){if(typeof narrow.addEventListener==='function')narrow.addEventListener('change',function(){setNav(false,false)});setNav(false,false)}
 if(window.EventSource){
-var cursor='';
-try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){cursor=''}
-var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));
+var stream=` + liveStreamOpen + `;
 var deliver=function(event){
-if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}
 try{document.dispatchEvent(new CustomEvent('sameoldchat:event',{detail:{type:event.type,data:event.data}}))}catch(error){}
 if(event.type==='huddle.signal'||event.type==='huddle.reaction')return;
 if(event.type.indexOf('view.')===0||event.type.indexOf('dialog.')===0){var viewFrame=null;try{viewFrame=JSON.parse(event.data)}catch(error){}if(viewFrame&&viewFrame.state_only)return;window.location.reload();return}
@@ -5541,6 +5536,11 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		return
 	}
 	csrfToken := auth.CSRFToken(sessionCookie.Value)
+	head, err := h.readLiveHead(r.Context(), principal)
+	if err != nil {
+		h.writeStoreError(w, err, "Live updates are temporarily unavailable.")
+		return
+	}
 
 	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
 	if err != nil {
@@ -5960,7 +5960,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	if status == 0 {
 		status = http.StatusOK
 	}
-	h.writeHTML(w, pageTemplate, data, status, "page rendering unavailable")
+	h.writeLivePage(w, head, pageTemplate, data, status, "page rendering unavailable")
 }
 
 // timeline renders the message region on its own so live updates and mutations
@@ -7179,6 +7179,11 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 		h.writePageError(w, http.StatusBadRequest, "That Later link is not valid", "Open Later from the workspace and choose a section.")
 		return
 	}
+	head, err := h.readLiveHead(r.Context(), principal)
+	if err != nil {
+		h.writeStoreError(w, err, "Later is temporarily unavailable.")
+		return
+	}
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
 	if channel == "" {
 		channel = string(h.Channel)
@@ -7320,7 +7325,7 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 		query := url.Values{"channel": {channel}, "state": {string(state)}, "cursor": {string(page.NextCursor)}}
 		data.MoreURL = "/app/later?" + query.Encode()
 	}
-	h.writeHTML(w, laterTemplate, data, http.StatusOK, "Later rendering unavailable")
+	h.writeLivePage(w, head, laterTemplate, data, http.StatusOK, "Later rendering unavailable")
 }
 
 func (h Handler) scheduledMessages(w http.ResponseWriter, r *http.Request) {
@@ -7512,6 +7517,11 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
 	if channel == "" {
 		channel = string(h.Channel)
+	}
+	head, err := h.readLiveHead(r.Context(), principal)
+	if err != nil {
+		h.writeStoreError(w, err, "Activity is temporarily unavailable.")
+		return
 	}
 	// Preferences carry the member's saved views, so they are read before the
 	// query: a saved view resolves to the same Kinds a single filter tab does.
@@ -7722,7 +7732,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	if page.HasMore && page.NextCursor != "" {
 		data.MoreURL = activityPageURL(channel, kindValue, viewValue, unreadOnly, clearedOnly, page.NextCursor)
 	}
-	h.writeHTML(w, activityTemplate, data, http.StatusOK, "activity rendering unavailable")
+	h.writeLivePage(w, head, activityTemplate, data, http.StatusOK, "activity rendering unavailable")
 }
 
 func activityKindLabel(item domain.ActivityItem) string {
@@ -13173,8 +13183,67 @@ func secureHeaders(w http.ResponseWriter, policy string) {
 	header.Set("Cache-Control", "no-store")
 }
 
+// layoutData is what the shared layout executes with. The page's own
+// templates ("title", "styles", "content", "scripts") receive Page, so they
+// never see the wrapper; the layout alone reads EventHead.
+type layoutData struct {
+	Page any
+	// EventHead is set only on a page that opens the live event stream. See
+	// liveHead.
+	EventHead string
+}
+
+// renderPage executes a layout page. Every layout page is executed here, so
+// none can be rendered without the wrapper the layout expects.
+func renderPage(output *bytes.Buffer, page *template.Template, data any, head liveHead) error {
+	return page.Execute(output, layoutData{Page: data, EventHead: head.attribute()})
+}
+
+// liveHead is the journal position a page that opens /events was rendered
+// after. The page reads it before it reads anything it renders, carries it in
+// <body data-event-head>, and opens its stream from there (liveStreamOpen). A
+// stream opened without a cursor starts at the journal head as of the moment
+// EventSource connects, so an event committed between the render and that
+// connection was neither in the page nor on the stream. A cursor remembered
+// in sessionStorage from an earlier page is no substitute: it is only advanced
+// by the topics that page listened to, so it replays events the new render
+// already reflects.
+type liveHead struct {
+	sequence uint64
+	read     bool
+}
+
+func (head liveHead) attribute() string {
+	if !head.read {
+		return ""
+	}
+	return strconv.FormatUint(head.sequence, 10)
+}
+
+// readLiveHead asks the service for the member's stream head. It is the same
+// member-authorized position /events opens at, so the page and the stream
+// cannot disagree about where "now" is.
+func (h Handler) readLiveHead(ctx context.Context, principal auth.Principal) (liveHead, error) {
+	sequence, err := h.Messages.LatestEventSequence(ctx, principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		return liveHead{}, err
+	}
+	return liveHead{sequence: sequence, read: true}, nil
+}
+
+// liveStreamOpen is the one expression every live page script opens its
+// stream with. EventSource itself resends the last id it received when it
+// reconnects, so the rendered head is only needed for the first connection.
+const liveStreamOpen = `new EventSource('/events'+(/^[0-9]+$/.test(document.body.getAttribute('data-event-head')||'')?'?last_event_id='+document.body.getAttribute('data-event-head'):''))`
+
 func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data any, status int, unavailable string) {
 	h.writeHTMLWithPolicy(w, page, data, status, unavailable, workspaceContentSecurityPolicy)
+}
+
+// writeLivePage serves a workspace page whose script opens the live event
+// stream from head.
+func (h Handler) writeLivePage(w http.ResponseWriter, head liveHead, page *template.Template, data any, status int, unavailable string) {
+	h.writeRendered(w, page, data, head, status, unavailable, workspaceContentSecurityPolicy)
 }
 
 // writeHTMLWithPolicy serves a page under a policy of its own. A page outside
@@ -13182,8 +13251,12 @@ func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data 
 // set of things it is allowed to do, and serving it under the workspace policy
 // would either allow more than it needs or block the scripts it has.
 func (h Handler) writeHTMLWithPolicy(w http.ResponseWriter, page *template.Template, data any, status int, unavailable, policy string) {
+	h.writeRendered(w, page, data, liveHead{}, status, unavailable, policy)
+}
+
+func (h Handler) writeRendered(w http.ResponseWriter, page *template.Template, data any, head liveHead, status int, unavailable, policy string) {
 	var output bytes.Buffer
-	if err := page.Execute(&output, data); err != nil {
+	if err := renderPage(&output, page, data, head); err != nil {
 		secureHeaders(w, policy)
 		http.Error(w, unavailable, http.StatusServiceUnavailable)
 		return
@@ -13215,7 +13288,7 @@ func (h Handler) writePartial(w http.ResponseWriter, name string, data any, unav
 
 func (h Handler) writePageError(w http.ResponseWriter, status int, heading, message string) {
 	var output bytes.Buffer
-	if err := errorTemplate.Execute(&output, errorData{Heading: heading, Message: message}); err != nil {
+	if err := renderPage(&output, errorTemplate, errorData{Heading: heading, Message: message}, liveHead{}); err != nil {
 		secureHeaders(w, workspaceContentSecurityPolicy)
 		http.Error(w, heading, status)
 		return
