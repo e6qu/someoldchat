@@ -123,7 +123,7 @@ function refresh(){if(busy){queued=true;return}busy=true;
 fetch(window.location.pathname+window.location.search,{headers:{'` + appHomeRefreshHeader + `':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error();return response.text()}).then(function(html){var replacement=new DOMParser().parseFromString(html,'text/html').getElementById('app-home-region');if(!replacement)throw new Error();region.replaceWith(replacement);region=replacement;if(window.sameoldchatLocalizeViews)window.sameoldchatLocalizeViews(region);if(live)live.textContent='The app updated this Home.'}).catch(function(){if(live)live.textContent='This Home changed. Reload the page to see the update.'}).finally(function(){busy=false;if(queued){queued=false;schedule()}})}
 function schedule(){window.clearTimeout(timer);timer=window.setTimeout(function(){if(editing()){var resume=function(){region.removeEventListener('focusout',resume);schedule()};region.addEventListener('focusout',resume);return}refresh()},150)}
 function appOf(data){return data&&(data.app_id||(data.payload&&data.payload.app_id))||''}
-var stream=new EventSource('/events');
+var stream=` + liveStreamOpen + `;
 ['view.published','view.updated'].forEach(function(topic){stream.addEventListener(topic,function(event){var data=null;try{data=JSON.parse(event.data||'null')}catch(error){}var target=appOf(data);if(target&&target!==appID)return;schedule()})});
 })();</script>`
 
@@ -144,6 +144,11 @@ func (h Handler) appHome(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) renderWorkspaceApps(w http.ResponseWriter, r *http.Request, principal auth.Principal, csrf, selectedID string) {
+	head, err := h.readLiveHead(r.Context(), principal)
+	if err != nil {
+		h.writePageError(w, http.StatusServiceUnavailable, "Apps are temporarily unavailable", "Live updates could not be started. Try again.")
+		return
+	}
 	apps, err := h.Messages.ListWorkspaceApps(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
 		h.writePageError(w, http.StatusServiceUnavailable, "Apps are temporarily unavailable", "Installed apps could not be read. Try again.")
@@ -158,7 +163,7 @@ func (h Handler) renderWorkspaceApps(w http.ResponseWriter, r *http.Request, pri
 		CanMessage: principal.HasScope(auth.ScopeChannelsManage), WorkspaceName: workspaceName,
 	}
 	if selectedID == "" {
-		h.writeHTML(w, workspaceAppsTemplate, data, http.StatusOK, "installed apps rendering unavailable")
+		h.writeLivePage(w, head, workspaceAppsTemplate, data, http.StatusOK, "installed apps rendering unavailable")
 		return
 	}
 	for index := range apps {
@@ -223,7 +228,7 @@ func (h Handler) renderWorkspaceApps(w http.ResponseWriter, r *http.Request, pri
 	if r.URL.Query().Get("notice") == "action_sent" {
 		data.Notice = "The app action ran."
 	}
-	h.writeHTML(w, workspaceAppsTemplate, data, http.StatusOK, "app home rendering unavailable")
+	h.writeLivePage(w, head, workspaceAppsTemplate, data, http.StatusOK, "app home rendering unavailable")
 }
 
 func (h Handler) newHomeView(ctx context.Context, principal auth.Principal, value domain.View) (*modalView, error) {

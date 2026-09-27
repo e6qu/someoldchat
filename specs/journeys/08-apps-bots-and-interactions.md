@@ -165,11 +165,22 @@ without deleting user-owned workspace history Slack retains.
   delivery.
 - Browser tests discover manifest-derived commands/shortcuts, distinguish bot
   identity, exercise all response types, and inspect app administration.
-- APP-04 and APP-06 are qualified through the official-SDK harness, not the
-  browser suite, and that is a property of the journeys rather than a missing
-  test. Both are observable only at an app endpoint: APP-04 asserts the
-  interaction payload an activation delivers, and APP-06 asserts what a
-  `response_url` capability accepts and refuses.
+- APP-06 is qualified through the official-SDK harness, not the browser
+  suite, and that is a property of the journey rather than a missing test: it
+  asserts what a `response_url` capability accepts and refuses, which is
+  observable only at an app endpoint.
+- The browser suite plays a Socket Mode app from the test process (it opens
+  the app's socket with the app-level token issued in the developer console
+  and acknowledges envelopes as Bolt does), so APP-03, APP-04 and APP-07 are
+  exercised end to end in Chromium: `[APP-04 APP-07 A11Y-01]` runs a global
+  shortcut from the shortcuts browser, opens a modal with `views.open`, shows
+  the app's `response_action: errors` beside the field while keeping what was
+  entered, submits, and closes with `view_closed`; `[APP-04 APP-07]` opens a
+  legacy dialog with `dialog.open`, loads its external select through
+  `dialog_suggestion`, shows the app's errors without clearing the fields, and
+  submits; `[APP-03 APP-08 A11Y-01]` answers `app_home_opened` with
+  `views.publish` and re-renders the Home live after a button's
+  `block_actions`.
 - The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey installs a Socket
   Mode app and inspects the same payload-redacted durable delivery cursor used
   by local and generated-gRPC workers. SQL restart tests preserve queued retry

@@ -106,6 +106,7 @@ func TestViewsMethodsNameEachFailureAsSlackDoes(t *testing.T) {
 	expectSlackError(t, "publish modal", call("/api/views.publish", url.Values{"user_id": {"U1"}, "view": {testModal("x", "")}}), "invalid_arguments")
 
 	seedHTTPInteractionTrigger(t, st, "t-dialog")
+	enableFixtureInteractivity(t, st)
 	for name, invalid := range map[string]string{
 		"element without a name": `{"callback_id":"c","title":"T","elements":[{"type":"text","label":"L"}]}`,
 		"title over 24":          `{"callback_id":"c","title":"` + strings.Repeat("t", 25) + `","elements":[{"type":"text","label":"L","name":"n"}]}`,

@@ -20,7 +20,7 @@ async function load(control){
  var minimum=parseInt(control.getAttribute('data-min-query')||'3',10),value=input.value.trim();
  if(value.length<minimum){status.textContent='Type at least '+minimum+' characters.';input.focus();return}
  var csrf=form.querySelector('input[name="_csrf"]'),params=new URLSearchParams();
- params.set('_csrf',csrf?csrf.value:'');params.set('app_id',control.getAttribute('data-app-id')||'');params.set('message_id',control.getAttribute('data-message-id')||'');params.set('view_id',control.getAttribute('data-view-id')||'');params.set('block_id',control.getAttribute('data-block-id')||'');params.set('action_id',control.getAttribute('data-action-id')||'');params.set('channel',control.getAttribute('data-channel')||'');params.set('query',value);
+ params.set('_csrf',csrf?csrf.value:'');params.set('app_id',control.getAttribute('data-app-id')||'');params.set('message_id',control.getAttribute('data-message-id')||'');params.set('view_id',control.getAttribute('data-view-id')||'');params.set('dialog_id',control.getAttribute('data-dialog-id')||'');params.set('block_id',control.getAttribute('data-block-id')||'');params.set('action_id',control.getAttribute('data-action-id')||'');params.set('channel',control.getAttribute('data-channel')||'');params.set('query',value);
  button.disabled=true;results.disabled=true;if(choose)choose.disabled=true;status.textContent='Loading options…';
  try{
   var response=await fetch('/app/options',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body:params.toString()});
@@ -52,7 +52,8 @@ func (h Handler) appOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	query := domain.AppOptionQuery{
 		AppID: domain.AppID(strings.TrimSpace(r.Form.Get("app_id"))), MessageID: domain.MessageID(strings.TrimSpace(r.Form.Get("message_id"))),
-		ViewID: domain.ViewID(strings.TrimSpace(r.Form.Get("view_id"))), BlockID: strings.TrimSpace(r.Form.Get("block_id")),
+		ViewID: domain.ViewID(strings.TrimSpace(r.Form.Get("view_id"))), DialogID: domain.DialogID(strings.TrimSpace(r.Form.Get("dialog_id"))),
+		BlockID:  strings.TrimSpace(r.Form.Get("block_id")),
 		ActionID: strings.TrimSpace(r.Form.Get("action_id")), Value: r.Form.Get("query"),
 	}
 	options, err := h.Messages.LoadAppOptions(
@@ -77,9 +78,10 @@ func (h Handler) appOptions(w http.ResponseWriter, r *http.Request) {
 		Value       string `json:"value"`
 		Description string `json:"description,omitempty"`
 		Group       string `json:"group,omitempty"`
-		// Choice is the <option value> for an option loaded into a view: it
-		// carries the text and the service's token so the submission can
-		// report the option's text as Slack does.
+		// Choice is the <option value> for an option the service vouched
+		// for: it carries the text and the service's token so the view
+		// submission or message action can report the option's text as
+		// Slack does.
 		Choice string `json:"choice,omitempty"`
 	}
 	response := struct {

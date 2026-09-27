@@ -54,48 +54,115 @@ func withAcceptedOptionText(actionPayload map[string]any, stateJSON, blockID, ac
 // service verifies and removes it before the state is stored or sent.
 const viewOptionSignatureField = "token"
 
-// signViewOption returns the token that vouches for an external option's
-// text inside one view element. Slack's view_submission and block_actions
-// payloads carry the chosen option's text, but the browser only knows it
-// because the app sent it, so the text is accepted back only with this
-// server-held signature.
-func (m Messages) signViewOption(viewID domain.ViewID, blockID, actionID, value, text string) string {
+// optionContainer names the surface an external select lives in: one view
+// or one message. A token signed for one never vouches for another.
+type optionContainer struct {
+	label string
+	id    string
+}
+
+func viewOptionContainer(id domain.ViewID) optionContainer {
+	return optionContainer{label: "sameoldchat view option text\x00", id: string(id)}
+}
+
+func messageOptionContainer(id domain.MessageID) optionContainer {
+	return optionContainer{label: "sameoldchat message option text\x00", id: string(id)}
+}
+
+func dialogOptionContainer(id domain.DialogID) optionContainer {
+	return optionContainer{label: "sameoldchat dialog option text\x00", id: string(id)}
+}
+
+// loadedOptionContainer is the container an options request was made for.
+func loadedOptionContainer(query domain.AppOptionQuery) optionContainer {
+	switch {
+	case query.ViewID != "":
+		return viewOptionContainer(query.ViewID)
+	case query.DialogID != "":
+		return dialogOptionContainer(query.DialogID)
+	}
+	return messageOptionContainer(query.MessageID)
+}
+
+// signOption returns the token that vouches for an external option's text
+// inside one element of one view or message. Slack's view_submission and
+// block_actions payloads carry the chosen option's text, but the browser only
+// knows it because the app sent it, so the text is accepted back only with
+// this server-held signature.
+func (m Messages) signOption(container optionContainer, blockID, actionID, value, text string) string {
 	if len(m.AppCredentialKey) == 0 {
 		return ""
 	}
-	return base64.RawURLEncoding.EncodeToString(m.viewOptionMAC(viewID, blockID, actionID, value, text))
+	return base64.RawURLEncoding.EncodeToString(m.optionMAC(container, blockID, actionID, value, text))
 }
 
-// vouchViewOptions signs each option loaded for a view element so the
+// vouchLoadedOptions signs each option loaded for an external select so the
 // client can report the chosen option's text back with it.
-func (m Messages) vouchViewOptions(query domain.AppOptionQuery) func([]domain.AppOption, error) ([]domain.AppOption, error) {
+func (m Messages) vouchLoadedOptions(query domain.AppOptionQuery) func([]domain.AppOption, error) ([]domain.AppOption, error) {
 	return func(options []domain.AppOption, err error) ([]domain.AppOption, error) {
-		if err != nil || query.ViewID == "" {
+		if err != nil {
 			return options, err
 		}
+		container := loadedOptionContainer(query)
 		for index := range options {
-			options[index].Token = m.signViewOption(query.ViewID, query.BlockID, query.ActionID, options[index].Value, options[index].Text)
+			options[index].Token = m.signOption(container, query.BlockID, query.ActionID, options[index].Value, options[index].Text)
 		}
 		return options, nil
 	}
 }
 
-func (m Messages) viewOptionMAC(viewID domain.ViewID, blockID, actionID, value, text string) []byte {
-	derived := sha256.Sum256(append([]byte("sameoldchat view option text\x00"), m.AppCredentialKey...))
+func (m Messages) optionMAC(container optionContainer, blockID, actionID, value, text string) []byte {
+	derived := sha256.Sum256(append([]byte(container.label), m.AppCredentialKey...))
 	mac := hmac.New(sha256.New, derived[:])
-	for _, part := range []string{string(viewID), blockID, actionID, value, text} {
+	for _, part := range []string{container.id, blockID, actionID, value, text} {
 		mac.Write([]byte(part))
 		mac.Write([]byte{0})
 	}
 	return mac.Sum(nil)
 }
 
-func (m Messages) validViewOptionToken(viewID domain.ViewID, blockID, actionID, value, text, token string) bool {
+func (m Messages) validOptionToken(container optionContainer, blockID, actionID, value, text, token string) bool {
 	if len(m.AppCredentialKey) == 0 || token == "" {
 		return false
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(token)
-	return err == nil && hmac.Equal(decoded, m.viewOptionMAC(viewID, blockID, actionID, value, text))
+	return err == nil && hmac.Equal(decoded, m.optionMAC(container, blockID, actionID, value, text))
+}
+
+// withChosenOptionText gives a message external-select action the text of
+// each chosen option the client vouched for with the token issued when the
+// option was loaded, as Slack's block_actions payload carries it. An option
+// without a valid token keeps only its value.
+func (m Messages) withChosenOptionText(actionPayload map[string]any, action domain.AppBlockAction) {
+	if action.Type != "external_select" && action.Type != "multi_external_select" {
+		return
+	}
+	container := messageOptionContainer(action.MessageID)
+	texts := make(map[string]string, len(action.ChosenOptions))
+	for _, chosen := range action.ChosenOptions {
+		if chosen.Text != "" && m.validOptionToken(container, action.BlockID, action.ActionID, chosen.Value, chosen.Text, chosen.Token) {
+			texts[chosen.Value] = chosen.Text
+		}
+	}
+	attach := func(option map[string]any) {
+		if option == nil {
+			return
+		}
+		if _, known := option["text"]; known {
+			return
+		}
+		if text := texts[stringValue(option["value"])]; text != "" {
+			option["text"] = map[string]any{"type": "plain_text", "text": text, "emoji": true}
+		}
+	}
+	if selected, ok := actionPayload["selected_option"].(map[string]any); ok {
+		attach(selected)
+	}
+	if selected, ok := actionPayload["selected_options"].([]map[string]any); ok {
+		for _, option := range selected {
+			attach(option)
+		}
+	}
 }
 
 // sanitizeViewState checks the option text a client reports for external
@@ -139,7 +206,7 @@ func (m Messages) sanitizeViewState(current domain.View, stateJSON string) (stri
 					delete(option, "text")
 					return option
 				}
-				if known[value] != text && !m.validViewOptionToken(current.ID, blockID, actionID, value, text, token) {
+				if known[value] != text && !m.validOptionToken(viewOptionContainer(current.ID), blockID, actionID, value, text, token) {
 					delete(option, "text")
 					return option
 				}

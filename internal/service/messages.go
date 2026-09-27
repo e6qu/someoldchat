@@ -133,10 +133,14 @@ var (
 	ErrAutomationEntitiesEmpty   = errors.New("automation named entities cannot be empty")
 	ErrWorkflowFunctionNotFound  = errors.New("workflow function was not found")
 	ErrInvalidDialog             = errors.New("dialog payload is invalid")
-	ErrInvalidBot                = errors.New("bot identifier is required")
-	ErrInvalidMigration          = errors.New("migration user identifiers are invalid")
-	ErrInvalidOAuth              = errors.New("oauth authorization is invalid")
-	ErrInvalidOAuthClient        = errors.New("oauth client is invalid")
+	// ErrAppMissingActionURL is dialog.open for an app that could never
+	// receive the dialog's submission: it has neither an interactivity
+	// request URL nor Socket Mode.
+	ErrAppMissingActionURL = errors.New("app has no interactivity request URL")
+	ErrInvalidBot          = errors.New("bot identifier is required")
+	ErrInvalidMigration    = errors.New("migration user identifiers are invalid")
+	ErrInvalidOAuth        = errors.New("oauth authorization is invalid")
+	ErrInvalidOAuthClient  = errors.New("oauth client is invalid")
 	// ErrBadOAuthClientSecret is a known client presenting the wrong secret.
 	// Slack reports it as bad_client_secret, distinct from an unknown
 	// client's invalid_client_id.
@@ -3167,6 +3171,16 @@ func (m Messages) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID
 	definition, err := ParseDialog(payload)
 	if err != nil {
 		return err
+	}
+	// Slack refuses a dialog its app could not receive the submission of
+	// (app_missing_action_url). An app that is not installed here has no
+	// trigger to spend either, so that is left to the trigger check.
+	_, parsed, err := m.installedApp(ctx, workspaceID, appID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err == nil && (!parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.InteractivityRequestURL == "")) {
+		return ErrAppMissingActionURL
 	}
 	trigger, err := m.consumeAppTrigger(ctx, workspaceID, appID, triggerID)
 	if err != nil {

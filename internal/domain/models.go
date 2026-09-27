@@ -3476,6 +3476,18 @@ type AppBlockAction struct {
 	ActionID  string
 	Type      string
 	Value     string
+	// ChosenOptions reports the text of the options chosen in an
+	// external_select or multi_external_select, each with the Token the
+	// service issued when it was loaded (AppOption.Token). Text without a
+	// valid token is never sent to the app.
+	ChosenOptions []AppChosenOption
+}
+
+// AppChosenOption is an external-select option a client says it chose.
+type AppChosenOption struct {
+	Value string
+	Text  string
+	Token string
 }
 
 // AppViewBlockAction is an interaction with an element rendered inside a
@@ -3491,11 +3503,14 @@ type AppViewBlockAction struct {
 }
 
 // AppOptionQuery identifies one external_select or multi_external_select
-// element. Exactly one of MessageID and ViewID is set.
+// element, or one legacy dialog select with data_source "external". Exactly
+// one of MessageID, ViewID and DialogID is set; a dialog element's name is
+// both its BlockID and its ActionID.
 type AppOptionQuery struct {
 	AppID     AppID
 	MessageID MessageID
 	ViewID    ViewID
+	DialogID  DialogID
 	BlockID   string
 	ActionID  string
 	Value     string
@@ -3506,10 +3521,10 @@ type AppOption struct {
 	Value       string
 	Description string
 	Group       string
-	// Token vouches for Text when the option was loaded for a view: the
-	// client returns it with a chosen option so the service can put the
-	// option's text in view_submission and block_actions payloads, as Slack
-	// does, without trusting text the browser made up.
+	// Token vouches for Text within the view or message the option was
+	// loaded for: the client returns it with a chosen option so the service
+	// can put the option's text in view_submission and block_actions
+	// payloads, as Slack does, without trusting text the browser made up.
 	Token string
 }
 

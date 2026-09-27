@@ -3777,7 +3777,7 @@ func TestHTMXPostMessage(t *testing.T) {
 		`data-theme="light"`,
 		"HX-Request",
 		"last_event_id",
-		"sessionStorage",
+		`<body data-event-head="`,
 		`method="get" action="/app/search"`,
 		`name="q"`,
 	)

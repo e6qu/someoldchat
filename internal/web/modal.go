@@ -431,7 +431,8 @@ func withChosenOptions(options []messageActionOptionView, values []string) []mes
 	return options
 }
 
-// externalChoice is an option a browser loaded for a view's external select:
+// externalChoice is an option a browser loaded for an external select in a
+// view or a message:
 // its value, its text, and the service's token vouching for that text.
 type externalChoice struct {
 	Value string `json:"value"`

@@ -188,6 +188,30 @@ func (m Messages) slashCommandChannelName(ctx context.Context, conversation doma
 	return conversation.Name, nil
 }
 
+// interactiveMessage is the app message a member interacts with: a stored
+// message, or an ephemeral one only that member was shown. Both the action
+// and the options request for an element in it resolve it the same way, so an
+// external select in an ephemeral message can load its options as well as
+// report a choice.
+func (m Messages) interactiveMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.MessageID) (domain.Message, bool, error) {
+	message, err := m.Store.GetMessage(ctx, id)
+	ephemeral := false
+	if errors.Is(err, store.ErrNotFound) {
+		value, ephemeralErr := m.Store.GetEphemeralMessage(ctx, workspaceID, userID, id)
+		if ephemeralErr != nil {
+			return domain.Message{}, false, store.ErrNotFound
+		}
+		message = ephemeralAsMessage(value)
+		ephemeral = true
+	} else if err != nil {
+		return domain.Message{}, false, err
+	}
+	if message.WorkspaceID != workspaceID || message.AppID == "" {
+		return domain.Message{}, false, store.ErrNotFound
+	}
+	return message, ephemeral, nil
+}
+
 func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, action domain.AppBlockAction, responseBaseURL string) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
@@ -195,20 +219,9 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 	if action.MessageID == "" || strings.TrimSpace(action.ActionID) == "" || strings.TrimSpace(action.Type) == "" {
 		return ErrAppInteractionUnavailable
 	}
-	message, err := m.Store.GetMessage(ctx, action.MessageID)
-	ephemeral := false
-	if errors.Is(err, store.ErrNotFound) {
-		value, ephemeralErr := m.Store.GetEphemeralMessage(ctx, workspaceID, userID, action.MessageID)
-		if ephemeralErr != nil {
-			return store.ErrNotFound
-		}
-		message = ephemeralAsMessage(value)
-		ephemeral = true
-	} else if err != nil {
+	message, ephemeral, err := m.interactiveMessage(ctx, workspaceID, userID, action.MessageID)
+	if err != nil {
 		return err
-	}
-	if message.WorkspaceID != workspaceID || message.AppID == "" {
-		return store.ErrNotFound
 	}
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, message.Conversation); err != nil {
 		return err
@@ -244,6 +257,7 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 		return err
 	}
 	actionPayload := appBlockActionPayload(message.Blocks, action)
+	m.withChosenOptionText(actionPayload, action)
 	payload := map[string]any{
 		"type":       "block_actions",
 		"api_app_id": snapshot.App.ID,
@@ -364,29 +378,41 @@ func (m Messages) DispatchViewBlockAction(ctx context.Context, workspaceID domai
 	return err
 }
 
-// LoadAppOptions sends Slack's block_suggestion payload for a dynamic select
-// and validates the owning app's response before it reaches the first-party
-// client.
+// LoadAppOptions asks the owning app for the options of a dynamic select —
+// Slack's block_suggestion for an external select in a message or view, and
+// dialog_suggestion for a legacy dialog select with data_source "external" —
+// and validates the app's response before it reaches the first-party client.
+// Every option is signed for the element it was loaded into (AppOption.Token).
 func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, query domain.AppOptionQuery, responseBaseURL string) ([]domain.AppOption, error) {
 	query.BlockID = strings.TrimSpace(query.BlockID)
 	query.ActionID = strings.TrimSpace(query.ActionID)
 	query.Value = strings.TrimSpace(query.Value)
-	if query.AppID == "" || query.BlockID == "" || query.ActionID == "" ||
-		(query.MessageID == "" && query.ViewID == "") || (query.MessageID != "" && query.ViewID != "") ||
-		len(query.Value) > 2000 {
+	containers := 0
+	for _, id := range []string{string(query.MessageID), string(query.ViewID), string(query.DialogID)} {
+		if id != "" {
+			containers++
+		}
+	}
+	if query.AppID == "" || query.BlockID == "" || query.ActionID == "" || containers != 1 || len(query.Value) > 2000 {
 		return nil, ErrAppInteractionUnavailable
 	}
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return nil, err
 	}
-	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
-		return nil, err
+	var (
+		payload map[string]any
+		parse   = parseAppOptions
+		err     error
+	)
+	if query.DialogID != "" {
+		// A dialog is the member's own and may have been opened from a
+		// shortcut anywhere; like its submission, the request names the
+		// channel only when the member is in it.
+		payload, err = m.dialogSuggestionPayload(ctx, workspaceID, userID, conversationID, query)
+		parse = parseDialogOptions
+	} else {
+		payload, err = m.blockSuggestionPayload(ctx, workspaceID, userID, conversationID, query)
 	}
-	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	user, err := m.Store.GetUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -396,45 +422,6 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 	}
 	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.MessageMenuOptionsURL == "") {
 		return nil, ErrAppInteractionUnavailable
-	}
-	payload := map[string]any{
-		"type": "block_suggestion", "api_app_id": query.AppID,
-		"team":      map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
-		"user":      map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
-		"block_id":  query.BlockID,
-		"action_id": query.ActionID,
-		"value":     query.Value,
-	}
-	if query.MessageID != "" {
-		message, messageErr := m.Store.GetMessage(ctx, query.MessageID)
-		if messageErr != nil || message.WorkspaceID != workspaceID || message.Conversation != conversationID || message.AppID != query.AppID {
-			return nil, store.ErrNotFound
-		}
-		if !blocksContainAction(message.Blocks, query.BlockID, query.ActionID, "external_select", "multi_external_select") {
-			return nil, store.ErrNotFound
-		}
-		payload["container"] = map[string]any{
-			"type": "message", "message_ts": domain.NewMessageTimestamp(message.CreatedAt),
-			"channel_id": message.Conversation, "is_ephemeral": false,
-		}
-		payload["channel"] = map[string]any{"id": message.Conversation}
-		payload["message"] = appInteractionMessage(message)
-	} else {
-		current, _, _, _, _, contextErr := m.viewInteractionContext(ctx, workspaceID, userID, conversationID, query.ViewID, "")
-		if contextErr != nil {
-			return nil, contextErr
-		}
-		if current.AppID != query.AppID ||
-			(!viewContainsAction(current.Payload, query.BlockID, query.ActionID, "external_select") &&
-				!viewContainsAction(current.Payload, query.BlockID, query.ActionID, "multi_external_select")) {
-			return nil, store.ErrNotFound
-		}
-		view, renderErr := appInteractionView(current)
-		if renderErr != nil {
-			return nil, renderErr
-		}
-		payload["container"] = map[string]any{"type": "view", "view_id": current.ID}
-		payload["view"] = view
 	}
 	verificationToken, err := m.openAppVerificationToken(snapshot.App)
 	if err != nil {
@@ -450,7 +437,7 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 		if requestErr != nil {
 			return nil, requestErr
 		}
-		return m.vouchViewOptions(query)(parseAppOptions(body))
+		return m.vouchLoadedOptions(query)(parse(body))
 	}
 	_, _, capability, err := m.createInteractionCapabilities(ctx, query.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
 	if err != nil {
@@ -467,7 +454,7 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 	for {
 		response, responseErr := m.Store.GetSocketModeResponse(ctx, query.AppID, envelopeID)
 		if responseErr == nil {
-			return m.vouchViewOptions(query)(parseAppOptions([]byte(response.Payload)))
+			return m.vouchLoadedOptions(query)(parse([]byte(response.Payload)))
 		}
 		if !errors.Is(responseErr, store.ErrNotFound) {
 			return nil, responseErr
@@ -480,6 +467,65 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 		case <-ticker.C:
 		}
 	}
+}
+
+// blockSuggestionPayload is Slack's block_suggestion for an external select
+// in a message or view the member can see, without the app's token.
+func (m Messages) blockSuggestionPayload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, query domain.AppOptionQuery) (map[string]any, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return nil, err
+	}
+	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	user, err := m.Store.GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	payload := map[string]any{
+		"type": "block_suggestion", "api_app_id": query.AppID,
+		"team":      map[string]any{"id": workspace.ID, "domain": workspace.SlackDomain()},
+		"user":      map[string]any{"id": user.ID, "username": user.Name, "name": user.Name, "team_id": workspace.ID},
+		"block_id":  query.BlockID,
+		"action_id": query.ActionID,
+		"value":     query.Value,
+	}
+	if query.MessageID != "" {
+		message, ephemeral, messageErr := m.interactiveMessage(ctx, workspaceID, userID, query.MessageID)
+		if errors.Is(messageErr, store.ErrNotFound) || (messageErr == nil && (message.Conversation != conversationID || message.AppID != query.AppID)) {
+			return nil, store.ErrNotFound
+		}
+		if messageErr != nil {
+			return nil, messageErr
+		}
+		if !blocksContainAction(message.Blocks, query.BlockID, query.ActionID, "external_select", "multi_external_select") {
+			return nil, store.ErrNotFound
+		}
+		payload["container"] = map[string]any{
+			"type": "message", "message_ts": domain.NewMessageTimestamp(message.CreatedAt),
+			"channel_id": message.Conversation, "is_ephemeral": ephemeral,
+		}
+		payload["channel"] = map[string]any{"id": message.Conversation}
+		payload["message"] = appInteractionMessage(message)
+		return payload, nil
+	}
+	current, _, _, _, _, err := m.viewInteractionContext(ctx, workspaceID, userID, conversationID, query.ViewID, "")
+	if err != nil {
+		return nil, err
+	}
+	if current.AppID != query.AppID ||
+		(!viewContainsAction(current.Payload, query.BlockID, query.ActionID, "external_select") &&
+			!viewContainsAction(current.Payload, query.BlockID, query.ActionID, "multi_external_select")) {
+		return nil, store.ErrNotFound
+	}
+	view, err := appInteractionView(current)
+	if err != nil {
+		return nil, err
+	}
+	payload["container"] = map[string]any{"type": "view", "view_id": current.ID}
+	payload["view"] = view
+	return payload, nil
 }
 
 func blocksContainAction(blocks, blockID, actionID string, actionTypes ...string) bool {
@@ -1315,7 +1361,8 @@ func (m Messages) HandleSocketModeResponse(ctx context.Context, appID domain.App
 		_, err = m.applyDialogResponse(ctx, current, payload)
 		return err
 	}
-	if interactionPayload.Type == "block_suggestion" {
+	if interactionPayload.Type == "block_suggestion" || interactionPayload.Type == "dialog_suggestion" {
+		// An options request is waiting for this answer (LoadAppOptions).
 		return m.Store.RecordSocketModeResponse(ctx, domain.SocketModeResponse{
 			AppID: appID, EnvelopeID: strings.TrimSpace(envelopeID), Payload: string(payload), ReceivedAt: time.Now().UTC(),
 		})

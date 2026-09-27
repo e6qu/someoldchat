@@ -239,6 +239,11 @@ Browsers reconnect with `Last-Event-ID`, and a replica reads missed events from
 the journal before subscribing to best-effort live notification. A stream opened
 with no cursor starts at the journal head (`LatestEventSequence`), as an RTM
 ticket does at `rtm.connect`, rather than replaying the reader's history.
+Because that head is taken when the stream connects, not when the page was
+drawn, every web page that opens `/events` reads the member's head before it
+reads the state it renders, carries it as `<body data-event-head>`, and opens
+its first connection with `last_event_id` set to it; an event committed between
+the render and the connection is therefore delivered rather than lost.
 Replica-local fan-out is an optimization only.
 
 Both live streams — SSE and RTM — read the journal only through the per-user

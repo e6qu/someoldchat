@@ -420,20 +420,25 @@ type pageData struct {
 	// browser's permission — only the client can see.
 	BrowserNotifications bool
 	NotificationsPaused  bool
-	Workspaces           []workspaceChoice
-	Huddle               huddleView
-	HuddleURL            string
-	Timeline             messageList
-	Thread               messageList
-	ThreadTimestamp      string
-	Channels             []conversationView
-	SidebarSections      []sidebarSectionView
-	SectionOptions       []sidebarSectionOption
-	Directs              []conversationView
-	MoreChannelsURL      string
-	Channel              string
-	ChannelName          string
-	ChannelPrefix        string
+	// CanonicalURL is set when the page answers a POST (a modal or dialog
+	// submitted with errors or still pending): the page replaces its history
+	// entry with it, so a live reload or the member's own refresh reads the
+	// conversation instead of submitting the form again.
+	CanonicalURL    string
+	Workspaces      []workspaceChoice
+	Huddle          huddleView
+	HuddleURL       string
+	Timeline        messageList
+	Thread          messageList
+	ThreadTimestamp string
+	Channels        []conversationView
+	SidebarSections []sidebarSectionView
+	SectionOptions  []sidebarSectionOption
+	Directs         []conversationView
+	MoreChannelsURL string
+	Channel         string
+	ChannelName     string
+	ChannelPrefix   string
 	// ChannelStatusDisplay is the other person's current status emoji resolved
 	// to a glyph, shown beside a one-to-one DM's title the way it is shown beside
 	// their name everywhere else. Empty for a channel or a group DM, which are
@@ -1399,7 +1404,7 @@ const themeBootstrap = `<script>(function(){var root=document.documentElement;va
 const themeToggleScript = `<script>(function(){var root=document.documentElement;var toggle=document.getElementById('theme-toggle');function apply(theme){root.setAttribute('data-theme',theme);root.setAttribute('data-theme-explicit','');if(toggle)toggle.setAttribute('aria-pressed',theme==='dark'?'true':'false')}apply(root.getAttribute('data-theme')==='dark'?'dark':'light');if(!toggle)return;toggle.addEventListener('click',function(){var next=root.getAttribute('data-theme')==='dark'?'light':'dark';apply(next);try{localStorage.setItem('sameoldchat-theme',next)}catch(error){}})})();</script>`
 
 const layoutMarkup = `<!doctype html>
-<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "title" .}}</title><style>` + sharedStyle + `</style>{{block "styles" .}}{{end}}` + themeBootstrap + `</head><body>{{template "content" .}}` + themeToggleScript + `{{block "scripts" .}}{{end}}</body></html>`
+<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "title" .Page}}</title><style>` + sharedStyle + `</style>{{block "styles" .Page}}{{end}}` + themeBootstrap + `</head><body{{with .EventHead}} data-event-head="{{.}}"{{end}}>{{template "content" .Page}}` + themeToggleScript + `{{block "scripts" .Page}}{{end}}</body></html>`
 
 // templateFunctions is deliberately tiny: it exists so a template cannot write
 // an aria-keyshortcuts value by hand. Every advertised chord is looked up in
@@ -2117,7 +2122,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
 {{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
-<div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}">
+<div class="shell" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}"{{if .CanonicalURL}} data-canonical-url="{{.CanonicalURL}}"{{end}}>
   <header class="topbar">
     <button class="nav-toggle" id="nav-toggle" type="button" aria-controls="workspace-sidebar" aria-expanded="false" aria-label="Open navigation"><span aria-hidden="true">☰</span></button>
     <span class="brand">{{.WorkspaceName}}</span>
@@ -2593,7 +2598,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
           {{else if $input.Unsupported}}<p class="modal-legend" id="modal-input-{{$input.Index}}">{{$input.Label}}{{if $input.Optional}} <span class="modal-hint">(optional)</span>{{end}}</p><p class="modal-hint modal-unsupported" role="note">{{$input.Unsupported}}{{if not $input.Optional}} The app requires a value here, so this form cannot be submitted from this client.{{end}}</p>
           {{else}}<label for="modal-input-{{$input.Index}}">{{$input.Label}}{{if $input.Optional}} <span class="modal-hint">(optional)</span>{{end}}</label>
             {{if or (eq $input.Control "textarea") (eq $input.Control "richtext")}}<textarea id="modal-input-{{$input.Index}}" name="input_{{$input.Index}}" placeholder="{{$input.Placeholder}}"{{if $input.MinLength}} minlength="{{$input.MinLength}}"{{end}}{{if $input.MaxLength}} maxlength="{{$input.MaxLength}}"{{end}}{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{$input.Value}}</textarea>
-            {{else if eq $input.Control "external"}}<div class="external-select" data-app-options data-app-id="{{$.Modal.AppID}}" data-view-id="{{$.Modal.ID}}" data-block-id="{{$input.BlockID}}" data-action-id="{{$input.ActionID}}" data-channel="{{$.Channel}}" data-min-query="{{$input.MinQueryLength}}"><input id="modal-input-{{$input.Index}}" type="search" data-options-query placeholder="{{$input.Placeholder}}" minlength="{{$input.MinQueryLength}}"><button class="block-action" type="button" data-options-load>Search</button><select name="input_{{$input.Index}}" data-options-results{{if $input.Multiple}} multiple{{end}}{{if not $input.Optional}} required{{end}}{{if not $input.Options}} disabled{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{range $option := $input.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select><p class="external-select-status" data-options-status role="status"></p><noscript>Dynamic options require JavaScript in this client.</noscript></div>
+            {{else if eq $input.Control "external"}}<div class="external-select" data-app-options data-app-id="{{$.Modal.AppID}}" {{if $.Modal.Dialog}}data-dialog-id{{else}}data-view-id{{end}}="{{$.Modal.ID}}" data-block-id="{{$input.BlockID}}" data-action-id="{{$input.ActionID}}" data-channel="{{$.Channel}}" data-min-query="{{$input.MinQueryLength}}"><input id="modal-input-{{$input.Index}}" type="search" data-options-query placeholder="{{$input.Placeholder}}" minlength="{{$input.MinQueryLength}}"><button class="block-action" type="button" data-options-load>Search</button><select name="input_{{$input.Index}}" data-options-results{{if $input.Multiple}} multiple{{end}}{{if not $input.Optional}} required{{end}}{{if not $input.Options}} disabled{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{range $option := $input.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select><p class="external-select-status" data-options-status role="status"></p><noscript>Dynamic options require JavaScript in this client.</noscript></div>
             {{else if eq $input.Control "file"}}{{if $input.Files}}<ul class="modal-file-list" aria-label="Attached files">{{range $file := $input.Files}}<li><label><input type="checkbox" name="input_{{$input.Index}}" value="{{$file.Value}}" checked> {{$file.Name}}</label></li>{{end}}</ul>{{end}}<input id="modal-input-{{$input.Index}}" type="file" name="input_{{$input.Index}}_upload"{{if gt $input.MaxFiles 1}} multiple{{end}}{{if $input.Accept}} accept="{{$input.Accept}}"{{end}}{{if and (not $input.Optional) (not $input.Files)}} required{{end}} aria-describedby="modal-file-hint-{{$input.Index}}{{if $block.Error}} modal-error-{{$input.Index}}{{end}}"{{if $block.Error}} aria-invalid="true"{{end}}><p class="modal-hint" id="modal-file-hint-{{$input.Index}}">Up to {{$input.MaxFiles}} {{if eq $input.MaxFiles 1}}file{{else}}files{{end}}{{if $input.FileTypes}} ({{range $index, $type := $input.FileTypes}}{{if $index}}, {{end}}{{$type}}{{end}}){{end}}. Attached files stay private to you; the app can read them.</p>
             {{else if eq $input.Control "select"}}<select id="modal-input-{{$input.Index}}" name="input_{{$input.Index}}"{{if $input.Multiple}} multiple{{end}}{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}><option value=""{{if not $input.Optional}} disabled{{end}}>{{$input.Placeholder}}</option>{{range $option := $input.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select>
             {{else}}<input id="modal-input-{{$input.Index}}" type="{{if eq $input.Control "date"}}date{{else if eq $input.Control "time"}}time{{else if eq $input.Control "datetime"}}datetime-local{{else if eq $input.Control "email"}}email{{else if eq $input.Control "url"}}url{{else if eq $input.Control "number"}}number{{else}}text{{end}}" name="input_{{$input.Index}}" value="{{$input.Value}}"{{if $input.DateTimeUnix}} data-unix="{{$input.DateTimeUnix}}"{{end}}{{if $input.MinLength}} minlength="{{$input.MinLength}}"{{end}}{{if $input.MaxLength}} maxlength="{{$input.MaxLength}}"{{end}}{{if eq $input.Control "number"}} step="{{$input.Step}}"{{if $input.MinValue}} min="{{$input.MinValue}}"{{end}}{{if $input.MaxValue}} max="{{$input.MaxValue}}"{{end}}{{end}} placeholder="{{$input.Placeholder}}"{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{end}}
@@ -2991,7 +2996,7 @@ var active=document.activeElement;var focusedRow=active&&active.closest?active.c
 fetch(window.location.pathname+window.location.search,{headers:{'X-SameOldChat-Activity-Refresh':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error();return response.text()}).then(function(html){var parsed=new DOMParser().parseFromString(html,'text/html');var replacement=parsed.getElementById('activity-feed');if(!replacement)throw new Error();feed.replaceWith(replacement);feed=replacement;Object.keys(selected).forEach(function(id){Array.prototype.forEach.call(feed.querySelectorAll('input[name=activity_id]'),function(input){if(input.value===id)input.checked=true})});syncRows(focusedID);if(focusedID){var row=rows[current];var target=row;if(focusedLabel){Array.prototype.some.call(row.querySelectorAll('[aria-label]'),function(candidate){if(candidate.getAttribute('aria-label')===focusedLabel){target=candidate;return true}return false})}target.focus({preventScroll:true});window.scrollTo(scrollX,scrollY)}if(liveStatus)liveStatus.textContent='Activity updated.'}).catch(function(){if(liveStatus)liveStatus.textContent='New activity is available. Reload to update the list.'}).finally(function(){refreshing=false;if(refreshQueued){refreshQueued=false;refreshActivity()}});
 }
 function scheduleActivityRefresh(){window.clearTimeout(refreshTimer);refreshTimer=window.setTimeout(refreshActivity,180)}
-if(window.EventSource){var cursor='';try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){}var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));activityTopics.forEach(function(topic){stream.addEventListener(topic,function(event){if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}scheduleActivityRefresh()})});stream.onerror=function(){if(liveStatus)liveStatus.textContent='Reconnecting to live Activity…'};stream.onopen=function(){if(liveStatus&&liveStatus.textContent==='Reconnecting to live Activity…')liveStatus.textContent='Live Activity resumed.'}}
+if(window.EventSource){var stream=` + liveStreamOpen + `;activityTopics.forEach(function(topic){stream.addEventListener(topic,scheduleActivityRefresh)});stream.onerror=function(){if(liveStatus)liveStatus.textContent='Reconnecting to live Activity…'};stream.onopen=function(){if(liveStatus&&liveStatus.textContent==='Reconnecting to live Activity…')liveStatus.textContent='Live Activity resumed.'}}
 })();</script>{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
@@ -3120,13 +3125,11 @@ var laterTemplate = mustPage(laterMarkup)
 // person's unsaved changes. Saving navigates anyway, which refreshes the page.
 const laterLiveScript = `<script>(function(){
 if(!window.EventSource)return;
-var cursor='';
-try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){cursor=''}
-var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));
+var stream=` + liveStreamOpen + `;
 var timezone='UTC';try{timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(error){}
 Array.prototype.forEach.call(document.querySelectorAll('[data-browser-timezone]'),function(input){input.value=timezone});
 ['saved_item.created','saved_item.changed','saved_item.removed','later_reminder.created','later_reminder.changed','later_reminder.completed','later_reminder.deleted','later_reminder.delivered','later_reminder.failed'].forEach(function(topic){
-stream.addEventListener(topic,function(event){if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}
+stream.addEventListener(topic,function(){
 if(document.querySelector('details[open]'))return;
 window.location.reload()});
 });
@@ -3533,6 +3536,18 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // elides comments in script context, and an elided comment makes the served
 // document disagree with the hash that permits it. There is deliberately not one
 // comment inside the script for that reason.
+// progressiveEnhancementScript's patchDialogErrors applies the errors an app
+// answered a dialog submission with to the dialog on screen, as Slack's client
+// does. A dialog keeps what the member entered only in the page (the server
+// stores a view's state, not a dialog's), so reloading for dialog.updated
+// emptied every field the app had just asked the member to correct. It
+// reports false, and the caller reloads, when the open dialog is not the one
+// the event names. (Comments cannot live inside the script: html/template
+// strips them, and the policy hashes the bytes as written.)
+// The live stream's deliver ignores view.closed, view.submitted and
+// dialog.closed on a page that shows no modal: there is nothing on it to
+// refresh, and the reload it used to start raced the member's own next
+// navigation, aborting it.
 var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
 var composer=document.getElementById('composer');
@@ -4598,15 +4613,35 @@ window.location.assign(href);
 if(navToggle)navToggle.addEventListener('click',function(){setNav(!nav.classList.contains('is-open'),true)});
 if(navScrim)navScrim.addEventListener('click',function(){setNav(false,false);if(navToggle)navToggle.focus()});
 if(narrow){if(typeof narrow.addEventListener==='function')narrow.addEventListener('change',function(){setNav(false,false)});setNav(false,false)}
+var canonicalShell=document.querySelector('[data-canonical-url]');
+if(canonicalShell&&window.history&&typeof window.history.replaceState==='function'){try{window.history.replaceState(null,'',canonicalShell.getAttribute('data-canonical-url'))}catch(error){}}
+function patchDialogErrors(dialogID){
+var current=document.querySelector('.app-modal');var field=current&&current.querySelector('.modal-form input[name="dialog_id"]');
+if(!field||!dialogID||field.value!==dialogID)return false;
+fetch(window.location.pathname+window.location.search,{credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error();return response.text()}).then(function(html){
+var fresh=new DOMParser().parseFromString(html,'text/html').querySelector('.app-modal');var freshField=fresh&&fresh.querySelector('.modal-form input[name="dialog_id"]');
+var freshBlocks=fresh?fresh.querySelectorAll('.modal-input'):[];var blocks=current.querySelectorAll('.modal-input');
+if(!freshField||freshField.value!==dialogID||freshBlocks.length!==blocks.length){window.location.reload();return}
+var formError=current.querySelector('.modal-body > .form-error');if(formError)formError.remove();
+var freshFormError=fresh.querySelector('.modal-body > .form-error');if(freshFormError)current.querySelector('.modal-body').prepend(document.importNode(freshFormError,true));
+var first=null;
+Array.prototype.forEach.call(blocks,function(block,index){
+var old=block.querySelector('.modal-error');if(old)old.remove();
+var control=block.querySelector('[name^="input_"]');var error=freshBlocks[index].querySelector('.modal-error');
+if(!control)return;
+if(error){block.appendChild(document.importNode(error,true));control.setAttribute('aria-invalid','true');control.setAttribute('aria-describedby',error.id);if(!first)first=control}else{control.removeAttribute('aria-invalid');control.removeAttribute('aria-describedby')}
+});
+if(first)first.focus();
+}).catch(function(){window.location.reload()});
+return true;
+}
 if(window.EventSource){
-var cursor='';
-try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){cursor=''}
-var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));
+var stream=` + liveStreamOpen + `;
 var deliver=function(event){
-if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}
 try{document.dispatchEvent(new CustomEvent('sameoldchat:event',{detail:{type:event.type,data:event.data}}))}catch(error){}
 if(event.type==='huddle.signal'||event.type==='huddle.reaction')return;
-if(event.type.indexOf('view.')===0||event.type.indexOf('dialog.')===0){var viewFrame=null;try{viewFrame=JSON.parse(event.data)}catch(error){}if(viewFrame&&viewFrame.state_only)return;window.location.reload();return}
+if((event.type==='view.closed'||event.type==='view.submitted'||event.type==='dialog.closed')&&!document.querySelector('.app-modal'))return;
+if(event.type.indexOf('view.')===0||event.type.indexOf('dialog.')===0){var viewFrame=null;try{viewFrame=JSON.parse(event.data)}catch(error){}if(viewFrame&&viewFrame.state_only)return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload();return}
 var live=regions(false);
 if(!live.length){announce('New activity is available in this conversation.');return}
 scheduleRefresh();
@@ -5542,6 +5577,11 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		return
 	}
 	csrfToken := auth.CSRFToken(sessionCookie.Value)
+	head, err := h.readLiveHead(r.Context(), principal)
+	if err != nil {
+		h.writeStoreError(w, err, "Live updates are temporarily unavailable.")
+		return
+	}
 
 	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
 	if err != nil {
@@ -5848,6 +5888,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	draftJSON, _ := json.Marshal(draftAttachments)
 
 	data := pageData{
+		CanonicalURL:         canonicalPageURL(r, appURL(string(channel), threadTimestamp, "", "", "")),
 		Timeline:             timeline,
 		Thread:               thread,
 		ThreadTimestamp:      threadTimestamp,
@@ -5961,7 +6002,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	if status == 0 {
 		status = http.StatusOK
 	}
-	h.writeHTML(w, pageTemplate, data, status, "page rendering unavailable")
+	h.writeLivePage(w, head, pageTemplate, data, status, "page rendering unavailable")
 }
 
 // timeline renders the message region on its own so live updates and mutations
@@ -7180,6 +7221,11 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 		h.writePageError(w, http.StatusBadRequest, "That Later link is not valid", "Open Later from the workspace and choose a section.")
 		return
 	}
+	head, err := h.readLiveHead(r.Context(), principal)
+	if err != nil {
+		h.writeStoreError(w, err, "Later is temporarily unavailable.")
+		return
+	}
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
 	if channel == "" {
 		channel = string(h.Channel)
@@ -7321,7 +7367,7 @@ func (h Handler) later(w http.ResponseWriter, r *http.Request) {
 		query := url.Values{"channel": {channel}, "state": {string(state)}, "cursor": {string(page.NextCursor)}}
 		data.MoreURL = "/app/later?" + query.Encode()
 	}
-	h.writeHTML(w, laterTemplate, data, http.StatusOK, "Later rendering unavailable")
+	h.writeLivePage(w, head, laterTemplate, data, http.StatusOK, "Later rendering unavailable")
 }
 
 func (h Handler) scheduledMessages(w http.ResponseWriter, r *http.Request) {
@@ -7513,6 +7559,11 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
 	if channel == "" {
 		channel = string(h.Channel)
+	}
+	head, err := h.readLiveHead(r.Context(), principal)
+	if err != nil {
+		h.writeStoreError(w, err, "Activity is temporarily unavailable.")
+		return
 	}
 	// Preferences carry the member's saved views, so they are read before the
 	// query: a saved view resolves to the same Kinds a single filter tab does.
@@ -7723,7 +7774,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	if page.HasMore && page.NextCursor != "" {
 		data.MoreURL = activityPageURL(channel, kindValue, viewValue, unreadOnly, clearedOnly, page.NextCursor)
 	}
-	h.writeHTML(w, activityTemplate, data, http.StatusOK, "activity rendering unavailable")
+	h.writeLivePage(w, head, activityTemplate, data, http.StatusOK, "activity rendering unavailable")
 }
 
 func activityKindLabel(item domain.ActivityItem) string {
@@ -11954,6 +12005,9 @@ func (h Handler) appInteraction(w http.ResponseWriter, r *http.Request) {
 		Type:      strings.TrimSpace(fields["action_type"]),
 		Value:     value,
 	}
+	if action.Type == "external_select" || action.Type == "multi_external_select" {
+		action.Value, action.ChosenOptions = externalSelectAction(action.Type, value)
+	}
 	if err := h.Messages.DispatchBlockAction(r.Context(), principal.WorkspaceID, principal.UserID, action, h.responseBaseURL(r)); err != nil {
 		status := http.StatusBadGateway
 		reason := "The app did not accept that action. Nothing was changed."
@@ -12007,6 +12061,40 @@ func (h Handler) appShortcut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.redirectMutation(w, r, h.viewURL(r, ""))
+}
+
+// externalSelectAction separates what a message external select posted into
+// the option values the app receives and the loaded options' text and
+// tokens, which the service checks before it reports the text to the app.
+// A multi-select posts a JSON array when more than one option is chosen.
+func externalSelectAction(actionType, posted string) (string, []domain.AppChosenOption) {
+	values := []string{posted}
+	list := false
+	if actionType == "multi_external_select" {
+		var decoded []string
+		if json.Unmarshal([]byte(posted), &decoded) == nil {
+			values, list = decoded, true
+		}
+	}
+	var chosen []domain.AppChosenOption
+	plain := make([]string, 0, len(values))
+	for _, value := range values {
+		choice, ok := decodeExternalChoice(value)
+		if !ok {
+			plain = append(plain, value)
+			continue
+		}
+		plain = append(plain, choice.Value)
+		chosen = append(chosen, domain.AppChosenOption{Value: choice.Value, Text: choice.Text, Token: choice.Token})
+	}
+	if !list {
+		return plain[0], chosen
+	}
+	encoded, err := json.Marshal(plain)
+	if err != nil {
+		return posted, nil
+	}
+	return string(encoded), chosen
 }
 
 func (h Handler) decodeAppInteractionMutation(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {
@@ -13174,8 +13262,67 @@ func secureHeaders(w http.ResponseWriter, policy string) {
 	header.Set("Cache-Control", "no-store")
 }
 
+// layoutData is what the shared layout executes with. The page's own
+// templates ("title", "styles", "content", "scripts") receive Page, so they
+// never see the wrapper; the layout alone reads EventHead.
+type layoutData struct {
+	Page any
+	// EventHead is set only on a page that opens the live event stream. See
+	// liveHead.
+	EventHead string
+}
+
+// renderPage executes a layout page. Every layout page is executed here, so
+// none can be rendered without the wrapper the layout expects.
+func renderPage(output *bytes.Buffer, page *template.Template, data any, head liveHead) error {
+	return page.Execute(output, layoutData{Page: data, EventHead: head.attribute()})
+}
+
+// liveHead is the journal position a page that opens /events was rendered
+// after. The page reads it before it reads anything it renders, carries it in
+// <body data-event-head>, and opens its stream from there (liveStreamOpen). A
+// stream opened without a cursor starts at the journal head as of the moment
+// EventSource connects, so an event committed between the render and that
+// connection was neither in the page nor on the stream. A cursor remembered
+// in sessionStorage from an earlier page is no substitute: it is only advanced
+// by the topics that page listened to, so it replays events the new render
+// already reflects.
+type liveHead struct {
+	sequence uint64
+	read     bool
+}
+
+func (head liveHead) attribute() string {
+	if !head.read {
+		return ""
+	}
+	return strconv.FormatUint(head.sequence, 10)
+}
+
+// readLiveHead asks the service for the member's stream head. It is the same
+// member-authorized position /events opens at, so the page and the stream
+// cannot disagree about where "now" is.
+func (h Handler) readLiveHead(ctx context.Context, principal auth.Principal) (liveHead, error) {
+	sequence, err := h.Messages.LatestEventSequence(ctx, principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		return liveHead{}, err
+	}
+	return liveHead{sequence: sequence, read: true}, nil
+}
+
+// liveStreamOpen is the one expression every live page script opens its
+// stream with. EventSource itself resends the last id it received when it
+// reconnects, so the rendered head is only needed for the first connection.
+const liveStreamOpen = `new EventSource('/events'+(/^[0-9]+$/.test(document.body.getAttribute('data-event-head')||'')?'?last_event_id='+document.body.getAttribute('data-event-head'):''))`
+
 func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data any, status int, unavailable string) {
 	h.writeHTMLWithPolicy(w, page, data, status, unavailable, workspaceContentSecurityPolicy)
+}
+
+// writeLivePage serves a workspace page whose script opens the live event
+// stream from head.
+func (h Handler) writeLivePage(w http.ResponseWriter, head liveHead, page *template.Template, data any, status int, unavailable string) {
+	h.writeRendered(w, page, data, head, status, unavailable, workspaceContentSecurityPolicy)
 }
 
 // writeHTMLWithPolicy serves a page under a policy of its own. A page outside
@@ -13183,8 +13330,12 @@ func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data 
 // set of things it is allowed to do, and serving it under the workspace policy
 // would either allow more than it needs or block the scripts it has.
 func (h Handler) writeHTMLWithPolicy(w http.ResponseWriter, page *template.Template, data any, status int, unavailable, policy string) {
+	h.writeRendered(w, page, data, liveHead{}, status, unavailable, policy)
+}
+
+func (h Handler) writeRendered(w http.ResponseWriter, page *template.Template, data any, head liveHead, status int, unavailable, policy string) {
 	var output bytes.Buffer
-	if err := page.Execute(&output, data); err != nil {
+	if err := renderPage(&output, page, data, head); err != nil {
 		secureHeaders(w, policy)
 		http.Error(w, unavailable, http.StatusServiceUnavailable)
 		return
@@ -13216,7 +13367,7 @@ func (h Handler) writePartial(w http.ResponseWriter, name string, data any, unav
 
 func (h Handler) writePageError(w http.ResponseWriter, status int, heading, message string) {
 	var output bytes.Buffer
-	if err := errorTemplate.Execute(&output, errorData{Heading: heading, Message: message}); err != nil {
+	if err := renderPage(&output, errorTemplate, errorData{Heading: heading, Message: message}, liveHead{}); err != nil {
 		secureHeaders(w, workspaceContentSecurityPolicy)
 		http.Error(w, heading, status)
 		return
@@ -13679,6 +13830,15 @@ func appAfterURL(channel, thread, after string) string {
 		query.Set("after", after)
 	}
 	return "/app?" + query.Encode()
+}
+
+// canonicalPageURL is the address a page answering a POST should stand at in
+// history; a GET page already stands at its own.
+func canonicalPageURL(r *http.Request, canonical string) string {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return ""
+	}
+	return canonical
 }
 
 func appURL(channel, thread, before, anchor, conversations string) string {

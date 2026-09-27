@@ -1967,8 +1967,11 @@ type BlockActionRequest struct {
 	ActionType      string                 `protobuf:"bytes,6,opt,name=action_type,json=actionType,proto3" json:"action_type,omitempty"`
 	Value           string                 `protobuf:"bytes,7,opt,name=value,proto3" json:"value,omitempty"`
 	ResponseBaseUrl string                 `protobuf:"bytes,8,opt,name=response_base_url,json=responseBaseUrl,proto3" json:"response_base_url,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// chosen_options reports each external-select option the member chose
+	// with the text and token the service issued when it was loaded.
+	ChosenOptions []*ChosenOption `protobuf:"bytes,9,rep,name=chosen_options,json=chosenOptions,proto3" json:"chosen_options,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BlockActionRequest) Reset() {
@@ -2057,6 +2060,73 @@ func (x *BlockActionRequest) GetResponseBaseUrl() string {
 	return ""
 }
 
+func (x *BlockActionRequest) GetChosenOptions() []*ChosenOption {
+	if x != nil {
+		return x.ChosenOptions
+	}
+	return nil
+}
+
+type ChosenOption struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChosenOption) Reset() {
+	*x = ChosenOption{}
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChosenOption) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChosenOption) ProtoMessage() {}
+
+func (x *ChosenOption) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChosenOption.ProtoReflect.Descriptor instead.
+func (*ChosenOption) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ChosenOption) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+func (x *ChosenOption) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *ChosenOption) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
 type ViewBlockActionRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -2075,7 +2145,7 @@ type ViewBlockActionRequest struct {
 
 func (x *ViewBlockActionRequest) Reset() {
 	*x = ViewBlockActionRequest{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[32]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2087,7 +2157,7 @@ func (x *ViewBlockActionRequest) String() string {
 func (*ViewBlockActionRequest) ProtoMessage() {}
 
 func (x *ViewBlockActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[32]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2100,7 +2170,7 @@ func (x *ViewBlockActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ViewBlockActionRequest.ProtoReflect.Descriptor instead.
 func (*ViewBlockActionRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{32}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ViewBlockActionRequest) GetWorkspaceId() string {
@@ -2185,13 +2255,16 @@ type AppOptionQueryRequest struct {
 	ActionId        string                 `protobuf:"bytes,8,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"`
 	Value           string                 `protobuf:"bytes,9,opt,name=value,proto3" json:"value,omitempty"`
 	ResponseBaseUrl string                 `protobuf:"bytes,10,opt,name=response_base_url,json=responseBaseUrl,proto3" json:"response_base_url,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// dialog_id names a legacy dialog whose select with data_source
+	// "external" is asking for options (dialog_suggestion).
+	DialogId      string `protobuf:"bytes,11,opt,name=dialog_id,json=dialogId,proto3" json:"dialog_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AppOptionQueryRequest) Reset() {
 	*x = AppOptionQueryRequest{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[33]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2203,7 +2276,7 @@ func (x *AppOptionQueryRequest) String() string {
 func (*AppOptionQueryRequest) ProtoMessage() {}
 
 func (x *AppOptionQueryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[33]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2216,7 +2289,7 @@ func (x *AppOptionQueryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppOptionQueryRequest.ProtoReflect.Descriptor instead.
 func (*AppOptionQueryRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{33}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *AppOptionQueryRequest) GetWorkspaceId() string {
@@ -2289,6 +2362,13 @@ func (x *AppOptionQueryRequest) GetResponseBaseUrl() string {
 	return ""
 }
 
+func (x *AppOptionQueryRequest) GetDialogId() string {
+	if x != nil {
+		return x.DialogId
+	}
+	return ""
+}
+
 type AppOption struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	Text        string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
@@ -2303,7 +2383,7 @@ type AppOption struct {
 
 func (x *AppOption) Reset() {
 	*x = AppOption{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[34]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2315,7 +2395,7 @@ func (x *AppOption) String() string {
 func (*AppOption) ProtoMessage() {}
 
 func (x *AppOption) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[34]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2328,7 +2408,7 @@ func (x *AppOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppOption.ProtoReflect.Descriptor instead.
 func (*AppOption) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{34}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *AppOption) GetText() string {
@@ -2375,7 +2455,7 @@ type AppOptionListResponse struct {
 
 func (x *AppOptionListResponse) Reset() {
 	*x = AppOptionListResponse{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[35]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2387,7 +2467,7 @@ func (x *AppOptionListResponse) String() string {
 func (*AppOptionListResponse) ProtoMessage() {}
 
 func (x *AppOptionListResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[35]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2400,7 +2480,7 @@ func (x *AppOptionListResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppOptionListResponse.ProtoReflect.Descriptor instead.
 func (*AppOptionListResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{35}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *AppOptionListResponse) GetOptions() []*AppOption {
@@ -2420,7 +2500,7 @@ type AppResponseRequest struct {
 
 func (x *AppResponseRequest) Reset() {
 	*x = AppResponseRequest{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[36]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2432,7 +2512,7 @@ func (x *AppResponseRequest) String() string {
 func (*AppResponseRequest) ProtoMessage() {}
 
 func (x *AppResponseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[36]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2445,7 +2525,7 @@ func (x *AppResponseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppResponseRequest.ProtoReflect.Descriptor instead.
 func (*AppResponseRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{36}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *AppResponseRequest) GetToken() string {
@@ -2479,7 +2559,7 @@ type AppShortcut struct {
 
 func (x *AppShortcut) Reset() {
 	*x = AppShortcut{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[37]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2491,7 +2571,7 @@ func (x *AppShortcut) String() string {
 func (*AppShortcut) ProtoMessage() {}
 
 func (x *AppShortcut) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[37]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2504,7 +2584,7 @@ func (x *AppShortcut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppShortcut.ProtoReflect.Descriptor instead.
 func (*AppShortcut) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{37}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *AppShortcut) GetAppId() string {
@@ -2581,7 +2661,7 @@ type AppShortcutListRequest struct {
 
 func (x *AppShortcutListRequest) Reset() {
 	*x = AppShortcutListRequest{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[38]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2593,7 +2673,7 @@ func (x *AppShortcutListRequest) String() string {
 func (*AppShortcutListRequest) ProtoMessage() {}
 
 func (x *AppShortcutListRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[38]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2606,7 +2686,7 @@ func (x *AppShortcutListRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppShortcutListRequest.ProtoReflect.Descriptor instead.
 func (*AppShortcutListRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{38}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *AppShortcutListRequest) GetWorkspaceId() string {
@@ -2639,7 +2719,7 @@ type AppShortcutListResponse struct {
 
 func (x *AppShortcutListResponse) Reset() {
 	*x = AppShortcutListResponse{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[39]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2651,7 +2731,7 @@ func (x *AppShortcutListResponse) String() string {
 func (*AppShortcutListResponse) ProtoMessage() {}
 
 func (x *AppShortcutListResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[39]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2664,7 +2744,7 @@ func (x *AppShortcutListResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppShortcutListResponse.ProtoReflect.Descriptor instead.
 func (*AppShortcutListResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{39}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *AppShortcutListResponse) GetShortcuts() []*AppShortcut {
@@ -2689,7 +2769,7 @@ type AppShortcutDispatchRequest struct {
 
 func (x *AppShortcutDispatchRequest) Reset() {
 	*x = AppShortcutDispatchRequest{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[40]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2701,7 +2781,7 @@ func (x *AppShortcutDispatchRequest) String() string {
 func (*AppShortcutDispatchRequest) ProtoMessage() {}
 
 func (x *AppShortcutDispatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[40]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2714,7 +2794,7 @@ func (x *AppShortcutDispatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppShortcutDispatchRequest.ProtoReflect.Descriptor instead.
 func (*AppShortcutDispatchRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{40}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *AppShortcutDispatchRequest) GetWorkspaceId() string {
@@ -2775,7 +2855,7 @@ type InteractionMutationResponse struct {
 
 func (x *InteractionMutationResponse) Reset() {
 	*x = InteractionMutationResponse{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[41]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2787,7 +2867,7 @@ func (x *InteractionMutationResponse) String() string {
 func (*InteractionMutationResponse) ProtoMessage() {}
 
 func (x *InteractionMutationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[41]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2800,7 +2880,7 @@ func (x *InteractionMutationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InteractionMutationResponse.ProtoReflect.Descriptor instead.
 func (*InteractionMutationResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{41}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *InteractionMutationResponse) GetOk() bool {
@@ -2842,7 +2922,7 @@ type SocketModeInteraction struct {
 
 func (x *SocketModeInteraction) Reset() {
 	*x = SocketModeInteraction{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[42]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2854,7 +2934,7 @@ func (x *SocketModeInteraction) String() string {
 func (*SocketModeInteraction) ProtoMessage() {}
 
 func (x *SocketModeInteraction) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[42]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2867,7 +2947,7 @@ func (x *SocketModeInteraction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SocketModeInteraction.ProtoReflect.Descriptor instead.
 func (*SocketModeInteraction) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{42}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *SocketModeInteraction) GetEnvelopeId() string {
@@ -3049,7 +3129,7 @@ type SocketModeInteractionClaimRequest struct {
 
 func (x *SocketModeInteractionClaimRequest) Reset() {
 	*x = SocketModeInteractionClaimRequest{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[43]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3061,7 +3141,7 @@ func (x *SocketModeInteractionClaimRequest) String() string {
 func (*SocketModeInteractionClaimRequest) ProtoMessage() {}
 
 func (x *SocketModeInteractionClaimRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[43]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3074,7 +3154,7 @@ func (x *SocketModeInteractionClaimRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use SocketModeInteractionClaimRequest.ProtoReflect.Descriptor instead.
 func (*SocketModeInteractionClaimRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{43}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *SocketModeInteractionClaimRequest) GetAppId() string {
@@ -3109,7 +3189,7 @@ type SocketModeInteractionAckRequest struct {
 
 func (x *SocketModeInteractionAckRequest) Reset() {
 	*x = SocketModeInteractionAckRequest{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[44]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3121,7 +3201,7 @@ func (x *SocketModeInteractionAckRequest) String() string {
 func (*SocketModeInteractionAckRequest) ProtoMessage() {}
 
 func (x *SocketModeInteractionAckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[44]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3134,7 +3214,7 @@ func (x *SocketModeInteractionAckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SocketModeInteractionAckRequest.ProtoReflect.Descriptor instead.
 func (*SocketModeInteractionAckRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{44}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *SocketModeInteractionAckRequest) GetAppId() string {
@@ -3171,7 +3251,7 @@ type SocketModeInteractionReleaseRequest struct {
 
 func (x *SocketModeInteractionReleaseRequest) Reset() {
 	*x = SocketModeInteractionReleaseRequest{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[45]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3183,7 +3263,7 @@ func (x *SocketModeInteractionReleaseRequest) String() string {
 func (*SocketModeInteractionReleaseRequest) ProtoMessage() {}
 
 func (x *SocketModeInteractionReleaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[45]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3196,7 +3276,7 @@ func (x *SocketModeInteractionReleaseRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use SocketModeInteractionReleaseRequest.ProtoReflect.Descriptor instead.
 func (*SocketModeInteractionReleaseRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{45}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *SocketModeInteractionReleaseRequest) GetAppId() string {
@@ -3245,7 +3325,7 @@ type SocketModeInteractionResponseRequest struct {
 
 func (x *SocketModeInteractionResponseRequest) Reset() {
 	*x = SocketModeInteractionResponseRequest{}
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[46]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3257,7 +3337,7 @@ func (x *SocketModeInteractionResponseRequest) String() string {
 func (*SocketModeInteractionResponseRequest) ProtoMessage() {}
 
 func (x *SocketModeInteractionResponseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[46]
+	mi := &file_sameoldchat_chat_v1_interactions_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3270,7 +3350,7 @@ func (x *SocketModeInteractionResponseRequest) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SocketModeInteractionResponseRequest.ProtoReflect.Descriptor instead.
 func (*SocketModeInteractionResponseRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{46}
+	return file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *SocketModeInteractionResponseRequest) GetAppId() string {
@@ -3445,7 +3525,7 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\x10thread_timestamp\x18\x04 \x01(\tR\x0fthreadTimestamp\x12\x18\n" +
 	"\acommand\x18\x05 \x01(\tR\acommand\x12\x12\n" +
 	"\x04text\x18\x06 \x01(\tR\x04text\x12*\n" +
-	"\x11response_base_url\x18\a \x01(\tR\x0fresponseBaseUrl\"\x8a\x02\n" +
+	"\x11response_base_url\x18\a \x01(\tR\x0fresponseBaseUrl\"\xd4\x02\n" +
 	"\x12BlockActionRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
@@ -3456,7 +3536,12 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\vaction_type\x18\x06 \x01(\tR\n" +
 	"actionType\x12\x14\n" +
 	"\x05value\x18\a \x01(\tR\x05value\x12*\n" +
-	"\x11response_base_url\x18\b \x01(\tR\x0fresponseBaseUrl\"\xd0\x02\n" +
+	"\x11response_base_url\x18\b \x01(\tR\x0fresponseBaseUrl\x12H\n" +
+	"\x0echosen_options\x18\t \x03(\v2!.sameoldchat.chat.v1.ChosenOptionR\rchosenOptions\"N\n" +
+	"\fChosenOption\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\x12\x14\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token\"\xd0\x02\n" +
 	"\x16ViewBlockActionRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -3470,7 +3555,7 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\n" +
 	"state_json\x18\t \x01(\tR\tstateJson\x12*\n" +
 	"\x11response_base_url\x18\n" +
-	" \x01(\tR\x0fresponseBaseUrl\"\xc5\x02\n" +
+	" \x01(\tR\x0fresponseBaseUrl\"\xe2\x02\n" +
 	"\x15AppOptionQueryRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -3483,7 +3568,8 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\taction_id\x18\b \x01(\tR\bactionId\x12\x14\n" +
 	"\x05value\x18\t \x01(\tR\x05value\x12*\n" +
 	"\x11response_base_url\x18\n" +
-	" \x01(\tR\x0fresponseBaseUrl\"\x83\x01\n" +
+	" \x01(\tR\x0fresponseBaseUrl\x12\x1b\n" +
+	"\tdialog_id\x18\v \x01(\tR\bdialogId\"\x83\x01\n" +
 	"\tAppOption\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12 \n" +
@@ -3615,7 +3701,7 @@ func file_sameoldchat_chat_v1_interactions_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_interactions_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_interactions_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
+var file_sameoldchat_chat_v1_interactions_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
 var file_sameoldchat_chat_v1_interactions_proto_goTypes = []any{
 	(*ReadCursor)(nil),                           // 0: sameoldchat.chat.v1.ReadCursor
 	(*MarkReadRequest)(nil),                      // 1: sameoldchat.chat.v1.MarkReadRequest
@@ -3649,24 +3735,25 @@ var file_sameoldchat_chat_v1_interactions_proto_goTypes = []any{
 	(*ThreadSummariesResponse)(nil),              // 29: sameoldchat.chat.v1.ThreadSummariesResponse
 	(*SlashCommandRequest)(nil),                  // 30: sameoldchat.chat.v1.SlashCommandRequest
 	(*BlockActionRequest)(nil),                   // 31: sameoldchat.chat.v1.BlockActionRequest
-	(*ViewBlockActionRequest)(nil),               // 32: sameoldchat.chat.v1.ViewBlockActionRequest
-	(*AppOptionQueryRequest)(nil),                // 33: sameoldchat.chat.v1.AppOptionQueryRequest
-	(*AppOption)(nil),                            // 34: sameoldchat.chat.v1.AppOption
-	(*AppOptionListResponse)(nil),                // 35: sameoldchat.chat.v1.AppOptionListResponse
-	(*AppResponseRequest)(nil),                   // 36: sameoldchat.chat.v1.AppResponseRequest
-	(*AppShortcut)(nil),                          // 37: sameoldchat.chat.v1.AppShortcut
-	(*AppShortcutListRequest)(nil),               // 38: sameoldchat.chat.v1.AppShortcutListRequest
-	(*AppShortcutListResponse)(nil),              // 39: sameoldchat.chat.v1.AppShortcutListResponse
-	(*AppShortcutDispatchRequest)(nil),           // 40: sameoldchat.chat.v1.AppShortcutDispatchRequest
-	(*InteractionMutationResponse)(nil),          // 41: sameoldchat.chat.v1.InteractionMutationResponse
-	(*SocketModeInteraction)(nil),                // 42: sameoldchat.chat.v1.SocketModeInteraction
-	(*SocketModeInteractionClaimRequest)(nil),    // 43: sameoldchat.chat.v1.SocketModeInteractionClaimRequest
-	(*SocketModeInteractionAckRequest)(nil),      // 44: sameoldchat.chat.v1.SocketModeInteractionAckRequest
-	(*SocketModeInteractionReleaseRequest)(nil),  // 45: sameoldchat.chat.v1.SocketModeInteractionReleaseRequest
-	(*SocketModeInteractionResponseRequest)(nil), // 46: sameoldchat.chat.v1.SocketModeInteractionResponseRequest
-	nil,             // 47: sameoldchat.chat.v1.MessageAnnotationsResponse.AnnotationsEntry
-	nil,             // 48: sameoldchat.chat.v1.ThreadSummariesResponse.SummariesEntry
-	(*Message)(nil), // 49: sameoldchat.chat.v1.Message
+	(*ChosenOption)(nil),                         // 32: sameoldchat.chat.v1.ChosenOption
+	(*ViewBlockActionRequest)(nil),               // 33: sameoldchat.chat.v1.ViewBlockActionRequest
+	(*AppOptionQueryRequest)(nil),                // 34: sameoldchat.chat.v1.AppOptionQueryRequest
+	(*AppOption)(nil),                            // 35: sameoldchat.chat.v1.AppOption
+	(*AppOptionListResponse)(nil),                // 36: sameoldchat.chat.v1.AppOptionListResponse
+	(*AppResponseRequest)(nil),                   // 37: sameoldchat.chat.v1.AppResponseRequest
+	(*AppShortcut)(nil),                          // 38: sameoldchat.chat.v1.AppShortcut
+	(*AppShortcutListRequest)(nil),               // 39: sameoldchat.chat.v1.AppShortcutListRequest
+	(*AppShortcutListResponse)(nil),              // 40: sameoldchat.chat.v1.AppShortcutListResponse
+	(*AppShortcutDispatchRequest)(nil),           // 41: sameoldchat.chat.v1.AppShortcutDispatchRequest
+	(*InteractionMutationResponse)(nil),          // 42: sameoldchat.chat.v1.InteractionMutationResponse
+	(*SocketModeInteraction)(nil),                // 43: sameoldchat.chat.v1.SocketModeInteraction
+	(*SocketModeInteractionClaimRequest)(nil),    // 44: sameoldchat.chat.v1.SocketModeInteractionClaimRequest
+	(*SocketModeInteractionAckRequest)(nil),      // 45: sameoldchat.chat.v1.SocketModeInteractionAckRequest
+	(*SocketModeInteractionReleaseRequest)(nil),  // 46: sameoldchat.chat.v1.SocketModeInteractionReleaseRequest
+	(*SocketModeInteractionResponseRequest)(nil), // 47: sameoldchat.chat.v1.SocketModeInteractionResponseRequest
+	nil,             // 48: sameoldchat.chat.v1.MessageAnnotationsResponse.AnnotationsEntry
+	nil,             // 49: sameoldchat.chat.v1.ThreadSummariesResponse.SummariesEntry
+	(*Message)(nil), // 50: sameoldchat.chat.v1.Message
 }
 var file_sameoldchat_chat_v1_interactions_proto_depIdxs = []int32{
 	6,  // 0: sameoldchat.chat.v1.AssistantThread.prompts:type_name -> sameoldchat.chat.v1.AssistantPrompt
@@ -3674,65 +3761,66 @@ var file_sameoldchat_chat_v1_interactions_proto_depIdxs = []int32{
 	11, // 2: sameoldchat.chat.v1.TypingSignalsResponse.signals:type_name -> sameoldchat.chat.v1.TypingSignal
 	19, // 3: sameoldchat.chat.v1.FollowedThreadPage.threads:type_name -> sameoldchat.chat.v1.FollowedThread
 	26, // 4: sameoldchat.chat.v1.MessageAnnotation.reactions:type_name -> sameoldchat.chat.v1.ReactionSummary
-	47, // 5: sameoldchat.chat.v1.MessageAnnotationsResponse.annotations:type_name -> sameoldchat.chat.v1.MessageAnnotationsResponse.AnnotationsEntry
-	48, // 6: sameoldchat.chat.v1.ThreadSummariesResponse.summaries:type_name -> sameoldchat.chat.v1.ThreadSummariesResponse.SummariesEntry
-	34, // 7: sameoldchat.chat.v1.AppOptionListResponse.options:type_name -> sameoldchat.chat.v1.AppOption
-	37, // 8: sameoldchat.chat.v1.AppShortcutListResponse.shortcuts:type_name -> sameoldchat.chat.v1.AppShortcut
-	27, // 9: sameoldchat.chat.v1.MessageAnnotationsResponse.AnnotationsEntry.value:type_name -> sameoldchat.chat.v1.MessageAnnotation
-	24, // 10: sameoldchat.chat.v1.ThreadSummariesResponse.SummariesEntry.value:type_name -> sameoldchat.chat.v1.ThreadSummary
-	1,  // 11: sameoldchat.chat.v1.InteractionsService.MarkRead:input_type -> sameoldchat.chat.v1.MarkReadRequest
-	2,  // 12: sameoldchat.chat.v1.InteractionsService.MarkAllRead:input_type -> sameoldchat.chat.v1.MarkAllReadRequest
-	18, // 13: sameoldchat.chat.v1.InteractionsService.ListFollowedThreads:input_type -> sameoldchat.chat.v1.FollowedThreadsRequest
-	16, // 14: sameoldchat.chat.v1.InteractionsService.RecordActivity:input_type -> sameoldchat.chat.v1.RecordActivityRequest
-	4,  // 15: sameoldchat.chat.v1.InteractionsService.ResumeWorkflowDelays:input_type -> sameoldchat.chat.v1.ResumeWorkflowDelaysRequest
-	8,  // 16: sameoldchat.chat.v1.InteractionsService.SetAssistantThread:input_type -> sameoldchat.chat.v1.SetAssistantThreadRequest
-	10, // 17: sameoldchat.chat.v1.InteractionsService.GetAssistantThread:input_type -> sameoldchat.chat.v1.AssistantThreadRequest
-	12, // 18: sameoldchat.chat.v1.InteractionsService.SetTyping:input_type -> sameoldchat.chat.v1.SetTypingRequest
-	14, // 19: sameoldchat.chat.v1.InteractionsService.TypingSignals:input_type -> sameoldchat.chat.v1.TypingSignalsRequest
-	21, // 20: sameoldchat.chat.v1.InteractionsService.GetReadCursor:input_type -> sameoldchat.chat.v1.ReadCursorRequest
-	23, // 21: sameoldchat.chat.v1.InteractionsService.ThreadSummaries:input_type -> sameoldchat.chat.v1.ThreadSummariesRequest
-	25, // 22: sameoldchat.chat.v1.InteractionsService.MessageAnnotations:input_type -> sameoldchat.chat.v1.MessageAnnotationsRequest
-	22, // 23: sameoldchat.chat.v1.InteractionsService.MessageAt:input_type -> sameoldchat.chat.v1.MessageAtRequest
-	30, // 24: sameoldchat.chat.v1.InteractionsService.DispatchSlashCommand:input_type -> sameoldchat.chat.v1.SlashCommandRequest
-	31, // 25: sameoldchat.chat.v1.InteractionsService.DispatchBlockAction:input_type -> sameoldchat.chat.v1.BlockActionRequest
-	32, // 26: sameoldchat.chat.v1.InteractionsService.DispatchViewBlockAction:input_type -> sameoldchat.chat.v1.ViewBlockActionRequest
-	33, // 27: sameoldchat.chat.v1.InteractionsService.LoadAppOptions:input_type -> sameoldchat.chat.v1.AppOptionQueryRequest
-	38, // 28: sameoldchat.chat.v1.InteractionsService.ListAppShortcuts:input_type -> sameoldchat.chat.v1.AppShortcutListRequest
-	40, // 29: sameoldchat.chat.v1.InteractionsService.DispatchAppShortcut:input_type -> sameoldchat.chat.v1.AppShortcutDispatchRequest
-	36, // 30: sameoldchat.chat.v1.InteractionsService.HandleAppResponse:input_type -> sameoldchat.chat.v1.AppResponseRequest
-	43, // 31: sameoldchat.chat.v1.InteractionsService.ClaimSocketModeInteraction:input_type -> sameoldchat.chat.v1.SocketModeInteractionClaimRequest
-	44, // 32: sameoldchat.chat.v1.InteractionsService.AckSocketModeInteraction:input_type -> sameoldchat.chat.v1.SocketModeInteractionAckRequest
-	45, // 33: sameoldchat.chat.v1.InteractionsService.ReleaseSocketModeInteraction:input_type -> sameoldchat.chat.v1.SocketModeInteractionReleaseRequest
-	46, // 34: sameoldchat.chat.v1.InteractionsService.HandleSocketModeResponse:input_type -> sameoldchat.chat.v1.SocketModeInteractionResponseRequest
-	0,  // 35: sameoldchat.chat.v1.InteractionsService.MarkRead:output_type -> sameoldchat.chat.v1.ReadCursor
-	3,  // 36: sameoldchat.chat.v1.InteractionsService.MarkAllRead:output_type -> sameoldchat.chat.v1.MarkAllReadResponse
-	20, // 37: sameoldchat.chat.v1.InteractionsService.ListFollowedThreads:output_type -> sameoldchat.chat.v1.FollowedThreadPage
-	17, // 38: sameoldchat.chat.v1.InteractionsService.RecordActivity:output_type -> sameoldchat.chat.v1.RecordActivityResponse
-	5,  // 39: sameoldchat.chat.v1.InteractionsService.ResumeWorkflowDelays:output_type -> sameoldchat.chat.v1.ResumeWorkflowDelaysResponse
-	9,  // 40: sameoldchat.chat.v1.InteractionsService.SetAssistantThread:output_type -> sameoldchat.chat.v1.SetAssistantThreadResponse
-	7,  // 41: sameoldchat.chat.v1.InteractionsService.GetAssistantThread:output_type -> sameoldchat.chat.v1.AssistantThread
-	13, // 42: sameoldchat.chat.v1.InteractionsService.SetTyping:output_type -> sameoldchat.chat.v1.SetTypingResponse
-	15, // 43: sameoldchat.chat.v1.InteractionsService.TypingSignals:output_type -> sameoldchat.chat.v1.TypingSignalsResponse
-	0,  // 44: sameoldchat.chat.v1.InteractionsService.GetReadCursor:output_type -> sameoldchat.chat.v1.ReadCursor
-	29, // 45: sameoldchat.chat.v1.InteractionsService.ThreadSummaries:output_type -> sameoldchat.chat.v1.ThreadSummariesResponse
-	28, // 46: sameoldchat.chat.v1.InteractionsService.MessageAnnotations:output_type -> sameoldchat.chat.v1.MessageAnnotationsResponse
-	49, // 47: sameoldchat.chat.v1.InteractionsService.MessageAt:output_type -> sameoldchat.chat.v1.Message
-	41, // 48: sameoldchat.chat.v1.InteractionsService.DispatchSlashCommand:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
-	41, // 49: sameoldchat.chat.v1.InteractionsService.DispatchBlockAction:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
-	41, // 50: sameoldchat.chat.v1.InteractionsService.DispatchViewBlockAction:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
-	35, // 51: sameoldchat.chat.v1.InteractionsService.LoadAppOptions:output_type -> sameoldchat.chat.v1.AppOptionListResponse
-	39, // 52: sameoldchat.chat.v1.InteractionsService.ListAppShortcuts:output_type -> sameoldchat.chat.v1.AppShortcutListResponse
-	41, // 53: sameoldchat.chat.v1.InteractionsService.DispatchAppShortcut:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
-	41, // 54: sameoldchat.chat.v1.InteractionsService.HandleAppResponse:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
-	42, // 55: sameoldchat.chat.v1.InteractionsService.ClaimSocketModeInteraction:output_type -> sameoldchat.chat.v1.SocketModeInteraction
-	41, // 56: sameoldchat.chat.v1.InteractionsService.AckSocketModeInteraction:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
-	41, // 57: sameoldchat.chat.v1.InteractionsService.ReleaseSocketModeInteraction:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
-	41, // 58: sameoldchat.chat.v1.InteractionsService.HandleSocketModeResponse:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
-	35, // [35:59] is the sub-list for method output_type
-	11, // [11:35] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	48, // 5: sameoldchat.chat.v1.MessageAnnotationsResponse.annotations:type_name -> sameoldchat.chat.v1.MessageAnnotationsResponse.AnnotationsEntry
+	49, // 6: sameoldchat.chat.v1.ThreadSummariesResponse.summaries:type_name -> sameoldchat.chat.v1.ThreadSummariesResponse.SummariesEntry
+	32, // 7: sameoldchat.chat.v1.BlockActionRequest.chosen_options:type_name -> sameoldchat.chat.v1.ChosenOption
+	35, // 8: sameoldchat.chat.v1.AppOptionListResponse.options:type_name -> sameoldchat.chat.v1.AppOption
+	38, // 9: sameoldchat.chat.v1.AppShortcutListResponse.shortcuts:type_name -> sameoldchat.chat.v1.AppShortcut
+	27, // 10: sameoldchat.chat.v1.MessageAnnotationsResponse.AnnotationsEntry.value:type_name -> sameoldchat.chat.v1.MessageAnnotation
+	24, // 11: sameoldchat.chat.v1.ThreadSummariesResponse.SummariesEntry.value:type_name -> sameoldchat.chat.v1.ThreadSummary
+	1,  // 12: sameoldchat.chat.v1.InteractionsService.MarkRead:input_type -> sameoldchat.chat.v1.MarkReadRequest
+	2,  // 13: sameoldchat.chat.v1.InteractionsService.MarkAllRead:input_type -> sameoldchat.chat.v1.MarkAllReadRequest
+	18, // 14: sameoldchat.chat.v1.InteractionsService.ListFollowedThreads:input_type -> sameoldchat.chat.v1.FollowedThreadsRequest
+	16, // 15: sameoldchat.chat.v1.InteractionsService.RecordActivity:input_type -> sameoldchat.chat.v1.RecordActivityRequest
+	4,  // 16: sameoldchat.chat.v1.InteractionsService.ResumeWorkflowDelays:input_type -> sameoldchat.chat.v1.ResumeWorkflowDelaysRequest
+	8,  // 17: sameoldchat.chat.v1.InteractionsService.SetAssistantThread:input_type -> sameoldchat.chat.v1.SetAssistantThreadRequest
+	10, // 18: sameoldchat.chat.v1.InteractionsService.GetAssistantThread:input_type -> sameoldchat.chat.v1.AssistantThreadRequest
+	12, // 19: sameoldchat.chat.v1.InteractionsService.SetTyping:input_type -> sameoldchat.chat.v1.SetTypingRequest
+	14, // 20: sameoldchat.chat.v1.InteractionsService.TypingSignals:input_type -> sameoldchat.chat.v1.TypingSignalsRequest
+	21, // 21: sameoldchat.chat.v1.InteractionsService.GetReadCursor:input_type -> sameoldchat.chat.v1.ReadCursorRequest
+	23, // 22: sameoldchat.chat.v1.InteractionsService.ThreadSummaries:input_type -> sameoldchat.chat.v1.ThreadSummariesRequest
+	25, // 23: sameoldchat.chat.v1.InteractionsService.MessageAnnotations:input_type -> sameoldchat.chat.v1.MessageAnnotationsRequest
+	22, // 24: sameoldchat.chat.v1.InteractionsService.MessageAt:input_type -> sameoldchat.chat.v1.MessageAtRequest
+	30, // 25: sameoldchat.chat.v1.InteractionsService.DispatchSlashCommand:input_type -> sameoldchat.chat.v1.SlashCommandRequest
+	31, // 26: sameoldchat.chat.v1.InteractionsService.DispatchBlockAction:input_type -> sameoldchat.chat.v1.BlockActionRequest
+	33, // 27: sameoldchat.chat.v1.InteractionsService.DispatchViewBlockAction:input_type -> sameoldchat.chat.v1.ViewBlockActionRequest
+	34, // 28: sameoldchat.chat.v1.InteractionsService.LoadAppOptions:input_type -> sameoldchat.chat.v1.AppOptionQueryRequest
+	39, // 29: sameoldchat.chat.v1.InteractionsService.ListAppShortcuts:input_type -> sameoldchat.chat.v1.AppShortcutListRequest
+	41, // 30: sameoldchat.chat.v1.InteractionsService.DispatchAppShortcut:input_type -> sameoldchat.chat.v1.AppShortcutDispatchRequest
+	37, // 31: sameoldchat.chat.v1.InteractionsService.HandleAppResponse:input_type -> sameoldchat.chat.v1.AppResponseRequest
+	44, // 32: sameoldchat.chat.v1.InteractionsService.ClaimSocketModeInteraction:input_type -> sameoldchat.chat.v1.SocketModeInteractionClaimRequest
+	45, // 33: sameoldchat.chat.v1.InteractionsService.AckSocketModeInteraction:input_type -> sameoldchat.chat.v1.SocketModeInteractionAckRequest
+	46, // 34: sameoldchat.chat.v1.InteractionsService.ReleaseSocketModeInteraction:input_type -> sameoldchat.chat.v1.SocketModeInteractionReleaseRequest
+	47, // 35: sameoldchat.chat.v1.InteractionsService.HandleSocketModeResponse:input_type -> sameoldchat.chat.v1.SocketModeInteractionResponseRequest
+	0,  // 36: sameoldchat.chat.v1.InteractionsService.MarkRead:output_type -> sameoldchat.chat.v1.ReadCursor
+	3,  // 37: sameoldchat.chat.v1.InteractionsService.MarkAllRead:output_type -> sameoldchat.chat.v1.MarkAllReadResponse
+	20, // 38: sameoldchat.chat.v1.InteractionsService.ListFollowedThreads:output_type -> sameoldchat.chat.v1.FollowedThreadPage
+	17, // 39: sameoldchat.chat.v1.InteractionsService.RecordActivity:output_type -> sameoldchat.chat.v1.RecordActivityResponse
+	5,  // 40: sameoldchat.chat.v1.InteractionsService.ResumeWorkflowDelays:output_type -> sameoldchat.chat.v1.ResumeWorkflowDelaysResponse
+	9,  // 41: sameoldchat.chat.v1.InteractionsService.SetAssistantThread:output_type -> sameoldchat.chat.v1.SetAssistantThreadResponse
+	7,  // 42: sameoldchat.chat.v1.InteractionsService.GetAssistantThread:output_type -> sameoldchat.chat.v1.AssistantThread
+	13, // 43: sameoldchat.chat.v1.InteractionsService.SetTyping:output_type -> sameoldchat.chat.v1.SetTypingResponse
+	15, // 44: sameoldchat.chat.v1.InteractionsService.TypingSignals:output_type -> sameoldchat.chat.v1.TypingSignalsResponse
+	0,  // 45: sameoldchat.chat.v1.InteractionsService.GetReadCursor:output_type -> sameoldchat.chat.v1.ReadCursor
+	29, // 46: sameoldchat.chat.v1.InteractionsService.ThreadSummaries:output_type -> sameoldchat.chat.v1.ThreadSummariesResponse
+	28, // 47: sameoldchat.chat.v1.InteractionsService.MessageAnnotations:output_type -> sameoldchat.chat.v1.MessageAnnotationsResponse
+	50, // 48: sameoldchat.chat.v1.InteractionsService.MessageAt:output_type -> sameoldchat.chat.v1.Message
+	42, // 49: sameoldchat.chat.v1.InteractionsService.DispatchSlashCommand:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
+	42, // 50: sameoldchat.chat.v1.InteractionsService.DispatchBlockAction:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
+	42, // 51: sameoldchat.chat.v1.InteractionsService.DispatchViewBlockAction:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
+	36, // 52: sameoldchat.chat.v1.InteractionsService.LoadAppOptions:output_type -> sameoldchat.chat.v1.AppOptionListResponse
+	40, // 53: sameoldchat.chat.v1.InteractionsService.ListAppShortcuts:output_type -> sameoldchat.chat.v1.AppShortcutListResponse
+	42, // 54: sameoldchat.chat.v1.InteractionsService.DispatchAppShortcut:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
+	42, // 55: sameoldchat.chat.v1.InteractionsService.HandleAppResponse:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
+	43, // 56: sameoldchat.chat.v1.InteractionsService.ClaimSocketModeInteraction:output_type -> sameoldchat.chat.v1.SocketModeInteraction
+	42, // 57: sameoldchat.chat.v1.InteractionsService.AckSocketModeInteraction:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
+	42, // 58: sameoldchat.chat.v1.InteractionsService.ReleaseSocketModeInteraction:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
+	42, // 59: sameoldchat.chat.v1.InteractionsService.HandleSocketModeResponse:output_type -> sameoldchat.chat.v1.InteractionMutationResponse
+	36, // [36:60] is the sub-list for method output_type
+	12, // [12:36] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_interactions_proto_init() }
@@ -3747,7 +3835,7 @@ func file_sameoldchat_chat_v1_interactions_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_interactions_proto_rawDesc), len(file_sameoldchat_chat_v1_interactions_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   49,
+			NumMessages:   50,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

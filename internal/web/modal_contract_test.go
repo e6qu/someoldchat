@@ -129,29 +129,12 @@ func TestExternalSelectSubmissionCarriesLoadedOptionText(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	seedSocketModeModalApp(t, s, "")
 	seedOpenModal(t, s, "Vx", `{"type":"modal","title":{"type":"plain_text","text":"Ext"},"submit":{"type":"plain_text","text":"Go"},"blocks":[{"type":"input","block_id":"ex","label":{"type":"plain_text","text":"Ext"},"element":{"type":"external_select","action_id":"exa","min_query_length":0}}]}`)
-	messages := service.Messages{Store: s, AppCredentialKey: []byte(strings.Repeat("k", 32))}
-	answered := make(chan error, 1)
-	go func() {
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
-			interaction, found, err := s.ClaimSocketModeInteraction(context.Background(), "A1", "modal-client", time.Minute)
-			if err != nil {
-				answered <- err
-				return
-			}
-			if found {
-				answered <- messages.HandleSocketModeResponse(context.Background(), "A1", interaction.EnvelopeID, []byte(`{"options":[{"text":{"type":"plain_text","text":"Option One"},"value":"one"}]}`))
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		answered <- errors.New("no block_suggestion arrived")
-	}()
+	answered := answerNextInteraction(s, `{"options":[{"text":{"type":"plain_text","text":"Option One"},"value":"one"}]}`)
 	loaded := postForm(t, mux, "/app/options?channel=Cdev", url.Values{
 		"_csrf": {auth.CSRFToken("session")}, "app_id": {"A1"}, "view_id": {"Vx"}, "block_id": {"ex"}, "action_id": {"exa"}, "channel": {"Cdev"}, "query": {"on"},
 	}.Encode(), false)
-	if err := <-answered; err != nil {
-		t.Fatal(err)
+	if suggestion := <-answered; suggestion.err != nil {
+		t.Fatal(suggestion.err)
 	}
 	var options struct {
 		Options []struct{ Text, Value, Choice string } `json:"options"`
@@ -181,6 +164,134 @@ func TestExternalSelectSubmissionCarriesLoadedOptionText(t *testing.T) {
 	}
 }
 
+// answered is what answerNextInteraction saw: the payload of the interaction
+// it answered, or why it could not.
+type answered struct {
+	payload map[string]any
+	err     error
+}
+
+// answerNextInteraction plays a Socket Mode app: it claims the next queued
+// interaction and acknowledges it with body, as an app answering an options
+// request does while the client waits for the response.
+func answerNextInteraction(s *memory.Store, body string) <-chan answered {
+	result := make(chan answered, 1)
+	messages := service.Messages{Store: s, AppCredentialKey: []byte(strings.Repeat("k", 32))}
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			interaction, found, err := s.ClaimSocketModeInteraction(context.Background(), "A1", "modal-client", time.Minute)
+			if err != nil {
+				result <- answered{err: err}
+				return
+			}
+			if found {
+				var payload map[string]any
+				if err := json.Unmarshal([]byte(interaction.Payload), &payload); err != nil {
+					result <- answered{err: err}
+					return
+				}
+				if err := messages.HandleSocketModeResponse(context.Background(), "A1", interaction.EnvelopeID, []byte(body)); err != nil {
+					result <- answered{err: err}
+					return
+				}
+				result <- answered{payload: payload, err: s.AckSocketModeInteraction(context.Background(), "A1", interaction.EnvelopeID, "modal-client")}
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		result <- answered{err: errors.New("no interaction arrived")}
+	}()
+	return result
+}
+
+// An external select in a message reports the chosen option's text in
+// block_actions, as Slack does, vouched for by the token the service issued
+// when the option was loaded; a token for another message, or text the
+// browser changed, reports the value alone.
+func TestMessageExternalSelectActionCarriesLoadedOptionText(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedSocketModeModalApp(t, s, "")
+	now := time.Now().UTC()
+	for index, id := range []domain.MessageID{"Mext", "Mother"} {
+		message := domain.Message{ID: id, WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", AppID: "A1", Text: "pick", CreatedAt: now.Add(time.Duration(index) * time.Millisecond),
+			Blocks: `[{"type":"actions","block_id":"eb","elements":[{"type":"external_select","action_id":"ea","min_query_length":0},{"type":"multi_external_select","action_id":"ma","min_query_length":0}]}]`}
+		if err := s.CreateMessage(context.Background(), message, events.Event{ID: domain.EventID("E-" + string(id)), WorkspaceID: "T1", Topic: "message.created", Payload: string(id), CreatedAt: now}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	load := func(messageID, actionID string) []string {
+		t.Helper()
+		suggestion := answerNextInteraction(s, `{"options":[{"text":{"type":"plain_text","text":"Option One"},"value":"one"},{"text":{"type":"plain_text","text":"Option Two"},"value":"two"}]}`)
+		loaded := postForm(t, mux, "/app/options?channel=Cdev", url.Values{
+			"_csrf": {auth.CSRFToken("session")}, "app_id": {"A1"}, "message_id": {messageID}, "block_id": {"eb"}, "action_id": {actionID}, "channel": {"Cdev"}, "query": {"o"},
+		}.Encode(), false)
+		if answer := <-suggestion; answer.err != nil || answer.payload["type"] != "block_suggestion" {
+			t.Fatalf("block_suggestion = %v err=%v", answer.payload, answer.err)
+		}
+		var options struct {
+			Options []struct{ Text, Value, Choice string } `json:"options"`
+		}
+		if loaded.Code != http.StatusOK || json.Unmarshal(loaded.Body.Bytes(), &options) != nil || len(options.Options) != 2 {
+			t.Fatalf("options status=%d body=%s", loaded.Code, loaded.Body)
+		}
+		choices := make([]string, 0, len(options.Options))
+		for _, option := range options.Options {
+			if option.Choice == "" {
+				t.Fatalf("a message option carries no vouched choice: %s", loaded.Body)
+			}
+			choices = append(choices, option.Choice)
+		}
+		return choices
+	}
+	act := func(actionType, actionID string, values ...string) map[string]any {
+		t.Helper()
+		response := postForm(t, mux, "/app/interaction", url.Values{
+			"_csrf": {auth.CSRFToken("session")}, "message_id": {"Mext"}, "app_id": {"A1"}, "block_id": {"eb"}, "action_id": {actionID},
+			"action_type": {actionType}, "channel": {"Cdev"}, "value": values,
+		}.Encode(), false)
+		if response.Code >= 400 {
+			t.Fatalf("dispatch status=%d body=%s", response.Code, response.Body)
+		}
+		payload := claimInteraction(t, s)
+		action := payload["actions"].([]any)[0].(map[string]any)
+		state := payload["state"].(map[string]any)["values"].(map[string]any)["eb"].(map[string]any)[actionID].(map[string]any)
+		if actionType == "external_select" {
+			if state["selected_option"] == nil {
+				t.Fatalf("state carries no selected_option: %v", payload["state"])
+			}
+			return action["selected_option"].(map[string]any)
+		}
+		return map[string]any{"selected_options": action["selected_options"]}
+	}
+	choices := load("Mext", "ea")
+	if selected := act("external_select", "ea", choices[0]); selected["value"] != "one" || selected["text"].(map[string]any)["text"] != "Option One" || selected["token"] != nil {
+		t.Fatalf("selected_option = %v", selected)
+	}
+	forged, _ := decodeExternalChoice(choices[0])
+	forged.Text = "Something else"
+	if selected := act("external_select", "ea", encodeExternalChoice(forged)); selected["value"] != "one" || selected["text"] != nil {
+		t.Fatalf("forged selected_option = %v", selected)
+	}
+	elsewhere := load("Mother", "ea")
+	if selected := act("external_select", "ea", elsewhere[0]); selected["value"] != "one" || selected["text"] != nil {
+		t.Fatalf("another message's option = %v", selected)
+	}
+	// An ephemeral app message's external select loads options too: the
+	// options request resolves the message the way the action does.
+	ephemeral := domain.EphemeralMessage{ID: "Meph", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", AppID: "A1", RecipientID: "U1", Text: "only you",
+		Blocks: `[{"type":"actions","block_id":"eb","elements":[{"type":"external_select","action_id":"ea","min_query_length":0}]}]`, Timestamp: domain.NewMessageTimestamp(now), CreatedAt: now}
+	if err := s.CreateEphemeralMessage(context.Background(), ephemeral, events.Event{ID: "E-Meph", WorkspaceID: "T1", Topic: "ephemeral_message", Payload: `{"type":"ephemeral_message","user_id":"U1"}`, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	load("Meph", "ea")
+	multi := load("Mext", "ma")
+	selected := act("multi_external_select", "ma", multi...)["selected_options"].([]any)
+	if len(selected) != 2 || selected[0].(map[string]any)["text"].(map[string]any)["text"] != "Option One" || selected[1].(map[string]any)["value"] != "two" || selected[1].(map[string]any)["text"].(map[string]any)["text"] != "Option Two" {
+		t.Fatalf("selected_options = %v", selected)
+	}
+}
+
 // A dialog.open dialog renders in the client, submits dialog_submission with
 // Slack's submission map, shows the errors the app answers with, closes on an
 // empty acknowledgement, and sends dialog_cancellation when asked to.
@@ -204,16 +315,56 @@ func TestLegacyDialogRendersSubmitsAndCancels(t *testing.T) {
 		`{"type":"select","name":"remote","label":"Remote","data_source":"external","optional":true}]}`)
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "dialog", body, "File a ticket", `action="/app/dialog/submit?channel=Cdev"`, `name="dialog_id" value="Dl1"`,
-		"Summary", "Details", `<option value="high"`, "Priority", "Owner", "cannot load this app", ">File</button>")
+		"Summary", "Details", `<option value="high"`, "Priority", "Owner", ">File</button>",
+		`data-dialog-id="Dl1" data-block-id="remote" data-action-id="remote"`, `data-min-query="1"`)
+	requireMissing(t, "dialog", body, "cannot load this app")
+	// The external select loads its options through dialog_suggestion: the
+	// app answers with Slack's label/value options, and the choice the member
+	// makes is reported in dialog_submission as its value.
+	suggestion := answerNextInteraction(s, `{"option_groups":[{"label":"Hosts","options":[{"label":"Build host","value":"build-1"}]}]}`)
+	loaded := postForm(t, mux, "/app/options?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "app_id": {"A1"}, "dialog_id": {"Dl1"}, "block_id": {"remote"}, "action_id": {"remote"}, "channel": {"Cdev"}, "query": {"bu"},
+	}.Encode(), false)
+	answer := <-suggestion
+	if answer.err != nil {
+		t.Fatal(answer.err)
+	}
+	if answer.payload["type"] != "dialog_suggestion" || answer.payload["name"] != "remote" || answer.payload["value"] != "bu" ||
+		answer.payload["callback_id"] != "ticket" || answer.payload["state"] != "s1" || answer.payload["token"] != "verification-token" ||
+		answer.payload["team"].(map[string]any)["id"] != "T1" || answer.payload["user"].(map[string]any)["id"] != "U1" ||
+		answer.payload["channel"].(map[string]any)["id"] != "Cdev" || answer.payload["action_ts"] == nil || answer.payload["response_url"] != nil {
+		t.Fatalf("dialog_suggestion = %v", answer.payload)
+	}
+	var options struct {
+		Options []struct{ Text, Value, Group, Choice string } `json:"options"`
+	}
+	if loaded.Code != http.StatusOK || json.Unmarshal(loaded.Body.Bytes(), &options) != nil || len(options.Options) != 1 ||
+		options.Options[0].Text != "Build host" || options.Options[0].Group != "Hosts" || options.Options[0].Choice == "" {
+		t.Fatalf("dialog options status=%d body=%s", loaded.Code, loaded.Body)
+	}
+	remote := options.Options[0].Choice
+	// An element that is not an external select asks for nothing.
+	if refused := postForm(t, mux, "/app/options?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "app_id": {"A1"}, "dialog_id": {"Dl1"}, "block_id": {"priority"}, "action_id": {"priority"}, "channel": {"Cdev"}, "query": {"bu"},
+	}.Encode(), false); refused.Code != http.StatusNotFound {
+		t.Fatalf("options for a static select status=%d body=%s", refused.Code, refused.Body)
+	}
 	submit := func(values url.Values) *httptest.ResponseRecorder {
 		values.Set("_csrf", auth.CSRFToken("session"))
 		values.Set("dialog_id", "Dl1")
 		return postForm(t, mux, "/app/dialog/submit?channel=Cdev", values.Encode(), false)
 	}
-	if response := submit(url.Values{"input_0": {"ab"}, "input_2": {"high"}}); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "Enter between 3 and 150 characters.") {
-		t.Fatalf("short summary status=%d", response.Code)
+	if response := submit(url.Values{"input_0": {"ab"}, "input_2": {"high"}, "input_4": {remote}}); response.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(response.Body.String(), "Enter between 3 and 150 characters.") || !strings.Contains(response.Body.String(), ">Build host</option>") {
+		t.Fatalf("short summary status=%d (the loaded choice must survive the re-render)", response.Code)
 	}
-	if response := submit(url.Values{"input_0": {"Broken build"}, "input_2": {"high"}}); response.Code != http.StatusAccepted {
+	// The re-rendered page answers a POST, so it moves its history entry to
+	// the conversation: a live reload or a refresh must not submit again.
+	if response := submit(url.Values{"input_0": {"ab"}, "input_2": {"high"}}); !strings.Contains(response.Body.String(), `data-canonical-url="/app?channel=Cdev"`) {
+		t.Fatalf("a POST-rendered page names no canonical URL")
+	}
+	requireMissing(t, "a GET page", get(t, mux, "/app?channel=Cdev").Body.String(), `data-canonical-url="`)
+	if response := submit(url.Values{"input_0": {"Broken build"}, "input_2": {"high"}, "input_4": {remote}}); response.Code != http.StatusAccepted {
 		t.Fatalf("submit status=%d body=%s", response.Code, response.Body)
 	}
 	interaction, found, err := s.ClaimSocketModeInteraction(ctx, "A1", "modal-client", time.Minute)
@@ -226,7 +377,7 @@ func TestLegacyDialogRendersSubmitsAndCancels(t *testing.T) {
 	}
 	submission, _ := payload["submission"].(map[string]any)
 	if payload["type"] != "dialog_submission" || payload["callback_id"] != "ticket" || payload["state"] != "s1" ||
-		submission["summary"] != "Broken build" || submission["priority"] != "high" || submission["details"] != nil ||
+		submission["summary"] != "Broken build" || submission["priority"] != "high" || submission["details"] != nil || submission["remote"] != "build-1" ||
 		payload["response_url"] == "" || payload["channel"].(map[string]any)["id"] != "Cdev" {
 		t.Fatalf("dialog_submission = %v", payload)
 	}
@@ -290,7 +441,7 @@ func TestViewInputScriptIsPermittedAndStateSavesDoNotReload(t *testing.T) {
 	if !strings.Contains(workspaceContentSecurityPolicy, inlineScriptHashes(viewInputScript)[0]) {
 		t.Fatal("the view input script is not permitted by the workspace policy")
 	}
-	if !strings.Contains(progressiveEnhancementScript, "viewFrame.state_only)return;window.location.reload()") {
+	if !strings.Contains(progressiveEnhancementScript, "viewFrame.state_only)return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload()") {
 		t.Fatal("a state-only view record still reloads the workspace page")
 	}
 	s, mux := browserWorkspace(t, auth.AllScopes())
