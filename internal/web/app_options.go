@@ -77,9 +77,10 @@ func (h Handler) appOptions(w http.ResponseWriter, r *http.Request) {
 		Value       string `json:"value"`
 		Description string `json:"description,omitempty"`
 		Group       string `json:"group,omitempty"`
-		// Choice is the <option value> for an option loaded into a view: it
-		// carries the text and the service's token so the submission can
-		// report the option's text as Slack does.
+		// Choice is the <option value> for an option the service vouched
+		// for: it carries the text and the service's token so the view
+		// submission or message action can report the option's text as
+		// Slack does.
 		Choice string `json:"choice,omitempty"`
 	}
 	response := struct {

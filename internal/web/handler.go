@@ -11963,6 +11963,9 @@ func (h Handler) appInteraction(w http.ResponseWriter, r *http.Request) {
 		Type:      strings.TrimSpace(fields["action_type"]),
 		Value:     value,
 	}
+	if action.Type == "external_select" || action.Type == "multi_external_select" {
+		action.Value, action.ChosenOptions = externalSelectAction(action.Type, value)
+	}
 	if err := h.Messages.DispatchBlockAction(r.Context(), principal.WorkspaceID, principal.UserID, action, h.responseBaseURL(r)); err != nil {
 		status := http.StatusBadGateway
 		reason := "The app did not accept that action. Nothing was changed."
@@ -12016,6 +12019,40 @@ func (h Handler) appShortcut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.redirectMutation(w, r, h.viewURL(r, ""))
+}
+
+// externalSelectAction separates what a message external select posted into
+// the option values the app receives and the loaded options' text and
+// tokens, which the service checks before it reports the text to the app.
+// A multi-select posts a JSON array when more than one option is chosen.
+func externalSelectAction(actionType, posted string) (string, []domain.AppChosenOption) {
+	values := []string{posted}
+	list := false
+	if actionType == "multi_external_select" {
+		var decoded []string
+		if json.Unmarshal([]byte(posted), &decoded) == nil {
+			values, list = decoded, true
+		}
+	}
+	var chosen []domain.AppChosenOption
+	plain := make([]string, 0, len(values))
+	for _, value := range values {
+		choice, ok := decodeExternalChoice(value)
+		if !ok {
+			plain = append(plain, value)
+			continue
+		}
+		plain = append(plain, choice.Value)
+		chosen = append(chosen, domain.AppChosenOption{Value: choice.Value, Text: choice.Text, Token: choice.Token})
+	}
+	if !list {
+		return plain[0], chosen
+	}
+	encoded, err := json.Marshal(plain)
+	if err != nil {
+		return posted, nil
+	}
+	return string(encoded), chosen
 }
 
 func (h Handler) decodeAppInteractionMutation(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {

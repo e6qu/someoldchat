@@ -17,7 +17,7 @@ func TestSanitizeViewStateKeepsOnlyVouchedExternalOptionText(t *testing.T) {
 		Payload: `{"type":"modal","blocks":[{"type":"input","block_id":"b","element":{"type":"external_select","action_id":"a","initial_option":{"text":{"type":"plain_text","text":"Initial"},"value":"init"}}},{"type":"input","block_id":"m","element":{"type":"multi_external_select","action_id":"a"}}]}`,
 		State:   `{"values":{"m":{"a":{"type":"multi_external_select","selected_options":[{"text":{"type":"plain_text","text":"Kept"},"value":"kept"}]}}}}`,
 	}
-	token := m.signViewOption("V1", "b", "a", "v1", "Loaded")
+	token := m.signOption(viewOptionContainer("V1"), "b", "a", "v1", "Loaded")
 	if token == "" {
 		t.Fatal("no token signed")
 	}
@@ -40,7 +40,7 @@ func TestSanitizeViewStateKeepsOnlyVouchedExternalOptionText(t *testing.T) {
 			t.Fatalf("%s: state = %s, want it to contain %s and no token", test.name, got, test.want)
 		}
 	}
-	if (Messages{}).signViewOption("V1", "b", "a", "v", "t") != "" {
+	if (Messages{}).signOption(viewOptionContainer("V1"), "b", "a", "v", "t") != "" {
 		t.Fatal("a service without a credential key signed an option")
 	}
 }

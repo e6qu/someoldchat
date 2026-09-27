@@ -4819,12 +4819,34 @@ func (r Remote) DispatchBlockAction(ctx context.Context, workspaceID domain.Work
 	out, err := r.interactions.DispatchBlockAction(ctx, &chatv1.BlockActionRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), MessageId: string(action.MessageID),
 		BlockId: action.BlockID, ActionId: action.ActionID, ActionType: action.Type, Value: action.Value,
-		ResponseBaseUrl: responseBaseURL,
+		ResponseBaseUrl: responseBaseURL, ChosenOptions: chosenOptionsToProto(action.ChosenOptions),
 	})
 	if err != nil {
 		return err
 	}
 	return requireAcknowledgement(out.GetOk(), "block action dispatch")
+}
+
+func chosenOptionsToProto(options []domain.AppChosenOption) []*chatv1.ChosenOption {
+	if len(options) == 0 {
+		return nil
+	}
+	out := make([]*chatv1.ChosenOption, 0, len(options))
+	for _, option := range options {
+		out = append(out, &chatv1.ChosenOption{Value: option.Value, Text: option.Text, Token: option.Token})
+	}
+	return out
+}
+
+func chosenOptionsFromProto(options []*chatv1.ChosenOption) []domain.AppChosenOption {
+	if len(options) == 0 {
+		return nil
+	}
+	out := make([]domain.AppChosenOption, 0, len(options))
+	for _, option := range options {
+		out = append(out, domain.AppChosenOption{Value: option.GetValue(), Text: option.GetText(), Token: option.GetToken()})
+	}
+	return out
 }
 
 func (r Remote) ListAppShortcuts(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, shortcutType string) ([]domain.AppShortcut, error) {
@@ -9449,6 +9471,7 @@ func (s *Server) DispatchBlockAction(ctx context.Context, input *chatv1.BlockAct
 	action := domain.AppBlockAction{
 		MessageID: domain.MessageID(input.GetMessageId()), BlockID: input.GetBlockId(),
 		ActionID: input.GetActionId(), Type: input.GetActionType(), Value: input.GetValue(),
+		ChosenOptions: chosenOptionsFromProto(input.GetChosenOptions()),
 	}
 	if err := s.implementation.DispatchBlockAction(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), action, input.GetResponseBaseUrl()); err != nil {
 		return nil, mapError(err)

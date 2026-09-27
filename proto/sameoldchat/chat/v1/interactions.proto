@@ -215,6 +215,15 @@ message BlockActionRequest {
   string action_type = 6;
   string value = 7;
   string response_base_url = 8;
+  // chosen_options reports each external-select option the member chose
+  // with the text and token the service issued when it was loaded.
+  repeated ChosenOption chosen_options = 9;
+}
+
+message ChosenOption {
+  string value = 1;
+  string text = 2;
+  string token = 3;
 }
 
 message ViewBlockActionRequest {

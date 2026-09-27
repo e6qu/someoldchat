@@ -188,6 +188,30 @@ func (m Messages) slashCommandChannelName(ctx context.Context, conversation doma
 	return conversation.Name, nil
 }
 
+// interactiveMessage is the app message a member interacts with: a stored
+// message, or an ephemeral one only that member was shown. Both the action
+// and the options request for an element in it resolve it the same way, so an
+// external select in an ephemeral message can load its options as well as
+// report a choice.
+func (m Messages) interactiveMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.MessageID) (domain.Message, bool, error) {
+	message, err := m.Store.GetMessage(ctx, id)
+	ephemeral := false
+	if errors.Is(err, store.ErrNotFound) {
+		value, ephemeralErr := m.Store.GetEphemeralMessage(ctx, workspaceID, userID, id)
+		if ephemeralErr != nil {
+			return domain.Message{}, false, store.ErrNotFound
+		}
+		message = ephemeralAsMessage(value)
+		ephemeral = true
+	} else if err != nil {
+		return domain.Message{}, false, err
+	}
+	if message.WorkspaceID != workspaceID || message.AppID == "" {
+		return domain.Message{}, false, store.ErrNotFound
+	}
+	return message, ephemeral, nil
+}
+
 func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, action domain.AppBlockAction, responseBaseURL string) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
@@ -195,20 +219,9 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 	if action.MessageID == "" || strings.TrimSpace(action.ActionID) == "" || strings.TrimSpace(action.Type) == "" {
 		return ErrAppInteractionUnavailable
 	}
-	message, err := m.Store.GetMessage(ctx, action.MessageID)
-	ephemeral := false
-	if errors.Is(err, store.ErrNotFound) {
-		value, ephemeralErr := m.Store.GetEphemeralMessage(ctx, workspaceID, userID, action.MessageID)
-		if ephemeralErr != nil {
-			return store.ErrNotFound
-		}
-		message = ephemeralAsMessage(value)
-		ephemeral = true
-	} else if err != nil {
+	message, ephemeral, err := m.interactiveMessage(ctx, workspaceID, userID, action.MessageID)
+	if err != nil {
 		return err
-	}
-	if message.WorkspaceID != workspaceID || message.AppID == "" {
-		return store.ErrNotFound
 	}
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, message.Conversation); err != nil {
 		return err
@@ -244,6 +257,7 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 		return err
 	}
 	actionPayload := appBlockActionPayload(message.Blocks, action)
+	m.withChosenOptionText(actionPayload, action)
 	payload := map[string]any{
 		"type":       "block_actions",
 		"api_app_id": snapshot.App.ID,
@@ -395,16 +409,19 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 		"value":     query.Value,
 	}
 	if query.MessageID != "" {
-		message, messageErr := m.Store.GetMessage(ctx, query.MessageID)
-		if messageErr != nil || message.WorkspaceID != workspaceID || message.Conversation != conversationID || message.AppID != query.AppID {
+		message, ephemeral, messageErr := m.interactiveMessage(ctx, workspaceID, userID, query.MessageID)
+		if errors.Is(messageErr, store.ErrNotFound) || (messageErr == nil && (message.Conversation != conversationID || message.AppID != query.AppID)) {
 			return nil, store.ErrNotFound
+		}
+		if messageErr != nil {
+			return nil, messageErr
 		}
 		if !blocksContainAction(message.Blocks, query.BlockID, query.ActionID, "external_select", "multi_external_select") {
 			return nil, store.ErrNotFound
 		}
 		payload["container"] = map[string]any{
 			"type": "message", "message_ts": domain.NewMessageTimestamp(message.CreatedAt),
-			"channel_id": message.Conversation, "is_ephemeral": false,
+			"channel_id": message.Conversation, "is_ephemeral": ephemeral,
 		}
 		payload["channel"] = map[string]any{"id": message.Conversation}
 		payload["message"] = appInteractionMessage(message)
@@ -439,7 +456,7 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 		if requestErr != nil {
 			return nil, requestErr
 		}
-		return m.vouchViewOptions(query)(parseAppOptions(body))
+		return m.vouchLoadedOptions(query)(parseAppOptions(body))
 	}
 	_, _, capability, err := m.createInteractionCapabilities(ctx, query.AppID, workspaceID, userID, conversationID, "", "", responseBaseURL)
 	if err != nil {
@@ -456,7 +473,7 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 	for {
 		response, responseErr := m.Store.GetSocketModeResponse(ctx, query.AppID, envelopeID)
 		if responseErr == nil {
-			return m.vouchViewOptions(query)(parseAppOptions([]byte(response.Payload)))
+			return m.vouchLoadedOptions(query)(parseAppOptions([]byte(response.Payload)))
 		}
 		if !errors.Is(responseErr, store.ErrNotFound) {
 			return nil, responseErr
