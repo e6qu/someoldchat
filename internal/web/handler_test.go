@@ -4333,7 +4333,7 @@ func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
 	)
 	// A result opens the message where it lives, anchored, instead of opening it
 	// as an empty thread.
-	result := regexp.MustCompile(`<a class="result" href="([^"]+)">`).FindStringSubmatch(body)
+	result := regexp.MustCompile(`<li class="v-row result" data-row-href="([^"]+)">`).FindStringSubmatch(body)
 	if result == nil {
 		t.Fatalf("no result link: %s", body)
 	}
@@ -4417,7 +4417,7 @@ func TestSearchRecentHistoryAndTypeaheadUseRealVisibleDestinations(t *testing.T)
 	if len(channels) != 1 || channels[0].Kind != "channel" || channels[0].URL != "/app?channel=Cdev" {
 		t.Fatalf("channel suggestions = %+v", channels)
 	}
-	if len(files) != 1 || files[0].Kind != "file" || files[0].URL != "/api/files/Fnotes" {
+	if len(files) != 1 || files[0].Kind != "file" || files[0].URL != "/app/files/Fnotes/view" {
 		t.Fatalf("file suggestions = %+v", files)
 	}
 	private := decodeSuggestions("/app/search/suggestions?q=secret&channel=Cdev")
@@ -4513,13 +4513,14 @@ func TestSearchPageSupportsTypedResultsFiltersAndConversationScope(t *testing.T)
 	if files.Code != http.StatusOK {
 		t.Fatalf("files status=%d body=%s", files.Code, files.Body)
 	}
-	requireContains(t, "file search", files.Body.String(), "<mark>Needle</mark> notes", "<mark>Needle</mark> elsewhere", "text/plain", "/api/files/Fneedle", "2 results in files")
+	requireContains(t, "file search", files.Body.String(), "<mark>Needle</mark> notes", "<mark>Needle</mark> elsewhere", "text/plain", "/app/files/Fneedle/view", "/app/files/Fneedle\"", "2 results for “needle”")
 	scopedFiles := get(t, mux, "/app/search?q=needle&type=files&scope=channel&channel=Cdev")
-	requireContains(t, "scoped file search", scopedFiles.Body.String(), "<mark>Needle</mark> notes", "1 results in files")
+	// One result is "1 result", not "1 results", and the scope is a named chip.
+	requireContains(t, "scoped file search", scopedFiles.Body.String(), "<mark>Needle</mark> notes", "1 result for “needle”", `class="scope-chip">in: #general`)
 	requireMissing(t, "scoped file search", scopedFiles.Body.String(), "<mark>Needle</mark> elsewhere")
 
 	people := get(t, mux, "/app/search?q=Ada&type=people&channel=Cdev")
-	requireContains(t, "people search", people.Body.String(), "Ada Developer", `/app/members?user=U1`)
+	requireContains(t, "people search", people.Body.String(), "<mark>Ada</mark> Developer", `/app/members?user=U1`, `data-profile-user="U1"`)
 	excludedPeople := get(t, mux, "/app/search?q=Ada+-Developer&type=people&channel=Cdev")
 	requireMissing(t, "excluded people search", excludedPeople.Body.String(), "Ada Developer")
 	channels := get(t, mux, "/app/search?q=general&type=channels&channel=Cdev")
@@ -4785,7 +4786,7 @@ func TestSearchNamesDirectMessagesAfterTheirParticipants(t *testing.T) {
 	}
 
 	body := get(t, mux, "/app/search?q=needle&channel=Cdm").Body.String()
-	requireContains(t, "direct-message search result", body, `<span class="channel">Bob Builder</span>`, "private <mark>needle</mark>")
+	requireContains(t, "direct-message search result", body, "Direct message with Bob Builder", "private <mark>needle</mark>")
 	requireMissing(t, "direct-message search result", body, "#direct")
 }
 

@@ -214,7 +214,11 @@ type messageView struct {
 	// AuthorID is set only for a member posting as themselves, so their name
 	// opens their profile (PROFILE-01); an app or a custom username is not a
 	// member whose profile the name could honestly open.
-	AuthorID      string
+	AuthorID string
+	// ChannelPrivate and DirectLabel are a search hit's context: a lock for a
+	// private channel, "Direct message with Ana Lima" for a DM.
+	ChannelPrivate bool
+	DirectLabel    string
 	AuthorInitial string
 	AvatarURL     string
 	AvatarEmoji   string
@@ -342,6 +346,14 @@ type emojiOptionView struct {
 type conversationView struct {
 	ID   string
 	Name string
+	// IsMember, IsPrivate, Topic and MemberCountLabel are a channel search
+	// result's context: whether the reader is in it (View) or not (Join),
+	// whether it is private, what it is about, and how many are in it.
+	IsMember         bool
+	IsPrivate        bool
+	Topic            string
+	MemberCountLabel string
+	Initial          string
 	// MarkedName is set only for a search result; see memberView.MarkedName.
 	MarkedName    template.HTML
 	Current       bool
@@ -976,6 +988,17 @@ type searchData struct {
 	Warning              string
 	Recent               []searchHistoryView
 	Searched             bool
+	// Summary is the sentence under the tabs ("1 result for “x”").
+	Summary string
+	// ScopeName names the conversation a Ctrl/Cmd+F search is confined to,
+	// shown as the "in:" chip, and WorkspaceScopeURL is the same search
+	// without it.
+	ScopeName         string
+	WorkspaceScopeURL string
+	// DatePreset is the Date chip's choice and DateOptions its menu.
+	DatePreset  string
+	DateOptions []filesOptionView
+	CSRFToken   string
 }
 
 // scheduleDayView is one weekday checkbox. The label is the English name and
@@ -1056,15 +1079,19 @@ type searchTabView struct {
 }
 
 type searchFileView struct {
-	ID          string
-	Name        template.HTML
-	Title       template.HTML
-	MIMEType    string
-	Size        string
-	Uploader    string
-	DisplayTime string
-	MachineTime string
-	DownloadURL string
+	ID           string
+	Name         template.HTML
+	Title        template.HTML
+	MIMEType     string
+	KindLabel    string
+	Icon         string
+	ThumbnailURL string
+	Size         string
+	Uploader     string
+	DisplayTime  string
+	MachineTime  string
+	DownloadURL  string
+	ViewURL      string
 }
 
 type searchSuggestion struct {
@@ -1072,6 +1099,10 @@ type searchSuggestion struct {
 	Label       string `json:"label"`
 	Description string `json:"description"`
 	URL         string `json:"url"`
+	// AvatarURL is a person's photo and Private marks a private channel, so
+	// the dropdown can show a face or a lock rather than a word.
+	AvatarURL string `json:"avatar_url,omitempty"`
+	Private   bool   `json:"private,omitempty"`
 }
 
 type searchSuggestionsResponse struct {
@@ -1468,8 +1499,7 @@ const pageStyle = `<style>
 .search input[name=q]{flex:1 1 auto;min-width:0;border:0;outline:0;background:transparent;color:var(--on-accent)}
 .search input[name=q]::placeholder{color:#ffffffd6}
 .search-submit{border:0;background:transparent;color:var(--on-accent);font-weight:700;padding:2px 2px}
-.search-suggestions{position:absolute;z-index:30;top:calc(100% + 6px);left:0;right:0;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
-.search-suggestions[hidden]{display:none}.search-suggestion{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:8px 10px;border-radius:6px;color:var(--text);text-decoration:none}.search-suggestion:hover,.search-suggestion[aria-selected=true]{background:var(--hover)}.search-suggestion-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.search-suggestion-kind{color:var(--muted);font-size:12px;text-transform:capitalize}
+` + searchSuggestionStyle + `
 .top-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex:0 0 auto}
 .icon-button{border:0;background:transparent;color:var(--on-accent);border-radius:6px;padding:7px 9px;text-decoration:none}
 .icon-button:hover{background:#ffffff2b}
@@ -2987,55 +3017,71 @@ const oauthConsentMarkup = `{{define "title"}}Authorize {{.AppName}} · SameOldC
 var oauthConsentTemplate = mustPage(oauthConsentMarkup)
 
 const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
-{{define "styles"}}<style>
+{{define "styles"}}` + viewStyle + `<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}
-.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}
-.bar form{position:relative;display:flex;flex:1 1 auto;min-width:0;max-width:600px;margin:auto;gap:8px}
-.bar input{flex:1 1 auto;min-width:0;border:1px solid #ffffff8a;border-radius:5px;padding:8px 10px;background:#ffffff2b;color:var(--on-accent)}
+.bar>a{color:var(--on-accent);text-decoration:none;font-weight:700;white-space:nowrap}
+.bar form{position:relative;display:flex;align-items:center;flex:1 1 auto;min-width:0;max-width:640px;margin:auto;gap:6px;padding:0 6px 0 10px;border:1px solid #ffffff8a;border-radius:7px;background:#ffffff2b}
+.bar input[type=search]{flex:1 1 auto;min-width:0;border:0;outline:0;padding:8px 2px;background:transparent;color:var(--on-accent);font:inherit}
 .bar input::placeholder{color:#ffffffd6}
-.bar button{border:1px solid #ffffff6b;background:transparent;color:var(--on-accent);border-radius:5px;padding:6px 10px}
-.search-suggestions{position:absolute;z-index:30;top:calc(100% + 6px);left:0;right:0;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
-.search-suggestions[hidden]{display:none}.search-suggestion{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:8px 10px;border-radius:6px;color:var(--text);text-decoration:none}.search-suggestion:hover,.search-suggestion[aria-selected=true]{background:var(--hover)}.search-suggestion-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.search-suggestion-kind{color:var(--muted);font-size:12px;text-transform:capitalize}
-.layout{max-width:980px;margin:0 auto;padding:28px 22px}
-.heading{border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:22px}
-.heading h1{margin:0 0 4px;font-size:26px}
-.muted{color:var(--muted)}
-.search-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow:auto;margin-bottom:14px}.search-tabs a{padding:9px 13px;color:var(--muted);font-weight:800;text-decoration:none;border-bottom:3px solid transparent;white-space:nowrap}.search-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}
-.filters{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:9px;align-items:end;padding:13px;margin-bottom:18px;background:var(--panel);border:1px solid var(--line);border-radius:8px}.filters label{display:grid;gap:4px;font-size:12px;font-weight:800}.filters select,.filters input{min-width:0;width:100%;border:1px solid var(--field-line);border-radius:5px;padding:7px;background:var(--field);color:var(--text)}.filters button{border:0;border-radius:5px;padding:8px 12px;background:var(--action);color:var(--on-strong);font-weight:800}.scope-note{grid-column:1/-1;margin:0;color:var(--muted);font-size:12px}.scope-note a{color:var(--action)}
-.results{display:grid;gap:8px}
-.result{display:block;padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:inherit;text-decoration:none}
-.result:hover{border-color:var(--action)}
-.author{font-weight:700}
-.time{color:var(--muted);font-size:12px;margin-left:8px}
-.channel{color:var(--muted);font-size:12px;margin-left:8px}
-.text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
-.file-result{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.file-result .text{color:var(--muted)}.result-kind{color:var(--muted);font-size:12px;font-weight:700}
-.empty{color:var(--muted);padding:22px;text-align:center}
-.recent-searches{margin-top:24px}.recent-searches h2{font-size:16px}.recent-searches ul{display:grid;gap:6px;margin:0;padding:0;list-style:none}.recent-searches a{display:block;padding:10px 12px;border:1px solid var(--line);border-radius:7px;color:var(--text);text-decoration:none}.recent-searches a:hover{background:var(--hover);border-color:var(--action)}
-.pager{text-align:center;margin-top:18px}.pager a{color:var(--action);font-weight:800}
-@media(max-width:820px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:720px){.layout{padding:20px 14px}.bar{padding:0 12px;gap:10px}.filters{grid-template-columns:1fr}.file-result{grid-template-columns:1fr}}
+.bar button[type=submit]{border:0;background:transparent;color:var(--on-accent);border-radius:5px;padding:6px 8px;font-weight:700}
+.scope-chip{display:inline-flex;align-items:center;gap:4px;flex:0 0 auto;max-width:45%;padding:2px 4px 2px 8px;border-radius:5px;background:var(--panel-strong);color:var(--text);font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scope-chip a{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:4px;color:var(--text);text-decoration:none}
+.scope-chip a:hover{background:var(--hover)}
+` + searchSuggestionStyle + `
+.search-page h1{margin:0 auto 0 0;font-size:22px}
+.search-summary{margin:0 0 12px;color:var(--muted)}
+.scope-note{margin:0 0 12px;color:var(--muted);font-size:13px}
+.search-filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 14px}
+.search-filters .v-menu-list{min-width:260px;padding:10px;gap:8px}
+.search-filters .v-menu-list label{display:grid;gap:4px;padding:0;font-size:12px;font-weight:700;color:var(--muted)}
+.search-filters .v-menu-list label:hover{background:transparent;color:var(--muted)}
+.search-filters .v-menu-list input,.search-filters .v-menu-list select{min-height:32px;padding:4px 8px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);font:inherit}
+.results{display:block}
+.result .text{margin:3px 0 0;overflow-wrap:anywhere}
+.result-title{margin:0;font-weight:700;overflow-wrap:anywhere}
+.result-title a{color:var(--text);text-decoration:none}.result-title a:hover{text-decoration:underline}
+.result-title .v-row-time{font-weight:400;text-decoration:none}.result-title .v-row-time:hover{text-decoration:underline}
+.bar input[type=search]::-webkit-search-cancel-button{filter:invert(1) brightness(2)}
+.result-context{display:inline-flex;align-items:center;gap:4px}
+.result .author-status .standard-emoji,.result .author-status .custom-emoji{width:15px;height:15px;font-size:14px}
+.result-glyph{display:grid;place-items:center;width:36px;height:36px;border-radius:6px;background:var(--hover);font-size:17px;font-weight:800}
+.result-glyph img{width:100%;height:100%;object-fit:cover;border-radius:6px}
+.result-side{display:flex;align-items:center;gap:6px}
+.result-side form{margin:0}
+.recent-searches h2{margin:18px 0 8px;font-size:16px}
+.recent-searches ul{margin:0;padding:0;list-style:none}
+.recent-searches a{display:flex;gap:10px;align-items:center;padding:10px 14px;border-top:1px solid var(--line);color:var(--text);text-decoration:none}
+.recent-searches li:first-child a{border-top:0}
+.recent-searches a:hover{background:var(--hover)}
+.pager{text-align:center;margin-top:16px}.pager a{color:var(--action);font-weight:800}
+@media(max-width:720px){.bar{padding:0 10px;gap:8px}.bar>a .back-label{display:none}.search-filters{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.search-filters>*{flex:0 0 auto}.search-filters .v-menu-list{position:fixed;left:10px;right:10px;top:auto}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + searchSuggestionsScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search the workspace</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages, files, people, and channels" role="combobox" autocomplete="off" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required autofocus><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">{{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">{{.ResultCount}} results in {{.Type}} for “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term or choose a recent search.</p>{{end}}{{if .Warning}}<p class="notice" role="status">{{.Warning}}</p>{{end}}</div>
-{{if and (not .Searched) .Recent}}<section class="recent-searches" aria-labelledby="recent-searches-title"><h2 id="recent-searches-title">Recent searches</h2><ul>{{range .Recent}}<li><a href="{{.URL}}">{{.Query}}</a></li>{{end}}</ul></section>{{end}}
-{{if .CurrentOnly}}<p class="scope-note">Searching only this conversation. <a href="/app/search?q={{.Query}}&amp;channel={{.Channel}}&amp;type={{.Type}}">Search the whole workspace</a></p>{{end}}
-{{if .Searched}}<nav class="search-tabs" aria-label="Search result types">{{range .Tabs}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
-{{if or (eq .Type "messages") (eq .Type "files")}}<form class="filters" method="get" action="/app/search" aria-label="Search filters"><input type="hidden" name="q" value="{{.Query}}"><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">
-<label>From<select name="from"><option value="">Anyone</option>{{range .MemberOptions}}<option value="{{.ID}}"{{if eq .ID $.SelectedMember}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
-<label>In<select name="in"><option value="">Anywhere</option>{{range .ConversationOptions}}<option value="{{.ID}}"{{if eq .ID $.SelectedConversation}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
-<label>After<input type="date" name="after" value="{{.After}}"></label><label>Before<input type="date" name="before" value="{{.Before}}"></label>
-<label>Contains<select name="has"><option value="">Anything</option>{{if eq .Type "messages"}}<option value="file"{{if eq .Has "file"}} selected{{end}}>A file</option><option value="pin"{{if eq .Has "pin"}} selected{{end}}>A pin</option><option value="reaction"{{if eq .Has "reaction"}} selected{{end}}>A reaction</option>{{else}}<option value="images"{{if eq .Has "images"}} selected{{end}}>Images</option><option value="pdf"{{if eq .Has "pdf"}} selected{{end}}>PDF files</option><option value="text"{{if eq .Has "text"}} selected{{end}}>Text files</option>{{end}}</select></label>
-<label>Sort<select name="order"><option value="relevant"{{if eq .Sort "score"}} selected{{end}}>Most relevant</option><option value="newest"{{if and (eq .Sort "timestamp") (eq .Direction "desc")}} selected{{end}}>Newest</option><option value="oldest"{{if eq .Direction "asc"}} selected{{end}}>Oldest</option></select></label><button type="submit">Apply filters</button>
-{{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form>{{end}}{{end}}
+{{define "scripts"}}` + localTimeScript + searchSuggestionsScript + liveFilterScript + rowLinkScript + profilePanelScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}" aria-label="Back to chat">←<span class="back-label"> Back to chat</span></a><form method="get" action="/app/search" role="search" aria-label="Search the workspace">{{if .CurrentOnly}}<span class="scope-chip">in: {{.ScopeName}}<a href="{{.WorkspaceScopeURL}}" aria-label="Remove in: {{.ScopeName}}, search the whole workspace"><span aria-hidden="true">×</span></a></span>{{end}}<label class="visually-hidden" for="search-query">Search the workspace</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="{{if .CurrentOnly}}Search {{.ScopeName}}{{else}}Search messages, files, people, and channels{{end}}" role="combobox" autocomplete="off" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required autofocus><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">{{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
+{{template "search-view" .}}{{end}}
+{{define "search-view"}}<main class="v-page search-page"><div class="v-head"><h1>Search results</h1></div>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if not .Searched}}<p class="search-summary">Enter a search term or choose a recent search.</p>{{end}}{{if .Warning}}<p class="notice" role="status">{{.Warning}}</p>{{end}}
+{{if and (not .Searched) .Recent}}<section class="recent-searches" aria-labelledby="recent-searches-title"><h2 id="recent-searches-title">Recent searches</h2><ul class="v-list">{{range .Recent}}<li><a href="{{.URL}}"><span aria-hidden="true">🕘</span>{{.Query}}</a></li>{{end}}</ul></section>{{end}}
+{{if .CurrentOnly}}<p class="scope-note">Searching only this conversation. <a href="{{.WorkspaceScopeURL}}">Search the whole workspace</a></p>{{end}}
+{{if .Searched}}<nav class="v-tabs" aria-label="Search result types">{{range .Tabs}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
+{{if or (eq .Type "messages") (eq .Type "files")}}<form class="search-filters" method="get" action="/app/search" aria-label="Search filters" data-live-filter="#search-results"><input type="hidden" name="q" value="{{.Query}}"><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">{{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}
+<label class="v-chip{{if .SelectedMember}} on{{end}}"><span aria-hidden="true">From</span><select name="from" aria-label="From"><option value="">Anyone</option>{{range .MemberOptions}}<option value="{{.ID}}"{{if eq .ID $.SelectedMember}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+{{if not .CurrentOnly}}<label class="v-chip{{if .SelectedConversation}} on{{end}}"><span aria-hidden="true">In</span><select name="in" aria-label="In"><option value="">Anywhere</option>{{range .ConversationOptions}}<option value="{{.ID}}"{{if eq .ID $.SelectedConversation}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>{{end}}
+<label class="v-chip{{if .DatePreset}} on{{end}}"><span aria-hidden="true">Date</span><select name="date" aria-label="Date">{{range .DateOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+<label class="v-chip{{if .Has}} on{{end}}"><span aria-hidden="true">{{if eq .Type "files"}}Type{{else}}Has{{end}}</span><select name="has" aria-label="{{if eq .Type "files"}}File type{{else}}Contains{{end}}"><option value="">Anything</option>{{if eq .Type "messages"}}<option value="file"{{if eq .Has "file"}} selected{{end}}>A file</option><option value="link"{{if eq .Has "link"}} selected{{end}}>A link</option><option value="pin"{{if eq .Has "pin"}} selected{{end}}>A pin</option><option value="reaction"{{if eq .Has "reaction"}} selected{{end}}>A reaction</option>{{else}}<option value="images"{{if eq .Has "images"}} selected{{end}}>Images</option><option value="pdf"{{if eq .Has "pdf"}} selected{{end}}>PDF files</option><option value="text"{{if eq .Has "text"}} selected{{end}}>Text files</option>{{end}}</select></label>
+<details class="v-menu"><summary class="v-chip{{if or .After .Before}} on{{end}}" role="button" aria-label="More filters">More filters<span aria-hidden="true"> ▾</span></summary><div class="v-menu-list"><label>After<input type="date" name="after" value="{{.After}}"></label><label>Before<input type="date" name="before" value="{{.Before}}"></label></div></details>
+<label class="v-chip"><span aria-hidden="true">Sort</span><select name="order" aria-label="Sort"><option value="relevant"{{if eq .Sort "score"}} selected{{end}}>Most relevant</option><option value="newest"{{if and (eq .Sort "timestamp") (eq .Direction "desc")}} selected{{end}}>Newest</option><option value="oldest"{{if eq .Direction "asc"}} selected{{end}}>Oldest</option></select></label>
+<noscript><button class="v-btn" type="submit">Apply filters</button></noscript>
+</form>{{end}}{{end}}
+<p class="visually-hidden" id="view-status" role="status" aria-live="polite"></p>
+<div id="search-results" data-live-summary="{{.Summary}}">{{if .Searched}}<p class="search-summary">{{.Summary}}</p>{{end}}
 <section class="results" aria-label="{{.Type}} search results">
-{{if eq .Type "messages"}}{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span>{{if .AuthorStatus}}<span class="author-status"{{if .AuthorStatusText}} title="{{.AuthorStatusText}}"{{end}}>{{.AuthorStatus}}</span>{{end}}<time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.DisplayText}}</p></a>{{else}}{{if $.Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}
-{{else if eq .Type "files"}}{{range .Files}}<a class="result file-result" href="{{.DownloadURL}}"><span><span class="author">{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</span><span class="result-kind">{{.MIMEType}} · {{.Size}}</span><p class="text">Uploaded by {{.Uploader}}</p></span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching files.</p>{{end}}
-{{else if eq .Type "canvases"}}{{range .Canvases}}<a class="result canvas-result" href="{{.URL}}"><span><span class="author">{{.Title}}</span><span class="result-kind">Canvas · {{.Owner}}</span>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching canvases.</p>{{end}}
-{{else if eq .Type "lists"}}{{range .Lists}}<a class="result list-result" href="{{.URL}}"><span><span class="author">{{.Title}}</span><span class="result-kind">List · {{.Owner}}</span>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching lists.</p>{{end}}
-{{else if eq .Type "people"}}{{range .People}}<a class="result" href="/app/members?user={{.ID}}"><span class="author">{{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</span>{{if .RealName}}<p class="text">{{.RealName}}</p>{{end}}</a>{{else}}<p class="empty">No matching people.</p>{{end}}
-{{else}}{{range .Conversations}}<a class="result" href="/app?channel={{.ID}}"><span class="author"># {{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</span></a>{{else}}<p class="empty">No matching channels.</p>{{end}}{{end}}
-</section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
+{{if eq .Type "messages"}}{{if .Messages}}<ul class="v-list">{{range .Messages}}<li class="v-row result" data-row-href="{{.Permalink}}"><span class="v-avatar" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span><div class="v-row-main"><div class="v-row-meta"><span class="result-context">{{if .ChannelPrivate}}<span aria-label="Private">🔒</span>{{end}}{{if .DirectLabel}}{{.DirectLabel}}{{else}}{{.ChannelPrefix}}{{.ChannelName}}{{end}}</span></div><p class="result-title">{{if .AuthorID}}<a class="author" href="/app/members?user={{.AuthorID}}" data-profile-user="{{.AuthorID}}">{{.AuthorName}}</a>{{else}}<span class="author">{{.AuthorName}}</span>{{end}}{{if .AuthorStatus}} <span class="author-status"{{if .AuthorStatusText}} title="{{.AuthorStatusText}}"{{end}}>{{.AuthorStatus}}</span>{{end}} <a class="v-row-time" href="{{.Permalink}}"><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a></p><div class="text v-text">{{.DisplayText}}</div></div></li>{{end}}</ul>{{else}}{{if $.Searched}}<p class="v-empty">No matching messages.</p>{{end}}{{end}}
+{{else if eq .Type "files"}}{{if .Files}}<ul class="v-list">{{range .Files}}<li class="v-row result file-result" data-row-href="{{.ViewURL}}"><span class="result-glyph" aria-hidden="true">{{if .ThumbnailURL}}<img src="{{.ThumbnailURL}}" alt="" loading="lazy">{{else}}{{.Icon}}{{end}}</span><div class="v-row-main"><p class="result-title"><a href="{{.ViewURL}}">{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</a></p><div class="v-row-meta"><span>{{.KindLabel}} ({{.MIMEType}})</span><span aria-hidden="true">·</span><span>{{.Size}}</span><span aria-hidden="true">·</span><span>Shared by {{.Uploader}}</span><span aria-hidden="true">·</span><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></div></div><div class="result-side"><a class="v-icon" href="{{.DownloadURL}}" aria-label="Download {{.Name}}" title="Download"><span aria-hidden="true">⤓</span></a></div></li>{{end}}</ul>{{else}}<p class="v-empty">No matching files.</p>{{end}}
+{{else if eq .Type "canvases"}}{{if .Canvases}}<ul class="v-list">{{range .Canvases}}<li class="v-row result canvas-result" data-row-href="{{.URL}}"><span class="result-glyph" aria-hidden="true">📝</span><div class="v-row-main"><p class="result-title"><a href="{{.URL}}">{{.Title}}</a></p><div class="v-row-meta"><span>Canvas · {{.Owner}}</span><span aria-hidden="true">·</span><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></div>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</div></li>{{end}}</ul>{{else}}<p class="v-empty">No matching canvases.</p>{{end}}
+{{else if eq .Type "lists"}}{{if .Lists}}<ul class="v-list">{{range .Lists}}<li class="v-row result list-result" data-row-href="{{.URL}}"><span class="result-glyph" aria-hidden="true">☑</span><div class="v-row-main"><p class="result-title"><a href="{{.URL}}">{{.Title}}</a></p><div class="v-row-meta"><span>List · {{.Owner}}</span><span aria-hidden="true">·</span><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></div>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</div></li>{{end}}</ul>{{else}}<p class="v-empty">No matching lists.</p>{{end}}
+{{else if eq .Type "people"}}{{if .People}}<ul class="v-list">{{range .People}}<li class="v-row result"><span class="v-avatar" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span><div class="v-row-main"><p class="result-title"><a href="/app/members?user={{.ID}}" data-profile-user="{{.ID}}">{{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</a>{{if .IsSelf}} <span class="v-badge">you</span>{{end}}</p>{{if .Profile.Title}}<p class="text">{{.Profile.Title}}</p>{{else if and .RealName (ne .RealName .Name)}}<p class="text">{{.RealName}}</p>{{end}}</div></li>{{end}}</ul>{{else}}<p class="v-empty">No matching people.</p>{{end}}
+{{else}}{{if .Conversations}}<ul class="v-list">{{range .Conversations}}<li class="v-row result" data-row-href="/app?channel={{.ID}}"><span class="result-glyph" aria-hidden="true">{{.Initial}}</span><div class="v-row-main"><p class="result-title"><a href="/app?channel={{.ID}}">{{if .IsPrivate}}🔒 {{else}}# {{end}}{{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</a></p><div class="v-row-meta">{{if .IsMember}}<span>Joined</span><span aria-hidden="true">·</span>{{end}}<span>{{.MemberCountLabel}}</span>{{if .Topic}}<span aria-hidden="true">·</span><span>{{.Topic}}</span>{{end}}</div></div><div class="result-side">{{if .IsMember}}<a class="v-btn" href="/app?channel={{.ID}}" aria-label="View {{.Name}}">View</a>{{else if $.CSRFToken}}<form method="post" action="/app/join?channel={{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="v-btn primary" type="submit" aria-label="Join {{.Name}}">Join</button></form>{{end}}</div></li>{{end}}</ul>{{else}}<p class="v-empty">No matching channels.</p>{{end}}{{end}}
+</section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</div></main>{{end}}`
 
 var searchTemplate = mustPage(searchMarkup)
 
@@ -3524,6 +3570,9 @@ const localTimeScript = `<script>(function(){window.sameoldchatLocalTimes=functi
 // with the same accessible listbox. The anchors remain real destinations, and
 // the form remains a complete non-JavaScript fallback.
 const searchSuggestionsScript = `<script>(function(){
+var acted=false;
+document.addEventListener('pointerdown',function(){acted=true},true);
+document.addEventListener('keydown',function(){acted=true},true);
 function bind(input){
 if(input.getAttribute('data-search-suggestions-bound')==='true'||!input.form)return;
 input.setAttribute('data-search-suggestions-bound','true');
@@ -3556,20 +3605,23 @@ for(var itemIndex=0;itemIndex<items.length;itemIndex++)items[itemIndex].setAttri
 input.setAttribute('aria-activedescendant',items[active].id);
 items[active].scrollIntoView({block:'nearest'});
 }
-function render(payload){
-list.replaceChildren();
-items=[];
-active=-1;
-var values=payload&&Array.isArray(payload.items)?payload.items:[];
-for(var index=0;index<values.length;index++){
-var value=values[index];
-if(!value||typeof value.url!=='string'||value.url.charAt(0)!=='/'||value.url.charAt(1)==='/'||typeof value.label!=='string')continue;
+function icon(value){
+var node=document.createElement('span');
+node.className='search-suggestion-icon';
+node.setAttribute('aria-hidden','true');
+var avatar=typeof value.avatar_url==='string'?value.avatar_url:'';if(avatar&&((avatar.charAt(0)==='/'&&avatar.charAt(1)!=='/')||avatar.indexOf('https://')===0)){var image=document.createElement('img');image.src=avatar;image.alt='';node.appendChild(image);return node}
+var glyphs={query:'⌕',recent:'🕘',channel:value.private?'🔒':'#',file:'📄'};
+node.textContent=glyphs[value.kind]||(value.kind==='person'?(value.label||'?').charAt(0):'•');
+return node;
+}
+function option(value){
 var link=document.createElement('a');
-link.className='search-suggestion';
+link.className='search-suggestion '+(value.kind||'');
 link.id=list.id+'-'+items.length;
 link.href=value.url;
 link.setAttribute('role','option');
 link.setAttribute('aria-selected','false');
+link.appendChild(icon(value));
 var label=document.createElement('span');
 label.className='search-suggestion-label';
 label.textContent=value.label;
@@ -3582,7 +3634,24 @@ link.addEventListener('pointermove',function(event){activate(items.indexOf(event
 list.appendChild(link);
 items.push(link);
 }
-if(items.length){
+function searchURL(){
+var parameters=new URLSearchParams();
+parameters.set('q',input.value.trim());
+Array.prototype.forEach.call(form.querySelectorAll('input[type=hidden]'),function(field){if(field.name&&field.value)parameters.set(field.name,field.value)});
+return '/app/search?'+parameters.toString();
+}
+function render(payload){
+list.replaceChildren();
+items=[];
+active=-1;
+if(input.value.trim())option({kind:'query',label:'Search for “'+input.value.trim()+'”',description:'Search',url:searchURL()});
+var values=payload&&Array.isArray(payload.items)?payload.items:[];
+for(var index=0;index<values.length;index++){
+var value=values[index];
+if(!value||typeof value.url!=='string'||value.url.charAt(0)!=='/'||value.url.charAt(1)==='/'||typeof value.label!=='string')continue;
+option(value);
+}
+if(items.length&&document.activeElement===input){
 list.hidden=false;
 input.setAttribute('aria-expanded','true');
 }else close();
@@ -3599,7 +3668,8 @@ if(!response.ok)throw new Error('suggestions unavailable');
 return response.json();
 }).then(render).catch(function(error){if(error.name!=='AbortError')close()});
 }
-input.addEventListener('focus',load);
+input.addEventListener('focus',function(){if(acted)load()});
+input.addEventListener('click',function(){if(list.hidden)load()});
 input.addEventListener('input',function(){
 clearTimeout(timer);
 if(request)request.abort();
@@ -3610,7 +3680,7 @@ timer=window.setTimeout(load,120);
 });
 input.addEventListener('keydown',function(event){
 if(event.key==='ArrowDown'||event.key==='ArrowUp'){
-if(!items.length){load();return}
+if(!items.length||list.hidden){load();return}
 event.preventDefault();
 activate(active+(event.key==='ArrowDown'?1:-1));
 return;
@@ -3621,11 +3691,13 @@ window.location.assign(items[active].href);
 return;
 }
 if(event.key==='Escape'&&!list.hidden){
-if(input.id!=='workspace-search')event.preventDefault();
+event.preventDefault();
+event.stopPropagation();
 close();
 }
 });
 form.addEventListener('submit',close);
+form.addEventListener('focusout',function(event){if(!event.relatedTarget||!form.contains(event.relatedTarget))window.setTimeout(function(){if(!form.contains(document.activeElement))close()},0)});
 document.addEventListener('pointerdown',function(event){if(!form.contains(event.target))close()});
 }
 var inputs=document.querySelectorAll('form.search input[name=q],#search-query');
@@ -5108,6 +5180,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/message/schedule/cancel", h.cancelScheduledMessage)
 	mux.HandleFunc("POST /app/file/stage", h.stageDraftFiles)
 	mux.HandleFunc("POST /app/file", h.uploadFile)
+	mux.HandleFunc("GET /app/files", h.filesBrowser)
+	mux.HandleFunc("GET /app/files/{fileID}/view", h.fileView)
 	mux.HandleFunc("GET /app/files/{fileID}", h.downloadFile)
 	mux.HandleFunc("GET /app/files/{fileID}/thumbnail", h.downloadFileThumbnail)
 	mux.HandleFunc("POST /app/interaction", h.appInteraction)
@@ -5260,6 +5334,12 @@ func (h Handler) deleteFile(w http.ResponseWriter, r *http.Request) {
 		// The service is uploader-only and answers a missing file and someone
 		// else's file identically, so this cannot be used to probe for files.
 		h.writeMessageMutationError(w, r, err, "deleted")
+		return
+	}
+	// Deleting from the Files view returns to Files; the file view it came
+	// from no longer exists.
+	if r.URL.Query().Get("next") == "files" {
+		h.redirectMutation(w, r, "/app/files?notice=deleted")
 		return
 	}
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
@@ -8955,6 +9035,31 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		Before:               strings.TrimSpace(r.URL.Query().Get("before")),
 		Has:                  strings.TrimSpace(r.URL.Query().Get("has")),
 		CurrentOnly:          r.URL.Query().Get("scope") == "channel",
+		DatePreset:           strings.TrimSpace(r.URL.Query().Get("date")),
+	}
+	if sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName); cookieErr == nil && strings.TrimSpace(sessionCookie.Value) != "" {
+		data.CSRFToken = auth.CSRFToken(sessionCookie.Value)
+	}
+	if data.CurrentOnly {
+		data.ScopeName = "this conversation"
+		if conversation, infoErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(channel)); infoErr == nil {
+			data.ScopeName = conversationName(conversation)
+			if conversation.IsDirectOrGroup() {
+				if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
+					data.ScopeName = participants
+				}
+			} else if !strings.HasPrefix(data.ScopeName, "#") {
+				data.ScopeName = "#" + data.ScopeName
+			}
+		}
+		unscoped := cloneURLValues(r.URL.Query())
+		unscoped.Del("scope")
+		unscoped.Del("cursor")
+		unscoped.Del("page")
+		data.WorkspaceScopeURL = "/app/search?" + unscoped.Encode()
+	}
+	for _, option := range []struct{ value, label string }{{"", "Any time"}, {"today", "Today"}, {"yesterday", "Yesterday"}, {"week", "Last 7 days"}, {"month", "Last 30 days"}, {"quarter", "Last 3 months"}, {"year", "Last 12 months"}} {
+		data.DateOptions = append(data.DateOptions, filesOptionView{Value: option.value, Label: option.label, Selected: data.DatePreset == option.value})
 	}
 	if query == "" {
 		recent, recentErr := h.Messages.RecentSearches(r.Context(), principal.WorkspaceID, principal.UserID, recentSearchWindow)
@@ -8971,7 +9076,8 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, err, "Search filters are temporarily unavailable.")
 		return
 	}
-	for _, tab := range []struct{ value, label string }{{"messages", "Messages"}, {"files", "Files"}, {"canvases", "Canvases"}, {"lists", "Lists"}, {"people", "People"}, {"channels", "Channels"}} {
+	// Slack's order: Messages, Files, Channels, People, Canvases, Lists.
+	for _, tab := range []struct{ value, label string }{{"messages", "Messages"}, {"files", "Files"}, {"channels", "Channels"}, {"people", "People"}, {"canvases", "Canvases"}, {"lists", "Lists"}} {
 		values := cloneURLValues(r.URL.Query())
 		values.Set("type", tab.value)
 		values.Del("cursor")
@@ -8979,6 +9085,9 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		data.Tabs = append(data.Tabs, searchTabView{Label: tab.label, URL: "/app/search?" + values.Encode(), Current: resultType == tab.value})
 	}
 	effectiveQuery := searchQueryWithFilters(query, data)
+	if modifier := searchDateModifier(data.DatePreset, h.memberZone(r, principal), time.Now()); modifier != "" {
+		effectiveQuery += " " + modifier
+	}
 	// The tokens are the terms a result marks. An unterminated phrase is still a
 	// bad query, and refusing it here keeps that answer the same on every tab.
 	textTokens, tokenErr := domain.SearchQueryTokens(query)
@@ -9033,11 +9142,13 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		}
 		names := h.newUserNames(r.Context(), principal)
 		for _, file := range results.Files {
+			row := h.fileRow(file, names)
 			data.Files = append(data.Files, searchFileView{
 				ID: string(file.ID), Name: markedText(file.Name, terms), Title: markedText(file.Title, terms), MIMEType: file.MIMEType,
-				Size: formatFileSize(file.Size), Uploader: names.name(file.Uploader),
-				DisplayTime: formatTime(file.CreatedAt), MachineTime: file.CreatedAt.UTC().Format(time.RFC3339Nano),
-				DownloadURL: "/api/files/" + url.PathEscape(string(file.ID)),
+				KindLabel: row.KindLabel, Icon: row.Icon, ThumbnailURL: row.ThumbnailURL,
+				Size: row.Size, Uploader: row.Uploader,
+				DisplayTime: row.DisplayTime, MachineTime: row.MachineTime,
+				DownloadURL: row.DownloadURL, ViewURL: row.ViewURL,
 			})
 		}
 		data.ResultCount = results.Total
@@ -9060,8 +9171,9 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 			}
 			name := displayName(member)
 			data.People = append(data.People, memberView{
-				ID: string(member.ID), Name: name, RealName: member.RealName,
+				ID: string(member.ID), Name: name, RealName: member.RealName, Profile: member.Profile,
 				MarkedName:    markedText(name, terms),
+				AvatarURL:     profileImageURL(member.Profile),
 				AuthorInitial: initial(name), IsSelf: member.ID == principal.UserID,
 			})
 		}
@@ -9129,7 +9241,12 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, conversation := range page.Conversations {
 			name := conversationName(conversation)
-			data.Conversations = append(data.Conversations, conversationView{ID: string(conversation.ID), Name: name, MarkedName: markedText(name, terms)})
+			view := conversationView{ID: string(conversation.ID), Name: name, Initial: initial(name), MarkedName: markedText(name, terms),
+				IsPrivate: conversation.Kind == domain.ConversationTypePrivate, IsMember: conversation.IsMember, Topic: conversation.Topic}
+			if count, countErr := h.Messages.ConversationMemberCount(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID); countErr == nil {
+				view.MemberCountLabel = pluralCount(count, "member", "members")
+			}
+			data.Conversations = append(data.Conversations, view)
 		}
 		data.ResultCount = len(data.Conversations)
 		data.MoreURL = searchPageURL(r, page.HasMore, string(page.NextCursor))
@@ -9137,6 +9254,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	if err := h.Messages.RecordSearch(r.Context(), principal.WorkspaceID, principal.UserID, query); err != nil {
 		data.Warning = "Search completed, but it could not be added to recent searches."
 	}
+	data.Summary = pluralCount(data.ResultCount, "result", "results") + " for “" + query + "”"
 	h.writeHTML(w, searchTemplate, data, http.StatusOK, "search rendering unavailable")
 }
 
@@ -9241,6 +9359,49 @@ func searchableTerms(tokens []string) []string {
 	return terms
 }
 
+// pluralCount is "1 result" and "2 results": the page used to say "1 results".
+func pluralCount(count int, one, many string) string {
+	if count == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(count) + " " + many
+}
+
+// memberZone is the member's recorded time zone (their browser's), or UTC.
+func (h Handler) memberZone(r *http.Request, principal auth.Principal) *time.Location {
+	if user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID); err == nil && user.Profile.Timezone != "" {
+		if location, loadErr := time.LoadLocation(user.Profile.Timezone); loadErr == nil {
+			return location
+		}
+	}
+	return time.UTC
+}
+
+// searchDateModifier turns the Date chip's preset into the modifier Slack's
+// grammar already understands: on:today, on:yesterday, or after: the day
+// before the window opens, counted in the member's own zone.
+func searchDateModifier(preset string, location *time.Location, now time.Time) string {
+	days := 0
+	switch preset {
+	case "today":
+		return "on:today"
+	case "yesterday":
+		return "on:yesterday"
+	case "week":
+		days = 7
+	case "month":
+		days = 30
+	case "quarter":
+		days = 91
+	case "year":
+		days = 365
+	default:
+		return ""
+	}
+	local := now.In(location)
+	return "after:" + time.Date(local.Year(), local.Month(), local.Day()-days, 0, 0, 0, 0, location).Format("2006-01-02")
+}
+
 func searchPageURL(r *http.Request, hasMore bool, cursor string) string {
 	if !hasMore || cursor == "" {
 		return ""
@@ -9309,7 +9470,8 @@ func (h Handler) searchSuggestions(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, searchSuggestion{
 			Kind: "person", Label: member.Name, Description: "Person",
-			URL: "/app/members?user=" + url.QueryEscape(member.ID),
+			URL:       "/app/members?user=" + url.QueryEscape(member.ID),
+			AvatarURL: member.AvatarURL,
 		})
 	}
 	for _, conversation := range conversations {
@@ -9319,9 +9481,14 @@ func (h Handler) searchSuggestions(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(domain.FoldSearchText(conversation.Name), folded) {
 			continue
 		}
+		label := "# " + conversation.Name
+		if conversation.IsPrivate {
+			label = conversation.Name
+		}
 		items = append(items, searchSuggestion{
-			Kind: "channel", Label: "# " + conversation.Name, Description: "Channel",
-			URL: "/app?channel=" + url.QueryEscape(conversation.ID),
+			Kind: "channel", Label: label, Description: "Channel",
+			URL:     "/app?channel=" + url.QueryEscape(conversation.ID),
+			Private: conversation.IsPrivate,
 		})
 	}
 	fileRequest := domain.PageRequest{Limit: 100}
@@ -9341,7 +9508,7 @@ func (h Handler) searchSuggestions(w http.ResponseWriter, r *http.Request) {
 			}
 			items = append(items, searchSuggestion{
 				Kind: "file", Label: label, Description: "File",
-				URL: "/api/files/" + url.PathEscape(string(file.ID)),
+				URL: "/app/files/" + url.PathEscape(string(file.ID)) + "/view",
 			})
 			if len(items) >= 20 {
 				break
@@ -9400,7 +9567,7 @@ func (h Handler) searchFilterOptions(ctx context.Context, principal auth.Princip
 			continue
 		}
 		name := displayName(user)
-		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
+		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, AuthorInitial: initial(name), AvatarURL: profileImageURL(user.Profile), IsSelf: user.ID == principal.UserID})
 	}
 	sort.Slice(members, func(left, right int) bool { return members[left].Name < members[right].Name })
 	conversations, err := h.visibleChannelOptions(ctx, principal)
@@ -9420,7 +9587,7 @@ func (h Handler) visibleChannelOptions(ctx context.Context, principal auth.Princ
 		return nil, err
 	}
 	for _, conversation := range page.Conversations {
-		conversations = append(conversations, conversationView{ID: string(conversation.ID), Name: conversationName(conversation)})
+		conversations = append(conversations, conversationView{ID: string(conversation.ID), Name: conversationName(conversation), IsPrivate: conversation.Kind == domain.ConversationTypePrivate})
 	}
 	sort.Slice(conversations, func(left, right int) bool { return conversations[left].Name < conversations[right].Name })
 	return conversations, nil
@@ -9679,13 +9846,19 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 		author := names.name(message.AuthorID)
 		channelName := string(message.Conversation)
 		channelPrefix := "#"
+		private, directLabel := false, ""
 		if conversation, err := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, message.Conversation); err == nil {
 			channelName = conversationName(conversation)
+			private = conversation.Kind == domain.ConversationTypePrivate
+			if private {
+				channelPrefix = ""
+			}
 			if conversation.IsDirectOrGroup() {
 				channelPrefix = ""
 				if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
 					channelName = participants
 				}
+				directLabel = "Direct message with " + channelName
 			}
 		}
 		// A search hit is opened where it lives: the window that includes the
@@ -9711,10 +9884,16 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 			DisplayText:   newRichMessageContentMarking(displayMessage, nil, terms).Text,
 			MachineTime:   message.CreatedAt.UTC().Format(time.RFC3339Nano),
 			DisplayTime:   formatTime(message.CreatedAt),
-			Channel:       string(message.Conversation),
-			ChannelName:   channelName,
-			ChannelPrefix: channelPrefix,
-			Permalink:     appURL(string(message.Conversation), string(message.ThreadTimestamp), before, messageAnchor(message.ID), ""),
+			Channel:        string(message.Conversation),
+			ChannelName:    channelName,
+			ChannelPrefix:  channelPrefix,
+			ChannelPrivate: private,
+			DirectLabel:    directLabel,
+			AvatarURL:      names.avatarURL(message.AuthorID),
+			Permalink:      appURL(string(message.Conversation), string(message.ThreadTimestamp), before, messageAnchor(message.ID), ""),
+		}
+		if message.AppID == "" && message.AuthorID != "" {
+			view.AuthorID = string(message.AuthorID)
 		}
 		// A search hit shows its author's current status beside their name, the
 		// same projection the timeline makes and only for a human author.

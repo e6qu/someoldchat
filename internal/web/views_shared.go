@@ -111,12 +111,28 @@ const viewStyle = `<style>
 .v-field{display:grid;gap:5px;color:var(--muted);font-size:12px;font-weight:700}
 .v-field input,.v-field select,.v-field textarea,.v-input{min-width:0;min-height:34px;padding:6px 10px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:14px}
 .v-search{display:flex;align-items:center;gap:8px;min-width:0;padding:0 10px;border:1px solid var(--field-line);border-radius:8px;background:var(--bg)}
+.v-search>span[aria-hidden]{color:var(--muted);font-size:18px;line-height:1}
 .v-search input{flex:1 1 auto;min-width:0;min-height:36px;border:0;outline:0;background:transparent;color:var(--text);font:inherit}
 .v-search:focus-within{box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 35%,transparent);border-color:var(--focus)}
 .v-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 .v-text p{margin:0}.v-text p+p{margin-top:4px}.v-text code{padding:1px 4px;border-radius:4px;background:var(--hover);font-size:13px}.v-text pre{margin:4px 0;padding:8px;border-radius:6px;background:var(--hover);white-space:pre-wrap}.v-text blockquote{margin:2px 0;padding-left:10px;border-left:3px solid var(--line)}.v-text mark{background:var(--mark-bg);color:inherit}
 @media(max-width:650px){.v-page{width:calc(100% - 20px);margin-top:12px}.v-row{grid-template-columns:auto minmax(0,1fr);padding:11px 12px}.v-row-side{grid-column:2;flex-direction:row;align-items:center;justify-content:space-between}.v-head h2{font-size:20px}}
 ` + profilePanelStyle + `</style>`
+
+// searchSuggestionStyle is the search dropdown's stylesheet, shared by the
+// workspace top bar and the search page so the two cannot drift. Its colours
+// are declared on the dropdown's own classes with enough specificity that a
+// header's link colour (white on the purple bar) cannot bleed into it, which
+// is how the search page's suggestions became white on white.
+const searchSuggestionStyle = `.search-suggestions{position:absolute;z-index:30;top:calc(100% + 6px);left:0;right:0;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
+.search-suggestions[hidden]{display:none}
+.search-suggestions a.search-suggestion{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:4px 10px;padding:7px 10px;border-radius:6px;color:var(--text);font-weight:400;text-decoration:none}
+.search-suggestions a.search-suggestion:hover,.search-suggestions a.search-suggestion[aria-selected=true]{background:var(--hover);color:var(--text)}
+.search-suggestion-icon{display:grid;place-items:center;width:24px;height:24px;overflow:hidden;border-radius:4px;background:var(--hover);color:var(--muted);font-size:13px;font-weight:800;text-transform:uppercase}
+.search-suggestion-icon img{width:100%;height:100%;object-fit:cover}
+.search-suggestion-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.search-suggestion-kind{color:var(--muted);font-size:12px}
+.search-suggestion.query .search-suggestion-label{font-weight:400}`
 
 // rowLinkScript lets a click anywhere on a [data-row-href] row open that
 // address, which is how Slack's list rows behave. The row's own primary link

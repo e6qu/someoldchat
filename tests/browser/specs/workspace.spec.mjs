@@ -865,15 +865,18 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   await query.fill(needle);
   await query.press('Enter');
   await expect(page.locator('.result', { hasText: message })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Search the whole workspace' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Search the whole workspace', exact: true })).toBeVisible();
+  // Ctrl/Cmd+F names the conversation it is confined to, as an in: chip.
+  await expect(page.locator('.scope-chip')).toContainText('in: #general');
   await page.getByRole('link', { name: 'Back to chat' }).click();
   await expect(composer).toHaveValue('draft survives current-conversation search');
   await page.goBack();
   await expect(page.locator('.result', { hasText: message })).toBeVisible();
 
+  // Filter chips apply the moment they change, as Slack's do.
   await page.getByLabel('Sort').selectOption('oldest');
-  await page.getByRole('button', { name: 'Apply filters' }).click();
   await expect(page).toHaveURL(/order=oldest/);
+  await expect(page.getByRole('status').filter({ hasText: /result/ })).toHaveText(/results? for/);
   await expect(page.locator('.result', { hasText: message })).toBeVisible();
 
   await page.getByRole('link', { name: 'Files', exact: true }).click();

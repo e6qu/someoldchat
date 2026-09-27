@@ -178,10 +178,19 @@ func (h Handler) unreadsPage(w http.ResponseWriter, r *http.Request) {
 			// the list disagreeing is visible rather than silent.
 			continue
 		}
+		name := conversationName(conversation)
+		prefix := unreadPrefix(conversation)
+		// A DM is named for the people in it, as the sidebar names it; its
+		// stored name is an internal key ("direct"), not something to show.
+		if conversation.IsDirectOrGroup() {
+			if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
+				name, prefix = participants, ""
+			}
+		}
 		view := unreadConversationView{
 			ID:          string(conversation.ID),
-			Name:        conversationName(conversation),
-			Prefix:      unreadPrefix(conversation),
+			Name:        name,
+			Prefix:      prefix,
 			Count:       conversation.UnreadCount,
 			URL:         appURL(string(conversation.ID), "", "", "", ""),
 			MarkReadURL: "/app/read?channel=" + string(conversation.ID),
