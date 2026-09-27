@@ -1984,7 +1984,7 @@ func TestActivityShowsDurableMentionWithFiltersAndTriage(t *testing.T) {
 		"Bob Builder",
 		"Please review this",
 		"Added you to #launch-room.",
-		`class="slack-mention">@Ada Developer</span>`,
+		`">@Ada Developer</a>`,
 		`data-read-button`,
 		`data-clear-button`,
 	)
@@ -2410,7 +2410,7 @@ func TestComposerAndMessagesUseWorkspaceEmojiAndVisibleChannelReferences(t *test
 		`data-channel-name="general"`,
 		`class="custom-emoji" src="https://cdn.example/party.png" alt=":party_parrot:"`,
 		`aria-label=":tada:"`,
-		`class="slack-mention">#general</span>`,
+		`class="slack-mention" href="/app?channel=Cdev">#general</a>`,
 	)
 	requireMissing(t, "rendered channel reference", body, `class="message-text">Ship it :party_parrot:`)
 
