@@ -3855,6 +3855,7 @@ func (s *Store) insertCommittedMessageLocked(message domain.Message) {
 		}
 	}
 	s.createMessageActivityLocked(message)
+	s.advanceAuthorReadCursorLocked(message)
 }
 
 func directOpenKey(workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) string {

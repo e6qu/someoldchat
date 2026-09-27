@@ -18,6 +18,8 @@ type OwnMessageUnreadRepository interface {
 	SetReadCursor(context.Context, domain.ReadCursor, events.Event) error
 	SetThreadFollowed(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, bool, events.Event) error
 	ListFollowedThreads(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FollowedThreadPage, error)
+	CreateFile(context.Context, domain.File, events.Event) error
+	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, []events.Event) error
 }
 
 // CheckOwnMessagesAreNeverUnread requires that a member's own messages never
@@ -117,5 +119,28 @@ func CheckOwnMessagesAreNeverUnread(t *testing.T, repository OwnMessageUnreadRep
 	}
 	if cursor.LastRead != ahead {
 		t.Fatalf("an older post moved U1's cursor back to %s, want %s", cursor.LastRead, ahead)
+	}
+
+	// Sharing a file is posting too. The SQL profiles stored a file share
+	// through a path of its own that left the sharer's cursor behind, so their
+	// own upload sat under a "New" divider in their own conversation.
+	sharedAt := base.Add(12 * time.Second)
+	fileCreated := events.Event{ID: "Efile-own", WorkspaceID: "T1", Topic: "file.created", Payload: "{}", CreatedAt: sharedAt}
+	if err := repository.CreateFile(ctx, domain.File{ID: "Fown", WorkspaceID: "T1", Uploader: "U1", Name: "own.txt", BlobKey: "blob-own", CreatedAt: sharedAt}, fileCreated); err != nil {
+		t.Fatal(err)
+	}
+	share := domain.Message{ID: "M4", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "", CreatedAt: sharedAt}
+	if err := repository.CreateFileShareMessage(ctx, []domain.FileID{"Fown"}, share, []events.Event{{ID: "EM4", WorkspaceID: "T1", Topic: "message.created", Payload: "M4", CreatedAt: sharedAt}}); err != nil {
+		t.Fatal(err)
+	}
+	cursor, err = repository.GetReadCursor(ctx, "T1", "U1", "C1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := domain.NewMessageTimestamp(sharedAt); cursor.LastRead != want {
+		t.Fatalf("sharing a file left U1's cursor at %s, want %s", cursor.LastRead, want)
+	}
+	if got := unread("U1"); got != 0 {
+		t.Fatalf("U1 unread after sharing a file = %d, want 0", got)
 	}
 }

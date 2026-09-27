@@ -15254,6 +15254,9 @@ func insertFileShareMessage(ctx context.Context, tx txRunner, message domain.Mes
 	if err := insertMessageActivity(ctx, tx, message); err != nil {
 		return err
 	}
+	if err := advanceAuthorReadCursorTx(ctx, tx, message); err != nil {
+		return err
+	}
 	return insertOutbox(ctx, tx, event)
 }
 
