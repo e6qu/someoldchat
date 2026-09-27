@@ -217,3 +217,41 @@ func TestNotificationPausePresetsResolveInTheMembersZone(t *testing.T) {
 	}
 	requireContains(t, "workspace with Nothing", get(t, mux, "/app?channel=Cdev").Body.String(), `data-browser-notifications="false"`)
 }
+
+// TestDirectMessagesListShowsFacesPreviewAndUnread covers DM-01's list rows:
+// each conversation shows its latest message as a one-line preview ("You:"
+// for the reader's own, the author's name in a group DM) with mentions
+// resolved and markup stripped, unread conversations are marked, and a group
+// DM's rename lives in its ⋮ menu instead of an always-visible form.
+func TestDirectMessagesListShowsFacesPreviewAndUnread(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	for _, user := range []domain.User{{ID: "U2", WorkspaceID: "T1", Name: "ana", RealName: "Ana Lima"}, {ID: "U3", WorkspaceID: "T1", Name: "ben", RealName: "Ben Ortiz"}} {
+		if err := s.SeedUser(user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages := service.Messages{Store: s}
+	direct, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2", "U3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.Post(ctx, "T1", "U1", direct.Conversation.ID, "see *you* at <@U2>", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.Post(ctx, "T1", "U3", group.Conversation.ID, "lunch?", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app/dms").Body.String()
+	requireContains(t, "DMs list", body,
+		"You: see you at @Ana Lima", "Ben Ortiz: lunch?", `class="v-row unread"`,
+		"New message", `aria-label="More actions for Ana Lima, Ben Ortiz"`, "Rename group DM")
+	requireMissing(t, "DMs list", body, "*you*", "&lt;@U2&gt;")
+	if unread := strings.Count(body, `class="v-row unread"`); unread != 1 {
+		t.Fatalf("unread rows = %d, want only the group DM (own messages are never unread)", unread)
+	}
+}

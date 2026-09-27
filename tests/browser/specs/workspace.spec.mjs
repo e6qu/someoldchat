@@ -280,6 +280,13 @@ test('[DM-03 DM-05 A11Y-01] adding people reviews history and group DMs convert 
     await composer.press('Enter');
     await expect(page.locator('.message-text', { hasText: retained })).toBeVisible();
 
+    const conversationURL = page.url();
+    await page.goto('/app/dms');
+    const row = page.locator('.v-row', { hasText: first.name });
+    await expect(row).toContainText(`You: ${retained}`);
+    await expect(row).not.toHaveClass(/unread/);
+    await page.goto(conversationURL);
+
     await page.getByRole('link', { name: 'Open conversation details' }).click();
     await page.getByText('Add people', { exact: true }).click();
     await page.locator(`input[name="user_${second.botUserID}"]`).check();

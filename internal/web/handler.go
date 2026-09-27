@@ -613,9 +613,25 @@ type scheduledStatusView struct {
 	EndsAt      int64
 }
 
+// directMessageView is one row of the DMs list: who it is with (their faces),
+// the newest message as a preview with its time, and whether it is unread.
+type directMessageView struct {
+	conversationView
+	Preview     string
+	PreviewTime string
+	PreviewAt   string
+	Faces       []directMessageFace
+	Extra       int
+}
+
+type directMessageFace struct {
+	AvatarURL string
+	Initial   string
+}
+
 type directMessagesData struct {
 	Query      string
-	Recent     []conversationView
+	Recent     []directMessageView
 	Members    []memberView
 	CSRFToken  string
 	Error      string
@@ -2829,28 +2845,62 @@ Array.prototype.forEach.call(document.querySelectorAll('[data-status-expires]'),
 var membersTemplate = mustPage(membersMarkup)
 
 const directMessagesMarkup = `{{define "title"}}Direct messages · SameOldChat{{end}}
-{{define "styles"}}<style>
-.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar .theme-toggle{margin-left:auto}
-.layout{width:min(920px,calc(100% - 32px));margin:28px auto 52px}.heading{display:flex;justify-content:space-between;gap:18px;align-items:end;border-bottom:1px solid var(--line);padding-bottom:18px}.heading h1{margin:0 0 4px;font-size:28px}.muted{color:var(--muted)}
-.search{display:flex;gap:8px;margin:20px 0}.search input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}button{border:1px solid var(--field-line);border-radius:7px;background:var(--panel-strong);color:var(--text);padding:9px 13px;font-weight:800}
-.panel{margin-top:22px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.panel h2{margin:0 0 6px}.recent,.people{display:grid;gap:8px;margin:14px 0 0;padding:0;list-style:none}.recent-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px;border:1px solid var(--line);border-radius:8px}.recent-row>a{color:var(--text);font-weight:800;text-decoration:none}.rename{display:flex;gap:6px}.rename input,.group-name{min-width:0;padding:7px 9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}
-.person-choice{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:8px}.person-choice strong{display:block}.compose-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin-top:14px}.primary{border:0;background:var(--action);color:var(--on-strong)}.error{color:var(--danger);font-weight:700}
-@media(max-width:620px){.layout{width:min(100% - 20px,920px);margin-top:18px}.heading{display:block}.recent-row,.compose-actions{grid-template-columns:minmax(0,1fr)}.rename{display:grid}.search{align-items:stretch}}
+{{define "styles"}}` + viewStyle + `<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar>a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar .theme-toggle{margin-left:auto}
+.dms-page h1{margin:0 auto 0 0;font-size:24px}
+.dm-search{margin:0 0 14px}
+.dm-section-title{margin:0 0 8px;color:var(--muted);font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
+.dm-faces{position:relative;width:36px;height:36px}
+.dm-faces .v-avatar{position:absolute}
+.dm-faces.pair .v-avatar{width:26px;height:26px;font-size:11px;border-radius:5px}
+.dm-faces.pair .v-avatar:first-child{left:0;top:0}
+.dm-faces.pair .v-avatar:nth-child(2){right:0;bottom:0;box-shadow:0 0 0 2px var(--panel-strong)}
+.dm-extra{position:absolute;right:-6px;top:-6px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:var(--hover);color:var(--muted);font-size:10px;font-weight:800;display:grid;place-items:center}
+.dm-name{display:inline-block;min-height:24px;line-height:24px;color:var(--text);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.dm-name:hover{text-decoration:underline}
+.v-row.unread .dm-name{font-weight:800}
+.dm-preview{margin:0;color:var(--muted);font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v-row.unread .dm-preview{color:var(--text)}
+.dm-unread{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--danger);color:#fff;font-size:11px;font-weight:800}
+.rename-form{display:grid;gap:6px;padding:6px;min-width:240px}
+.rename-form input{min-height:32px;padding:4px 8px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);font:inherit}
+.new-dm{margin-top:22px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.new-dm h2{margin:0 0 4px;font-size:17px}
+.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin:12px 0 0;padding:0;list-style:none}
+.person-choice{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);cursor:pointer}
+.person-choice:has(input:checked){border-color:var(--action);box-shadow:inset 0 0 0 1px var(--action)}
+.person-choice strong{display:block}
+.person-choice .muted{display:block;color:var(--muted);font-size:12px}
+.compose-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;margin-top:14px}
+.compose-actions label{display:grid;gap:4px;font-size:13px;font-weight:700}
+.group-name{min-height:34px;padding:6px 10px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);font:inherit}
+.error{color:var(--danger);font-weight:700}.muted{color:var(--muted)}
+@media(max-width:620px){.compose-actions{grid-template-columns:minmax(0,1fr)}}
 </style>{{end}}
+{{define "scripts"}}` + localTimeScript + liveFilterScript + rowLinkScript + profilePanelScript + `{{end}}
 {{define "content"}}
 <header class="bar"><a href="/app">← Back to chat</a><span>Direct messages</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
-<main class="layout">
-  <div class="heading"><div><h1>Direct messages</h1><p class="muted">Find a conversation or start a DM with up to nine people total.</p></div></div>
-  <form class="search" method="get" action="/app/dms"><label class="visually-hidden" for="dm-search">Search direct messages and people</label><input id="dm-search" type="search" name="q" value="{{.Query}}" placeholder="Search direct messages and people"><button type="submit">Search</button></form>
+{{template "dms-view" .}}{{end}}
+{{define "dms-view"}}<main class="v-page dms-page">
+  <div class="v-head"><h1>Direct messages</h1>{{if .CanMessage}}<a class="v-btn primary" href="#new-dm"><span aria-hidden="true">✎</span> New message</a>{{end}}</div>
+  <p class="v-sub">Find a conversation or start a DM with up to nine people total.</p>
+  <form class="dm-search" role="search" method="get" action="/app/dms" data-live-filter="#dm-results"><label class="v-search"><span aria-hidden="true">⌕</span><span class="visually-hidden">Search direct messages and people</span><input id="dm-search" type="search" name="q" value="{{.Query}}" placeholder="Search direct messages and people" aria-label="Search direct messages and people" autocomplete="off"></label><noscript><button class="v-btn" type="submit">Search</button></noscript></form>
   {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
-  <section class="panel" aria-labelledby="recent-dms"><h2 id="recent-dms">Recent</h2><p class="muted">Closing a DM removes it from this list without deleting its history.</p>
-    <ul class="recent">{{range .Recent}}<li class="recent-row">{{if $.Query}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.OpenUsers}}"><button type="submit">Open {{.Name}}{{if .UnreadCount}} ({{.UnreadCount}} unread){{end}}</button></form>{{else}}<a href="/app?channel={{.ID}}">@ {{.Name}}{{if .UnreadCount}} <span aria-label="{{.UnreadCount}} unread">({{.UnreadCount}})</span>{{end}}</a>{{end}}{{if .IsGroupDirect}}<form class="rename" method="post" action="/app/conversation/rename?channel={{.ID}}&return=dms"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label class="visually-hidden" for="name-{{.ID}}">Group DM name</label><input id="name-{{.ID}}" name="name" maxlength="80" value="{{.Name}}" required><button type="submit">Save name</button></form>{{end}}</li>{{else}}<li class="muted">No recent DMs. Start one below.</li>{{end}}</ul>
+  <p class="visually-hidden" id="view-status" aria-live="polite"></p>
+  <div id="dm-results">
+  <section aria-labelledby="recent-dms"><h2 class="dm-section-title" id="recent-dms">Recent</h2>
+    <ul class="v-list" aria-label="Recent direct messages">{{range .Recent}}<li class="v-row{{if .UnreadCount}} unread{{end}}"{{if not $.Query}} data-row-href="/app?channel={{.ID}}"{{end}}>
+      <span class="dm-faces{{if gt (len .Faces) 1}} pair{{end}}" aria-hidden="true">{{range .Faces}}<span class="v-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.Initial}}{{end}}</span>{{else}}<span class="v-avatar">@</span>{{end}}{{if .Extra}}<span class="dm-extra">+{{.Extra}}</span>{{end}}</span>
+      <div class="v-row-main">{{if $.Query}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.OpenUsers}}"><button class="v-btn quiet" type="submit">Open {{.Name}}{{if .UnreadCount}} ({{.UnreadCount}} unread){{end}}</button></form>{{else}}<a class="dm-name" href="/app?channel={{.ID}}">{{.Name}}{{if .UnreadCount}}<span class="visually-hidden">, {{.UnreadCount}} unread</span>{{end}}</a>{{end}}
+      {{if .Preview}}<p class="dm-preview">{{.Preview}}</p>{{end}}</div>
+      <div class="v-row-side">{{if .PreviewAt}}<time class="v-row-time" datetime="{{.PreviewAt}}">{{.PreviewTime}}</time>{{end}}{{if .UnreadCount}}<span class="dm-unread" aria-hidden="true">{{.UnreadCount}}</span>{{end}}{{if .IsGroupDirect}}<div class="v-hover-actions"><details class="v-menu"><summary class="v-icon" role="button" aria-label="More actions for {{.Name}}"><span aria-hidden="true">⋮</span></summary><div class="v-menu-list"><form class="rename-form" method="post" action="/app/conversation/rename?channel={{.ID}}&return=dms"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label class="v-menu-label" for="name-{{.ID}}">Rename group DM</label><input id="name-{{.ID}}" name="name" maxlength="80" value="{{.Name}}" required><button class="v-btn primary" type="submit">Save name</button></form></div></details></div>{{end}}</div>
+    </li>{{else}}<li class="v-empty">No recent DMs. Start one below.</li>{{end}}</ul>
   </section>
-  <section class="panel" aria-labelledby="new-dm"><h2 id="new-dm">New message</h2><p class="muted">Select one person for a one-to-one DM, or several people for a group DM.</p>
-    {{if .CanMessage}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="dms"><div class="people">{{range .Members}}<label class="person-choice"><input type="checkbox" name="user_{{.ID}}" value="1"><span><strong>{{.Name}}</strong>{{if and .RealName (ne .RealName .Name)}}<span class="muted">{{.RealName}}</span>{{end}}</span></label>{{else}}<p class="muted">No matching active members.</p>{{end}}</div><div class="compose-actions"><label>Group DM name (optional)<input class="group-name" name="name" maxlength="80" placeholder="Design launch"></label><button class="primary" type="submit">Start conversation</button></div></form>{{else}}<p class="muted">Your current permissions do not allow starting direct messages.</p>{{end}}
+  </div>
+  <section class="new-dm" id="new-dm" aria-labelledby="new-dm-heading"><h2 id="new-dm-heading">New message</h2><p class="muted">Select one person for a one-to-one DM, or several people for a group DM.</p>
+    {{if .CanMessage}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="dms"><div class="people">{{range .Members}}<label class="person-choice"><input type="checkbox" name="user_{{.ID}}" value="1"><span class="v-avatar sm" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span><span><strong>{{.Name}}</strong>{{if and .RealName (ne .RealName .Name)}}<span class="muted">{{.RealName}}</span>{{end}}</span></label>{{else}}<p class="muted">No matching active members.</p>{{end}}</div><div class="compose-actions"><label>Group DM name (optional)<input class="group-name" name="name" maxlength="80" placeholder="Design launch"></label><button class="v-btn primary" type="submit">Start conversation</button></div></form>{{else}}<p class="muted">Your current permissions do not allow starting direct messages.</p>{{end}}
   </section>
-</main>
-{{end}}`
+</main>{{end}}`
 
 var directMessagesTemplate = mustPage(directMessagesMarkup)
 
@@ -10814,7 +10864,7 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 		if foldedQuery != "" && !strings.Contains(domain.FoldSearchText(name+" "+user.RealName+" "+user.Email), foldedQuery) {
 			continue
 		}
-		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, AuthorInitial: initial(name)})
+		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, AuthorInitial: initial(name), AvatarURL: profileImageURL(user.Profile)})
 	}
 	sort.Slice(members, func(i, j int) bool { return members[i].Name < members[j].Name })
 
@@ -10827,7 +10877,8 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, err, "Recent direct messages are temporarily unavailable.")
 		return
 	}
-	recent := make([]conversationView, 0, len(recentPage.Conversations))
+	recent := make([]directMessageView, 0, len(recentPage.Conversations))
+	userNames := h.newUserNames(r.Context(), principal)
 	for _, conversation := range recentPage.Conversations {
 		name := conversation.Name
 		memberPage, memberErr := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: 10})
@@ -10836,12 +10887,14 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		names := make([]string, 0, len(memberPage.Users))
 		ids := make([]string, 0, len(memberPage.Users))
+		var faces []directMessageFace
 		for _, user := range memberPage.Users {
 			if user.ID == principal.UserID {
 				continue
 			}
 			names = append(names, displayName(user))
 			ids = append(ids, string(user.ID))
+			faces = append(faces, directMessageFace{AvatarURL: profileImageURL(user.Profile), Initial: initial(displayName(user))})
 		}
 		sort.Strings(names)
 		sort.Strings(ids)
@@ -10851,9 +10904,18 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 		if foldedQuery != "" && !strings.Contains(domain.FoldSearchText(name), foldedQuery) {
 			continue
 		}
-		item := conversationView{ID: string(conversation.ID), Name: name, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.Kind == domain.ConversationTypeMPIM, OpenUsers: strings.Join(ids, ",")}
+		item := directMessageView{conversationView: conversationView{ID: string(conversation.ID), Name: name, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.Kind == domain.ConversationTypeMPIM, OpenUsers: strings.Join(ids, ",")}}
+		if len(faces) > 2 {
+			item.Extra = len(faces) - 2
+			faces = faces[:2]
+		}
+		item.Faces = faces
 		if history, historyErr := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 1, Descending: true}}); historyErr == nil && len(history.Messages) == 1 {
-			item.RecentAt = history.Messages[0].CreatedAt
+			latest := history.Messages[0]
+			item.RecentAt = latest.CreatedAt
+			item.PreviewAt = latest.CreatedAt.UTC().Format(time.RFC3339)
+			item.PreviewTime = formatTime(latest.CreatedAt)
+			item.Preview = directMessagePreview(latest, principal.UserID, item.IsGroupDirect, userNames)
 		}
 		recent = append(recent, item)
 	}
@@ -10873,6 +10935,40 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 		CSRFToken:  auth.CSRFToken(sessionCookie.Value),
 		CanMessage: principal.HasScope(auth.ScopeChannelsManage),
 	}, http.StatusOK, "direct message rendering unavailable")
+}
+
+var (
+	previewLabelledReference = regexp.MustCompile(`<([@#!][^|>]*)\|([^>]*)>`)
+	previewLink              = regexp.MustCompile(`<(https?://[^|>]*)(\|([^>]*))?>`)
+)
+
+// directMessagePreview is the DMs list's one-line preview of the newest
+// message: "You: …" for the reader's own, the author's name in a group DM,
+// mentions shown as names, and mrkdwn markers dropped, cut to one line.
+func directMessagePreview(message domain.Message, reader domain.UserID, group bool, names *userNames) string {
+	text := resolveSlackUserMentions(message.Text, names)
+	text = previewLabelledReference.ReplaceAllString(text, "$2")
+	text = previewLink.ReplaceAllStringFunc(text, func(link string) string {
+		if bar := strings.IndexByte(link, '|'); bar >= 0 {
+			return strings.TrimSuffix(link[bar+1:], ">")
+		}
+		return strings.Trim(link, "<>")
+	})
+	text = strings.NewReplacer("*", "", "_", "", "~", "", "`", "").Replace(text)
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" && len(message.Files) > 0 {
+		text = "Shared a file"
+	}
+	if runes := []rune(text); len(runes) > 90 {
+		text = strings.TrimSpace(string(runes[:89])) + "…"
+	}
+	switch {
+	case message.AuthorID == reader:
+		return "You: " + text
+	case group && message.AuthorID != "":
+		return names.name(message.AuthorID) + ": " + text
+	}
+	return text
 }
 
 func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal auth.Principal, submitted *domain.UserProfile, submittedScheduled *scheduledStatusView, message string, status int) {
