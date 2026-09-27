@@ -101,20 +101,20 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
   {{if .SidebarTruncated}}<p class="side-note">You belong to more conversations than the sidebar shows. Use Jump to a conversation (Ctrl/⌘K) to reach the rest.</p>{{end}}
   <form id="sidebar-move-form" method="post" action="/app/sidebar/sections/assign?channel={{.Channel}}" hidden><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="conversation" value=""><input type="hidden" name="section" value=""></form>
 </div>
-<dialog class="shell-dialog" id="section-dialog" aria-labelledby="section-dialog-title">
+<template data-dialog-template="section-dialog"><dialog class="shell-dialog" id="section-dialog" aria-labelledby="section-dialog-title">
   <form method="post" action="/app/sidebar/sections/create?channel={{.Channel}}">
     <div class="dialog-head"><h2 id="section-dialog-title" tabindex="-1">Create a section</h2><button class="dialog-close" type="button" data-dialog-close aria-label="Close create a section">{{icon "close"}}</button></div>
     <div class="dialog-body"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label for="new-section-name">Section name</label><input id="new-section-name" type="text" name="name" maxlength="80" placeholder="e.g. Priorities" required autocomplete="off"><p class="dialog-note">Organise conversations into sections. Only you see your sections.</p></div>
     <div class="dialog-foot"><button class="button" type="button" data-dialog-close>Cancel</button><button class="button primary" type="submit">Create section</button></div>
   </form>
-</dialog>
-{{range .HomeSections}}{{if .Custom}}<dialog class="shell-dialog" id="section-rename-{{.ID}}" aria-labelledby="section-rename-{{.ID}}-title">
+</dialog></template>
+{{range .HomeSections}}{{if .Custom}}<template data-dialog-template="section-rename-{{.ID}}"><dialog class="shell-dialog" id="section-rename-{{.ID}}" aria-labelledby="section-rename-{{.ID}}-title">
   <form method="post" action="/app/sidebar/sections/rename?channel={{$.Channel}}">
     <div class="dialog-head"><h2 id="section-rename-{{.ID}}-title" tabindex="-1">Rename section</h2><button class="dialog-close" type="button" data-dialog-close aria-label="Close rename section">{{icon "close"}}</button></div>
     <div class="dialog-body"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{.ID}}"><label for="section-name-{{.ID}}">Section name</label><input id="section-name-{{.ID}}" type="text" name="name" maxlength="80" value="{{.Label}}" required autocomplete="off"></div>
     <div class="dialog-foot"><button class="button" type="button" data-dialog-close>Cancel</button><button class="button primary" type="submit">Save</button></div>
   </form>
-</dialog>{{end}}{{end}}{{end}}
+</dialog></template>{{end}}{{end}}{{end}}
 
 {{define "channel-header"}}<div class="channel-header">
   <div class="channel-header-row">
@@ -175,7 +175,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
   </div>
 </div>{{end}}
 
-{{define "channel-notifications"}}<dialog class="shell-dialog" id="channel-notifications" aria-labelledby="channel-notifications-title">
+{{define "channel-notifications"}}<template data-dialog-template="channel-notifications"><dialog class="shell-dialog" id="channel-notifications" aria-labelledby="channel-notifications-title">
   <form method="post" action="/app/conversation/notifications?channel={{.Channel}}">
     <div class="dialog-head"><h2 id="channel-notifications-title" tabindex="-1">Notifications for {{.ChannelPrefix}}{{.ChannelName}}</h2><button class="dialog-close" type="button" data-dialog-close aria-label="Close notifications">{{icon "close"}}</button></div>
     <div class="dialog-body">
@@ -190,7 +190,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
     </div>
     <div class="dialog-foot"><button class="button" type="button" data-dialog-close>Cancel</button><button class="button primary" type="submit">Save changes</button></div>
   </form>
-</dialog>{{end}}`
+</dialog></template>{{end}}`
 
 // dmPanePartial is the DMs pane beside the rail. The DMs page and a conversation
 // opened from it (?pane=dms) both draw it, so it is parsed into every page with

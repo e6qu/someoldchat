@@ -12,12 +12,12 @@ const conversationDetailsPartial = `{{define "conversation-details"}}<dialog cla
   </div>
   <p class="dialog-note details-type">{{.Details.Type}}{{if .Details.Archived}} · Archived{{end}}</p>
   <div class="details-tabs" role="tablist" aria-label="Conversation details">
-    <button type="button" role="tab" id="details-tab-about" data-tab="about" aria-controls="details-about" aria-selected="true">About</button>
-    <button type="button" role="tab" id="details-tab-members" data-tab="members" aria-controls="details-members" aria-selected="false" tabindex="-1">Members {{len .Details.Members}}</button>
-    {{if .Details.IsChannel}}<button type="button" role="tab" id="details-tab-integrations" data-tab="integrations" aria-controls="details-integrations" aria-selected="false" tabindex="-1">Integrations</button>{{end}}
-    {{if .Details.HasSettings}}<button type="button" role="tab" id="details-tab-settings" data-tab="settings" aria-controls="details-settings" aria-selected="false" tabindex="-1">Settings</button>{{end}}
+    <a role="tab" id="details-tab-about" data-tab="about" href="{{.Details.TabURL "about"}}" aria-controls="details-about" {{if eq .Details.InitialTab "about"}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>About</a>
+    <a role="tab" id="details-tab-members" data-tab="members" href="{{.Details.TabURL "members"}}" aria-controls="details-members" {{if eq .Details.InitialTab "members"}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Members {{len .Details.Members}}</a>
+    {{if .Details.IsChannel}}<a role="tab" id="details-tab-integrations" data-tab="integrations" href="{{.Details.TabURL "integrations"}}" aria-controls="details-integrations" {{if eq .Details.InitialTab "integrations"}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Integrations</a>{{end}}
+    {{if .Details.HasSettings}}<a role="tab" id="details-tab-settings" data-tab="settings" href="{{.Details.TabURL "settings"}}" aria-controls="details-settings" {{if eq .Details.InitialTab "settings"}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Settings</a>{{end}}
   </div>
-  <section class="details-panel" role="tabpanel" id="details-about" aria-labelledby="details-tab-about">
+  <section class="details-panel" role="tabpanel" id="details-about" aria-labelledby="details-tab-about"{{if ne .Details.InitialTab "about"}} hidden{{end}}>
     <div class="details-card">
       {{if .Details.IsChannel}}<div class="details-row"><div><h3>Channel name</h3><p>{{if .Details.IsPrivate}}{{icon "lock"}}{{else}}{{icon "hash"}}{{end}} {{.Details.Name}}</p></div>{{if .Details.CanEdit}}<button class="details-edit" type="button" data-dialog-open="details-edit-name" aria-label="Edit channel name">Edit</button>{{end}}</div>{{end}}
       <div class="details-row"><div><h3>Topic</h3><p>{{if .Details.Topic}}{{.Details.Topic}}{{else}}<span class="muted-text">No topic set</span>{{end}}</p></div>{{if .Details.CanEdit}}<button class="details-edit" type="button" data-dialog-open="details-edit-topic" aria-label="Edit topic">Edit</button>{{end}}</div>
@@ -41,7 +41,7 @@ const conversationDetailsPartial = `{{define "conversation-details"}}<dialog cla
       {{if .Details.CanClose}}<form method="post" action="/app/conversation/leave?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger-link" type="submit">Close conversation</button></form>{{end}}
     </div>{{end}}
   </section>
-  <section class="details-panel" role="tabpanel" id="details-members" aria-labelledby="details-tab-members" hidden>
+  <section class="details-panel" role="tabpanel" id="details-members" aria-labelledby="details-tab-members"{{if ne .Details.InitialTab "members"}} hidden{{end}}>
     <div class="details-members-tools">
       <label class="visually-hidden" for="details-member-search">Find members</label>
       <input id="details-member-search" type="search" placeholder="Find members" autocomplete="off" data-member-filter aria-controls="details-member-list" data-empty="details-member-empty">
@@ -81,13 +81,13 @@ const conversationDetailsPartial = `{{define "conversation-details"}}<dialog cla
     </details>
     {{end}}
   </section>
-  {{if .Details.IsChannel}}<section class="details-panel" role="tabpanel" id="details-integrations" aria-labelledby="details-tab-integrations" hidden>
+  {{if .Details.IsChannel}}<section class="details-panel" role="tabpanel" id="details-integrations" aria-labelledby="details-tab-integrations"{{if ne .Details.InitialTab "integrations"}} hidden{{end}}>
     <div class="details-card">
       <div class="details-row"><div><h3>Apps</h3>{{if .Apps}}<ul class="details-apps">{{range .Apps}}<li>{{icon "apps"}} <a href="/app/apps/{{.ID}}?channel={{$.Details.ID}}">{{.Name}}</a></li>{{end}}</ul>{{else}}<p class="muted-text">No apps are installed in this workspace.</p>{{end}}</div><a class="button" href="/app/apps?channel={{.Details.ID}}">Add an app</a></div>
       <div class="details-row"><div><h3>Workflows</h3><p class="muted-text">Automate routine work in this channel with Workflow Builder.</p></div><a class="button" href="/app/workflows">Add a workflow</a></div>
     </div>
   </section>{{end}}
-  {{if .Details.HasSettings}}<section class="details-panel" role="tabpanel" id="details-settings" aria-labelledby="details-tab-settings" hidden>
+  {{if .Details.HasSettings}}<section class="details-panel" role="tabpanel" id="details-settings" aria-labelledby="details-tab-settings"{{if ne .Details.InitialTab "settings"}} hidden{{end}}>
     {{if .Details.CanEdit}}<div class="details-card"><div class="details-row"><div><h3>Channel name</h3><p>{{.Details.Name}}</p></div><button class="details-edit" type="button" data-dialog-open="details-edit-name" aria-label="Rename channel">Edit</button></div></div>{{end}}
     {{if .Details.CanConvert}}
     <details class="conversation-setting details-card">

@@ -949,7 +949,10 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
 test('[APP-01 APP-02 APP-09] developer app console creates, validates, edits, and deletes a real app', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
-  await page.getByRole('link', { name: 'Developer apps', exact: true }).click();
+  // Developer apps is under the workspace menu's Tools & settings, as in Slack.
+  await page.locator('.rail-workspace > summary').click();
+  await page.locator('.rail-workspace').getByRole('menuitem', { name: 'Tools & settings' }).click();
+  await page.locator('.rail-workspace').getByRole('menuitem', { name: 'Developer apps' }).click();
   await expect(page).toHaveURL(/\/app\/developer\/apps$/);
   await expect(page.getByRole('heading', { name: 'Developer apps' }).last()).toBeVisible();
 
@@ -1385,7 +1388,7 @@ test('[COMP-01 NAV-02 NAV-03 APP-05] the composer and workspace honour Slack web
   // navigation-tab shortcut (Activity is the default third tab).
   await page.keyboard.press(activity);
   await expect(page).toHaveURL(/\/app\/activity/);
-  await expect(page.getByRole('heading', { name: 'Activity', exact: true, level: 2 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Activity', exact: true, level: 1 })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Activity filters' })).toBeVisible();
 });
 
@@ -1779,7 +1782,8 @@ test('[COMP-01 THREAD-01 THREAD-02 DRAFT-01] a thread keeps the conversation com
 
 test('[COMP-01 COMP-02] Preferences choose what Enter does and whether to write markup', async ({ page, context }) => {
   await signIn(context);
-  await page.goto('/app/notifications');
+  await page.goto('/app/preferences');
+  await page.getByRole('tab', { name: 'Advanced' }).click();
   await page.getByRole('radio', { name: /Start a new line/ }).check();
   await page.goto('/app');
   const { primary } = await slackModifiers(page);
@@ -1792,7 +1796,8 @@ test('[COMP-01 COMP-02] Preferences choose what Enter does and whether to write 
   await composer.press(`${primary}+Enter`);
   await expect(page.locator('.message').last().locator('.message-text')).toContainText('line two');
 
-  await page.goto('/app/notifications');
+  await page.goto('/app/preferences');
+  await page.getByRole('tab', { name: 'Advanced' }).click();
   await page.getByRole('radio', { name: 'Send the message' }).check();
   await page.getByRole('checkbox', { name: 'Format messages with markup' }).check();
   await page.goto('/app');
@@ -1900,19 +1905,19 @@ test('[CONV-03 CONV-04] conversation details manage a channel without falling ba
   const renamed = `release-${stamp}`;
   await details.getByRole('button', { name: 'Edit channel name' }).click();
   const rename = page.getByRole('dialog', { name: 'Rename this channel' });
-  await rename.getByLabel('Channel name').fill(renamed);
+  await rename.getByRole('textbox', { name: 'Channel name' }).fill(renamed);
   await rename.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByRole('dialog', { name: `Channel ${renamed}` })).toBeVisible();
 
   await page.locator('#conversation-details').getByRole('button', { name: 'Edit topic' }).click();
-  await page.getByRole('dialog', { name: 'Edit topic' }).getByLabel('Topic').fill('Shipping this week');
+  await page.getByRole('dialog', { name: 'Edit topic' }).getByRole('textbox', { name: 'Topic' }).fill('Shipping this week');
   await page.getByRole('dialog', { name: 'Edit topic' }).getByRole('button', { name: 'Save' }).click();
-  await expect(page.locator('#conversation-details').getByText('Shipping this week', { exact: true })).toBeVisible();
+  await expect(page.locator('#details-about .details-row p').getByText('Shipping this week', { exact: true })).toBeVisible();
 
   await page.locator('#conversation-details').getByRole('button', { name: 'Edit description' }).click();
-  await page.getByRole('dialog', { name: 'Edit description' }).getByLabel('Description').fill('Coordinate the release');
+  await page.getByRole('dialog', { name: 'Edit description' }).getByRole('textbox', { name: 'Description' }).fill('Coordinate the release');
   await page.getByRole('dialog', { name: 'Edit description' }).getByRole('button', { name: 'Save' }).click();
-  await expect(page.locator('#conversation-details').getByText('Coordinate the release', { exact: true })).toBeVisible();
+  await expect(page.locator('#details-about .details-row p').getByText('Coordinate the release', { exact: true })).toBeVisible();
 
   await page.locator('#conversation-details').getByRole('tab', { name: 'Settings' }).click();
   await page.getByRole('button', { name: 'Archive channel' }).click();
@@ -1921,7 +1926,10 @@ test('[CONV-03 CONV-04] conversation details manage a channel without falling ba
   await page.locator('#conversation-details').getByRole('tab', { name: 'Settings' }).click();
   await page.getByRole('button', { name: 'Unarchive channel' }).click();
   await expect(page.locator('form.composer')).toBeVisible();
+  // A change made on the Settings tab reopens the dialog there.
+  await expect(page.locator('#conversation-details').getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
 
+  await page.locator('#conversation-details').getByRole('tab', { name: 'About' }).click();
   await page.locator('#conversation-details').getByRole('button', { name: 'Leave channel' }).click();
   await expect(page.getByText(`You are viewing #${renamed}`, { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Join channel' })).toBeVisible();
@@ -2049,7 +2057,7 @@ test('[CONV-02 NAV-04] channel creation is reachable and conversation shortcuts 
   await createChannel(page, name, { isPrivate: true });
   await expect(page.locator('.channel-name-text')).toHaveText(name);
   // A private channel carries a lock, not a #, in the header and the sidebar.
-  await expect(page.locator('#conversation-name-button use')).toHaveAttribute('href', '#i-lock');
+  await expect(page.locator('#conversation-name-button use').first()).toHaveAttribute('href', '#i-lock');
   await expect(page.locator('.side-row', { hasText: name }).locator('.side-icon use')).toHaveAttribute('href', '#i-lock');
   const createdURL = page.url();
 
@@ -2093,15 +2101,15 @@ test('[PROFILE-01 PROFILE-02 STATUS-01 STATUS-02 STATUS-03] profile editing and 
   await page.getByLabel('Remove status after').fill(localExpires);
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page).toHaveURL('/app/members');
-  await expect(page.getByText(status, { exact: false }).first()).toBeVisible();
+  await expect(page.locator('main').getByText(status, { exact: false }).first()).toBeVisible();
   await expect(page.locator('time[data-status-expires]')).toHaveAttribute('datetime', /T/);
 
   await page.getByLabel('Availability').selectOption('away');
   await page.getByRole('button', { name: 'Update availability' }).click();
-  await expect(page.getByText('Away', { exact: true }).first()).toBeVisible();
+  await expect(page.locator('main').getByText('Away', { exact: true }).first()).toBeVisible();
   await page.getByLabel('Availability').selectOption('auto');
   await page.getByRole('button', { name: 'Update availability' }).click();
-  await expect(page.getByText('Active', { exact: true }).first()).toBeVisible();
+  await expect(page.locator('main').getByText('Active', { exact: true }).first()).toBeVisible();
 
   await page.getByRole('button', { name: 'Clear status' }).click();
   await expect(page.getByText('No status set', { exact: true })).toBeVisible();
@@ -2300,7 +2308,7 @@ test('[RESILIENCE-03] the workspace entry point renders without post-processing 
 
   // The search control is a real form from the template, not a label patched
   // into one after rendering.
-  const form = page.locator('form.search');
+  const form = page.locator('form.top-search');
   await expect(form).toHaveAttribute('method', 'get');
   await expect(form).toHaveAttribute('action', '/app/search');
   await expect(page.locator('label.search')).toHaveCount(0);
@@ -2400,12 +2408,12 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   await signIn(context);
   await page.goto('/app');
 
-  await page.getByRole('link', { name: 'Canvases' }).click();
+  await (await openMenu(page, 'More')).getByRole('menuitem', { name: 'Canvases' }).click();
   await page.getByText('Create a canvas').click();
   const canvasName = `Launch canvas ${Date.now()}`;
   await page.getByLabel('Name').fill(canvasName);
   await page.getByLabel('Content').fill('Initial durable content');
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name: canvasName })).toBeVisible();
   // The title has its own rename control, opened from its summary like the
   // create control above it; renaming commits a revision.
@@ -2436,7 +2444,7 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   const listName = `Launch list ${Date.now()}`;
   await page.getByLabel('Name').fill(listName);
   await page.getByLabel('Use as a to-do list').check();
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name: listName })).toBeVisible();
   await page.getByLabel('New item').fill('Verify the persisted journey');
   await page.getByRole('button', { name: 'Add' }).click();
@@ -2482,7 +2490,7 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   }, redirectURI);
 
   await page.goto('/app');
-  await page.getByRole('link', { name: 'Workflows' }).click();
+  await (await openMenu(page, 'More')).getByRole('menuitem', { name: 'Workflows' }).click();
   await page.getByText('Create a workflow').click();
   const workflowName = `Incident workflow ${Date.now()}`;
   await page.getByLabel('Name').fill(workflowName);
@@ -2635,7 +2643,7 @@ test('[WORKFLOW-04] a step with a condition only runs when the condition holds',
   }, redirectURI);
 
   await page.goto('/app');
-  await page.getByRole('link', { name: 'Workflows' }).click();
+  await (await openMenu(page, 'More')).getByRole('menuitem', { name: 'Workflows' }).click();
   await page.getByText('Create a workflow').click();
   await page.getByLabel('Name').fill(`Branched workflow ${Date.now()}`);
   await page.getByLabel('Owning app').selectOption(installed.appID);
@@ -2685,7 +2693,7 @@ test('[WORKFLOW-02] a built-in message step posts and completes the run with no 
   }, redirectURI);
 
   await page.goto('/app');
-  await page.getByRole('link', { name: 'Workflows' }).click();
+  await (await openMenu(page, 'More')).getByRole('menuitem', { name: 'Workflows' }).click();
   await page.getByText('Create a workflow').click();
   await page.getByLabel('Name').fill(`Announcer ${Date.now()}`);
   await page.getByLabel('Owning app').selectOption(installed.appID);
@@ -2736,7 +2744,7 @@ test('[WORKFLOW-02] built-in steps add people and create a canvas, and chain int
   }, redirectURI);
 
   await page.goto('/app');
-  await page.getByRole('link', { name: 'Workflows' }).click();
+  await (await openMenu(page, 'More')).getByRole('menuitem', { name: 'Workflows' }).click();
   await page.getByText('Create a workflow').click();
   await page.getByLabel('Name').fill(`Onboarding ${Date.now()}`);
   await page.getByLabel('Owning app').selectOption(installed.appID);
@@ -2785,7 +2793,7 @@ test('[WORKFLOW-02] a wait step can be authored and published from the builder',
   }, redirectURI);
 
   await page.goto('/app');
-  await page.getByRole('link', { name: 'Workflows' }).click();
+  await (await openMenu(page, 'More')).getByRole('menuitem', { name: 'Workflows' }).click();
   await page.getByText('Create a workflow').click();
   await page.getByLabel('Name').fill(`Scheduled announcement ${Date.now()}`);
   await page.getByLabel('Owning app').selectOption(installed.appID);
@@ -2836,7 +2844,7 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
   }, redirectURI);
 
   await page.goto('/app');
-  await page.getByRole('link', { name: 'Workflows' }).click();
+  await (await openMenu(page, 'More')).getByRole('menuitem', { name: 'Workflows' }).click();
   await page.getByText('Create a workflow').click();
   await page.getByLabel('Name').fill(`Interactive workflow ${Date.now()}`);
   await page.getByLabel('Owning app').selectOption(installed.appID);
@@ -2941,6 +2949,8 @@ test('[CONNECT-01][CONNECT-03] the details panel separates an invitation from a 
   await signIn(context);
   await page.goto('/app?details=1');
 
+  // Slack keeps sharing with other organizations on the details Settings tab.
+  await page.locator('#conversation-details').getByRole('tab', { name: 'Settings' }).click();
   await expect(page.getByRole('heading', { name: 'Shared with other organizations' })).toBeVisible();
   // With nobody invited, the panel says so plainly rather than leaving the
   // section empty and ambiguous.
@@ -3503,7 +3513,7 @@ test('[SEARCH-01 SEARCH-02 A11Y-01] canvases are searchable by their title and t
   await page.getByRole('group').filter({ hasText: 'Create a canvas' }).locator('summary').click();
   await page.getByLabel('Name').fill(`${needle} runbook`);
   await page.getByLabel('Content').fill(`roll back the ${needle} deployment`);
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByText(`${needle} runbook`)).toBeVisible();
 
   await page.goto(`/app/search?q=${encodeURIComponent(needle)}&type=canvases`);
@@ -3765,7 +3775,7 @@ test('[LIST-01 A11Y-01] a list item can be assigned with a due date', async ({ p
   await page.goto('/app/lists');
   await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
   await page.getByLabel('Name').fill(name);
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name })).toBeVisible();
 
   await page.getByPlaceholder('Add an item').fill('ship it');
@@ -3825,7 +3835,7 @@ test('[CANVAS-01 A11Y-01] a canvas keeps its history and an earlier revision can
   await page.getByRole('group').filter({ hasText: 'Create a canvas' }).locator('summary').click();
   await page.getByLabel('Name').fill(first);
   await page.getByLabel('Content').fill('the original body');
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name: first })).toBeVisible();
 
   // A canvas nobody has edited has no history to show.
@@ -3863,7 +3873,7 @@ test('[CANVAS-01 A11Y-01] a canvas section can be commented on and the comment o
   await page.getByRole('group').filter({ hasText: 'Create a canvas' }).locator('summary').click();
   await page.getByLabel('Name').fill(name);
   await page.getByLabel('Content').fill('the paragraph under review');
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name })).toBeVisible();
   await expect(page.getByText('No comments yet.')).toBeVisible();
 
@@ -3934,7 +3944,7 @@ test('[CANVAS-01 A11Y-01] a canvas says who it is shared with and the owner can 
   await page.getByRole('group').filter({ hasText: 'Create a canvas' }).locator('summary').click();
   await page.getByLabel('Name').fill(name);
   await page.getByLabel('Content').fill('who else can read this');
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name })).toBeVisible();
 
   // A canvas shared with nobody still names its owner: "nobody" and "everyone"
@@ -3970,7 +3980,7 @@ test('[LIST-01 A11Y-01] a list column can be removed and takes its values with i
   await page.goto('/app/lists');
   await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
   await page.getByLabel('Name').fill(name);
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name })).toBeVisible();
 
   await page.getByRole('group').filter({ hasText: 'Add a column' }).locator('summary').click();
@@ -4008,7 +4018,7 @@ test('[LIST-01 A11Y-01] a list item can be completed reversibly or deleted for g
   await page.goto('/app/lists');
   await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
   await page.getByLabel('Name').fill(name);
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name })).toBeVisible();
 
   await page.getByPlaceholder('Add an item').fill('added by mistake');
@@ -4040,7 +4050,7 @@ test('[LIST-01 A11Y-01] a list says who it is shared with and the owner can chan
   await page.goto('/app/lists');
   await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
   await page.getByLabel('Name').fill(name);
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name })).toBeVisible();
 
   const grants = page.locator('.grant');
@@ -4072,7 +4082,7 @@ test('[LIST-01 A11Y-01] a column can be declared from the list page', async ({ p
   await page.goto('/app/lists');
   await page.getByRole('group').filter({ hasText: 'Create a list' }).locator('summary').click();
   await page.getByLabel('Name').fill(name);
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name })).toBeVisible();
 
   await page.getByRole('group').filter({ hasText: 'Add a column' }).locator('summary').click();

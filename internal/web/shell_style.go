@@ -9,7 +9,7 @@ const shellStyle = `<style>
 .icon-sprite{position:absolute;width:0;height:0;overflow:hidden}
 .icon{width:18px;height:18px;flex:0 0 auto;display:inline-block;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
 .icon .fill,.icon-sprite .fill{fill:currentColor;stroke:none}
-.shell{height:100vh;height:100dvh;display:grid;grid-template-rows:44px minmax(0,1fr);background:var(--chrome-top);overflow:hidden}
+.shell{height:100vh;height:100dvh;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:44px minmax(0,1fr);background:var(--chrome-top);overflow:hidden}
 .shell .topbar{grid-row:1;display:flex;align-items:center;gap:10px;height:44px;padding:0 12px 0 78px;background:var(--chrome-top);color:var(--on-accent);box-shadow:none;border:0}
 .shell .top-search{position:relative;flex:1 1 auto;min-width:0;max-width:720px;margin:0 auto;display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;border:1px solid #ffffff5c;border-radius:8px;background:#ffffff1f;color:var(--on-accent)}
 .shell .top-search:focus-within{background:var(--panel-strong);color:var(--text);border-color:var(--focus)}
@@ -156,8 +156,8 @@ details[open]>.menu-list{display:grid}
 .switcher-group{margin:10px 16px 4px;color:var(--muted);font-size:12px;font-weight:700}
 .switcher-results{list-style:none;margin:0;padding:0 6px 6px;overflow:auto;max-height:min(420px,60vh)}
 .switcher-results li[hidden]{display:none}
-.switcher-results a{display:grid;grid-template-columns:22px minmax(0,auto) auto minmax(0,1fr);align-items:center;gap:4px 10px;padding:7px 10px;border-radius:7px;color:var(--text);text-decoration:none}
-.switcher-results li[aria-selected=true] a{background:var(--action);color:var(--on-strong)}
+.switcher-option{display:grid;cursor:pointer;grid-template-columns:22px minmax(0,auto) auto minmax(0,1fr);align-items:center;gap:4px 10px;padding:7px 10px;border-radius:7px;color:var(--text);text-decoration:none}
+.switcher-results li[aria-selected=true] .switcher-option{background:var(--action);color:var(--on-strong)}
 .switcher-results li[aria-selected=true] .switcher-type,.switcher-results li[aria-selected=true] .switcher-context{color:inherit}
 .switcher-icon{display:grid;place-items:center}
 .switcher-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -248,7 +248,7 @@ html.js .nav-scrim.is-open{display:block}
 html.js .shell .sidebar{position:fixed;inset:44px auto 56px 0;z-index:31;width:min(320px,calc(100vw - 48px));border-radius:0;transform:translateX(-105%);transition:transform .18s ease;box-shadow:var(--shadow)}
 html.js .shell .sidebar.is-open{transform:translateX(0)}
 .preferences-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
-.preferences-tabs{flex-direction:row;overflow:auto;border-right:0;border-bottom:1px solid var(--line);padding:6px 10px}
+.preferences-tabs{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line);padding:6px 10px}
 .status-inputs{grid-template-columns:minmax(0,1fr)}
 }
 @media(max-height:520px) and (max-width:800px){

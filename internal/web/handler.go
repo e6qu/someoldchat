@@ -433,6 +433,13 @@ type conversationDetailsView struct {
 	CanRemove   bool
 }
 
+// TabURL is the address of one details tab. The tabs are links so that the
+// dialog works without script: each tab is a server rendering of its own, and
+// the shell script only swaps panels in place when it is present.
+func (v conversationDetailsView) TabURL(tab string) string {
+	return conversationDetailsURL(domain.ConversationID(v.ID), tab)
+}
+
 type connectOrganizationView struct {
 	ID   string
 	Name string
@@ -4735,10 +4742,10 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			notices = append(notices, "Conversation details are temporarily unavailable.")
 		} else {
 			switch tab := strings.TrimSpace(r.URL.Query().Get("tab")); tab {
-			case "members", "integrations", "settings":
+			case detailsTabMembers, detailsTabIntegrations, detailsTabSettings:
 				details.InitialTab = tab
 			default:
-				details.InitialTab = "about"
+				details.InitialTab = detailsTabAbout
 			}
 		}
 	}
@@ -7072,7 +7079,7 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 			data.Exceptions = append(data.Exceptions, notificationExceptionView{
 				ID: string(conversation.ID), Name: conversationName(conversation), Prefix: "#",
 				Level: string(override.Level), FollowEveryThread: override.FollowEveryThread,
-				URL: conversationDetailsURL(conversation.ID) + "#conversation-notifications",
+				URL: conversationDetailsURL(conversation.ID, detailsTabAbout) + "#conversation-notifications",
 			})
 		}
 		if !page.HasMore || page.NextCursor == "" {
@@ -11632,7 +11639,7 @@ func (h Handler) setConversationVisibility(w http.ResponseWriter, r *http.Reques
 		h.writeMutationError(w, r, http.StatusBadRequest, "The channel was not changed", "Only a workspace administrator can change who may read a channel, and a channel shared with another organization cannot be made public.")
 		return
 	}
-	h.redirectMutation(w, r, appURL(string(channel), "", "", "", "")+"&details=1")
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabSettings))
 }
 
 func (h Handler) convertGroupDirectToPrivate(w http.ResponseWriter, r *http.Request) {
@@ -11744,7 +11751,7 @@ func (h Handler) inviteConversationMember(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	h.redirectMutation(w, r, conversationDetailsURL(channel))
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabMembers))
 }
 
 func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
@@ -11777,7 +11784,7 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 		h.redirectMutation(w, r, "/app/dms")
 		return
 	}
-	h.redirectMutation(w, r, conversationDetailsURL(channel))
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabAbout))
 }
 
 func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
@@ -11816,7 +11823,7 @@ func (h Handler) setConversationNotifications(w http.ResponseWriter, r *http.Req
 		}
 		return
 	}
-	h.redirectMutation(w, r, returnTarget(fields, conversationDetailsURL(channel)+"#conversation-notifications"))
+	h.redirectMutation(w, r, returnTarget(fields, conversationDetailsURL(channel, detailsTabAbout)+"#conversation-notifications"))
 }
 
 func (h Handler) setThreadFollow(w http.ResponseWriter, r *http.Request) {
@@ -11888,7 +11895,7 @@ func (h Handler) setConversationText(w http.ResponseWriter, r *http.Request, fie
 		}
 		return
 	}
-	h.redirectMutation(w, r, conversationDetailsURL(channel))
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabAbout))
 }
 
 func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request) {
@@ -11912,7 +11919,7 @@ func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request)
 		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, service.ErrCannotArchiveDefault):
 			h.writeMutationError(w, r, http.StatusBadRequest, "This conversation cannot be archived", "Only public and private channels that are not required by the workspace can be archived.")
 		case errors.Is(err, service.ErrConversationAlreadyArchived), errors.Is(err, service.ErrConversationNotArchived):
-			h.redirectMutation(w, r, conversationDetailsURL(channel))
+			h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabSettings))
 		case errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That channel is no longer available", "Nothing was changed.")
 		default:
@@ -11920,7 +11927,7 @@ func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request)
 		}
 		return
 	}
-	h.redirectMutation(w, r, conversationDetailsURL(channel))
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabSettings))
 }
 
 func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
@@ -11962,8 +11969,21 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, appURL(string(channel), "", "", "", ""))
 }
 
-func conversationDetailsURL(channel domain.ConversationID) string {
-	return "/app?" + url.Values{"channel": {string(channel)}, "details": {"1"}}.Encode()
+// Details dialog tabs. A mutation made from a tab returns to that tab, so
+// the change it made is on screen when the dialog reopens.
+const (
+	detailsTabAbout        = "about"
+	detailsTabMembers      = "members"
+	detailsTabIntegrations = "integrations"
+	detailsTabSettings     = "settings"
+)
+
+func conversationDetailsURL(channel domain.ConversationID, tab string) string {
+	values := url.Values{"channel": {string(channel)}, "details": {"1"}}
+	if tab != "" && tab != detailsTabAbout {
+		values.Set("tab", tab)
+	}
+	return "/app?" + values.Encode()
 }
 
 func normalizeUserIDs(raw string) ([]domain.UserID, error) {

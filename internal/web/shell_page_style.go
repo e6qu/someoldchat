@@ -55,7 +55,7 @@ const conversationShellStyle = `<style>
 .channel-overflow>.header-button{padding:0 5px}
 .header-link{color:var(--muted);font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap}
 .header-link:hover{color:var(--text);text-decoration:underline}
-.channel-tabs{display:flex;align-items:center;gap:2px;padding:0 16px;overflow-x:auto;scrollbar-width:none}
+.channel-tabs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:0 16px}
 .channel-tabs>a{display:inline-flex;align-items:center;gap:6px;padding:6px 10px 8px;border-bottom:2px solid transparent;color:var(--muted);font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap}
 .channel-tabs>a .icon{width:15px;height:15px}
 .channel-tabs>a:hover{color:var(--text)}
@@ -64,7 +64,7 @@ const conversationShellStyle = `<style>
 .bookmark-add>summary{display:grid;place-items:center;width:26px;height:26px;border-radius:6px;color:var(--muted);cursor:pointer;list-style:none}
 .bookmark-add>summary::-webkit-details-marker{display:none}
 .bookmark-add>summary:hover{background:var(--hover);color:var(--text)}
-.bookmark-form{position:absolute;z-index:40;top:30px;left:0;display:grid;gap:6px;width:min(320px,80vw);padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.bookmark-form{position:absolute;z-index:40;top:30px;left:0;display:grid;gap:6px;width:min(320px,calc(100vw - 32px));padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);box-shadow:var(--shadow)}
 .bookmark-form label{font-size:13px;font-weight:700}
 .bookmark-form input{padding:7px 9px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);font:inherit}
 .bookmarks-bar{display:flex;align-items:center;gap:4px;margin:0;padding:2px 16px 6px;list-style:none;overflow-x:auto;scrollbar-width:thin}
@@ -95,14 +95,12 @@ const conversationShellStyle = `<style>
 .conversation-details[open]{display:flex;flex-direction:column}
 .conversation-details-head h2{display:flex;align-items:center;gap:6px;font-size:22px}
 .details-type{padding:0 20px 8px}
-.details-tabs{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--line)}
-.details-tabs [role=tab]{padding:8px 10px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font:inherit;font-weight:700;cursor:pointer}
+.details-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:0 20px;border-bottom:1px solid var(--line)}
+.details-tabs [role=tab]{padding:8px 10px;text-decoration:none;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font:inherit;font-weight:700;cursor:pointer}
 .details-tabs [role=tab][aria-selected=true]{border-bottom-color:var(--action);color:var(--text)}
 .details-tabs [role=tab]:hover{color:var(--text)}
 .details-panel{flex:1 1 auto;display:grid;align-content:start;gap:14px;padding:16px 20px 20px;overflow:auto;background:var(--panel)}
 .details-panel[hidden]{display:none}
-html:not(.js) .details-panel[hidden]{display:grid}
-html:not(.js) .details-tabs{display:none}
 .details-card{display:grid;gap:0;border:1px solid var(--line);border-radius:10px;background:var(--panel-strong);overflow:hidden}
 .details-card>.conversation-setting,.details-card>form,.details-card>h3,.details-card>p{margin:0;padding:12px 16px}
 .details-row{display:flex;align-items:flex-start;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
@@ -143,6 +141,7 @@ html:not(.js) .details-tabs{display:none}
 .shell .channel-meta,.facepile .faces{display:none}
 .channel-tabs{padding:0 8px}
 .bookmarks-bar{padding:0 8px 4px}
+.bookmark-form{position:fixed;top:auto;left:16px;right:16px;width:auto;margin-top:6px}
 .conversation-details{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;border-radius:0}
 .details-row{flex-wrap:wrap}
 }

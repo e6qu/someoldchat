@@ -180,7 +180,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
 </nav>{{end}}
 
 {{define "shell-dialogs"}}` + iconSprite + `
-<dialog class="shell-dialog conversation-switcher" id="conversation-switcher" aria-labelledby="conversation-switcher-title">
+<template data-dialog-template="conversation-switcher"><dialog class="shell-dialog conversation-switcher" id="conversation-switcher" aria-labelledby="conversation-switcher-title">
   <div class="switcher-head">
     <h2 class="visually-hidden" id="conversation-switcher-title">Jump to a conversation</h2>
     {{icon "search"}}
@@ -188,11 +188,11 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     <button class="dialog-close switcher-close" type="button" data-dialog-close aria-label="Close conversation switcher">{{icon "close"}}</button>
   </div>
   <p class="switcher-group" id="conversation-switcher-group" aria-hidden="true">Conversations</p>
-  <ul class="switcher-results" id="conversation-switcher-results" role="listbox" aria-label="Conversations">{{range .Switcher}}<li role="option" id="switch-{{.Kind}}-{{.ID}}" aria-selected="false" data-href="{{.Href}}" data-conversation-id="{{.ID}}" data-conversation-name="{{.Name}}" data-kind="{{.Kind}}"><a href="{{.Href}}" tabindex="-1"><span class="switcher-icon" aria-hidden="true">{{if eq .Kind "private"}}{{icon "lock"}}{{else if eq .Kind "dm"}}{{icon "user"}}{{else if eq .Kind "group"}}{{icon "people"}}{{else if eq .Kind "app"}}{{icon "apps"}}{{else}}{{icon "hash"}}{{end}}</span><span class="switcher-name{{if .Unread}} unread{{end}}">{{.Name}}</span><span class="switcher-type">{{.KindText}}</span>{{if .Context}}<span class="switcher-context">{{.Context}}</span>{{end}}</a></li>{{end}}</ul>
+  <ul class="switcher-results" id="conversation-switcher-results" role="listbox" aria-label="Conversations">{{range .Switcher}}<li role="option" id="switch-{{.Kind}}-{{.ID}}" aria-selected="false" data-href="{{.Href}}" data-conversation-id="{{.ID}}" data-conversation-name="{{.Name}}" data-kind="{{.Kind}}"><span class="switcher-option"><span class="switcher-icon" aria-hidden="true">{{if eq .Kind "private"}}{{icon "lock"}}{{else if eq .Kind "dm"}}{{icon "user"}}{{else if eq .Kind "group"}}{{icon "people"}}{{else if eq .Kind "app"}}{{icon "apps"}}{{else}}{{icon "hash"}}{{end}}</span><span class="switcher-name{{if .Unread}} unread{{end}}">{{.Name}}</span><span class="switcher-type">{{.KindText}}</span>{{if .Context}}<span class="switcher-context">{{.Context}}</span>{{end}}</span></li>{{end}}</ul>
   <p class="switcher-empty" id="conversation-switcher-empty" role="status" aria-live="polite"></p>
   <p class="switcher-hint" aria-hidden="true"><kbd>↑</kbd><kbd>↓</kbd> to navigate · <kbd>Enter</kbd> to open · <kbd>Esc</kbd> to close</p>
-</dialog>
-<dialog class="shell-dialog keyboard-help" id="keyboard-help" aria-labelledby="keyboard-help-title">
+</dialog></template>
+<template data-dialog-template="keyboard-help"><dialog class="shell-dialog keyboard-help" id="keyboard-help" aria-labelledby="keyboard-help-title">
   <div class="dialog-head keyboard-help-head">
     <h2 id="keyboard-help-title" tabindex="-1">Keyboard shortcuts</h2>
     <label class="visually-hidden" for="keyboard-help-query">Search shortcuts</label>
@@ -211,17 +211,17 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     </section>{{end}}
   </div>
   <p class="keyboard-help-empty" id="keyboard-help-empty" role="status" hidden>No matching shortcuts.</p>
-</dialog>
-<dialog class="shell-dialog preferences-dialog" id="preferences" aria-labelledby="preferences-title">
+</dialog></template>
+<template data-dialog-template="preferences"><dialog class="shell-dialog preferences-dialog" id="preferences" aria-labelledby="preferences-title">
   <div class="dialog-head"><h2 id="preferences-title" tabindex="-1">Preferences</h2><button class="dialog-close" type="button" data-dialog-close aria-label="Close preferences">{{icon "close"}}</button></div>
   {{template "preferences-panels" .}}
-</dialog>
-{{if .CanSetStatus}}<dialog class="shell-dialog status-dialog" id="status-dialog" aria-labelledby="status-dialog-title">
+</dialog></template>
+{{if .CanSetStatus}}<template data-dialog-template="status-dialog"><dialog class="shell-dialog status-dialog" id="status-dialog" aria-labelledby="status-dialog-title">
   {{template "status-form" .}}
-</dialog>{{end}}
-{{if .CanCreate}}<dialog class="shell-dialog create-channel" id="create-channel" aria-labelledby="create-channel-title">
+</dialog></template>{{end}}
+{{if .CanCreate}}<template data-dialog-template="create-channel"><dialog class="shell-dialog create-channel" id="create-channel" aria-labelledby="create-channel-title">
   {{template "create-channel-form" .}}
-</dialog>{{end}}
+</dialog></template>{{end}}
 <div class="visually-hidden" id="shell-status" aria-live="polite" aria-atomic="true"></div>{{end}}
 
 {{define "status-form"}}<form class="status-form" method="post" action="/app/status" data-status-form>

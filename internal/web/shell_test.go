@@ -340,6 +340,13 @@ func TestConversationDetailsIsATabbedDialog(t *testing.T) {
 		`<dialog class="shell-dialog details-edit" id="details-edit-topic"`,
 		`data-member-filter`,
 		`action="/app/conversation/remove?channel=Cdev"`,
+		// The requested tab is the server's rendering, so it is right
+		// without script and before script runs: each tab is a link to its
+		// own rendering, and only the selected panel is shown.
+		`href="/app?channel=Cdev&amp;details=1&amp;tab=settings" aria-controls="details-settings" aria-selected="false" tabindex="-1"`,
+		`aria-controls="details-members" aria-selected="true"`,
+		`id="details-members" aria-labelledby="details-tab-members">`,
+		`id="details-about" aria-labelledby="details-tab-about" hidden>`,
 	)
 	if strings.Count(body, "<header") != 1 {
 		t.Fatalf("the page has %d header elements; only the top bar may be a banner", strings.Count(body, "<header"))
@@ -347,6 +354,9 @@ func TestConversationDetailsIsATabbedDialog(t *testing.T) {
 	removed := postForm(t, mux, "/app/conversation/remove?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}, "user": {"U2"}}.Encode(), false)
 	if removed.Code != http.StatusSeeOther {
 		t.Fatalf("remove status=%d body=%s", removed.Code, removed.Body)
+	}
+	if got := removed.Header().Get("Location"); got != "/app?channel=Cdev&details=1&tab=members" {
+		t.Fatalf("removing a member returned to %q, want the Members tab", got)
 	}
 	if member, _ := s.IsConversationMember(context.Background(), "Cdev", "U2"); member {
 		t.Fatal("the member was not removed")

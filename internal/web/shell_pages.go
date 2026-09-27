@@ -226,7 +226,7 @@ func (h Handler) removeConversationMember(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	h.redirectMutation(w, r, conversationDetailsURL(channel)+"&tab=members")
+	h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabMembers))
 }
 
 // addBookmark adds a link to the channel's bookmarks bar.
