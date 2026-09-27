@@ -3385,8 +3385,8 @@ test('[LIST-01 A11Y-01] a list item can be assigned with a due date', async ({ p
   await page.getByLabel('Due').fill('2026-09-01');
   await page.getByRole('button', { name: 'Save assignment' }).click();
 
-  await expect(page.locator('.item-assignee')).toHaveText('SameOldChat');
-  await expect(page.locator('.item-due')).toContainText('Due 2026-09-01');
+  await expect(page.locator('.item-assignee .cell-value')).toHaveText('SameOldChat');
+  await expect(page.locator('.item-due')).toContainText('Assignment due 2026-09-01');
   await expectNoSeriousAccessibilityViolations(page);
 
   // The control now offers to change the assignment rather than to make one,
@@ -3744,11 +3744,13 @@ test('[LIST-01 LIST-02 A11Y-01] a list with declared columns shows and enforces 
 
   await page.goto(`/app/lists/${encodeURIComponent(listID)}`);
   await expect(page.getByText('Columns: Title (text), Status (select), Due (date)')).toBeVisible();
+  // The primary column names the item and opens it; the others read as
+  // labelled values beside it, so a status of "open" is never a link.
+  await expect(page.locator('.item').first().locator('.item-title')).toHaveText('ship it');
   const cells = page.locator('.item').first().locator('.cell-value');
-  await expect(cells).toHaveCount(3);
-  await expect(cells.nth(0)).toHaveText('ship it');
-  await expect(cells.nth(1)).toHaveText('open');
-  await expect(cells.nth(2)).toHaveText('2026-09-01');
+  await expect(cells).toHaveCount(2);
+  await expect(cells.nth(0)).toHaveText('open');
+  await expect(cells.nth(1)).toHaveText('2026-09-01');
   await expectNoSeriousAccessibilityViolations(page);
 
   // The board layout groups items into lanes by the select column, is reached
@@ -3765,6 +3767,14 @@ test('[LIST-01 LIST-02 A11Y-01] a list with declared columns shows and enforces 
   await expect(page).toHaveURL(/\/app\/lists\/.*view=table/);
   await expect(page.getByRole('columnheader', { name: /Status/ })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'ship it' })).toBeVisible();
+  // A cell is edited in place and saved when it changes.
+  await page.getByLabel('Status for ship it').selectOption('done');
+  await expect(page.getByLabel('Status for ship it')).toHaveValue('done');
+  await page.reload();
+  await expect(page.getByLabel('Status for ship it')).toHaveValue('done');
+  await page.getByLabel('Status for ship it').selectOption('open');
+  await expect(page.getByLabel('Status for ship it')).toHaveValue('open');
+  await page.reload();
   await page.getByRole('link', { name: /Status/ }).click();
   await expect(page).toHaveURL(/[?&]sort=status\b/);
   await expect(page).toHaveURL(/[?&]view=table\b/);
@@ -3782,7 +3792,7 @@ test('[LIST-01 LIST-02 A11Y-01] a list with declared columns shows and enforces 
 
   // [LIST-02] An item opens on its own page, where a reader can comment on it,
   // and that page is itself keyboard and screen-reader usable.
-  await page.getByRole('link', { name: 'Open' }).first().click();
+  await page.getByRole('link', { name: /open item details/ }).first().click();
   await expect(page).toHaveURL(/\/app\/lists\/.*\/items\//);
   await expect(page.getByRole('heading', { name: 'Comments' })).toBeVisible();
   await page.getByLabel('Add a comment').fill('who owns this incident');

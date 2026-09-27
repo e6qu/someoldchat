@@ -1439,11 +1439,30 @@ func TestListTableViewSortsByColumn(t *testing.T) {
 	// Ascending by Priority: 1 (low), 2 (mid), 3 (high) — numeric, not "1,2,3" as text.
 	asc := get(t, mux, target+"?view=table&sort=priority&dir=asc").Body.String()
 	requireContains(t, "table renders", asc, `<table class="list-table">`, "Priority")
-	requireOrdered(t, "ascending by priority", asc, "<td>low</td>", "<td>mid</td>", "<td>high</td>")
+	// The primary cell names the item and opens it; there is no separate
+	// "Open" column to confuse with a status value.
+	requireOrdered(t, "ascending by priority", asc, ">low</a>", ">mid</a>", ">high</a>")
+	requireMissing(t, "table without an Open column", asc, `<th scope="col">Open</th>`, `<th scope="col">Assignment due</th>`)
 
 	// The Priority header now links to descending, and desc reverses the rows.
 	desc := get(t, mux, target+"?view=table&sort=priority&dir=desc").Body.String()
-	requireOrdered(t, "descending by priority", desc, "<td>high</td>", "<td>mid</td>", "<td>low</td>")
+	requireOrdered(t, "descending by priority", desc, ">high</a>", ">mid</a>", ">low</a>")
+
+	// A cell is edited in place, through the same cell update the API uses.
+	items, err := messages.ListItems(ctx, "T1", "U1", value.ID, domain.PageRequest{Limit: 10}, true)
+	if err != nil || len(items.Items) == 0 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	item := items.Items[0]
+	requireContains(t, "editable cell", asc, `action="`+target+`/items/`+string(item.ID)+`/cell"`, `name="column" value="priority"`, `type="number"`)
+	edited := postForm(t, mux, target+"/items/"+string(item.ID)+"/cell", url.Values{"_csrf": {auth.CSRFToken("session")}, "column": {"priority"}, "value": {"7"}, "return": {"view=table"}}.Encode(), false)
+	if edited.Code != http.StatusSeeOther || !strings.Contains(edited.Header().Get("Location"), "view=table") {
+		t.Fatalf("cell edit status=%d location=%q body=%s", edited.Code, edited.Header().Get("Location"), edited.Body)
+	}
+	stored, err := messages.GetListItem(ctx, "T1", "U1", value.ID, item.ID)
+	if err != nil || !strings.Contains(stored.Fields, `"7"`) {
+		t.Fatalf("stored fields=%s err=%v", stored.Fields, err)
+	}
 }
 
 // TestListFilterNarrowsItemsAndSurvivesViewSwitch covers filtering: a filter by a
