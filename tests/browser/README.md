@@ -40,7 +40,13 @@ pending item does not appear in channel history, reviews it on the Scheduled
 surface, and cancels it. It signs out through the application UI,
 asserts the application-owned signed-out destination remains terminal across a
 reload, does not invent a sign-in route when the local fixture has no provider,
-and verifies the revoked session cannot reopen a protected page. Provider-backed
+and verifies the revoked session cannot reopen a protected page. For app
+surfaces the suite plays a Socket Mode app itself: it installs an app, issues
+its app-level token in the developer console, holds the app's socket, and
+acknowledges envelopes as Bolt does, so a global shortcut opening a modal
+(validation errors, submission, close), a legacy dialog with a
+`dialog_suggestion`-loaded select, and an App Home published on
+`app_home_opened` and re-rendered after a button are exercised end to end. Provider-backed
 qualification separately verifies the configured sign-in destination.
 
 Every test title carries one or more stable IDs from the normative

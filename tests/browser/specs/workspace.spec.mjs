@@ -3976,6 +3976,310 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+// A Socket Mode app played by the test itself: it connects with its
+// app-level token, acknowledges every envelope with what handle returns
+// (Slack's ack payload: response_action, errors, options), and afterwards runs
+// the work a Bolt listener does once it has acknowledged — calling the Web API
+// with a trigger_id or publishing a Home. Nothing here fabricates a payload
+// the server did not deliver: every assertion reads what the socket carried.
+async function connectSocketModeApp(request, appToken, handle) {
+  const response = await request.post('/api/apps.connections.open', {
+    headers: { authorization: `Bearer ${appToken}` },
+  });
+  const opened = await response.json();
+  expect(opened.ok, JSON.stringify(opened)).toBe(true);
+  const socket = new WebSocket(opened.url);
+  const received = [];
+  const failures = [];
+  // One listener, attached before the socket opens: a WebSocket client may
+  // dispatch hello and the first envelope from one read, so a listener added
+  // after awaiting hello can miss an envelope the server is then waiting on.
+  let hello;
+  const greeted = new Promise((resolve, reject) => {
+    hello = resolve;
+    socket.addEventListener('error', reject);
+  });
+  socket.addEventListener('message', async (event) => {
+    const frame = JSON.parse(event.data);
+    if (frame.type === 'hello') hello();
+    if (!frame.envelope_id) return;
+    received.push(frame);
+    let answer = {};
+    try {
+      answer = (await handle(frame)) || {};
+    } catch (error) {
+      failures.push(error);
+    }
+    socket.send(JSON.stringify(answer.ack === undefined
+      ? { envelope_id: frame.envelope_id }
+      : { envelope_id: frame.envelope_id, payload: answer.ack }));
+    if (answer.then) {
+      try {
+        await answer.then();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+  });
+  await greeted;
+  return {
+    received,
+    // A listener's own failure (a Web API call the server refused) is a test
+    // failure, not something to discover as a missing modal later.
+    check() {
+      expect(failures.map(String)).toEqual([]);
+    },
+    close() {
+      socket.close();
+    },
+  };
+}
+
+async function callAPI(request, token, method, body) {
+  const response = await request.post(`/api/${method}`, {
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    data: body,
+  });
+  const payload = await response.json();
+  if (!payload.ok) {
+    throw new Error(`${method}: ${JSON.stringify(payload)}`);
+  }
+  return payload;
+}
+
+// installInteractiveApp creates and installs a Socket Mode app with global
+// shortcuts, a Home tab, and interactivity, then issues its app-level token
+// from the developer console exactly as its developer would.
+async function installInteractiveApp(page, request) {
+  const redirectURI = 'https://client.example/browser-oauth-callback';
+  const name = `Interactive app ${Date.now()}`;
+  const installed = await createAndInstallApp(page, request, {
+    display_information: { name, description: 'Opens modals, dialogs, and a Home' },
+    features: {
+      bot_user: { display_name: 'Interactive bot' },
+      app_home: { home_tab_enabled: true, messages_tab_enabled: false },
+      shortcuts: [
+        { name: 'File a report', type: 'global', callback_id: 'file_report', description: 'Opens a report modal' },
+        { name: 'Open a ticket', type: 'global', callback_id: 'open_ticket', description: 'Opens a legacy dialog' },
+      ],
+    },
+    oauth_config: { redirect_urls: [redirectURI], scopes: { bot: ['commands', 'chat:write'] } },
+    settings: {
+      socket_mode_enabled: true,
+      interactivity: { is_enabled: true },
+      event_subscriptions: { bot_events: ['app_home_opened'] },
+    },
+  }, redirectURI);
+  await page.goto(`/app/developer/apps?app=${encodeURIComponent(installed.appID)}`);
+  await page.getByRole('button', { name: 'Generate app-level token' }).click();
+  await expect(page.getByRole('heading', { name: 'Save this app-level token now' })).toBeVisible();
+  const appToken = (await page.locator('.secret code').first().textContent()).trim();
+  expect(appToken).toMatch(/^xapp-/);
+  return { ...installed, name, appToken };
+}
+
+async function runGlobalShortcut(page, app, name) {
+  await page.goto(`/app?channel=${CHANNEL}`);
+  // Shortcuts are one level down, in the composer's ＋ menu, as in Slack.
+  await page.getByRole('button', { name: 'Attach a file or browse shortcuts' }).click();
+  await page.getByRole('button', { name: 'Browse shortcuts', exact: true }).click();
+  const browser = page.getByRole('dialog', { name: 'Shortcuts' });
+  await expect(browser).toBeVisible();
+  // Every journey installs its own app, so the shortcut is picked by its app.
+  await browser.getByRole('button', { name }).filter({ hasText: app.name }).click();
+}
+
+const reportModal = {
+  type: 'modal',
+  callback_id: 'report',
+  notify_on_close: true,
+  title: { type: 'plain_text', text: 'File a report' },
+  submit: { type: 'plain_text', text: 'File' },
+  close: { type: 'plain_text', text: 'Cancel' },
+  blocks: [
+    { type: 'section', block_id: 'intro', text: { type: 'mrkdwn', text: 'Tell us what *broke*.' } },
+    {
+      type: 'input', block_id: 'summary', label: { type: 'plain_text', text: 'Summary' },
+      element: { type: 'plain_text_input', action_id: 'value' },
+    },
+    {
+      type: 'input', block_id: 'severity', label: { type: 'plain_text', text: 'Severity' },
+      element: {
+        type: 'static_select', action_id: 'value', placeholder: { type: 'plain_text', text: 'Choose a severity' },
+        options: [
+          { text: { type: 'plain_text', text: 'High' }, value: 'high' },
+          { text: { type: 'plain_text', text: 'Low' }, value: 'low' },
+        ],
+      },
+    },
+  ],
+};
+
+test('[APP-04 APP-07 A11Y-01] a global shortcut opens an app modal that validates, submits, and closes', async ({ page, context, request }) => {
+  await signIn(context);
+  const app = await installInteractiveApp(page, request);
+  const submissions = [];
+  const socket = await connectSocketModeApp(request, app.appToken, async (frame) => {
+    const payload = frame.payload || {};
+    if (payload.type === 'shortcut' && payload.callback_id === 'file_report') {
+      return { then: () => callAPI(request, app.token, 'views.open', { trigger_id: payload.trigger_id, view: reportModal }) };
+    }
+    if (payload.type === 'view_submission') {
+      const values = payload.view.state.values;
+      submissions.push(values);
+      const summary = values.summary.value.value || '';
+      if (summary.length < 10) {
+        return { ack: { response_action: 'errors', errors: { summary: 'Describe the problem in at least ten characters.' } } };
+      }
+      return { ack: { response_action: 'clear' } };
+    }
+    return {};
+  });
+  try {
+    await runGlobalShortcut(page, app, 'File a report');
+    const modal = page.getByRole('dialog', { name: 'File a report' });
+    await expect(modal).toBeVisible();
+    await expect(modal.getByText('Tell us what')).toBeVisible();
+    const shortcut = socket.received.find((frame) => frame.payload?.type === 'shortcut');
+    expect(shortcut.payload.callback_id).toBe('file_report');
+    expect(shortcut.payload.trigger_id).toBeTruthy();
+    expect(shortcut.payload.user.id).toBeTruthy();
+    await expectNoSeriousAccessibilityViolations(page, '.app-modal');
+
+    // The app's validation error is shown beside the field it names, and the
+    // member's entries survive the round trip.
+    await modal.getByLabel('Summary').fill('Broken');
+    await modal.getByLabel('Severity').selectOption('high');
+    await modal.getByRole('button', { name: 'File', exact: true }).click();
+    await expect(modal.getByRole('alert')).toContainText('Describe the problem in at least ten characters.');
+    await expect(modal.getByLabel('Summary')).toHaveValue('Broken');
+    expect(submissions[0].severity.value.selected_option.value).toBe('high');
+
+    await modal.getByLabel('Summary').fill('The nightly build is broken');
+    await modal.getByRole('button', { name: 'File', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'File a report' })).toHaveCount(0);
+    expect(submissions.at(-1).summary.value.value).toBe('The nightly build is broken');
+
+    // Closing is the member's action: the modal goes away at once and the app,
+    // which asked for notify_on_close, is told with view_closed.
+    await runGlobalShortcut(page, app, 'File a report');
+    await expect(page.getByRole('dialog', { name: 'File a report' })).toBeVisible();
+    await page.getByRole('dialog', { name: 'File a report' }).getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.getByRole('dialog', { name: 'File a report' })).toHaveCount(0);
+    await expect.poll(() => socket.received.some((frame) => frame.payload?.type === 'view_closed')).toBe(true);
+    socket.check();
+  } finally {
+    socket.close();
+  }
+});
+
+test('[APP-04 APP-07] a legacy dialog loads external options, shows the app\'s errors, and submits', async ({ page, context, request }) => {
+  await signIn(context);
+  const app = await installInteractiveApp(page, request);
+  const submissions = [];
+  const suggestions = [];
+  const socket = await connectSocketModeApp(request, app.appToken, async (frame) => {
+    const payload = frame.payload || {};
+    if (payload.type === 'shortcut' && payload.callback_id === 'open_ticket') {
+      return {
+        then: () => callAPI(request, app.token, 'dialog.open', {
+          trigger_id: payload.trigger_id,
+          dialog: JSON.stringify({
+            callback_id: 'ticket', title: 'Open a ticket', submit_label: 'Open', state: 'from-shortcut',
+            elements: [
+              { type: 'text', name: 'summary', label: 'Summary' },
+              { type: 'select', name: 'host', label: 'Host', data_source: 'external', min_query_length: 2 },
+            ],
+          }),
+        }),
+      };
+    }
+    if (payload.type === 'dialog_suggestion') {
+      suggestions.push(payload);
+      return { ack: { options: [{ label: 'Build host', value: 'build-1' }, { label: 'Deploy host', value: 'deploy-1' }] } };
+    }
+    if (payload.type === 'dialog_submission') {
+      submissions.push(payload);
+      if (!/^\p{Lu}+-\d+/u.test(payload.submission.summary)) {
+        return { ack: { errors: [{ name: 'summary', error: 'Start with a ticket number, like OPS-1.' }] } };
+      }
+      return { ack: {} };
+    }
+    return {};
+  });
+  try {
+    await runGlobalShortcut(page, app, 'Open a ticket');
+    const dialog = page.getByRole('dialog', { name: 'Open a ticket' });
+    await expect(dialog).toBeVisible();
+
+    // The Host options come from the app through dialog_suggestion.
+    await dialog.getByLabel('Host').fill('bu');
+    await dialog.getByRole('button', { name: 'Search' }).click();
+    await expect(dialog.locator('[data-options-status]')).toHaveText('2 options loaded.');
+    expect(suggestions[0]).toMatchObject({ name: 'host', value: 'bu', callback_id: 'ticket', state: 'from-shortcut' });
+    await dialog.locator('[data-options-results]').selectOption({ label: 'Build host' });
+
+    await dialog.getByLabel('Summary').fill('The build is broken');
+    await dialog.getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toContainText('Start with a ticket number, like OPS-1.');
+    await expect(dialog.getByLabel('Summary')).toHaveValue('The build is broken');
+
+    await dialog.getByLabel('Summary').fill('OPS-7 the build is broken');
+    await dialog.locator('[data-options-results]').selectOption({ label: 'Build host' });
+    await dialog.getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Open a ticket' })).toHaveCount(0);
+    expect(submissions.at(-1).submission).toEqual({ summary: 'OPS-7 the build is broken', host: 'build-1' });
+    socket.check();
+  } finally {
+    socket.close();
+  }
+});
+
+test('[APP-03 APP-08 A11Y-01] App Home is published on open and re-rendered live after a button', async ({ page, context, request }) => {
+  await signIn(context);
+  const app = await installInteractiveApp(page, request);
+  let count = 0;
+  const home = () => ({
+    type: 'home',
+    blocks: [
+      { type: 'header', text: { type: 'plain_text', text: 'Release desk' } },
+      { type: 'section', text: { type: 'mrkdwn', text: `Deploys requested: *${count}*` } },
+      { type: 'actions', block_id: 'desk', elements: [{ type: 'button', action_id: 'request_deploy', text: { type: 'plain_text', text: 'Request a deploy' }, value: 'deploy' }] },
+    ],
+  });
+  const socket = await connectSocketModeApp(request, app.appToken, async (frame) => {
+    const payload = frame.payload || {};
+    if (frame.type === 'events_api' && payload.event?.type === 'app_home_opened' && payload.event.tab === 'home') {
+      return { then: () => callAPI(request, app.token, 'views.publish', { user_id: payload.event.user, view: home() }) };
+    }
+    if (payload.type === 'block_actions' && payload.actions?.[0]?.action_id === 'request_deploy') {
+      count += 1;
+      return { then: () => callAPI(request, app.token, 'views.publish', { user_id: payload.user.id, view: home() }) };
+    }
+    return {};
+  });
+  try {
+    // The Home is published in answer to app_home_opened, which is sent while
+    // the page renders: the live stream opened from the rendered head is what
+    // carries the publication into the page that is already on screen.
+    await page.goto(`/app/apps/${encodeURIComponent(app.appID)}?channel=${CHANNEL}`);
+    await expect.poll(() => socket.received.map((frame) => frame.payload?.event?.type || frame.payload?.type || frame.type)).toContain('app_home_opened');
+    await expect(page.getByText('Release desk')).toBeVisible();
+    await expect(page.getByText('Deploys requested: 0')).toBeVisible();
+    await expectNoSeriousAccessibilityViolations(page, '#app-home-region');
+
+    await page.getByRole('button', { name: 'Request a deploy' }).click();
+    await expect(page.getByText('Deploys requested: 1')).toBeVisible();
+    const action = socket.received.find((frame) => frame.payload?.type === 'block_actions');
+    expect(action.payload.container.type).toBe('view');
+    expect(action.payload.view.type).toBe('home');
+    expect(socket.received.filter((frame) => frame.payload?.event?.type === 'app_home_opened')).toHaveLength(1);
+    socket.check();
+  } finally {
+    socket.close();
+  }
+});
+
 test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
