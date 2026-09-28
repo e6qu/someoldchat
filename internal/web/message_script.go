@@ -17,6 +17,10 @@ package web
 // It listens in the capture phase on window, so a key it handles — Escape in
 // a menu, say — is not also read by the page script's conversation-wide keys.
 //
+// A reaction's form is looked up by id when the emoji is chosen, not held from
+// when the picker opened: a live timeline update can replace the message while
+// the picker is open, and a detached form submits nothing.
+//
 // The script carries no comments: html/template strips JavaScript comments
 // from the page it renders, so the served bytes would differ from these and
 // miss their Content-Security-Policy hash.
@@ -287,8 +291,10 @@ var full=name+(chosenTone?'::skin-tone-'+chosenTone:'');
 remember(name);var callback=pickerSelect;closePicker(true);if(callback)callback(full,option);
 }
 window.sameoldchatEmojiPicker={open:openPicker,close:closePicker};
-function reactWith(form,name){
-if(!form)return;var input=doc.createElement('input');input.type='hidden';input.name='name';input.value=name;form.appendChild(input);submit(form);input.remove();
+function reactWith(formId,name){
+var form=doc.getElementById(formId);
+if(!form){toast('That message is no longer here, so the reaction was not added.');return}
+var input=doc.createElement('input');input.type='hidden';input.name='name';input.value=name;form.appendChild(input);submit(form);input.remove();
 }
 if(picker){
 if(pickerQuery){
@@ -373,7 +379,7 @@ var opener=target.closest('[data-open-emoji-picker]');
 if(opener){
 event.preventDefault();event.stopImmediatePropagation();
 if(picker&&!picker.hidden&&pickerTrigger===opener){closePicker(true);return}
-if(opener.getAttribute('data-emoji-target')==='reaction'){var form=doc.getElementById(opener.getAttribute('data-reaction-form')||'');if(form)openPicker(opener,function(name){reactWith(form,name)})}
+if(opener.getAttribute('data-emoji-target')==='reaction'){var formId=opener.getAttribute('data-reaction-form')||'';if(doc.getElementById(formId))openPicker(opener,function(name){reactWith(formId,name)})}
 else openPicker(opener,function(name,option){var visual=option&&option.firstChild;doc.dispatchEvent(new CustomEvent('sameoldchat:composer-emoji',{detail:{name:name,glyph:visual&&visual.tagName==='SPAN'?visual.textContent:'',image:visual&&visual.tagName==='IMG'?visual.getAttribute('src'):'',trigger:opener}}))});
 return;
 }
@@ -410,7 +416,7 @@ if(key==='ArrowLeft'&&inThread){var closer=doc.querySelector('[data-thread-close
 if(lower==='e'&&openEditor(message)){event.preventDefault();return true}
 if((key==='Delete'||key==='Backspace')&&openDelete(message)){event.preventDefault();return true}
 if(lower==='f'&&openForward(message)){event.preventDefault();return true}
-if(lower==='r'){var react=message.querySelector('.message-actions [data-open-emoji-picker]');var form=react?doc.getElementById(react.getAttribute('data-reaction-form')||''):null;if(react&&form){event.preventDefault();openPicker(react,function(name){reactWith(form,name)});return true}}
+if(lower==='r'){var react=message.querySelector('.message-actions [data-open-emoji-picker]');var formId=react?react.getAttribute('data-reaction-form')||'':'';if(react&&doc.getElementById(formId)){event.preventDefault();openPicker(react,function(name){reactWith(formId,name)});return true}}
 if(lower==='u'||lower==='p'){var item=message.querySelector('[data-menu-key="'+lower+'"]');if(item){event.preventDefault();item.click();return true}}
 if(lower==='a'){var save=message.querySelector('[data-message-save] button');if(save){event.preventDefault();submit(save.form,save);return true}}
 if(lower==='m'){var remind=message.querySelector('[data-reminder-menu]');if(remind&&openMenuFromKeyboard(message)){event.preventDefault();remind.setAttribute('data-keyboard-open','');remind.open=true;return true}}
