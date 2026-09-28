@@ -113,7 +113,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
 </div>{{end}}
 
 {{define "profile-menu"}}<div class="menu-list profile-menu" role="menu" aria-label="Your profile and status">
-  <div class="menu-identity" role="none" data-shauth-user="{{.Username}}">{{template "self-avatar" .}}<span><strong>{{.Username}}</strong><small>{{if .Away}}Away{{else}}Active{{end}}{{if .NotificationsPaused}} · Notifications paused{{end}}</small></span></div>
+  <div class="menu-identity" role="none">{{template "self-avatar" .}}<span><strong>{{.Username}}</strong><small>{{if .Away}}Away{{else}}Active{{end}}{{if .NotificationsPaused}} · Notifications paused{{end}}</small></span></div>
   {{if .CanSetStatus}}<a role="menuitem" class="status-item" href="{{.With "/app/status"}}" data-dialog-open="status-dialog" {{ariaKeyshortcuts "Set your status"}}>{{if or .StatusDisplay .StatusText}}<span class="status-now">{{if .StatusDisplay}}{{.StatusDisplay}}{{else}}{{icon "status"}}{{end}}</span><span>{{if .StatusText}}{{.StatusText}}{{else}}Edit your status{{end}}</span>{{else}}{{icon "status"}}<span>Update your status</span>{{end}}</a>
   <form class="menu-form" method="post" action="/app/presence" role="none"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="presence" value="{{if .Away}}auto{{else}}away{{end}}"><input type="hidden" name="return" value="{{.ReturnTo}}"><button type="submit" role="menuitem">{{icon "user"}}<span>Set yourself as <strong>{{if .Away}}active{{else}}away{{end}}</strong></span></button></form>{{end}}
   <details class="submenu" data-menu>
@@ -173,7 +173,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       </div>
     </details>
     <details class="menu rail-avatar" data-menu>
-      <summary class="rail-me" role="button" aria-haspopup="menu" aria-expanded="false" aria-label="{{.Username}}, {{if .Away}}away{{else}}active{{end}}. Profile and status menu">{{template "self-avatar" .}}</summary>
+      <summary class="rail-me" role="button" aria-haspopup="menu" aria-expanded="false" aria-label="{{.Username}}, {{if .Away}}away{{else}}active{{end}}. Profile and status menu" data-shauth-user="{{.Username}}">{{template "self-avatar" .}}</summary>
       {{template "profile-menu" .}}
     </details>
   </div>

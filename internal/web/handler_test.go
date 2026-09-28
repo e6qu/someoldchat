@@ -4284,6 +4284,11 @@ func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.
 			t.Fatalf("authenticated application status=%d missing %q body=%s", applicationResponse.Code, expected, applicationResponse.Body)
 		}
 	}
+	// The marker must be on what the page always shows: in a closed menu it is
+	// in the document but not visible, and qualification waits for it visible.
+	if !regexp.MustCompile(`<summary class="rail-me"[^>]*data-shauth-user="developer"`).MatchString(applicationResponse.Body.String()) {
+		t.Fatalf("the signed-in user is not named on the always-visible profile button: %s", applicationResponse.Body)
+	}
 	anonymous := httptest.NewRecorder()
 	mux.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/auth/validation", nil))
 	if anonymous.Code != http.StatusSeeOther || anonymous.Header().Get("Location") != "/signed-out" {
