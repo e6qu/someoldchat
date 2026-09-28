@@ -1634,6 +1634,35 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   await expect(composerValue).toHaveValue('');
 });
 
+test('[ACT-02] a reaction chosen after the timeline re-rendered lands on its message', async ({ page, context, request }) => {
+  await signIn(context);
+  const text = `react across a refresh ${Date.now()}`;
+  await postThroughTheAPI(request, text);
+  await page.goto('/app');
+  const message = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: text }) });
+  await message.focus();
+  await page.keyboard.press('r');
+  const picker = page.getByRole('dialog', { name: 'Emoji picker' });
+  const search = picker.getByPlaceholder('Search all emoji');
+  await expect(search).toBeFocused();
+
+  // A message arriving while the picker is open re-renders the timeline, so
+  // the message the picker was opened for is a new node by the time the emoji
+  // is chosen. The mark proves the old node is gone.
+  await message.evaluate((node) => { node.dataset.beforeRefresh = 'true'; });
+  const arriving = `arrives while picking ${Date.now()}`;
+  await postThroughTheAPI(request, arriving);
+  await expect(page.locator('.message-text', { hasText: arriving })).toBeVisible();
+  await expect(page.locator('.message[data-before-refresh]')).toHaveCount(0);
+
+  await search.fill('wave');
+  const wave = picker.getByRole('option', { name: ':wave:' });
+  await expect(wave).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Enter');
+  await expect(message.getByRole('button', { name: /You reacted with :wave:/ })).toBeVisible();
+  await expect(picker).toBeHidden();
+});
+
 test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions honour Slack keyboard navigation', async ({ page, context, request }) => {
   await signIn(context);
   const firstText = `keyboard first ${Date.now()}`;

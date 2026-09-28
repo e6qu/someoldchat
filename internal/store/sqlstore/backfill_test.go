@@ -558,113 +558,57 @@ func TestSQLiteBackfillSurvivesAnUnparseableTimestamp(t *testing.T) {
 	}
 }
 
-// TestSQLiteBackfillChunkQueryIsIndexed is the structural half of the
-// performance claim. The shipped shape had no index leading with the column
-// being rewritten, so EXPLAIN QUERY PLAN reported a full scan plus a temp B-tree
-// for DISTINCT — per chunk — which is where the quadratic term came from and why
-// the stated memory bound was false: LIMIT bounded what Go received, not what
-// the engine materialised.
-func TestSQLiteBackfillChunkQueryIsIndexed(t *testing.T) {
+// TestSQLiteBackfillChunkQueriesAreRangeSeeks pins what keeps every pass
+// linear. The shipped shape had no index leading with the column being
+// rewritten, so EXPLAIN QUERY PLAN reported a full scan plus a temp B-tree for
+// DISTINCT per chunk, which made the pass quadratic (5k/10k/20k/40k rows in
+// 77 ms / 196 ms / 554 ms / 2.0 s) and made LIMIT bound what Go received rather
+// than what the engine materialised. A chunk that is a range seek touches only
+// its own rows, so the pass costs its rows once.
+//
+// This used to be half of a pair with a stopwatch test that doubled the rows and
+// bounded the ratio of the fastest times. On a shared runner that ratio moved
+// with whatever else ran: one fast ten-thousand-row sample made a linear pass
+// read as 3.1 times and failed a publish. The plan is the property the ratio
+// approximated, and it does not depend on the runner.
+func TestSQLiteBackfillChunkQueriesAreRangeSeeks(t *testing.T) {
 	ctx := context.Background()
 	s := openDrained(t, ctx, filepath.Join(t.TempDir(), "plan.db"))
 	defer s.Close()
-
-	task := columnBackfills["outbox.created_at"]
-	if task.name == "" {
-		t.Fatal("the re-encoding registry no longer holds outbox.created_at")
+	if len(columnBackfills) == 0 {
+		t.Fatal("no backfill passes are registered")
 	}
-	if err := s.createBackfillIndex(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	query := `SELECT DISTINCT ` + task.key + ` FROM ` + task.table +
-		` WHERE ` + task.key + ` > ? AND ` + task.pending +
-		` ORDER BY ` + task.key + ` LIMIT ?`
-	rows, err := s.db.QueryContext(ctx, `EXPLAIN QUERY PLAN `+query, "", backfillChunkSize)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var plan []string
-	for rows.Next() {
-		var id, parent, notUsed int
-		var detail string
-		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+	for name, task := range columnBackfills {
+		if err := s.createBackfillIndex(ctx, task); err != nil {
 			t.Fatal(err)
 		}
-		plan = append(plan, detail)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	joined := strings.Join(plan, " | ")
-	if strings.Contains(strings.ToUpper(joined), "TEMP B-TREE") {
-		t.Fatalf("the chunk query still materialises the whole distinct set: %s", joined)
-	}
-	if !strings.Contains(joined, backfillIndexName(task)) {
-		t.Fatalf("the chunk query does not use the transient index: %s", joined)
-	}
-}
-
-// TestSQLiteBackfillRateIsLinear is the measured half. The shipped shape was
-// quadratic — 5k/10k/20k/40k rows in 77 ms / 196 ms / 554 ms / 2.0 s, four times
-// the time for twice the rows — which extrapolates to about 8.7 hours for
-// messages.created_at on the five-million-row example the design used, against
-// the 1 h 45 m of the single-pass migration it replaced.
-//
-// The bar here is a shape bar, not a stopwatch bar: doubling the rows may not
-// more than triple the time. A quadratic pass quadruples it.
-func TestSQLiteBackfillRateIsLinear(t *testing.T) {
-	if testing.Short() {
-		t.Skip("rewrites sixty thousand rows")
-	}
-	ctx := context.Background()
-	measure := func(rows int) time.Duration {
-		t.Helper()
-		path := filepath.Join(t.TempDir(), fmt.Sprintf("rate-%d.db", rows))
-		legacyTimestampDatabase(t, ctx, path, rows)
-		started := time.Now()
-		migrated := openDrained(t, ctx, path)
-		elapsed := time.Since(started)
-		defer migrated.Close()
-		if unordered := countUnordered(t, ctx, migrated.db); unordered != 0 {
-			t.Fatalf("%d rows still carry a variable-width timestamp", unordered)
+		rows, err := s.db.QueryContext(ctx, `EXPLAIN QUERY PLAN `+backfillChunkQuery(task), "", backfillChunkSize)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
 		}
-		t.Logf("%6d rows in %8s (%7.0f rows/s)", rows, elapsed.Round(time.Millisecond), float64(rows)/elapsed.Seconds())
-		return elapsed
-	}
-	// Package tests run in separate processes and may contend for the same
-	// runner, and contention only ever makes a measurement SLOWER. The fastest
-	// time observed at each size is therefore the closest estimate of what the
-	// pass actually costs, and the ratio of the two fastest is the least
-	// contaminated comparison available.
-	//
-	// This used to take the median of three paired ratios, on the argument that
-	// pairing preserves runner conditions better than combining independently
-	// fastest measurements. CI disproved both halves of that: the runner
-	// disturbed TWO of the three pairs, so the median was disturbed too, and it
-	// disturbed the halves of a single pair very differently — 1.143s for ten
-	// thousand rows against 3.902s for twenty thousand, while another pair ran
-	// the same twenty thousand in 1.656s. Throughput swung from 5,125 to 12,079
-	// rows a second inside one run. A ratio of two independently noisy numbers
-	// amplifies that noise; taking the best of each does not.
-	//
-	// It still catches what it is for. A quadratic pass costs four times as much
-	// at twenty thousand rows as at ten thousand in EVERY sample, including its
-	// fastest, so the best-of ratio is just as damning — there is no sample for
-	// it to hide in.
-	best := func(rows, samples int) time.Duration {
-		t.Helper()
-		fastest := time.Duration(0)
-		for sample := 0; sample < samples; sample++ {
-			if elapsed := measure(rows); fastest == 0 || elapsed < fastest {
-				fastest = elapsed
+		var plan []string
+		for rows.Next() {
+			var id, parent, notUsed int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+				t.Fatal(err)
 			}
+			plan = append(plan, detail)
 		}
-		return fastest
-	}
-	small, large := best(10000, 3), best(20000, 3)
-	if multiplier := float64(large) / float64(small); multiplier > 3 {
-		t.Fatalf("doubling the rows multiplied the fastest time by %.1f (%s against %s); the pass is not linear", multiplier, large.Round(time.Millisecond), small.Round(time.Millisecond))
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		_ = rows.Close()
+		joined := strings.ToUpper(strings.Join(plan, " | "))
+		if strings.Contains(joined, "TEMP B-TREE") {
+			t.Errorf("%s: the chunk query materialises its whole result per chunk: %s", name, joined)
+		}
+		if !strings.Contains(joined, "SEARCH "+strings.ToUpper(task.table)) {
+			t.Errorf("%s: the chunk query is not a range seek on %s: %s", name, task.table, joined)
+		}
+		if task.index && !strings.Contains(joined, strings.ToUpper(backfillIndexName(task))) {
+			t.Errorf("%s: the chunk query does not use its transient index: %s", name, joined)
+		}
 	}
 }
 

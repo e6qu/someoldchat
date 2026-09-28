@@ -602,15 +602,20 @@ func (s *Store) backfillProgress(ctx context.Context, name string) (string, bool
 // its chunk query stays the DISTINCT it always was.
 type backfillRow struct{ key, source string }
 
-func (s *Store) selectBackfillChunk(ctx context.Context, task columnBackfill, cursor string) ([]backfillRow, error) {
+// backfillChunkQuery is the chunk query of a pass, taking the cursor and the
+// chunk size.
+func backfillChunkQuery(task columnBackfill) string {
 	projection := `SELECT DISTINCT ` + task.key
 	if !task.keyed() {
 		projection = `SELECT ` + task.key + `, ` + task.source
 	}
-	query := projection + ` FROM ` + task.table +
+	return projection + ` FROM ` + task.table +
 		` WHERE ` + task.key + ` > ? AND ` + task.pending +
 		` ORDER BY ` + task.key + ` LIMIT ?`
-	rows, err := s.db.QueryContext(ctx, query, cursor, backfillChunkSize)
+}
+
+func (s *Store) selectBackfillChunk(ctx context.Context, task columnBackfill, cursor string) ([]backfillRow, error) {
+	rows, err := s.db.QueryContext(ctx, backfillChunkQuery(task), cursor, backfillChunkSize)
 	if err != nil {
 		return nil, err
 	}
