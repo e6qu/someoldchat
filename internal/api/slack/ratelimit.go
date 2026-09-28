@@ -180,9 +180,8 @@ func rateLimitCredential(r *http.Request) string {
 	if token := headerToken(r); token != "" {
 		return domain.HashToken(token)
 	}
-	// r.RemoteAddr is the peer the listener accepted, the same identity the
-	// access log records; a forwarded-for header is spoofable and is not
-	// consulted for admission decisions.
+	// r.RemoteAddr is the client the access log records too: the peer, or
+	// the client a trusted proxy forwarded (clientaddr.Resolver.Middleware).
 	host := r.RemoteAddr
 	if index := strings.LastIndex(host, ":"); index > 0 {
 		host = host[:index]

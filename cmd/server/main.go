@@ -21,6 +21,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/api/slack"
 	"github.com/sameoldchat/sameoldchat/internal/app/localchat"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/clientaddr"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/generated"
 	"github.com/sameoldchat/sameoldchat/internal/huddlesfu"
@@ -73,6 +74,11 @@ func main() {
 }
 
 func run(ctx context.Context, logger *slog.Logger, args []string) int {
+	huddleUDPPortDefault, err := envInt("SAMEOLDCHAT_HUDDLE_UDP_PORT")
+	if err != nil {
+		logger.Error("invalid configuration", "error", err)
+		return exitConfiguration
+	}
 	flags := flag.NewFlagSet("sameoldchat", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	addr := flags.String("addr", ":8080", "HTTP listen address")
@@ -102,7 +108,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// deployment behind NAT sets the advertised address and a single UDP port to
 	// expose, and hands the browser the ICE servers (STUN/TURN) to reach it.
 	huddlePublicIP := flags.String("huddle-public-ip", os.Getenv("SAMEOLDCHAT_HUDDLE_PUBLIC_IP"), "public IP the huddle SFU advertises (NAT 1-to-1 mapping of host candidates); empty leaves host candidates unmapped")
-	huddleUDPPort := flags.Int("huddle-udp-port", envInt("SAMEOLDCHAT_HUDDLE_UDP_PORT"), "single UDP port for all huddle media; 0 uses ephemeral ports")
+	huddleUDPPort := flags.Int("huddle-udp-port", huddleUDPPortDefault, "single UDP port for all huddle media; 0 uses ephemeral ports")
 	huddleICEServers := flags.String("huddle-ice-servers", os.Getenv("SAMEOLDCHAT_HUDDLE_ICE_SERVERS"), "JSON array of ICE servers (STUN/TURN) browsers use to reach the huddle SFU; empty uses none")
 	chatAddress := flags.String("chat-address", "", "distributed chat gRPC address; required for -chat-mode=grpc")
 	chatCA := flags.String("chat-ca", "", "CA certificate for distributed chat gRPC")
@@ -110,6 +116,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	chatClientCert := flags.String("chat-client-cert", "", "client certificate for distributed chat gRPC")
 	chatClientKey := flags.String("chat-client-key", "", "client private key for distributed chat gRPC")
 	apiToken := flags.String("api-token", os.Getenv("SAMEOLDCHAT_API_TOKEN"), "API bearer token (required)")
+	trustedProxies := flags.String("trusted-proxies", os.Getenv("SAMEOLDCHAT_TRUSTED_PROXIES"), "comma-separated addresses or CIDR ranges of the reverse proxies whose X-Forwarded-For names the client; empty trusts none, so every request is keyed by its peer")
 	apiRateLimit := flags.Bool("api-rate-limit", true, "enforce the Web API rate-limiting contract (429 + Retry-After); qualification harnesses that seed fixtures at superhuman rates disable it")
 	// -session-token is optional. It seeds one static browser session that every
 	// visitor holding the value shares, which is a development convenience and
@@ -164,7 +171,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	}
 
 	settings := startupConfig{
-		addr: *addr, metricsListen: *metricsListen, monitoringToken: *monitoringToken, authCookieDomain: *authCookieDomain, releaseRevisionFlag: *release,
+		addr: *addr, trustedProxies: *trustedProxies, metricsListen: *metricsListen, monitoringToken: *monitoringToken, authCookieDomain: *authCookieDomain, releaseRevisionFlag: *release,
 		chatMode: *chatMode, storeName: *storeName, databaseDSN: *dsn,
 		dqliteDirectory: *dqliteDirectory, dqliteAddress: *dqliteAddress, dqliteCluster: *dqliteCluster, dqliteDatabase: *dqliteDatabase,
 		blobDirectory: *blobDirectory, blobS3Bucket: *blobS3Bucket, blobS3Prefix: *blobS3Prefix,
@@ -466,7 +473,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// deadlines belong in those handlers, not on the listener.
 	server := &http.Server{
 		Addr:              settings.addr,
-		Handler:           mux,
+		Handler:           resolved.clientAddresses.Middleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		// Every request context descends from the signal context, so a long-lived
@@ -523,6 +530,21 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	return 0
 }
 
+// envInt reads a non-negative integer from an environment variable, zero when
+// unset, so an operator can configure the huddle media port purely from the
+// environment the way terraform/ecs-runtime does.
+func envInt(name string) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative whole number", name)
+	}
+	return value, nil
+}
+
 // startupFailure classifies a startup step that failed while holding the signal
 // context.
 //
@@ -532,16 +554,6 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 // deploy that stops a task mid-startup then looks like a crash, which a
 // deployment circuit breaker rolls the release back on. Being asked to stop is
 // exit 0.
-// envInt reads a non-negative integer from an environment variable, defaulting
-// to zero when unset or unparseable, so an operator can configure the huddle
-// media port purely from the environment the way terraform/ecs-runtime does.
-func envInt(name string) int {
-	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
-	if err != nil || value < 0 {
-		return 0
-	}
-	return value
-}
 
 func startupFailure(ctx context.Context, logger *slog.Logger, stage string, err error) int {
 	if ctx.Err() != nil {
@@ -596,7 +608,8 @@ var multiTenantEntraTenants = map[string]bool{"common": true, "organizations": t
 // and nothing else, so a deployment template can be verified against the binary
 // it configures instead of being discovered wrong by a crash-looping task.
 type startupConfig struct {
-	addr string
+	addr           string
+	trustedProxies string
 	// metricsListen, authCookieDomain and releaseRevisionFlag are here because
 	// the values were validated *after* resolve and therefore outside
 	// -check-config: a bad cookie domain, a bad release revision and a
@@ -662,6 +675,7 @@ type resolvedConfig struct {
 	scopes                []string
 	externalAuthorization bool
 	monitoringTokenDigest *observability.TokenDigest
+	clientAddresses       clientaddr.Resolver
 }
 
 // configuredProviders names the real identity providers this process would
@@ -699,6 +713,10 @@ func (c startupConfig) resolve() (resolvedConfig, error) {
 		return resolvedConfig{}, err
 	}
 	resolved.monitoringTokenDigest = monitoringTokenDigest
+	resolved.clientAddresses, err = clientaddr.Parse(c.trustedProxies)
+	if err != nil {
+		return resolvedConfig{}, fmt.Errorf("-trusted-proxies: %w", err)
+	}
 	if c.chatMode != "local" && c.chatMode != "grpc" {
 		return resolvedConfig{}, fmt.Errorf("invalid chat composition %q: -chat-mode must be local or grpc", c.chatMode)
 	}
