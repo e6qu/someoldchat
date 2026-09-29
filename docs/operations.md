@@ -311,6 +311,23 @@ does not synthesize a replacement payload from an internal topic and string.
 The Real Time Messaging event stream applies the same rule and rejects invalid
 or type-less JSON event payloads.
 
+## Client addresses behind a reverse proxy
+
+The Web API rate limiter keys a request with no bearer token by its client
+address, and the access log records that address for every sign-in and API
+call. Behind a reverse proxy every request arrives from the proxy, so without
+configuration every such client shares one rate-limit bucket and the access
+log names the proxy.
+
+Set `-trusted-proxies` / `SAMEOLDCHAT_TRUSTED_PROXIES` to the proxy's address
+or range (comma-separated addresses and CIDR ranges). A request from a trusted
+peer is keyed by the rightmost `X-Forwarded-For` entry that is not itself a
+trusted proxy; a request from any other peer is keyed by the peer, and its
+`X-Forwarded-For` is ignored because the peer wrote it. A trusted proxy that
+forwards an entry that is not an address is answered with HTTP 400. A value
+that is neither an address nor a CIDR range refuses startup, and
+`-check-config` reports it.
+
 ## Public URL
 
 `-auth-public-url` / `SAMEOLDCHAT_AUTH_PUBLIC_URL` is the one statement of
