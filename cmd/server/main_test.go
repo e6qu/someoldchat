@@ -262,7 +262,7 @@ func TestCheckConfigValidatesWithoutStartingAnything(t *testing.T) {
 
 func TestCheckConfigRefusesAnUnusableClientAddressOrHuddlePort(t *testing.T) {
 	base := []string{"-check-config", "-chat-mode", "local", "-store", "memory", "-api-token", "xoxb-test", "-addr", "127.0.0.1:0"}
-	if code := run(t.Context(), discardLogger(), append(base, "-trusted-proxies", "10.89.0.2, 192.168.7.0/24")); code != 0 {
+	if code := run(t.Context(), discardLogger(), append(base, "-trusted-proxies", "192.0.2.10, 192.168.7.0/24")); code != 0 {
 		t.Fatalf("trusted proxies exit = %d, want 0", code)
 	}
 	if code := run(t.Context(), discardLogger(), append(base, "-trusted-proxies", "caddy")); code != exitConfiguration {

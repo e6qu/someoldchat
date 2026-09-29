@@ -15,7 +15,7 @@ func TestParseRefusesWhatIsNotAnAddressOrRange(t *testing.T) {
 }
 
 func TestClientBehindATrustedProxyIsTheForwardedAddress(t *testing.T) {
-	resolver, err := Parse("10.89.0.2, 192.168.7.0/24")
+	resolver, err := Parse("192.0.2.10, 192.168.7.0/24")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,11 +25,11 @@ func TestClientBehindATrustedProxyIsTheForwardedAddress(t *testing.T) {
 		want       string
 	}{
 		{name: "direct client ignores its own header", peer: "203.0.113.9:4000", forwarded: []string{"198.51.100.1"}, want: "203.0.113.9"},
-		{name: "trusted proxy forwards the client", peer: "10.89.0.2:5000", forwarded: []string{"198.51.100.1"}, want: "198.51.100.1"},
-		{name: "a spoofed leading entry is skipped", peer: "10.89.0.2:5000", forwarded: []string{"1.2.3.4, 198.51.100.1"}, want: "198.51.100.1"},
-		{name: "a chain of trusted proxies is walked", peer: "10.89.0.2:5000", forwarded: []string{"198.51.100.1", "192.168.7.4"}, want: "198.51.100.1"},
-		{name: "no header leaves the proxy", peer: "10.89.0.2:5000", want: "10.89.0.2"},
-		{name: "a mapped peer is its IPv4 address", peer: "[::ffff:10.89.0.2]:5000", forwarded: []string{"198.51.100.1"}, want: "198.51.100.1"},
+		{name: "trusted proxy forwards the client", peer: "192.0.2.10:5000", forwarded: []string{"198.51.100.1"}, want: "198.51.100.1"},
+		{name: "a spoofed leading entry is skipped", peer: "192.0.2.10:5000", forwarded: []string{"1.2.3.4, 198.51.100.1"}, want: "198.51.100.1"},
+		{name: "a chain of trusted proxies is walked", peer: "192.0.2.10:5000", forwarded: []string{"198.51.100.1", "192.168.7.4"}, want: "198.51.100.1"},
+		{name: "no header leaves the proxy", peer: "192.0.2.10:5000", want: "192.0.2.10"},
+		{name: "a mapped peer is its IPv4 address", peer: "[::ffff:192.0.2.10]:5000", forwarded: []string{"198.51.100.1"}, want: "198.51.100.1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -49,7 +49,7 @@ func TestClientBehindATrustedProxyIsTheForwardedAddress(t *testing.T) {
 }
 
 func TestMiddlewareRewritesRemoteAddrAndRefusesAnUnusableHeader(t *testing.T) {
-	resolver, err := Parse("10.89.0.2")
+	resolver, err := Parse("192.0.2.10")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestMiddlewareRewritesRemoteAddrAndRefusesAnUnusableHeader(t *testing.T) {
 	}))
 
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
-	request.RemoteAddr = "10.89.0.2:5000"
+	request.RemoteAddr = "192.0.2.10:5000"
 	request.Header.Set("X-Forwarded-For", "198.51.100.1")
 	handler.ServeHTTP(httptest.NewRecorder(), request)
 	if seen != "198.51.100.1:0" {
@@ -68,7 +68,7 @@ func TestMiddlewareRewritesRemoteAddrAndRefusesAnUnusableHeader(t *testing.T) {
 
 	seen = ""
 	refused := httptest.NewRequest(http.MethodGet, "/", nil)
-	refused.RemoteAddr = "10.89.0.2:5000"
+	refused.RemoteAddr = "192.0.2.10:5000"
 	refused.Header.Set("X-Forwarded-For", "unknown")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, refused)
