@@ -4458,13 +4458,8 @@ func parityCases() []parityCase {
 				if err := chat.WorkflowUpdateStep(ctx, "T1", "U1", "triage", `{"item":{"value":"request"}}`, `[{"name":"result","type":"text"}]`, "Triage request", "https://example.test/icon.png"); err != nil {
 					return nil, err
 				}
-				// No seam method returns a stored workflow step, so what these
-				// three write is observable only through the run they move and
-				// through whether they were accepted at all. That bounds this
-				// case honestly: dropping an identifier is caught, dropping a
-				// payload field is not, because nothing can read the payload
-				// back. The product gap audit records that separately — an app
-				// completes a step with outputs and no method reports them.
+				// WorkflowRunSteps reads back what these write, so a dropped
+				// payload field is caught as well as a dropped identifier.
 				configured, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxParity")
 				if err != nil {
 					return nil, err
@@ -4478,11 +4473,26 @@ func parityCases() []parityCase {
 				// payload that is not an object is refused rather than stored.
 				repeatErr := chat.WorkflowStepCompleted(ctx, "T1", "U1", "FxParity", `{"result":"again"}`)
 				malformedErr := chat.WorkflowStepFailed(ctx, "T1", "U1", "FxParity", `not-json`)
+				steps, err := chat.WorkflowRunSteps(ctx, "T1", "U1", "WxParity")
+				if err != nil {
+					return nil, err
+				}
+				if len(steps) == 0 {
+					return nil, errors.New("the run reports no steps, so the read-back compares nothing")
+				}
+				stored := make([]any, 0, len(steps))
+				for _, step := range steps {
+					stored = append(stored, []any{
+						step.FunctionID, step.EditID, string(step.Status), step.StepName, step.ImageURL,
+						step.Inputs, step.Outputs, step.Error,
+					})
+				}
 				return []any{
 					string(configured.Status), configured.Inputs,
 					completeErr == nil, string(completed.Status), completed.Outputs,
 					repeatErr != nil, malformedErr != nil,
 					errors.Is(malformedErr, domain.ErrInvalidWorkflowStep),
+					stored,
 				}, nil
 			},
 		},
@@ -7039,11 +7049,8 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // either gets a case or this constant has to be raised, which is a decision
 // somebody has to argue for rather than a list somebody can quietly append to.
 //
-// Two limits are worth knowing rather than discovering. The workflow step
-// methods can be checked for a dropped identifier but not for a dropped
-// payload, because nothing on this seam reads a stored step back; the case says
-// so and the product gap audit records the underlying gap. And a case whose
-// methods call an app over HTTP must use seedWithApp: the receiver has to be
+// One limit is worth knowing rather than discovering: a case whose methods
+// call an app over HTTP must use seedWithApp: the receiver has to be
 // TLS and the app's credentials sealed for real, or every dispatch fails
 // identically in both compositions and the case reports an agreement it has
 // not established.

@@ -2851,7 +2851,7 @@ func workflowJSON(raw string, allowEmpty bool, array bool) (string, error) {
 }
 
 func (m Messages) WorkflowStepCompleted(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, executeID, outputs string) error {
-	return m.setWorkflowStep(ctx, workspaceID, actor, executeID, domain.WorkflowStepCompleted, outputs, "", "", "")
+	return m.setWorkflowStep(ctx, workspaceID, actor, executeID, domain.WorkflowStepCompleted, outputs, "")
 }
 
 func (m Messages) WorkflowStepFailed(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, executeID, failure string) error {
@@ -2867,7 +2867,7 @@ func (m Messages) WorkflowStepFailed(ctx context.Context, workspaceID domain.Wor
 	if raw, ok := fields["message"]; !ok || json.Unmarshal(raw, &message) != nil || strings.TrimSpace(message) == "" {
 		return domain.ErrInvalidWorkflowStep
 	}
-	return m.setWorkflowStep(ctx, workspaceID, actor, executeID, domain.WorkflowStepFailed, "", failure, "", "")
+	return m.setWorkflowStep(ctx, workspaceID, actor, executeID, domain.WorkflowStepFailed, "", failure)
 }
 
 func (m Messages) WorkflowUpdateStep(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, editID, inputs, outputs, stepName, imageURL string) error {
@@ -2882,10 +2882,13 @@ func (m Messages) WorkflowUpdateStep(ctx context.Context, workspaceID domain.Wor
 	if err != nil {
 		return err
 	}
-	return m.setWorkflowStepWithValues(ctx, workspaceID, actor, editID, domain.WorkflowStep{ID: domain.WorkflowStepID(editID), EditID: editID, Status: domain.WorkflowStepConfigured, Inputs: inputs, Outputs: outputs, StepName: strings.TrimSpace(stepName), ImageURL: strings.TrimSpace(imageURL)})
+	return m.setWorkflowStepWithValues(ctx, workspaceID, actor, editID, domain.WorkflowStepConfigured, func(step *domain.WorkflowStep) {
+		step.EditID, step.Inputs, step.Outputs = editID, inputs, outputs
+		step.StepName, step.ImageURL = strings.TrimSpace(stepName), strings.TrimSpace(imageURL)
+	})
 }
 
-func (m Messages) setWorkflowStep(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, executeID string, status domain.WorkflowStepStatus, outputs, failure, stepName, imageURL string) error {
+func (m Messages) setWorkflowStep(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, executeID string, status domain.WorkflowStepStatus, outputs, failure string) error {
 	if strings.TrimSpace(executeID) == "" {
 		return domain.ErrInvalidWorkflowStep
 	}
@@ -2897,10 +2900,16 @@ func (m Messages) setWorkflowStep(ctx context.Context, workspaceID domain.Worksp
 			return err
 		}
 	}
-	return m.setWorkflowStepWithValues(ctx, workspaceID, actor, executeID, domain.WorkflowStep{ID: domain.WorkflowStepID(executeID), Status: status, Outputs: outputsJSON, Error: failure, StepName: stepName, ImageURL: imageURL})
+	return m.setWorkflowStepWithValues(ctx, workspaceID, actor, executeID, status, func(step *domain.WorkflowStep) {
+		step.Outputs, step.Error = outputsJSON, failure
+	})
 }
 
-func (m Messages) setWorkflowStepWithValues(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id string, value domain.WorkflowStep) error {
+// setWorkflowStepWithValues moves one step to status and lets apply change the
+// fields that operation owns. Every other field comes from the stored step, so
+// recording an outcome keeps the step's run, app, function and inputs, and the
+// step stays in its run's WorkflowRunSteps.
+func (m Messages) setWorkflowStepWithValues(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id string, status domain.WorkflowStepStatus, apply func(*domain.WorkflowStep)) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
 	}
@@ -2919,12 +2928,16 @@ func (m Messages) setWorkflowStepWithValues(ctx context.Context, workspaceID dom
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
-	if err == nil && current.Status.Terminal() && current.Status != value.Status {
+	if err == nil && current.Status.Terminal() && current.Status != status {
 		return domain.ErrInvalidWorkflowStep
 	}
+	value := current
+	if err != nil {
+		value = domain.WorkflowStep{ID: domain.WorkflowStepID(id), WorkspaceID: workspaceID, UserID: actor}
+	}
+	value.Status = status
+	apply(&value)
 	now := time.Now().UTC()
-	value.WorkspaceID = workspaceID
-	value.UserID = actor
 	value.UpdatedAt = now
 	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.step_"+string(value.Status), events.String("workflow_step_id", id)), now)
 	if err != nil {
