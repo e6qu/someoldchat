@@ -43,11 +43,9 @@ journey inventory is maintained in
 ## Measured remaining gaps
 
 The compatibility ledger is generated from Slack's current method catalog and
-ratcheted in CI. `make compatibility-report` currently reports all 310 current
-Web API methods implemented (plus 10 retained legacy methods outside that
-denominator): 270 `behavior-compatible`-or-better, 308
-`sdk-compatible`-or-better, 0 `verified-against-slack`, and 70 carrying known
-deviations. Every current method names method-level evidence. Implemented is a
+ratcheted in CI. `make compatibility-report` prints the current figures, and
+the [project status](../PLAN.md#status) records them; every current Web API
+method is implemented and names method-level evidence. Implemented is a
 coverage statement, not a claim of live-Slack equivalence.
 
 The next app-runtime priorities are controlled HTTP/Socket differential

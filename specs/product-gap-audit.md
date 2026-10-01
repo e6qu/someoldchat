@@ -8,11 +8,8 @@ its row; the change history lives in version control.
 Coverage figures come from the gates, not from this file:
 `make compatibility-report` for method and event coverage, `make journey-check`
 for journey and browser-citation coverage, and `make sdk-qualification` for
-what the pinned official SDKs exercise. At this revision they report 310/310
-current Web API methods implemented (270 `behavior-compatible`-or-better,
-0 `verified-against-slack`, 70 with known deviations, 10 retained legacy
-methods) and 108 journeys, 100 browser-cited and 53 cited to an external
-source.
+what the pinned official SDKs exercise; the
+[project status](../PLAN.md#status) records their current figures.
 
 The normative [Slack user-journey catalog](journeys/README.md) records the full
 target. A journey missing from this list is still a gap if the catalog has it;

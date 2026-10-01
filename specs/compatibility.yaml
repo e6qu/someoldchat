@@ -1594,11 +1594,29 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestEntityMethodsAcceptStructuredWorkObjectPayloads
   - method: openid.connect.token
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/openid.connect.token/
     evidence:
       - go-test:internal/api/slack:TestOpenIDConnectTokenRefusesCredentialsInTheURL
+      - go-test:internal/service:TestOpenIDTokenNamesTheDeploymentAsItsIssuer
+    deviations:
+      - >-
+        The id_token is signed HS256 with the OAuth client secret and names the
+        deployment's -auth-public-url as its issuer. Slack signs RS256 and
+        publishes the key set and an OpenID discovery document; this
+        deployment serves neither, nor Slack's /openid/connect/authorize
+        route, so a relying party that discovers and verifies the token as it
+        does Slack's cannot verify it.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: >-
+        The id_token claimed https://slack.com as its issuer and is verified
+        differently from Slack's, so the behavior claim overstated what a
+        relying party pointed at this deployment can rely on.
+      evidence:
+        - source:internal/service/openid.go
+        - https://docs.slack.dev/reference/methods/openid.connect.token/
   - method: openid.connect.userInfo
     status: behavior-compatible
     provenance: slack-reference

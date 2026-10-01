@@ -64,9 +64,9 @@ The figures below come from `make compatibility-report` and
 |---|---|
 | Current Slack Web API methods implemented | 310 of 310 |
 | …with method-level evidence | 310 of 310 |
-| …`behavior-compatible` or better | 270 of 310 |
+| …`behavior-compatible` or better | 269 of 310 |
 | …`verified-against-slack` | 0 of 310 |
-| Recorded known deviations | 70 |
+| Recorded known deviations | 71 |
 | Retained legacy methods implemented | 10 of 10 |
 | User journeys in the normative catalog | 108 |
 | …cited by a browser scenario | 100 of 108 |
@@ -111,13 +111,18 @@ Exit criteria for every supported profile:
 The surface is implemented; what remains is evidence and the recorded
 deviations.
 
-- Work down the 70 known deviations in the ledger, and keep each claim at the
+- Work down the 71 known deviations in the ledger, and keep each claim at the
   level its evidence supports; the contract ratchet permits an audited
   downgrade when a claim is found to be overstated.
 - Close the journey gaps `make journey-check` prints: eight journeys without a
   browser scenario and 55 without a current official-source assertion.
 - Add visual baselines and manual assistive-technology evidence to the
   browser qualification.
+- Sign in with Slack: serve an OpenID discovery document and key set at this
+  deployment's own URLs, sign ID tokens RS256 with a durable key every
+  replica shares, and serve `/openid/connect/authorize`, so a relying party
+  that only changes Slack's endpoints can discover and verify tokens the way
+  it does Slack's.
 - Phase 5 exits only when each method names its current official sources,
   executable evidence, known deviations, and live-comparison state; an
   aggregate green suite supports that record but does not replace it.
@@ -131,6 +136,10 @@ deviations.
 - Exercise node loss, quorum loss, failed snapshot upload, corrupt snapshot,
   interrupted restoration, and rollback against a deployed profile; the
   lifecycle and dqlite qualification suites cover them in process today.
+- Authenticate and encrypt dqlite node-to-node traffic with per-node
+  certificates, as the [persistence specification](specs/persistence.md#dqlite-adapter)
+  requires; nodes replicate over plain TCP today, so the cluster network must
+  be private.
 - Wire OSV/advisory and container-image scanning, which the
   [dependency policy](specs/dependency-policy.md) requires, into CI;
   `govulncheck` already runs over the module source.

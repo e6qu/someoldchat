@@ -1,5 +1,22 @@
 # SameOldChat Slack API and SDK compatibility specification
 
+## What compatibility means
+
+A Slack client, official SDK, or Slack app MUST be able to use SameOldChat by
+changing only the endpoints it is configured with: the Web API base URL, the
+OAuth and OpenID endpoints, the Events API and interactivity request URLs it
+already declares, and the Socket Mode and RTM URLs the API hands out. Given
+that change, SameOldChat MUST answer with Slack's documented API and behavior:
+the same methods, arguments, response and error shapes, status codes,
+headers, event envelopes, signatures, and ordering.
+
+SameOldChat MUST NOT accommodate a client that hardcodes Slack and cannot be
+pointed elsewhere. It does not impersonate Slack's hosts, issuers, or
+certificates, and it does not emit `slack.com` URLs or identities in place of
+its own. Where Slack's format embeds a literal Slack string that is part of
+the format rather than a location, such as the `https://slack.com/team_id`
+OpenID claim name, the literal is kept exactly as Slack sends it.
+
 ## Compatibility sources
 
 The current official SDK inventory is maintained in
@@ -49,9 +66,12 @@ references, against which they are qualified before their provenance is
 promoted; tracking them does not claim the vendored snapshot contains them.
 
 `openid.connect.token` keeps authorization codes single-use and rotates refresh
-tokens in the selected durable store. It signs the returned JSON Web Token with
-the OAuth client secret because this service does not publish a separate JSON
-Web Key Set.
+tokens in the selected durable store. Its ID token names the deployment's
+`-auth-public-url` as its issuer. It is signed HS256 with the OAuth client
+secret, where Slack signs RS256 against a published key set; the missing
+discovery document, key set, and `/openid/connect/authorize` route are a
+recorded deviation in the ledger and open work in the
+[project plan](../PLAN.md#phase-5-compatibility-evidence).
 
 ### Reporting
 
@@ -61,10 +81,8 @@ counts. It separates the current Slack reference from retained legacy methods
 so compatibility aliases cannot inflate the current denominator, and reports
 how many methods name method-level executable evidence, how many
 `sdk-compatible`-or-better claims lack it, and how many carry known deviations.
-At this revision it reports 310/310 current methods implemented, 270
-`behavior-compatible`-or-better, 0 `verified-against-slack`, 70 with known
-deviations, and 10 retained legacy methods. The target is
-`verified-against-slack` for every operation; a schema-compatible handler is
+The [project status](../PLAN.md#status) records its current figures. The
+target is `verified-against-slack` for every operation; a schema-compatible handler is
 not behavior verification.
 
 `make sdk-qualification` records the exact Web API paths emitted by the pinned

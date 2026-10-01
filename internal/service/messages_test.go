@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -292,6 +293,50 @@ func TestOpenIDConnectTokenRotatesRefreshTokenAndUserInfoUsesIssuedScope(t *test
 	}
 	if _, err := service.OpenIDConnectToken(ctx, "client", "secret", "", "", "refresh_token", token.RefreshToken, ""); !errors.Is(err, domain.ErrInvalidOAuth) {
 		t.Fatalf("reused refresh token error=%v, want %v", err, domain.ErrInvalidOAuth)
+	}
+}
+
+// A relying party that pointed Slack's OpenID endpoints at this deployment
+// validates iss against the issuer it was configured with. The ID token used to
+// claim https://slack.com, which only a client hardcoded to Slack would accept.
+func TestOpenIDTokenNamesTheDeploymentAsItsIssuer(t *testing.T) {
+	for _, publicURL := range []string{"https://chat.example.com/", ""} {
+		s := memory.New()
+		s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test", Domain: "test.example"})
+		s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com"})
+		ctx := context.Background()
+		if err := s.CreateOAuthClient(ctx, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("secret"), AppID: "A1"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CreateOAuthCode(ctx, domain.OAuthCode{Code: "code", ClientID: "client", WorkspaceID: "T1", UserID: "U1", Scopes: []string{"openid"}, RedirectURI: "https://callback", CodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", CodeChallengeMethod: "S256"}); err != nil {
+			t.Fatal(err)
+		}
+		token, err := Messages{Store: s, PublicURL: publicURL}.OpenIDConnectToken(ctx, "client", "secret", "code", "https://callback", "authorization_code", "", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parts := strings.Split(token.IDToken, ".")
+		if len(parts) != 3 {
+			t.Fatalf("id_token=%q is not a JWT", token.IDToken)
+		}
+		payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var claims map[string]any
+		if err := json.Unmarshal(payload, &claims); err != nil {
+			t.Fatal(err)
+		}
+		issuer, present := claims["iss"]
+		switch {
+		case publicURL != "" && issuer != "https://chat.example.com":
+			t.Fatalf("iss=%v, want the deployment's public URL", issuer)
+		case publicURL == "" && present:
+			t.Fatalf("iss=%v without a public URL, want no issuer rather than slack.com", issuer)
+		}
+		if claims["https://slack.com/user_id"] != "U1" || claims["https://slack.com/team_id"] != "T1" {
+			t.Fatalf("claims=%v, want Slack's literal user and team claim keys", claims)
+		}
 	}
 }
 
