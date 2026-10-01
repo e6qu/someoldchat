@@ -2832,7 +2832,7 @@ var notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end}}
 <label class="choice"><input type="radio" name="level" value="mentions"{{if eq .Level "mentions"}} checked{{end}}> Direct messages, mentions and keywords</label>
 <label class="choice"><input type="radio" name="level" value="mute"{{if eq .Level "mute"}} checked{{end}}> Nothing</label>
 </fieldset>
-<label for="notification-keywords">My keywords<input id="notification-keywords" type="text" name="keywords" maxlength="5049" value="{{.Keywords}}" placeholder="release, customer escalation"><span class="hint">Comma-separated. You’ll be notified when someone uses one in a channel you’re in; exact matches are case-insensitive and do not trigger in threads.</span></label>
+<label for="notification-keywords">My keywords<input id="notification-keywords" type="text" name="keywords" maxlength="5049" value="{{.Keywords}}" placeholder="release, customer escalation"><span class="hint">Comma-separated. You’ll be notified when someone uses one in a channel you’re in; exact matches are case-insensitive, and in threads only ones you follow trigger.</span></label>
 <label class="check"><input type="checkbox" name="activity_channels" value="true"{{if .ActivityChannels}} checked{{end}}> Show channels set to All new posts in Activity</label>
 <label class="check"><input type="checkbox" name="activity_reminders" value="true"{{if .ActivityReminders}} checked{{end}}> Show due personal reminders in Activity</label>
 <label class="check"><input type="checkbox" id="browser-notifications" name="browser_notifications" value="true"{{if .BrowserNotifications}} checked{{end}}> Show desktop notifications while SameOldChat is open in a tab</label>

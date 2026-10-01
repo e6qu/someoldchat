@@ -8640,6 +8640,11 @@ func (s *Store) createMessageActivityLocked(message domain.Message) {
 		if message.ThreadTimestamp != "" &&
 			(conversationPreferences.FollowEveryThread || s.threadFollows[threadFollowKey(message.WorkspaceID, user, message.Conversation, root)]) {
 			add(user, domain.ActivityThread)
+			// Slack matches keywords in replies to threads the member
+			// follows, and only those.
+			if !conversation.IsDirectOrGroup() && effective != domain.NotificationMute && domain.MatchesNotificationKeyword(message.Text, workspacePreferences.Keywords) {
+				add(user, domain.ActivityKeyword)
+			}
 		}
 	}
 	if message.ThreadTimestamp != "" {

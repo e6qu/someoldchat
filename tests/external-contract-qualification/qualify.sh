@@ -350,6 +350,8 @@ assert_contains "$work/notifications.html" 'Everything or Mentions and direct me
 	'[NOTIFY-01] workspace notification trigger choices' "$notification_url"
 assert_contains "$work/notifications.html" 'only exact matches will trigger notifications' \
 	'[NOTIFY-01] channel keywords use exact case-insensitive matching' "$notification_url"
+assert_contains "$work/notifications.html" "Keywords in messages sent in threads you're not following won't trigger a notification" \
+	'[NOTIFY-01] channel keywords trigger only from threads the member follows' "$notification_url"
 assert_contains "$work/notifications.html" 'Channels with notifications set to "All new posts"' \
 	'[NOTIFY-01 ACTIVITY-01] all-post channels can be included in Activity' "$notification_url"
 assert_contains "$work/conversation-notifications.html" 'All new posts' \

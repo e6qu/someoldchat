@@ -15489,6 +15489,11 @@ func insertMessageActivity(ctx context.Context, tx txRunner, message domain.Mess
 			}
 			if conversationPreferences.FollowEveryThread || followed != 0 {
 				add(user, domain.ActivityThread)
+				// Slack matches keywords in replies to threads the member
+				// follows, and only those.
+				if direct == 0 && groupDirect == 0 && effective != domain.NotificationMute && domain.MatchesNotificationKeyword(message.Text, workspacePreferences.Keywords) {
+					add(user, domain.ActivityKeyword)
+				}
 			}
 		}
 	}
