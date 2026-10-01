@@ -394,7 +394,8 @@ follows reads it:
 
 The URLs an event carries — a shared file's `url_private`,
 `url_private_download` and `permalink`, and the `image_*` of the user object in
-`team_join`, `user_change`, `user_profile_changed` and `user_status_changed` —
+`team_join`, `user_change`, `user_profile_changed`, `user_status_changed` and
+`user_guest_status_changed` —
 are built on it, exactly as `files.info` and `users.info` build theirs. Journal
 records store those URLs origin-relative and are resolved when an event is
 delivered, so a changed public URL applies to every later delivery.

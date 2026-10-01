@@ -155,6 +155,10 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/oauth.v2.access", h.oauthV2Access)
 	mux.HandleFunc("GET /api/oauth.v2.exchange", h.oauthV2ExchangeToken)
 	mux.HandleFunc("POST /api/oauth.v2.exchange", h.oauthV2ExchangeToken)
+	mux.HandleFunc("GET /api/oauth.v2.beginShortTokenRotation", h.oauthV2BeginShortTokenRotation)
+	mux.HandleFunc("POST /api/oauth.v2.beginShortTokenRotation", h.oauthV2BeginShortTokenRotation)
+	mux.HandleFunc("GET /api/oauth.v2.completeShortTokenRotation", h.oauthV2CompleteShortTokenRotation)
+	mux.HandleFunc("POST /api/oauth.v2.completeShortTokenRotation", h.oauthV2CompleteShortTokenRotation)
 	mux.HandleFunc("GET /api/oauth.v2.user.access", h.oauthV2UserAccess)
 	mux.HandleFunc("POST /api/oauth.v2.user.access", h.oauthV2UserAccess)
 	mux.HandleFunc("GET /api/auth.revoke", h.authRevoke)
@@ -351,6 +355,8 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.conversations.bulkMove", h.adminConversationsBulkMove)
 	mux.HandleFunc("GET /api/admin.conversations.bulkSetExcludeFromSlackAi", h.adminConversationsBulkSetExcludeFromAI)
 	mux.HandleFunc("POST /api/admin.conversations.bulkSetExcludeFromSlackAi", h.adminConversationsBulkSetExcludeFromAI)
+	mux.HandleFunc("GET /api/admin.conversations.bulkSetProperties", h.adminConversationsBulkSetProperties)
+	mux.HandleFunc("POST /api/admin.conversations.bulkSetProperties", h.adminConversationsBulkSetProperties)
 	mux.HandleFunc("GET /api/admin.conversations.linkObjects", h.adminConversationsLinkObjects)
 	mux.HandleFunc("POST /api/admin.conversations.linkObjects", h.adminConversationsLinkObjects)
 	mux.HandleFunc("GET /api/admin.conversations.unlinkObjects", h.adminConversationsUnlinkObjects)
@@ -643,6 +649,8 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/canvases.access.delete", h.deleteCanvasAccess)
 	mux.HandleFunc("GET /api/canvases.sections.lookup", h.lookupCanvasSections)
 	mux.HandleFunc("POST /api/canvases.sections.lookup", h.lookupCanvasSections)
+	mux.HandleFunc("GET /api/canvases.getContent", h.getCanvasContent)
+	mux.HandleFunc("POST /api/canvases.getContent", h.getCanvasContent)
 	mux.HandleFunc("GET /api/conversations.canvases.create", h.createConversationCanvas)
 	mux.HandleFunc("POST /api/conversations.canvases.create", h.createConversationCanvas)
 	mux.HandleFunc("GET /api/slackLists.create", h.createList)
@@ -12743,7 +12751,7 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // methods answered invalid_array_arg to the SDK's own request.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages", "property":
 		return true
 	default:
 		return false

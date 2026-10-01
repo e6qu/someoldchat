@@ -22,6 +22,7 @@ const (
 	ConversationMutationsService_AdminLookupConversations_FullMethodName            = "/sameoldchat.chat.v1.ConversationMutationsService/AdminLookupConversations"
 	ConversationMutationsService_AdminBulkMoveConversations_FullMethodName          = "/sameoldchat.chat.v1.ConversationMutationsService/AdminBulkMoveConversations"
 	ConversationMutationsService_AdminSetConversationsExcludedFromAI_FullMethodName = "/sameoldchat.chat.v1.ConversationMutationsService/AdminSetConversationsExcludedFromAI"
+	ConversationMutationsService_AdminBulkSetConversationProperties_FullMethodName  = "/sameoldchat.chat.v1.ConversationMutationsService/AdminBulkSetConversationProperties"
 	ConversationMutationsService_AdminConversationsExcludedFromAI_FullMethodName    = "/sameoldchat.chat.v1.ConversationMutationsService/AdminConversationsExcludedFromAI"
 	ConversationMutationsService_AdminLinkConversationObjects_FullMethodName        = "/sameoldchat.chat.v1.ConversationMutationsService/AdminLinkConversationObjects"
 	ConversationMutationsService_AdminUnlinkConversationObjects_FullMethodName      = "/sameoldchat.chat.v1.ConversationMutationsService/AdminUnlinkConversationObjects"
@@ -61,6 +62,7 @@ type ConversationMutationsServiceClient interface {
 	AdminLookupConversations(ctx context.Context, in *ConversationLookupRequest, opts ...grpc.CallOption) (*ConversationPage, error)
 	AdminBulkMoveConversations(ctx context.Context, in *BulkMoveConversationsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminSetConversationsExcludedFromAI(ctx context.Context, in *ConversationAIExclusionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminBulkSetConversationProperties(ctx context.Context, in *ConversationPropertiesRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminConversationsExcludedFromAI(ctx context.Context, in *ConversationAIExclusionRequest, opts ...grpc.CallOption) (*ConversationAIExclusionResponse, error)
 	AdminLinkConversationObjects(ctx context.Context, in *LinkConversationObjectsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminUnlinkConversationObjects(ctx context.Context, in *UnlinkConversationObjectsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -125,6 +127,16 @@ func (c *conversationMutationsServiceClient) AdminSetConversationsExcludedFromAI
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
 	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminSetConversationsExcludedFromAI_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) AdminBulkSetConversationProperties(ctx context.Context, in *ConversationPropertiesRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AdminBulkSetConversationProperties_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -438,6 +450,7 @@ type ConversationMutationsServiceServer interface {
 	AdminLookupConversations(context.Context, *ConversationLookupRequest) (*ConversationPage, error)
 	AdminBulkMoveConversations(context.Context, *BulkMoveConversationsRequest) (*MutationResponse, error)
 	AdminSetConversationsExcludedFromAI(context.Context, *ConversationAIExclusionRequest) (*MutationResponse, error)
+	AdminBulkSetConversationProperties(context.Context, *ConversationPropertiesRequest) (*MutationResponse, error)
 	AdminConversationsExcludedFromAI(context.Context, *ConversationAIExclusionRequest) (*ConversationAIExclusionResponse, error)
 	AdminLinkConversationObjects(context.Context, *LinkConversationObjectsRequest) (*MutationResponse, error)
 	AdminUnlinkConversationObjects(context.Context, *UnlinkConversationObjectsRequest) (*MutationResponse, error)
@@ -485,6 +498,9 @@ func (UnimplementedConversationMutationsServiceServer) AdminBulkMoveConversation
 }
 func (UnimplementedConversationMutationsServiceServer) AdminSetConversationsExcludedFromAI(context.Context, *ConversationAIExclusionRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminSetConversationsExcludedFromAI not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AdminBulkSetConversationProperties(context.Context, *ConversationPropertiesRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminBulkSetConversationProperties not implemented")
 }
 func (UnimplementedConversationMutationsServiceServer) AdminConversationsExcludedFromAI(context.Context, *ConversationAIExclusionRequest) (*ConversationAIExclusionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminConversationsExcludedFromAI not implemented")
@@ -646,6 +662,24 @@ func _ConversationMutationsService_AdminSetConversationsExcludedFromAI_Handler(s
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ConversationMutationsServiceServer).AdminSetConversationsExcludedFromAI(ctx, req.(*ConversationAIExclusionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_AdminBulkSetConversationProperties_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConversationPropertiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AdminBulkSetConversationProperties(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AdminBulkSetConversationProperties_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AdminBulkSetConversationProperties(ctx, req.(*ConversationPropertiesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1208,6 +1242,10 @@ var ConversationMutationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminSetConversationsExcludedFromAI",
 			Handler:    _ConversationMutationsService_AdminSetConversationsExcludedFromAI_Handler,
+		},
+		{
+			MethodName: "AdminBulkSetConversationProperties",
+			Handler:    _ConversationMutationsService_AdminBulkSetConversationProperties_Handler,
 		},
 		{
 			MethodName: "AdminConversationsExcludedFromAI",

@@ -337,7 +337,8 @@ func recordedNonPinnedCodes() map[string]string {
 		// declares. net/http.ServeMux answered both with text/plain at a non-200
 		// status, which no SDK can parse. `unknown_method` is the name Slack itself
 		// uses for the case.
-		"unknown_method": "the pinned snapshot declares no routing error code; this is the name Slack uses for an unrecognised method",
+		"unknown_method":    "the pinned snapshot declares no routing error code; this is the name Slack uses for an unrecognised method",
+		"no_valid_channels": "current admin.conversations.bulkSetProperties method reference: all input channels are invalid",
 	}
 }
 
