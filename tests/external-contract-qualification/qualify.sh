@@ -556,6 +556,20 @@ compare_catalog() {
 	sort -u "$pinned" >"$work/pinned-$kind"
 	comm -13 "$work/pinned-$kind" "$work/live-$kind" >"$work/added-$kind"
 	comm -23 "$work/pinned-$kind" "$work/live-$kind" >"$work/removed-$kind"
+	if [ -s "$work/added-$kind" ] && [ -n "${SAMEOLDCHAT_REFERENCE_CAPTURE:-}" ]; then
+		# Keep the reference page of every addition, so the change can be
+		# adopted from Slack's own definition rather than from memory.
+		mkdir -p "$SAMEOLDCHAT_REFERENCE_CAPTURE/$kind"
+		while read -r name; do
+			page=$(grep -i "^https://docs\.slack\.dev/reference/$kind/$name/*\$" "$work/reference-urls" | head -1)
+			[ -n "$page" ] || continue
+			curl --fail --silent --show-error --location --compressed \
+				--retry 4 --retry-all-errors --connect-timeout 15 --max-time 45 \
+				--user-agent 'sameoldchat-contract-qualification/1.0' \
+				--output "$SAMEOLDCHAT_REFERENCE_CAPTURE/$kind/$(echo "$name" | tr '/' '_').html" "$page" ||
+				echo "official Slack source unavailable: $page" >&2
+		done <"$work/added-$kind"
+	fi
 	if [ -s "$work/added-$kind" ] || [ -s "$work/removed-$kind" ]; then
 		echo "official Slack reference $kind differ from $pinned:" >&2
 		sed 's/^/  added by Slack: /' "$work/added-$kind" >&2
