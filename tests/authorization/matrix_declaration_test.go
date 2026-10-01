@@ -558,5 +558,14 @@ func authorityMatrix() map[string]authority {
 		"WorkflowUpdateStep":                      authorityAnyMember,
 		"WorkspaceInfo":                           authorityAnyMember,
 		"WorkspaceNotificationPreferences":        authorityAnyMember,
+
+		// Agent sessions act in a conversation as one of its members — the
+		// app's bot for the two Web API methods, the member for the stop and
+		// retitle controls — so membership, not tier, is the gate.
+		"AgentSession":            authorityAnyMember,
+		"ChangeAgentSessionTitle": authorityAnyMember,
+		"RenameAgentSession":      authorityAnyMember,
+		"SetAgentSessionStatus":   authorityAnyMember,
+		"StopAgentSession":        authorityAnyMember,
 	}
 }

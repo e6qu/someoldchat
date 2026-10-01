@@ -429,6 +429,14 @@ var topicRules = []topicRule{
 	{topic: "invite_request.approved", note: "not pinned: invite requests have no Slack event"},
 	{topic: "invite_request.denied", note: "not pinned: invite requests have no Slack event"},
 	{topic: "incoming_webhook.enabled", note: "not pinned: integration administration has no Slack event"},
+	{topic: AgentSessionStoppedTopic, slack: translated("agent_session_stopped", appSurfaces, agentSessionStopped),
+		note: "current agent_session_stopped reference: a member pressed stop on a processing session; chat:write, Events API only, one record per stopped agent routed by target_app_id"},
+	{topic: AgentSessionTitleChangedTopic, slack: translated("agent_session_title_changed", appSurfaces, agentSessionTitleChanged),
+		note: "current agent_session_title_changed reference: a member retitled a session; chat:write, Events API only, one record per agent of the session routed by target_app_id"},
+	{topic: AgentSessionStatusSetTopic,
+		note: "not a Slack event: agents.sessions.setStatus answers the app itself, and the record exists so an open client re-renders the session"},
+	{topic: AgentSessionRenamedTopic,
+		note: "not a Slack event: agent_session_title_changed is for a member's change, and an app is not told of its own agents.sessions.rename"},
 }
 
 // rulesByTopic indexes the table. A duplicate row would make one of the two

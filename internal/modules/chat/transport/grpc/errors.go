@@ -141,6 +141,15 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_view", code: codes.InvalidArgument, sentinel: domain.ErrInvalidView},
 	{key: "service.invalid_assistant_thread", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAssistantThread},
 	{key: "service.assistant_thread_not_found", code: codes.NotFound, sentinel: domain.ErrAssistantThreadNotFound},
+	{key: "service.invalid_agent_session", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAgentSession},
+	{key: "service.invalid_agent_session_status", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAgentSessionStatus},
+	{key: "service.agent_session_thread_required", code: codes.InvalidArgument, sentinel: domain.ErrAgentSessionThreadRequired},
+	{key: "service.agent_session_not_found", code: codes.NotFound, sentinel: domain.ErrAgentSessionNotFound},
+	// PermissionDenied: the session exists and the caller is not one of its
+	// agents. FailedPrecondition: the session is real and well named, and it
+	// is its state — nothing processing that accepts a stop — that refuses.
+	{key: "service.agent_session_not_agent", code: codes.PermissionDenied, sentinel: domain.ErrAgentSessionNotAgent},
+	{key: "service.agent_session_not_stoppable", code: codes.FailedPrecondition, sentinel: domain.ErrAgentSessionNotStoppable},
 	{key: "service.invalid_workflow_step", code: codes.InvalidArgument, sentinel: domain.ErrInvalidWorkflowStep},
 	{key: "service.invalid_trigger_config", code: codes.InvalidArgument, sentinel: domain.ErrInvalidTriggerConfig},
 	{key: "service.automation_entities_empty", code: codes.InvalidArgument, sentinel: domain.ErrAutomationEntitiesEmpty},

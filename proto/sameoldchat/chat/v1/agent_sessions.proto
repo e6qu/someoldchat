@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+// AgentSessionAgent is one app's part in a session.
+message AgentSessionAgent {
+  string app_id = 1;
+  string status = 2;
+  string username = 3;
+  string icon_emoji = 4;
+  string icon_url = 5;
+  int64 updated_at_unix_nano = 6;
+}
+
+// AgentSession is a thread's session with every agent that has written to it.
+message AgentSession {
+  string workspace_id = 1;
+  string conversation = 2;
+  string thread_ts = 3;
+  string title = 4;
+  string initiator_user_id = 5;
+  int64 created_at_unix_nano = 6;
+  int64 updated_at_unix_nano = 7;
+  repeated AgentSessionAgent agents = 8;
+}
+
+message SetAgentSessionStatusRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string conversation = 4;
+  string thread_ts = 5;
+  string status = 6;
+  string title = 7;
+  string initiator_user_id = 8;
+  string username = 9;
+  string icon_emoji = 10;
+  string icon_url = 11;
+}
+
+message SetAgentSessionStatusResponse {
+  AgentSession session = 1;
+  string agent_status = 2;
+  repeated string warnings = 3;
+}
+
+// RenameAgentSessionRequest carries both renames: an agent's, when app_id is
+// set, and a member's (ChangeAgentSessionTitle), which names no app.
+message RenameAgentSessionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string conversation = 4;
+  string thread_ts = 5;
+  string title = 6;
+}
+
+message AgentSessionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation = 3;
+  string thread_ts = 4;
+}
+
+message AgentSessionView {
+  AgentSession session = 1;
+  bool stoppable = 2;
+}
+
+service AgentSessionsService {
+  rpc SetAgentSessionStatus(SetAgentSessionStatusRequest) returns (SetAgentSessionStatusResponse);
+  rpc RenameAgentSession(RenameAgentSessionRequest) returns (AgentSession);
+  rpc ChangeAgentSessionTitle(RenameAgentSessionRequest) returns (AgentSession);
+  rpc StopAgentSession(AgentSessionRequest) returns (AgentSession);
+  rpc GetAgentSession(AgentSessionRequest) returns (AgentSessionView);
+}

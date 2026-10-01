@@ -211,6 +211,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
  prompts_title TEXT NOT NULL DEFAULT '', prompts TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL,
  PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 );
+` + agentSessionSchema + `
 CREATE TABLE IF NOT EXISTS conversation_typing (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
  user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL,
@@ -3560,6 +3561,16 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	// --- end schema 196 ---
+	// --- schema 195: agent sessions ---
+	if version < 195 {
+		// agents.sessions.* keeps one session per thread and one agent row
+		// per app that wrote a status to it. Both tables are new, so an
+		// existing database gains them empty.
+		if _, err := db.ExecContext(ctx, agentSessionSchema); err != nil {
+			return fmt.Errorf("migrate agent sessions: %w", err)
+		}
+	}
+	// --- end schema 195 ---
 	// --- schema 194: app and MCP server access control lists ---
 	if version < 194 {
 		// admin.apps.permissions.* and admin.apps.mcp.servers.permissions.*:
@@ -8131,6 +8142,8 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		`DELETE FROM bookmarks WHERE conversation_id = ?`,
 		`DELETE FROM incoming_webhooks WHERE conversation_id = ?`,
 		`DELETE FROM assistant_threads WHERE conversation_id = ?`,
+		`DELETE FROM agent_session_agents WHERE conversation_id = ?`,
+		`DELETE FROM agent_sessions WHERE conversation_id = ?`,
 		`DELETE FROM shared_invites WHERE conversation_id = ?`,
 		`DELETE FROM ephemeral_messages WHERE conversation_id = ?`,
 		`DELETE FROM read_cursors WHERE conversation_id = ?`,

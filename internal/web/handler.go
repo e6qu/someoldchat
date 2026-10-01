@@ -183,6 +183,11 @@ var liveEventTopics = []string{
 	// nobody, so the WebRTC handshake never reached the peer it addressed.
 	"huddle.signal",
 	"huddle.reaction",
+	// An agent session re-renders its own region in the thread pane.
+	events.AgentSessionStatusSetTopic,
+	events.AgentSessionRenamedTopic,
+	events.AgentSessionTitleChangedTopic,
+	events.AgentSessionStoppedTopic,
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +612,8 @@ type pageData struct {
 	// Assistant is the state an assistant app has set on the open thread. It is
 	// empty for every thread no app has touched, which is almost all of them.
 	Assistant assistantThreadView
+	// AgentSession is the open thread's agent session region.
+	AgentSession agentSessionView
 	// CanvasURL opens this conversation's own canvas. Slack gives every channel
 	// one canvas of its own, which is not the same thing as a canvas shared
 	// into it; it is empty until somebody writes in it, and it is offered only
@@ -2110,7 +2117,7 @@ const attachmentPartial = `{{define "attachment"}}
 {{end}}`
 
 var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
-{{define "styles"}}` + pageStyle + workspaceRefinements + messageStyle + composerStyle + shellStyle + conversationShellStyle + `<style>` + viewControlRules + profilePanelStyle + `
+{{define "styles"}}` + pageStyle + workspaceRefinements + messageStyle + composerStyle + shellStyle + conversationShellStyle + `<style>` + viewControlRules + profilePanelStyle + agentSessionStyle + `
 .message-head a.author{color:var(--text);text-decoration:none}.message-head a.author:hover{text-decoration:underline}.message-gutter [data-profile-user]{cursor:pointer}</style>{{end}}
 {{define "scripts"}}` + shellScript + progressiveEnhancementScript + messageScript + composerScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + rowLinkScript + profilePanelScript + `{{end}}
 {{define "content"}}
@@ -2147,6 +2154,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
             </form>{{end}}
           </div>{{end}}
         </div>{{end}}
+        <div id="agent-session" data-fragment="{{.AgentSession.FragmentURL}}" data-live="true">{{template "agent-session" .AgentSession}}</div>
         <div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div>
         {{if .CanPost}}<div class="composer-wrap thread-composer-wrap">{{template "composer" .ThreadComposer}}</div>{{end}}
       </aside>
@@ -2234,7 +2242,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
 </div>
 {{end}}
 {{end}}
-` + messagesPartial + messageDialogsPartial + huddlePartial + typingPartial + homePanePartial + conversationDetailsPartial
+` + messagesPartial + messageDialogsPartial + huddlePartial + typingPartial + homePanePartial + conversationDetailsPartial + agentSessionPartial
 
 var pageTemplate = mustPage(pageMarkup)
 
@@ -3870,6 +3878,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/active", h.recordActivity)
 	mux.HandleFunc("POST /app/typing", h.recordTyping)
 	mux.HandleFunc("GET /app/typing", h.typingFragment)
+	mux.HandleFunc("GET /app/agent-session", h.agentSessionFragment)
+	mux.HandleFunc("POST /app/agent-session/stop", h.stopAgentSession)
+	mux.HandleFunc("POST /app/agent-session/title", h.retitleAgentSession)
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/search/suggestions", h.searchSuggestions)
 	mux.HandleFunc("GET /app/emoji/options", h.emojiOptions)
@@ -4972,6 +4983,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		WorkspaceName:        workspaceName,
 		CSRFToken:            csrfToken,
 		Assistant:            h.assistantThreadView(r.Context(), principal, channel, domain.MessageTimestamp(threadTimestamp)),
+		AgentSession:         h.agentSessionView(r.Context(), principal, channel, domain.MessageTimestamp(threadTimestamp), csrfToken, isMember),
 		CanvasURL:            channelCanvasURL(principal, conversation, isMember),
 		IsMember:             isMember,
 		CanPost:              canPost,

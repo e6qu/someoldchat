@@ -628,6 +628,7 @@ func conversionCases() map[string]conversionCase {
 		"SessionSettings":       {sample: &domain.SessionSettings{}, through: throughInfallible(encodeProtoSessionSettings, decodeProtoSessionSettings)},
 		"InformationBarrier":    {sample: &domain.InformationBarrier{}, through: throughInfallible(encodeProtoBarrier, decodeProtoBarrier)},
 		"AppConfig":             {sample: &domain.AppConfig{}, through: throughInfallible(encodeProtoAppConfig, decodeProtoAppConfig)},
+		"AgentSession":          {sample: &domain.AgentSession{}, through: throughInfallible(encodeProtoAgentSession, decodeProtoAgentSession)},
 		"AppPermission":         {sample: &domain.AppPermission{}, through: throughInfallible(encodeProtoAppPermission, decodeProtoAppPermission)},
 		"MCPServer":             {sample: &domain.MCPServer{}, through: throughInfallible(encodeProtoMCPServer, decodeProtoMCPServer)},
 		"MCPServerPermission":   {sample: &domain.MCPServerPermission{}, through: throughInfallible(encodeProtoMCPServerPermission, decodeProtoMCPServerPermission)},

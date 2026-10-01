@@ -54,6 +54,7 @@ type Remote struct {
 	oauth         chatv1.OAuthServiceClient
 	rtm           chatv1.RTMServiceClient
 	canvases      chatv1.CanvasesServiceClient
+	agentSessions chatv1.AgentSessionsServiceClient
 }
 
 // mappedClientConn preserves the domain error contract when an implementation is
@@ -133,6 +134,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 		oauth:         chatv1.NewOAuthServiceClient(conn),
 		rtm:           chatv1.NewRTMServiceClient(conn),
 		canvases:      chatv1.NewCanvasesServiceClient(conn),
+		agentSessions: chatv1.NewAgentSessionsServiceClient(conn),
 	}, nil
 }
 
@@ -5953,6 +5955,7 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterCanvasesServiceServer(registrar, server)
 	chatv1.RegisterEntityServiceServer(registrar, server)
 	chatv1.RegisterAppsServiceServer(registrar, server)
+	chatv1.RegisterAgentSessionsServiceServer(registrar, server)
 	return nil
 }
 

@@ -94,6 +94,9 @@ func TestMapServiceErrorNamesEveryTransportRelevantSentinel(t *testing.T) {
 		// block action, whose web handler names it (modalInteractionError).
 		"ErrViewFilesInvalid":    "returned only for a first-party modal's file_input, answered by the web /app/view routes",
 		"ErrCapabilityExhausted": "UseAppResponseURL's refusal, translated by HandleAppResponse to ErrAppResponseURLUsed",
+		// A member's stop control on a session is a web route, not a Web API
+		// method: only the web handler's agent session stop answers it.
+		"ErrAgentSessionNotStoppable": "returned only by StopAgentSession, answered by the web /app/agent-session/stop route",
 		// A row this system wrote and can no longer decode is a fault, not a
 		// caller mistake, so the unclassified fallback is the right answer.
 		"ErrInvalidStoredTimestamp": "stored state that cannot be decoded, which no request can correct",
@@ -283,6 +286,9 @@ func recordedNonPinnedCodes() map[string]string {
 		"restricted_too_many":       "current chat.scheduleMessage method reference; the immutable legacy OpenAPI snapshot predates the documented 30-messages-per-five-minute restriction",
 		"no_query":                  "current search.* method references require query; the immutable legacy OpenAPI snapshot omits the Web API error enum",
 		"auth_mismatch":             "current apps.event.authorizations.list method reference; the supplied app token belongs to a different app than event_context",
+		"thread_ts_required":        "current agents.sessions.setStatus and agents.sessions.rename method references; a thread-based session named without its thread root",
+		"invalid_status":            "current agents.sessions.setStatus method reference; a status outside active, processing, suspended and closed",
+		"session_not_found":         "current agents.sessions.rename method reference; no agent session exists for the channel and thread",
 		"invalid_event_context":     "current apps.event.authorizations.list method reference; event_context does not resolve to an event visible to the authenticated app",
 		// The immutable legacy OpenAPI snapshot predates current custom
 		// functions and Workflow Builder management methods. These names come

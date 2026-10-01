@@ -46,6 +46,7 @@ func drivers() map[string]driver {
 		"WorkflowStatus":       workflowDriver(),
 		"WorkflowRunStatus":    workflowRunDriver(),
 		"WorkflowStepStatus":   workflowStepDriver(),
+		"AgentSessionStatus":   agentSessionDriver(),
 	}
 }
 

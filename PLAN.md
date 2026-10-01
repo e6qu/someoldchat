@@ -62,11 +62,11 @@ The figures below come from `make compatibility-report` and
 
 | Measure | Value |
 |---|---|
-| Current Slack Web API methods implemented | 310 of 310 |
-| …with method-level evidence | 310 of 310 |
-| …`behavior-compatible` or better | 269 of 310 |
-| …`verified-against-slack` | 0 of 310 |
-| Recorded known deviations | 71 |
+| Current Slack Web API methods implemented | 331 of 331 |
+| …with method-level evidence | 331 of 331 |
+| …`behavior-compatible` or better | 281 of 331 |
+| …`verified-against-slack` | 0 of 331 |
+| Recorded known deviations | 92 |
 | Retained legacy methods implemented | 10 of 10 |
 | User journeys in the normative catalog | 108 |
 | …cited by a browser scenario | 100 of 108 |
@@ -111,7 +111,7 @@ Exit criteria for every supported profile:
 The surface is implemented; what remains is evidence and the recorded
 deviations.
 
-- Work down the 71 known deviations in the ledger, and keep each claim at the
+- Work down the 92 known deviations in the ledger, and keep each claim at the
   level its evidence supports; the contract ratchet permits an audited
   downgrade when a claim is found to be overstated.
 - Close the journey gaps `make journey-check` prints: eight journeys without a

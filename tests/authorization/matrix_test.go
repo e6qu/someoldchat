@@ -441,6 +441,9 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		// A real column type, so AddListColumn passes schema validation and the
 		// holder's write grant carries it to success.
 		return reflect.ValueOf(domain.ListColumnText)
+	case reflect.TypeOf(domain.AgentSessionStatusRequest{}):
+		// A valid status, so the holder's write on the seeded session succeeds.
+		return reflect.ValueOf(domain.AgentSessionStatusRequest{Status: domain.AgentSessionActive})
 	case reflect.TypeOf(domain.LaterReminderRequest{}):
 		// A valid personal reminder edit, so UpdateLaterReminder — acting on the
 		// holder's own seeded reminder after authorizeWorkspace — reaches success
@@ -556,6 +559,9 @@ func fixtureStringArgument(method string) reflect.Value {
 		return reflect.ValueOf("U-member@example.test")
 	case "RenameConversation":
 		return reflect.ValueOf("renamed-fixture")
+	case "RenameAgentSession", "ChangeAgentSessionTitle":
+		// A session title, the only free string these take.
+		return reflect.ValueOf("Renamed fixture session")
 	case "UpdateCall":
 		// Both the external id and the join URL are required and are the only
 		// strings this operation takes, so one non-empty value reaches success.
@@ -747,7 +753,7 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		VerificationTokenCiphertext: "fixture-verification-ciphertext",
 		ManifestVersion:             1, Distribution: "private", CreatedAt: at, UpdatedAt: at,
 	}, domain.AppManifestRevision{
-		AppID: fixtureAppID, Version: 1, CreatedBy: "U-member", Manifest: `{"display_information":{"name":"Fixture app"},"features":{"app_home":{"messages_tab_enabled":true}}}`, CreatedAt: at,
+		AppID: fixtureAppID, Version: 1, CreatedBy: "U-member", Manifest: `{"display_information":{"name":"Fixture app"},"features":{"app_home":{"messages_tab_enabled":true}},"settings":{"socket_mode_enabled":true,"event_subscriptions":{"bot_events":["agent_session_stopped"]}}}`, CreatedAt: at,
 	}, domain.OAuthClient{
 		ID: "fixture-client", AppID: fixtureAppID, SecretHash: "fixture-client-secret-hash",
 	}))
@@ -763,6 +769,15 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	// the dialog operations have one to find.
 	seed("app bot user", repository.SeedUser(domain.User{ID: "U-fixture-bot", WorkspaceID: "T1", Name: "fixture-bot"}))
 	seed("app bot", repository.CreateBot(ctx, domain.Bot{ID: "F-bot", WorkspaceID: "T1", AppID: fixtureAppID, UserID: "U-fixture-bot", Name: "fixture-bot", UpdatedAt: at}))
+	// The app is processing in an agent session on the seeded message, and
+	// its manifest subscribes to agent_session_stopped, so the session
+	// operations — read, status, rename, retitle and stop — each find what
+	// they act on and the holder reaches success.
+	_, sessionErr := repository.SetAgentSessionStatus(ctx, domain.AgentSessionStatusWrite{
+		WorkspaceID: "T1", Conversation: "C1", ThreadTimestamp: fixtureMessageTimestamp, AppID: fixtureAppID,
+		Status: domain.AgentSessionProcessing, Title: "Fixture session", At: at,
+	}, event("E-agent-session", "agent_session.status_set"))
+	seed("agent session", sessionErr)
 	seed("dialog", repository.CreateDialog(ctx, domain.Dialog{
 		ID: fixtureDialogID, WorkspaceID: "T1", UserID: "U-owner", AppID: fixtureAppID, CreatedAt: at,
 		Payload: `{"callback_id":"fixture","title":"Fixture","elements":[{"type":"text","name":"answer","label":"Answer"}]}`,
