@@ -114,6 +114,14 @@ deviations.
 - Work down the 92 known deviations in the ledger, and keep each claim at the
   level its evidence supports; the contract ratchet permits an audited
   downgrade when a claim is found to be overstated.
+- Refuse bot tokens on every `admin.*` method with `not_allowed_token_type`,
+  as Slack does: admin scopes exist only on user tokens. Only the
+  `admin.apps.permissions.*`, `admin.apps.mcp.servers.*`, the new
+  `admin.usergroups.*` methods and `admin.conversations.bulkSetProperties`
+  enforce it today. The other admin methods
+  accept the deployment's `-api-token`, a bot token, and the handler tests and
+  official SDK qualification call them with bot tokens, so the change needs an
+  admin user-token fixture and an operator path to an admin user token first.
 - Close the journey gaps `make journey-check` prints: eight journeys without a
   browser scenario and 55 without a current official-source assertion.
 - Add visual baselines and manual assistive-technology evidence to the
