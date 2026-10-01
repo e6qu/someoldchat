@@ -10480,6 +10480,7 @@ func (s *Store) ReleaseScheduledMessage(_ context.Context, owner string, id doma
 func cloneUserGroup(value domain.UserGroup) domain.UserGroup {
 	value.Users = append([]domain.UserID(nil), value.Users...)
 	value.Channels = append([]domain.ConversationID(nil), value.Channels...)
+	value.Teams = append([]domain.WorkspaceID(nil), value.Teams...)
 	return value
 }
 
@@ -10576,7 +10577,11 @@ func (s *Store) UpdateUserGroup(_ context.Context, value domain.UserGroup, event
 	if err := s.userGroupChannelsBelongLocked(value.WorkspaceID, value.Channels); err != nil {
 		return err
 	}
+	// Membership and workspace assignment have their own writers, and whether
+	// a group belongs to the organization is fixed when it is created.
 	value.Users = append([]domain.UserID(nil), current.Users...)
+	value.Teams = current.Teams
+	value.OrgLevel = current.OrgLevel
 	s.userGroups[value.ID] = cloneUserGroup(value)
 	s.outbox = append(s.outbox, event)
 	return nil

@@ -408,8 +408,11 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		}
 		return reflect.Zero(argument)
 	case reflect.TypeOf([]domain.WorkspaceID(nil)):
-		if method == "AdminAddUserGroupTeams" {
-			return reflect.ValueOf([]domain.WorkspaceID{"T2"})
+		// The organization's one workspace, which the holder may assign the
+		// fixture group to and release it from.
+		switch method {
+		case "AdminAddUserGroupTeams", "AdminRemoveUserGroupTeams":
+			return reflect.ValueOf([]domain.WorkspaceID{"T1"})
 		}
 		return reflect.Zero(argument)
 	case reflect.TypeOf(domain.MessageID("")):
@@ -545,6 +548,9 @@ func fixtureStringArgument(method string) reflect.Value {
 	case "LookupCanvasSections":
 		// An empty criteria object matches every section, so the read succeeds.
 		return reflect.ValueOf("{}")
+	case "AdminUploadUserGroupUsers":
+		// A one-row CSV naming a member the holder can add to the fixture group.
+		return reflect.ValueOf("U-member")
 	case "UserByEmail":
 		// The seeded member's own address, so the lookup finds a user.
 		return reflect.ValueOf("U-member@example.test")

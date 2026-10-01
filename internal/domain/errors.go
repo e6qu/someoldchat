@@ -317,3 +317,17 @@ var ErrInvalidTriggerConfig = errors.New("workflow trigger configuration is inva
 // not match the trigger's stored hash. The HTTP boundary answers it with the
 // same indistinguishable 404 as an unknown trigger.
 var ErrWebhookTriggerSecret = errors.New("webhook trigger secret does not match")
+
+// The admin.usergroups.* organization methods name these failures with codes
+// of their own.
+var (
+	// ErrUnparseableUserGroupFile is admin.usergroups.uploadUsers'
+	// unable_to_parse_csv: the file is not a "member id, email" CSV.
+	ErrUnparseableUserGroupFile = errors.New("the uploaded user CSV could not be parsed")
+	// ErrNoValidUserGroupUsers is admin.usergroups.uploadUsers' no_valid_users:
+	// the CSV names nobody who can join the group.
+	ErrNoValidUserGroupUsers = errors.New("the uploaded user CSV names no user that can join")
+	// ErrUserGroupNeedsHandle is admin.usergroups.update's
+	// visible_group_needs_handle: a visible group's handle was removed.
+	ErrUserGroupNeedsHandle = errors.New("a visible user group needs a handle")
+)

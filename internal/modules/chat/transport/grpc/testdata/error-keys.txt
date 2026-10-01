@@ -111,6 +111,7 @@ service.message_not_owned_by_app
 service.message_not_streaming
 service.missing_stream_recipient_team
 service.missing_stream_recipient_user
+service.no_valid_user_group_users
 service.not_in_conversation
 service.not_starred
 service.not_workspace_admin
@@ -135,8 +136,10 @@ service.thread_not_found
 service.trigger_exchanged
 service.trigger_expired
 service.trigger_type_restricted
+service.unparseable_user_group_file
 service.user_group_handle_taken
 service.user_group_name_taken
+service.user_group_needs_handle
 service.user_is_restricted
 service.user_is_ultra_restricted
 service.user_not_found

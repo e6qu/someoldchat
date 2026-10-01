@@ -464,6 +464,17 @@ func seedUserGroupParity(t *testing.T, target *memory.Store) {
 	}
 }
 
+// seedOrgUserGroupParity adds a multi-channel guest, whom an organization
+// group refuses, to the user-group fixture.
+func seedOrgUserGroupParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedUserGroupParity(t, target)
+	requireSeed(t, target.CreateUser(context.Background(),
+		domain.User{ID: "UG", WorkspaceID: "T1", Name: "guest", Email: "guest@example.com"},
+		domain.WorkspaceMembership{WorkspaceID: "T1", UserID: "UG", Role: domain.WorkspaceRoleMember, Active: true, Restricted: true},
+		events.Event{ID: "evt_seed_guest", WorkspaceID: "T1", Topic: "user.created", CreatedAt: time.Unix(1_700_000_300, 0).UTC()}))
+}
+
 func seedFormParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedWorkflowParity(t, target)
@@ -1738,6 +1749,73 @@ func parityCases() []parityCase {
 					channels, remaining, len(members),
 					disabled.Enabled, enabled.Enabled,
 					missingChannel != nil, teams != nil, missingGroup != nil,
+				}, nil
+			},
+		},
+		{
+			// An organization group's whole admin.usergroups.* life: created
+			// hidden, its members added, uploaded and removed with each refusal
+			// the methods name, assigned to and released from its workspace, made
+			// visible, and fetched.
+			name: "an organization user group is administered identically",
+			seed: seedOrgUserGroupParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.AdminCreateUserGroup(ctx, "T1", "UA", "Org Admins", "", "Runs the org", false)
+				if err != nil {
+					return nil, err
+				}
+				_, memberCreate := chat.AdminCreateUserGroup(ctx, "T1", "U1", "Members", "", "", true)
+				_, duplicate := chat.AdminCreateUserGroup(ctx, "T1", "UA", "org admins", "", "", true)
+				added, err := chat.AdminAddUserGroupUsers(ctx, "T1", "UA", created.ID, []domain.UserID{"U1", "UG"})
+				if err != nil {
+					return nil, err
+				}
+				_, unknownUser := chat.AdminAddUserGroupUsers(ctx, "T1", "UA", created.ID, []domain.UserID{"U1", "U-nobody"})
+				_, onlyGuests := chat.AdminAddUserGroupUsers(ctx, "T1", "UA", created.ID, []domain.UserID{"UG"})
+				_, missingGroup := chat.AdminAddUserGroupUsers(ctx, "T1", "UA", "S-nobody", []domain.UserID{"U1"})
+				uploaded, err := chat.AdminUploadUserGroupUsers(ctx, "T1", "UA", created.ID, "member id,email\n,bob@example.com\nU-nobody,\n")
+				if err != nil {
+					return nil, err
+				}
+				_, unparseable := chat.AdminUploadUserGroupUsers(ctx, "T1", "UA", created.ID, "U1,a,b")
+				_, noneValid := chat.AdminUploadUserGroupUsers(ctx, "T1", "UA", created.ID, "U-nobody\n")
+				if err := chat.AdminRemoveUserGroupUsers(ctx, "T1", "UA", created.ID, []domain.UserID{"U1"}); err != nil {
+					return nil, err
+				}
+				removeUnknown := chat.AdminRemoveUserGroupUsers(ctx, "T1", "UA", created.ID, []domain.UserID{"U-nobody"})
+				if err := chat.AdminAddUserGroupTeams(ctx, "T1", "UA", created.ID, []domain.WorkspaceID{"T1"}); err != nil {
+					return nil, err
+				}
+				assigned, err := chat.AdminFetchUserGroup(ctx, "T1", "UA", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminRemoveUserGroupTeams(ctx, "T1", "UA", created.ID, []domain.WorkspaceID{"T1"}); err != nil {
+					return nil, err
+				}
+				foreignTeam := chat.AdminRemoveUserGroupTeams(ctx, "T1", "UA", created.ID, []domain.WorkspaceID{"T2"})
+				visible, description := true, "Runs everything"
+				updated, err := chat.AdminUpdateUserGroup(ctx, "T1", "UA", created.ID, domain.UserGroupPatch{Visible: &visible, Description: &description})
+				if err != nil {
+					return nil, err
+				}
+				noHandle := ""
+				_, needsHandle := chat.AdminUpdateUserGroup(ctx, "T1", "UA", created.ID, domain.UserGroupPatch{Handle: &noHandle})
+				fetched, err := chat.AdminFetchUserGroup(ctx, "T1", "UA", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				_, memberFetch := chat.AdminFetchUserGroup(ctx, "T1", "U1", created.ID)
+				return []any{
+					created.Name, created.Handle, created.Description, created.OrgLevel, created.Hidden,
+					errors.Is(memberCreate, domain.ErrNotWorkspaceAdmin), errors.Is(duplicate, domain.ErrUserGroupNameTaken),
+					added.Group.Users, added.Succeeded, added.Invalid,
+					errors.Is(unknownUser, domain.ErrUserNotFound), errors.Is(onlyGuests, domain.ErrInvalidUserGroupUsers), missingGroup != nil,
+					uploaded.Group.Users, uploaded.Succeeded, uploaded.Invalid,
+					errors.Is(unparseable, domain.ErrUnparseableUserGroupFile), errors.Is(noneValid, domain.ErrNoValidUserGroupUsers),
+					errors.Is(removeUnknown, domain.ErrUserNotFound), assigned.Teams, errors.Is(foreignTeam, domain.ErrInvalidUserGroup),
+					updated.Hidden, updated.Description, errors.Is(needsHandle, domain.ErrUserGroupNeedsHandle),
+					fetched.Users, fetched.Teams, fetched.OrgLevel, errors.Is(memberFetch, domain.ErrNotWorkspaceAdmin),
 				}, nil
 			},
 		},

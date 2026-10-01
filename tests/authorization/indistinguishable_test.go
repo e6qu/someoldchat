@@ -77,7 +77,6 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 		"CreateListFromTemplate":                  {},
 		"DeleteListTemplate":                      {},
 		"AdminAddConversationAccessGroup":         {},
-		"AdminAddUserGroupTeams":                  {},
 		"AdminClearAppResolution":                 {},
 		"AdminCreateIncomingWebhook":              {},
 		"PublishView":                             {},
@@ -164,4 +163,8 @@ func refusalDoesNotDistinguishTheHolder() map[string]struct{} {
 //
 // 61 to 60: RemoveStar left once AddStar was driven in its channel form, so the
 // holder could own a star on the seeded message for RemoveStar to remove.
-const indistinguishableRefusalCeiling = 60
+//
+// 60 to 59: AdminAddUserGroupTeams left once it was handed the organization's
+// own workspace, which the holder can assign the fixture group to, instead of a
+// foreign one every tier is refused alike.
+const indistinguishableRefusalCeiling = 59

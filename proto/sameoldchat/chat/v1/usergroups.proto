@@ -20,6 +20,12 @@ message UserGroup {
   bool enabled = 11;
   repeated string users = 12;
   repeated string channels = 13;
+  // Whether admin.usergroups.create made the group for the organization.
+  bool org_level = 14;
+  // The inverse of Slack's is_visible.
+  bool hidden = 15;
+  // The workspaces the group is assigned to.
+  repeated string teams = 16;
 }
 
 message UserGroupRequest {
@@ -92,6 +98,45 @@ message AdminUserGroupTeamsRequest {
   repeated string team_ids = 4;
 }
 
+message AdminCreateUserGroupRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  string handle = 4;
+  string description = 5;
+  bool visible = 6;
+}
+
+// An absent optional field is a property the caller did not name.
+message AdminUpdateUserGroupRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string user_group_id = 3;
+  optional string name = 4;
+  optional string handle = 5;
+  optional string description = 6;
+  optional bool visible = 7;
+}
+
+message AdminUploadUserGroupUsersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string user_group_id = 3;
+  // The uploaded "member id, email" CSV.
+  string file = 4;
+}
+
+message UserGroupMemberRefusal {
+  string user_id = 1;
+  string reason = 2;
+}
+
+message UserGroupMembershipResult {
+  UserGroup usergroup = 1;
+  int64 succeeded = 2;
+  repeated UserGroupMemberRefusal invalid = 3;
+}
+
 service UserGroupsService {
   rpc CreateUserGroup(CreateUserGroupRequest) returns (UserGroup);
   rpc UpdateUserGroup(UpdateUserGroupRequest) returns (UserGroup);
@@ -104,4 +149,11 @@ service UserGroupsService {
   rpc AddUserGroupChannels(UserGroupChannelsRequest) returns (MutationResponse);
   rpc RemoveUserGroupChannels(UserGroupChannelsRequest) returns (MutationResponse);
   rpc AdminAddUserGroupTeams(AdminUserGroupTeamsRequest) returns (MutationResponse);
+  rpc AdminRemoveUserGroupTeams(AdminUserGroupTeamsRequest) returns (MutationResponse);
+  rpc AdminCreateUserGroup(AdminCreateUserGroupRequest) returns (UserGroup);
+  rpc AdminFetchUserGroup(UserGroupRequest) returns (UserGroup);
+  rpc AdminUpdateUserGroup(AdminUpdateUserGroupRequest) returns (UserGroup);
+  rpc AdminAddUserGroupUsers(UserGroupUsersRequest) returns (UserGroupMembershipResult);
+  rpc AdminRemoveUserGroupUsers(UserGroupUsersRequest) returns (MutationResponse);
+  rpc AdminUploadUserGroupUsers(AdminUploadUserGroupUsersRequest) returns (UserGroupMembershipResult);
 }

@@ -6309,34 +6309,13 @@ func (m Messages) AddUserGroupChannels(ctx context.Context, workspaceID domain.W
 	return m.Store.SetUserGroupChannels(ctx, workspaceID, id, combined, actor, event)
 }
 
-// AdminAddUserGroupTeams validates the organization-level association against
-// this process's single-workspace topology. The workspace is already implicit
-// in UserGroup, so a valid association needs no additional persisted edge.
+// AdminAddUserGroupTeams assigns a group to workspaces of the organization.
+// In this process's single-workspace topology the organization's one
+// workspace is the group's own. The assignment used to be validated and then
+// discarded, so admin.usergroups.fetch could not report it and
+// admin.usergroups.removeTeams had nothing to remove; it is now recorded.
 func (m Messages) AdminAddUserGroupTeams(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, teams []domain.WorkspaceID) error {
-	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
-		return err
-	}
-	if _, err := m.Store.GetUserGroup(ctx, workspaceID, id); err != nil {
-		return err
-	}
-	if len(teams) == 0 {
-		return domain.ErrInvalidUserGroup
-	}
-	seen := make(map[domain.WorkspaceID]struct{}, len(teams))
-	for _, team := range teams {
-		team = domain.WorkspaceID(strings.TrimSpace(string(team)))
-		if team == "" {
-			return domain.ErrInvalidUserGroup
-		}
-		if _, exists := seen[team]; exists {
-			continue
-		}
-		seen[team] = struct{}{}
-		if team != workspaceID {
-			return domain.ErrInvalidUserGroup
-		}
-	}
-	return nil
+	return m.changeUserGroupTeams(ctx, workspaceID, actor, id, teams, true)
 }
 
 func (m Messages) RemoveUserGroupChannels(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, channels []domain.ConversationID) error {
@@ -8311,6 +8290,14 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserGroup{}, err
 	}
+	return m.createUserGroup(ctx, workspaceID, actor, domain.UserGroup{Name: name, Handle: handle, Description: description, Channels: channels})
+}
+
+// createUserGroup validates and stores a new group drawn from draft's name,
+// handle, description, default channels and organization properties. The
+// caller has authorized the actor.
+func (m Messages) createUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, draft domain.UserGroup) (domain.UserGroup, error) {
+	name, handle, description, channels := draft.Name, draft.Handle, draft.Description, draft.Channels
 	name = strings.TrimSpace(name)
 	description = strings.TrimSpace(description)
 	if name == "" {
@@ -8339,7 +8326,7 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 		return domain.UserGroup{}, err
 	}
 	now := time.Now().UTC()
-	value := domain.UserGroup{WorkspaceID: workspaceID, ID: id, Name: name, Handle: handle, Description: description, Creator: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now, Enabled: true, Channels: defaults}
+	value := domain.UserGroup{WorkspaceID: workspaceID, ID: id, Name: name, Handle: handle, Description: description, Creator: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now, Enabled: true, Channels: defaults, OrgLevel: draft.OrgLevel, Hidden: draft.Hidden}
 	payload, err := userGroupEventPayload("usergroup.created", value)
 	if err != nil {
 		return domain.UserGroup{}, err
@@ -8384,6 +8371,13 @@ func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.Worksp
 			return domain.UserGroup{}, err
 		}
 	}
+	return m.saveUserGroup(ctx, workspaceID, actor, value)
+}
+
+// saveUserGroup validates a changed group and stores it with its
+// usergroup.updated event. The caller has authorized the actor.
+func (m Messages) saveUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, value domain.UserGroup) (domain.UserGroup, error) {
+	id := value.ID
 	if value.Name == "" || value.Handle == "" || len(value.Name) > 255 || len(value.Handle) > 255 || len(value.Description) > 2000 {
 		return domain.UserGroup{}, domain.ErrInvalidUserGroup
 	}

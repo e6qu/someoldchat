@@ -2843,6 +2843,17 @@ type UserGroup struct {
 	Enabled     bool
 	Users       []UserID
 	Channels    []ConversationID
+	// OrgLevel marks a group admin.usergroups.create made for the whole
+	// organization, as distinct from one usergroups.create made in a workspace.
+	// It is fixed when the group is created.
+	OrgLevel bool
+	// Hidden is the inverse of Slack's is_visible, so that the zero value is
+	// the visible group every existing record and every usergroups.create
+	// group is.
+	Hidden bool
+	// Teams are the workspaces an organization group is assigned to by
+	// admin.usergroups.addTeams and released from by removeTeams.
+	Teams []WorkspaceID
 }
 
 type UserGroupPage struct {
