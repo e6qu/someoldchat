@@ -11,6 +11,7 @@ events.payload_field_invalid
 events.payload_malformed
 events.payload_required
 events.slack_event_incomplete
+service.app_access_list_not_found
 service.app_configuration_authentication
 service.app_credential_key_unavailable
 service.app_datastore_not_found
@@ -19,10 +20,13 @@ service.app_interaction_unavailable
 service.app_missing_action_url
 service.app_not_distributable
 service.app_not_hosted
+service.app_not_managed
+service.app_permission_type
 service.app_response_no_text
 service.app_response_payload_invalid
 service.app_response_url_expired
 service.app_response_url_used
+service.app_use_restricted
 service.assistant_thread_not_found
 service.automation_channel_not_found
 service.automation_entities_empty
@@ -38,6 +42,9 @@ service.cannot_kick_from_default
 service.cannot_kick_self
 service.cannot_leave_default
 service.cannot_unfurl_url
+service.channel_restriction_ids_required
+service.channel_restriction_mode
+service.channel_restriction_requires_app_access
 service.conversation_already_archived
 service.conversation_archived
 service.conversation_not_archived
@@ -54,6 +61,7 @@ service.invalid_access_log
 service.invalid_activity_saved_view
 service.invalid_app_approval
 service.invalid_app_manifest
+service.invalid_app_permission
 service.invalid_app_response
 service.invalid_assistant_thread
 service.invalid_blocks
@@ -111,6 +119,9 @@ service.message_not_owned_by_app
 service.message_not_streaming
 service.missing_stream_recipient_team
 service.missing_stream_recipient_user
+service.named_entities_empty
+service.named_user_group_not_found
+service.no_valid_named_entities
 service.not_in_conversation
 service.not_starred
 service.not_workspace_admin
@@ -120,11 +131,15 @@ service.reminder_owned_by_other
 service.reminder_recurring
 service.reminder_time_in_past
 service.reminder_unparseable
+service.restricted_channel_not_found
 service.retention_not_supported
 service.scheduled_status_limit
 service.scheduled_time_in_past
 service.scheduled_time_too_far
 service.scheduled_too_many
+service.server_not_found
+service.server_permission_broader_than_app
+service.server_permission_out_of_app_scope
 service.shared_invite_settled
 service.slack_connect_full
 service.slash_command_in_thread
@@ -132,6 +147,7 @@ service.slash_command_not_found
 service.snooze_not_active
 service.snooze_too_long
 service.thread_not_found
+service.too_many_named_entities
 service.trigger_exchanged
 service.trigger_expired
 service.trigger_type_restricted

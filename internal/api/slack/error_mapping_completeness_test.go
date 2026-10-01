@@ -308,6 +308,20 @@ func recordedNonPinnedCodes() map[string]string {
 		"name_already_exists":   "usergroups.create and usergroups.update: the name is taken by another group",
 		"handle_already_exists": "usergroups.create and usergroups.update: the handle is taken by another group",
 		"invalid_users":         "usergroups.users.update: a named member is not in the workspace; the snapshot's enum declares no code for it, and usergroup_not_found named the wrong missing thing",
+		// admin.apps.permissions.*, admin.apps.mcp.servers.* and
+		// apps.managed.permissions.set are absent from the pinned snapshot; each
+		// code below is declared by those methods' current Slack references.
+		"app_acl_not_found":                       "current admin.apps.permissions.add and .remove references",
+		"app_not_managed":                         "current apps.managed.permissions.set reference",
+		"channel_ids_required":                    "current admin.apps.permissions.set reference",
+		"channel_restriction_requires_app_access": "current admin.apps.permissions.set reference",
+		"invalid_channel_restriction_mode":        "current admin.apps.permissions.add, .remove and .set references",
+		"invalid_entities":                        "current admin.apps.permissions.add reference",
+		"no_valid_named_entities":                 "current admin.apps.permissions.add and .set and admin.apps.mcp.servers.permissions.set references",
+		"server_acl_entities_not_in_scope":        "current admin.apps.mcp.servers.permissions.set reference",
+		"server_acl_type_broader_than_app":        "current admin.apps.mcp.servers.permissions.set reference",
+		"server_not_found":                        "current admin.apps.mcp.servers.permissions.set reference",
+		"too_many_named_entities":                 "current admin.apps.permissions.* and admin.apps.mcp.servers.permissions.set references",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so

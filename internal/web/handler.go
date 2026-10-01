@@ -11049,6 +11049,10 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusBadRequest
 			reason = "Slash commands cannot be used in threads."
 		}
+		if errors.Is(err, domain.ErrAppUseRestricted) {
+			status = http.StatusForbidden
+			reason = "An administrator has restricted who may use this app, or where. Your command was not posted as a message."
+		}
 		if errors.Is(err, domain.ErrAppInteractionUnavailable) || errors.Is(err, domain.ErrInvalidAppResponse) {
 			status = http.StatusBadGateway
 			reason = "The app did not accept that command. Your command was not posted as a message."
@@ -11864,6 +11868,8 @@ func (h Handler) appShortcut(w http.ResponseWriter, r *http.Request) {
 			status, reason = http.StatusConflict, "This app has no interactive endpoint available."
 		case errors.Is(err, store.ErrConflict):
 			status, reason = http.StatusConflict, "That shortcut configuration is ambiguous."
+		case errors.Is(err, domain.ErrAppUseRestricted):
+			status, reason = http.StatusForbidden, "An administrator has restricted who may use this app, or where."
 		}
 		h.writeMutationError(w, r, status, "That app shortcut did not run", reason)
 		return

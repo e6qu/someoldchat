@@ -124,6 +124,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	// rate-limited production configuration.
 	api := http.NewServeMux()
 	h.registerWebAPI(api)
+	h.registerAdminAppPermissions(api)
 	var front http.Handler = api
 	if h.Limiter != nil {
 		front = h.Limiter.Middleware(front)
@@ -12209,6 +12210,11 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 		return "restricted_action"
 	}
 	if errors.Is(err, domain.ErrTriggerTypeRestricted) {
+		return "restricted_action"
+	}
+	// An app whose access control list does not admit the member, or not in
+	// this channel, is refused the same way.
+	if errors.Is(err, domain.ErrAppUseRestricted) {
 		return "restricted_action"
 	}
 	if errors.Is(err, domain.ErrCannotInviteSelf) {

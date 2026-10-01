@@ -4,6 +4,7 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+import "sameoldchat/chat/v1/app_permissions.proto";
 import "sameoldchat/chat/v1/messages.proto";
 
 message AppConfigurationTokenRequest {
@@ -431,6 +432,14 @@ service AppsService {
   rpc AdminAppConfigs(AppConfigsRequest) returns (AppConfigsResponse);
   rpc AdminSetAppConfig(AppConfigMutationRequest) returns (AppConfig);
   rpc AdminClearAppResolution(AppResolutionRequest) returns (AppMutationResponse);
+  rpc AdminAppPermission(AppAccessControlRequest) returns (AppPermission);
+  rpc AdminSetAppPermission(AppPermissionMutationRequest) returns (AppPermission);
+  rpc AdminAddAppPermissionEntities(AppPermissionChangeRequest) returns (AppPermission);
+  rpc AdminRemoveAppPermissionEntities(AppPermissionChangeRequest) returns (AppPermission);
+  rpc AdminMCPServers(MCPServersRequest) returns (MCPServerPage);
+  rpc AdminAppMCPServerPermissions(AppAccessControlRequest) returns (MCPServerAccessResponse);
+  rpc AdminSetMCPServerPermission(MCPServerPermissionMutationRequest) returns (MCPServerPermission);
+  rpc SetManagedAppPermissions(ManagedAppPermissionRequest) returns (AppMutationResponse);
   rpc IssueAppConfigurationToken(AppConfigurationTokenRequest) returns (AppConfigurationCredentials);
   rpc RotateAppConfigurationToken(AppConfigurationTokenRotateRequest) returns (AppConfigurationCredentials);
   rpc ValidateAppManifest(AppManifestRequest) returns (AppManifestValidation);

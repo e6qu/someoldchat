@@ -19,45 +19,53 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AppsService_SetAppIcon_FullMethodName                     = "/sameoldchat.chat.v1.AppsService/SetAppIcon"
-	AppsService_ExternalAuthToken_FullMethodName              = "/sameoldchat.chat.v1.AppsService/ExternalAuthToken"
-	AppsService_DeleteExternalAuthToken_FullMethodName        = "/sameoldchat.chat.v1.AppsService/DeleteExternalAuthToken"
-	AppsService_SetAppExternalAuthProvider_FullMethodName     = "/sameoldchat.chat.v1.AppsService/SetAppExternalAuthProvider"
-	AppsService_AppExternalAuthProviders_FullMethodName       = "/sameoldchat.chat.v1.AppsService/AppExternalAuthProviders"
-	AppsService_StartExternalAuthConnection_FullMethodName    = "/sameoldchat.chat.v1.AppsService/StartExternalAuthConnection"
-	AppsService_CompleteExternalAuthConnection_FullMethodName = "/sameoldchat.chat.v1.AppsService/CompleteExternalAuthConnection"
-	AppsService_UpdateUserAppConnection_FullMethodName        = "/sameoldchat.chat.v1.AppsService/UpdateUserAppConnection"
-	AppsService_AssistantSearchAvailability_FullMethodName    = "/sameoldchat.chat.v1.AppsService/AssistantSearchAvailability"
-	AppsService_AssistantSearchContext_FullMethodName         = "/sameoldchat.chat.v1.AppsService/AssistantSearchContext"
-	AppsService_AppActivities_FullMethodName                  = "/sameoldchat.chat.v1.AppsService/AppActivities"
-	AppsService_AdminAppActivities_FullMethodName             = "/sameoldchat.chat.v1.AppsService/AdminAppActivities"
-	AppsService_AdminAppConfigs_FullMethodName                = "/sameoldchat.chat.v1.AppsService/AdminAppConfigs"
-	AppsService_AdminSetAppConfig_FullMethodName              = "/sameoldchat.chat.v1.AppsService/AdminSetAppConfig"
-	AppsService_AdminClearAppResolution_FullMethodName        = "/sameoldchat.chat.v1.AppsService/AdminClearAppResolution"
-	AppsService_IssueAppConfigurationToken_FullMethodName     = "/sameoldchat.chat.v1.AppsService/IssueAppConfigurationToken"
-	AppsService_RotateAppConfigurationToken_FullMethodName    = "/sameoldchat.chat.v1.AppsService/RotateAppConfigurationToken"
-	AppsService_ValidateAppManifest_FullMethodName            = "/sameoldchat.chat.v1.AppsService/ValidateAppManifest"
-	AppsService_CreateAppFromManifest_FullMethodName          = "/sameoldchat.chat.v1.AppsService/CreateAppFromManifest"
-	AppsService_ExportAppManifest_FullMethodName              = "/sameoldchat.chat.v1.AppsService/ExportAppManifest"
-	AppsService_UpdateAppFromManifest_FullMethodName          = "/sameoldchat.chat.v1.AppsService/UpdateAppFromManifest"
-	AppsService_SetAppDistribution_FullMethodName             = "/sameoldchat.chat.v1.AppsService/SetAppDistribution"
-	AppsService_DeleteDeveloperApp_FullMethodName             = "/sameoldchat.chat.v1.AppsService/DeleteDeveloperApp"
-	AppsService_ListDeveloperApps_FullMethodName              = "/sameoldchat.chat.v1.AppsService/ListDeveloperApps"
-	AppsService_ListWorkspaceApps_FullMethodName              = "/sameoldchat.chat.v1.AppsService/ListWorkspaceApps"
-	AppsService_AdminFunctions_FullMethodName                 = "/sameoldchat.chat.v1.AppsService/AdminFunctions"
-	AppsService_PutAppDatastoreItems_FullMethodName           = "/sameoldchat.chat.v1.AppsService/PutAppDatastoreItems"
-	AppsService_GetAppDatastoreItems_FullMethodName           = "/sameoldchat.chat.v1.AppsService/GetAppDatastoreItems"
-	AppsService_QueryAppDatastoreItems_FullMethodName         = "/sameoldchat.chat.v1.AppsService/QueryAppDatastoreItems"
-	AppsService_CountAppDatastoreItems_FullMethodName         = "/sameoldchat.chat.v1.AppsService/CountAppDatastoreItems"
-	AppsService_DeleteAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/DeleteAppDatastoreItems"
-	AppsService_GetDeveloperApp_FullMethodName                = "/sameoldchat.chat.v1.AppsService/GetDeveloperApp"
-	AppsService_GetDeveloperAppDeliveryHealth_FullMethodName  = "/sameoldchat.chat.v1.AppsService/GetDeveloperAppDeliveryHealth"
-	AppsService_IssueDeveloperAppToken_FullMethodName         = "/sameoldchat.chat.v1.AppsService/IssueDeveloperAppToken"
-	AppsService_RevokeDeveloperAppTokens_FullMethodName       = "/sameoldchat.chat.v1.AppsService/RevokeDeveloperAppTokens"
-	AppsService_ListDeveloperAppTokens_FullMethodName         = "/sameoldchat.chat.v1.AppsService/ListDeveloperAppTokens"
-	AppsService_RevokeDeveloperAppToken_FullMethodName        = "/sameoldchat.chat.v1.AppsService/RevokeDeveloperAppToken"
-	AppsService_InspectOAuthAuthorization_FullMethodName      = "/sameoldchat.chat.v1.AppsService/InspectOAuthAuthorization"
-	AppsService_AuthorizeOAuth_FullMethodName                 = "/sameoldchat.chat.v1.AppsService/AuthorizeOAuth"
+	AppsService_SetAppIcon_FullMethodName                       = "/sameoldchat.chat.v1.AppsService/SetAppIcon"
+	AppsService_ExternalAuthToken_FullMethodName                = "/sameoldchat.chat.v1.AppsService/ExternalAuthToken"
+	AppsService_DeleteExternalAuthToken_FullMethodName          = "/sameoldchat.chat.v1.AppsService/DeleteExternalAuthToken"
+	AppsService_SetAppExternalAuthProvider_FullMethodName       = "/sameoldchat.chat.v1.AppsService/SetAppExternalAuthProvider"
+	AppsService_AppExternalAuthProviders_FullMethodName         = "/sameoldchat.chat.v1.AppsService/AppExternalAuthProviders"
+	AppsService_StartExternalAuthConnection_FullMethodName      = "/sameoldchat.chat.v1.AppsService/StartExternalAuthConnection"
+	AppsService_CompleteExternalAuthConnection_FullMethodName   = "/sameoldchat.chat.v1.AppsService/CompleteExternalAuthConnection"
+	AppsService_UpdateUserAppConnection_FullMethodName          = "/sameoldchat.chat.v1.AppsService/UpdateUserAppConnection"
+	AppsService_AssistantSearchAvailability_FullMethodName      = "/sameoldchat.chat.v1.AppsService/AssistantSearchAvailability"
+	AppsService_AssistantSearchContext_FullMethodName           = "/sameoldchat.chat.v1.AppsService/AssistantSearchContext"
+	AppsService_AppActivities_FullMethodName                    = "/sameoldchat.chat.v1.AppsService/AppActivities"
+	AppsService_AdminAppActivities_FullMethodName               = "/sameoldchat.chat.v1.AppsService/AdminAppActivities"
+	AppsService_AdminAppConfigs_FullMethodName                  = "/sameoldchat.chat.v1.AppsService/AdminAppConfigs"
+	AppsService_AdminSetAppConfig_FullMethodName                = "/sameoldchat.chat.v1.AppsService/AdminSetAppConfig"
+	AppsService_AdminClearAppResolution_FullMethodName          = "/sameoldchat.chat.v1.AppsService/AdminClearAppResolution"
+	AppsService_AdminAppPermission_FullMethodName               = "/sameoldchat.chat.v1.AppsService/AdminAppPermission"
+	AppsService_AdminSetAppPermission_FullMethodName            = "/sameoldchat.chat.v1.AppsService/AdminSetAppPermission"
+	AppsService_AdminAddAppPermissionEntities_FullMethodName    = "/sameoldchat.chat.v1.AppsService/AdminAddAppPermissionEntities"
+	AppsService_AdminRemoveAppPermissionEntities_FullMethodName = "/sameoldchat.chat.v1.AppsService/AdminRemoveAppPermissionEntities"
+	AppsService_AdminMCPServers_FullMethodName                  = "/sameoldchat.chat.v1.AppsService/AdminMCPServers"
+	AppsService_AdminAppMCPServerPermissions_FullMethodName     = "/sameoldchat.chat.v1.AppsService/AdminAppMCPServerPermissions"
+	AppsService_AdminSetMCPServerPermission_FullMethodName      = "/sameoldchat.chat.v1.AppsService/AdminSetMCPServerPermission"
+	AppsService_SetManagedAppPermissions_FullMethodName         = "/sameoldchat.chat.v1.AppsService/SetManagedAppPermissions"
+	AppsService_IssueAppConfigurationToken_FullMethodName       = "/sameoldchat.chat.v1.AppsService/IssueAppConfigurationToken"
+	AppsService_RotateAppConfigurationToken_FullMethodName      = "/sameoldchat.chat.v1.AppsService/RotateAppConfigurationToken"
+	AppsService_ValidateAppManifest_FullMethodName              = "/sameoldchat.chat.v1.AppsService/ValidateAppManifest"
+	AppsService_CreateAppFromManifest_FullMethodName            = "/sameoldchat.chat.v1.AppsService/CreateAppFromManifest"
+	AppsService_ExportAppManifest_FullMethodName                = "/sameoldchat.chat.v1.AppsService/ExportAppManifest"
+	AppsService_UpdateAppFromManifest_FullMethodName            = "/sameoldchat.chat.v1.AppsService/UpdateAppFromManifest"
+	AppsService_SetAppDistribution_FullMethodName               = "/sameoldchat.chat.v1.AppsService/SetAppDistribution"
+	AppsService_DeleteDeveloperApp_FullMethodName               = "/sameoldchat.chat.v1.AppsService/DeleteDeveloperApp"
+	AppsService_ListDeveloperApps_FullMethodName                = "/sameoldchat.chat.v1.AppsService/ListDeveloperApps"
+	AppsService_ListWorkspaceApps_FullMethodName                = "/sameoldchat.chat.v1.AppsService/ListWorkspaceApps"
+	AppsService_AdminFunctions_FullMethodName                   = "/sameoldchat.chat.v1.AppsService/AdminFunctions"
+	AppsService_PutAppDatastoreItems_FullMethodName             = "/sameoldchat.chat.v1.AppsService/PutAppDatastoreItems"
+	AppsService_GetAppDatastoreItems_FullMethodName             = "/sameoldchat.chat.v1.AppsService/GetAppDatastoreItems"
+	AppsService_QueryAppDatastoreItems_FullMethodName           = "/sameoldchat.chat.v1.AppsService/QueryAppDatastoreItems"
+	AppsService_CountAppDatastoreItems_FullMethodName           = "/sameoldchat.chat.v1.AppsService/CountAppDatastoreItems"
+	AppsService_DeleteAppDatastoreItems_FullMethodName          = "/sameoldchat.chat.v1.AppsService/DeleteAppDatastoreItems"
+	AppsService_GetDeveloperApp_FullMethodName                  = "/sameoldchat.chat.v1.AppsService/GetDeveloperApp"
+	AppsService_GetDeveloperAppDeliveryHealth_FullMethodName    = "/sameoldchat.chat.v1.AppsService/GetDeveloperAppDeliveryHealth"
+	AppsService_IssueDeveloperAppToken_FullMethodName           = "/sameoldchat.chat.v1.AppsService/IssueDeveloperAppToken"
+	AppsService_RevokeDeveloperAppTokens_FullMethodName         = "/sameoldchat.chat.v1.AppsService/RevokeDeveloperAppTokens"
+	AppsService_ListDeveloperAppTokens_FullMethodName           = "/sameoldchat.chat.v1.AppsService/ListDeveloperAppTokens"
+	AppsService_RevokeDeveloperAppToken_FullMethodName          = "/sameoldchat.chat.v1.AppsService/RevokeDeveloperAppToken"
+	AppsService_InspectOAuthAuthorization_FullMethodName        = "/sameoldchat.chat.v1.AppsService/InspectOAuthAuthorization"
+	AppsService_AuthorizeOAuth_FullMethodName                   = "/sameoldchat.chat.v1.AppsService/AuthorizeOAuth"
 )
 
 // AppsServiceClient is the client API for AppsService service.
@@ -79,6 +87,14 @@ type AppsServiceClient interface {
 	AdminAppConfigs(ctx context.Context, in *AppConfigsRequest, opts ...grpc.CallOption) (*AppConfigsResponse, error)
 	AdminSetAppConfig(ctx context.Context, in *AppConfigMutationRequest, opts ...grpc.CallOption) (*AppConfig, error)
 	AdminClearAppResolution(ctx context.Context, in *AppResolutionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
+	AdminAppPermission(ctx context.Context, in *AppAccessControlRequest, opts ...grpc.CallOption) (*AppPermission, error)
+	AdminSetAppPermission(ctx context.Context, in *AppPermissionMutationRequest, opts ...grpc.CallOption) (*AppPermission, error)
+	AdminAddAppPermissionEntities(ctx context.Context, in *AppPermissionChangeRequest, opts ...grpc.CallOption) (*AppPermission, error)
+	AdminRemoveAppPermissionEntities(ctx context.Context, in *AppPermissionChangeRequest, opts ...grpc.CallOption) (*AppPermission, error)
+	AdminMCPServers(ctx context.Context, in *MCPServersRequest, opts ...grpc.CallOption) (*MCPServerPage, error)
+	AdminAppMCPServerPermissions(ctx context.Context, in *AppAccessControlRequest, opts ...grpc.CallOption) (*MCPServerAccessResponse, error)
+	AdminSetMCPServerPermission(ctx context.Context, in *MCPServerPermissionMutationRequest, opts ...grpc.CallOption) (*MCPServerPermission, error)
+	SetManagedAppPermissions(ctx context.Context, in *ManagedAppPermissionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	IssueAppConfigurationToken(ctx context.Context, in *AppConfigurationTokenRequest, opts ...grpc.CallOption) (*AppConfigurationCredentials, error)
 	RotateAppConfigurationToken(ctx context.Context, in *AppConfigurationTokenRotateRequest, opts ...grpc.CallOption) (*AppConfigurationCredentials, error)
 	ValidateAppManifest(ctx context.Context, in *AppManifestRequest, opts ...grpc.CallOption) (*AppManifestValidation, error)
@@ -257,6 +273,86 @@ func (c *appsServiceClient) AdminClearAppResolution(ctx context.Context, in *App
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AppMutationResponse)
 	err := c.cc.Invoke(ctx, AppsService_AdminClearAppResolution_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminAppPermission(ctx context.Context, in *AppAccessControlRequest, opts ...grpc.CallOption) (*AppPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppPermission)
+	err := c.cc.Invoke(ctx, AppsService_AdminAppPermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminSetAppPermission(ctx context.Context, in *AppPermissionMutationRequest, opts ...grpc.CallOption) (*AppPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppPermission)
+	err := c.cc.Invoke(ctx, AppsService_AdminSetAppPermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminAddAppPermissionEntities(ctx context.Context, in *AppPermissionChangeRequest, opts ...grpc.CallOption) (*AppPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppPermission)
+	err := c.cc.Invoke(ctx, AppsService_AdminAddAppPermissionEntities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminRemoveAppPermissionEntities(ctx context.Context, in *AppPermissionChangeRequest, opts ...grpc.CallOption) (*AppPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppPermission)
+	err := c.cc.Invoke(ctx, AppsService_AdminRemoveAppPermissionEntities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminMCPServers(ctx context.Context, in *MCPServersRequest, opts ...grpc.CallOption) (*MCPServerPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MCPServerPage)
+	err := c.cc.Invoke(ctx, AppsService_AdminMCPServers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminAppMCPServerPermissions(ctx context.Context, in *AppAccessControlRequest, opts ...grpc.CallOption) (*MCPServerAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MCPServerAccessResponse)
+	err := c.cc.Invoke(ctx, AppsService_AdminAppMCPServerPermissions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) AdminSetMCPServerPermission(ctx context.Context, in *MCPServerPermissionMutationRequest, opts ...grpc.CallOption) (*MCPServerPermission, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MCPServerPermission)
+	err := c.cc.Invoke(ctx, AppsService_AdminSetMCPServerPermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) SetManagedAppPermissions(ctx context.Context, in *ManagedAppPermissionRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppMutationResponse)
+	err := c.cc.Invoke(ctx, AppsService_SetManagedAppPermissions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -522,6 +618,14 @@ type AppsServiceServer interface {
 	AdminAppConfigs(context.Context, *AppConfigsRequest) (*AppConfigsResponse, error)
 	AdminSetAppConfig(context.Context, *AppConfigMutationRequest) (*AppConfig, error)
 	AdminClearAppResolution(context.Context, *AppResolutionRequest) (*AppMutationResponse, error)
+	AdminAppPermission(context.Context, *AppAccessControlRequest) (*AppPermission, error)
+	AdminSetAppPermission(context.Context, *AppPermissionMutationRequest) (*AppPermission, error)
+	AdminAddAppPermissionEntities(context.Context, *AppPermissionChangeRequest) (*AppPermission, error)
+	AdminRemoveAppPermissionEntities(context.Context, *AppPermissionChangeRequest) (*AppPermission, error)
+	AdminMCPServers(context.Context, *MCPServersRequest) (*MCPServerPage, error)
+	AdminAppMCPServerPermissions(context.Context, *AppAccessControlRequest) (*MCPServerAccessResponse, error)
+	AdminSetMCPServerPermission(context.Context, *MCPServerPermissionMutationRequest) (*MCPServerPermission, error)
+	SetManagedAppPermissions(context.Context, *ManagedAppPermissionRequest) (*AppMutationResponse, error)
 	IssueAppConfigurationToken(context.Context, *AppConfigurationTokenRequest) (*AppConfigurationCredentials, error)
 	RotateAppConfigurationToken(context.Context, *AppConfigurationTokenRotateRequest) (*AppConfigurationCredentials, error)
 	ValidateAppManifest(context.Context, *AppManifestRequest) (*AppManifestValidation, error)
@@ -599,6 +703,30 @@ func (UnimplementedAppsServiceServer) AdminSetAppConfig(context.Context, *AppCon
 }
 func (UnimplementedAppsServiceServer) AdminClearAppResolution(context.Context, *AppResolutionRequest) (*AppMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminClearAppResolution not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminAppPermission(context.Context, *AppAccessControlRequest) (*AppPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAppPermission not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminSetAppPermission(context.Context, *AppPermissionMutationRequest) (*AppPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetAppPermission not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminAddAppPermissionEntities(context.Context, *AppPermissionChangeRequest) (*AppPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAddAppPermissionEntities not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminRemoveAppPermissionEntities(context.Context, *AppPermissionChangeRequest) (*AppPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminRemoveAppPermissionEntities not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminMCPServers(context.Context, *MCPServersRequest) (*MCPServerPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminMCPServers not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminAppMCPServerPermissions(context.Context, *AppAccessControlRequest) (*MCPServerAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAppMCPServerPermissions not implemented")
+}
+func (UnimplementedAppsServiceServer) AdminSetMCPServerPermission(context.Context, *MCPServerPermissionMutationRequest) (*MCPServerPermission, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetMCPServerPermission not implemented")
+}
+func (UnimplementedAppsServiceServer) SetManagedAppPermissions(context.Context, *ManagedAppPermissionRequest) (*AppMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetManagedAppPermissions not implemented")
 }
 func (UnimplementedAppsServiceServer) IssueAppConfigurationToken(context.Context, *AppConfigurationTokenRequest) (*AppConfigurationCredentials, error) {
 	return nil, status.Error(codes.Unimplemented, "method IssueAppConfigurationToken not implemented")
@@ -958,6 +1086,150 @@ func _AppsService_AdminClearAppResolution_Handler(srv interface{}, ctx context.C
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AppsServiceServer).AdminClearAppResolution(ctx, req.(*AppResolutionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminAppPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppAccessControlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminAppPermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminAppPermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminAppPermission(ctx, req.(*AppAccessControlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminSetAppPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppPermissionMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminSetAppPermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminSetAppPermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminSetAppPermission(ctx, req.(*AppPermissionMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminAddAppPermissionEntities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppPermissionChangeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminAddAppPermissionEntities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminAddAppPermissionEntities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminAddAppPermissionEntities(ctx, req.(*AppPermissionChangeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminRemoveAppPermissionEntities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppPermissionChangeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminRemoveAppPermissionEntities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminRemoveAppPermissionEntities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminRemoveAppPermissionEntities(ctx, req.(*AppPermissionChangeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminMCPServers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MCPServersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminMCPServers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminMCPServers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminMCPServers(ctx, req.(*MCPServersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminAppMCPServerPermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppAccessControlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminAppMCPServerPermissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminAppMCPServerPermissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminAppMCPServerPermissions(ctx, req.(*AppAccessControlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_AdminSetMCPServerPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MCPServerPermissionMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).AdminSetMCPServerPermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_AdminSetMCPServerPermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).AdminSetMCPServerPermission(ctx, req.(*MCPServerPermissionMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_SetManagedAppPermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ManagedAppPermissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).SetManagedAppPermissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_SetManagedAppPermissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).SetManagedAppPermissions(ctx, req.(*ManagedAppPermissionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1460,6 +1732,38 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminClearAppResolution",
 			Handler:    _AppsService_AdminClearAppResolution_Handler,
+		},
+		{
+			MethodName: "AdminAppPermission",
+			Handler:    _AppsService_AdminAppPermission_Handler,
+		},
+		{
+			MethodName: "AdminSetAppPermission",
+			Handler:    _AppsService_AdminSetAppPermission_Handler,
+		},
+		{
+			MethodName: "AdminAddAppPermissionEntities",
+			Handler:    _AppsService_AdminAddAppPermissionEntities_Handler,
+		},
+		{
+			MethodName: "AdminRemoveAppPermissionEntities",
+			Handler:    _AppsService_AdminRemoveAppPermissionEntities_Handler,
+		},
+		{
+			MethodName: "AdminMCPServers",
+			Handler:    _AppsService_AdminMCPServers_Handler,
+		},
+		{
+			MethodName: "AdminAppMCPServerPermissions",
+			Handler:    _AppsService_AdminAppMCPServerPermissions_Handler,
+		},
+		{
+			MethodName: "AdminSetMCPServerPermission",
+			Handler:    _AppsService_AdminSetMCPServerPermission_Handler,
+		},
+		{
+			MethodName: "SetManagedAppPermissions",
+			Handler:    _AppsService_SetManagedAppPermissions_Handler,
 		},
 		{
 			MethodName: "IssueAppConfigurationToken",

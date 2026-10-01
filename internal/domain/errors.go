@@ -317,3 +317,53 @@ var ErrInvalidTriggerConfig = errors.New("workflow trigger configuration is inva
 // not match the trigger's stored hash. The HTTP boundary answers it with the
 // same indistinguishable 404 as an unknown trigger.
 var ErrWebhookTriggerSecret = errors.New("webhook trigger secret does not match")
+
+// The app access control refusals of admin.apps.permissions.*,
+// admin.apps.mcp.servers.permissions.* and apps.managed.permissions.set. Each
+// is the cause one documented code names, so each crosses the gRPC seam as
+// itself rather than as a generic invalid argument.
+var (
+	// ErrInvalidAppPermission is a malformed request: an argument the method
+	// requires is missing or a list is longer than its documented maximum.
+	ErrInvalidAppPermission = errors.New("app permission request is invalid")
+	// ErrAppAccessListNotFound is an add or remove against an app nobody has set an
+	// access control list on.
+	ErrAppAccessListNotFound = errors.New("app has no access control list")
+	// ErrAppPermissionType is a permission type that is not one of the
+	// documented values, or one that does not take the entities the request
+	// names: users and user groups belong to a named_entities list.
+	ErrAppPermissionType = errors.New("permission type does not allow this change")
+	// ErrChannelRestrictionMode is a channel restriction mode that is not one
+	// of the documented values, or a channel list given to a mode without one.
+	ErrChannelRestrictionMode = errors.New("channel restriction mode is invalid")
+	// ErrChannelRestrictionIDsRequired is a listing mode given no channels.
+	ErrChannelRestrictionIDsRequired = errors.New("channel restriction mode requires channel_ids")
+	// ErrChannelRestrictionRequiresAppAccess is a channel restriction on an
+	// app nobody may use, which can be used in no channel at all.
+	ErrChannelRestrictionRequiresAppAccess = errors.New("channel restriction requires an app that somebody may use")
+	// ErrNamedEntitiesEmpty is a named list that would name nobody.
+	ErrNamedEntitiesEmpty = errors.New("named entities cannot be empty")
+	// ErrNoValidNamedEntities is a named list none of whose entities exist.
+	ErrNoValidNamedEntities = errors.New("none of the named entities is valid")
+	// ErrTooManyNamedEntities is a named list longer than its documented maximum.
+	ErrTooManyNamedEntities = errors.New("too many named entities")
+	// ErrNamedUserGroupNotFound is a named user group that does not exist here.
+	ErrNamedUserGroupNotFound = errors.New("named user group was not found")
+	// ErrRestrictedChannelNotFound is a channel restriction naming a channel
+	// that does not exist here.
+	ErrRestrictedChannelNotFound = errors.New("restricted channel was not found")
+	// ErrServerNotFound is a server the app's manifest does not declare.
+	ErrServerNotFound = errors.New("MCP server was not found for this app")
+	// ErrServerPermissionBroaderThanApp is a server rule that would admit somebody
+	// the app-level access control list keeps out.
+	ErrServerPermissionBroaderThanApp = errors.New("MCP server permission is broader than the app permission")
+	// ErrServerPermissionOutOfAppScope is a server rule naming somebody the
+	// app-level named list does not include.
+	ErrServerPermissionOutOfAppScope = errors.New("MCP server permission names entities outside the app permission")
+	// ErrAppNotManaged is an app no manager app manages.
+	ErrAppNotManaged = errors.New("app is not managed by a manager app")
+	// ErrAppUseRestricted is a member using an app its access control list
+	// does not admit, or using it in a channel its channel restriction leaves
+	// out.
+	ErrAppUseRestricted = errors.New("app access control does not admit this use")
+)

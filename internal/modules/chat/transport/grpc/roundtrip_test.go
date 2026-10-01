@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"hash/fnv"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -626,12 +627,22 @@ func conversionCases() map[string]conversionCase {
 		"SessionSettings":       {sample: &domain.SessionSettings{}, through: throughInfallible(encodeProtoSessionSettings, decodeProtoSessionSettings)},
 		"InformationBarrier":    {sample: &domain.InformationBarrier{}, through: throughInfallible(encodeProtoBarrier, decodeProtoBarrier)},
 		"AppConfig":             {sample: &domain.AppConfig{}, through: throughInfallible(encodeProtoAppConfig, decodeProtoAppConfig)},
+		"AppPermission":         {sample: &domain.AppPermission{}, through: throughInfallible(encodeProtoAppPermission, decodeProtoAppPermission)},
+		"MCPServer":             {sample: &domain.MCPServer{}, through: throughInfallible(encodeProtoMCPServer, decodeProtoMCPServer)},
+		"MCPServerPermission":   {sample: &domain.MCPServerPermission{}, through: throughInfallible(encodeProtoMCPServerPermission, decodeProtoMCPServerPermission)},
 		"LinkedObject":          {sample: &domain.LinkedObject{}, through: throughInfallible(encodeProtoLinkedObject, decodeProtoLinkedObject)},
 		"AppActivity":           {sample: &domain.AppActivity{}, through: throughInfallible(encodeProtoAppActivity, decodeProtoAppActivity)},
 		"AppActivityPage":       {sample: &domain.AppActivityPage{}, through: throughInfallible(encodeProtoAppActivityPage, decodeProtoAppActivityPage)},
 		"AnalyticsRow":          {sample: &domain.AnalyticsRow{}, through: throughInfallible(encodeProtoAnalyticsRow, decodeProtoAnalyticsRow)},
 		"AnomalyAllowList":      {sample: &domain.AnomalyAllowList{}, through: throughInfallible(encodeProtoAnomalyAllowList, decodeProtoAnomalyAllowList)},
 		"WorkflowStepResponse":  {sample: &domain.WorkflowStepResponse{}, through: throughInfallible(encodeProtoWorkflowStepResponse, decodeProtoWorkflowStepResponse)},
+		"AppPermissionChange": {
+			sample: &domain.AppPermissionChange{},
+			through: func(t *testing.T, filled any) (any, proto.Message, error) {
+				wire := encodeProtoAppPermissionChange("T1", "U1", *filled.(*domain.AppPermissionChange))
+				return ptr(decodeProtoAppPermissionChange(wire)), wire, nil
+			},
+		},
 		"ExternalAuthToken": {
 			sample:  &domain.ExternalAuthToken{},
 			through: throughInfallible(encodeProtoExternalAuthToken, decodeProtoExternalAuthToken),
@@ -790,25 +801,37 @@ type draftAttachmentsRoundTrip struct {
 // list actually names, so adding a converter without a case fails here rather
 // than shipping.
 func TestEveryConverterPairIsExercisedByTheProperty(t *testing.T) {
-	parsed, err := parser.ParseFile(token.NewFileSet(), "grpc.go", nil, parser.SkipObjectResolution)
+	// Every non-test file of the package, not grpc.go alone: a method family
+	// whose adapters live in a file of their own would otherwise carry
+	// converters this property never sees.
+	sources, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	encoders, decoders := make(map[string]struct{}), make(map[string]struct{})
-	for _, declaration := range parsed.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Recv != nil {
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
 			continue
 		}
-		if name, found := strings.CutPrefix(function.Name.Name, "encodeProto"); found {
-			encoders[name] = struct{}{}
+		parsed, err := parser.ParseFile(token.NewFileSet(), source, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if name, found := strings.CutPrefix(function.Name.Name, "decodeProto"); found {
-			decoders[name] = struct{}{}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Recv != nil {
+				continue
+			}
+			if name, found := strings.CutPrefix(function.Name.Name, "encodeProto"); found {
+				encoders[name] = struct{}{}
+			}
+			if name, found := strings.CutPrefix(function.Name.Name, "decodeProto"); found {
+				decoders[name] = struct{}{}
+			}
 		}
 	}
 	if len(encoders) == 0 {
-		t.Fatal("no converters discovered in grpc.go; the source scan is broken")
+		t.Fatal("no converters discovered in the package; the source scan is broken")
 	}
 
 	named := convertersNamedByTheCaseList(t)

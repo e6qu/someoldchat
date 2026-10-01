@@ -143,6 +143,8 @@ type Store struct {
 	sessionSettings               map[string]domain.SessionSettings
 	barriers                      map[domain.BarrierID]domain.InformationBarrier
 	appConfigs                    map[string]domain.AppConfig
+	appPermissions                map[string]domain.AppPermission
+	mcpServerPermissions          map[string]domain.MCPServerPermission
 	aiExcludedConversations       map[domain.ConversationID]struct{}
 	conversationObjects           map[string]domain.LinkedObject
 	appActivities                 []domain.AppActivity
@@ -414,6 +416,8 @@ func New() *Store {
 		sessionSettings:               make(map[string]domain.SessionSettings),
 		barriers:                      make(map[domain.BarrierID]domain.InformationBarrier),
 		appConfigs:                    make(map[string]domain.AppConfig),
+		appPermissions:                make(map[string]domain.AppPermission),
+		mcpServerPermissions:          make(map[string]domain.MCPServerPermission),
 		aiExcludedConversations:       make(map[domain.ConversationID]struct{}),
 		conversationObjects:           make(map[string]domain.LinkedObject),
 		anomalyAllowLists:             make(map[domain.WorkspaceID]domain.AnomalyAllowList),
