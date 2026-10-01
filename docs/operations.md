@@ -111,11 +111,16 @@ replayed within the queue and deadline limits receives HTTP 503 and
 Lambda activator in `deploy/ecs-scale-zero` enforce the same body and deadline
 limits.
 
-The refusal bodies differ. The Lambda answers with the Slack error envelope
-`{"ok":false,"error":"service_unavailable"}` and `application/json`, so an
-official SDK surfaces a Slack error code. `sameoldchat-activator` answers
-`text/plain` through `http.Error`, which an SDK reports as a JSON decode
-failure; giving `internal/activator` the same envelope is an open change.
+Both answer a refusal with Slack's error envelope and `application/json`, so
+an official SDK surfaces a Slack error code rather than a decode failure:
+`service_unavailable` (503, with `Retry-After`) while the stack wakes, the
+spool is full or unavailable, or the application cannot be reached;
+`request_entity_too_large` (413) for a body over the limit, whether declared
+or discovered mid-stream; and, from `sameoldchat-activator` only,
+`invalid_form_data` (400) for a body that cannot be read. Spool overflow and
+spool failure stay distinguishable through
+`sameoldchat_activator_spool_overflow_total` and
+`sameoldchat_activator_spool_failures_total`.
 
 ## Scheduled work while hibernated
 

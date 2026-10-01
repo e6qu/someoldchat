@@ -194,6 +194,7 @@ func run(logger *slog.Logger) int {
 		logger.Error("lifecycle state requires explicit recovery; serving operator endpoints only", "error", err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ErrorHandler = activator.ProxyErrorHandler(logger)
 	spool, err := activator.OpenSQLiteSpool(*stateDB, spoolEncryption, activator.SpoolLimits{MaxBodyBytes: *maxRequestBytes, MaxQueuedBytes: *spoolMaxBytes, MaxQueuedRequests: *spoolMaxRequests})
 	if err != nil {
 		logger.Error("configure request spool", "error", err)

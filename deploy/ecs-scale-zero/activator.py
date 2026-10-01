@@ -86,8 +86,8 @@ def response(status, error, retry_after=None):
     """Answers a refusal with the Slack error envelope, not plain text.
 
     An official Slack SDK decodes every response as JSON, so a text/plain
-    refusal surfaced as a decode error rather than as a Slack error code. See
-    "The refusal bodies differ" in docs/operations.md.
+    refusal surfaces as a decode error rather than as a Slack error code.
+    internal/activator answers with the same envelope and codes.
     """
     headers = {"content-type": "application/json; charset=utf-8"}
     if retry_after is not None:
@@ -336,9 +336,8 @@ def handler(event, _context):
             body = base64.b64decode(body)
         else:
             body = body.encode()
-        # The Go activator rejects an oversized body with 413 before it reaches
-        # the application (internal/activator/handler.go:137). This path had no
-        # cap at all, so the two activators enforced different contracts.
+        # The Go activator rejects an oversized body with the same 413 before
+        # it reaches the application, so both activators enforce one contract.
         if len(body) > MAX_BODY_BYTES:
             return response(413, "request_entity_too_large")
         # An absent method must never be inferred: defaulting to GET turned a

@@ -2,10 +2,14 @@ package activator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -175,6 +179,7 @@ func TestFailedLifecycleDoesNotImplicitlyRetryWake(t *testing.T) {
 	if res.Code != http.StatusServiceUnavailable || driver.count() != 0 {
 		t.Fatalf("status=%d wake calls=%d, want explicit recovery", res.Code, driver.count())
 	}
+	requireSlackError(t, res, "service_unavailable")
 }
 
 func TestActivatorOwnsWakeFenceBeforeDriver(t *testing.T) {
@@ -323,6 +328,7 @@ func TestForwardingActivatorRejectsOversizedBody(t *testing.T) {
 	if res.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status=%d, want body-limit rejection", res.Code)
 	}
+	requireSlackError(t, res, "request_entity_too_large")
 }
 
 func newTestSpool(t *testing.T) *SQLiteSpool {
@@ -354,6 +360,7 @@ func TestDurableForwardingRejectsMalformedBodyAsBadRequest(t *testing.T) {
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want malformed body rejection", response.Code)
 	}
+	requireSlackError(t, response, "invalid_form_data")
 }
 
 // An activator shutting down mid-wake must not record the generation FAILED. A
@@ -504,14 +511,40 @@ func TestDurableForwardingRejectsQueueOverflowWithRetryAfter(t *testing.T) {
 		t.Fatal(err)
 	}
 	controller := lifecycle.New(lifecycle.StateFailed)
-	h := newDurableTestHandler(t, controller, func(context.Context, uint64) error { return nil }, createdHandler(), spool, "activator-a", 1024, time.Second)
+	metrics := observability.NewRegistry()
+	h, err := NewDurableForwardingHandler(context.Background(), controller, func(context.Context, uint64) error { return nil }, createdHandler(), spool, "activator-a", 1024, time.Second, metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
 	response := httptest.NewRecorder()
 	h.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/message", strings.NewReader("overflow")))
 	if response.Code != http.StatusServiceUnavailable || response.Header().Get("Retry-After") != "1" {
 		t.Fatalf("status=%d retry-after=%q, want bounded overflow rejection", response.Code, response.Header().Get("Retry-After"))
 	}
-	if response.Body.String() == "" || !strings.Contains(response.Body.String(), "full") {
-		t.Fatalf("body=%q, want overload distinguishable from a storage failure", response.Body.String())
+	requireSlackError(t, response, "service_unavailable")
+	// The client sees Slack's service_unavailable; the operator tells overload
+	// from a broken control store by the counter.
+	counters := metrics.Snapshot().Counters
+	if counters["sameoldchat_activator_spool_overflow_total"] != 1 || counters["sameoldchat_activator_spool_failures_total"] != 0 {
+		t.Fatalf("counters=%v, want one overflow and no storage failure", counters)
+	}
+}
+
+// requireSlackError asserts the Slack Web API error envelope an official SDK
+// decodes into an error code. A text/plain refusal surfaced in the SDKs as a
+// JSON decode failure instead.
+func requireSlackError(t *testing.T, response *httptest.ResponseRecorder, code string) {
+	t.Helper()
+	if contentType := response.Header().Get("Content-Type"); contentType != "application/json; charset=utf-8" {
+		t.Fatalf("content-type=%q, want the Slack JSON envelope", contentType)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("body=%q is not JSON: %v", response.Body.String(), err)
+	}
+	if len(envelope) != 2 || envelope["ok"] != false || envelope["error"] != code {
+		t.Fatalf("body=%q, want {\"ok\":false,\"error\":%q}", response.Body.String(), code)
 	}
 }
 
@@ -744,4 +777,54 @@ func TestPublicProbeRevealsNoLifecycleStateAndTheFenceHasItsOwnRoute(t *testing.
 	if body := strings.TrimSpace(status.Body.String()); !strings.Contains(body, `"generation":`+strconv.FormatUint(fence, 10)) || !strings.Contains(body, `"state":"waking"`) {
 		t.Fatalf("lifecycle body=%q, want the state and the fencing generation", body)
 	}
+}
+
+// proxiedHandler forwards through a real httputil.ReverseProxy, as
+// cmd/activator does, so the failures the proxy itself produces are covered.
+func proxiedHandler(t *testing.T, target string, maxBody int64) http.Handler {
+	t.Helper()
+	upstream, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	proxy.ErrorHandler = ProxyErrorHandler(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler, err := NewForwardingHandler(context.Background(), lifecycle.New(lifecycle.StateActive), func(context.Context, uint64) error { return nil }, proxy, maxBody, time.Second, observability.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.Close() })
+	mux := http.NewServeMux()
+	handler.RegisterForwarding(mux)
+	return mux
+}
+
+// A chunked body declares no length, so it is caught only once it outgrows the
+// limit mid-stream. The proxy's default handler answered that with a bare 502.
+func TestProxiedChunkedBodyOverTheLimitIsSlacksTooLarge(t *testing.T) {
+	application := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer application.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", io.MultiReader(strings.NewReader("oversized"), strings.NewReader(" body")))
+	request.ContentLength = -1
+	response := httptest.NewRecorder()
+	proxiedHandler(t, application.URL, 8).ServeHTTP(response, request)
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d, want 413", response.Code)
+	}
+	requireSlackError(t, response, "request_entity_too_large")
+}
+
+func TestProxiedUnreachableApplicationIsSlacksServiceUnavailable(t *testing.T) {
+	application := httptest.NewServer(http.NotFoundHandler())
+	target := application.URL
+	application.Close()
+	response := httptest.NewRecorder()
+	proxiedHandler(t, target, 1024).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("hello")))
+	if response.Code != http.StatusServiceUnavailable || response.Header().Get("Retry-After") != "1" {
+		t.Fatalf("status=%d retry-after=%q, want 503 with a retry hint", response.Code, response.Header().Get("Retry-After"))
+	}
+	requireSlackError(t, response, "service_unavailable")
 }
