@@ -296,6 +296,15 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+      # The same pages as text, for a workspace that can read the job log but
+      # cannot download artifacts or reach docs.slack.dev.
+      - name: Print the reference pages of Slack's changes
+        if: failure()
+        run: |
+          if [ -d "$RUNNER_TEMP/slack-reference-drift" ]; then
+            python3 tests/external-contract-qualification/reference-text.py "$RUNNER_TEMP/slack-reference-drift"
+          fi
+
       - name: Run official SDK qualification
         run: make sdk-qualification
 
