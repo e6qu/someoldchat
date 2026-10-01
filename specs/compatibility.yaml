@@ -2527,6 +2527,90 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
       - Enterprise organization and multi-workspace named-entity resolution has not been live-Slack qualified.
+  - method: admin.apps.mcp.servers.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.mcp.servers.list/
+  - method: admin.apps.mcp.servers.permissions.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.mcp.servers.permissions.list/
+  - method: admin.apps.mcp.servers.permissions.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.mcp.servers.permissions.set/
+  - method: admin.apps.permissions.add
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.add/
+  - method: admin.apps.permissions.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.list/
+  - method: admin.apps.permissions.remove
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.remove/
+  - method: admin.apps.permissions.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.set/
+  - method: admin.conversations.bulkSetProperties
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkSetProperties/
+  - method: admin.usergroups.addUsers
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.addUsers/
+  - method: admin.usergroups.create
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.create/
+  - method: admin.usergroups.fetch
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.fetch/
+  - method: admin.usergroups.removeTeams
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.removeTeams/
+  - method: admin.usergroups.removeUsers
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.removeUsers/
+  - method: admin.usergroups.update
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.update/
+  - method: admin.usergroups.uploadUsers
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.uploadUsers/
+  - method: agents.sessions.rename
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/agents.sessions.rename/
+  - method: agents.sessions.setStatus
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/agents.sessions.setStatus/
+  - method: apps.managed.permissions.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.managed.permissions.set/
+  - method: canvases.getContent
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/canvases.getContent/
+  - method: oauth.v2.beginShortTokenRotation
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/oauth.v2.beginShortTokenRotation/
+  - method: oauth.v2.completeShortTokenRotation
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/oauth.v2.completeShortTokenRotation/
 
 decisions:
   # The two Events-API sources above are pinned and hashed, and until this entry
