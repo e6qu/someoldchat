@@ -64,7 +64,7 @@ The figures below come from `make compatibility-report` and
 |---|---|
 | Current Slack Web API methods implemented | 331 of 331 |
 | …with method-level evidence | 331 of 331 |
-| …`behavior-compatible` or better | 281 of 331 |
+| …`behavior-compatible` or better | 269 of 331 |
 | …`verified-against-slack` | 0 of 331 |
 | Recorded known deviations | 92 |
 | Retained legacy methods implemented | 10 of 10 |

@@ -2563,7 +2563,7 @@ operations:
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
   - method: admin.apps.mcp.servers.permissions.set
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.mcp.servers.permissions.set/
     evidence:
@@ -2583,7 +2583,7 @@ operations:
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
   - method: admin.apps.permissions.add
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.add/
     evidence:
@@ -2603,7 +2603,7 @@ operations:
       - failed_to_update_channels is never emitted because the list and its channels are written in one transaction, so a storage failure is reported with the shared engine codes instead.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
   - method: admin.apps.permissions.list
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.list/
     evidence:
@@ -2620,7 +2620,7 @@ operations:
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
   - method: admin.apps.permissions.remove
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.remove/
     evidence:
@@ -2639,7 +2639,7 @@ operations:
       - failed_to_update_channels is never emitted because the list and its channels are written in one transaction, so a storage failure is reported with the shared engine codes instead.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
   - method: admin.apps.permissions.set
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.set/
     evidence:
@@ -2659,7 +2659,7 @@ operations:
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
   - method: admin.conversations.bulkSetProperties
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkSetProperties/
     evidence:
@@ -2691,7 +2691,7 @@ operations:
       - 'users is accepted as a comma-separated string, a JSON-encoded array string, or a JSON array in a JSON body; more than 15000 users or none is invalid_arguments.'
       - 'The documented rate-limit tier is not enforced per method beyond the Web API''s uniform per-method budget.'
   - method: admin.usergroups.create
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.usergroups.create/
     evidence:
@@ -2708,7 +2708,7 @@ operations:
       - 'is_visible is stored and reported, but the reference does not say what hiding a group changes, so a hidden group is still listed by usergroups.list and can still be mentioned by its handle.'
       - 'The documented rate-limit tier is not enforced per method beyond the Web API''s uniform per-method budget.'
   - method: admin.usergroups.fetch
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.usergroups.fetch/
     evidence:
@@ -2723,7 +2723,7 @@ operations:
       - 'Any user group of the workspace may be fetched, as admin.usergroups.listChannels reads any; one usergroups.create made reports is_org_level false. teams lists the workspaces admin.usergroups.addTeams assigned the group to.'
       - 'The documented rate-limit tier is not enforced per method beyond the Web API''s uniform per-method budget.'
   - method: admin.usergroups.removeTeams
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.usergroups.removeTeams/
     evidence:
@@ -2841,7 +2841,7 @@ operations:
       - The reference's description speaks of a user token from the manager app while its token section names a configuration token with app_configurations:write; the method authenticates the configuration token, as apps.manifest.* does.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
   - method: canvases.getContent
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/canvases.getContent/
     evidence:
@@ -2853,7 +2853,7 @@ operations:
       - The reference does not show its HTML, so html is this deployment's rendering of the canvas (domain.CanvasDocumentHTML, the renderer the product's reading view uses), with a heading section as h1-h3, checklists as disabled checkboxes and a mention as a span naming the member id; it is not byte-compatible with Slack's HTML.
       - Markdown is the stored sections joined by blank lines, headings as "#" lines, which canvases.create reads back to the same sections; section kinds this deployment does not model beyond h1-h3 and markdown are returned as their text. A stored body that cannot be decoded answers internal_error. canvas_disabled_user_team is never returned because canvases cannot be disabled per workspace here.
   - method: oauth.v2.beginShortTokenRotation
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.beginShortTokenRotation/
     evidence:
@@ -2867,7 +2867,7 @@ operations:
       - This deployment did not exist before August 19, 2016 and keeps no token creation time, so eligibility is the test the reference gives for tokens of unknown age, a secret (the section after the final "-") shorter than 32 characters, and a token whose secret is 32 or longer answers token_too_long. The xoxp- tokens this deployment issues carry a 20-character hexadecimal secret, which that test calls short, so each of them may be rotated once to a 32-character secret; a token in Slack's pre-2016 sectioned form (xoxp-111-222-333-d6bc76) keeps its sections exactly as the reference describes.
       - Only a non-expiring user token beginning xoxp- is rotated; a bot, execution-scoped or expiring rotating (xoxe.xoxp-) token answers not_allowed_token_type. The token authenticates the request like any other (not_authed, invalid_auth, token_revoked, token_expired, account_inactive) before client_id and client_secret are checked; a token issued to another app answers invalid_client_id. Beginning again replaces the pending replacement. Live-Slack outcomes remain unqualified.
   - method: oauth.v2.completeShortTokenRotation
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.completeShortTokenRotation/
     evidence:
