@@ -1185,6 +1185,14 @@ type Store interface {
 	SetUserGroupEnabled(context.Context, domain.WorkspaceID, domain.UserGroupID, bool, domain.UserID, events.Event) error
 	SetUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserGroupID, []domain.UserID, domain.UserID, events.Event) error
 	SetUserGroupChannels(context.Context, domain.WorkspaceID, domain.UserGroupID, []domain.ConversationID, domain.UserID, events.Event) error
+	// ChangeUserGroupUsers adds the first list's users to a group and removes
+	// the second's in one transaction, leaving every other member alone, so two
+	// administrators changing one group at once cannot undo each other. Adding a
+	// member or removing a non-member is not an error.
+	ChangeUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserGroupID, []domain.UserID, []domain.UserID, domain.UserID, events.Event) error
+	// ChangeUserGroupTeams is ChangeUserGroupUsers for the workspaces a group
+	// is assigned to.
+	ChangeUserGroupTeams(context.Context, domain.WorkspaceID, domain.UserGroupID, []domain.WorkspaceID, []domain.WorkspaceID, domain.UserID, events.Event) error
 	CreateCall(context.Context, domain.Call, events.Event) error
 	GetCall(context.Context, domain.WorkspaceID, domain.CallID) (domain.Call, error)
 	UpdateCall(context.Context, domain.Call, events.Event) error

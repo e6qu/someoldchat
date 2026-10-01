@@ -19,17 +19,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	UserGroupsService_CreateUserGroup_FullMethodName         = "/sameoldchat.chat.v1.UserGroupsService/CreateUserGroup"
-	UserGroupsService_UpdateUserGroup_FullMethodName         = "/sameoldchat.chat.v1.UserGroupsService/UpdateUserGroup"
-	UserGroupsService_EnableUserGroup_FullMethodName         = "/sameoldchat.chat.v1.UserGroupsService/EnableUserGroup"
-	UserGroupsService_DisableUserGroup_FullMethodName        = "/sameoldchat.chat.v1.UserGroupsService/DisableUserGroup"
-	UserGroupsService_UserGroups_FullMethodName              = "/sameoldchat.chat.v1.UserGroupsService/UserGroups"
-	UserGroupsService_UserGroupUsers_FullMethodName          = "/sameoldchat.chat.v1.UserGroupsService/UserGroupUsers"
-	UserGroupsService_SetUserGroupUsers_FullMethodName       = "/sameoldchat.chat.v1.UserGroupsService/SetUserGroupUsers"
-	UserGroupsService_UserGroupChannels_FullMethodName       = "/sameoldchat.chat.v1.UserGroupsService/UserGroupChannels"
-	UserGroupsService_AddUserGroupChannels_FullMethodName    = "/sameoldchat.chat.v1.UserGroupsService/AddUserGroupChannels"
-	UserGroupsService_RemoveUserGroupChannels_FullMethodName = "/sameoldchat.chat.v1.UserGroupsService/RemoveUserGroupChannels"
-	UserGroupsService_AdminAddUserGroupTeams_FullMethodName  = "/sameoldchat.chat.v1.UserGroupsService/AdminAddUserGroupTeams"
+	UserGroupsService_CreateUserGroup_FullMethodName           = "/sameoldchat.chat.v1.UserGroupsService/CreateUserGroup"
+	UserGroupsService_UpdateUserGroup_FullMethodName           = "/sameoldchat.chat.v1.UserGroupsService/UpdateUserGroup"
+	UserGroupsService_EnableUserGroup_FullMethodName           = "/sameoldchat.chat.v1.UserGroupsService/EnableUserGroup"
+	UserGroupsService_DisableUserGroup_FullMethodName          = "/sameoldchat.chat.v1.UserGroupsService/DisableUserGroup"
+	UserGroupsService_UserGroups_FullMethodName                = "/sameoldchat.chat.v1.UserGroupsService/UserGroups"
+	UserGroupsService_UserGroupUsers_FullMethodName            = "/sameoldchat.chat.v1.UserGroupsService/UserGroupUsers"
+	UserGroupsService_SetUserGroupUsers_FullMethodName         = "/sameoldchat.chat.v1.UserGroupsService/SetUserGroupUsers"
+	UserGroupsService_UserGroupChannels_FullMethodName         = "/sameoldchat.chat.v1.UserGroupsService/UserGroupChannels"
+	UserGroupsService_AddUserGroupChannels_FullMethodName      = "/sameoldchat.chat.v1.UserGroupsService/AddUserGroupChannels"
+	UserGroupsService_RemoveUserGroupChannels_FullMethodName   = "/sameoldchat.chat.v1.UserGroupsService/RemoveUserGroupChannels"
+	UserGroupsService_AdminAddUserGroupTeams_FullMethodName    = "/sameoldchat.chat.v1.UserGroupsService/AdminAddUserGroupTeams"
+	UserGroupsService_AdminRemoveUserGroupTeams_FullMethodName = "/sameoldchat.chat.v1.UserGroupsService/AdminRemoveUserGroupTeams"
+	UserGroupsService_AdminCreateUserGroup_FullMethodName      = "/sameoldchat.chat.v1.UserGroupsService/AdminCreateUserGroup"
+	UserGroupsService_AdminFetchUserGroup_FullMethodName       = "/sameoldchat.chat.v1.UserGroupsService/AdminFetchUserGroup"
+	UserGroupsService_AdminUpdateUserGroup_FullMethodName      = "/sameoldchat.chat.v1.UserGroupsService/AdminUpdateUserGroup"
+	UserGroupsService_AdminAddUserGroupUsers_FullMethodName    = "/sameoldchat.chat.v1.UserGroupsService/AdminAddUserGroupUsers"
+	UserGroupsService_AdminRemoveUserGroupUsers_FullMethodName = "/sameoldchat.chat.v1.UserGroupsService/AdminRemoveUserGroupUsers"
+	UserGroupsService_AdminUploadUserGroupUsers_FullMethodName = "/sameoldchat.chat.v1.UserGroupsService/AdminUploadUserGroupUsers"
 )
 
 // UserGroupsServiceClient is the client API for UserGroupsService service.
@@ -47,6 +54,13 @@ type UserGroupsServiceClient interface {
 	AddUserGroupChannels(ctx context.Context, in *UserGroupChannelsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	RemoveUserGroupChannels(ctx context.Context, in *UserGroupChannelsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminAddUserGroupTeams(ctx context.Context, in *AdminUserGroupTeamsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminRemoveUserGroupTeams(ctx context.Context, in *AdminUserGroupTeamsRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminCreateUserGroup(ctx context.Context, in *AdminCreateUserGroupRequest, opts ...grpc.CallOption) (*UserGroup, error)
+	AdminFetchUserGroup(ctx context.Context, in *UserGroupRequest, opts ...grpc.CallOption) (*UserGroup, error)
+	AdminUpdateUserGroup(ctx context.Context, in *AdminUpdateUserGroupRequest, opts ...grpc.CallOption) (*UserGroup, error)
+	AdminAddUserGroupUsers(ctx context.Context, in *UserGroupUsersRequest, opts ...grpc.CallOption) (*UserGroupMembershipResult, error)
+	AdminRemoveUserGroupUsers(ctx context.Context, in *UserGroupUsersRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminUploadUserGroupUsers(ctx context.Context, in *AdminUploadUserGroupUsersRequest, opts ...grpc.CallOption) (*UserGroupMembershipResult, error)
 }
 
 type userGroupsServiceClient struct {
@@ -167,6 +181,76 @@ func (c *userGroupsServiceClient) AdminAddUserGroupTeams(ctx context.Context, in
 	return out, nil
 }
 
+func (c *userGroupsServiceClient) AdminRemoveUserGroupTeams(ctx context.Context, in *AdminUserGroupTeamsRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, UserGroupsService_AdminRemoveUserGroupTeams_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userGroupsServiceClient) AdminCreateUserGroup(ctx context.Context, in *AdminCreateUserGroupRequest, opts ...grpc.CallOption) (*UserGroup, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserGroup)
+	err := c.cc.Invoke(ctx, UserGroupsService_AdminCreateUserGroup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userGroupsServiceClient) AdminFetchUserGroup(ctx context.Context, in *UserGroupRequest, opts ...grpc.CallOption) (*UserGroup, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserGroup)
+	err := c.cc.Invoke(ctx, UserGroupsService_AdminFetchUserGroup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userGroupsServiceClient) AdminUpdateUserGroup(ctx context.Context, in *AdminUpdateUserGroupRequest, opts ...grpc.CallOption) (*UserGroup, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserGroup)
+	err := c.cc.Invoke(ctx, UserGroupsService_AdminUpdateUserGroup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userGroupsServiceClient) AdminAddUserGroupUsers(ctx context.Context, in *UserGroupUsersRequest, opts ...grpc.CallOption) (*UserGroupMembershipResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserGroupMembershipResult)
+	err := c.cc.Invoke(ctx, UserGroupsService_AdminAddUserGroupUsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userGroupsServiceClient) AdminRemoveUserGroupUsers(ctx context.Context, in *UserGroupUsersRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, UserGroupsService_AdminRemoveUserGroupUsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userGroupsServiceClient) AdminUploadUserGroupUsers(ctx context.Context, in *AdminUploadUserGroupUsersRequest, opts ...grpc.CallOption) (*UserGroupMembershipResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserGroupMembershipResult)
+	err := c.cc.Invoke(ctx, UserGroupsService_AdminUploadUserGroupUsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserGroupsServiceServer is the server API for UserGroupsService service.
 // All implementations should embed UnimplementedUserGroupsServiceServer
 // for forward compatibility.
@@ -182,6 +266,13 @@ type UserGroupsServiceServer interface {
 	AddUserGroupChannels(context.Context, *UserGroupChannelsRequest) (*MutationResponse, error)
 	RemoveUserGroupChannels(context.Context, *UserGroupChannelsRequest) (*MutationResponse, error)
 	AdminAddUserGroupTeams(context.Context, *AdminUserGroupTeamsRequest) (*MutationResponse, error)
+	AdminRemoveUserGroupTeams(context.Context, *AdminUserGroupTeamsRequest) (*MutationResponse, error)
+	AdminCreateUserGroup(context.Context, *AdminCreateUserGroupRequest) (*UserGroup, error)
+	AdminFetchUserGroup(context.Context, *UserGroupRequest) (*UserGroup, error)
+	AdminUpdateUserGroup(context.Context, *AdminUpdateUserGroupRequest) (*UserGroup, error)
+	AdminAddUserGroupUsers(context.Context, *UserGroupUsersRequest) (*UserGroupMembershipResult, error)
+	AdminRemoveUserGroupUsers(context.Context, *UserGroupUsersRequest) (*MutationResponse, error)
+	AdminUploadUserGroupUsers(context.Context, *AdminUploadUserGroupUsersRequest) (*UserGroupMembershipResult, error)
 }
 
 // UnimplementedUserGroupsServiceServer should be embedded to have
@@ -223,6 +314,27 @@ func (UnimplementedUserGroupsServiceServer) RemoveUserGroupChannels(context.Cont
 }
 func (UnimplementedUserGroupsServiceServer) AdminAddUserGroupTeams(context.Context, *AdminUserGroupTeamsRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminAddUserGroupTeams not implemented")
+}
+func (UnimplementedUserGroupsServiceServer) AdminRemoveUserGroupTeams(context.Context, *AdminUserGroupTeamsRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminRemoveUserGroupTeams not implemented")
+}
+func (UnimplementedUserGroupsServiceServer) AdminCreateUserGroup(context.Context, *AdminCreateUserGroupRequest) (*UserGroup, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminCreateUserGroup not implemented")
+}
+func (UnimplementedUserGroupsServiceServer) AdminFetchUserGroup(context.Context, *UserGroupRequest) (*UserGroup, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminFetchUserGroup not implemented")
+}
+func (UnimplementedUserGroupsServiceServer) AdminUpdateUserGroup(context.Context, *AdminUpdateUserGroupRequest) (*UserGroup, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminUpdateUserGroup not implemented")
+}
+func (UnimplementedUserGroupsServiceServer) AdminAddUserGroupUsers(context.Context, *UserGroupUsersRequest) (*UserGroupMembershipResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminAddUserGroupUsers not implemented")
+}
+func (UnimplementedUserGroupsServiceServer) AdminRemoveUserGroupUsers(context.Context, *UserGroupUsersRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminRemoveUserGroupUsers not implemented")
+}
+func (UnimplementedUserGroupsServiceServer) AdminUploadUserGroupUsers(context.Context, *AdminUploadUserGroupUsersRequest) (*UserGroupMembershipResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminUploadUserGroupUsers not implemented")
 }
 func (UnimplementedUserGroupsServiceServer) testEmbeddedByValue() {}
 
@@ -442,6 +554,132 @@ func _UserGroupsService_AdminAddUserGroupTeams_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserGroupsService_AdminRemoveUserGroupTeams_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminUserGroupTeamsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserGroupsServiceServer).AdminRemoveUserGroupTeams(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserGroupsService_AdminRemoveUserGroupTeams_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserGroupsServiceServer).AdminRemoveUserGroupTeams(ctx, req.(*AdminUserGroupTeamsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserGroupsService_AdminCreateUserGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminCreateUserGroupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserGroupsServiceServer).AdminCreateUserGroup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserGroupsService_AdminCreateUserGroup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserGroupsServiceServer).AdminCreateUserGroup(ctx, req.(*AdminCreateUserGroupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserGroupsService_AdminFetchUserGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UserGroupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserGroupsServiceServer).AdminFetchUserGroup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserGroupsService_AdminFetchUserGroup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserGroupsServiceServer).AdminFetchUserGroup(ctx, req.(*UserGroupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserGroupsService_AdminUpdateUserGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminUpdateUserGroupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserGroupsServiceServer).AdminUpdateUserGroup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserGroupsService_AdminUpdateUserGroup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserGroupsServiceServer).AdminUpdateUserGroup(ctx, req.(*AdminUpdateUserGroupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserGroupsService_AdminAddUserGroupUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UserGroupUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserGroupsServiceServer).AdminAddUserGroupUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserGroupsService_AdminAddUserGroupUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserGroupsServiceServer).AdminAddUserGroupUsers(ctx, req.(*UserGroupUsersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserGroupsService_AdminRemoveUserGroupUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UserGroupUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserGroupsServiceServer).AdminRemoveUserGroupUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserGroupsService_AdminRemoveUserGroupUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserGroupsServiceServer).AdminRemoveUserGroupUsers(ctx, req.(*UserGroupUsersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserGroupsService_AdminUploadUserGroupUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminUploadUserGroupUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserGroupsServiceServer).AdminUploadUserGroupUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserGroupsService_AdminUploadUserGroupUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserGroupsServiceServer).AdminUploadUserGroupUsers(ctx, req.(*AdminUploadUserGroupUsersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UserGroupsService_ServiceDesc is the grpc.ServiceDesc for UserGroupsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -492,6 +730,34 @@ var UserGroupsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminAddUserGroupTeams",
 			Handler:    _UserGroupsService_AdminAddUserGroupTeams_Handler,
+		},
+		{
+			MethodName: "AdminRemoveUserGroupTeams",
+			Handler:    _UserGroupsService_AdminRemoveUserGroupTeams_Handler,
+		},
+		{
+			MethodName: "AdminCreateUserGroup",
+			Handler:    _UserGroupsService_AdminCreateUserGroup_Handler,
+		},
+		{
+			MethodName: "AdminFetchUserGroup",
+			Handler:    _UserGroupsService_AdminFetchUserGroup_Handler,
+		},
+		{
+			MethodName: "AdminUpdateUserGroup",
+			Handler:    _UserGroupsService_AdminUpdateUserGroup_Handler,
+		},
+		{
+			MethodName: "AdminAddUserGroupUsers",
+			Handler:    _UserGroupsService_AdminAddUserGroupUsers_Handler,
+		},
+		{
+			MethodName: "AdminRemoveUserGroupUsers",
+			Handler:    _UserGroupsService_AdminRemoveUserGroupUsers_Handler,
+		},
+		{
+			MethodName: "AdminUploadUserGroupUsers",
+			Handler:    _UserGroupsService_AdminUploadUserGroupUsers_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

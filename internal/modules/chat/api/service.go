@@ -266,6 +266,15 @@ type Service interface {
 	UserGroupChannels(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) ([]domain.ConversationID, error)
 	AddUserGroupChannels(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.ConversationID) error
 	AdminAddUserGroupTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.WorkspaceID) error
+	AdminRemoveUserGroupTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.WorkspaceID) error
+	// AdminCreateUserGroup creates an organization group; the bool is is_visible.
+	AdminCreateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, bool) (domain.UserGroup, error)
+	AdminFetchUserGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) (domain.UserGroup, error)
+	AdminUpdateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, domain.UserGroupPatch) (domain.UserGroup, error)
+	AdminAddUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserID) (domain.UserGroupMembershipResult, error)
+	AdminRemoveUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserID) error
+	// AdminUploadUserGroupUsers takes the uploaded "member id, email" CSV text.
+	AdminUploadUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, string) (domain.UserGroupMembershipResult, error)
 	RemoveUserGroupChannels(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.ConversationID) error
 	AdminSetWorkspaceName(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.Workspace, error)
 	AdminSetWorkspaceDescription(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.Workspace, error)

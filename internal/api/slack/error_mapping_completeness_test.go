@@ -308,6 +308,14 @@ func recordedNonPinnedCodes() map[string]string {
 		"name_already_exists":   "usergroups.create and usergroups.update: the name is taken by another group",
 		"handle_already_exists": "usergroups.create and usergroups.update: the handle is taken by another group",
 		"invalid_users":         "usergroups.users.update: a named member is not in the workspace; the snapshot's enum declares no code for it, and usergroup_not_found named the wrong missing thing",
+		// admin.usergroups.* organization methods are absent from the pinned
+		// snapshot; each code is in its current method reference.
+		"invalid_usergroup":          "current admin.usergroups.addUsers, fetch, removeUsers, update and uploadUsers references: no group has the ID",
+		"invalid_team_ids":           "current admin.usergroups.removeTeams reference: a team_ids entry is not a workspace of the organization",
+		"no_team_ids_given":          "current admin.usergroups.removeTeams reference: team_ids is empty",
+		"unable_to_parse_csv":        "current admin.usergroups.uploadUsers reference: the file is not a member id, email CSV",
+		"no_valid_users":             "current admin.usergroups.uploadUsers reference: the CSV names no user who can join",
+		"visible_group_needs_handle": "current admin.usergroups.update reference: a visible group's handle was removed",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so

@@ -22,20 +22,26 @@ const (
 )
 
 type UserGroup struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Handle        string                 `protobuf:"bytes,4,opt,name=handle,proto3" json:"handle,omitempty"`
-	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
-	CreatorId     string                 `protobuf:"bytes,6,opt,name=creator_id,json=creatorId,proto3" json:"creator_id,omitempty"`
-	UpdatedBy     string                 `protobuf:"bytes,7,opt,name=updated_by,json=updatedBy,proto3" json:"updated_by,omitempty"`
-	CreatedAt     int64                  `protobuf:"varint,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     int64                  `protobuf:"varint,9,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	DeletedAt     int64                  `protobuf:"varint,10,opt,name=deleted_at,json=deletedAt,proto3" json:"deleted_at,omitempty"`
-	Enabled       bool                   `protobuf:"varint,11,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	Users         []string               `protobuf:"bytes,12,rep,name=users,proto3" json:"users,omitempty"`
-	Channels      []string               `protobuf:"bytes,13,rep,name=channels,proto3" json:"channels,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Id          string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Name        string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Handle      string                 `protobuf:"bytes,4,opt,name=handle,proto3" json:"handle,omitempty"`
+	Description string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	CreatorId   string                 `protobuf:"bytes,6,opt,name=creator_id,json=creatorId,proto3" json:"creator_id,omitempty"`
+	UpdatedBy   string                 `protobuf:"bytes,7,opt,name=updated_by,json=updatedBy,proto3" json:"updated_by,omitempty"`
+	CreatedAt   int64                  `protobuf:"varint,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt   int64                  `protobuf:"varint,9,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	DeletedAt   int64                  `protobuf:"varint,10,opt,name=deleted_at,json=deletedAt,proto3" json:"deleted_at,omitempty"`
+	Enabled     bool                   `protobuf:"varint,11,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Users       []string               `protobuf:"bytes,12,rep,name=users,proto3" json:"users,omitempty"`
+	Channels    []string               `protobuf:"bytes,13,rep,name=channels,proto3" json:"channels,omitempty"`
+	// Whether admin.usergroups.create made the group for the organization.
+	OrgLevel bool `protobuf:"varint,14,opt,name=org_level,json=orgLevel,proto3" json:"org_level,omitempty"`
+	// The inverse of Slack's is_visible.
+	Hidden bool `protobuf:"varint,15,opt,name=hidden,proto3" json:"hidden,omitempty"`
+	// The workspaces the group is assigned to.
+	Teams         []string `protobuf:"bytes,16,rep,name=teams,proto3" json:"teams,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -157,6 +163,27 @@ func (x *UserGroup) GetUsers() []string {
 func (x *UserGroup) GetChannels() []string {
 	if x != nil {
 		return x.Channels
+	}
+	return nil
+}
+
+func (x *UserGroup) GetOrgLevel() bool {
+	if x != nil {
+		return x.OrgLevel
+	}
+	return false
+}
+
+func (x *UserGroup) GetHidden() bool {
+	if x != nil {
+		return x.Hidden
+	}
+	return false
+}
+
+func (x *UserGroup) GetTeams() []string {
+	if x != nil {
+		return x.Teams
 	}
 	return nil
 }
@@ -827,11 +854,369 @@ func (x *AdminUserGroupTeamsRequest) GetTeamIds() []string {
 	return nil
 }
 
+type AdminCreateUserGroupRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Handle        string                 `protobuf:"bytes,4,opt,name=handle,proto3" json:"handle,omitempty"`
+	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	Visible       bool                   `protobuf:"varint,6,opt,name=visible,proto3" json:"visible,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminCreateUserGroupRequest) Reset() {
+	*x = AdminCreateUserGroupRequest{}
+	mi := &file_sameoldchat_chat_v1_usergroups_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminCreateUserGroupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminCreateUserGroupRequest) ProtoMessage() {}
+
+func (x *AdminCreateUserGroupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_usergroups_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminCreateUserGroupRequest.ProtoReflect.Descriptor instead.
+func (*AdminCreateUserGroupRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_usergroups_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *AdminCreateUserGroupRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AdminCreateUserGroupRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AdminCreateUserGroupRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AdminCreateUserGroupRequest) GetHandle() string {
+	if x != nil {
+		return x.Handle
+	}
+	return ""
+}
+
+func (x *AdminCreateUserGroupRequest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *AdminCreateUserGroupRequest) GetVisible() bool {
+	if x != nil {
+		return x.Visible
+	}
+	return false
+}
+
+// An absent optional field is a property the caller did not name.
+type AdminUpdateUserGroupRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UserGroupId   string                 `protobuf:"bytes,3,opt,name=user_group_id,json=userGroupId,proto3" json:"user_group_id,omitempty"`
+	Name          *string                `protobuf:"bytes,4,opt,name=name,proto3,oneof" json:"name,omitempty"`
+	Handle        *string                `protobuf:"bytes,5,opt,name=handle,proto3,oneof" json:"handle,omitempty"`
+	Description   *string                `protobuf:"bytes,6,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	Visible       *bool                  `protobuf:"varint,7,opt,name=visible,proto3,oneof" json:"visible,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminUpdateUserGroupRequest) Reset() {
+	*x = AdminUpdateUserGroupRequest{}
+	mi := &file_sameoldchat_chat_v1_usergroups_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminUpdateUserGroupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminUpdateUserGroupRequest) ProtoMessage() {}
+
+func (x *AdminUpdateUserGroupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_usergroups_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminUpdateUserGroupRequest.ProtoReflect.Descriptor instead.
+func (*AdminUpdateUserGroupRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_usergroups_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *AdminUpdateUserGroupRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AdminUpdateUserGroupRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AdminUpdateUserGroupRequest) GetUserGroupId() string {
+	if x != nil {
+		return x.UserGroupId
+	}
+	return ""
+}
+
+func (x *AdminUpdateUserGroupRequest) GetName() string {
+	if x != nil && x.Name != nil {
+		return *x.Name
+	}
+	return ""
+}
+
+func (x *AdminUpdateUserGroupRequest) GetHandle() string {
+	if x != nil && x.Handle != nil {
+		return *x.Handle
+	}
+	return ""
+}
+
+func (x *AdminUpdateUserGroupRequest) GetDescription() string {
+	if x != nil && x.Description != nil {
+		return *x.Description
+	}
+	return ""
+}
+
+func (x *AdminUpdateUserGroupRequest) GetVisible() bool {
+	if x != nil && x.Visible != nil {
+		return *x.Visible
+	}
+	return false
+}
+
+type AdminUploadUserGroupUsersRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UserGroupId string                 `protobuf:"bytes,3,opt,name=user_group_id,json=userGroupId,proto3" json:"user_group_id,omitempty"`
+	// The uploaded "member id, email" CSV.
+	File          string `protobuf:"bytes,4,opt,name=file,proto3" json:"file,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminUploadUserGroupUsersRequest) Reset() {
+	*x = AdminUploadUserGroupUsersRequest{}
+	mi := &file_sameoldchat_chat_v1_usergroups_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminUploadUserGroupUsersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminUploadUserGroupUsersRequest) ProtoMessage() {}
+
+func (x *AdminUploadUserGroupUsersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_usergroups_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminUploadUserGroupUsersRequest.ProtoReflect.Descriptor instead.
+func (*AdminUploadUserGroupUsersRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_usergroups_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *AdminUploadUserGroupUsersRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AdminUploadUserGroupUsersRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AdminUploadUserGroupUsersRequest) GetUserGroupId() string {
+	if x != nil {
+		return x.UserGroupId
+	}
+	return ""
+}
+
+func (x *AdminUploadUserGroupUsersRequest) GetFile() string {
+	if x != nil {
+		return x.File
+	}
+	return ""
+}
+
+type UserGroupMemberRefusal struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserGroupMemberRefusal) Reset() {
+	*x = UserGroupMemberRefusal{}
+	mi := &file_sameoldchat_chat_v1_usergroups_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserGroupMemberRefusal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserGroupMemberRefusal) ProtoMessage() {}
+
+func (x *UserGroupMemberRefusal) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_usergroups_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserGroupMemberRefusal.ProtoReflect.Descriptor instead.
+func (*UserGroupMemberRefusal) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_usergroups_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *UserGroupMemberRefusal) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *UserGroupMemberRefusal) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type UserGroupMembershipResult struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Usergroup     *UserGroup                `protobuf:"bytes,1,opt,name=usergroup,proto3" json:"usergroup,omitempty"`
+	Succeeded     int64                     `protobuf:"varint,2,opt,name=succeeded,proto3" json:"succeeded,omitempty"`
+	Invalid       []*UserGroupMemberRefusal `protobuf:"bytes,3,rep,name=invalid,proto3" json:"invalid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserGroupMembershipResult) Reset() {
+	*x = UserGroupMembershipResult{}
+	mi := &file_sameoldchat_chat_v1_usergroups_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserGroupMembershipResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserGroupMembershipResult) ProtoMessage() {}
+
+func (x *UserGroupMembershipResult) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_usergroups_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserGroupMembershipResult.ProtoReflect.Descriptor instead.
+func (*UserGroupMembershipResult) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_usergroups_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *UserGroupMembershipResult) GetUsergroup() *UserGroup {
+	if x != nil {
+		return x.Usergroup
+	}
+	return nil
+}
+
+func (x *UserGroupMembershipResult) GetSucceeded() int64 {
+	if x != nil {
+		return x.Succeeded
+	}
+	return 0
+}
+
+func (x *UserGroupMembershipResult) GetInvalid() []*UserGroupMemberRefusal {
+	if x != nil {
+		return x.Invalid
+	}
+	return nil
+}
+
 var File_sameoldchat_chat_v1_usergroups_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_usergroups_proto_rawDesc = "" +
 	"\n" +
-	"$sameoldchat/chat/v1/usergroups.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xf3\x02\n" +
+	"$sameoldchat/chat/v1/usergroups.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xbe\x03\n" +
 	"\tUserGroup\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x12\n" +
@@ -851,7 +1236,10 @@ const file_sameoldchat_chat_v1_usergroups_proto_rawDesc = "" +
 	" \x01(\x03R\tdeletedAt\x12\x18\n" +
 	"\aenabled\x18\v \x01(\bR\aenabled\x12\x14\n" +
 	"\x05users\x18\f \x03(\tR\x05users\x12\x1a\n" +
-	"\bchannels\x18\r \x03(\tR\bchannels\"r\n" +
+	"\bchannels\x18\r \x03(\tR\bchannels\x12\x1b\n" +
+	"\torg_level\x18\x0e \x01(\bR\borgLevel\x12\x16\n" +
+	"\x06hidden\x18\x0f \x01(\bR\x06hidden\x12\x14\n" +
+	"\x05teams\x18\x10 \x03(\tR\x05teams\"r\n" +
 	"\x10UserGroupRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
@@ -902,7 +1290,39 @@ const file_sameoldchat_chat_v1_usergroups_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
 	"\fusergroup_id\x18\x03 \x01(\tR\vusergroupId\x12\x19\n" +
-	"\bteam_ids\x18\x04 \x03(\tR\ateamIds2\xe6\b\n" +
+	"\bteam_ids\x18\x04 \x03(\tR\ateamIds\"\xc1\x01\n" +
+	"\x1bAdminCreateUserGroupRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x16\n" +
+	"\x06handle\x18\x04 \x01(\tR\x06handle\x12 \n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\x12\x18\n" +
+	"\avisible\x18\x06 \x01(\bR\avisible\"\xa9\x02\n" +
+	"\x1bAdminUpdateUserGroupRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
+	"\ruser_group_id\x18\x03 \x01(\tR\vuserGroupId\x12\x17\n" +
+	"\x04name\x18\x04 \x01(\tH\x00R\x04name\x88\x01\x01\x12\x1b\n" +
+	"\x06handle\x18\x05 \x01(\tH\x01R\x06handle\x88\x01\x01\x12%\n" +
+	"\vdescription\x18\x06 \x01(\tH\x02R\vdescription\x88\x01\x01\x12\x1d\n" +
+	"\avisible\x18\a \x01(\bH\x03R\avisible\x88\x01\x01B\a\n" +
+	"\x05_nameB\t\n" +
+	"\a_handleB\x0e\n" +
+	"\f_descriptionB\n" +
+	"\n" +
+	"\b_visible\"\x96\x01\n" +
+	" AdminUploadUserGroupUsersRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
+	"\ruser_group_id\x18\x03 \x01(\tR\vuserGroupId\x12\x12\n" +
+	"\x04file\x18\x04 \x01(\tR\x04file\"I\n" +
+	"\x16UserGroupMemberRefusal\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xbe\x01\n" +
+	"\x19UserGroupMembershipResult\x12<\n" +
+	"\tusergroup\x18\x01 \x01(\v2\x1e.sameoldchat.chat.v1.UserGroupR\tusergroup\x12\x1c\n" +
+	"\tsucceeded\x18\x02 \x01(\x03R\tsucceeded\x12E\n" +
+	"\ainvalid\x18\x03 \x03(\v2+.sameoldchat.chat.v1.UserGroupMemberRefusalR\ainvalid2\xf8\x0e\n" +
 	"\x11UserGroupsService\x12^\n" +
 	"\x0fCreateUserGroup\x12+.sameoldchat.chat.v1.CreateUserGroupRequest\x1a\x1e.sameoldchat.chat.v1.UserGroup\x12^\n" +
 	"\x0fUpdateUserGroup\x12+.sameoldchat.chat.v1.UpdateUserGroupRequest\x1a\x1e.sameoldchat.chat.v1.UserGroup\x12X\n" +
@@ -915,7 +1335,14 @@ const file_sameoldchat_chat_v1_usergroups_proto_rawDesc = "" +
 	"\x11UserGroupChannels\x12%.sameoldchat.chat.v1.UserGroupRequest\x1a..sameoldchat.chat.v1.UserGroupChannelsResponse\x12l\n" +
 	"\x14AddUserGroupChannels\x12-.sameoldchat.chat.v1.UserGroupChannelsRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12o\n" +
 	"\x17RemoveUserGroupChannels\x12-.sameoldchat.chat.v1.UserGroupChannelsRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12p\n" +
-	"\x16AdminAddUserGroupTeams\x12/.sameoldchat.chat.v1.AdminUserGroupTeamsRequest\x1a%.sameoldchat.chat.v1.MutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x16AdminAddUserGroupTeams\x12/.sameoldchat.chat.v1.AdminUserGroupTeamsRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12s\n" +
+	"\x19AdminRemoveUserGroupTeams\x12/.sameoldchat.chat.v1.AdminUserGroupTeamsRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12h\n" +
+	"\x14AdminCreateUserGroup\x120.sameoldchat.chat.v1.AdminCreateUserGroupRequest\x1a\x1e.sameoldchat.chat.v1.UserGroup\x12\\\n" +
+	"\x13AdminFetchUserGroup\x12%.sameoldchat.chat.v1.UserGroupRequest\x1a\x1e.sameoldchat.chat.v1.UserGroup\x12h\n" +
+	"\x14AdminUpdateUserGroup\x120.sameoldchat.chat.v1.AdminUpdateUserGroupRequest\x1a\x1e.sameoldchat.chat.v1.UserGroup\x12t\n" +
+	"\x16AdminAddUserGroupUsers\x12*.sameoldchat.chat.v1.UserGroupUsersRequest\x1a..sameoldchat.chat.v1.UserGroupMembershipResult\x12n\n" +
+	"\x19AdminRemoveUserGroupUsers\x12*.sameoldchat.chat.v1.UserGroupUsersRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12\x82\x01\n" +
+	"\x19AdminUploadUserGroupUsers\x125.sameoldchat.chat.v1.AdminUploadUserGroupUsersRequest\x1a..sameoldchat.chat.v1.UserGroupMembershipResultBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_usergroups_proto_rawDescOnce sync.Once
@@ -929,50 +1356,71 @@ func file_sameoldchat_chat_v1_usergroups_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_usergroups_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_usergroups_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_sameoldchat_chat_v1_usergroups_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_sameoldchat_chat_v1_usergroups_proto_goTypes = []any{
-	(*UserGroup)(nil),                  // 0: sameoldchat.chat.v1.UserGroup
-	(*UserGroupRequest)(nil),           // 1: sameoldchat.chat.v1.UserGroupRequest
-	(*UserGroupsRequest)(nil),          // 2: sameoldchat.chat.v1.UserGroupsRequest
-	(*CreateUserGroupRequest)(nil),     // 3: sameoldchat.chat.v1.CreateUserGroupRequest
-	(*UpdateUserGroupRequest)(nil),     // 4: sameoldchat.chat.v1.UpdateUserGroupRequest
-	(*UserGroupUsersRequest)(nil),      // 5: sameoldchat.chat.v1.UserGroupUsersRequest
-	(*UserGroupPage)(nil),              // 6: sameoldchat.chat.v1.UserGroupPage
-	(*UserGroupUsersResponse)(nil),     // 7: sameoldchat.chat.v1.UserGroupUsersResponse
-	(*UserGroupChannelsRequest)(nil),   // 8: sameoldchat.chat.v1.UserGroupChannelsRequest
-	(*UserGroupChannelsResponse)(nil),  // 9: sameoldchat.chat.v1.UserGroupChannelsResponse
-	(*AdminUserGroupTeamsRequest)(nil), // 10: sameoldchat.chat.v1.AdminUserGroupTeamsRequest
-	(*MutationResponse)(nil),           // 11: sameoldchat.chat.v1.MutationResponse
+	(*UserGroup)(nil),                        // 0: sameoldchat.chat.v1.UserGroup
+	(*UserGroupRequest)(nil),                 // 1: sameoldchat.chat.v1.UserGroupRequest
+	(*UserGroupsRequest)(nil),                // 2: sameoldchat.chat.v1.UserGroupsRequest
+	(*CreateUserGroupRequest)(nil),           // 3: sameoldchat.chat.v1.CreateUserGroupRequest
+	(*UpdateUserGroupRequest)(nil),           // 4: sameoldchat.chat.v1.UpdateUserGroupRequest
+	(*UserGroupUsersRequest)(nil),            // 5: sameoldchat.chat.v1.UserGroupUsersRequest
+	(*UserGroupPage)(nil),                    // 6: sameoldchat.chat.v1.UserGroupPage
+	(*UserGroupUsersResponse)(nil),           // 7: sameoldchat.chat.v1.UserGroupUsersResponse
+	(*UserGroupChannelsRequest)(nil),         // 8: sameoldchat.chat.v1.UserGroupChannelsRequest
+	(*UserGroupChannelsResponse)(nil),        // 9: sameoldchat.chat.v1.UserGroupChannelsResponse
+	(*AdminUserGroupTeamsRequest)(nil),       // 10: sameoldchat.chat.v1.AdminUserGroupTeamsRequest
+	(*AdminCreateUserGroupRequest)(nil),      // 11: sameoldchat.chat.v1.AdminCreateUserGroupRequest
+	(*AdminUpdateUserGroupRequest)(nil),      // 12: sameoldchat.chat.v1.AdminUpdateUserGroupRequest
+	(*AdminUploadUserGroupUsersRequest)(nil), // 13: sameoldchat.chat.v1.AdminUploadUserGroupUsersRequest
+	(*UserGroupMemberRefusal)(nil),           // 14: sameoldchat.chat.v1.UserGroupMemberRefusal
+	(*UserGroupMembershipResult)(nil),        // 15: sameoldchat.chat.v1.UserGroupMembershipResult
+	(*MutationResponse)(nil),                 // 16: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_usergroups_proto_depIdxs = []int32{
 	0,  // 0: sameoldchat.chat.v1.UserGroupPage.usergroups:type_name -> sameoldchat.chat.v1.UserGroup
-	3,  // 1: sameoldchat.chat.v1.UserGroupsService.CreateUserGroup:input_type -> sameoldchat.chat.v1.CreateUserGroupRequest
-	4,  // 2: sameoldchat.chat.v1.UserGroupsService.UpdateUserGroup:input_type -> sameoldchat.chat.v1.UpdateUserGroupRequest
-	1,  // 3: sameoldchat.chat.v1.UserGroupsService.EnableUserGroup:input_type -> sameoldchat.chat.v1.UserGroupRequest
-	1,  // 4: sameoldchat.chat.v1.UserGroupsService.DisableUserGroup:input_type -> sameoldchat.chat.v1.UserGroupRequest
-	2,  // 5: sameoldchat.chat.v1.UserGroupsService.UserGroups:input_type -> sameoldchat.chat.v1.UserGroupsRequest
-	1,  // 6: sameoldchat.chat.v1.UserGroupsService.UserGroupUsers:input_type -> sameoldchat.chat.v1.UserGroupRequest
-	5,  // 7: sameoldchat.chat.v1.UserGroupsService.SetUserGroupUsers:input_type -> sameoldchat.chat.v1.UserGroupUsersRequest
-	1,  // 8: sameoldchat.chat.v1.UserGroupsService.UserGroupChannels:input_type -> sameoldchat.chat.v1.UserGroupRequest
-	8,  // 9: sameoldchat.chat.v1.UserGroupsService.AddUserGroupChannels:input_type -> sameoldchat.chat.v1.UserGroupChannelsRequest
-	8,  // 10: sameoldchat.chat.v1.UserGroupsService.RemoveUserGroupChannels:input_type -> sameoldchat.chat.v1.UserGroupChannelsRequest
-	10, // 11: sameoldchat.chat.v1.UserGroupsService.AdminAddUserGroupTeams:input_type -> sameoldchat.chat.v1.AdminUserGroupTeamsRequest
-	0,  // 12: sameoldchat.chat.v1.UserGroupsService.CreateUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
-	0,  // 13: sameoldchat.chat.v1.UserGroupsService.UpdateUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
-	0,  // 14: sameoldchat.chat.v1.UserGroupsService.EnableUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
-	0,  // 15: sameoldchat.chat.v1.UserGroupsService.DisableUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
-	6,  // 16: sameoldchat.chat.v1.UserGroupsService.UserGroups:output_type -> sameoldchat.chat.v1.UserGroupPage
-	7,  // 17: sameoldchat.chat.v1.UserGroupsService.UserGroupUsers:output_type -> sameoldchat.chat.v1.UserGroupUsersResponse
-	0,  // 18: sameoldchat.chat.v1.UserGroupsService.SetUserGroupUsers:output_type -> sameoldchat.chat.v1.UserGroup
-	9,  // 19: sameoldchat.chat.v1.UserGroupsService.UserGroupChannels:output_type -> sameoldchat.chat.v1.UserGroupChannelsResponse
-	11, // 20: sameoldchat.chat.v1.UserGroupsService.AddUserGroupChannels:output_type -> sameoldchat.chat.v1.MutationResponse
-	11, // 21: sameoldchat.chat.v1.UserGroupsService.RemoveUserGroupChannels:output_type -> sameoldchat.chat.v1.MutationResponse
-	11, // 22: sameoldchat.chat.v1.UserGroupsService.AdminAddUserGroupTeams:output_type -> sameoldchat.chat.v1.MutationResponse
-	12, // [12:23] is the sub-list for method output_type
-	1,  // [1:12] is the sub-list for method input_type
-	1,  // [1:1] is the sub-list for extension type_name
-	1,  // [1:1] is the sub-list for extension extendee
-	0,  // [0:1] is the sub-list for field type_name
+	0,  // 1: sameoldchat.chat.v1.UserGroupMembershipResult.usergroup:type_name -> sameoldchat.chat.v1.UserGroup
+	14, // 2: sameoldchat.chat.v1.UserGroupMembershipResult.invalid:type_name -> sameoldchat.chat.v1.UserGroupMemberRefusal
+	3,  // 3: sameoldchat.chat.v1.UserGroupsService.CreateUserGroup:input_type -> sameoldchat.chat.v1.CreateUserGroupRequest
+	4,  // 4: sameoldchat.chat.v1.UserGroupsService.UpdateUserGroup:input_type -> sameoldchat.chat.v1.UpdateUserGroupRequest
+	1,  // 5: sameoldchat.chat.v1.UserGroupsService.EnableUserGroup:input_type -> sameoldchat.chat.v1.UserGroupRequest
+	1,  // 6: sameoldchat.chat.v1.UserGroupsService.DisableUserGroup:input_type -> sameoldchat.chat.v1.UserGroupRequest
+	2,  // 7: sameoldchat.chat.v1.UserGroupsService.UserGroups:input_type -> sameoldchat.chat.v1.UserGroupsRequest
+	1,  // 8: sameoldchat.chat.v1.UserGroupsService.UserGroupUsers:input_type -> sameoldchat.chat.v1.UserGroupRequest
+	5,  // 9: sameoldchat.chat.v1.UserGroupsService.SetUserGroupUsers:input_type -> sameoldchat.chat.v1.UserGroupUsersRequest
+	1,  // 10: sameoldchat.chat.v1.UserGroupsService.UserGroupChannels:input_type -> sameoldchat.chat.v1.UserGroupRequest
+	8,  // 11: sameoldchat.chat.v1.UserGroupsService.AddUserGroupChannels:input_type -> sameoldchat.chat.v1.UserGroupChannelsRequest
+	8,  // 12: sameoldchat.chat.v1.UserGroupsService.RemoveUserGroupChannels:input_type -> sameoldchat.chat.v1.UserGroupChannelsRequest
+	10, // 13: sameoldchat.chat.v1.UserGroupsService.AdminAddUserGroupTeams:input_type -> sameoldchat.chat.v1.AdminUserGroupTeamsRequest
+	10, // 14: sameoldchat.chat.v1.UserGroupsService.AdminRemoveUserGroupTeams:input_type -> sameoldchat.chat.v1.AdminUserGroupTeamsRequest
+	11, // 15: sameoldchat.chat.v1.UserGroupsService.AdminCreateUserGroup:input_type -> sameoldchat.chat.v1.AdminCreateUserGroupRequest
+	1,  // 16: sameoldchat.chat.v1.UserGroupsService.AdminFetchUserGroup:input_type -> sameoldchat.chat.v1.UserGroupRequest
+	12, // 17: sameoldchat.chat.v1.UserGroupsService.AdminUpdateUserGroup:input_type -> sameoldchat.chat.v1.AdminUpdateUserGroupRequest
+	5,  // 18: sameoldchat.chat.v1.UserGroupsService.AdminAddUserGroupUsers:input_type -> sameoldchat.chat.v1.UserGroupUsersRequest
+	5,  // 19: sameoldchat.chat.v1.UserGroupsService.AdminRemoveUserGroupUsers:input_type -> sameoldchat.chat.v1.UserGroupUsersRequest
+	13, // 20: sameoldchat.chat.v1.UserGroupsService.AdminUploadUserGroupUsers:input_type -> sameoldchat.chat.v1.AdminUploadUserGroupUsersRequest
+	0,  // 21: sameoldchat.chat.v1.UserGroupsService.CreateUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
+	0,  // 22: sameoldchat.chat.v1.UserGroupsService.UpdateUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
+	0,  // 23: sameoldchat.chat.v1.UserGroupsService.EnableUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
+	0,  // 24: sameoldchat.chat.v1.UserGroupsService.DisableUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
+	6,  // 25: sameoldchat.chat.v1.UserGroupsService.UserGroups:output_type -> sameoldchat.chat.v1.UserGroupPage
+	7,  // 26: sameoldchat.chat.v1.UserGroupsService.UserGroupUsers:output_type -> sameoldchat.chat.v1.UserGroupUsersResponse
+	0,  // 27: sameoldchat.chat.v1.UserGroupsService.SetUserGroupUsers:output_type -> sameoldchat.chat.v1.UserGroup
+	9,  // 28: sameoldchat.chat.v1.UserGroupsService.UserGroupChannels:output_type -> sameoldchat.chat.v1.UserGroupChannelsResponse
+	16, // 29: sameoldchat.chat.v1.UserGroupsService.AddUserGroupChannels:output_type -> sameoldchat.chat.v1.MutationResponse
+	16, // 30: sameoldchat.chat.v1.UserGroupsService.RemoveUserGroupChannels:output_type -> sameoldchat.chat.v1.MutationResponse
+	16, // 31: sameoldchat.chat.v1.UserGroupsService.AdminAddUserGroupTeams:output_type -> sameoldchat.chat.v1.MutationResponse
+	16, // 32: sameoldchat.chat.v1.UserGroupsService.AdminRemoveUserGroupTeams:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 33: sameoldchat.chat.v1.UserGroupsService.AdminCreateUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
+	0,  // 34: sameoldchat.chat.v1.UserGroupsService.AdminFetchUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
+	0,  // 35: sameoldchat.chat.v1.UserGroupsService.AdminUpdateUserGroup:output_type -> sameoldchat.chat.v1.UserGroup
+	15, // 36: sameoldchat.chat.v1.UserGroupsService.AdminAddUserGroupUsers:output_type -> sameoldchat.chat.v1.UserGroupMembershipResult
+	16, // 37: sameoldchat.chat.v1.UserGroupsService.AdminRemoveUserGroupUsers:output_type -> sameoldchat.chat.v1.MutationResponse
+	15, // 38: sameoldchat.chat.v1.UserGroupsService.AdminUploadUserGroupUsers:output_type -> sameoldchat.chat.v1.UserGroupMembershipResult
+	21, // [21:39] is the sub-list for method output_type
+	3,  // [3:21] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_usergroups_proto_init() }
@@ -981,13 +1429,14 @@ func file_sameoldchat_chat_v1_usergroups_proto_init() {
 		return
 	}
 	file_sameoldchat_chat_v1_conversation_mutations_proto_init()
+	file_sameoldchat_chat_v1_usergroups_proto_msgTypes[12].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_usergroups_proto_rawDesc), len(file_sameoldchat_chat_v1_usergroups_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

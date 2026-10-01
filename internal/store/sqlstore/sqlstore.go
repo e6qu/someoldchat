@@ -504,7 +504,8 @@ CREATE INDEX IF NOT EXISTS draft_attachments_owner ON draft_attachments(workspac
 CREATE TABLE IF NOT EXISTS user_groups (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, handle TEXT NOT NULL,
  description TEXT NOT NULL DEFAULT '', creator_id TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id),
- created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1
+ created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
+ org_level INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS conversation_access_groups (conversation_id TEXT NOT NULL REFERENCES conversations(id), group_id TEXT NOT NULL REFERENCES user_groups(id), PRIMARY KEY (conversation_id, group_id));
 CREATE UNIQUE INDEX IF NOT EXISTS user_groups_workspace_handle ON user_groups(workspace_id, handle);
@@ -513,6 +514,9 @@ CREATE TABLE IF NOT EXISTS user_group_users (
 );
 CREATE TABLE IF NOT EXISTS user_group_channels (
  group_id TEXT NOT NULL REFERENCES user_groups(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), PRIMARY KEY (group_id, conversation_id)
+);
+CREATE TABLE IF NOT EXISTS user_group_teams (
+ group_id TEXT NOT NULL REFERENCES user_groups(id), team_id TEXT NOT NULL REFERENCES workspaces(id), PRIMARY KEY (group_id, team_id)
 );
 CREATE TABLE IF NOT EXISTS calls (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), external_unique_id TEXT NOT NULL,
@@ -593,7 +597,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 192
+const schemaVersion = 193
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3544,6 +3548,27 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 193: organization user groups ---
+	if version < 193 {
+		// admin.usergroups.* creates groups for the organization, which may be
+		// hidden from clients and are assigned to workspaces. Every existing
+		// group is a visible workspace group assigned to none.
+		columns, err := s.tableColumns(ctx, db, "user_groups")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{"org_level", "hidden"} {
+			if !columns[column] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE user_groups ADD COLUMN `+column+` INTEGER NOT NULL DEFAULT 0`); err != nil {
+					return fmt.Errorf("migrate user group %s: %w", column, err)
+				}
+			}
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS user_group_teams (group_id TEXT NOT NULL REFERENCES user_groups(id), team_id TEXT NOT NULL REFERENCES workspaces(id), PRIMARY KEY (group_id, team_id))`); err != nil {
+			return fmt.Errorf("migrate user group teams: %w", err)
+		}
+	}
+	// --- end schema 193 ---
 	// --- schema 192: profile title, pronouns and time zone ---
 	if version < 192 {
 		// Slack's profile carries a title and pronouns, and its user object
@@ -4964,6 +4989,7 @@ var migratableTables = []string{
 	"slack_apps",
 	"socket_mode_connections",
 	"tokens",
+	"user_groups",
 	"users",
 	"views",
 	"workflow_revisions",
@@ -19232,11 +19258,14 @@ func (s *Store) CreateUserGroup(ctx context.Context, value domain.UserGroup, eve
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO user_groups(id, workspace_id, name, handle, description, creator_id, updated_by, created_at, updated_at, deleted_at, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, value.ID, value.WorkspaceID, value.Name, value.Handle, value.Description, value.Creator, value.UpdatedBy, value.CreatedAt.Unix(), value.UpdatedAt.Unix(), boolInt(value.Enabled))
+	_, err = tx.ExecContext(ctx, `INSERT INTO user_groups(id, workspace_id, name, handle, description, creator_id, updated_by, created_at, updated_at, deleted_at, enabled, org_level, hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Name, value.Handle, value.Description, value.Creator, value.UpdatedBy, value.CreatedAt.Unix(), value.UpdatedAt.Unix(), boolInt(value.Enabled), boolInt(value.OrgLevel), boolInt(value.Hidden))
 	if err != nil {
 		return classify(err)
 	}
 	if err := replaceUserGroupChannels(ctx, tx, value.WorkspaceID, value.ID, value.Channels); err != nil {
+		return err
+	}
+	if err := changeUserGroupTeams(ctx, tx, value.ID, value.Teams, nil); err != nil {
 		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -19248,8 +19277,8 @@ func (s *Store) CreateUserGroup(ctx context.Context, value domain.UserGroup, eve
 func (s *Store) GetUserGroup(ctx context.Context, workspace domain.WorkspaceID, id domain.UserGroupID) (domain.UserGroup, error) {
 	var value domain.UserGroup
 	var created, updated, deleted int64
-	var enabled int
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, name, handle, description, creator_id, updated_by, created_at, updated_at, deleted_at, enabled FROM user_groups WHERE workspace_id = ? AND id = ?`, workspace, id).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Handle, &value.Description, &value.Creator, &value.UpdatedBy, &created, &updated, &deleted, &enabled)
+	var enabled, orgLevel, hidden int
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, name, handle, description, creator_id, updated_by, created_at, updated_at, deleted_at, enabled, org_level, hidden FROM user_groups WHERE workspace_id = ? AND id = ?`, workspace, id).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Handle, &value.Description, &value.Creator, &value.UpdatedBy, &created, &updated, &deleted, &enabled, &orgLevel, &hidden)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.UserGroup{}, store.ErrNotFound
 	}
@@ -19262,6 +19291,11 @@ func (s *Store) GetUserGroup(ctx context.Context, workspace domain.WorkspaceID, 
 		value.DeletedAt = time.Unix(deleted, 0).UTC()
 	}
 	value.Enabled = enabled != 0
+	value.OrgLevel = orgLevel != 0
+	value.Hidden = hidden != 0
+	if value.Teams, err = s.userGroupTeams(ctx, id); err != nil {
+		return domain.UserGroup{}, err
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT user_id FROM user_group_users WHERE group_id = ? ORDER BY user_id`, id)
 	if err != nil {
 		return domain.UserGroup{}, err
@@ -19303,7 +19337,7 @@ func (s *Store) ListUserGroups(ctx context.Context, workspace domain.WorkspaceID
 	if err != nil {
 		return domain.UserGroupPage{}, err
 	}
-	query := `SELECT id, workspace_id, name, handle, description, creator_id, updated_by, created_at, updated_at, deleted_at, enabled FROM user_groups WHERE workspace_id = ?`
+	query := `SELECT id, workspace_id, name, handle, description, creator_id, updated_by, created_at, updated_at, deleted_at, enabled, org_level, hidden FROM user_groups WHERE workspace_id = ?`
 	args := []any{workspace}
 	if !includeDisabled {
 		query += ` AND enabled = 1`
@@ -19319,10 +19353,12 @@ func (s *Store) ListUserGroups(ctx context.Context, workspace domain.WorkspaceID
 	for rows.Next() {
 		var value domain.UserGroup
 		var created, updated, deleted int64
-		var enabled int
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Handle, &value.Description, &value.Creator, &value.UpdatedBy, &created, &updated, &deleted, &enabled); err != nil {
+		var enabled, orgLevel, hidden int
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Handle, &value.Description, &value.Creator, &value.UpdatedBy, &created, &updated, &deleted, &enabled, &orgLevel, &hidden); err != nil {
 			return domain.UserGroupPage{}, err
 		}
+		value.OrgLevel = orgLevel != 0
+		value.Hidden = hidden != 0
 		value.CreatedAt = time.Unix(created, 0).UTC()
 		value.UpdatedAt = time.Unix(updated, 0).UTC()
 		if deleted != 0 {
@@ -19345,6 +19381,7 @@ func (s *Store) ListUserGroups(ctx context.Context, workspace domain.WorkspaceID
 		}
 		values[index].Users = value.Users
 		values[index].Channels = value.Channels
+		values[index].Teams = value.Teams
 	}
 	if page.HasMore {
 		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
@@ -19405,7 +19442,7 @@ func (s *Store) UpdateUserGroup(ctx context.Context, value domain.UserGroup, eve
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE user_groups SET name = ?, handle = ?, description = ?, updated_by = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, value.Name, value.Handle, value.Description, value.UpdatedBy, value.UpdatedAt.Unix(), value.ID, value.WorkspaceID)
+	result, err := tx.ExecContext(ctx, `UPDATE user_groups SET name = ?, handle = ?, description = ?, hidden = ?, updated_by = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, value.Name, value.Handle, value.Description, boolInt(value.Hidden), value.UpdatedBy, value.UpdatedAt.Unix(), value.ID, value.WorkspaceID)
 	if err != nil {
 		return classify(err)
 	}
