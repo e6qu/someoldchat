@@ -4,8 +4,10 @@
 
 SameOldChat MUST provide a multi-workspace Slack-compatible chat experience and a
 Slack-compatible platform API implemented in Go. The human interface MUST use
-server-rendered HTML enhanced with HTMX. SQLite MUST be the default persistence
-implementation and dqlite MUST be selectable without changing domain logic.
+server-rendered HTML enhanced with HTMX. SQLite MUST be the persistence
+profile for local and small deployments, and dqlite and PostgreSQL MUST be
+selectable without changing domain logic. Every profile is selected
+explicitly; none is an implicit default.
 
 ## Functional requirements
 

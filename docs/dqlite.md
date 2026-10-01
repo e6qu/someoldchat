@@ -25,6 +25,7 @@ bin/sameoldchat-dqlite -chat-mode local -store dqlite \
   -dqlite-directory /var/lib/sameoldchat/dqlite \
   -dqlite-address node-a:19001 \
   -dqlite-database sameoldchat \
+  -app-credential-key-hex "$SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX" \
   -api-token xoxb-production -session-token browser-session
 ```
 
@@ -36,10 +37,18 @@ bin/sameoldchat-dqlite -chat-mode local -store dqlite \
   -dqlite-address node-b:19001 \
   -dqlite-cluster node-a:19001 \
   -dqlite-database sameoldchat \
+  -app-credential-key-hex "$SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX" \
   -api-token xoxb-production -session-token browser-session
 ```
 
 Start a third node the same way with its own state directory and address.
+Every node takes the same `-app-credential-key-hex`, as any durable store does.
+
+Nodes replicate over plain TCP: the adapter does not yet authenticate or
+encrypt node-to-node traffic, which [the persistence
+specification](../specs/persistence.md#dqlite-adapter) requires. Until it does,
+the `-dqlite-address` listeners MUST be reachable only on a private network
+that carries nothing but the cluster's members.
 `chatd`, `worker`, `socketmode-worker`, and `blobgc` accept the same
 `-dqlite-*` flags. Missing directory, address, or database settings are
 configuration errors; an empty seed list is valid only for the bootstrap node.
