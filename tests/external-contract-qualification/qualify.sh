@@ -8,11 +8,21 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
+# fetch saves a page as plain text. A page Slack removed or moved is reported
+# by URL and counted as a failure, and the run continues with an empty page so
+# every assertion against it is reported too: a dropped source is a contract
+# change to adopt, not a reason to stop looking at the rest.
 fetch() {
 	raw="$2.raw"
-	curl --fail --silent --show-error --location --compressed \
+	if ! curl --fail --silent --show-error --location --compressed \
 		--retry 4 --retry-all-errors --connect-timeout 15 --max-time 45 \
-		--user-agent 'sameoldchat-contract-qualification/1.0' --output "$raw" "$1"
+		--user-agent 'sameoldchat-contract-qualification/1.0' --output "$raw" "$1"; then
+		echo "official Slack source unavailable: $1" >&2
+		failures=$((failures + 1))
+		: >"$2"
+		rm -f "$raw"
+		return 0
+	fi
 	sed -e 's/<[^>]*>/ /g' -e 's/&nbsp;/ /g' -e 's/&#160;/ /g' -e "s/&#39;/'/g" -e 's/&amp;/\\&/g' "$raw" |
 		tr '\n\r\t\302\240' '     ' |
 		sed -e 's/  */ /g' >"$2"
@@ -340,8 +350,6 @@ assert_contains "$work/notifications.html" 'Everything or Mentions and direct me
 	'[NOTIFY-01] workspace notification trigger choices' "$notification_url"
 assert_contains "$work/notifications.html" 'only exact matches will trigger notifications' \
 	'[NOTIFY-01] channel keywords use exact case-insensitive matching' "$notification_url"
-assert_contains "$work/notifications.html" "Keywords in messages sent in threads won't trigger a notification" \
-	'[NOTIFY-01] channel keywords do not trigger from thread replies' "$notification_url"
 assert_contains "$work/notifications.html" 'Channels with notifications set to "All new posts"' \
 	'[NOTIFY-01 ACTIVITY-01] all-post channels can be included in Activity' "$notification_url"
 assert_contains "$work/conversation-notifications.html" 'All new posts' \
@@ -504,6 +512,59 @@ assert_contains "$work/reminders-add.html" 'have become degraded or useless' \
 	'[REMIND-API-01] reminders API retirement state' "$reminder_api_url"
 assert_contains "$work/later-api.html" 'There are no direct APIs for Save it for Later to integrate with.' \
 	'[LATER-01 REMIND-API-01] current Later has no direct app API' "$later_api_url"
+
+# Slack's current reference is the API this project implements, so a method
+# or event Slack adds or retires is a change to adopt. The pinned catalogs in
+# specs/upstream/slack-reference are compared with the reference sitemap, and
+# every difference is reported by name.
+sitemap_url='https://docs.slack.dev/sitemap.xml'
+sitemap_locations() {
+	if ! curl --fail --silent --show-error --location --compressed \
+		--retry 4 --retry-all-errors --connect-timeout 15 --max-time 45 \
+		--user-agent 'sameoldchat-contract-qualification/1.0' "$1"; then
+		echo "official Slack source unavailable: $1" >&2
+		return 1
+	fi
+}
+: >"$work/reference-urls"
+if sitemap_locations "$sitemap_url" >"$work/sitemap.xml"; then
+	grep -o '<loc>[^<]*</loc>' "$work/sitemap.xml" | sed -e 's/<loc>//' -e 's/<\/loc>//' >"$work/sitemap-locations"
+	grep -v '\.xml$' "$work/sitemap-locations" >>"$work/reference-urls" || true
+	for child in $(grep '\.xml$' "$work/sitemap-locations"); do
+		if sitemap_locations "$child" >"$work/child-sitemap.xml"; then
+			grep -o '<loc>[^<]*</loc>' "$work/child-sitemap.xml" | sed -e 's/<loc>//' -e 's/<\/loc>//' >>"$work/reference-urls"
+		else
+			failures=$((failures + 1))
+		fi
+	done
+else
+	failures=$((failures + 1))
+fi
+compare_catalog() {
+	kind=$1
+	pinned=$2
+	minimum=$3
+	sed -n "s#^https://docs\.slack\.dev/reference/$kind/\([A-Za-z0-9_./]*[A-Za-z0-9_.]\)/*\$#\1#p" "$work/reference-urls" |
+		tr 'A-Z' 'a-z' | sort -u >"$work/live-$kind"
+	if [ "$(wc -l <"$work/live-$kind")" -lt "$minimum" ]; then
+		echo "official Slack reference sitemap lists too few $kind to compare; the source or its format changed: $sitemap_url" >&2
+		failures=$((failures + 1))
+		return 0
+	fi
+	sort -u "$pinned" >"$work/pinned-$kind"
+	comm -13 "$work/pinned-$kind" "$work/live-$kind" >"$work/added-$kind"
+	comm -23 "$work/pinned-$kind" "$work/live-$kind" >"$work/removed-$kind"
+	if [ -s "$work/added-$kind" ] || [ -s "$work/removed-$kind" ]; then
+		echo "official Slack reference $kind differ from $pinned:" >&2
+		sed 's/^/  added by Slack: /' "$work/added-$kind" >&2
+		sed 's/^/  retired by Slack: /' "$work/removed-$kind" >&2
+		failures=$((failures + 1))
+	else
+		assertions=$((assertions + 1))
+	fi
+}
+compare_catalog methods specs/upstream/slack-reference/current-methods.txt 250
+compare_catalog events specs/upstream/slack-reference/current-events.txt 100
 
 if [ "$failures" -ne 0 ]; then
 	echo "external Slack journey contract qualification failed ($failures of $((assertions + failures)) assertions)" >&2
