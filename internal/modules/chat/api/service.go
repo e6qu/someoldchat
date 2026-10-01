@@ -235,6 +235,11 @@ type Service interface {
 	OAuthV2Exchange(context.Context, string, string, string, string, bool) (domain.OAuthToken, error)
 	OAuthV2Refresh(context.Context, string, string, string) (domain.OAuthToken, error)
 	OAuthV2ExchangeToken(context.Context, string, string, string) (domain.OAuthToken, error)
+	// BeginShortTokenRotation and CompleteShortTokenRotation are the
+	// one-time short-secret rotation pair: client id, client secret, the
+	// token being rotated and, to complete, the replacement begin returned.
+	BeginShortTokenRotation(context.Context, string, string, string) (string, error)
+	CompleteShortTokenRotation(context.Context, string, string, string, string) (string, error)
 	OpenIDConnectToken(context.Context, string, string, string, string, string, string, string) (domain.OpenIDToken, error)
 	OpenIDConnectUserInfo(context.Context, string) (domain.OpenIDUserInfo, error)
 	CreateRTMConnection(context.Context, domain.WorkspaceID, domain.UserID) (domain.RTMConnection, error)
@@ -329,6 +334,7 @@ type Service interface {
 	AdminLookupConversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationLookup, domain.PageRequest) (domain.ConversationPage, error)
 	AdminBulkMoveConversations(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, domain.WorkspaceID) error
 	AdminSetConversationsExcludedFromAI(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, bool) error
+	AdminBulkSetConversationProperties(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, domain.ConversationProperty) error
 	AdminConversationsExcludedFromAI(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) ([]domain.ConversationID, error)
 	AdminLinkConversationObjects(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, []string) error
 	AdminUnlinkConversationObjects(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) error

@@ -196,6 +196,7 @@ CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TE
 CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, installer_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (app_id, workspace_id));
 CREATE TABLE IF NOT EXISTS file_access_grants (file_id TEXT NOT NULL, user_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), granted_at INTEGER NOT NULL, PRIMARY KEY (file_id, user_id));
+CREATE TABLE IF NOT EXISTS short_token_rotations (token_hash TEXT PRIMARY KEY, new_token_hash TEXT NOT NULL, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS function_execution_tokens (token_hash TEXT PRIMARY KEY, execution_id TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, callback_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL, bot_id TEXT NOT NULL DEFAULT '', scopes TEXT NOT NULL DEFAULT '', token_ciphertext TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS incoming_webhooks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id), user_id TEXT NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspace_id, app_id, secret_hash, enabled);
@@ -593,7 +594,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 192
+const schemaVersion = 196
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3544,6 +3545,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 196: short-secret token rotation ---
+	if version < 196 {
+		// oauth.v2.beginShortTokenRotation issues a replacement that only
+		// takes effect when oauth.v2.completeShortTokenRotation confirms it
+		// within ten minutes, so the pending rotation is durable state: the
+		// begin and the completion may reach different replicas.
+		if _, err := db.ExecContext(ctx, shortTokenRotationsTable); err != nil {
+			return fmt.Errorf("migrate short token rotations: %w", err)
+		}
+	}
+	// --- end schema 196 ---
 	// --- schema 192: profile title, pronouns and time zone ---
 	if version < 192 {
 		// Slack's profile carries a title and pronouns, and its user object
@@ -6579,6 +6591,10 @@ func (s *Store) ExpireUserAccount(ctx context.Context, workspaceID domain.Worksp
 	if changed != 1 {
 		return false, nil
 	}
+	guestEvent, err := guestDeactivationEvent(ctx, tx, workspaceID, userID, event)
+	if err != nil {
+		return false, err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE workspace_members SET active = 0 WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
 		return false, err
 	}
@@ -6591,8 +6607,10 @@ func (s *Store) ExpireUserAccount(ctx context.Context, workspaceID domain.Worksp
 	if _, err := tx.ExecContext(ctx, revokeSessionsStatement+` WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
 		return false, err
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return false, err
+	for _, recorded := range append([]events.Event{event}, guestEvent...) {
+		if err := insertOutbox(ctx, tx, recorded); err != nil {
+			return false, err
+		}
 	}
 	return true, tx.Commit()
 }
@@ -6603,6 +6621,20 @@ func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.Workspace
 		return err
 	}
 	defer tx.Rollback()
+	// Deactivating an active guest is also a guest status change, decided
+	// from the state this transaction reads.
+	var guestEvent []events.Event
+	if deleted {
+		var wasDeleted int
+		if err := tx.QueryRowContext(ctx, `SELECT deleted FROM users WHERE id = ? AND workspace_id = ?`, userID, workspaceID).Scan(&wasDeleted); err != nil {
+			return translateNotFound(err)
+		}
+		if wasDeleted == 0 {
+			if guestEvent, err = guestDeactivationEvent(ctx, tx, workspaceID, userID, event); err != nil {
+				return err
+			}
+		}
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE users SET deleted = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, boolInt(deleted), unixSeconds(event.CreatedAt), userID, workspaceID)
 	if err != nil {
 		return err
@@ -6625,8 +6657,10 @@ func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.Workspace
 			return err
 		}
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return err
+	for _, recorded := range append([]events.Event{event}, guestEvent...) {
+		if err := insertOutbox(ctx, tx, recorded); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

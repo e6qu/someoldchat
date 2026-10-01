@@ -42,6 +42,7 @@ service.conversation_already_archived
 service.conversation_archived
 service.conversation_not_archived
 service.conversation_posting_restricted
+service.conversation_property_not_allowed
 service.conversation_text_too_long
 service.emoji_already_exists
 service.external_auth_connection
@@ -63,6 +64,7 @@ service.invalid_call
 service.invalid_canvas
 service.invalid_conversation
 service.invalid_conversation_prefs
+service.invalid_conversation_property
 service.invalid_datastore_item
 service.invalid_datastore_query
 service.invalid_dialog
@@ -111,6 +113,7 @@ service.message_not_owned_by_app
 service.message_not_streaming
 service.missing_stream_recipient_team
 service.missing_stream_recipient_user
+service.no_valid_channels
 service.not_in_conversation
 service.not_starred
 service.not_workspace_admin
@@ -126,12 +129,17 @@ service.scheduled_time_in_past
 service.scheduled_time_too_far
 service.scheduled_too_many
 service.shared_invite_settled
+service.short_token_rotation_mismatch
+service.short_token_rotation_not_found
 service.slack_connect_full
 service.slash_command_in_thread
 service.slash_command_not_found
 service.snooze_not_active
 service.snooze_too_long
 service.thread_not_found
+service.token_secret_too_long
+service.token_type_not_rotatable
+service.too_many_conversation_properties
 service.trigger_exchanged
 service.trigger_expired
 service.trigger_type_restricted

@@ -2170,6 +2170,83 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// bulkSetProperties sets the channels that are here and skips the
+			// ones that are not; both compositions must agree on what was set.
+			name: "bulk channel properties set the channels that exist",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.AdminBulkSetConversationProperties(ctx, "T1", "UA", []domain.ConversationID{"C1", "C-nobody"}, domain.ConversationProperty{ExcludeFromSlackAI: true}); err != nil {
+					return nil, err
+				}
+				excluded, err := chat.AdminConversationsExcludedFromAI(ctx, "T1", "UA", []domain.ConversationID{"C1", "C2"})
+				if err != nil {
+					return nil, err
+				}
+				member := chat.AdminBulkSetConversationProperties(ctx, "T1", "U1", []domain.ConversationID{"C2"}, domain.ConversationProperty{ExcludeFromSlackAI: true})
+				return []any{excluded, errors.Is(member, domain.ErrNotWorkspaceAdmin)}, nil
+			},
+		},
+		{
+			name:         "bulk channel properties naming no channel of the workspace",
+			wantSentinel: domain.ErrNoValidChannels,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				return nil, chat.AdminBulkSetConversationProperties(ctx, "T1", "UA", []domain.ConversationID{"C-nobody"}, domain.ConversationProperty{ExcludeFromSlackAI: true})
+			},
+		},
+		{
+			// The replacement is random, so the compositions compare its shape
+			// and its effect: the kept sections, a 32-character secret, the
+			// original no longer authenticating and the replacement doing so.
+			name: "a short-secret token rotates once",
+			seed: seedShortTokenRotationParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, badSecret := chat.BeginShortTokenRotation(ctx, "short-client", "wrong", shortTokenParityToken)
+				_, otherApp := chat.BeginShortTokenRotation(ctx, "other-client", "other-secret", shortTokenParityToken)
+				_, botToken := chat.BeginShortTokenRotation(ctx, "short-client", "short-secret", "xoxb-111-222-d6bc76")
+				_, early := chat.CompleteShortTokenRotation(ctx, "short-client", "short-secret", shortTokenParityToken, "xoxp-111-222-333-"+strings.Repeat("0", 32))
+				replacement, err := chat.BeginShortTokenRotation(ctx, "short-client", "short-secret", shortTokenParityToken)
+				if err != nil {
+					return nil, err
+				}
+				_, mismatch := chat.CompleteShortTokenRotation(ctx, "short-client", "short-secret", shortTokenParityToken, "xoxp-111-222-333-"+strings.Repeat("0", 32))
+				live, err := chat.CompleteShortTokenRotation(ctx, "short-client", "short-secret", shortTokenParityToken, replacement)
+				if err != nil {
+					return nil, err
+				}
+				_, original := chat.Tokens.LookupToken(ctx, shortTokenParityToken)
+				record, err := chat.Tokens.LookupToken(ctx, live)
+				if err != nil {
+					return nil, err
+				}
+				_, again := chat.BeginShortTokenRotation(ctx, "short-client", "short-secret", live)
+				return []any{
+					errors.Is(badSecret, domain.ErrBadOAuthClientSecret), errors.Is(otherApp, domain.ErrOAuthAppMismatch),
+					errors.Is(botToken, domain.ErrTokenTypeNotRotatable), errors.Is(early, domain.ErrShortTokenRotationNotFound),
+					errors.Is(mismatch, domain.ErrShortTokenRotationMismatch),
+					live == replacement, strings.HasPrefix(live, "xoxp-111-222-333-"), len(strings.TrimPrefix(live, "xoxp-111-222-333-")),
+					errors.Is(original, storepkg.ErrNotFound), string(record.UserID), string(record.AppID), record.Scopes,
+					errors.Is(again, domain.ErrTokenSecretTooLong),
+				}, nil
+			},
+		},
+		{
+			name:         "a rotated token is not short enough to rotate again",
+			seed:         seedShortTokenRotationParity,
+			wantSentinel: domain.ErrTokenSecretTooLong,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, err := chat.BeginShortTokenRotation(ctx, "short-client", "short-secret", "xoxp-111-222-333-"+strings.Repeat("a", 32))
+				return nil, err
+			},
+		},
+		{
+			name:         "a completion with no begun rotation",
+			seed:         seedShortTokenRotationParity,
+			wantSentinel: domain.ErrShortTokenRotationNotFound,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, err := chat.CompleteShortTokenRotation(ctx, "short-client", "short-secret", shortTokenParityToken, "xoxp-111-222-333-"+strings.Repeat("0", 32))
+				return nil, err
+			},
+		},
+		{
 			// An app nobody has configured answers the defaults, so both
 			// compositions must report the same effective configuration.
 			name: "app configuration defaults and resolution clearance agree",

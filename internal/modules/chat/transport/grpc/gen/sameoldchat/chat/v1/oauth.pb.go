@@ -680,6 +680,122 @@ func (x *OpenIDConnectUserInfoResponse) GetTeamImageDefault() bool {
 	return false
 }
 
+// ShortTokenRotationRequest is oauth.v2.beginShortTokenRotation (new_token
+// empty) and oauth.v2.completeShortTokenRotation.
+type ShortTokenRotationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClientId      string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ClientSecret  string                 `protobuf:"bytes,2,opt,name=client_secret,json=clientSecret,proto3" json:"client_secret,omitempty"`
+	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
+	NewToken      string                 `protobuf:"bytes,4,opt,name=new_token,json=newToken,proto3" json:"new_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShortTokenRotationRequest) Reset() {
+	*x = ShortTokenRotationRequest{}
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShortTokenRotationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShortTokenRotationRequest) ProtoMessage() {}
+
+func (x *ShortTokenRotationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShortTokenRotationRequest.ProtoReflect.Descriptor instead.
+func (*ShortTokenRotationRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_oauth_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ShortTokenRotationRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *ShortTokenRotationRequest) GetClientSecret() string {
+	if x != nil {
+		return x.ClientSecret
+	}
+	return ""
+}
+
+func (x *ShortTokenRotationRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *ShortTokenRotationRequest) GetNewToken() string {
+	if x != nil {
+		return x.NewToken
+	}
+	return ""
+}
+
+// ShortTokenRotationResponse carries the replacement token: the pending one
+// from a begin, the now-live one from a completion.
+type ShortTokenRotationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShortTokenRotationResponse) Reset() {
+	*x = ShortTokenRotationResponse{}
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShortTokenRotationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShortTokenRotationResponse) ProtoMessage() {}
+
+func (x *ShortTokenRotationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShortTokenRotationResponse.ProtoReflect.Descriptor instead.
+func (*ShortTokenRotationResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_oauth_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ShortTokenRotationResponse) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
 var File_sameoldchat_chat_v1_oauth_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
@@ -762,12 +878,21 @@ const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a=\n" +
 	"\x0fTeamImagesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\x83\x05\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x90\x01\n" +
+	"\x19ShortTokenRotationRequest\x12\x1b\n" +
+	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12#\n" +
+	"\rclient_secret\x18\x02 \x01(\tR\fclientSecret\x12\x14\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token\x12\x1b\n" +
+	"\tnew_token\x18\x04 \x01(\tR\bnewToken\"2\n" +
+	"\x1aShortTokenRotationResponse\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token2\xfe\x06\n" +
 	"\fOAuthService\x12[\n" +
 	"\rExchangeOAuth\x12).sameoldchat.chat.v1.OAuthExchangeRequest\x1a\x1f.sameoldchat.chat.v1.OAuthToken\x12]\n" +
 	"\x0fExchangeOAuthV2\x12).sameoldchat.chat.v1.OAuthExchangeRequest\x1a\x1f.sameoldchat.chat.v1.OAuthToken\x12\\\n" +
 	"\x0eRefreshOAuthV2\x12).sameoldchat.chat.v1.OAuthExchangeRequest\x1a\x1f.sameoldchat.chat.v1.OAuthToken\x12b\n" +
-	"\x14ExchangeOAuthV2Token\x12).sameoldchat.chat.v1.OAuthExchangeRequest\x1a\x1f.sameoldchat.chat.v1.OAuthToken\x12u\n" +
+	"\x14ExchangeOAuthV2Token\x12).sameoldchat.chat.v1.OAuthExchangeRequest\x1a\x1f.sameoldchat.chat.v1.OAuthToken\x12z\n" +
+	"\x17BeginShortTokenRotation\x12..sameoldchat.chat.v1.ShortTokenRotationRequest\x1a/.sameoldchat.chat.v1.ShortTokenRotationResponse\x12}\n" +
+	"\x1aCompleteShortTokenRotation\x12..sameoldchat.chat.v1.ShortTokenRotationRequest\x1a/.sameoldchat.chat.v1.ShortTokenRotationResponse\x12u\n" +
 	"\x12OpenIDConnectToken\x12..sameoldchat.chat.v1.OpenIDConnectTokenRequest\x1a/.sameoldchat.chat.v1.OpenIDConnectTokenResponse\x12~\n" +
 	"\x15OpenIDConnectUserInfo\x121.sameoldchat.chat.v1.OpenIDConnectUserInfoRequest\x1a2.sameoldchat.chat.v1.OpenIDConnectUserInfoResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
@@ -783,7 +908,7 @@ func file_sameoldchat_chat_v1_oauth_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_oauth_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_oauth_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_sameoldchat_chat_v1_oauth_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_sameoldchat_chat_v1_oauth_proto_goTypes = []any{
 	(*OAuthExchangeRequest)(nil),          // 0: sameoldchat.chat.v1.OAuthExchangeRequest
 	(*OAuthToken)(nil),                    // 1: sameoldchat.chat.v1.OAuthToken
@@ -791,30 +916,36 @@ var file_sameoldchat_chat_v1_oauth_proto_goTypes = []any{
 	(*OpenIDConnectTokenResponse)(nil),    // 3: sameoldchat.chat.v1.OpenIDConnectTokenResponse
 	(*OpenIDConnectUserInfoRequest)(nil),  // 4: sameoldchat.chat.v1.OpenIDConnectUserInfoRequest
 	(*OpenIDConnectUserInfoResponse)(nil), // 5: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse
-	nil,                                   // 6: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.UserImagesEntry
-	nil,                                   // 7: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.TeamImagesEntry
+	(*ShortTokenRotationRequest)(nil),     // 6: sameoldchat.chat.v1.ShortTokenRotationRequest
+	(*ShortTokenRotationResponse)(nil),    // 7: sameoldchat.chat.v1.ShortTokenRotationResponse
+	nil,                                   // 8: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.UserImagesEntry
+	nil,                                   // 9: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.TeamImagesEntry
 }
 var file_sameoldchat_chat_v1_oauth_proto_depIdxs = []int32{
-	1, // 0: sameoldchat.chat.v1.OpenIDConnectTokenResponse.oauth_token:type_name -> sameoldchat.chat.v1.OAuthToken
-	6, // 1: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.user_images:type_name -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.UserImagesEntry
-	7, // 2: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.team_images:type_name -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.TeamImagesEntry
-	0, // 3: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
-	0, // 4: sameoldchat.chat.v1.OAuthService.ExchangeOAuthV2:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
-	0, // 5: sameoldchat.chat.v1.OAuthService.RefreshOAuthV2:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
-	0, // 6: sameoldchat.chat.v1.OAuthService.ExchangeOAuthV2Token:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
-	2, // 7: sameoldchat.chat.v1.OAuthService.OpenIDConnectToken:input_type -> sameoldchat.chat.v1.OpenIDConnectTokenRequest
-	4, // 8: sameoldchat.chat.v1.OAuthService.OpenIDConnectUserInfo:input_type -> sameoldchat.chat.v1.OpenIDConnectUserInfoRequest
-	1, // 9: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:output_type -> sameoldchat.chat.v1.OAuthToken
-	1, // 10: sameoldchat.chat.v1.OAuthService.ExchangeOAuthV2:output_type -> sameoldchat.chat.v1.OAuthToken
-	1, // 11: sameoldchat.chat.v1.OAuthService.RefreshOAuthV2:output_type -> sameoldchat.chat.v1.OAuthToken
-	1, // 12: sameoldchat.chat.v1.OAuthService.ExchangeOAuthV2Token:output_type -> sameoldchat.chat.v1.OAuthToken
-	3, // 13: sameoldchat.chat.v1.OAuthService.OpenIDConnectToken:output_type -> sameoldchat.chat.v1.OpenIDConnectTokenResponse
-	5, // 14: sameoldchat.chat.v1.OAuthService.OpenIDConnectUserInfo:output_type -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse
-	9, // [9:15] is the sub-list for method output_type
-	3, // [3:9] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	1,  // 0: sameoldchat.chat.v1.OpenIDConnectTokenResponse.oauth_token:type_name -> sameoldchat.chat.v1.OAuthToken
+	8,  // 1: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.user_images:type_name -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.UserImagesEntry
+	9,  // 2: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.team_images:type_name -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.TeamImagesEntry
+	0,  // 3: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
+	0,  // 4: sameoldchat.chat.v1.OAuthService.ExchangeOAuthV2:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
+	0,  // 5: sameoldchat.chat.v1.OAuthService.RefreshOAuthV2:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
+	0,  // 6: sameoldchat.chat.v1.OAuthService.ExchangeOAuthV2Token:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
+	6,  // 7: sameoldchat.chat.v1.OAuthService.BeginShortTokenRotation:input_type -> sameoldchat.chat.v1.ShortTokenRotationRequest
+	6,  // 8: sameoldchat.chat.v1.OAuthService.CompleteShortTokenRotation:input_type -> sameoldchat.chat.v1.ShortTokenRotationRequest
+	2,  // 9: sameoldchat.chat.v1.OAuthService.OpenIDConnectToken:input_type -> sameoldchat.chat.v1.OpenIDConnectTokenRequest
+	4,  // 10: sameoldchat.chat.v1.OAuthService.OpenIDConnectUserInfo:input_type -> sameoldchat.chat.v1.OpenIDConnectUserInfoRequest
+	1,  // 11: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:output_type -> sameoldchat.chat.v1.OAuthToken
+	1,  // 12: sameoldchat.chat.v1.OAuthService.ExchangeOAuthV2:output_type -> sameoldchat.chat.v1.OAuthToken
+	1,  // 13: sameoldchat.chat.v1.OAuthService.RefreshOAuthV2:output_type -> sameoldchat.chat.v1.OAuthToken
+	1,  // 14: sameoldchat.chat.v1.OAuthService.ExchangeOAuthV2Token:output_type -> sameoldchat.chat.v1.OAuthToken
+	7,  // 15: sameoldchat.chat.v1.OAuthService.BeginShortTokenRotation:output_type -> sameoldchat.chat.v1.ShortTokenRotationResponse
+	7,  // 16: sameoldchat.chat.v1.OAuthService.CompleteShortTokenRotation:output_type -> sameoldchat.chat.v1.ShortTokenRotationResponse
+	3,  // 17: sameoldchat.chat.v1.OAuthService.OpenIDConnectToken:output_type -> sameoldchat.chat.v1.OpenIDConnectTokenResponse
+	5,  // 18: sameoldchat.chat.v1.OAuthService.OpenIDConnectUserInfo:output_type -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse
+	11, // [11:19] is the sub-list for method output_type
+	3,  // [3:11] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_oauth_proto_init() }
@@ -828,7 +959,7 @@ func file_sameoldchat_chat_v1_oauth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_oauth_proto_rawDesc), len(file_sameoldchat_chat_v1_oauth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

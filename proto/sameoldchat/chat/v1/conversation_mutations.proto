@@ -167,6 +167,16 @@ message ConversationAIExclusionResponse {
   repeated string conversation_ids = 1;
 }
 
+// ConversationPropertiesRequest is admin.conversations.bulkSetProperties: one
+// channel property, already parsed and validated at the Slack boundary, for
+// up to 100 channels. The one settable property is exclude_from_slack_ai.
+message ConversationPropertiesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string conversation_ids = 3;
+  bool exclude_from_slack_ai = 4;
+}
+
 message LinkConversationObjectsRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -204,6 +214,7 @@ service ConversationMutationsService {
   rpc AdminLookupConversations(ConversationLookupRequest) returns (ConversationPage);
   rpc AdminBulkMoveConversations(BulkMoveConversationsRequest) returns (MutationResponse);
   rpc AdminSetConversationsExcludedFromAI(ConversationAIExclusionRequest) returns (MutationResponse);
+  rpc AdminBulkSetConversationProperties(ConversationPropertiesRequest) returns (MutationResponse);
   rpc AdminConversationsExcludedFromAI(ConversationAIExclusionRequest) returns (ConversationAIExclusionResponse);
   rpc AdminLinkConversationObjects(LinkConversationObjectsRequest) returns (MutationResponse);
   rpc AdminUnlinkConversationObjects(UnlinkConversationObjectsRequest) returns (MutationResponse);

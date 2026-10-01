@@ -144,6 +144,7 @@ type Store struct {
 	barriers                      map[domain.BarrierID]domain.InformationBarrier
 	appConfigs                    map[string]domain.AppConfig
 	aiExcludedConversations       map[domain.ConversationID]struct{}
+	shortTokenRotations           map[string]domain.ShortTokenRotation
 	conversationObjects           map[string]domain.LinkedObject
 	appActivities                 []domain.AppActivity
 	anomalyAllowLists             map[domain.WorkspaceID]domain.AnomalyAllowList
@@ -415,6 +416,7 @@ func New() *Store {
 		barriers:                      make(map[domain.BarrierID]domain.InformationBarrier),
 		appConfigs:                    make(map[string]domain.AppConfig),
 		aiExcludedConversations:       make(map[domain.ConversationID]struct{}),
+		shortTokenRotations:           make(map[string]domain.ShortTokenRotation),
 		conversationObjects:           make(map[string]domain.LinkedObject),
 		anomalyAllowLists:             make(map[domain.WorkspaceID]domain.AnomalyAllowList),
 		externalAuthTokens:            make(map[string]domain.ExternalAuthToken),
@@ -3254,6 +3256,10 @@ func (s *Store) ExpireUserAccount(_ context.Context, workspaceID domain.Workspac
 	if user.Deleted || !s.userExpirations[userID].Equal(expected.UTC()) {
 		return false, nil
 	}
+	guestEvent, err := s.guestDeactivationEventLocked(user, event)
+	if err != nil {
+		return false, err
+	}
 	user.Deleted = true
 	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
@@ -3277,6 +3283,7 @@ func (s *Store) ExpireUserAccount(_ context.Context, workspaceID domain.Workspac
 		}
 	}
 	s.outbox = append(s.outbox, event)
+	s.outbox = append(s.outbox, guestEvent...)
 	return true, nil
 }
 
@@ -3286,6 +3293,13 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 	user, ok := s.users[userID]
 	if !ok || user.WorkspaceID != workspaceID {
 		return store.ErrNotFound
+	}
+	var guestEvent []events.Event
+	if deleted && !user.Deleted {
+		var err error
+		if guestEvent, err = s.guestDeactivationEventLocked(user, event); err != nil {
+			return err
+		}
 	}
 	user.Deleted = deleted
 	user.Updated = secondsInstant(event.CreatedAt)
@@ -3310,6 +3324,7 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 		}
 	}
 	s.outbox = append(s.outbox, event)
+	s.outbox = append(s.outbox, guestEvent...)
 	return nil
 }
 

@@ -80,11 +80,28 @@ message OpenIDConnectUserInfoResponse {
   bool team_image_default = 16;
 }
 
+// ShortTokenRotationRequest is oauth.v2.beginShortTokenRotation (new_token
+// empty) and oauth.v2.completeShortTokenRotation.
+message ShortTokenRotationRequest {
+  string client_id = 1;
+  string client_secret = 2;
+  string token = 3;
+  string new_token = 4;
+}
+
+// ShortTokenRotationResponse carries the replacement token: the pending one
+// from a begin, the now-live one from a completion.
+message ShortTokenRotationResponse {
+  string token = 1;
+}
+
 service OAuthService {
   rpc ExchangeOAuth(OAuthExchangeRequest) returns (OAuthToken);
   rpc ExchangeOAuthV2(OAuthExchangeRequest) returns (OAuthToken);
   rpc RefreshOAuthV2(OAuthExchangeRequest) returns (OAuthToken);
   rpc ExchangeOAuthV2Token(OAuthExchangeRequest) returns (OAuthToken);
+  rpc BeginShortTokenRotation(ShortTokenRotationRequest) returns (ShortTokenRotationResponse);
+  rpc CompleteShortTokenRotation(ShortTokenRotationRequest) returns (ShortTokenRotationResponse);
   rpc OpenIDConnectToken(OpenIDConnectTokenRequest) returns (OpenIDConnectTokenResponse);
   rpc OpenIDConnectUserInfo(OpenIDConnectUserInfoRequest) returns (OpenIDConnectUserInfoResponse);
 }

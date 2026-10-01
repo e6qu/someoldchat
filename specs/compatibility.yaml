@@ -2556,9 +2556,19 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.set/
   - method: admin.conversations.bulkSetProperties
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkSetProperties/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationsBulkSetPropertiesSetsTheChannelsThatExist
+      - go-test:internal/domain:TestParseConversationPropertyUsesTheReferenceCodes
+      - go-test:internal/store/sqlstore:TestSQLiteExistingConversationsExcludedFromAI
+      - go-test:internal/store/memory:TestExistingConversationsExcludedFromAI
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference names exclude_from_slack_ai only as its example and lists no other property, so that is the one property accepted (the flag admin.conversations.bulkSetExcludeFromSlackAi writes); every other key answers property_not_allowed, and a value that is not a JSON boolean answers invalid_arguments.
+      - The reference documents no response body and reserves no_valid_channels for a request whose channels are all invalid, so the channels of the workspace are set, the others are skipped in the same transaction, and a successful request answers only {"ok":true}; which channels were skipped is not reported. An invalid channel is one that is not a conversation of the caller's workspace; the property applies to every conversation type here, so disallowed_action is never returned.
+      - The change is applied synchronously in one transaction, so action_already_in_progress is never returned; feature_not_enabled and restricted_plan_level are never returned because this deployment has no plan tiers. A non-administrator answers restricted_action and a bot token not_allowed_token_type. Enterprise organization behavior and live-Slack outcomes remain unqualified.
   - method: admin.usergroups.addUsers
     status: unimplemented
     provenance: slack-reference
@@ -2600,17 +2610,43 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.managed.permissions.set/
   - method: canvases.getContent
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/canvases.getContent/
+    evidence:
+      - go-test:internal/api/slack:TestCanvasesGetContentReturnsMarkdownAndHTML
+      - go-test:internal/domain:TestCanvasDocumentMarkdownRoundTripsThroughTheCreateSplitter
+      - go-test:internal/domain:TestCanvasDocumentMarkdownMatchesTheReferenceExample
+      - go-test:internal/domain:TestCanvasDocumentHTMLUsesTheSharedRendererAndEscapesEverything
+    deviations:
+      - The reference does not show its HTML, so html is this deployment's rendering of the canvas (domain.CanvasDocumentHTML, the renderer the product's reading view uses), with a heading section as h1-h3, checklists as disabled checkboxes and a mention as a span naming the member id; it is not byte-compatible with Slack's HTML.
+      - Markdown is the stored sections joined by blank lines, headings as "#" lines, which canvases.create reads back to the same sections; section kinds this deployment does not model beyond h1-h3 and markdown are returned as their text. A stored body that cannot be decoded answers internal_error. canvas_disabled_user_team is never returned because canvases cannot be disabled per workspace here.
   - method: oauth.v2.beginShortTokenRotation
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.beginShortTokenRotation/
+    evidence:
+      - go-test:internal/api/slack:TestShortTokenRotationReplacesTheSecretOnlyWhenCompleted
+      - go-test:internal/api/slack:TestShortTokenRotationAnswersEachDeclaredRefusal
+      - go-test:internal/domain:TestShortSecretFollowsTheReferenceExamples
+      - go-test:internal/domain:TestLengthenTokenSecretKeepsEverySectionButTheSecret
+      - go-test:internal/store/sqlstore:TestSQLiteShortTokenRotation
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - This deployment did not exist before August 19, 2016 and keeps no token creation time, so eligibility is the test the reference gives for tokens of unknown age, a secret (the section after the final "-") shorter than 32 characters, and a token whose secret is 32 or longer answers token_too_long. The xoxp- tokens this deployment issues carry a 20-character hexadecimal secret, which that test calls short, so each of them may be rotated once to a 32-character secret; a token in Slack's pre-2016 sectioned form (xoxp-111-222-333-d6bc76) keeps its sections exactly as the reference describes.
+      - Only a non-expiring user token beginning xoxp- is rotated; a bot, execution-scoped or expiring rotating (xoxe.xoxp-) token answers not_allowed_token_type. The token authenticates the request like any other (not_authed, invalid_auth, token_revoked, token_expired, account_inactive) before client_id and client_secret are checked; a token issued to another app answers invalid_client_id. Beginning again replaces the pending replacement. Live-Slack outcomes remain unqualified.
   - method: oauth.v2.completeShortTokenRotation
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.completeShortTokenRotation/
+    evidence:
+      - go-test:internal/api/slack:TestShortTokenRotationReplacesTheSecretOnlyWhenCompleted
+      - go-test:internal/api/slack:TestShortTokenRotationAnswersEachDeclaredRefusal
+      - go-test:internal/store/sqlstore:TestSQLiteShortTokenRotation
+      - go-test:internal/store/memory:TestShortTokenRotation
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The pending rotation is durable (schema 196) and completable for ten minutes; after that, or with nothing begun, the answer is rotation_not_found. A new_token other than the one begin issued answers invalid_token and a missing one invalid_arguments. Completion moves the original credential to the replacement's hash in one transaction, so the original answers invalid_auth afterwards rather than token_revoked, and no tokens_revoked event is sent for it. Eligibility and authentication follow oauth.v2.beginShortTokenRotation's recorded deviation. Live-Slack outcomes remain unqualified.
 
 decisions:
   # The two Events-API sources above are pinned and hashed, and until this entry
@@ -2638,7 +2674,12 @@ decisions:
       its current-catalog user_profile_changed and user_status_changed
       companions, dnd_updated, presence_change (RTM only), team_rename and
       file_public, each from a producer-snapshotted payload pinned by builder
-      and producer-seam tests. The user object team_join and user_change carry
+      and producer-seam tests. user_guest_status_changed (current catalog,
+      users:read, Events API and Socket Mode only) is minted by the store
+      inside the mutation that ends a guest tier (admin.users.setRegular,
+      setAdmin, setOwner and the admin page's role control) or deactivates
+      an active guest (admin.users.remove, the admin page's Disable, guest
+      expiry), with the user object as the change leaves it and cache_ts. The user object team_join and user_change carry
       is users.info's own (internal/slackobject), and every URL an event
       carries — a file's url_private, a user's image_* — is built on
       -auth-public-url at delivery, origin-relative when none is configured. user_typing is delivered on RTM and on the

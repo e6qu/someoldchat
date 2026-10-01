@@ -317,3 +317,40 @@ var ErrInvalidTriggerConfig = errors.New("workflow trigger configuration is inva
 // not match the trigger's stored hash. The HTTP boundary answers it with the
 // same indistinguishable 404 as an unknown trigger.
 var ErrWebhookTriggerSecret = errors.New("webhook trigger secret does not match")
+
+// The admin.conversations.bulkSetProperties refusals, one per code its
+// reference declares for a property or a channel list that cannot be applied.
+var (
+	// ErrInvalidConversationProperty is a property argument that is not a JSON
+	// object naming one property with a value of that property's type
+	// (invalid_arguments).
+	ErrInvalidConversationProperty = errors.New("channel property is not a valid JSON object")
+	// ErrTooManyConversationProperties is an object naming more than one
+	// property; only one may be updated at a time (too_many_properties).
+	ErrTooManyConversationProperties = errors.New("only one channel property can be updated at a time")
+	// ErrConversationPropertyNotAllowed names a property that may not be
+	// updated (property_not_allowed).
+	ErrConversationPropertyNotAllowed = errors.New("channel property is not allowed to be updated")
+	// ErrNoValidChannels is a request none of whose channels is a channel of
+	// this workspace (no_valid_channels).
+	ErrNoValidChannels = errors.New("none of the channels is valid")
+)
+
+// The oauth.v2.beginShortTokenRotation and completeShortTokenRotation
+// refusals that are about the token being rotated rather than about the
+// client presenting it.
+var (
+	// ErrTokenTypeNotRotatable is a credential that is not an xoxp user token
+	// (not_allowed_token_type).
+	ErrTokenTypeNotRotatable = errors.New("only a user token can have its short secret rotated")
+	// ErrTokenSecretTooLong is a token whose secret is already the full
+	// 32 characters (token_too_long).
+	ErrTokenSecretTooLong = errors.New("token secret is not short enough to be rotated")
+	// ErrShortTokenRotationNotFound is a completion with no pending rotation
+	// for the token, or one begun more than ten minutes ago
+	// (rotation_not_found).
+	ErrShortTokenRotationNotFound = errors.New("no pending short token rotation was found")
+	// ErrShortTokenRotationMismatch is a completion naming a new token other
+	// than the one the pending rotation issued (invalid_token).
+	ErrShortTokenRotationMismatch = errors.New("new token does not match the pending rotation")
+)

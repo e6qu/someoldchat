@@ -1597,6 +1597,11 @@ func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID
 	if getErr != nil || target.WorkspaceID != workspaceID {
 		return store.ErrNotFound
 	}
+	// The snapshot is Slack's user object, which reports the role and guest
+	// tier; the stored row alone left a removed guest reading as a member.
+	if target, err = m.describeUser(ctx, target); err != nil {
+		return err
+	}
 	payload, err := events.UserChangePayload("user.removed", target, true, false, time.Now().UTC())
 	if err != nil {
 		return err
@@ -1616,7 +1621,10 @@ func (m Messages) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceI
 	if err := m.authorizeRoleChange(ctx, workspaceID, actor, targetID, role); err != nil {
 		return err
 	}
-	return m.setWorkspaceRole(ctx, workspaceID, actorID, targetID, role)
+	// Slack's setRegular, setAdmin and setOwner each take "an existing
+	// guest" to the role they name, so the administrative assignment ends a
+	// guest tier; the identity provider's claim below does not.
+	return m.setWorkspaceRole(ctx, workspaceID, actorID, targetID, role, true)
 }
 
 // authorizeRoleChange enforces the workspace role hierarchy on a role mutation.
@@ -1687,7 +1695,12 @@ func (m Messages) requireWorkspaceRole(ctx context.Context, workspaceID domain.W
 // setWorkspaceRole is the validation and write shared by the administrative
 // SetUserRole and the provider-driven SynchronizeExternalUserRole. It performs no
 // authority check of its own; every caller must have decided authority first.
-func (m Messages) setWorkspaceRole(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, role domain.WorkspaceRole) error {
+//
+// endGuestTier selects the administrative assignment, which also makes a guest
+// a full member of the role (store.AssignWorkspaceRole, journaling
+// user.guest_status_changed in the same transaction); without it a guest
+// cannot be promoted at all (store.SetWorkspaceRole).
+func (m Messages) setWorkspaceRole(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, role domain.WorkspaceRole, endGuestTier bool) error {
 	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
 		// This is reachable from admin.users.setRole AND from the provider-driven
 		// SynchronizeExternalUserRole. As a bare errors.New it had no domain class,
@@ -1702,6 +1715,9 @@ func (m Messages) setWorkspaceRole(ctx context.Context, workspaceID domain.Works
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("workspace.role_changed", events.String("user_id", string(targetID)), events.String("role", string(role))), time.Now().UTC())
 	if err != nil {
 		return err
+	}
+	if endGuestTier {
+		return m.Store.AssignWorkspaceRole(ctx, workspaceID, targetID, role, event)
 	}
 	return m.Store.SetWorkspaceRole(ctx, workspaceID, targetID, role, event)
 }
@@ -10052,7 +10068,7 @@ func (m Messages) SynchronizeExternalUserRole(ctx context.Context, workspaceID d
 	if err == nil && membership.Role == domain.WorkspaceRoleOwner {
 		return nil
 	}
-	return m.setWorkspaceRole(ctx, workspaceID, "", targetID, role)
+	return m.setWorkspaceRole(ctx, workspaceID, "", targetID, role, false)
 }
 
 func (m Messages) PostWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
