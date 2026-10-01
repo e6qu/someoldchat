@@ -19,16 +19,51 @@ fetch() {
 	rm -f "$raw"
 }
 
+# closest_sentences prints the three sentences of a fetched page that share the
+# most words with the expected text, so a reworded source shows its current
+# wording in the CI log instead of only reporting that the old one is gone.
+closest_sentences() {
+	awk -v expected="$2" '
+		function words(text, set,    count, list, i, word) {
+			count = split(tolower(text), list, /[^a-z0-9]+/)
+			for (i = 1; i <= count; i++) {
+				word = list[i]
+				if (length(word) > 3) {
+					set[word] = 1
+				}
+			}
+		}
+		BEGIN { RS = "[.!?] " ; words(expected, wanted) }
+		{
+			delete seen
+			words($0, seen)
+			score = 0
+			for (word in seen) {
+				if (word in wanted) {
+					score++
+				}
+			}
+			if (score > 0) {
+				printf "%d\t%s\n", score, substr($0, 1, 300)
+			}
+		}
+	' "$1" | sort -rn | head -3 | cut -f2- | sed 's/^/  closest: /' >&2
+}
+
 assert_contains() {
 	if ! grep -F "$2" "$1" >/dev/null; then
 		echo "official Slack source no longer supports contract assertion: $3" >&2
 		echo "source: $4" >&2
-		exit 1
+		echo "expected: $2" >&2
+		closest_sentences "$1" "$2"
+		failures=$((failures + 1))
+		return 0
 	fi
 	assertions=$((assertions + 1))
 }
 
 assertions=0
+failures=0
 sign_in_url='https://slack.com/help/articles/212681477-Sign-in-to-Slack'
 keyboard_url='https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands'
 keyboard_navigation_url='https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard'
@@ -470,4 +505,8 @@ assert_contains "$work/reminders-add.html" 'have become degraded or useless' \
 assert_contains "$work/later-api.html" 'There are no direct APIs for Save it for Later to integrate with.' \
 	'[LATER-01 REMIND-API-01] current Later has no direct app API' "$later_api_url"
 
+if [ "$failures" -ne 0 ]; then
+	echo "external Slack journey contract qualification failed ($failures of $((assertions + failures)) assertions)" >&2
+	exit 1
+fi
 echo "external Slack journey contract qualification passed ($assertions assertions)"
