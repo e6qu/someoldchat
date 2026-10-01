@@ -62,6 +62,14 @@ func deletingAConversationRemovesEverythingItOwns(t *testing.T, open opener) {
 	if err := f.repository.SetThreadFollowed(ctx, f.workspaceID, f.userID, f.channelID, domain.MessageTimestamp("1700000000.000100"), true, f.event("follow", "thread.followed", string(message.ID))); err != nil {
 		t.Fatalf("seed thread follow: %v", err)
 	}
+	// An agent session and its agent row: the agent row's foreign key names
+	// the session, so the two must go in that order or not at all.
+	if _, err := f.repository.SetAgentSessionStatus(ctx, domain.AgentSessionStatusWrite{
+		WorkspaceID: f.workspaceID, Conversation: f.channelID, ThreadTimestamp: domain.MessageTimestamp("1700000000.000100"),
+		AppID: domain.AppID("A-" + f.suffix), Status: domain.AgentSessionProcessing, Title: "Owned session", At: now,
+	}, f.event("agent-session", "agent_session.status_set", string(f.channelID))); err != nil {
+		t.Fatalf("seed agent session: %v", err)
+	}
 	if _, _, err := f.repository.CreateSavedItem(ctx, domain.SavedItem{
 		ID: domain.SavedItemID("SV-" + f.suffix), WorkspaceID: f.workspaceID, UserID: f.userID, MessageID: message.ID,
 		Conversation: f.channelID, State: domain.SavedItemInProgress, CreatedAt: now, UpdatedAt: now,
@@ -131,6 +139,9 @@ func deletingAConversationRemovesEverythingItOwns(t *testing.T, open opener) {
 	}
 	if followed {
 		t.Fatal("thread follow survived delete")
+	}
+	if _, err := f.repository.GetAgentSession(ctx, f.workspaceID, f.channelID, domain.MessageTimestamp("1700000000.000100")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("agent session after delete: %v, want not found", err)
 	}
 	if remaining := invitationActivity(); remaining != 0 {
 		t.Fatalf("the invitation to a deleted conversation is still in Activity (%d items)", remaining)

@@ -11,6 +11,10 @@ events.payload_field_invalid
 events.payload_malformed
 events.payload_required
 events.slack_event_incomplete
+service.agent_session_not_agent
+service.agent_session_not_found
+service.agent_session_not_stoppable
+service.agent_session_thread_required
 service.app_configuration_authentication
 service.app_credential_key_unavailable
 service.app_datastore_not_found
@@ -52,6 +56,8 @@ service.function_use_restricted
 service.huddle_not_owned
 service.invalid_access_log
 service.invalid_activity_saved_view
+service.invalid_agent_session
+service.invalid_agent_session_status
 service.invalid_app_approval
 service.invalid_app_manifest
 service.invalid_app_response

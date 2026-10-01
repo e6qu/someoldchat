@@ -302,6 +302,8 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/assistant.threads.setTitle", auth.ScopeChatWrite},
 		{http.MethodPost, "/api/assistant.threads.setStatus", auth.ScopeChatWrite},
 		{http.MethodPost, "/api/assistant.threads.setSuggestedPrompts", auth.ScopeChatWrite},
+		{http.MethodPost, "/api/agents.sessions.setStatus", auth.ScopeChatWrite},
+		{http.MethodPost, "/api/agents.sessions.rename", auth.ScopeChatWrite},
 		{http.MethodPost, "/api/pins.add", auth.ScopePinsWrite},
 		{http.MethodPost, "/api/pins.remove", auth.ScopePinsWrite},
 		{http.MethodGet, "/api/pins.list", auth.ScopePinsRead},

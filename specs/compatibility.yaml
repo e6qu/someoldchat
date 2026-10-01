@@ -2588,11 +2588,40 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.usergroups.uploadUsers/
   - method: agents.sessions.rename
-    status: unimplemented
+    status: schema-compatible
+    evidence:
+      - go-test:internal/api/slack:TestAgentsSessionsRenameAnswersTheReferenceShapes
+      - go-test:internal/service:TestAgentSessionRenameIsTheAgentsOwn
+      - go-test:internal/store/memory:TestAgentSessionsKeepTheSharedContract
+      - go-test:internal/store/sqlstore:TestSQLiteAgentSessionsKeepTheSharedContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - Not sdk-compatible because the pinned official SDKs (@slack/web-api 8.0.0, slack_sdk 3.43.0) predate the method; @slack/web-api 8.2.0 and slack_sdk 3.44.1 declare it, and the argument names were checked against @slack/web-api 8.2.0's AgentsSessionsRenameArguments, but no pinned SDK suite calls it.
+      - Session channels do not exist here, so every session is a thread session. A missing thread_ts is always thread_ts_required, and thread_ts_not_allowed, invalid_name, name_taken and is_archived — the codes for renaming a session channel — are never produced. channel_id is required (invalid_arguments when absent) even though the page makes it optional outside public channels, because the page does not say how the session is found without it.
+      - An agent's own rename is journaled for the first-party client only; agent_session_title_changed is sent for a member's change from the client, as the event page describes, never for the app's own rename. Renaming to the current title changes nothing and is reported to nobody.
+      - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited follows the deployment's shared Web API limiter rather than a per-method Tier 3 budget.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.sessions.rename/
   - method: agents.sessions.setStatus
-    status: unimplemented
+    status: schema-compatible
+    evidence:
+      - go-test:internal/api/slack:TestAgentsSessionsSetStatusAnswersTheReferenceShapes
+      - go-test:internal/service:TestAgentSessionSetStatusFollowsTheReference
+      - go-test:internal/service:TestAgentSessionIdentityOverridesTravelAsOneSet
+      - go-test:internal/service:TestStoppingASessionSendsAgentSessionStoppedAndLeavesTheStatus
+      - go-test:internal/store/memory:TestAgentSessionsKeepTheSharedContract
+      - go-test:internal/store/sqlstore:TestSQLiteAgentSessionsKeepTheSharedContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+      - go-test:internal/web:TestTheThreadPaneShowsTheAgentSessionAndItsControls
+      - go-test:tests/lifecycle:TestTheProductRefusesEveryTransitionTheMachineForbids
+    deviations:
+      - Not sdk-compatible because the pinned official SDKs (@slack/web-api 8.0.0, slack_sdk 3.43.0) predate the method; @slack/web-api 8.2.0 and slack_sdk 3.44.1 declare it, and the argument names were checked against @slack/web-api 8.2.0's AgentsSessionsSetStatusArguments, but no pinned SDK suite calls it.
+      - Session channels do not exist here, so every session is a thread session scoped to a live top-level message of the conversation (another thread_ts is invalid_arguments when it would create a session); thread_ts_not_allowed is never produced, and channel_id is required (invalid_arguments when absent) because the page does not say how a session is found without it.
+      - The page requires initiator_user_id to be a member of the channel without naming a code; a non-member is invalid_arguments, and an unknown user is user_not_found as listed.
+      - The missing_agent_session_stopped_event_subscription warning is answered, as the agent_session_stopped page states, on every call while the app's manifest subscribes to neither the bot nor the user event, in both `warning` and `response_metadata.warnings`; the page calls it a warning, so the call still succeeds. `title` is omitted from the response while the session has none.
+      - The agent's icon_emoji, icon_url and username are stored with the page's set semantics (a JSON null is the same as leaving one out) and shown in the first-party session panel; they do not restyle the app's messages.
+      - The agent_session_stopped page lets an app leave processing with chat.stopStream, but no page says which status that sets, so chat.stopStream does not change a session's status here; the app moves it with this method.
+      - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited follows the deployment's shared Web API limiter rather than a per-method Tier 3 budget.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.sessions.setStatus/
   - method: apps.managed.permissions.set

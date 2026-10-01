@@ -74,6 +74,32 @@ var (
 	ErrAssistantThreadNotFound = errors.New("assistant thread state not found")
 )
 
+// The agents.sessions.* refusals, each one a code the reference pages name.
+var (
+	// ErrInvalidAgentSession is a malformed session write: a title outside
+	// 1-200 characters, an over-long username or an unusable icon_url, a
+	// thread_ts that is not a thread root of the conversation, or an
+	// initiator who is not in the conversation (invalid_arguments).
+	ErrInvalidAgentSession = errors.New("agent session arguments are invalid")
+	// ErrInvalidAgentSessionStatus is a status outside active, processing,
+	// suspended and closed (invalid_status).
+	ErrInvalidAgentSessionStatus = errors.New("agent session status is invalid")
+	// ErrAgentSessionThreadRequired is a session named without its thread
+	// root; every session here is thread-based (thread_ts_required).
+	ErrAgentSessionThreadRequired = errors.New("agent session thread_ts is required")
+	// ErrAgentSessionNotFound is a thread no agent session exists for
+	// (session_not_found). It is distinct from store.ErrNotFound, the answer
+	// for a conversation the caller cannot see.
+	ErrAgentSessionNotFound = errors.New("agent session not found")
+	// ErrAgentSessionNotAgent is an app renaming a session it is not an agent
+	// of (not_authorized).
+	ErrAgentSessionNotAgent = errors.New("app is not an agent of the session")
+	// ErrAgentSessionNotStoppable is a stop pressed on a session with no
+	// processing agent whose app subscribes to agent_session_stopped — the
+	// state in which the client shows no stop control at all.
+	ErrAgentSessionNotStoppable = errors.New("agent session has no processing agent that can be stopped")
+)
+
 // ErrInvalidBlocks reports message blocks that are not valid Block Kit —
 // Slack's invalid_blocks. It is distinct from ErrInvalidMessage (no_text),
 // which reports a message with nothing to show.

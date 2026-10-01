@@ -5054,6 +5054,62 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// An agent session crosses the seam whole: the session and every
+			// agent's status and identity, the setStatus warning, the stop
+			// control, and each refusal's sentinel.
+			name: "agent sessions keep their lifecycle, warnings and refusals",
+			seed: seedAgentSessionParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				root, err := chat.Post(ctx, "T1", "U1", "C1", "agent root", "", "")
+				if err != nil {
+					return nil, err
+				}
+				thread := timestampOf(root)
+				created, err := chat.SetAgentSessionStatus(ctx, "T1", "UB", "AG", "C1", thread, domain.AgentSessionStatusRequest{
+					Status: domain.AgentSessionProcessing, Title: "Research", InitiatorUserID: "U1",
+					Identity: domain.AgentIdentity{IconEmoji: ":robot_face:", Username: "Agent"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				warned, err := chat.SetAgentSessionStatus(ctx, "T1", "UH", "AH", "C1", thread, domain.AgentSessionStatusRequest{Status: domain.AgentSessionActive})
+				if err != nil {
+					return nil, err
+				}
+				_, invalid := chat.SetAgentSessionStatus(ctx, "T1", "UB", "AG", "C1", thread, domain.AgentSessionStatusRequest{Status: "thinking"})
+				_, threadless := chat.SetAgentSessionStatus(ctx, "T1", "UB", "AG", "C1", "", domain.AgentSessionStatusRequest{Status: domain.AgentSessionActive})
+				renamed, err := chat.RenameAgentSession(ctx, "T1", "UB", "AG", "C1", thread, "Renamed")
+				if err != nil {
+					return nil, err
+				}
+				_, unnamed := chat.RenameAgentSession(ctx, "T1", "UB", "AG", "C2", thread, "Elsewhere")
+				retitled, err := chat.ChangeAgentSessionTitle(ctx, "T1", "U2", "C1", thread, "Member title")
+				if err != nil {
+					return nil, err
+				}
+				view, err := chat.AgentSession(ctx, "T1", "U1", "C1", thread)
+				if err != nil {
+					return nil, err
+				}
+				stopped, err := chat.StopAgentSession(ctx, "T1", "U2", "C1", thread)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetAgentSessionStatus(ctx, "T1", "UB", "AG", "C1", thread, domain.AgentSessionStatusRequest{Status: domain.AgentSessionSuspended}); err != nil {
+					return nil, err
+				}
+				_, notStoppable := chat.StopAgentSession(ctx, "T1", "U2", "C1", thread)
+				return []any{
+					projectAgentSession(created.Session), created.AgentStatus, created.Warnings,
+					projectAgentSession(warned.Session), warned.AgentStatus, warned.Warnings,
+					errors.Is(invalid, domain.ErrInvalidAgentSessionStatus), errors.Is(threadless, domain.ErrAgentSessionThreadRequired),
+					projectAgentSession(renamed), errors.Is(unnamed, domain.ErrNotInConversation),
+					projectAgentSession(retitled), projectAgentSession(view.Session), view.Stoppable,
+					projectAgentSession(stopped), errors.Is(notStoppable, domain.ErrAgentSessionNotStoppable),
+				}, nil
+			},
+		},
+		{
 			// Assistant state is written a field at a time, which is the part
 			// the two compositions can disagree about: a whole-record write
 			// would clear the fields the caller left empty, and only setting

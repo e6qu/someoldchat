@@ -433,6 +433,10 @@ func appEventRequiredScopes(ctx context.Context, state AppEventProjectionStore, 
 		return []string{"team:read"}, nil
 	case strings.HasPrefix(event.Topic, "link."):
 		return []string{string(auth.ScopeLinksRead)}, nil
+	// agent_session_stopped and agent_session_title_changed: the current
+	// reference pages require chat:write.
+	case strings.HasPrefix(event.Topic, "agent_session."):
+		return []string{string(auth.ScopeChatWrite)}, nil
 	}
 	channelID, scoped := eventChannelID(event)
 	if !scoped {
