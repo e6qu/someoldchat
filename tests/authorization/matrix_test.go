@@ -193,11 +193,11 @@ func holderOf(required authority) domain.UserID {
 // that something is there.
 func isStandingRefusal(err error) bool {
 	switch {
-	case errors.Is(err, service.ErrNotWorkspaceAdmin),
-		errors.Is(err, service.ErrUserIsRestricted),
-		errors.Is(err, service.ErrUserIsUltraRestricted),
-		errors.Is(err, service.ErrNotInConversation),
-		errors.Is(err, service.ErrBarrieredFromMember),
+	case errors.Is(err, domain.ErrNotWorkspaceAdmin),
+		errors.Is(err, domain.ErrUserIsRestricted),
+		errors.Is(err, domain.ErrUserIsUltraRestricted),
+		errors.Is(err, domain.ErrNotInConversation),
+		errors.Is(err, domain.ErrBarrieredFromMember),
 		errors.Is(err, store.ErrNotFound):
 		return true
 	}

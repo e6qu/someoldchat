@@ -10,7 +10,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -351,7 +351,7 @@ func (h Handler) workspaceRetentionSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.Messages.SetWorkspaceRetention(r.Context(), principal.WorkspaceID, principal.UserID, domain.RetentionPolicy{MessageDays: messageDays, FileDays: fileDays}); err != nil {
-		if errors.Is(err, service.ErrInvalidRetentionDuration) {
+		if errors.Is(err, domain.ErrInvalidRetentionDuration) {
 			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_duration", Title: "Request rejected", Message: "A retention limit must be between 0 and 36499 days."})
 			return
 		}
@@ -384,7 +384,7 @@ func (h Handler) workspaceProfileFieldSet(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if _, err := h.Messages.SetWorkspaceProfileField(r.Context(), principal.WorkspaceID, principal.UserID, definition); err != nil {
-		if errors.Is(err, service.ErrInvalidProfileField) {
+		if errors.Is(err, domain.ErrInvalidProfileField) {
 			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_profile_field", Title: "Request rejected", Message: "A field needs a label and a type, and an options list needs at least one option."})
 			return
 		}
@@ -499,9 +499,9 @@ func (h Handler) redirectSettings(w http.ResponseWriter, r *http.Request, notice
 
 func workspaceSettingsProblem(err error, message string) authAdminProblem {
 	switch {
-	case errors.Is(err, service.ErrNotWorkspaceAdmin):
+	case errors.Is(err, domain.ErrNotWorkspaceAdmin):
 		return authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Your workspace role does not change workspace settings. " + message}
-	case errors.Is(err, service.ErrInvalidWorkspace), errors.Is(err, store.ErrInvalidArgument):
+	case errors.Is(err, domain.ErrInvalidWorkspace), errors.Is(err, store.ErrInvalidArgument):
 		return authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_workspace", Title: "Request rejected", Message: "That value is not one this workspace accepts. " + message}
 	case errors.Is(err, store.ErrNotFound):
 		return authAdminProblem{Status: http.StatusNotFound, Code: "not_found", Title: "Not found", Message: message}

@@ -50,7 +50,7 @@ func TestStarringAPrivateChannelRequiresBeingAbleToSeeIt(t *testing.T) {
 	if err := messages.RemoveStar(ctx, "T1", "U1", "CP", ""); err != nil {
 		t.Fatalf("a member unstarring a private channel: %v", err)
 	}
-	if err := messages.RemoveStar(ctx, "T1", "U1", "CP", ""); !errors.Is(err, ErrNotStarred) {
-		t.Fatalf("a member unstarring a channel twice: err=%v, want %v", err, ErrNotStarred)
+	if err := messages.RemoveStar(ctx, "T1", "U1", "CP", ""); !errors.Is(err, domain.ErrNotStarred) {
+		t.Fatalf("a member unstarring a channel twice: err=%v, want %v", err, domain.ErrNotStarred)
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -449,9 +449,9 @@ func setDeveloperAppLinks(data *developerAppsData, app domain.App, manifest stri
 
 func developerAppStatus(err error) int {
 	switch {
-	case errors.Is(err, service.ErrAppNotDistributable), errors.Is(err, service.ErrInvalidExternalAuthProvider):
+	case errors.Is(err, domain.ErrAppNotDistributable), errors.Is(err, domain.ErrInvalidExternalAuthProvider):
 		return http.StatusBadRequest
-	case errors.Is(err, service.ErrExternalAuthConnection):
+	case errors.Is(err, domain.ErrExternalAuthConnection):
 		return http.StatusBadGateway
 	case errors.Is(err, store.ErrNotFound):
 		return http.StatusNotFound
@@ -466,11 +466,11 @@ func developerAppStatus(err error) int {
 
 func developerAppError(err error) string {
 	switch {
-	case errors.Is(err, service.ErrAppNotDistributable):
+	case errors.Is(err, domain.ErrAppNotDistributable):
 		return "Add a redirect URL to the manifest before activating public distribution: an install has nowhere to return to without one."
-	case errors.Is(err, service.ErrInvalidExternalAuthProvider):
+	case errors.Is(err, domain.ErrInvalidExternalAuthProvider):
 		return "A provider needs a name, a client ID and secret, and https authorization and token URLs."
-	case errors.Is(err, service.ErrExternalAuthConnection):
+	case errors.Is(err, domain.ErrExternalAuthConnection):
 		return "The provider did not complete the connection. Try again."
 	case errors.Is(err, store.ErrNotFound):
 		return "That app is not available. It may have been deleted or belong to another developer."

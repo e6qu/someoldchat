@@ -326,7 +326,7 @@ func TestOnlyAnOperatorFailureIsAWarning(t *testing.T) {
 	target := seededStore(t)
 	handler := &recordingHandler{}
 	remote, _ := serve(t, service.Messages{Store: target}, target, Observer{Logger: slog.New(handler)})
-	if _, err := remote.Post(ctx, "T1", "U1", "C1", "", "", ""); !errors.Is(err, service.ErrInvalidMessage) {
+	if _, err := remote.Post(ctx, "T1", "U1", "C1", "", "", ""); !errors.Is(err, domain.ErrInvalidMessage) {
 		t.Fatalf("invalid post error = %v", err)
 	}
 	callerCaused := handler.byPeer(t, "chat rpc failed")
@@ -416,7 +416,7 @@ func TestTheSeamIsObservable(t *testing.T) {
 	if _, err := remote.Post(ctx, "T1", "U1", "C1", "observed", "", ""); err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	if _, err := remote.Post(ctx, "T1", "U1", "C1", "", "", ""); !errors.Is(err, service.ErrInvalidMessage) {
+	if _, err := remote.Post(ctx, "T1", "U1", "C1", "", "", ""); !errors.Is(err, domain.ErrInvalidMessage) {
 		t.Fatalf("invalid post error = %v", err)
 	}
 
@@ -845,8 +845,8 @@ func TestTheServerReportsTheDomainClassOnEveryStreamingPath(t *testing.T) {
 	// failure has to travel back through the client stream.
 	withoutBlobs := seededStore(t)
 	unavailable, _ := serve(t, service.Messages{Store: withoutBlobs}, withoutBlobs, Observer{})
-	if _, err := unavailable.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", "", 5, bytes.NewReader([]byte("hello"))); !errors.Is(err, service.ErrBlobUnavailable) {
-		t.Fatalf("upload error = %v, want service.ErrBlobUnavailable", err)
+	if _, err := unavailable.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", "", 5, bytes.NewReader([]byte("hello"))); !errors.Is(err, domain.ErrBlobUnavailable) {
+		t.Fatalf("upload error = %v, want domain.ErrBlobUnavailable", err)
 	}
 
 	// With blob storage configured, a download of a file that does not exist must

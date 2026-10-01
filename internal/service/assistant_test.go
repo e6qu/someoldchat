@@ -96,20 +96,20 @@ func TestAssistantThreadWithoutStateIsNotFound(t *testing.T) {
 
 func TestAssistantWritesAreValidated(t *testing.T) {
 	ctx, _, messages, thread := assistantWorld(t)
-	if err := messages.SetAssistantThreadTitle(ctx, "T1", "U1", "C1", thread, "   "); !errors.Is(err, ErrInvalidAssistantThread) {
+	if err := messages.SetAssistantThreadTitle(ctx, "T1", "U1", "C1", thread, "   "); !errors.Is(err, domain.ErrInvalidAssistantThread) {
 		t.Errorf("an empty title = %v, want it refused", err)
 	}
-	if err := messages.SetAssistantThreadSuggestedPrompts(ctx, "T1", "U1", "C1", thread, "", nil); !errors.Is(err, ErrInvalidAssistantThread) {
+	if err := messages.SetAssistantThreadSuggestedPrompts(ctx, "T1", "U1", "C1", thread, "", nil); !errors.Is(err, domain.ErrInvalidAssistantThread) {
 		t.Errorf("no prompts = %v, want it refused", err)
 	}
 	tooMany := make([]domain.AssistantPrompt, domain.AssistantPromptLimit+1)
 	for index := range tooMany {
 		tooMany[index] = domain.AssistantPrompt{Title: "t", Message: "m"}
 	}
-	if err := messages.SetAssistantThreadSuggestedPrompts(ctx, "T1", "U1", "C1", thread, "", tooMany); !errors.Is(err, ErrInvalidAssistantThread) {
+	if err := messages.SetAssistantThreadSuggestedPrompts(ctx, "T1", "U1", "C1", thread, "", tooMany); !errors.Is(err, domain.ErrInvalidAssistantThread) {
 		t.Errorf("too many prompts = %v, want it refused", err)
 	}
-	if err := messages.SetAssistantThreadTitle(ctx, "T1", "U1", "C1", "not-a-timestamp", "x"); !errors.Is(err, ErrInvalidTimestamp) {
+	if err := messages.SetAssistantThreadTitle(ctx, "T1", "U1", "C1", "not-a-timestamp", "x"); !errors.Is(err, domain.ErrInvalidTimestamp) {
 		t.Errorf("a malformed thread = %v, want it refused", err)
 	}
 }

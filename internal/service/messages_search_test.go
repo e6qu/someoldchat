@@ -79,10 +79,10 @@ func TestChannelSearchCannotRevealAPrivateChannel(t *testing.T) {
 func TestDirectorySearchRefusesABlankQuery(t *testing.T) {
 	ctx, messages := directoryWorld(t)
 	page := domain.PageRequest{Limit: 10}
-	if _, err := messages.SearchPeople(ctx, "T1", "U1", "   ", page); !errors.Is(err, ErrInvalidSearch) {
+	if _, err := messages.SearchPeople(ctx, "T1", "U1", "   ", page); !errors.Is(err, domain.ErrInvalidSearch) {
 		t.Fatalf("blank people search = %v, want ErrInvalidSearch", err)
 	}
-	if _, err := messages.SearchChannels(ctx, "T1", "U1", "", page); !errors.Is(err, ErrInvalidSearch) {
+	if _, err := messages.SearchChannels(ctx, "T1", "U1", "", page); !errors.Is(err, domain.ErrInvalidSearch) {
 		t.Fatalf("blank channel search = %v, want ErrInvalidSearch", err)
 	}
 }

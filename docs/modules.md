@@ -94,6 +94,15 @@ The blob cleanup process is an operational worker, not a business module. It
 has its own binary and replica count, and shares the owning module's durable
 store and external blob store.
 
+Adapters see a module only through its API package and the shared `domain`
+vocabulary: the error sentinels a module returns, its request limits, and the
+pure parsers its callers share (reminder phrases, dialog definitions, search
+highlight terms) live in `internal/domain`, not beside the implementation.
+They used to live in `internal/service`, so the HTTP and HTMX adapters linked
+the whole chat implementation even when it ran in another process.
+`internal/modules/boundary_test.go` walks each adapter's import graph and fails
+when it reaches `internal/service`, a storage backend, or the gRPC transport.
+
 Remote module APIs must be coarse enough to survive a process boundary: they
 carry explicit request objects, context cancellation, deadlines, typed errors,
 and bounded/streamable results. Directory, conversation reads/mutations,

@@ -132,7 +132,7 @@ func TestOIDCProvisioningAcrossPostgreSQLAndGRPC(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a member listed the workspace: page=%+v", page)
 	}
-	if !errors.Is(err, service.ErrNotWorkspaceAdmin) {
+	if !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		t.Fatalf("administrative listing refusal=%v, want it to survive the transport as ErrNotWorkspaceAdmin", err)
 	}
 }

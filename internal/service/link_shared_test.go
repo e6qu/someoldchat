@@ -214,11 +214,11 @@ func TestAnAppUnfurlsItsOwnDomainsInAPublicChannelItHasNotJoined(t *testing.T) {
 		t.Fatalf("unfurled=%+v err=%v", unfurled.Unfurls, err)
 	}
 	// Another app's link in the same message is not this app's to unfurl.
-	if _, err := messages.Unfurl(ctx, "T1", "UB1", "A1", "COPEN", ts, map[string]string{"https://other.test/y": `{"title":"Other"}`}); !errors.Is(err, ErrCannotUnfurlURL) {
+	if _, err := messages.Unfurl(ctx, "T1", "UB1", "A1", "COPEN", ts, map[string]string{"https://other.test/y": `{"title":"Other"}`}); !errors.Is(err, domain.ErrCannotUnfurlURL) {
 		t.Fatalf("foreign-domain unfurl err=%v", err)
 	}
 	// A caller that is no app keeps the membership rule.
-	if _, err := messages.Unfurl(ctx, "T1", "UB1", "", "COPEN", ts, map[string]string{"https://example.com/open": `{"title":"Open"}`}); !errors.Is(err, ErrNotInConversation) {
+	if _, err := messages.Unfurl(ctx, "T1", "UB1", "", "COPEN", ts, map[string]string{"https://example.com/open": `{"title":"Open"}`}); !errors.Is(err, domain.ErrNotInConversation) {
 		t.Fatalf("non-app non-member err=%v", err)
 	}
 	private, err := messages.Post(ctx, "T1", "U1", "CPRIV", "https://example.com/private", "", "")

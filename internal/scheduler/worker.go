@@ -9,7 +9,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/lease"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -115,13 +115,13 @@ func (w Worker) postWithLease(ctx context.Context, item domain.ScheduledMessage)
 
 func permanentFailureCode(err error) string {
 	switch {
-	case errors.Is(err, service.ErrNotInConversation):
+	case errors.Is(err, domain.ErrNotInConversation):
 		return "not_in_channel"
-	case errors.Is(err, service.ErrConversationAlreadyArchived):
+	case errors.Is(err, domain.ErrConversationAlreadyArchived):
 		return "is_archived"
-	case errors.Is(err, service.ErrInvalidTimestamp):
+	case errors.Is(err, domain.ErrInvalidTimestamp):
 		return "invalid_thread_ts"
-	case errors.Is(err, service.ErrInvalidMessage), errors.Is(err, store.ErrInvalidArgument):
+	case errors.Is(err, domain.ErrInvalidMessage), errors.Is(err, store.ErrInvalidArgument):
 		return "invalid_arguments"
 	case errors.Is(err, store.ErrNotFound):
 		return "channel_not_found"

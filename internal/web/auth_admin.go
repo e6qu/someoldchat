@@ -13,7 +13,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -439,7 +439,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 		}
 		queue := func(status domain.InviteRequestStatus) ([]authAdminInviteView, domain.Cursor, bool) {
 			page, pageErr := h.Messages.AdminListInviteRequests(r.Context(), principal.WorkspaceID, principal.UserID, status, domain.PageRequest{Limit: 25})
-			if pageErr != nil && !errors.Is(pageErr, service.ErrNotWorkspaceAdmin) {
+			if pageErr != nil && !errors.Is(pageErr, domain.ErrNotWorkspaceAdmin) {
 				h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "invitations_unavailable", Title: "Temporarily unavailable", Message: "Invitations could not be read."})
 				return nil, "", false
 			}
@@ -485,7 +485,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if canReadApps {
 		apps, appsErr := h.Messages.AdminListApps(r.Context(), principal.WorkspaceID, principal.UserID, domain.AppApprovalRequested, domain.PageRequest{Limit: 25})
-		if appsErr != nil && !errors.Is(appsErr, service.ErrNotWorkspaceAdmin) {
+		if appsErr != nil && !errors.Is(appsErr, domain.ErrNotWorkspaceAdmin) {
 			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "app_requests_unavailable", Title: "Temporarily unavailable", Message: "App requests could not be read."})
 			return
 		}
@@ -620,13 +620,13 @@ func authAdminUserMutationProblem(err error) authAdminProblem {
 	// A refusal by the role hierarchy is an authorization answer, not an
 	// outage: it used to be reported as "temporarily unavailable", which told an
 	// administrator to try again at something that can never succeed.
-	if errors.Is(err, service.ErrNotWorkspaceAdmin) {
+	if errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		return authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Your workspace role does not allow that change. Nothing was changed."}
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		return authAdminProblem{Status: http.StatusNotFound, Code: "user_not_found", Title: "User not found", Message: "That workspace user does not exist."}
 	}
-	if errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidWorkspace) {
+	if errors.Is(err, domain.ErrInvalidInviteRequest) || errors.Is(err, domain.ErrInvalidWorkspace) {
 		return authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_user", Title: "Request rejected", Message: "The submitted user details are not valid."}
 	}
 	return authAdminProblem{Status: http.StatusServiceUnavailable, Code: "user_update_unavailable", Title: "Temporarily unavailable", Message: "The user could not be updated. Nothing was changed."}
@@ -770,7 +770,7 @@ func normalizeAdminInviteChannels(raw string) []domain.ConversationID {
 }
 
 func authAdminInvitationProblem(err error) authAdminProblem {
-	if errors.Is(err, service.ErrInvalidInviteRequest) {
+	if errors.Is(err, domain.ErrInvalidInviteRequest) {
 		return authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_invitation", Title: "Request rejected", Message: "The submitted invitation is not valid."}
 	}
 	if errors.Is(err, store.ErrAlreadyExists) {
@@ -779,7 +779,7 @@ func authAdminInvitationProblem(err error) authAdminProblem {
 	// A lapsed request is not a transient failure: nothing the administrator
 	// waits for will make approving it work, and the default below would tell
 	// them to try again in a moment for ever.
-	if errors.Is(err, service.ErrInvitationExpired) {
+	if errors.Is(err, domain.ErrInvitationExpired) {
 		return authAdminProblem{Status: http.StatusConflict, Code: "invitation_expired", Title: "Invitation expired", Message: "This request is older than the invitation it would issue, so approving it would invite nobody. Deny it and ask for a new one."}
 	}
 	return authAdminProblem{Status: http.StatusServiceUnavailable, Code: "user_invitation_unavailable", Title: "Temporarily unavailable", Message: "The invitation could not be recorded. Nothing was changed."}
@@ -942,7 +942,7 @@ func (h Handler) authAppDecision(approve bool) http.HandlerFunc {
 
 func authAdminAppDecisionProblem(err error) authAdminProblem {
 	switch {
-	case errors.Is(err, service.ErrNotWorkspaceAdmin):
+	case errors.Is(err, domain.ErrNotWorkspaceAdmin):
 		return authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Your workspace role does not decide app requests. Nothing was changed."}
 	case errors.Is(err, store.ErrNotFound):
 		return authAdminProblem{Status: http.StatusNotFound, Code: "app_request_not_found", Title: "Request not found", Message: "That app request no longer exists. It may already have been decided."}
@@ -970,7 +970,7 @@ func (h Handler) authUserCreate(w http.ResponseWriter, r *http.Request) {
 		problem := authAdminProblem{Status: http.StatusServiceUnavailable, Code: "user_creation_unavailable", Title: "Temporarily unavailable", Message: "The user could not be created. Nothing was changed."}
 		if errors.Is(err, store.ErrAlreadyExists) {
 			problem = authAdminProblem{Status: http.StatusConflict, Code: "user_already_exists", Title: "Already a member", Message: "A workspace user already has that address."}
-		} else if errors.Is(err, service.ErrInvalidInviteRequest) {
+		} else if errors.Is(err, domain.ErrInvalidInviteRequest) {
 			problem = authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_user", Title: "Request rejected", Message: "The submitted user details are not valid."}
 		}
 		h.writeAuthAdminProblem(w, r, problem)

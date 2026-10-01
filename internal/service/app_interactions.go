@@ -29,62 +29,32 @@ const (
 	appRequestTimeout   = 3 * time.Second
 )
 
-var (
-	ErrAppInteractionUnavailable = errors.New("application interaction is unavailable")
-	ErrSlashCommandNotFound      = errors.New("slash command was not found")
-	ErrSlashCommandInThread      = errors.New("slash commands cannot be invoked in threads")
-	ErrInvalidAppResponse        = errors.New("application response is invalid")
-	ErrInvalidTrigger            = errors.New("trigger_id is invalid")
-	// ErrTriggerExchanged and ErrTriggerExpired name a trigger that existed
-	// but was already used or outlived its three seconds; Slack reports each
-	// outcome separately from an unknown trigger (ErrInvalidTrigger).
-	ErrTriggerExchanged = errors.New("trigger_id was already exchanged")
-	ErrTriggerExpired   = errors.New("trigger_id expired")
-	// ErrViewPushLimit reports a push onto a modal stack that already holds
-	// Slack's maximum of three views.
-	ErrViewPushLimit = errors.New("modal view stack is full")
-
-	// The response_url refusals Slack distinguishes, which HandleAppResponse
-	// returns so the HTTP boundary can answer Slack's status and reason: 400
-	// invalid_payload and no_text for a body that could never be applied —
-	// refused before a use of the URL is spent — and 404 used_url and
-	// expired_url for a URL that cannot be used any more. A URL this system
-	// never issued is indistinguishable from one that expired and was purged.
-	// They are distinct from ErrInvalidAppResponse, which still reports an
-	// app's unusable acknowledgement body, so each keeps its identity across
-	// the gRPC seam.
-	ErrAppResponsePayloadInvalid = errors.New("response_url payload is not a valid message")
-	ErrAppResponseNoText         = errors.New("response_url payload has no text, blocks, or attachments")
-	ErrAppResponseURLUsed        = errors.New("response_url has no uses left")
-	ErrAppResponseURLExpired     = errors.New("response_url has expired")
-)
-
 func (m Messages) consumeAppTrigger(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, triggerID string) (domain.AppTrigger, error) {
 	if appID == "" || strings.TrimSpace(triggerID) == "" {
-		return domain.AppTrigger{}, ErrInvalidTrigger
+		return domain.AppTrigger{}, domain.ErrInvalidTrigger
 	}
 	trigger, err := m.Store.ConsumeAppTrigger(ctx, domain.HashToken(strings.TrimSpace(triggerID)), appID)
 	if errors.Is(err, store.ErrTriggerExchanged) {
-		return domain.AppTrigger{}, ErrTriggerExchanged
+		return domain.AppTrigger{}, domain.ErrTriggerExchanged
 	}
 	if errors.Is(err, store.ErrTriggerExpired) {
-		return domain.AppTrigger{}, ErrTriggerExpired
+		return domain.AppTrigger{}, domain.ErrTriggerExpired
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		return domain.AppTrigger{}, ErrInvalidTrigger
+		return domain.AppTrigger{}, domain.ErrInvalidTrigger
 	}
 	if err != nil {
 		return domain.AppTrigger{}, err
 	}
 	if trigger.WorkspaceID != workspaceID {
-		return domain.AppTrigger{}, ErrInvalidTrigger
+		return domain.AppTrigger{}, domain.ErrInvalidTrigger
 	}
 	return trigger, nil
 }
 
 func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, threadTimestamp domain.MessageTimestamp, command, text, responseBaseURL string) error {
 	if threadTimestamp != "" {
-		return ErrSlashCommandInThread
+		return domain.ErrSlashCommandInThread
 	}
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
@@ -98,7 +68,7 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 	}
 	command = strings.TrimSpace(command)
 	if !strings.HasPrefix(command, "/") || strings.ContainsAny(command, " \t\r\n") {
-		return ErrSlashCommandNotFound
+		return domain.ErrSlashCommandNotFound
 	}
 	snapshot, parsed, slash, err := m.slashCommandApp(ctx, workspaceID, command)
 	if err != nil {
@@ -111,7 +81,7 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 		}
 	}
 	if !parsed.SocketModeEnabled && slash.URL == "" {
-		return ErrAppInteractionUnavailable
+		return domain.ErrAppInteractionUnavailable
 	}
 	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
 	if err != nil {
@@ -217,7 +187,7 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 		return err
 	}
 	if action.MessageID == "" || strings.TrimSpace(action.ActionID) == "" || strings.TrimSpace(action.Type) == "" {
-		return ErrAppInteractionUnavailable
+		return domain.ErrAppInteractionUnavailable
 	}
 	message, ephemeral, err := m.interactiveMessage(ctx, workspaceID, userID, action.MessageID)
 	if err != nil {
@@ -231,7 +201,7 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 		return err
 	}
 	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.InteractivityRequestURL == "") {
-		return ErrAppInteractionUnavailable
+		return domain.ErrAppInteractionUnavailable
 	}
 	if !blocksContainDispatchableAction(message.Blocks, action.BlockID, action.ActionID, action.Type) {
 		return store.ErrNotFound
@@ -304,7 +274,7 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 // asynchronous changes.
 func (m Messages) DispatchViewBlockAction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, action domain.AppViewBlockAction, responseBaseURL string) error {
 	if action.ViewID == "" || strings.TrimSpace(action.BlockID) == "" || strings.TrimSpace(action.ActionID) == "" || strings.TrimSpace(action.Type) == "" {
-		return ErrAppInteractionUnavailable
+		return domain.ErrAppInteractionUnavailable
 	}
 	current, snapshot, parsed, workspace, user, err := m.viewInteractionContext(ctx, workspaceID, userID, conversationID, action.ViewID, "")
 	if err != nil {
@@ -322,7 +292,7 @@ func (m Messages) DispatchViewBlockAction(ctx context.Context, workspaceID domai
 	}
 	var state map[string]any
 	if json.Unmarshal([]byte(stateJSON), &state) != nil || state == nil {
-		return ErrInvalidAppResponse
+		return domain.ErrInvalidAppResponse
 	}
 	current.State = stateJSON
 	current.UpdatedAt = time.Now().UTC()
@@ -394,7 +364,7 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 		}
 	}
 	if query.AppID == "" || query.BlockID == "" || query.ActionID == "" || containers != 1 || len(query.Value) > 2000 {
-		return nil, ErrAppInteractionUnavailable
+		return nil, domain.ErrAppInteractionUnavailable
 	}
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return nil, err
@@ -421,7 +391,7 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 		return nil, err
 	}
 	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.MessageMenuOptionsURL == "") {
-		return nil, ErrAppInteractionUnavailable
+		return nil, domain.ErrAppInteractionUnavailable
 	}
 	verificationToken, err := m.openAppVerificationToken(snapshot.App)
 	if err != nil {
@@ -463,7 +433,7 @@ func (m Messages) LoadAppOptions(ctx context.Context, workspaceID domain.Workspa
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline.C:
-			return nil, ErrAppInteractionUnavailable
+			return nil, domain.ErrAppInteractionUnavailable
 		case <-ticker.C:
 		}
 	}
@@ -548,7 +518,7 @@ func parseAppOptions(body []byte) ([]domain.AppOption, error) {
 		(response.Options == nil && response.OptionGroups == nil) ||
 		(len(response.Options) != 0 && len(response.OptionGroups) != 0) ||
 		len(response.Options) > 100 || len(response.OptionGroups) > 100 {
-		return nil, ErrInvalidAppResponse
+		return nil, domain.ErrInvalidAppResponse
 	}
 	result := make([]domain.AppOption, 0, len(response.Options))
 	appendOption := func(raw map[string]any, group string) error {
@@ -556,7 +526,7 @@ func parseAppOptions(body []byte) ([]domain.AppOption, error) {
 		value := strings.TrimSpace(stringValue(raw["value"]))
 		description := appOptionTextObject(raw["description"])
 		if text == "" || value == "" || len([]rune(text)) > 75 || len([]rune(value)) > 75 || len([]rune(description)) > 75 {
-			return ErrInvalidAppResponse
+			return domain.ErrInvalidAppResponse
 		}
 		result = append(result, domain.AppOption{Text: text, Value: value, Description: description, Group: group})
 		return nil
@@ -569,7 +539,7 @@ func parseAppOptions(body []byte) ([]domain.AppOption, error) {
 	for _, group := range response.OptionGroups {
 		label := appOptionTextObject(group.Label)
 		if label == "" || len([]rune(label)) > 75 || len(group.Options) > 100 {
-			return nil, ErrInvalidAppResponse
+			return nil, domain.ErrInvalidAppResponse
 		}
 		for _, option := range group.Options {
 			if err := appendOption(option, label); err != nil {
@@ -669,7 +639,7 @@ func (m Messages) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID
 	}
 	var state map[string]any
 	if json.Unmarshal([]byte(stateJSON), &state) != nil || state == nil {
-		return domain.ViewInteractionResult{}, ErrInvalidAppResponse
+		return domain.ViewInteractionResult{}, domain.ErrInvalidAppResponse
 	}
 	current.State = stateJSON
 	current.Errors = nil
@@ -818,11 +788,11 @@ func (m Messages) viewInteractionContext(ctx context.Context, workspaceID domain
 		return domain.View{}, domain.AppManifestSnapshot{}, appmanifest.Parsed{}, domain.Workspace{}, domain.User{}, err
 	}
 	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.InteractivityRequestURL == "") {
-		return domain.View{}, domain.AppManifestSnapshot{}, appmanifest.Parsed{}, domain.Workspace{}, domain.User{}, ErrAppInteractionUnavailable
+		return domain.View{}, domain.AppManifestSnapshot{}, appmanifest.Parsed{}, domain.Workspace{}, domain.User{}, domain.ErrAppInteractionUnavailable
 	}
 	if current.Type == "home" {
 		if !parsed.HomeTabEnabled {
-			return domain.View{}, domain.AppManifestSnapshot{}, appmanifest.Parsed{}, domain.Workspace{}, domain.User{}, ErrAppHomeNotEnabled
+			return domain.View{}, domain.AppManifestSnapshot{}, appmanifest.Parsed{}, domain.Workspace{}, domain.User{}, domain.ErrAppHomeNotEnabled
 		}
 		published, err := m.Store.GetPublishedView(ctx, workspaceID, userID, current.AppID)
 		if err != nil || published.ID != current.ID {
@@ -840,7 +810,7 @@ func (m Messages) viewInteractionContext(ctx context.Context, workspaceID domain
 func appInteractionView(value domain.View) (map[string]any, error) {
 	result := make(map[string]any)
 	if json.Unmarshal([]byte(value.Payload), &result) != nil || result == nil {
-		return nil, ErrInvalidAppResponse
+		return nil, domain.ErrInvalidAppResponse
 	}
 	result["id"] = value.ID
 	result["team_id"] = value.WorkspaceID
@@ -854,7 +824,7 @@ func appInteractionView(value domain.View) (map[string]any, error) {
 	state := any(map[string]any{"values": map[string]any{}})
 	if strings.TrimSpace(value.State) != "" {
 		if json.Unmarshal([]byte(value.State), &state) != nil {
-			return nil, ErrInvalidAppResponse
+			return nil, domain.ErrInvalidAppResponse
 		}
 	}
 	result["state"] = state
@@ -878,7 +848,7 @@ func (m Messages) applyViewSubmissionResponse(ctx context.Context, current domai
 	}
 	var response viewSubmissionResponse
 	if json.Unmarshal(body, &response) != nil {
-		return domain.ViewInteractionResult{}, ErrInvalidAppResponse
+		return domain.ViewInteractionResult{}, domain.ErrInvalidAppResponse
 	}
 	if response.ResponseAction == "" && len(response.Errors) == 0 && len(response.View) == 0 {
 		err := m.deleteView(ctx, current.WorkspaceID, actor, current, false, "view.submitted")
@@ -890,11 +860,11 @@ func (m Messages) applyViewSubmissionResponse(ctx context.Context, current domai
 	switch response.ResponseAction {
 	case "errors":
 		if len(response.Errors) == 0 {
-			return domain.ViewInteractionResult{}, ErrInvalidAppResponse
+			return domain.ViewInteractionResult{}, domain.ErrInvalidAppResponse
 		}
 		for blockID, message := range response.Errors {
 			if strings.TrimSpace(blockID) == "" || strings.TrimSpace(message) == "" {
-				return domain.ViewInteractionResult{}, ErrInvalidAppResponse
+				return domain.ViewInteractionResult{}, domain.ErrInvalidAppResponse
 			}
 		}
 		if idempotencyKey == "" || !reflect.DeepEqual(current.Errors, response.Errors) {
@@ -921,7 +891,7 @@ func (m Messages) applyViewSubmissionResponse(ctx context.Context, current domai
 		return domain.ViewInteractionResult{}, err
 	case "update":
 		if len(response.View) == 0 {
-			return domain.ViewInteractionResult{}, ErrInvalidAppResponse
+			return domain.ViewInteractionResult{}, domain.ErrInvalidAppResponse
 		}
 		payload := string(response.View)
 		if idempotencyKey != "" && strings.TrimSpace(current.Payload) == strings.TrimSpace(payload) {
@@ -931,7 +901,7 @@ func (m Messages) applyViewSubmissionResponse(ctx context.Context, current domai
 		return domain.ViewInteractionResult{}, err
 	case "push":
 		if len(response.View) == 0 {
-			return domain.ViewInteractionResult{}, ErrInvalidAppResponse
+			return domain.ViewInteractionResult{}, domain.ErrInvalidAppResponse
 		}
 		if idempotencyKey != "" {
 			latest, err := m.Store.GetLatestView(ctx, current.WorkspaceID, current.UserID, current.AppID, "modal")
@@ -942,12 +912,12 @@ func (m Messages) applyViewSubmissionResponse(ctx context.Context, current domai
 		if depth, err := m.viewStackDepth(ctx, current); err != nil {
 			return domain.ViewInteractionResult{}, err
 		} else if depth >= 3 {
-			return domain.ViewInteractionResult{}, ErrInvalidAppResponse
+			return domain.ViewInteractionResult{}, domain.ErrInvalidAppResponse
 		}
 		_, err := m.createView(ctx, current.WorkspaceID, current.AppID, current.UserID, string(response.View), current.RootViewID, current.ID, "", "view.pushed", current.FunctionExecutionID)
 		return domain.ViewInteractionResult{}, err
 	default:
-		return domain.ViewInteractionResult{}, ErrInvalidAppResponse
+		return domain.ViewInteractionResult{}, domain.ErrInvalidAppResponse
 	}
 }
 
@@ -959,7 +929,7 @@ func (m Messages) viewStackDepth(ctx context.Context, current domain.View) (int,
 			return 0, err
 		}
 		if parent.AppID != current.AppID || parent.UserID != current.UserID || parent.RootViewID != current.RootViewID {
-			return 0, ErrInvalidAppResponse
+			return 0, domain.ErrInvalidAppResponse
 		}
 		depth++
 		current = parent
@@ -1068,7 +1038,7 @@ func (m Messages) DispatchAppShortcut(ctx context.Context, workspaceID domain.Wo
 	}
 	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.InteractivityRequestURL == "") ||
 		!containsString(parsed.BotScopes, "commands") {
-		return ErrAppInteractionUnavailable
+		return domain.ErrAppInteractionUnavailable
 	}
 	callbackID = strings.TrimSpace(callbackID)
 	shortcutType := "global"
@@ -1307,9 +1277,9 @@ func (m Messages) HandleAppResponse(ctx context.Context, responseToken, payload 
 	response, err := m.Store.UseAppResponseURL(ctx, domain.HashToken(strings.TrimSpace(responseToken)))
 	switch {
 	case errors.Is(err, store.ErrCapabilityExhausted):
-		return ErrAppResponseURLUsed
+		return domain.ErrAppResponseURLUsed
 	case errors.Is(err, store.ErrNotFound):
-		return ErrAppResponseURLExpired
+		return domain.ErrAppResponseURLExpired
 	case err != nil:
 		return err
 	}
@@ -1374,14 +1344,14 @@ func (m Messages) HandleSocketModeResponse(ctx context.Context, appID domain.App
 			} `json:"view"`
 		}
 		if json.Unmarshal([]byte(interaction.Payload), &submitted) != nil || submitted.View.ID == "" {
-			return ErrInvalidAppResponse
+			return domain.ErrInvalidAppResponse
 		}
 		current, err := m.Store.GetView(ctx, interaction.WorkspaceID, submitted.View.ID)
 		if errors.Is(err, store.ErrNotFound) && emptyViewAcknowledgement(payload) {
 			return nil
 		}
 		if err != nil || current.AppID != appID || current.UserID != interaction.UserID {
-			return ErrInvalidAppResponse
+			return domain.ErrInvalidAppResponse
 		}
 		_, err = m.applyViewSubmissionResponse(ctx, current, interaction.UserID, payload, "socket-mode:"+string(appID)+":"+interaction.EnvelopeID)
 		return err
@@ -1406,7 +1376,7 @@ func emptyViewAcknowledgement(payload []byte) bool {
 func (m Messages) createInteractionCapabilities(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, originalMessageID domain.MessageID, threadTimestamp domain.MessageTimestamp, responseBaseURL string) (string, string, domain.AppResponseURL, error) {
 	base, err := url.Parse(strings.TrimSpace(responseBaseURL))
 	if err != nil || !base.IsAbs() || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
-		return "", "", domain.AppResponseURL{}, ErrAppInteractionUnavailable
+		return "", "", domain.AppResponseURL{}, domain.ErrAppInteractionUnavailable
 	}
 	triggerID, err := domain.PublicID("trigger_")
 	if err != nil {
@@ -1498,7 +1468,7 @@ func (m Messages) slashCommandApp(ctx context.Context, workspaceID domain.Worksp
 		}
 	}
 	if matchedSnapshot.App.ID == "" {
-		return domain.AppManifestSnapshot{}, appmanifest.Parsed{}, appmanifest.SlashCommand{}, ErrSlashCommandNotFound
+		return domain.AppManifestSnapshot{}, appmanifest.Parsed{}, appmanifest.SlashCommand{}, domain.ErrSlashCommandNotFound
 	}
 	return matchedSnapshot, matchedParsed, matchedCommand, nil
 }
@@ -1521,7 +1491,7 @@ func (m Messages) installedApp(ctx context.Context, workspaceID domain.Workspace
 		}
 		parsed, problems := appmanifest.Parse(snapshot.Manifest)
 		if len(problems) != 0 {
-			return domain.AppManifestSnapshot{}, appmanifest.Parsed{}, ErrAppInteractionUnavailable
+			return domain.AppManifestSnapshot{}, appmanifest.Parsed{}, domain.ErrAppInteractionUnavailable
 		}
 		return snapshot, parsed, nil
 	}
@@ -1670,7 +1640,7 @@ func (m Messages) postSignedAppForm(ctx context.Context, target string, app doma
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrAppInteractionUnavailable, err)
+		return nil, fmt.Errorf("%w: %v", domain.ErrAppInteractionUnavailable, err)
 	}
 	defer response.Body.Close()
 	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
@@ -1678,7 +1648,7 @@ func (m Messages) postSignedAppForm(ctx context.Context, target string, app doma
 		return nil, readErr
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("%w: app returned HTTP %d", ErrAppInteractionUnavailable, response.StatusCode)
+		return nil, fmt.Errorf("%w: app returned HTTP %d", domain.ErrAppInteractionUnavailable, response.StatusCode)
 	}
 	return responseBody, nil
 }
@@ -1711,25 +1681,25 @@ func parseAppResponse(body []byte, strict bool) (parsedAppResponse, error) {
 	switch {
 	case len(body) != 0 && body[0] == '{':
 		if err := json.Unmarshal(body, &parsed.appResponsePayload); err != nil {
-			return parsedAppResponse{}, ErrAppResponsePayloadInvalid
+			return parsedAppResponse{}, domain.ErrAppResponsePayloadInvalid
 		}
 	case strict:
-		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
+		return parsedAppResponse{}, domain.ErrAppResponsePayloadInvalid
 	default:
 		parsed.Text = string(body)
 	}
 	var err error
 	if parsed.blocks, err = domain.NormalizeBlocks(parsed.Blocks); err != nil {
-		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
+		return parsedAppResponse{}, domain.ErrAppResponsePayloadInvalid
 	}
 	if err := validateMessageBlocks(parsed.blocks); err != nil {
 		return parsedAppResponse{}, err
 	}
 	if parsed.attachments, err = domain.NormalizeAttachments(parsed.Attachments); err != nil {
-		return parsedAppResponse{}, ErrAppResponsePayloadInvalid
+		return parsedAppResponse{}, domain.ErrAppResponsePayloadInvalid
 	}
 	if strict && parsed.empty() {
-		return parsedAppResponse{}, ErrAppResponseNoText
+		return parsedAppResponse{}, domain.ErrAppResponseNoText
 	}
 	return parsed, nil
 }
@@ -1737,7 +1707,7 @@ func parseAppResponse(body []byte, strict bool) (parsedAppResponse, error) {
 func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppResponseURL, body []byte, idempotencyKey string) error {
 	parsed, err := parseAppResponse(body, false)
 	if err != nil {
-		return ErrInvalidAppResponse
+		return domain.ErrInvalidAppResponse
 	}
 	if parsed.empty() {
 		return nil
@@ -1749,7 +1719,7 @@ func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppRes
 	}
 	if response.DeleteOriginal || response.ReplaceOriginal {
 		if capability.OriginalMessageID == "" {
-			return ErrInvalidAppResponse
+			return domain.ErrInvalidAppResponse
 		}
 		original, err := m.Store.GetMessage(ctx, capability.OriginalMessageID)
 		var ephemeralOriginal *domain.EphemeralMessage
@@ -1759,7 +1729,7 @@ func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppRes
 				if idempotencyKey != "" && response.DeleteOriginal && errors.Is(ephemeralErr, store.ErrNotFound) {
 					return nil
 				}
-				return ErrInvalidAppResponse
+				return domain.ErrInvalidAppResponse
 			}
 			ephemeralOriginal = &value
 			original = ephemeralAsMessage(value)
@@ -1767,7 +1737,7 @@ func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppRes
 			return err
 		}
 		if original.AppID != capability.AppID || original.WorkspaceID != capability.WorkspaceID {
-			return ErrInvalidAppResponse
+			return domain.ErrInvalidAppResponse
 		}
 		timestamp := domain.NewMessageTimestamp(original.CreatedAt)
 		if ephemeralOriginal != nil {
@@ -1793,7 +1763,7 @@ func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppRes
 		}
 		if response.DeleteOriginal {
 			_, err = m.Delete(ctx, original.WorkspaceID, bot.UserID, original.Conversation, timestamp)
-			if idempotencyKey != "" && errors.Is(err, ErrMessageAlreadyDeleted) {
+			if idempotencyKey != "" && errors.Is(err, domain.ErrMessageAlreadyDeleted) {
 				return nil
 			}
 			return err

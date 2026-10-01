@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -18,24 +17,13 @@ import (
 // history, in search and in unread counts, and would still be there after the
 // assistant stopped thinking.
 
-var (
-	// ErrInvalidAssistantThread is the single sentinel for a malformed
-	// assistant write — an empty title, an empty status, no prompts, or more
-	// prompts than a pane can offer.
-	ErrInvalidAssistantThread = errors.New("invalid assistant thread state")
-	// ErrAssistantThreadNotFound distinguishes "this thread has no assistant
-	// state" from "this thread does not exist", which the client needs in order
-	// to render nothing rather than an error.
-	ErrAssistantThreadNotFound = errors.New("assistant thread state not found")
-)
-
 // SetAssistantThreadTitle names a thread in the client. Slack's own assistant
 // uses it to replace "New chat" with what the conversation turned out to be
 // about.
 func (m Messages) SetAssistantThreadTitle(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, thread domain.MessageTimestamp, title string) error {
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return ErrInvalidAssistantThread
+		return domain.ErrInvalidAssistantThread
 	}
 	return m.setAssistantThread(ctx, workspaceID, actor, conversationID, thread, domain.AssistantThreadTitle,
 		func(value *domain.AssistantThread) { value.Title = title })
@@ -52,14 +40,14 @@ func (m Messages) SetAssistantThreadStatus(ctx context.Context, workspaceID doma
 // SetAssistantThreadSuggestedPrompts offers openings a member can click.
 func (m Messages) SetAssistantThreadSuggestedPrompts(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, thread domain.MessageTimestamp, title string, prompts []domain.AssistantPrompt) error {
 	if len(prompts) == 0 || len(prompts) > domain.AssistantPromptLimit {
-		return ErrInvalidAssistantThread
+		return domain.ErrInvalidAssistantThread
 	}
 	cleaned := make([]domain.AssistantPrompt, 0, len(prompts))
 	for _, prompt := range prompts {
 		prompt.Title = strings.TrimSpace(prompt.Title)
 		prompt.Message = strings.TrimSpace(prompt.Message)
 		if prompt.Title == "" || prompt.Message == "" {
-			return ErrInvalidAssistantThread
+			return domain.ErrInvalidAssistantThread
 		}
 		cleaned = append(cleaned, prompt)
 	}
@@ -84,7 +72,7 @@ func (m Messages) AssistantThread(ctx context.Context, workspaceID domain.Worksp
 // creates no message.
 func (m Messages) setAssistantThread(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, thread domain.MessageTimestamp, field domain.AssistantThreadField, apply func(*domain.AssistantThread)) error {
 	if _, err := domain.ParseMessageTimestamp(thread); err != nil {
-		return ErrInvalidTimestamp
+		return domain.ErrInvalidTimestamp
 	}
 	if err := m.requireConversationMembership(ctx, workspaceID, actor, conversationID); err != nil {
 		return err

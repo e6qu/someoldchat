@@ -21,7 +21,7 @@ func (m Messages) SaveListAsTemplate(ctx context.Context, workspaceID domain.Wor
 	}
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 200 {
-		return domain.ListTemplate{}, ErrInvalidListTemplate
+		return domain.ListTemplate{}, domain.ErrInvalidListTemplate
 	}
 	list, err := m.Store.GetList(ctx, workspaceID, listID)
 	if err != nil {
@@ -32,7 +32,7 @@ func (m Messages) SaveListAsTemplate(ctx context.Context, workspaceID domain.Wor
 	}
 	descriptionBlocks, err = normalizeJSONArray(descriptionBlocks, "[]")
 	if err != nil {
-		return domain.ListTemplate{}, ErrInvalidListTemplate
+		return domain.ListTemplate{}, domain.ErrInvalidListTemplate
 	}
 	seed := "[]"
 	if includeRecords {
@@ -50,15 +50,15 @@ func (m Messages) SaveListAsTemplate(ctx context.Context, workspaceID domain.Wor
 // and discovered later by whoever creates a list from it.
 func (m Messages) createListTemplate(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, descriptionBlocks, schema string, todoMode bool, seed string) (domain.ListTemplate, error) {
 	if _, err := domain.ParseListSchema(schema); err != nil {
-		return domain.ListTemplate{}, ErrInvalidListTemplate
+		return domain.ListTemplate{}, domain.ErrInvalidListTemplate
 	}
 	schema, err := normalizeJSONArray(schema, "[]")
 	if err != nil {
-		return domain.ListTemplate{}, ErrInvalidListTemplate
+		return domain.ListTemplate{}, domain.ErrInvalidListTemplate
 	}
 	seed, err = normalizeJSONArray(seed, "[]")
 	if err != nil {
-		return domain.ListTemplate{}, ErrInvalidListTemplate
+		return domain.ListTemplate{}, domain.ErrInvalidListTemplate
 	}
 	id, err := domain.NewListTemplateID()
 	if err != nil {
@@ -86,7 +86,7 @@ func (m Messages) serializeListSeed(ctx context.Context, workspaceID domain.Work
 		}
 		for _, item := range page.Items {
 			if len(rows) >= maxCopiedListRecords {
-				return "", ErrInvalidList
+				return "", domain.ErrInvalidList
 			}
 			fields := strings.TrimSpace(item.Fields)
 			if fields == "" {
@@ -101,7 +101,7 @@ func (m Messages) serializeListSeed(ctx context.Context, workspaceID domain.Work
 	}
 	encoded, err := json.Marshal(rows)
 	if err != nil {
-		return "", ErrInvalidList
+		return "", domain.ErrInvalidList
 	}
 	return string(encoded), nil
 }
@@ -132,7 +132,7 @@ func (m Messages) CreateListFromTemplate(ctx context.Context, workspaceID domain
 		name = template.Name
 	}
 	if name == "" || len(name) > 200 {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	listID, err := domain.NewListID()
 	if err != nil {
@@ -167,13 +167,13 @@ func (m Messages) seedItemsFromTemplate(workspaceID domain.WorkspaceID, userID d
 	}
 	var rows []json.RawMessage
 	if err := json.Unmarshal([]byte(seed), &rows); err != nil {
-		return nil, nil, ErrInvalidListTemplate
+		return nil, nil, domain.ErrInvalidListTemplate
 	}
 	items := make([]domain.ListItem, 0, len(rows))
 	records := make([]events.Event, 0, len(rows))
 	for _, row := range rows {
 		if len(items) >= maxCopiedListRecords {
-			return nil, nil, ErrInvalidListTemplate
+			return nil, nil, domain.ErrInvalidListTemplate
 		}
 		itemID, err := domain.NewListItemID()
 		if err != nil {

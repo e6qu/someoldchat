@@ -10,7 +10,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatv1 "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,8 +36,8 @@ import (
 //     in libraryProducedCodes sets it. That class is the fallback for a peer old
 //     enough to send no DomainError detail; a code with no such class stays
 //     unmapped rather than restoring a sentinel that may be wrong.
-//   - every exported sentinel of internal/store, internal/service and
-//     internal/domain appears here or in unclassifiedSentinels with a reason, so
+//   - every exported sentinel of internal/store, internal/domain,
+//     internal/events and internal/blob appears here or in unclassifiedSentinels with a reason, so
 //     a new sentinel fails the suite instead of degrading to codes.Unavailable.
 type errorClass struct {
 	key      string
@@ -61,7 +61,7 @@ var errorClasses = []errorClass{
 	// Validation. Every specific sentinel precedes store.ErrInvalidArgument,
 	// which closes the block: it is the generic member of the class, and this
 	// file's own ordering rule is that a specific sentinel comes first. It used
-	// to lead the block, so errors.Join(service.ErrInvalidMessage,
+	// to lead the block, so errors.Join(domain.ErrInvalidMessage,
 	// store.ErrInvalidArgument) — the shape a compensating store failure
 	// produces — classified as the generic one and lost the specific one.
 	{key: "store.invalid_conversation_type", code: codes.InvalidArgument, sentinel: store.ErrInvalidConversationType},
@@ -69,111 +69,111 @@ var errorClasses = []errorClass{
 	{key: "store.invalid_app_approval", code: codes.InvalidArgument, sentinel: store.ErrInvalidAppApproval},
 	{key: "domain.invalid_cursor", code: codes.InvalidArgument, sentinel: domain.ErrInvalidCursor},
 	{key: "domain.invalid_message_timestamp", code: codes.InvalidArgument, sentinel: domain.ErrInvalidMessageTimestamp},
-	{key: "service.invalid_message", code: codes.InvalidArgument, sentinel: service.ErrInvalidMessage},
-	{key: "service.invalid_message_stream", code: codes.InvalidArgument, sentinel: service.ErrInvalidMessageStream},
-	{key: "service.invalid_stream_chunks", code: codes.InvalidArgument, sentinel: service.ErrInvalidStreamChunks},
-	{key: "service.view_files_invalid", code: codes.InvalidArgument, sentinel: service.ErrViewFilesInvalid},
-	{key: "service.missing_stream_recipient_team", code: codes.InvalidArgument, sentinel: service.ErrMissingStreamRecipientTeam},
-	{key: "service.missing_stream_recipient_user", code: codes.InvalidArgument, sentinel: service.ErrMissingStreamRecipientUser},
-	{key: "service.invalid_timestamp", code: codes.InvalidArgument, sentinel: service.ErrInvalidTimestamp},
-	{key: "service.invalid_conversation", code: codes.InvalidArgument, sentinel: service.ErrInvalidConversation},
-	{key: "service.conversation_text_too_long", code: codes.InvalidArgument, sentinel: service.ErrConversationTextTooLong},
-	{key: "service.invalid_workspace", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkspace},
-	{key: "service.invalid_conversation_prefs", code: codes.InvalidArgument, sentinel: service.ErrInvalidConversationPrefs},
-	{key: "service.invalid_reaction", code: codes.InvalidArgument, sentinel: service.ErrInvalidReaction},
-	{key: "service.invalid_file", code: codes.InvalidArgument, sentinel: service.ErrInvalidFile},
-	{key: "service.invalid_search", code: codes.InvalidArgument, sentinel: service.ErrInvalidSearch},
-	{key: "service.invalid_profile", code: codes.InvalidArgument, sentinel: service.ErrInvalidProfile},
-	{key: "service.invalid_profile_field", code: codes.InvalidArgument, sentinel: service.ErrInvalidProfileField},
-	{key: "service.invalid_scheduled_status", code: codes.InvalidArgument, sentinel: service.ErrInvalidScheduledStatus},
-	{key: "service.invalid_presence", code: codes.InvalidArgument, sentinel: service.ErrInvalidPresence},
-	{key: "service.invalid_snooze", code: codes.InvalidArgument, sentinel: service.ErrInvalidSnooze},
-	{key: "service.invalid_reminder", code: codes.InvalidArgument, sentinel: service.ErrInvalidReminder},
-	{key: "service.invalid_later_reminder", code: codes.InvalidArgument, sentinel: service.ErrInvalidLaterReminder},
-	{key: "service.invalid_activity_saved_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidActivitySavedView},
-	{key: "service.invalid_sidebar_section", code: codes.InvalidArgument, sentinel: service.ErrInvalidSidebarSection},
-	{key: "service.reminder_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrReminderTimeInPast},
+	{key: "service.invalid_message", code: codes.InvalidArgument, sentinel: domain.ErrInvalidMessage},
+	{key: "service.invalid_message_stream", code: codes.InvalidArgument, sentinel: domain.ErrInvalidMessageStream},
+	{key: "service.invalid_stream_chunks", code: codes.InvalidArgument, sentinel: domain.ErrInvalidStreamChunks},
+	{key: "service.view_files_invalid", code: codes.InvalidArgument, sentinel: domain.ErrViewFilesInvalid},
+	{key: "service.missing_stream_recipient_team", code: codes.InvalidArgument, sentinel: domain.ErrMissingStreamRecipientTeam},
+	{key: "service.missing_stream_recipient_user", code: codes.InvalidArgument, sentinel: domain.ErrMissingStreamRecipientUser},
+	{key: "service.invalid_timestamp", code: codes.InvalidArgument, sentinel: domain.ErrInvalidTimestamp},
+	{key: "service.invalid_conversation", code: codes.InvalidArgument, sentinel: domain.ErrInvalidConversation},
+	{key: "service.conversation_text_too_long", code: codes.InvalidArgument, sentinel: domain.ErrConversationTextTooLong},
+	{key: "service.invalid_workspace", code: codes.InvalidArgument, sentinel: domain.ErrInvalidWorkspace},
+	{key: "service.invalid_conversation_prefs", code: codes.InvalidArgument, sentinel: domain.ErrInvalidConversationPrefs},
+	{key: "service.invalid_reaction", code: codes.InvalidArgument, sentinel: domain.ErrInvalidReaction},
+	{key: "service.invalid_file", code: codes.InvalidArgument, sentinel: domain.ErrInvalidFile},
+	{key: "service.invalid_search", code: codes.InvalidArgument, sentinel: domain.ErrInvalidSearch},
+	{key: "service.invalid_profile", code: codes.InvalidArgument, sentinel: domain.ErrInvalidProfile},
+	{key: "service.invalid_profile_field", code: codes.InvalidArgument, sentinel: domain.ErrInvalidProfileField},
+	{key: "service.invalid_scheduled_status", code: codes.InvalidArgument, sentinel: domain.ErrInvalidScheduledStatus},
+	{key: "service.invalid_presence", code: codes.InvalidArgument, sentinel: domain.ErrInvalidPresence},
+	{key: "service.invalid_snooze", code: codes.InvalidArgument, sentinel: domain.ErrInvalidSnooze},
+	{key: "service.invalid_reminder", code: codes.InvalidArgument, sentinel: domain.ErrInvalidReminder},
+	{key: "service.invalid_later_reminder", code: codes.InvalidArgument, sentinel: domain.ErrInvalidLaterReminder},
+	{key: "service.invalid_activity_saved_view", code: codes.InvalidArgument, sentinel: domain.ErrInvalidActivitySavedView},
+	{key: "service.invalid_sidebar_section", code: codes.InvalidArgument, sentinel: domain.ErrInvalidSidebarSection},
+	{key: "service.reminder_time_in_past", code: codes.InvalidArgument, sentinel: domain.ErrReminderTimeInPast},
 	// FailedPrecondition and PermissionDenied: the request is well formed, but a
 	// recurring reminder is the wrong state to complete and another member's
 	// reminder is not the caller's to complete. They must survive the seam as
 	// themselves so reminders.complete answers cannot_complete_recurring and
 	// cannot_complete_others rather than a generic not_found.
-	{key: "service.reminder_recurring", code: codes.FailedPrecondition, sentinel: service.ErrReminderRecurring},
-	{key: "service.reminder_owned_by_other", code: codes.PermissionDenied, sentinel: service.ErrReminderOwnedByOther},
-	{key: "service.snooze_not_active", code: codes.FailedPrecondition, sentinel: service.ErrSnoozeNotActive},
-	{key: "service.snooze_too_long", code: codes.InvalidArgument, sentinel: service.ErrSnoozeTooLong},
-	{key: "service.reminder_unparseable", code: codes.InvalidArgument, sentinel: service.ErrReminderUnparseable},
-	{key: "service.not_starred", code: codes.FailedPrecondition, sentinel: service.ErrNotStarred},
-	{key: "service.user_group_name_taken", code: codes.AlreadyExists, sentinel: service.ErrUserGroupNameTaken},
-	{key: "service.user_group_handle_taken", code: codes.AlreadyExists, sentinel: service.ErrUserGroupHandleTaken},
-	{key: "service.invalid_user_group_users", code: codes.InvalidArgument, sentinel: service.ErrInvalidUserGroupUsers},
-	{key: "service.cannot_unfurl_url", code: codes.FailedPrecondition, sentinel: service.ErrCannotUnfurlURL},
-	{key: "service.scheduled_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeInPast},
-	{key: "service.scheduled_time_too_far", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeTooFar},
-	{key: "service.scheduled_too_many", code: codes.ResourceExhausted, sentinel: service.ErrScheduledTooMany},
-	{key: "service.scheduled_status_limit", code: codes.ResourceExhausted, sentinel: service.ErrScheduledStatusLimit},
-	{key: "service.invalid_call", code: codes.InvalidArgument, sentinel: service.ErrInvalidCall},
-	{key: "service.invalid_user_group", code: codes.InvalidArgument, sentinel: service.ErrInvalidUserGroup},
-	{key: "service.invalid_ephemeral", code: codes.InvalidArgument, sentinel: service.ErrInvalidEphemeral},
-	{key: "service.invalid_access_log", code: codes.InvalidArgument, sentinel: service.ErrInvalidAccessLog},
-	{key: "service.invalid_emoji", code: codes.InvalidArgument, sentinel: service.ErrInvalidEmoji},
-	{key: "service.invalid_remote_file", code: codes.InvalidArgument, sentinel: service.ErrInvalidRemoteFile},
-	{key: "service.invalid_invite_request", code: codes.InvalidArgument, sentinel: service.ErrInvalidInviteRequest},
+	{key: "service.reminder_recurring", code: codes.FailedPrecondition, sentinel: domain.ErrReminderRecurring},
+	{key: "service.reminder_owned_by_other", code: codes.PermissionDenied, sentinel: domain.ErrReminderOwnedByOther},
+	{key: "service.snooze_not_active", code: codes.FailedPrecondition, sentinel: domain.ErrSnoozeNotActive},
+	{key: "service.snooze_too_long", code: codes.InvalidArgument, sentinel: domain.ErrSnoozeTooLong},
+	{key: "service.reminder_unparseable", code: codes.InvalidArgument, sentinel: domain.ErrReminderUnparseable},
+	{key: "service.not_starred", code: codes.FailedPrecondition, sentinel: domain.ErrNotStarred},
+	{key: "service.user_group_name_taken", code: codes.AlreadyExists, sentinel: domain.ErrUserGroupNameTaken},
+	{key: "service.user_group_handle_taken", code: codes.AlreadyExists, sentinel: domain.ErrUserGroupHandleTaken},
+	{key: "service.invalid_user_group_users", code: codes.InvalidArgument, sentinel: domain.ErrInvalidUserGroupUsers},
+	{key: "service.cannot_unfurl_url", code: codes.FailedPrecondition, sentinel: domain.ErrCannotUnfurlURL},
+	{key: "service.scheduled_time_in_past", code: codes.InvalidArgument, sentinel: domain.ErrScheduledTimeInPast},
+	{key: "service.scheduled_time_too_far", code: codes.InvalidArgument, sentinel: domain.ErrScheduledTimeTooFar},
+	{key: "service.scheduled_too_many", code: codes.ResourceExhausted, sentinel: domain.ErrScheduledTooMany},
+	{key: "service.scheduled_status_limit", code: codes.ResourceExhausted, sentinel: domain.ErrScheduledStatusLimit},
+	{key: "service.invalid_call", code: codes.InvalidArgument, sentinel: domain.ErrInvalidCall},
+	{key: "service.invalid_user_group", code: codes.InvalidArgument, sentinel: domain.ErrInvalidUserGroup},
+	{key: "service.invalid_ephemeral", code: codes.InvalidArgument, sentinel: domain.ErrInvalidEphemeral},
+	{key: "service.invalid_access_log", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAccessLog},
+	{key: "service.invalid_emoji", code: codes.InvalidArgument, sentinel: domain.ErrInvalidEmoji},
+	{key: "service.invalid_remote_file", code: codes.InvalidArgument, sentinel: domain.ErrInvalidRemoteFile},
+	{key: "service.invalid_invite_request", code: codes.InvalidArgument, sentinel: domain.ErrInvalidInviteRequest},
 	// FailedPrecondition, not InvalidArgument: the request is well formed and
 	// the invitation is real; it is the state that refuses, and retrying with a
 	// corrected argument cannot help.
-	{key: "service.invitation_expired", code: codes.FailedPrecondition, sentinel: service.ErrInvitationExpired},
-	{key: "service.huddle_not_owned", code: codes.PermissionDenied, sentinel: service.ErrHuddleNotOwned},
-	{key: "service.external_invite_not_permitted", code: codes.PermissionDenied, sentinel: service.ErrExternalInviteNotPermitted},
-	{key: "service.invalid_shared_invite", code: codes.InvalidArgument, sentinel: service.ErrInvalidSharedInvite},
+	{key: "service.invitation_expired", code: codes.FailedPrecondition, sentinel: domain.ErrInvitationExpired},
+	{key: "service.huddle_not_owned", code: codes.PermissionDenied, sentinel: domain.ErrHuddleNotOwned},
+	{key: "service.external_invite_not_permitted", code: codes.PermissionDenied, sentinel: domain.ErrExternalInviteNotPermitted},
+	{key: "service.invalid_shared_invite", code: codes.InvalidArgument, sentinel: domain.ErrInvalidSharedInvite},
 	// FailedPrecondition for both: the request is well formed and it is the
 	// state — already decided, or already full — that refuses.
-	{key: "service.shared_invite_settled", code: codes.FailedPrecondition, sentinel: service.ErrSharedInviteSettled},
-	{key: "service.slack_connect_full", code: codes.FailedPrecondition, sentinel: service.ErrSlackConnectFull},
-	{key: "service.invalid_retention_duration", code: codes.InvalidArgument, sentinel: service.ErrInvalidRetentionDuration},
+	{key: "service.shared_invite_settled", code: codes.FailedPrecondition, sentinel: domain.ErrSharedInviteSettled},
+	{key: "service.slack_connect_full", code: codes.FailedPrecondition, sentinel: domain.ErrSlackConnectFull},
+	{key: "service.invalid_retention_duration", code: codes.InvalidArgument, sentinel: domain.ErrInvalidRetentionDuration},
 	// FailedPrecondition: the request is well formed and the conversation is
 	// real; it is the conversation's type that carries no retention policy.
-	{key: "service.retention_not_supported", code: codes.FailedPrecondition, sentinel: service.ErrRetentionNotSupported},
-	{key: "service.invalid_app_approval", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppApproval},
-	{key: "service.invalid_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidView},
-	{key: "service.invalid_assistant_thread", code: codes.InvalidArgument, sentinel: service.ErrInvalidAssistantThread},
-	{key: "service.assistant_thread_not_found", code: codes.NotFound, sentinel: service.ErrAssistantThreadNotFound},
-	{key: "service.invalid_workflow_step", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkflowStep},
-	{key: "service.invalid_trigger_config", code: codes.InvalidArgument, sentinel: service.ErrInvalidTriggerConfig},
-	{key: "service.automation_entities_empty", code: codes.InvalidArgument, sentinel: service.ErrAutomationEntitiesEmpty},
-	{key: "service.invalid_dialog", code: codes.InvalidArgument, sentinel: service.ErrInvalidDialog},
-	{key: "service.app_missing_action_url", code: codes.FailedPrecondition, sentinel: service.ErrAppMissingActionURL},
-	{key: "service.invalid_bot", code: codes.InvalidArgument, sentinel: service.ErrInvalidBot},
-	{key: "service.invalid_migration", code: codes.InvalidArgument, sentinel: service.ErrInvalidMigration},
-	{key: "service.invalid_oauth", code: codes.InvalidArgument, sentinel: service.ErrInvalidOAuth},
-	{key: "service.invalid_oauth_client", code: codes.InvalidArgument, sentinel: service.ErrInvalidOAuthClient},
-	{key: "service.bad_oauth_client_secret", code: codes.InvalidArgument, sentinel: service.ErrBadOAuthClientSecret},
-	{key: "service.oauth_app_mismatch", code: codes.PermissionDenied, sentinel: service.ErrOAuthAppMismatch},
-	{key: "service.invalid_integration_logs", code: codes.InvalidArgument, sentinel: service.ErrInvalidIntegrationLogs},
-	{key: "service.invalid_list", code: codes.InvalidArgument, sentinel: service.ErrInvalidList},
-	{key: "service.invalid_list_template", code: codes.InvalidArgument, sentinel: service.ErrInvalidListTemplate},
-	{key: "service.invalid_entity", code: codes.InvalidArgument, sentinel: service.ErrInvalidEntity},
-	{key: "service.invalid_bookmark", code: codes.InvalidArgument, sentinel: service.ErrInvalidBookmark},
-	{key: "service.invalid_canvas", code: codes.InvalidArgument, sentinel: service.ErrInvalidCanvas},
-	{key: "service.invalid_external_upload", code: codes.InvalidArgument, sentinel: service.ErrInvalidExternalUpload},
-	{key: "service.invalid_app_manifest", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppManifest},
-	{key: "service.app_not_distributable", code: codes.InvalidArgument, sentinel: service.ErrAppNotDistributable},
-	{key: "service.invalid_external_auth_provider", code: codes.InvalidArgument, sentinel: service.ErrInvalidExternalAuthProvider},
-	{key: "service.external_auth_connection", code: codes.FailedPrecondition, sentinel: service.ErrExternalAuthConnection},
+	{key: "service.retention_not_supported", code: codes.FailedPrecondition, sentinel: domain.ErrRetentionNotSupported},
+	{key: "service.invalid_app_approval", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAppApproval},
+	{key: "service.invalid_view", code: codes.InvalidArgument, sentinel: domain.ErrInvalidView},
+	{key: "service.invalid_assistant_thread", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAssistantThread},
+	{key: "service.assistant_thread_not_found", code: codes.NotFound, sentinel: domain.ErrAssistantThreadNotFound},
+	{key: "service.invalid_workflow_step", code: codes.InvalidArgument, sentinel: domain.ErrInvalidWorkflowStep},
+	{key: "service.invalid_trigger_config", code: codes.InvalidArgument, sentinel: domain.ErrInvalidTriggerConfig},
+	{key: "service.automation_entities_empty", code: codes.InvalidArgument, sentinel: domain.ErrAutomationEntitiesEmpty},
+	{key: "service.invalid_dialog", code: codes.InvalidArgument, sentinel: domain.ErrInvalidDialog},
+	{key: "service.app_missing_action_url", code: codes.FailedPrecondition, sentinel: domain.ErrAppMissingActionURL},
+	{key: "service.invalid_bot", code: codes.InvalidArgument, sentinel: domain.ErrInvalidBot},
+	{key: "service.invalid_migration", code: codes.InvalidArgument, sentinel: domain.ErrInvalidMigration},
+	{key: "service.invalid_oauth", code: codes.InvalidArgument, sentinel: domain.ErrInvalidOAuth},
+	{key: "service.invalid_oauth_client", code: codes.InvalidArgument, sentinel: domain.ErrInvalidOAuthClient},
+	{key: "service.bad_oauth_client_secret", code: codes.InvalidArgument, sentinel: domain.ErrBadOAuthClientSecret},
+	{key: "service.oauth_app_mismatch", code: codes.PermissionDenied, sentinel: domain.ErrOAuthAppMismatch},
+	{key: "service.invalid_integration_logs", code: codes.InvalidArgument, sentinel: domain.ErrInvalidIntegrationLogs},
+	{key: "service.invalid_list", code: codes.InvalidArgument, sentinel: domain.ErrInvalidList},
+	{key: "service.invalid_list_template", code: codes.InvalidArgument, sentinel: domain.ErrInvalidListTemplate},
+	{key: "service.invalid_entity", code: codes.InvalidArgument, sentinel: domain.ErrInvalidEntity},
+	{key: "service.invalid_bookmark", code: codes.InvalidArgument, sentinel: domain.ErrInvalidBookmark},
+	{key: "service.invalid_canvas", code: codes.InvalidArgument, sentinel: domain.ErrInvalidCanvas},
+	{key: "service.invalid_external_upload", code: codes.InvalidArgument, sentinel: domain.ErrInvalidExternalUpload},
+	{key: "service.invalid_app_manifest", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAppManifest},
+	{key: "service.app_not_distributable", code: codes.InvalidArgument, sentinel: domain.ErrAppNotDistributable},
+	{key: "service.invalid_external_auth_provider", code: codes.InvalidArgument, sentinel: domain.ErrInvalidExternalAuthProvider},
+	{key: "service.external_auth_connection", code: codes.FailedPrecondition, sentinel: domain.ErrExternalAuthConnection},
 	// The response_url refusals. The two URL states are NotFound, as the HTTP
 	// boundary answers them 404.
-	{key: "service.app_response_payload_invalid", code: codes.InvalidArgument, sentinel: service.ErrAppResponsePayloadInvalid},
-	{key: "service.invalid_blocks", code: codes.InvalidArgument, sentinel: service.ErrInvalidBlocks},
-	{key: "service.app_response_no_text", code: codes.InvalidArgument, sentinel: service.ErrAppResponseNoText},
-	{key: "service.app_response_url_used", code: codes.NotFound, sentinel: service.ErrAppResponseURLUsed},
-	{key: "service.app_response_url_expired", code: codes.NotFound, sentinel: service.ErrAppResponseURLExpired},
-	{key: "service.invalid_app_response", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppResponse},
-	{key: "service.invalid_datastore_item", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreItem},
-	{key: "service.invalid_datastore_query", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreQuery},
-	{key: "service.trigger_exchanged", code: codes.InvalidArgument, sentinel: service.ErrTriggerExchanged},
-	{key: "service.trigger_expired", code: codes.InvalidArgument, sentinel: service.ErrTriggerExpired},
-	{key: "service.invalid_trigger", code: codes.InvalidArgument, sentinel: service.ErrInvalidTrigger},
-	{key: "service.slash_command_in_thread", code: codes.InvalidArgument, sentinel: service.ErrSlashCommandInThread},
+	{key: "service.app_response_payload_invalid", code: codes.InvalidArgument, sentinel: domain.ErrAppResponsePayloadInvalid},
+	{key: "service.invalid_blocks", code: codes.InvalidArgument, sentinel: domain.ErrInvalidBlocks},
+	{key: "service.app_response_no_text", code: codes.InvalidArgument, sentinel: domain.ErrAppResponseNoText},
+	{key: "service.app_response_url_used", code: codes.NotFound, sentinel: domain.ErrAppResponseURLUsed},
+	{key: "service.app_response_url_expired", code: codes.NotFound, sentinel: domain.ErrAppResponseURLExpired},
+	{key: "service.invalid_app_response", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAppResponse},
+	{key: "service.invalid_datastore_item", code: codes.InvalidArgument, sentinel: domain.ErrInvalidDatastoreItem},
+	{key: "service.invalid_datastore_query", code: codes.InvalidArgument, sentinel: domain.ErrInvalidDatastoreQuery},
+	{key: "service.trigger_exchanged", code: codes.InvalidArgument, sentinel: domain.ErrTriggerExchanged},
+	{key: "service.trigger_expired", code: codes.InvalidArgument, sentinel: domain.ErrTriggerExpired},
+	{key: "service.invalid_trigger", code: codes.InvalidArgument, sentinel: domain.ErrInvalidTrigger},
+	{key: "service.slash_command_in_thread", code: codes.InvalidArgument, sentinel: domain.ErrSlashCommandInThread},
 	// The generic member of the class closes it, and it restores a bare
 	// InvalidArgument: a peer that sent no detail still yields an
 	// invalid-argument classification (HTTP 400) rather than codes.Unavailable
@@ -189,16 +189,16 @@ var errorClasses = []errorClass{
 	// Configuration tokens authenticate a developer rather than an installed
 	// app. Keeping this separate from OAuth validation lets the manifest API
 	// return invalid_auth without pretending a client grant was malformed.
-	{key: "service.app_configuration_authentication", code: codes.Unauthenticated, sentinel: service.ErrAppConfigurationAuthentication, restoresCode: true},
-	{key: "service.app_credential_key_unavailable", code: codes.FailedPrecondition, sentinel: service.ErrAppCredentialKeyUnavailable},
+	{key: "service.app_configuration_authentication", code: codes.Unauthenticated, sentinel: domain.ErrAppConfigurationAuthentication, restoresCode: true},
+	{key: "service.app_credential_key_unavailable", code: codes.FailedPrecondition, sentinel: domain.ErrAppCredentialKeyUnavailable},
 
 	// Uniqueness. The two sentinels mean different things to the Slack API:
 	// store.ErrAlreadyExists is "already_reacted" and
-	// service.ErrEmojiAlreadyExists is "emoji_already_exists". Collapsing them
+	// domain.ErrEmojiAlreadyExists is "emoji_already_exists". Collapsing them
 	// onto codes.AlreadyExists made reactions.add answer the emoji error in the
 	// split deployment, so the specific sentinel is listed first and the generic
 	// one restores the bare code.
-	{key: "service.emoji_already_exists", code: codes.AlreadyExists, sentinel: service.ErrEmojiAlreadyExists},
+	{key: "service.emoji_already_exists", code: codes.AlreadyExists, sentinel: domain.ErrEmojiAlreadyExists},
 	// A message's Slack-style timestamp is its public identifier, so a second
 	// message on the same microsecond would be permanently unaddressable. The
 	// repository refuses it and internal/service retries with the next
@@ -228,74 +228,74 @@ var errorClasses = []errorClass{
 	{key: "store.bookmark_limit", code: codes.ResourceExhausted, sentinel: store.ErrBookmarkLimit},
 	{key: "store.scheduled_message_limit", code: codes.ResourceExhausted, sentinel: store.ErrScheduledMessageLimit},
 	{key: "store.scheduled_status_limit", code: codes.ResourceExhausted, sentinel: store.ErrScheduledStatusLimit},
-	{key: "service.view_push_limit", code: codes.ResourceExhausted, sentinel: service.ErrViewPushLimit},
+	{key: "service.view_push_limit", code: codes.ResourceExhausted, sentinel: domain.ErrViewPushLimit},
 
-	// Authorisation and preconditions. service.ErrNotWorkspaceAdmin shares
-	// codes.PermissionDenied with service.ErrMessageNotOwned and stays
+	// Authorisation and preconditions. domain.ErrNotWorkspaceAdmin shares
+	// codes.PermissionDenied with domain.ErrMessageNotOwned and stays
 	// distinguishable through its key; ErrMessageNotOwned keeps restoresCode
 	// because renaming the fallback would change what a peer that sends no detail
 	// means, and only one class per code may hold it.
-	{key: "service.not_workspace_admin", code: codes.PermissionDenied, sentinel: service.ErrNotWorkspaceAdmin},
-	{key: "service.user_is_restricted", code: codes.PermissionDenied, sentinel: service.ErrUserIsRestricted},
-	{key: "service.user_is_ultra_restricted", code: codes.PermissionDenied, sentinel: service.ErrUserIsUltraRestricted},
-	{key: "service.workflow_permission_denied", code: codes.PermissionDenied, sentinel: service.ErrWorkflowPermissionDenied},
-	{key: "service.function_access_denied", code: codes.PermissionDenied, sentinel: service.ErrFunctionAccessDenied},
+	{key: "service.not_workspace_admin", code: codes.PermissionDenied, sentinel: domain.ErrNotWorkspaceAdmin},
+	{key: "service.user_is_restricted", code: codes.PermissionDenied, sentinel: domain.ErrUserIsRestricted},
+	{key: "service.user_is_ultra_restricted", code: codes.PermissionDenied, sentinel: domain.ErrUserIsUltraRestricted},
+	{key: "service.workflow_permission_denied", code: codes.PermissionDenied, sentinel: domain.ErrWorkflowPermissionDenied},
+	{key: "service.function_access_denied", code: codes.PermissionDenied, sentinel: domain.ErrFunctionAccessDenied},
 	// An information barrier is a standing rule, not a transient conflict: the
 	// caller cannot retry their way past it. It sits with the other specific
 	// permission denials, before the general one closes the group.
-	{key: "service.barriered_from_member", code: codes.PermissionDenied, sentinel: service.ErrBarrieredFromMember},
-	{key: "service.message_not_owned_by_app", code: codes.PermissionDenied, sentinel: service.ErrMessageNotOwnedByApp},
-	{key: "service.message_not_owned", code: codes.PermissionDenied, sentinel: service.ErrMessageNotOwned, restoresCode: true},
+	{key: "service.barriered_from_member", code: codes.PermissionDenied, sentinel: domain.ErrBarrieredFromMember},
+	{key: "service.message_not_owned_by_app", code: codes.PermissionDenied, sentinel: domain.ErrMessageNotOwnedByApp},
+	{key: "service.message_not_owned", code: codes.PermissionDenied, sentinel: domain.ErrMessageNotOwned, restoresCode: true},
 	// Refusing to remove a workspace's last owner is a precondition failure, not
 	// a permission failure: the actor has the authority, and the operation is
 	// refused because the workspace would become unadministrable.
-	{key: "service.last_workspace_owner", code: codes.FailedPrecondition, sentinel: service.ErrLastWorkspaceOwner},
-	{key: "service.conversation_already_archived", code: codes.FailedPrecondition, sentinel: service.ErrConversationAlreadyArchived},
-	{key: "service.conversation_not_archived", code: codes.FailedPrecondition, sentinel: service.ErrConversationNotArchived},
-	{key: "service.cannot_archive_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotArchiveDefault},
-	{key: "service.cannot_leave_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotLeaveDefault},
-	{key: "service.cannot_kick_from_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotKickFromDefault},
-	{key: "service.cannot_kick_self", code: codes.FailedPrecondition, sentinel: service.ErrCannotKickSelf},
-	{key: "service.conversation_archived", code: codes.FailedPrecondition, sentinel: service.ErrConversationArchived},
+	{key: "service.last_workspace_owner", code: codes.FailedPrecondition, sentinel: domain.ErrLastWorkspaceOwner},
+	{key: "service.conversation_already_archived", code: codes.FailedPrecondition, sentinel: domain.ErrConversationAlreadyArchived},
+	{key: "service.conversation_not_archived", code: codes.FailedPrecondition, sentinel: domain.ErrConversationNotArchived},
+	{key: "service.cannot_archive_default", code: codes.FailedPrecondition, sentinel: domain.ErrCannotArchiveDefault},
+	{key: "service.cannot_leave_default", code: codes.FailedPrecondition, sentinel: domain.ErrCannotLeaveDefault},
+	{key: "service.cannot_kick_from_default", code: codes.FailedPrecondition, sentinel: domain.ErrCannotKickFromDefault},
+	{key: "service.cannot_kick_self", code: codes.FailedPrecondition, sentinel: domain.ErrCannotKickSelf},
+	{key: "service.conversation_archived", code: codes.FailedPrecondition, sentinel: domain.ErrConversationArchived},
 	// Not being in the conversation is the refusal behind not_in_channel: the
 	// caller is a workspace member and the conversation exists, so it is neither
 	// an absence nor a permission failure.
-	{key: "service.not_in_conversation", code: codes.FailedPrecondition, sentinel: service.ErrNotInConversation},
+	{key: "service.not_in_conversation", code: codes.FailedPrecondition, sentinel: domain.ErrNotInConversation},
 	// The channel's posting permissions refuse a member who could otherwise
 	// post; it is a precondition on the channel, not an absence or a lack of
 	// membership, which is why it sits beside not_in_conversation.
-	{key: "service.conversation_posting_restricted", code: codes.FailedPrecondition, sentinel: service.ErrConversationPostingRestricted},
-	{key: "service.function_use_restricted", code: codes.FailedPrecondition, sentinel: service.ErrFunctionUseRestricted},
-	{key: "service.trigger_type_restricted", code: codes.FailedPrecondition, sentinel: service.ErrTriggerTypeRestricted},
-	{key: "service.cannot_invite_self", code: codes.FailedPrecondition, sentinel: service.ErrCannotInviteSelf},
-	{key: "service.app_interaction_unavailable", code: codes.FailedPrecondition, sentinel: service.ErrAppInteractionUnavailable},
-	{key: "service.app_home_not_enabled", code: codes.FailedPrecondition, sentinel: service.ErrAppHomeNotEnabled},
-	{key: "service.app_not_hosted", code: codes.FailedPrecondition, sentinel: service.ErrAppNotHosted},
-	{key: "service.function_not_running", code: codes.FailedPrecondition, sentinel: service.ErrFunctionNotRunning},
-	{key: "service.message_not_streaming", code: codes.FailedPrecondition, sentinel: service.ErrMessageNotStreaming},
+	{key: "service.conversation_posting_restricted", code: codes.FailedPrecondition, sentinel: domain.ErrConversationPostingRestricted},
+	{key: "service.function_use_restricted", code: codes.FailedPrecondition, sentinel: domain.ErrFunctionUseRestricted},
+	{key: "service.trigger_type_restricted", code: codes.FailedPrecondition, sentinel: domain.ErrTriggerTypeRestricted},
+	{key: "service.cannot_invite_self", code: codes.FailedPrecondition, sentinel: domain.ErrCannotInviteSelf},
+	{key: "service.app_interaction_unavailable", code: codes.FailedPrecondition, sentinel: domain.ErrAppInteractionUnavailable},
+	{key: "service.app_home_not_enabled", code: codes.FailedPrecondition, sentinel: domain.ErrAppHomeNotEnabled},
+	{key: "service.app_not_hosted", code: codes.FailedPrecondition, sentinel: domain.ErrAppNotHosted},
+	{key: "service.function_not_running", code: codes.FailedPrecondition, sentinel: domain.ErrFunctionNotRunning},
+	{key: "service.message_not_streaming", code: codes.FailedPrecondition, sentinel: domain.ErrMessageNotStreaming},
 	// The recipient exists or does not, but either way cannot see the
 	// conversation; that is a precondition on the recipient, not an absence
 	// of the conversation the caller named.
-	{key: "service.recipient_not_in_conversation", code: codes.FailedPrecondition, sentinel: service.ErrRecipientNotInConversation},
-	{key: "service.message_already_deleted", code: codes.FailedPrecondition, sentinel: service.ErrMessageAlreadyDeleted, restoresCode: true},
+	{key: "service.recipient_not_in_conversation", code: codes.FailedPrecondition, sentinel: domain.ErrRecipientNotInConversation},
+	{key: "service.message_already_deleted", code: codes.FailedPrecondition, sentinel: domain.ErrMessageAlreadyDeleted, restoresCode: true},
 
 	// Absence. blob.ErrNotFound is distinct from store.ErrNotFound and reaches a
 	// caller: service.Messages converts blob.ErrUnavailable to
-	// service.ErrBlobUnavailable on every blob call but returns a blob absence
+	// domain.ErrBlobUnavailable on every blob call but returns a blob absence
 	// unchanged (OpenUserPhoto, internal/service/messages.go), so without a class
 	// a missing object was store.ErrNotFound in one composition and
 	// codes.Unavailable in the other.
 	{key: "blob.not_found", code: codes.NotFound, sentinel: blob.ErrNotFound},
-	{key: "service.automation_user_not_found", code: codes.NotFound, sentinel: service.ErrAutomationUserNotFound},
-	{key: "service.user_not_found", code: codes.NotFound, sentinel: service.ErrUserNotFound},
-	{key: "service.automation_channel_not_found", code: codes.NotFound, sentinel: service.ErrAutomationChannelNotFound},
-	{key: "service.automation_team_not_found", code: codes.NotFound, sentinel: service.ErrAutomationTeamNotFound},
-	{key: "service.automation_org_not_found", code: codes.NotFound, sentinel: service.ErrAutomationOrgNotFound},
-	{key: "service.workflow_function_not_found", code: codes.NotFound, sentinel: service.ErrWorkflowFunctionNotFound},
-	{key: "service.webhook_trigger_secret", code: codes.NotFound, sentinel: service.ErrWebhookTriggerSecret},
-	{key: "service.slash_command_not_found", code: codes.NotFound, sentinel: service.ErrSlashCommandNotFound},
-	{key: "service.thread_not_found", code: codes.NotFound, sentinel: service.ErrThreadNotFound},
-	{key: "service.app_datastore_not_found", code: codes.NotFound, sentinel: service.ErrAppDatastoreNotFound},
+	{key: "service.automation_user_not_found", code: codes.NotFound, sentinel: domain.ErrAutomationUserNotFound},
+	{key: "service.user_not_found", code: codes.NotFound, sentinel: domain.ErrUserNotFound},
+	{key: "service.automation_channel_not_found", code: codes.NotFound, sentinel: domain.ErrAutomationChannelNotFound},
+	{key: "service.automation_team_not_found", code: codes.NotFound, sentinel: domain.ErrAutomationTeamNotFound},
+	{key: "service.automation_org_not_found", code: codes.NotFound, sentinel: domain.ErrAutomationOrgNotFound},
+	{key: "service.workflow_function_not_found", code: codes.NotFound, sentinel: domain.ErrWorkflowFunctionNotFound},
+	{key: "service.webhook_trigger_secret", code: codes.NotFound, sentinel: domain.ErrWebhookTriggerSecret},
+	{key: "service.slash_command_not_found", code: codes.NotFound, sentinel: domain.ErrSlashCommandNotFound},
+	{key: "service.thread_not_found", code: codes.NotFound, sentinel: domain.ErrThreadNotFound},
+	{key: "service.app_datastore_not_found", code: codes.NotFound, sentinel: domain.ErrAppDatastoreNotFound},
 	{key: "store.trigger_exchanged", code: codes.NotFound, sentinel: store.ErrTriggerExchanged},
 	{key: "store.trigger_expired", code: codes.NotFound, sentinel: store.ErrTriggerExpired},
 	{key: "store.not_found", code: codes.NotFound, sentinel: store.ErrNotFound, restoresCode: true},
@@ -317,9 +317,9 @@ var errorClasses = []errorClass{
 
 	// Dependency failure. codes.Unavailable deliberately has no restoresCode
 	// class: it is also the code an unclassified internal failure returns, and
-	// restoring service.ErrBlobUnavailable for every one of those would invent a
+	// restoring domain.ErrBlobUnavailable for every one of those would invent a
 	// cause. A peer that sends the detail still restores it exactly.
-	{key: "service.blob_unavailable", code: codes.Unavailable, sentinel: service.ErrBlobUnavailable},
+	{key: "service.blob_unavailable", code: codes.Unavailable, sentinel: domain.ErrBlobUnavailable},
 	{key: "blob.unavailable", code: codes.Unavailable, sentinel: blob.ErrUnavailable},
 	// A serialization failure, a deadlock victim, a lock timeout or a lost
 	// leader is exactly what codes.Unavailable means: retry the same request.
@@ -431,7 +431,7 @@ func init() {
 // specific sentinel precedes a general one it may wrap.
 //
 // An error can match more than one: errors.Join(store.ErrNotFound,
-// service.ErrInvalidCanvas) is the literal shape internal/service returns when a
+// domain.ErrInvalidCanvas) is the literal shape internal/service returns when a
 // compensating delete fails after a rejected create, and errors.Is is true for
 // both sentinels in process. Returning only the first put one key on the wire
 // and the caller lost the other, so canvases.create answered channel_not_found
@@ -452,7 +452,7 @@ func classifyErrors(err error) []errorClass {
 // codeSeverity ranks a status code by how restrictive the answer it carries is.
 //
 // An error can match several classes at once — errors.Join(store.ErrNotFound,
-// service.ErrInvalidCanvas) is what internal/service returns when a
+// domain.ErrInvalidCanvas) is what internal/service returns when a
 // compensating delete fails after a rejected create — and exactly one code and
 // one key go on the wire. Taking them from the first matching row made the
 // answer depend on the *order of the table*, whose first block is validation,
@@ -629,8 +629,8 @@ func mapRemoteError(err error) error {
 // entirely: the peer named a class and this build does not have it. Answering
 // from the code there invents a *different specific* class — a newer peer's
 // FailedPrecondition channel_is_archived came back as
-// service.ErrMessageAlreadyDeleted and its PermissionDenied
-// not_a_workspace_owner as service.ErrMessageNotOwned — and internal/api/slack
+// domain.ErrMessageAlreadyDeleted and its PermissionDenied
+// not_a_workspace_owner as domain.ErrMessageNotOwned — and internal/api/slack
 // maps by sentinel, so a caller was confidently told the wrong thing for the
 // whole rolling window. Leaving it unclassified gives the generic path instead.
 func restoreSentinel(remoteStatus *status.Status) (error, bool) {

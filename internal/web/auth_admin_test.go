@@ -838,7 +838,7 @@ func TestAnExpiredInvitationIsRefusedDistinctly(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := service.Messages{Store: store}
-	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "late@example.test", "Late"); !errors.Is(err, service.ErrInvitationExpired) {
+	if _, err := messages.AcceptInvitationForEmail(ctx, "T1", "late@example.test", "Late"); !errors.Is(err, domain.ErrInvitationExpired) {
 		t.Fatalf("an expired invitation was not refused as expired: %v", err)
 	}
 }

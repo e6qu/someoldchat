@@ -141,11 +141,11 @@ func TestDeactivatedListMembersLoseTheirCommentGuards(t *testing.T) {
 
 func TestAListItemCommentMustSaySomethingAndNotTooMuch(t *testing.T) {
 	ctx, messages, listID, itemID := listCommentWorld(t)
-	if _, err := messages.CommentOnListItem(ctx, "T1", "U1", listID, itemID, "   "); !errors.Is(err, ErrInvalidList) {
+	if _, err := messages.CommentOnListItem(ctx, "T1", "U1", listID, itemID, "   "); !errors.Is(err, domain.ErrInvalidList) {
 		t.Fatalf("an empty comment = %v, want ErrInvalidList", err)
 	}
 	tooLong := strings.Repeat("x", domain.ListItemCommentLimit+1)
-	if _, err := messages.CommentOnListItem(ctx, "T1", "U1", listID, itemID, tooLong); !errors.Is(err, ErrInvalidList) {
+	if _, err := messages.CommentOnListItem(ctx, "T1", "U1", listID, itemID, tooLong); !errors.Is(err, domain.ErrInvalidList) {
 		t.Fatalf("an over-long comment = %v, want ErrInvalidList", err)
 	}
 }

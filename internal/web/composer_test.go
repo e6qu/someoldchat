@@ -83,7 +83,7 @@ func TestThreadComposerBroadcastsWhenAskedTo(t *testing.T) {
 // names the overrun rather than calling the message empty.
 func TestComposerRefusesAnOverLimitMessageSpecifically(t *testing.T) {
 	_, mux := browserWorkspace(t, auth.AllScopes())
-	form := url.Values{auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "text": {strings.Repeat("x", service.MaxMessageTextRunes+12)}}.Encode()
+	form := url.Values{auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "text": {strings.Repeat("x", domain.MaxMessageTextRunes+12)}}.Encode()
 	response := postForm(t, mux, "/app/message?channel=Cdev", form, true)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "12 characters too long") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)

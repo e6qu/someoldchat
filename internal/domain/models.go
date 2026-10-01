@@ -4412,3 +4412,12 @@ type ExternalUploadCompletion struct {
 	ID    ExternalUploadID
 	Title string
 }
+
+// InternalScheduledCredential is the owner of a message a member schedules
+// through the first-party client: the member, with no app. Keeping this
+// coordinate in one place lets the web client preserve thread context through
+// ScheduleMessageAs without duplicating the ownership contract that list and
+// delete use.
+func InternalScheduledCredential(workspaceID WorkspaceID, userID UserID) string {
+	return ScheduledMessageOwner(workspaceID, userID, "", "")
+}

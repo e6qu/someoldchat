@@ -11,7 +11,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -114,7 +114,7 @@ func (h Handler) setStatus(w http.ResponseWriter, r *http.Request) {
 		profile.StatusExpiration = expiration
 	}
 	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
-		if errors.Is(err, service.ErrInvalidProfile) {
+		if errors.Is(err, domain.ErrInvalidProfile) {
 			h.writeMutationError(w, r, http.StatusBadRequest, "Your status was not saved", "A status is at most 100 characters, and its emoji must be an emoji this workspace knows, written like :palm_tree:.")
 			return
 		}
@@ -176,7 +176,7 @@ func (h Handler) starConversation(w http.ResponseWriter, r *http.Request) {
 	channel := h.requestChannel(r)
 	if fields["starred"] == "false" {
 		err = h.Messages.RemoveStar(r.Context(), principal.WorkspaceID, principal.UserID, channel, "")
-		if errors.Is(err, service.ErrNotStarred) {
+		if errors.Is(err, domain.ErrNotStarred) {
 			err = nil
 		}
 	} else {
@@ -187,7 +187,7 @@ func (h Handler) starConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		switch {
-		case errors.Is(err, store.ErrNotFound), errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, store.ErrNotFound), errors.Is(err, domain.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusNotFound, "That conversation is not available", "Nothing was starred or unstarred.")
 		default:
 			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The star was not changed", "The workspace store is temporarily unavailable. Try again.")
@@ -213,13 +213,13 @@ func (h Handler) removeConversationMember(w http.ResponseWriter, r *http.Request
 	target := domain.UserID(strings.TrimSpace(fields["user"]))
 	if err := h.Messages.KickConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel, target); err != nil {
 		switch {
-		case errors.Is(err, service.ErrCannotKickFromDefault):
+		case errors.Is(err, domain.ErrCannotKickFromDefault):
 			h.writeMutationError(w, r, http.StatusForbidden, "Nobody can be removed from this channel", "It is one of the workspace's required channels, which every member belongs to.")
-		case errors.Is(err, service.ErrCannotKickSelf):
+		case errors.Is(err, domain.ErrCannotKickSelf):
 			h.writeMutationError(w, r, http.StatusBadRequest, "You cannot remove yourself", "Use Leave channel instead.")
-		case errors.Is(err, service.ErrNotInConversation), errors.Is(err, service.ErrUserNotFound), errors.Is(err, store.ErrNotFound):
+		case errors.Is(err, domain.ErrNotInConversation), errors.Is(err, domain.ErrUserNotFound), errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That person is not in this channel", "Nothing was changed.")
-		case errors.Is(err, service.ErrInvalidConversation):
+		case errors.Is(err, domain.ErrInvalidConversation):
 			h.writeMutationError(w, r, http.StatusBadRequest, "Nobody can be removed from a direct message", "A direct message's members are what it is.")
 		default:
 			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The person was not removed", "The workspace store is temporarily unavailable. Nothing was changed.")
@@ -248,9 +248,9 @@ func (h Handler) addBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := h.Messages.AddBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["title"], domain.BookmarkLink, link, "", "", "", ""); err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidBookmark):
+		case errors.Is(err, domain.ErrInvalidBookmark):
 			h.writeMutationError(w, r, http.StatusBadRequest, "The bookmark was not added", "Give the bookmark a name of at most 255 characters and a link.")
-		case errors.Is(err, service.ErrNotInConversation), errors.Is(err, store.ErrNotFound):
+		case errors.Is(err, domain.ErrNotInConversation), errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusForbidden, "The bookmark was not added", "Only members of this conversation can add bookmarks to it.")
 		default:
 			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The bookmark was not added", "The workspace store is temporarily unavailable. Try again.")
@@ -272,7 +272,7 @@ func (h Handler) removeBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 	channel := h.requestChannel(r)
 	if err := h.Messages.RemoveBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.BookmarkID(strings.TrimSpace(fields["bookmark"]))); err != nil && !errors.Is(err, store.ErrNotFound) {
-		if errors.Is(err, service.ErrNotInConversation) {
+		if errors.Is(err, domain.ErrNotInConversation) {
 			h.writeMutationError(w, r, http.StatusForbidden, "The bookmark was not removed", "Only members of this conversation can change its bookmarks.")
 			return
 		}

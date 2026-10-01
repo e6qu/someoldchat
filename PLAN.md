@@ -654,6 +654,129 @@ their request paths.
 - Produce an SBOM, signed artifacts, compatibility report, and operational
   recovery guide for each release.
 
+### Phase 7: Compile-time module composition
+
+The architecture's distinguishing mechanic, which this phase finishes, is that
+modules call one another as ordinary Go interfaces and the build decides how a
+call travels. `modulegen` reads [modules.json](modules.json) and, for each
+target, generates the composition: in the monolith every module dependency is a
+direct function call into the implementation; in a split target a dependency on
+a module that lives in another binary is satisfied by a generated gRPC client,
+and the owning binary registers the generated server. Business code never
+names a transport, and the choice is made when the binary is compiled, not by a
+runtime flag.
+
+Current state, measured rather than intended:
+
+- There is one module. `chat` owns a 518-method `chatapi.Service`, the
+  502-method `store.Store` port, and `internal/service`, an implementation of
+  23,500 lines outside its tests; identity, files, apps, real-time delivery, and collaboration
+  features all sit behind it.
+- Transport selection is a runtime decision. `sameoldchat -chat-mode
+  local|grpc` links the implementation, every storage backend, and the gRPC
+  client into one binary, and `internal/generated/bindings.go` exports both the
+  local and the remote provider from a single package, so every binary that
+  imports it links both. The target profiles in `modules.json` are runtime data;
+  no build output corresponds to a target.
+- Configuration is declared per binary. `sameoldchat` parses 49 flags and
+  `sameoldchat-chatd` 21, of which 17 (`-store`, `-db`, the `-dqlite-*` and
+  `-blob-*` families, `-auth-public-url`, `-app-credential-key-hex`,
+  `-metrics-listen`, the app and session tokens) are declared twice; the workers each declare their own copy of the
+  store settings.
+- Publication covers one shape. The container workflow publishes only
+  `ghcr.io/e6qu/someoldchat`, built from `cmd/server`. `sameoldchat-chatd` and
+  the workers are built by `make build` but never published, so a split
+  deployment cannot be assembled from released artifacts.
+
+Completed: the HTTP and HTMX adapters no longer link the implementation. They
+imported `internal/service` for its error sentinels, request limits, and pure
+parsers; those now live in `internal/domain`, and
+`internal/modules/boundary_test.go` fails when `api/slack`, `web`, `realtime`,
+or `auth` reaches `internal/service`, a storage backend, or the gRPC transport.
+The gRPC error table now finds each sentinel by the expression that names it
+rather than by a key derived from its package, so the wire keys (`service.*`)
+stayed fixed when the sentinels moved. Widening the validation-error scan from
+`internal/service` to every sentinel package found
+`domain.ErrInvalidMessageTimestamp`, which the SQL store returns unwrapped and
+the Slack handler answered as `fatal_error`; it is now an invalid-argument
+reason.
+
+Remaining work, in order:
+
+1. **Classify packages as modules or libraries.** A module owns durable state
+   and its transactions and is reachable through an API that can cross a
+   process boundary. A library is pure code linked into whichever binary
+   imports it and is never called over gRPC. The proposed modules are
+   identity (users, profiles, groups, sessions, tokens, external identity,
+   workspace membership and roles), messaging (conversations, membership,
+   messages, threads, reactions, pins, bookmarks, drafts, scheduled messages,
+   the journal and outbox), files (metadata, blob streaming, thumbnails, remote
+   files, blob deletion), apps platform (installations, manifests, datastores,
+   Events API delivery, interactivity, views, Socket Mode, workflows and
+   functions), real-time delivery (SSE and RTM fan-out, typing, presence; it
+   only reads the journal), and collaboration (canvases, lists, huddles,
+   reminders, saved items). Libraries are `domain`, `blockkit`, `slackobject`,
+   `slackemoji`, `appmanifest`, `bearer`, `secretbox`, `lease`,
+   `clientaddr`, `observability`, `thumbnail`, and `huddlesfu`; `outbox`,
+   `socketmode`, `realtime`, and `scheduler` are shared runtime libraries,
+   and `scheduler` must stop importing `internal/service`.
+2. **Split the chat API in process first.** Divide `chatapi.Service` and
+   `store.Store` into per-module interfaces served by the existing monolith and
+   database, so dependencies become visible before any process boundary moves.
+   Each module's sentinels move to its API package. The store port's
+   sentinels move out of `internal/store` with them; five names
+   (`ErrInvalidAppApproval`, `ErrInvalidInviteRequest`,
+   `ErrScheduledStatusLimit`, `ErrTriggerExchanged`, `ErrTriggerExpired`) are
+   declared in both `store` and the former service set with different
+   meanings and must be renamed apart while keeping their wire keys.
+3. **Make dependency direction a build error.** `modules.json` names each
+   module's dependencies on other module APIs; `modulegen` rejects cycles and
+   generates the boundary rules the adapter test now hard-codes, so a module
+   importing another module's implementation fails `make check`. Feature
+   modules depend on messaging and identity, never the reverse; a module that
+   must react to messages consumes the journal instead of running inside
+   messaging's transaction.
+4. **Generate one composition root per target.** `modulegen` emits a package
+   per target and process that wires every module dependency to either the
+   local constructor or the generated gRPC client, and every `cmd/` main
+   becomes a thin wrapper over one generated root. Generation must cover
+   module-to-module clients, not only the HTTP-to-chat seam that exists
+   today. `-chat-mode` is retired; a binary's composition is fixed when it is
+   compiled. This is generated code, not build tags, so the existing rule
+   that tags must not encode local/remote combinations still holds.
+5. **One configuration schema.** Declare every flag and `SAMEOLDCHAT_*`
+   environment variable once, in a shared package, and have every binary
+   accept the whole schema, so one configuration serves the monolith and
+   every process of a split deployment. Each binary requires the settings of
+   the modules it links and the addresses and mutual-TLS material of the
+   modules it reaches remotely. Decision needed: a setting that belongs only to
+   a module the binary does not link is either accepted and reported as not
+   applicable at startup, or rejected as contradictory, which is today's rule
+   for `-db` in `-chat-mode grpc`.
+6. **Scale each module independently.** A split target gives every module
+   binary its own replica count, which `modules.json` already records, and
+   `terraform/ecs-runtime` must express one service per binary. Each module
+   that owns a dqlite store needs its own three-voter quorum, so splitting a
+   module out multiplies database processes; the read path that hydrates a
+   message from several modules needs batch lookups or a journal-built read
+   model instead of one RPC per field.
+7. **Publish both shapes.** Release the monolith image and one image per split
+   binary under the same immutable commit tag, each with the provenance, SBOM,
+   dual-architecture, and retention gates the current image passes, and
+   publish the static binaries of both shapes as release assets. The
+   retention script must group versions across all of the packages.
+
+Exit criteria:
+
+- `make build` produces the monolith and every split binary from generated
+  roots, and a CI check asserts from `go list -deps` that the monolith links
+  no internal gRPC transport and that each split binary links only its own
+  module implementations.
+- The existing composition parity and differential suites run against the
+  compiled split binaries as well as the monolith.
+- The same configuration file and environment start both shapes.
+- Every published image and binary passes the container publication gate.
+
 ## Cross-cutting release gates
 
 Every change must pass:

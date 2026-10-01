@@ -33,7 +33,7 @@ func TestSetAppDistributionRequiresOwnerAndRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.SetAppDistribution(ctx, configuration.Token, bare.ID, true); !errors.Is(err, ErrAppNotDistributable) {
+	if _, err := m.SetAppDistribution(ctx, configuration.Token, bare.ID, true); !errors.Is(err, domain.ErrAppNotDistributable) {
 		t.Fatalf("distribute without redirect = %v, want ErrAppNotDistributable", err)
 	}
 

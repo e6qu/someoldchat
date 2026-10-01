@@ -30,21 +30,6 @@ import (
 // transport this product does not have, and a single-workspace mock cannot
 // qualify it either way.
 
-var (
-	// ErrInvalidSharedInvite refuses a malformed invitation.
-	ErrInvalidSharedInvite = errors.New("shared invitation is invalid")
-	// ErrExternalInviteNotPermitted refuses a connected organization that a host
-	// has restricted from inviting further organizations into a conversation.
-	ErrExternalInviteNotPermitted = errors.New("external invitations are not permitted for this organization")
-	// ErrSharedInviteSettled refuses a decision on an invitation that already
-	// has one. It is distinct from a malformed request: the caller did nothing
-	// wrong, someone else simply got there first.
-	ErrSharedInviteSettled = errors.New("shared invitation has already been settled")
-	// ErrSlackConnectFull refuses the place rather than promising one that is
-	// not there.
-	ErrSlackConnectFull = errors.New("conversation already holds the maximum number of organizations")
-)
-
 // SharedInviteLifetime bounds how long an external organization has to accept.
 const SharedInviteLifetime = 14 * 24 * time.Hour
 
@@ -85,21 +70,21 @@ func (m Messages) InviteShared(ctx context.Context, workspaceID domain.Workspace
 			return domain.SharedInvite{}, store.ErrNotFound
 		}
 		if !permitted {
-			return domain.SharedInvite{}, ErrExternalInviteNotPermitted
+			return domain.SharedInvite{}, domain.ErrExternalInviteNotPermitted
 		}
 	}
 	email = strings.ToLower(strings.TrimSpace(email))
 	if target == "" && email == "" {
-		return domain.SharedInvite{}, ErrInvalidSharedInvite
+		return domain.SharedInvite{}, domain.ErrInvalidSharedInvite
 	}
 	if email != "" && !strings.Contains(email, "@") {
-		return domain.SharedInvite{}, ErrInvalidSharedInvite
+		return domain.SharedInvite{}, domain.ErrInvalidSharedInvite
 	}
 	if conversation.IsDirectOrGroup() {
-		return domain.SharedInvite{}, ErrInvalidSharedInvite
+		return domain.SharedInvite{}, domain.ErrInvalidSharedInvite
 	}
 	if conversation.Archived {
-		return domain.SharedInvite{}, ErrConversationAlreadyArchived
+		return domain.SharedInvite{}, domain.ErrConversationAlreadyArchived
 	}
 	id, err := domain.PublicID("SI_")
 	if err != nil {
@@ -157,7 +142,7 @@ func (m Messages) decideSharedInvite(ctx context.Context, workspaceID domain.Wor
 		return domain.SharedInvite{}, err
 	}
 	if invite.Status != from {
-		return domain.SharedInvite{}, ErrSharedInviteSettled
+		return domain.SharedInvite{}, domain.ErrSharedInviteSettled
 	}
 	now := time.Now().UTC()
 	// Approving a lapsed invitation records it as live and sends nobody
@@ -166,7 +151,7 @@ func (m Messages) decideSharedInvite(ctx context.Context, workspaceID domain.Wor
 	// clearing a queue of dead invitations is the remaining useful action and
 	// refusing it would leave them there permanently.
 	if to == domain.SharedInviteApproved && invite.Expired(now) {
-		return domain.SharedInvite{}, ErrInvitationExpired
+		return domain.SharedInvite{}, domain.ErrInvitationExpired
 	}
 	event, err := sharedInviteEvent(workspaceID, actorID, topic, invite, now)
 	if err != nil {
@@ -174,7 +159,7 @@ func (m Messages) decideSharedInvite(ctx context.Context, workspaceID domain.Wor
 	}
 	if err := m.Store.SetSharedInviteStatus(ctx, id, from, to, now, event); err != nil {
 		if errors.Is(err, store.ErrConflict) {
-			return domain.SharedInvite{}, ErrSharedInviteSettled
+			return domain.SharedInvite{}, domain.ErrSharedInviteSettled
 		}
 		return domain.SharedInvite{}, err
 	}
@@ -205,11 +190,11 @@ func (m Messages) AcceptSharedInvite(ctx context.Context, workspaceID domain.Wor
 		// An invitation that named only an address has no organization to
 		// bring in; accepting it is a cross-deployment flow this product does
 		// not have.
-		return domain.Conversation{}, ErrInvalidSharedInvite
+		return domain.Conversation{}, domain.ErrInvalidSharedInvite
 	}
 	now := time.Now().UTC()
 	if !invite.Acceptable(now) {
-		return domain.Conversation{}, ErrSharedInviteSettled
+		return domain.Conversation{}, domain.ErrSharedInviteSettled
 	}
 	accepted, err := sharedInviteEvent(workspaceID, actorID, "shared_invite.accepted", invite, now)
 	if err != nil {
@@ -229,9 +214,9 @@ func (m Messages) AcceptSharedInvite(ctx context.Context, workspaceID domain.Wor
 			// with a conflict; only one of the two is still acceptable, so the
 			// caller is told which by re-reading it.
 			if current, readErr := m.Store.GetSharedInvite(ctx, id); readErr == nil && current.Acceptable(now) {
-				return domain.Conversation{}, ErrSlackConnectFull
+				return domain.Conversation{}, domain.ErrSlackConnectFull
 			}
-			return domain.Conversation{}, ErrSharedInviteSettled
+			return domain.Conversation{}, domain.ErrSharedInviteSettled
 		}
 		return domain.Conversation{}, err
 	}
@@ -249,7 +234,7 @@ func (m Messages) ListSharedInvites(ctx context.Context, workspaceID domain.Work
 	switch status {
 	case domain.SharedInvitePending, domain.SharedInviteApproved, domain.SharedInviteAccepted, domain.SharedInviteDeclined, domain.SharedInviteRevoked:
 	default:
-		return domain.SharedInvitePage{}, ErrInvalidSharedInvite
+		return domain.SharedInvitePage{}, domain.ErrInvalidSharedInvite
 	}
 	return m.Store.ListSharedInvites(ctx, workspaceID, status, request)
 }
@@ -281,7 +266,7 @@ func (m Messages) DisconnectExternalTeam(ctx context.Context, workspaceID domain
 		return err
 	}
 	if strings.TrimSpace(string(target)) == "" || target == workspaceID {
-		return ErrInvalidSharedInvite
+		return domain.ErrInvalidSharedInvite
 	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("team.external_disconnected",
 		events.String("team_id", string(target))), time.Now().UTC())
@@ -303,7 +288,7 @@ func (m Messages) ExternalInvitePermission(ctx context.Context, workspaceID doma
 		return false, err
 	}
 	if target == "" {
-		return false, ErrInvalidSharedInvite
+		return false, domain.ErrInvalidSharedInvite
 	}
 	return m.Store.GetExternalInvitePermission(ctx, workspaceID, conversationID, target)
 }
@@ -313,7 +298,7 @@ func (m Messages) SetExternalInvitePermissions(ctx context.Context, workspaceID 
 		return domain.Conversation{}, err
 	}
 	if target == "" {
-		return domain.Conversation{}, ErrInvalidSharedInvite
+		return domain.Conversation{}, domain.ErrInvalidSharedInvite
 	}
 	teams, orgChannel, err := m.Store.ListConversationTeams(ctx, workspaceID, conversationID)
 	if err != nil {

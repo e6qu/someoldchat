@@ -98,7 +98,7 @@ type parityCase struct {
 	name string
 
 	// blobs provisions blob storage. A case that leaves it false exercises the
-	// service.ErrBlobUnavailable path.
+	// domain.ErrBlobUnavailable path.
 	blobs bool
 
 	// seed prepares a store. It runs once per composition with an empty store, so
@@ -663,7 +663,7 @@ func TestCompositionsAgreeOnEveryErrorClassAndValue(t *testing.T) {
 
 			// The sweep is the point of the harness: the two compositions must
 			// agree about every sentinel, so restoring a plausible neighbour
-			// (service.ErrEmojiAlreadyExists for store.ErrAlreadyExists) fails
+			// (domain.ErrEmojiAlreadyExists for store.ErrAlreadyExists) fails
 			// here even though the case only names one sentinel.
 			for _, class := range errorClasses {
 				if errors.Is(localErr, class.sentinel) != errors.Is(remoteErr, class.sentinel) {
@@ -728,7 +728,7 @@ func parityCases() []parityCase {
 				})
 				return []any{
 					unfurled.Unfurls["https://docs.example.test/page"],
-					errors.Is(foreign, service.ErrCannotUnfurlURL), errors.Is(appless, service.ErrNotInConversation),
+					errors.Is(foreign, domain.ErrCannotUnfurlURL), errors.Is(appless, domain.ErrNotInConversation),
 				}, nil
 			},
 		},
@@ -1785,7 +1785,7 @@ func parityCases() []parityCase {
 				}
 				return []any{read.Text, read.Time.Equal(due), len(listed.Reminders), len(after.Reminders),
 					somebodyElse != nil, missing != nil, completedTwice != nil, deletedTwice != nil,
-					errors.Is(completingOther, service.ErrReminderOwnedByOther)}, nil
+					errors.Is(completingOther, domain.ErrReminderOwnedByOther)}, nil
 			},
 		},
 		{
@@ -2881,7 +2881,7 @@ func parityCases() []parityCase {
 				}
 				return []any{
 					webhook.Type, strings.HasPrefix(invokeURL, "/services/triggers/T1/"+string(webhook.ID)+"/"),
-					errors.Is(deniedErr, storepkg.ErrNotFound), errors.Is(wrongSecretErr, service.ErrWebhookTriggerSecret),
+					errors.Is(deniedErr, storepkg.ErrNotFound), errors.Is(wrongSecretErr, domain.ErrWebhookTriggerSecret),
 					hookRun.Status, hookRun.ActorID,
 					autoRun.Status, autoRun.ID == autoReplay.ID,
 					!scheduled.NextRunAt.IsZero(), weekdays.Config, weekdays.NextRunAt.Format(time.RFC3339),
@@ -2999,14 +2999,14 @@ func parityCases() []parityCase {
 		// transient failure instead of a denial.
 		{
 			name:         "a member cannot promote themselves",
-			wantSentinel: service.ErrNotWorkspaceAdmin,
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				return nil, chat.SetUserRole(ctx, "T1", "U1", "U1", domain.WorkspaceRoleOwner)
 			},
 		},
 		{
 			name:         "a member cannot list the workspace directory administratively",
-			wantSentinel: service.ErrNotWorkspaceAdmin,
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.AdminListUsers(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
 				return nil, err
@@ -3014,7 +3014,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "a member cannot rename the workspace",
-			wantSentinel: service.ErrNotWorkspaceAdmin,
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.AdminSetWorkspaceName(ctx, "T1", "U1", "Taken Over")
 				return nil, err
@@ -3038,7 +3038,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "a member cannot read another member's membership",
-			wantSentinel: service.ErrNotWorkspaceAdmin,
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.WorkspaceMembership(ctx, "T1", "U1", "U2")
 				return nil, err
@@ -3095,7 +3095,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "post rejects empty text",
-			wantSentinel: service.ErrInvalidMessage,
+			wantSentinel: domain.ErrInvalidMessage,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.Post(ctx, "T1", "U1", "C1", "", "", "")
 				return nil, err
@@ -3147,7 +3147,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "search rejects an empty query",
-			wantSentinel: service.ErrInvalidSearch,
+			wantSentinel: domain.ErrInvalidSearch,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.Search(ctx, "T1", "U1", "   ", domain.PageRequest{Limit: 10})
 				return nil, err
@@ -3213,7 +3213,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "reaction rejects an invalid name",
-			wantSentinel: service.ErrInvalidReaction,
+			wantSentinel: domain.ErrInvalidReaction,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				message, err := chat.Post(ctx, "T1", "U1", "C1", "reactable", "", "")
 				if err != nil {
@@ -3242,7 +3242,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "duplicate custom emoji",
-			wantSentinel: service.ErrEmojiAlreadyExists,
+			wantSentinel: domain.ErrEmojiAlreadyExists,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				if err := chat.AdminAddEmoji(ctx, "T1", "UA", "party", "https://example.test/party.png"); err != nil {
 					return nil, err
@@ -3252,14 +3252,14 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "custom emoji rejects an empty name",
-			wantSentinel: service.ErrInvalidEmoji,
+			wantSentinel: domain.ErrInvalidEmoji,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				return nil, chat.AdminAddEmoji(ctx, "T1", "UA", "  ", "https://example.test/party.png")
 			},
 		},
 		{
 			name:         "presence rejects an unknown value",
-			wantSentinel: service.ErrInvalidPresence,
+			wantSentinel: domain.ErrInvalidPresence,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.SetUserPresence(ctx, "T1", "U1", domain.Presence("sleepy"))
 				return nil, err
@@ -3267,7 +3267,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "profile rejects an oversized display name",
-			wantSentinel: service.ErrInvalidProfile,
+			wantSentinel: domain.ErrInvalidProfile,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.SetUserProfile(ctx, "T1", "U1", domain.UserProfile{DisplayName: string(bytes.Repeat([]byte("a"), 81))})
 				return nil, err
@@ -3275,7 +3275,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "conversation rejects an empty name",
-			wantSentinel: service.ErrInvalidConversation,
+			wantSentinel: domain.ErrInvalidConversation,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.CreateConversation(ctx, "T1", "U1", "   ", false)
 				return nil, err
@@ -3283,7 +3283,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "bookmark rejects an unsupported type",
-			wantSentinel: service.ErrInvalidBookmark,
+			wantSentinel: domain.ErrInvalidBookmark,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.AddBookmark(ctx, "T1", "U1", "C1", "Title", "video", "https://example.test", ":link:", "", "", "")
 				return nil, err
@@ -3306,7 +3306,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "update rejects a message owned by another user",
-			wantSentinel: service.ErrMessageNotOwned,
+			wantSentinel: domain.ErrMessageNotOwned,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				message, err := chat.Post(ctx, "T1", "U2", "C1", "bob wrote this", "", "")
 				if err != nil {
@@ -3318,7 +3318,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "delete rejects an already deleted message",
-			wantSentinel: service.ErrMessageAlreadyDeleted,
+			wantSentinel: domain.ErrMessageAlreadyDeleted,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				message, err := chat.Post(ctx, "T1", "U1", "C1", "delete me", "", "")
 				if err != nil {
@@ -3424,7 +3424,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "upload without blob storage",
-			wantSentinel: service.ErrBlobUnavailable,
+			wantSentinel: domain.ErrBlobUnavailable,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", "", 5, bytes.NewReader([]byte("hello")))
 				return nil, err
@@ -3450,7 +3450,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "upload with an empty title while blob storage is down",
-			wantSentinel: service.ErrBlobUnavailable,
+			wantSentinel: domain.ErrBlobUnavailable,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "", "text/plain", "", 5, bytes.NewReader([]byte("hello")))
 				return nil, err
@@ -3990,13 +3990,13 @@ func parityCases() []parityCase {
 					pushed.Type, pushed.RootViewID == opened.ID, pushed.PreviousViewID == opened.ID,
 					staleErr != nil, errors.Is(staleErr, storepkg.ErrConflict),
 					updated.ID == pushed.ID, updated.Hash != pushed.Hash, normalizeViewPayload(updated.Payload),
-					replayErr != nil, errors.Is(replayErr, service.ErrTriggerExchanged),
+					replayErr != nil, errors.Is(replayErr, domain.ErrTriggerExchanged),
 					published.Type, published.UserID, normalizeViewPayload(published.Payload),
 					installed.ID, installed.Name, installed.HomeTabEnabled, normalizeViewPayload(home.Payload),
 					openedApp.ID, openedHome.Payload == home.Payload,
 					messagesTab.Kind, messagesTab.ID != "",
 					dialogErr == nil, invalidDialogErr != nil,
-					errors.Is(invalidDialogErr, service.ErrInvalidDialog),
+					errors.Is(invalidDialogErr, domain.ErrInvalidDialog),
 					currentErr == nil, openDialog.AppID, openDialog.UserID, openDialog.Payload != "",
 					submitErr == nil, refused.Errors["summary"], refused.Pending,
 					cancelErr == nil, errors.Is(afterCancelErr, storepkg.ErrNotFound),
@@ -4119,7 +4119,7 @@ func parityCases() []parityCase {
 					string(accepted.ConversationID), string(accepted.TargetWorkspaceID),
 					string(accepted.Status), accepted.InvitedBy,
 					string(approved.Status), settledErr != nil,
-					errors.Is(settledErr, service.ErrSharedInviteSettled),
+					errors.Is(settledErr, domain.ErrSharedInviteSettled),
 					string(conversation.ID), conversation.WorkspaceID,
 					// Denying and revoking both end an invitation and are both
 					// recorded as revoked, which is only correct if the reason
@@ -4358,7 +4358,7 @@ func parityCases() []parityCase {
 				}
 				sort.Strings(left)
 				return []any{
-					foreignErr != nil, errors.Is(foreignErr, service.ErrInvalidConversation),
+					foreignErr != nil, errors.Is(foreignErr, domain.ErrInvalidConversation),
 					attached, hasMore, connected, infoMore, left,
 				}, nil
 			},
@@ -4482,7 +4482,7 @@ func parityCases() []parityCase {
 					string(configured.Status), configured.Inputs,
 					completeErr == nil, string(completed.Status), completed.Outputs,
 					repeatErr != nil, malformedErr != nil,
-					errors.Is(malformedErr, service.ErrInvalidWorkflowStep),
+					errors.Is(malformedErr, domain.ErrInvalidWorkflowStep),
 				}, nil
 			},
 		},
@@ -4508,7 +4508,7 @@ func parityCases() []parityCase {
 					switch {
 					case err == nil:
 						return "ok"
-					case errors.Is(err, service.ErrInvalidEntity):
+					case errors.Is(err, domain.ErrInvalidEntity):
 						return "invalid_entity"
 					default:
 						return "other:" + err.Error()
@@ -4780,13 +4780,13 @@ func parityCases() []parityCase {
 				}
 				sort.Strings(texts)
 				return []any{
-					slashErr == nil, threadErr != nil, errors.Is(threadErr, service.ErrSlashCommandInThread),
-					unknownErr != nil, errors.Is(unknownErr, service.ErrSlashCommandNotFound),
+					slashErr == nil, threadErr != nil, errors.Is(threadErr, domain.ErrSlashCommandInThread),
+					unknownErr != nil, errors.Is(unknownErr, domain.ErrSlashCommandNotFound),
 					actionErr == nil, viewActionErr == nil,
 					optionsErr == nil, loaded,
 					responseErr == nil, spentErr != nil,
-					errors.Is(spentErr, service.ErrAppResponseURLExpired),
-					errors.Is(malformedErr, service.ErrAppResponsePayloadInvalid), errors.Is(emptyErr, service.ErrAppResponseNoText),
+					errors.Is(spentErr, domain.ErrAppResponseURLExpired),
+					errors.Is(malformedErr, domain.ErrAppResponsePayloadInvalid), errors.Is(emptyErr, domain.ErrAppResponseNoText),
 					texts,
 				}, nil
 			},
@@ -6151,7 +6151,7 @@ func parityCases() []parityCase {
 				}
 				scheduled, err := chat.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{
 					Channel: "C1", Text: "old text", PostAt: time.Now().UTC().Add(2 * time.Hour),
-					CredentialHash:  service.InternalScheduledCredential("T1", "U1"),
+					CredentialHash:  domain.InternalScheduledCredential("T1", "U1"),
 					FileAttachments: draft.Attachments,
 				})
 				if err != nil {
@@ -6281,7 +6281,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "a member cannot create a user group",
-			wantSentinel: service.ErrNotWorkspaceAdmin,
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.CreateUserGroup(ctx, "T1", "U1", "Engineers", "engineers", "builds things", nil)
 				return nil, err
@@ -6335,7 +6335,7 @@ func parityCases() []parityCase {
 				for _, reaction := range reactions {
 					names = append(names, reaction.Name)
 				}
-				return []any{names, reactionsMore, len(pins), pinsMore, len(stars), starsMore, starred.Total, channelStars, errors.Is(notStarred, service.ErrNotStarred)}, nil
+				return []any{names, reactionsMore, len(pins), pinsMore, len(stars), starsMore, starred.Total, channelStars, errors.Is(notStarred, domain.ErrNotStarred)}, nil
 			},
 		},
 		{
@@ -6439,7 +6439,7 @@ func parityCases() []parityCase {
 				reference := time.Now().UTC()
 				return []any{
 					initial.Enabled, snoozed.SnoozeEnabled(reference), ended.SnoozeEnabled(reference),
-					paused.SnoozeEnabled(reference), paused.SnoozeUntil.Sub(reference) > 47*time.Hour, errors.Is(pastErr, service.ErrInvalidSnooze),
+					paused.SnoozeEnabled(reference), paused.SnoozeUntil.Sub(reference) > 47*time.Hour, errors.Is(pastErr, domain.ErrInvalidSnooze),
 					afterEndDND.Enabled, afterEndDND.SnoozeEnabled(reference),
 				}, nil
 			},
@@ -6889,7 +6889,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				if _, err := chat.OAuthV2ExchangeToken(ctx, credentials.ClientID, credentials.ClientSecret, oauthToken.AccessToken); !errors.Is(err, service.ErrInvalidOAuth) {
+				if _, err := chat.OAuthV2ExchangeToken(ctx, credentials.ClientID, credentials.ClientSecret, oauthToken.AccessToken); !errors.Is(err, domain.ErrInvalidOAuth) {
 					return nil, fmt.Errorf("rotating token accepted by oauth.v2.exchange: %w", err)
 				}
 				// External auth: the owner declares a provider, any member lists it

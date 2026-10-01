@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -69,14 +69,14 @@ func TestAppResponseFailureNeverAnswersAHandledErrorWithAServerError(t *testing.
 		err    error
 		status int
 	}{
-		{service.ErrAppResponsePayloadInvalid, http.StatusBadRequest},
-		{service.ErrAppResponseNoText, http.StatusBadRequest},
-		{service.ErrAppResponseURLUsed, http.StatusNotFound},
-		{service.ErrAppResponseURLExpired, http.StatusNotFound},
-		{service.ErrInvalidAppResponse, http.StatusBadRequest},
-		{service.ErrConversationAlreadyArchived, http.StatusGone},
-		{service.ErrConversationPostingRestricted, http.StatusForbidden},
-		{service.ErrNotInConversation, http.StatusNotFound},
+		{domain.ErrAppResponsePayloadInvalid, http.StatusBadRequest},
+		{domain.ErrAppResponseNoText, http.StatusBadRequest},
+		{domain.ErrAppResponseURLUsed, http.StatusNotFound},
+		{domain.ErrAppResponseURLExpired, http.StatusNotFound},
+		{domain.ErrInvalidAppResponse, http.StatusBadRequest},
+		{domain.ErrConversationAlreadyArchived, http.StatusGone},
+		{domain.ErrConversationPostingRestricted, http.StatusForbidden},
+		{domain.ErrNotInConversation, http.StatusNotFound},
 		{store.ErrNotFound, http.StatusNotFound},
 		{store.ErrTransient, http.StatusServiceUnavailable},
 		{errors.New("unclassified"), http.StatusInternalServerError},

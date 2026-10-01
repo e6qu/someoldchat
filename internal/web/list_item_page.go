@@ -9,7 +9,6 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
 )
 
 // listItemCommentView is one remark on the item page: who said it, when, and —
@@ -248,7 +247,7 @@ func (h Handler) attachFileToListItem(w http.ResponseWriter, r *http.Request) {
 	}
 	if uploadErr != nil {
 		status, reason := http.StatusBadRequest, "Choose a non-empty file with a valid name and try again."
-		if errors.Is(uploadErr, service.ErrBlobUnavailable) {
+		if errors.Is(uploadErr, domain.ErrBlobUnavailable) {
 			status, reason = http.StatusServiceUnavailable, "The file store is temporarily unavailable. Try again shortly."
 		}
 		h.writeMutationError(w, r, status, "That file was not attached", reason)

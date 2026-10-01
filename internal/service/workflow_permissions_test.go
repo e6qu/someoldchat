@@ -98,7 +98,7 @@ func TestWorkflowUsePermissionGatesRunsBeyondTheTriggerGrant(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.RunWorkflow(ctx, "T1", "U2", link.ID, "C1", `{}`, "use-denied"); !errors.Is(err, ErrWorkflowPermissionDenied) {
+	if _, err := messages.RunWorkflow(ctx, "T1", "U2", link.ID, "C1", `{}`, "use-denied"); !errors.Is(err, domain.ErrWorkflowPermissionDenied) {
 		t.Fatalf("excluded member run error=%v, want ErrWorkflowPermissionDenied", err)
 	}
 	if _, err := messages.RunWorkflow(ctx, "T1", "U3", link.ID, "C1", `{}`, "use-named"); err != nil {
@@ -210,12 +210,12 @@ func TestWorkflowPermissionReadAndWriteContracts(t *testing.T) {
 		t.Fatalf("member read of a visible workflow's scope: %v", err)
 	}
 
-	if _, err := messages.GetWorkflowPermission(ctx, "T1", "U1", workflow.ID, "run"); !errors.Is(err, ErrInvalidWorkflowStep) {
+	if _, err := messages.GetWorkflowPermission(ctx, "T1", "U1", workflow.ID, "run"); !errors.Is(err, domain.ErrInvalidWorkflowStep) {
 		t.Fatalf("unknown scope error=%v, want ErrInvalidWorkflowStep", err)
 	}
 	if _, err := messages.SetWorkflowPermission(ctx, "T1", "U1", workflow.ID, "find", domain.AutomationPermission{
 		PermissionType: "owner_only",
-	}); !errors.Is(err, ErrInvalidWorkflowStep) {
+	}); !errors.Is(err, domain.ErrInvalidWorkflowStep) {
 		t.Fatalf("unknown permission type error=%v, want ErrInvalidWorkflowStep", err)
 	}
 	if _, err := messages.SetWorkflowPermission(ctx, "T1", "U2", workflow.ID, "find", domain.AutomationPermission{
@@ -225,7 +225,7 @@ func TestWorkflowPermissionReadAndWriteContracts(t *testing.T) {
 	}
 	if _, err := messages.SetWorkflowPermission(ctx, "T1", "U1", workflow.ID, "use", domain.AutomationPermission{
 		PermissionType: "named_entities", UserIDs: []domain.UserID{"Unknown"},
-	}); !errors.Is(err, ErrAutomationUserNotFound) {
+	}); !errors.Is(err, domain.ErrAutomationUserNotFound) {
 		t.Fatalf("unknown named user error=%v, want ErrAutomationUserNotFound", err)
 	}
 

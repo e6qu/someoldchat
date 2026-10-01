@@ -33,7 +33,7 @@ func TestFunctionPermissionGatesBuildingAWorkflow(t *testing.T) {
 	}
 
 	// The excluded builder can no longer build a workflow with it.
-	if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", updated, updated.Version, false); !errors.Is(err, ErrFunctionUseRestricted) {
+	if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", updated, updated.Version, false); !errors.Is(err, domain.ErrFunctionUseRestricted) {
 		t.Fatalf("a builder the restriction excludes updated the workflow anyway: err=%v, want ErrFunctionUseRestricted", err)
 	}
 
@@ -82,7 +82,7 @@ func TestTriggerTypePermissionGatesTriggerCreation(t *testing.T) {
 	restrictTo(domain.PermissionNamedEntities, "U2")
 	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 		WorkflowID: workflow.ID, Title: "Daily", Type: "scheduled", Config: schedule, Enabled: true,
-	}, 0); !errors.Is(err, ErrTriggerTypeRestricted) {
+	}, 0); !errors.Is(err, domain.ErrTriggerTypeRestricted) {
 		t.Fatalf("a builder the restriction excludes created the trigger anyway: err=%v, want ErrTriggerTypeRestricted", err)
 	}
 

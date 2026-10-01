@@ -214,3 +214,12 @@ func linksInMrkdwn(text string) []string {
 func blank(value string) string {
 	return strings.Repeat(" ", len(value))
 }
+
+// IncomingWebhookPath is the path, under the deployment's public base URL, an
+// app posts to trigger its webhook: the route the Slack API handler serves at
+// POST /services/{workspace}/{app}/{secret}. Install and admin creation both
+// use it, so an app sees one URL shape however the hook was minted. It is a
+// path because the host is the deployment's, never Slack's.
+func IncomingWebhookPath(workspaceID WorkspaceID, appID AppID, secret string) string {
+	return "/services/" + url.PathEscape(string(workspaceID)) + "/" + url.PathEscape(string(appID)) + "/" + url.PathEscape(secret)
+}

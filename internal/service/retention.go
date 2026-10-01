@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"time"
 
@@ -18,15 +17,6 @@ import (
 // This product has no plans, so it applies the same authority rule it applies
 // to every other administrative operation — the workspace administrator role —
 // rather than inventing a plan tier to refuse against.
-
-var (
-	// ErrInvalidRetentionDuration refuses a duration outside Slack's documented
-	// range: an integer greater than zero and below 36500 days.
-	ErrInvalidRetentionDuration = errors.New("retention duration is invalid")
-	// ErrRetentionNotSupported refuses a conversation type Slack will not apply
-	// a custom retention policy to.
-	ErrRetentionNotSupported = errors.New("conversation type does not support a retention policy")
-)
 
 // WorkspaceRetention reads the workspace default. It is an administrative read
 // because a retention policy tells an attacker how long evidence survives.
@@ -45,7 +35,7 @@ func (m Messages) SetWorkspaceRetention(ctx context.Context, workspaceID domain.
 		return domain.RetentionPolicy{}, err
 	}
 	if !policy.Valid() {
-		return domain.RetentionPolicy{}, ErrInvalidRetentionDuration
+		return domain.RetentionPolicy{}, domain.ErrInvalidRetentionDuration
 	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("retention.policy_changed",
 		events.String("message_days", retentionDays(policy.MessageDays)),
@@ -100,7 +90,7 @@ func (m Messages) SetConversationRetention(ctx context.Context, workspaceID doma
 	// channel returns to the workspace default and two ways of saying it would
 	// leave the caller guessing which one they got.
 	if days <= 0 || !domain.ValidRetentionDays(days) {
-		return ErrInvalidRetentionDuration
+		return domain.ErrInvalidRetentionDuration
 	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("retention.policy_changed",
 		events.String("channel_id", string(conversation.ID)),
@@ -141,7 +131,7 @@ func (m Messages) retentionTarget(ctx context.Context, workspaceID domain.Worksp
 		return domain.Conversation{}, store.ErrNotFound
 	}
 	if conversation.Kind == domain.ConversationTypeMPIM {
-		return domain.Conversation{}, ErrRetentionNotSupported
+		return domain.Conversation{}, domain.ErrRetentionNotSupported
 	}
 	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
 	if err != nil {
@@ -149,7 +139,7 @@ func (m Messages) retentionTarget(ctx context.Context, workspaceID domain.Worksp
 	}
 	for _, required := range workspace.DefaultChannelIDs {
 		if required == conversationID {
-			return domain.Conversation{}, ErrRetentionNotSupported
+			return domain.Conversation{}, domain.ErrRetentionNotSupported
 		}
 	}
 	return conversation, nil

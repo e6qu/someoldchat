@@ -10469,7 +10469,7 @@ func (s *Server) UploadFile(stream chatv1.ChatService_UploadFileServer) error {
 			// A write fails because the implementation stopped reading, so its
 			// error is the cause and the pipe error is the symptom. Reporting the
 			// symptom made the seam answer codes.Unavailable with no domain class
-			// for a failure the monolith reports as service.ErrBlobUnavailable.
+			// for a failure the monolith reports as domain.ErrBlobUnavailable.
 			if completed := <-result; completed.err != nil {
 				return mapError(completed.err)
 			}

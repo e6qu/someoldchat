@@ -130,11 +130,11 @@ func TestExternalAuthConnectRefusesForgedStateAndForeignMembers(t *testing.T) {
 	}
 
 	// The state is bound to Umember: another member cannot spend it.
-	if err := m.CompleteExternalAuthConnection(ctx, "T1", "Uowner", "A1", "acme", "code", state, callback); !errors.Is(err, ErrExternalAuthConnection) {
+	if err := m.CompleteExternalAuthConnection(ctx, "T1", "Uowner", "A1", "acme", "code", state, callback); !errors.Is(err, domain.ErrExternalAuthConnection) {
 		t.Fatalf("cross-member complete = %v, want ErrExternalAuthConnection", err)
 	}
 	// A garbage state is refused.
-	if err := m.CompleteExternalAuthConnection(ctx, "T1", "Umember", "A1", "acme", "code", "forged", callback); !errors.Is(err, ErrExternalAuthConnection) {
+	if err := m.CompleteExternalAuthConnection(ctx, "T1", "Umember", "A1", "acme", "code", "forged", callback); !errors.Is(err, domain.ErrExternalAuthConnection) {
 		t.Fatalf("forged state complete = %v, want ErrExternalAuthConnection", err)
 	}
 
@@ -156,7 +156,7 @@ func TestExternalAuthConnectRefusesForgedStateAndForeignMembers(t *testing.T) {
 	}
 	if err := m.SetAppExternalAuthProvider(ctx, ownerConfiguration.Token, "A1", domain.ExternalAuthProviderConfig{
 		Name: "acme", ClientID: "c", ClientSecret: "s", AuthorizationURL: "http://acme.test/a", TokenURL: "https://acme.test/t",
-	}); !errors.Is(err, ErrInvalidExternalAuthProvider) {
+	}); !errors.Is(err, domain.ErrInvalidExternalAuthProvider) {
 		t.Fatalf("non-https provider = %v, want ErrInvalidExternalAuthProvider", err)
 	}
 }

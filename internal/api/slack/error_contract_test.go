@@ -1099,7 +1099,7 @@ func TestAdminTeamMutationsRejectAForeignWorkspace(t *testing.T) {
 // one does, its sentinel has to reach the permission branch of mapServiceErrorNamed
 // for this mapping to apply.
 func TestAdminErrorsNameARoleDenial(t *testing.T) {
-	if reason := mapAdminError(service.ErrMessageNotOwned, "channel_not_found"); reason != "not_an_admin" {
+	if reason := mapAdminError(domain.ErrMessageNotOwned, "channel_not_found"); reason != "not_an_admin" {
 		t.Fatalf("mapAdminError for a permission denial = %q, want not_an_admin", reason)
 	}
 	if reason := mapAdminError(store.ErrNotFound, "channel_not_found"); reason != "channel_not_found" {

@@ -36,14 +36,14 @@ func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret
 		grantType = "authorization_code"
 	}
 	if clientID == "" || clientSecret == "" {
-		return domain.OpenIDToken{}, ErrInvalidOAuthClient
+		return domain.OpenIDToken{}, domain.ErrInvalidOAuthClient
 	}
 	if grantType != "authorization_code" && grantType != "refresh_token" {
-		return domain.OpenIDToken{}, ErrInvalidOAuth
+		return domain.OpenIDToken{}, domain.ErrInvalidOAuth
 	}
 	if grantType == "refresh_token" {
 		if refreshToken == "" || code != "" || codeVerifier != "" {
-			return domain.OpenIDToken{}, ErrInvalidOAuth
+			return domain.OpenIDToken{}, domain.ErrInvalidOAuth
 		}
 		accessToken, err := domain.NewOAuthToken()
 		if err != nil {
@@ -55,11 +55,11 @@ func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret
 		}
 		client, err := m.Store.GetOAuthClient(ctx, clientID)
 		if err != nil || !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
-			return domain.OpenIDToken{}, ErrInvalidOAuthClient
+			return domain.OpenIDToken{}, domain.ErrInvalidOAuthClient
 		}
 		token, err := m.Store.ExchangeOpenIDRefreshToken(ctx, clientID, refreshToken, accessToken, newRefreshToken, domain.OpenIDToken{OAuthToken: domain.OAuthToken{ClientID: clientID, AppID: client.AppID, TokenType: "Bearer"}})
 		if errors.Is(err, store.ErrNotFound) {
-			return domain.OpenIDToken{}, ErrInvalidOAuth
+			return domain.OpenIDToken{}, domain.ErrInvalidOAuth
 		}
 		if err != nil {
 			return domain.OpenIDToken{}, err
@@ -67,14 +67,14 @@ func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret
 		return m.finishOpenIDToken(ctx, clientSecret, token)
 	}
 	if code == "" || refreshToken != "" {
-		return domain.OpenIDToken{}, ErrInvalidOAuth
+		return domain.OpenIDToken{}, domain.ErrInvalidOAuth
 	}
 	oauthToken, err := m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, codeVerifier, "user", false)
 	if err != nil {
 		return domain.OpenIDToken{}, err
 	}
 	if !containsScope(oauthToken.Scopes, "openid") {
-		return domain.OpenIDToken{}, ErrInvalidOAuth
+		return domain.OpenIDToken{}, domain.ErrInvalidOAuth
 	}
 	newRefreshToken, err := domain.NewOAuthToken()
 	if err != nil {

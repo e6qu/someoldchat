@@ -12,13 +12,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	chatv1 "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -88,7 +89,7 @@ func TestNoCodeGRPCProducesItselfHasAFallbackClass(t *testing.T) {
 //
 // store.ErrInvalidArgument used to lead its block of 34, so classifyError
 // answered the generic class for every error that carried both, and
-// errors.Join(service.ErrInvalidMessage, store.ErrInvalidArgument) lost the
+// errors.Join(domain.ErrInvalidMessage, store.ErrInvalidArgument) lost the
 // specific sentinel on the wire.
 func TestTheFallbackClassIsTheLastOfItsCode(t *testing.T) {
 	lastIndexOfCode := make(map[codes.Code]int, len(errorClasses))
@@ -115,14 +116,14 @@ func TestTheFallbackClassIsTheLastOfItsCode(t *testing.T) {
 // store.ErrNotFound first — answered channel_not_found in the monolith and
 // invalid_arg_name across the seam.
 func TestAnErrorCarryingTwoSentinelsRestoresBoth(t *testing.T) {
-	joined := errors.Join(store.ErrNotFound, service.ErrInvalidCanvas)
+	joined := errors.Join(store.ErrNotFound, domain.ErrInvalidCanvas)
 	mapped := mapError(joined)
 	sent, ok := status.FromError(mapped)
 	if !ok {
 		t.Fatal("mapError did not produce a gRPC status")
 	}
 	restored := mapRemoteError(sent.Err())
-	for _, sentinel := range []error{store.ErrNotFound, service.ErrInvalidCanvas} {
+	for _, sentinel := range []error{store.ErrNotFound, domain.ErrInvalidCanvas} {
 		if !errors.Is(joined, sentinel) {
 			t.Fatalf("the local error no longer carries %v; the case no longer provokes the class it documents", sentinel)
 		}
@@ -131,8 +132,8 @@ func TestAnErrorCarryingTwoSentinelsRestoresBoth(t *testing.T) {
 		}
 	}
 	// A sentinel the error never carried must not appear.
-	if errors.Is(restored, service.ErrInvalidMessage) {
-		t.Errorf("the restored error invented service.ErrInvalidMessage: %v", restored)
+	if errors.Is(restored, domain.ErrInvalidMessage) {
+		t.Errorf("the restored error invented domain.ErrInvalidMessage: %v", restored)
 	}
 }
 
@@ -176,7 +177,7 @@ func TestTheStatusMessageIsBounded(t *testing.T) {
 // 404 an absence and 400 a caller mistake. An error that matches several classes
 // took its code from whichever class the table listed first, and the table lists
 // the validation block first — so errors.Join(store.ErrNotFound,
-// service.ErrInvalidCanvas), the shape internal/service returns when a
+// domain.ErrInvalidCanvas), the shape internal/service returns when a
 // compensating delete fails after a rejected create, crossed the seam as a 400
 // naming invalid_canvas while the monolith answered channel_not_found. keys
 // fixed the sentinel set for a peer that reads keys; the code and the key a
@@ -188,12 +189,12 @@ func TestTheStatusCodeComesFromTheMostRestrictiveMatchedClass(t *testing.T) {
 		code codes.Code
 		key  string
 	}{
-		"absence with a validation failure":   {errors.Join(store.ErrNotFound, service.ErrInvalidCanvas), codes.NotFound, "store.not_found"},
-		"denial with a validation failure":    {errors.Join(service.ErrInvalidMessage, service.ErrNotWorkspaceAdmin), codes.PermissionDenied, "service.not_workspace_admin"},
+		"absence with a validation failure":   {errors.Join(store.ErrNotFound, domain.ErrInvalidCanvas), codes.NotFound, "store.not_found"},
+		"denial with a validation failure":    {errors.Join(domain.ErrInvalidMessage, domain.ErrNotWorkspaceAdmin), codes.PermissionDenied, "service.not_workspace_admin"},
 		"conflict with a validation failure":  {errors.Join(store.ErrInvalidArgument, store.ErrConflict), codes.Aborted, "store.conflict"},
-		"a validation failure on its own":     {fmt.Errorf("%w: bad", service.ErrInvalidCanvas), codes.InvalidArgument, "service.invalid_canvas"},
-		"two members of the same block":       {errors.Join(service.ErrInvalidCanvas, store.ErrInvalidArgument), codes.InvalidArgument, "service.invalid_canvas"},
-		"absence with a denial and a mistake": {errors.Join(store.ErrInvalidArgument, store.ErrNotFound, service.ErrMessageNotOwned), codes.PermissionDenied, "service.message_not_owned"},
+		"a validation failure on its own":     {fmt.Errorf("%w: bad", domain.ErrInvalidCanvas), codes.InvalidArgument, "service.invalid_canvas"},
+		"two members of the same block":       {errors.Join(domain.ErrInvalidCanvas, store.ErrInvalidArgument), codes.InvalidArgument, "service.invalid_canvas"},
+		"absence with a denial and a mistake": {errors.Join(store.ErrInvalidArgument, store.ErrNotFound, domain.ErrMessageNotOwned), codes.PermissionDenied, "service.message_not_owned"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			mapped := mapError(testCase.err)
@@ -341,10 +342,10 @@ func TestUnclassifiedFailuresDoNotLeakStorageText(t *testing.T) {
 }
 
 func TestRemoteErrorTextOmitsTheTransportPreamble(t *testing.T) {
-	mapped := mapError(fmt.Errorf("post message: %w", service.ErrInvalidMessage))
+	mapped := mapError(fmt.Errorf("post message: %w", domain.ErrInvalidMessage))
 	sent, _ := status.FromError(mapped)
 	restored := mapRemoteError(sent.Err())
-	if got := restored.Error(); got != "post message: "+service.ErrInvalidMessage.Error() {
+	if got := restored.Error(); got != "post message: "+domain.ErrInvalidMessage.Error() {
 		t.Fatalf("remote error text = %q, want the domain text a caller renders in process", got)
 	}
 }
@@ -404,8 +405,8 @@ func TestContextErrorsRestoreWithoutDetails(t *testing.T) {
 // unrecognised detail means "the peer named a class and I do not know it", and
 // answering with the code's fallback invents a *different specific* class: a
 // newer peer's FailedPrecondition channel_is_archived was restored as
-// service.ErrMessageAlreadyDeleted and its PermissionDenied
-// not_a_workspace_owner as service.ErrMessageNotOwned. internal/api/slack maps
+// domain.ErrMessageAlreadyDeleted and its PermissionDenied
+// not_a_workspace_owner as domain.ErrMessageNotOwned. internal/api/slack maps
 // by sentinel, so for the whole rolling window a caller was told a message had
 // been deleted when the channel was archived. Leaving it unclassified gives the
 // generic path instead of a confidently wrong one.
@@ -447,25 +448,29 @@ func TestAnUnknownDetailKeyIsNotGuessedFromTheCode(t *testing.T) {
 	}
 }
 
-// TestEveryDomainSentinelIsClassified reads the sentinel declarations of
-// internal/store, internal/service and internal/domain from source. A sentinel
-// declared there and absent from the table fails here, which is the gate that
-// stops the seam from silently degrading a new failure mode to codes.Unavailable.
+// TestEveryDomainSentinelIsClassified reads the sentinel declarations under
+// sentinelRoots from source. A sentinel declared there and absent from the
+// table fails here, which is the gate that stops the seam from silently
+// degrading a new failure mode to codes.Unavailable.
 //
-// The expected key is derived from the declaration, so the table cannot drift
-// from the sentinel it claims to carry either.
+// A sentinel is found in the table by the expression that names it, not by a
+// key derived from its package: the key is wire contract and stays fixed when a
+// sentinel moves between packages, as the service sentinels did when they moved
+// to internal/domain. TestErrorKeysNameTheirSentinels keeps each key's name in
+// step with its sentinel instead.
 func TestEveryDomainSentinelIsClassified(t *testing.T) {
-	for qualified, name := range discoveredSentinels(t) {
-		key := packageOf(qualified) + "." + sentinelKey(name)
+	table := tableSentinelKeys(t)
+	for qualified := range discoveredSentinels(t) {
+		key, inTable := table[qualified]
 		if reason, excluded := unclassifiedSentinels[qualified]; excluded {
-			if _, classified := errorClassesByKey[key]; classified {
+			if inTable {
 				t.Errorf("%s is both classified and excluded (%s)", qualified, reason)
 			}
 			continue
 		}
-		if _, classified := errorClassesByKey[key]; !classified {
-			t.Errorf("%s crosses the seam unclassified: add {key: %q, code: ..., sentinel: %s} to errorClasses, or document it in unclassifiedSentinels",
-				qualified, key, qualified)
+		if _, classified := errorClassesByKey[key]; !inTable || !classified {
+			t.Errorf("%s crosses the seam unclassified: add {key: ..., code: ..., sentinel: %s} to errorClasses, or document it in unclassifiedSentinels",
+				qualified, qualified)
 		}
 	}
 }
@@ -478,8 +483,8 @@ var unclassifiedSentinels = map[string]string{
 	"sqlstore.ErrIntegrityCheckUnsupported": "IntegrityCheck is storage maintenance, not part of chatapi.Service, so it never crosses the chat seam; classifying it would make the transport package import a storage backend",
 	"events.ErrPayloadInternal":             "a delivery filter the consumer evaluates on records it already holds (internal/socketmode), never returned by a chat RPC",
 	"events.ErrPayloadRecipientScoped":      "a delivery filter, as above",
-	"store.ErrCapabilityExpired":            "UseAppResponseURL's refusal, which service.HandleAppResponse translates to service.ErrAppResponseURLExpired before it can cross the seam; it wraps store.ErrNotFound regardless",
-	"store.ErrCapabilityExhausted":          "UseAppResponseURL's refusal, translated to service.ErrAppResponseURLUsed as above",
+	"store.ErrCapabilityExpired":            "UseAppResponseURL's refusal, which service.HandleAppResponse translates to domain.ErrAppResponseURLExpired before it can cross the seam; it wraps store.ErrNotFound regardless",
+	"store.ErrCapabilityExhausted":          "UseAppResponseURL's refusal, translated to domain.ErrAppResponseURLUsed as above",
 }
 
 func TestExclusionsNameRealSentinels(t *testing.T) {
@@ -500,10 +505,10 @@ func TestExclusionsNameRealSentinels(t *testing.T) {
 // internal/events and internal/blob are here because they do reach one:
 // service.Messages.newEvent funnels every mutation through events.New, and
 // service.Messages returns a blob absence unchanged. The scan used to cover
-// store, service and domain only, so those sentinels crossed the seam as
+// store, service and domain only (the service sentinels now live in domain), so those sentinels crossed the seam as
 // codes.Unavailable with the fixed unclassified message — a caller told to retry
 // a request that can never succeed.
-var sentinelRoots = []string{"store", "service", "domain", "events", "blob"}
+var sentinelRoots = []string{"store", "domain", "events", "blob"}
 
 // discoveredSentinels reads every exported Err* declaration under sentinelRoots
 // from source and returns them keyed by "package.Name".
@@ -552,8 +557,58 @@ func discoveredSentinels(t *testing.T) map[string]string {
 	return discovered
 }
 
-func packageOf(qualified string) string {
-	return qualified[:strings.Index(qualified, ".")]
+// tableSentinelKeys reads errorClasses from errors.go and returns each class's
+// key under the expression its sentinel is written as, such as
+// "domain.ErrInvalidMessage". Reading the source rather than the values lets
+// the scans above, which only know a sentinel's declared name, find its class.
+func tableSentinelKeys(t *testing.T) map[string]string {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), "errors.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse errors.go: %v", err)
+	}
+	keys := make(map[string]string)
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		spec, ok := node.(*ast.ValueSpec)
+		if !ok || len(spec.Names) != 1 || spec.Names[0].Name != "errorClasses" || len(spec.Values) != 1 {
+			return true
+		}
+		for _, element := range spec.Values[0].(*ast.CompositeLit).Elts {
+			var key, sentinel string
+			for _, field := range element.(*ast.CompositeLit).Elts {
+				pair := field.(*ast.KeyValueExpr)
+				switch pair.Key.(*ast.Ident).Name {
+				case "key":
+					key, _ = strconv.Unquote(pair.Value.(*ast.BasicLit).Value)
+				case "sentinel":
+					selector := pair.Value.(*ast.SelectorExpr)
+					sentinel = selector.X.(*ast.Ident).Name + "." + selector.Sel.Name
+				}
+			}
+			keys[sentinel] = key
+		}
+		return false
+	})
+	if len(keys) != len(errorClasses) {
+		t.Fatalf("read %d classes from errors.go, want %d; the source scan is broken", len(keys), len(errorClasses))
+	}
+	return keys
+}
+
+// TestErrorKeysNameTheirSentinels keeps each key's name, the part after the
+// package prefix, derived from its sentinel's identifier, so the table cannot
+// carry a sentinel under a key that names another. The prefix is the package
+// the sentinel was first declared in and does not follow it when it moves.
+func TestErrorKeysNameTheirSentinels(t *testing.T) {
+	for sentinel, key := range tableSentinelKeys(t) {
+		name := sentinel[strings.Index(sentinel, ".")+1:]
+		if !strings.HasPrefix(name, "Err") {
+			continue
+		}
+		if _, suffix, _ := strings.Cut(key, "."); suffix != sentinelKey(name) {
+			t.Errorf("%s is carried as %q, want a key ending in %q", sentinel, key, sentinelKey(name))
+		}
+	}
 }
 
 func exportedSentinelNames(parsed *ast.File) []string {

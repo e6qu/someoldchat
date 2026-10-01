@@ -73,7 +73,7 @@ func TestADescriptionCanBeClearedAndIsBounded(t *testing.T) {
 		t.Fatalf("description = %q err = %v, want it cleared", cleared.Description, err)
 	}
 	tooLong := strings.Repeat("x", FileDescriptionLimit+1)
-	if err := messages.SetFileDescription(ctx, "T1", "U1", fileID, tooLong); !errors.Is(err, ErrInvalidFile) {
+	if err := messages.SetFileDescription(ctx, "T1", "U1", fileID, tooLong); !errors.Is(err, domain.ErrInvalidFile) {
 		t.Fatalf("over-long description = %v, want ErrInvalidFile", err)
 	}
 }

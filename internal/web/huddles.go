@@ -10,7 +10,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
@@ -368,7 +368,7 @@ func (h Handler) huddleReact(w http.ResponseWriter, r *http.Request) {
 		// An invalid emoji is the member's mistake; anything else means the
 		// huddle ended or they left it, which the script treats the same way as a
 		// refused signal — it stops rather than surfacing an outage.
-		if errors.Is(err, service.ErrInvalidReaction) {
+		if errors.Is(err, domain.ErrInvalidReaction) {
 			writeJSONRefusal(w, http.StatusBadRequest, "invalid_reaction")
 			return
 		}
@@ -382,7 +382,7 @@ func (h Handler) huddleReact(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) writeHuddleError(w http.ResponseWriter, r *http.Request, err error, action string) {
 	switch {
-	case errors.Is(err, service.ErrHuddleNotOwned):
+	case errors.Is(err, domain.ErrHuddleNotOwned):
 		h.writeMutationError(w, r, http.StatusForbidden, "The huddle was not ended",
 			"Only the person who started a huddle, or a workspace administrator, can end it for everyone. You can leave it instead.")
 	case errors.Is(err, store.ErrNotFound):
@@ -391,7 +391,7 @@ func (h Handler) writeHuddleError(w http.ResponseWriter, r *http.Request, err er
 	case errors.Is(err, store.ErrConflict):
 		h.writeMutationError(w, r, http.StatusConflict, "That huddle has ended",
 			"Start a new one if you still want to talk.")
-	case errors.Is(err, service.ErrNotInConversation):
+	case errors.Is(err, domain.ErrNotInConversation):
 		h.writeMutationError(w, r, http.StatusForbidden, "You are not in this conversation",
 			"A huddle belongs to its conversation, so joining one means being in it.")
 	default:

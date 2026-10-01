@@ -159,8 +159,8 @@ func TestAppManifestLifecycleAndConfigurationTokenRotation(t *testing.T) {
 	if refreshed.TokenType != "bot" || !strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-") || !strings.HasPrefix(refreshed.RefreshToken, "xoxe-") || refreshed.RefreshToken == exchanged.RefreshToken {
 		t.Fatalf("oauth refresh=%+v", refreshed)
 	}
-	if _, err := messages.OAuthV2Refresh(ctx, credentials.ClientID, credentials.ClientSecret, exchanged.RefreshToken); !errors.Is(err, ErrInvalidOAuth) {
-		t.Fatalf("oauth refresh replay error=%v, want %v", err, ErrInvalidOAuth)
+	if _, err := messages.OAuthV2Refresh(ctx, credentials.ClientID, credentials.ClientSecret, exchanged.RefreshToken); !errors.Is(err, domain.ErrInvalidOAuth) {
+		t.Fatalf("oauth refresh replay error=%v, want %v", err, domain.ErrInvalidOAuth)
 	}
 	if err := repository.SeedToken(ctx, "xoxb-legacy", domain.TokenRecord{WorkspaceID: "T1", UserID: authorization.BotUserID, AppID: app.ID, BotID: authorization.BotID, TokenType: "bot", Scopes: []string{"chat:write"}}); err != nil {
 		t.Fatal(err)
@@ -172,24 +172,24 @@ func TestAppManifestLifecycleAndConfigurationTokenRotation(t *testing.T) {
 	if converted.TokenType != "bot" || !strings.HasPrefix(converted.AccessToken, "xoxe.xoxb-") || !strings.HasPrefix(converted.RefreshToken, "xoxe-") {
 		t.Fatalf("oauth token conversion=%+v", converted)
 	}
-	if _, err := messages.OAuthV2ExchangeToken(ctx, credentials.ClientID, credentials.ClientSecret, "xoxb-legacy"); !errors.Is(err, ErrInvalidOAuth) {
-		t.Fatalf("oauth token conversion replay error=%v, want %v", err, ErrInvalidOAuth)
+	if _, err := messages.OAuthV2ExchangeToken(ctx, credentials.ClientID, credentials.ClientSecret, "xoxb-legacy"); !errors.Is(err, domain.ErrInvalidOAuth) {
+		t.Fatalf("oauth token conversion replay error=%v, want %v", err, domain.ErrInvalidOAuth)
 	}
-	if _, err := messages.InspectOAuthAuthorization(ctx, domain.OAuthAuthorizationRequest{ClientID: credentials.ClientID, WorkspaceID: "T1", UserID: "U1", RedirectURI: "https://attacker.example/callback", BotScopes: []string{"chat:write"}}); !errors.Is(err, ErrInvalidOAuth) {
-		t.Fatalf("unregistered redirect error=%v, want %v", err, ErrInvalidOAuth)
+	if _, err := messages.InspectOAuthAuthorization(ctx, domain.OAuthAuthorizationRequest{ClientID: credentials.ClientID, WorkspaceID: "T1", UserID: "U1", RedirectURI: "https://attacker.example/callback", BotScopes: []string{"chat:write"}}); !errors.Is(err, domain.ErrInvalidOAuth) {
+		t.Fatalf("unregistered redirect error=%v, want %v", err, domain.ErrInvalidOAuth)
 	}
-	if _, err := messages.InspectOAuthAuthorization(ctx, domain.OAuthAuthorizationRequest{ClientID: credentials.ClientID, WorkspaceID: "T1", UserID: "U1", RedirectURI: "https://example.test/oauth", BotScopes: []string{"admin"}}); !errors.Is(err, ErrInvalidOAuth) {
-		t.Fatalf("undeclared scope error=%v, want %v", err, ErrInvalidOAuth)
+	if _, err := messages.InspectOAuthAuthorization(ctx, domain.OAuthAuthorizationRequest{ClientID: credentials.ClientID, WorkspaceID: "T1", UserID: "U1", RedirectURI: "https://example.test/oauth", BotScopes: []string{"admin"}}); !errors.Is(err, domain.ErrInvalidOAuth) {
+		t.Fatalf("undeclared scope error=%v, want %v", err, domain.ErrInvalidOAuth)
 	}
 	rotated, err := messages.RotateAppConfigurationToken(ctx, configuration.RefreshToken)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := messages.ExportAppManifest(ctx, configuration.Token, app.ID); !errors.Is(err, ErrAppConfigurationAuthentication) {
-		t.Fatalf("old access error=%v, want %v", err, ErrAppConfigurationAuthentication)
+	if _, _, err := messages.ExportAppManifest(ctx, configuration.Token, app.ID); !errors.Is(err, domain.ErrAppConfigurationAuthentication) {
+		t.Fatalf("old access error=%v, want %v", err, domain.ErrAppConfigurationAuthentication)
 	}
-	if _, err := messages.RotateAppConfigurationToken(ctx, configuration.RefreshToken); !errors.Is(err, ErrAppConfigurationAuthentication) {
-		t.Fatalf("refresh replay error=%v, want %v", err, ErrAppConfigurationAuthentication)
+	if _, err := messages.RotateAppConfigurationToken(ctx, configuration.RefreshToken); !errors.Is(err, domain.ErrAppConfigurationAuthentication) {
+		t.Fatalf("refresh replay error=%v, want %v", err, domain.ErrAppConfigurationAuthentication)
 	}
 	if err := messages.DeleteDeveloperApp(ctx, rotated.Token, app.ID); err != nil {
 		t.Fatal(err)
@@ -213,8 +213,8 @@ func TestAppManifestValidationDoesNotCreatePartialApp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := messages.CreateAppFromManifest(ctx, configuration.Token, `{"display_information":{}}`, ""); !errors.Is(err, ErrInvalidAppManifest) {
-		t.Fatalf("invalid manifest error=%v, want %v", err, ErrInvalidAppManifest)
+	if _, _, err := messages.CreateAppFromManifest(ctx, configuration.Token, `{"display_information":{}}`, ""); !errors.Is(err, domain.ErrInvalidAppManifest) {
+		t.Fatalf("invalid manifest error=%v, want %v", err, domain.ErrInvalidAppManifest)
 	}
 	if apps, err := messages.ListDeveloperApps(ctx, "T1", "U1"); err != nil || len(apps) != 0 {
 		t.Fatalf("partial apps=%+v err=%v", apps, err)
@@ -488,8 +488,8 @@ func TestOpeningAnAppsMessagesTabRefusesAnOutsiderBeforeExaminingTheApp(t *testi
 	messages := Messages{Store: s}
 
 	// The positive control: a member is let through and told about the app.
-	if _, err := messages.OpenAppMessages(ctx, "T1", "U1", "A1"); !errors.Is(err, ErrAppInteractionUnavailable) {
-		t.Fatalf("member opening a broken app's Messages tab: err=%v, want %v", err, ErrAppInteractionUnavailable)
+	if _, err := messages.OpenAppMessages(ctx, "T1", "U1", "A1"); !errors.Is(err, domain.ErrAppInteractionUnavailable) {
+		t.Fatalf("member opening a broken app's Messages tab: err=%v, want %v", err, domain.ErrAppInteractionUnavailable)
 	}
 	for _, outsider := range []domain.UserID{"U2", "U-nobody"} {
 		installed, err := messages.OpenAppMessages(ctx, "T1", outsider, "A1")

@@ -15,17 +15,6 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
-// ErrInvalidTriggerConfig reports a trigger configuration that cannot execute:
-// an unknown schedule frequency, an unbound channel or list, or a malformed
-// JSON object. It is distinct from ErrInvalidWorkflowStep so the Slack HTTP
-// boundary can keep its own error mapping per resource.
-var ErrInvalidTriggerConfig = errors.New("workflow trigger configuration is invalid")
-
-// ErrWebhookTriggerSecret reports a webhook invocation whose path secret does
-// not match the trigger's stored hash. The HTTP boundary answers it with the
-// same indistinguishable 404 as an unknown trigger.
-var ErrWebhookTriggerSecret = errors.New("webhook trigger secret does not match")
-
 const (
 	// workflowScheduleMaxIterations bounds occurrence stepping so a pathological
 	// configuration (a one-hour interval asked for an occurrence years ahead)
@@ -80,11 +69,11 @@ func workflowTriggerSecretAssociatedData(triggerID domain.WorkflowTriggerID) str
 func parseWorkflowSchedule(raw string) (workflowScheduleConfig, time.Time, *time.Location, error) {
 	var config workflowScheduleConfig
 	if err := json.Unmarshal([]byte(raw), &config); err != nil {
-		return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+		return workflowScheduleConfig{}, time.Time{}, nil, domain.ErrInvalidTriggerConfig
 	}
 	start, err := time.Parse(time.RFC3339, strings.TrimSpace(config.StartTime))
 	if err != nil {
-		return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+		return workflowScheduleConfig{}, time.Time{}, nil, domain.ErrInvalidTriggerConfig
 	}
 	zoneName := strings.TrimSpace(config.Timezone)
 	if zoneName == "" {
@@ -92,32 +81,32 @@ func parseWorkflowSchedule(raw string) (workflowScheduleConfig, time.Time, *time
 	}
 	location, err := time.LoadLocation(zoneName)
 	if err != nil {
-		return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+		return workflowScheduleConfig{}, time.Time{}, nil, domain.ErrInvalidTriggerConfig
 	}
 	interval := config.interval()
 	if interval < 1 || interval > 366 {
-		return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+		return workflowScheduleConfig{}, time.Time{}, nil, domain.ErrInvalidTriggerConfig
 	}
 	switch config.Frequency.Type {
 	case "hourly", "daily", "weekly", "monthly":
 	default:
-		return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+		return workflowScheduleConfig{}, time.Time{}, nil, domain.ErrInvalidTriggerConfig
 	}
 	if len(config.Frequency.Weekdays) > 0 {
 		if config.Frequency.Type != "weekly" {
-			return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+			return workflowScheduleConfig{}, time.Time{}, nil, domain.ErrInvalidTriggerConfig
 		}
 		seen := make(map[string]bool, len(config.Frequency.Weekdays))
 		for _, day := range config.Frequency.Weekdays {
 			if _, ok := workflowWeekdays[day]; !ok || seen[day] {
-				return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+				return workflowScheduleConfig{}, time.Time{}, nil, domain.ErrInvalidTriggerConfig
 			}
 			seen[day] = true
 		}
 	}
 	if config.Frequency.Day != nil {
 		if config.Frequency.Type != "monthly" || *config.Frequency.Day < 1 || *config.Frequency.Day > 31 {
-			return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+			return workflowScheduleConfig{}, time.Time{}, nil, domain.ErrInvalidTriggerConfig
 		}
 	}
 	return config, start.UTC(), location, nil
@@ -209,11 +198,11 @@ func NextWorkflowScheduledRun(raw string, from time.Time, inclusive bool) (time.
 		}
 		next := stepSchedule(config, start, location, occurrence)
 		if !next.After(occurrence) {
-			return time.Time{}, ErrInvalidTriggerConfig
+			return time.Time{}, domain.ErrInvalidTriggerConfig
 		}
 		occurrence = next
 	}
-	return time.Time{}, ErrInvalidTriggerConfig
+	return time.Time{}, domain.ErrInvalidTriggerConfig
 }
 
 // normalizeWorkflowTriggerConfig validates and canonicalizes one trigger's
@@ -225,7 +214,7 @@ func (m Messages) normalizeWorkflowTriggerConfig(ctx context.Context, value *dom
 	config := map[string]json.RawMessage{}
 	if strings.TrimSpace(value.Config) != "" {
 		if err := json.Unmarshal([]byte(value.Config), &config); err != nil || config == nil {
-			return ErrInvalidTriggerConfig
+			return domain.ErrInvalidTriggerConfig
 		}
 	}
 	switch domain.WorkflowTriggerType(value.Type) {
@@ -266,7 +255,7 @@ func (m Messages) normalizeWorkflowTriggerConfig(ctx context.Context, value *dom
 		}
 		if secret.SecretHash == "" || secret.SecretCiphertext == "" {
 			if len(m.AppCredentialKey) == 0 {
-				return ErrInvalidTriggerConfig
+				return domain.ErrInvalidTriggerConfig
 			}
 			raw := make([]byte, workflowWebhookSecretBytes)
 			if _, err := rand.Read(raw); err != nil {
@@ -292,14 +281,14 @@ func (m Messages) normalizeWorkflowTriggerConfig(ctx context.Context, value *dom
 	case domain.WorkflowTriggerMessage, domain.WorkflowTriggerReaction, domain.WorkflowTriggerJoin:
 		var event workflowEventConfig
 		if err := json.Unmarshal([]byte(value.Config), &event); err != nil {
-			return ErrInvalidTriggerConfig
+			return domain.ErrInvalidTriggerConfig
 		}
 		if len(event.ChannelIDs) != 1 {
-			return ErrInvalidTriggerConfig
+			return domain.ErrInvalidTriggerConfig
 		}
 		channel, err := m.Store.GetConversation(ctx, domain.ConversationID(strings.TrimSpace(event.ChannelIDs[0])))
 		if err != nil || channel.WorkspaceID != value.WorkspaceID || channel.IsDirectOrGroup() {
-			return ErrInvalidTriggerConfig
+			return domain.ErrInvalidTriggerConfig
 		}
 		normalized := workflowEventConfig{ChannelIDs: []string{string(channel.ID)}}
 		if domain.WorkflowTriggerType(value.Type) == domain.WorkflowTriggerMessage {
@@ -319,14 +308,14 @@ func (m Messages) normalizeWorkflowTriggerConfig(ctx context.Context, value *dom
 	case domain.WorkflowTriggerList:
 		var event workflowEventConfig
 		if err := json.Unmarshal([]byte(value.Config), &event); err != nil {
-			return ErrInvalidTriggerConfig
+			return domain.ErrInvalidTriggerConfig
 		}
 		list, err := m.Store.GetList(ctx, value.WorkspaceID, domain.ListID(strings.TrimSpace(event.ListID)))
 		if err != nil || list.WorkspaceID != value.WorkspaceID {
-			return ErrInvalidTriggerConfig
+			return domain.ErrInvalidTriggerConfig
 		}
 		if event.Event != "created" && event.Event != "updated" {
-			return ErrInvalidTriggerConfig
+			return domain.ErrInvalidTriggerConfig
 		}
 		encoded, err := json.Marshal(workflowEventConfig{ListID: string(list.ID), Event: event.Event})
 		if err != nil {
@@ -336,7 +325,7 @@ func (m Messages) normalizeWorkflowTriggerConfig(ctx context.Context, value *dom
 		value.NextRunAt = time.Time{}
 		return nil
 	default:
-		return ErrInvalidTriggerConfig
+		return domain.ErrInvalidTriggerConfig
 	}
 }
 
@@ -379,19 +368,19 @@ func (m Messages) RunWebhookTrigger(ctx context.Context, workspaceID domain.Work
 	trigger, err := m.Store.GetWorkflowTrigger(ctx, workspaceID, triggerID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return domain.WorkflowRun{}, ErrWebhookTriggerSecret
+			return domain.WorkflowRun{}, domain.ErrWebhookTriggerSecret
 		}
 		return domain.WorkflowRun{}, err
 	}
 	if domain.WorkflowTriggerType(trigger.Type) != domain.WorkflowTriggerWebhook {
-		return domain.WorkflowRun{}, ErrWebhookTriggerSecret
+		return domain.WorkflowRun{}, domain.ErrWebhookTriggerSecret
 	}
 	var stored workflowWebhookConfig
 	if err := json.Unmarshal([]byte(trigger.Config), &stored); err != nil || stored.SecretHash == "" {
-		return domain.WorkflowRun{}, ErrWebhookTriggerSecret
+		return domain.WorkflowRun{}, domain.ErrWebhookTriggerSecret
 	}
 	if domain.HashToken(strings.TrimSpace(secret)) != stored.SecretHash {
-		return domain.WorkflowRun{}, ErrWebhookTriggerSecret
+		return domain.WorkflowRun{}, domain.ErrWebhookTriggerSecret
 	}
 	return m.RunAutomaticWorkflow(ctx, workspaceID, triggerID, "", inputs, "")
 }

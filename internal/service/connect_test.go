@@ -53,7 +53,7 @@ func TestSlackConnectCapacityIsEnforcedAtAcceptance(t *testing.T) {
 	if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", invite.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.AcceptSharedInvite(ctx, "T-late", "U-late", invite.ID); !errors.Is(err, ErrSlackConnectFull) {
+	if _, err := messages.AcceptSharedInvite(ctx, "T-late", "U-late", invite.ID); !errors.Is(err, domain.ErrSlackConnectFull) {
 		t.Fatalf("acceptance into a full channel err=%v, want the capacity refusal", err)
 	}
 	// The refusal left the invitation acceptable: nothing was consumed by
@@ -167,7 +167,7 @@ func TestALapsedInvitationCannotBeApprovedButCanBeWithdrawn(t *testing.T) {
 	t.Run("approval is refused", func(t *testing.T) {
 		store, messages := newFixture(t)
 		lapsed(t, store, "SI_lapsed")
-		if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", "SI_lapsed"); !errors.Is(err, ErrInvitationExpired) {
+		if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", "SI_lapsed"); !errors.Is(err, domain.ErrInvitationExpired) {
 			t.Fatalf("approving a lapsed invitation err=%v, want ErrInvitationExpired", err)
 		}
 		// The refusal changed nothing: the invitation is still pending, not
@@ -247,7 +247,7 @@ func TestExternalInvitePermissionIsStoredReadableAndEnforced(t *testing.T) {
 
 	// Now the connected team is refused when it tries to invite, and with the
 	// classified sentinel rather than a not-found.
-	if _, err := messages.InviteShared(ctx, "T2", "U2", "C1", "T3", ""); !errors.Is(err, ErrExternalInviteNotPermitted) {
+	if _, err := messages.InviteShared(ctx, "T2", "U2", "C1", "T3", ""); !errors.Is(err, domain.ErrExternalInviteNotPermitted) {
 		t.Fatalf("a restricted connected team's invite = %v, want ErrExternalInviteNotPermitted", err)
 	}
 

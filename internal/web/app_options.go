@@ -8,7 +8,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -65,9 +65,9 @@ func (h Handler) appOptions(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			status, message = http.StatusNotFound, "That dynamic menu is no longer available."
-		case errors.Is(err, service.ErrInvalidAppResponse):
+		case errors.Is(err, domain.ErrInvalidAppResponse):
 			message = "The app returned invalid options."
-		case errors.Is(err, service.ErrAppInteractionUnavailable):
+		case errors.Is(err, domain.ErrAppInteractionUnavailable):
 			message = "The app did not provide options in time."
 		}
 		h.writeOptionsError(w, status, message)

@@ -60,7 +60,7 @@ func TestListTemplateLifecycle(t *testing.T) {
 	}
 
 	// A non-creator, non-admin cannot delete the template.
-	if err := messages.DeleteListTemplate(ctx, "T1", "U2", template.ID); !errors.Is(err, ErrNotWorkspaceAdmin) {
+	if err := messages.DeleteListTemplate(ctx, "T1", "U2", template.ID); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		t.Fatalf("non-creator delete = %v, want ErrNotWorkspaceAdmin", err)
 	}
 	// A workspace administrator can, even though they did not create it.

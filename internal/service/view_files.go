@@ -13,12 +13,6 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
-// ErrViewFilesInvalid reports a file_input value the element does not accept:
-// a file that is not the submitting member's own upload, more files than
-// max_files, or a type outside filetypes. The client checks the same
-// constraints first; this is the authoritative check.
-var ErrViewFilesInvalid = errors.New("view file input value is invalid")
-
 // fileInputMaxFiles is Slack's default and ceiling for file_input max_files.
 const fileInputMaxFiles = 10
 
@@ -34,7 +28,7 @@ func (m Messages) attachViewFiles(ctx context.Context, current domain.View, user
 		Values map[string]map[string]map[string]any `json:"values"`
 	}
 	if json.Unmarshal([]byte(stateJSON), &state) != nil {
-		return "", ErrInvalidAppResponse
+		return "", domain.ErrInvalidAppResponse
 	}
 	var grants []domain.FileAccessGrant
 	var grantee domain.UserID
@@ -47,7 +41,7 @@ func (m Messages) attachViewFiles(ctx context.Context, current domain.View, user
 			}
 			element, found := viewElement(current.Payload, blockID, actionID)
 			if !found || stringValue(element["type"]) != "file_input" {
-				return "", ErrViewFilesInvalid
+				return "", domain.ErrViewFilesInvalid
 			}
 			raw, _ := action["files"].([]any)
 			maxFiles := fileInputMaxFiles
@@ -55,7 +49,7 @@ func (m Messages) attachViewFiles(ctx context.Context, current domain.View, user
 				maxFiles = int(value)
 			}
 			if len(raw) > maxFiles {
-				return "", ErrViewFilesInvalid
+				return "", domain.ErrViewFilesInvalid
 			}
 			accepted := make([]any, 0, len(raw))
 			seen := make(map[domain.FileID]bool, len(raw))
@@ -63,19 +57,19 @@ func (m Messages) attachViewFiles(ctx context.Context, current domain.View, user
 				object, _ := entry.(map[string]any)
 				id := domain.FileID(strings.TrimSpace(stringValue(object["id"])))
 				if id == "" || seen[id] {
-					return "", ErrViewFilesInvalid
+					return "", domain.ErrViewFilesInvalid
 				}
 				seen[id] = true
 				file, err := m.Store.GetFile(ctx, id)
 				if errors.Is(err, store.ErrNotFound) {
-					return "", ErrViewFilesInvalid
+					return "", domain.ErrViewFilesInvalid
 				}
 				if err != nil {
 					return "", err
 				}
 				if file.WorkspaceID != current.WorkspaceID || file.Uploader != userID || file.Deleted ||
 					!fileTypeAccepted(file, element["filetypes"]) {
-					return "", ErrViewFilesInvalid
+					return "", domain.ErrViewFilesInvalid
 				}
 				if grantee == "" {
 					bot, err := m.Store.GetBotByApp(ctx, current.WorkspaceID, current.AppID)

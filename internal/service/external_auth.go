@@ -39,10 +39,10 @@ func (m Messages) SetAppExternalAuthProvider(ctx context.Context, configurationT
 	authorizationURL := strings.TrimSpace(config.AuthorizationURL)
 	tokenURL := strings.TrimSpace(config.TokenURL)
 	if name == "" || len(name) > 80 || clientID == "" || strings.TrimSpace(config.ClientSecret) == "" || !httpsURL(authorizationURL) || !httpsURL(tokenURL) {
-		return ErrInvalidExternalAuthProvider
+		return domain.ErrInvalidExternalAuthProvider
 	}
 	if len(m.AppCredentialKey) != 32 {
-		return ErrAppCredentialKeyUnavailable
+		return domain.ErrAppCredentialKeyUnavailable
 	}
 	ciphertext, err := secretbox.Seal(m.AppCredentialKey, externalAuthProviderAssociatedData(appID, name), config.ClientSecret)
 	if err != nil {
@@ -89,7 +89,7 @@ func (m Messages) StartExternalAuthConnection(ctx context.Context, workspaceID d
 		return "", err
 	}
 	if len(m.AppCredentialKey) != 32 {
-		return "", ErrAppCredentialKeyUnavailable
+		return "", domain.ErrAppCredentialKeyUnavailable
 	}
 	state, err := m.sealExternalAuthState(workspaceID, userID, appID, provider.Name)
 	if err != nil {
@@ -97,7 +97,7 @@ func (m Messages) StartExternalAuthConnection(ctx context.Context, workspaceID d
 	}
 	authorize, err := url.Parse(provider.AuthorizationURL)
 	if err != nil {
-		return "", ErrInvalidExternalAuthProvider
+		return "", domain.ErrInvalidExternalAuthProvider
 	}
 	query := authorize.Query()
 	query.Set("client_id", provider.ClientID)
@@ -120,17 +120,17 @@ func (m Messages) CompleteExternalAuthConnection(ctx context.Context, workspaceI
 		return err
 	}
 	if strings.TrimSpace(code) == "" {
-		return ErrExternalAuthConnection
+		return domain.ErrExternalAuthConnection
 	}
 	if !m.verifyExternalAuthState(state, workspaceID, userID, appID, strings.TrimSpace(providerName)) {
-		return ErrExternalAuthConnection
+		return domain.ErrExternalAuthConnection
 	}
 	provider, err := m.Store.GetExternalAuthProvider(ctx, appID, strings.TrimSpace(providerName))
 	if err != nil {
 		return err
 	}
 	if len(m.AppCredentialKey) != 32 {
-		return ErrAppCredentialKeyUnavailable
+		return domain.ErrAppCredentialKeyUnavailable
 	}
 	clientSecret, err := secretbox.Open(m.AppCredentialKey, externalAuthProviderAssociatedData(appID, provider.Name), provider.ClientSecretCiphertext)
 	if err != nil {
@@ -138,7 +138,7 @@ func (m Messages) CompleteExternalAuthConnection(ctx context.Context, workspaceI
 	}
 	accessToken, expiresAt, err := m.exchangeExternalAuthCode(ctx, provider, clientSecret, code, callbackURL)
 	if err != nil {
-		return ErrExternalAuthConnection
+		return domain.ErrExternalAuthConnection
 	}
 	sealed, err := secretbox.Seal(m.AppCredentialKey, externalAuthTokenAssociatedData(appID, provider.Name), accessToken)
 	if err != nil {
@@ -193,7 +193,7 @@ func (m Messages) exchangeExternalAuthCode(ctx context.Context, provider domain.
 		return "", time.Time{}, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return "", time.Time{}, ErrExternalAuthConnection
+		return "", time.Time{}, domain.ErrExternalAuthConnection
 	}
 	var decoded struct {
 		AccessToken string `json:"access_token"`
@@ -204,7 +204,7 @@ func (m Messages) exchangeExternalAuthCode(ctx context.Context, provider domain.
 		return "", time.Time{}, err
 	}
 	if decoded.Error != "" || strings.TrimSpace(decoded.AccessToken) == "" {
-		return "", time.Time{}, ErrExternalAuthConnection
+		return "", time.Time{}, domain.ErrExternalAuthConnection
 	}
 	expiresAt := time.Time{}
 	if decoded.ExpiresIn > 0 {
@@ -261,7 +261,7 @@ func httpsURL(value string) bool {
 // the providers of, an app their workspace does not run.
 func (m Messages) requireInstalledApp(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID) error {
 	if strings.TrimSpace(string(appID)) == "" {
-		return ErrInvalidWorkspace
+		return domain.ErrInvalidWorkspace
 	}
 	installations, err := m.Store.ListAppInstallations(ctx, appID)
 	if err != nil {

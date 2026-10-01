@@ -32,7 +32,7 @@ func TestWorkspaceProfileFieldsAreAdminDefinedAndMemberSet(t *testing.T) {
 	_, messages := seedProfileFieldWorkspace(t)
 
 	// A plain member cannot define a field.
-	if _, err := messages.SetWorkspaceProfileField(ctx, "T1", "U2", domain.ProfileFieldDefinition{Label: "Pronouns", Type: domain.ProfileFieldText}); !errors.Is(err, ErrNotWorkspaceAdmin) {
+	if _, err := messages.SetWorkspaceProfileField(ctx, "T1", "U2", domain.ProfileFieldDefinition{Label: "Pronouns", Type: domain.ProfileFieldText}); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		t.Fatalf("member define = %v, want ErrNotWorkspaceAdmin", err)
 	}
 	// A stranger cannot either, and the store never records the attempt.
@@ -53,7 +53,7 @@ func TestWorkspaceProfileFieldsAreAdminDefinedAndMemberSet(t *testing.T) {
 		t.Fatalf("admin define options: %v", err)
 	}
 	// An options_list with no options is refused.
-	if _, err := messages.SetWorkspaceProfileField(ctx, "T1", "U1", domain.ProfileFieldDefinition{Label: "Empty", Type: domain.ProfileFieldOptionsList}); !errors.Is(err, ErrInvalidProfileField) {
+	if _, err := messages.SetWorkspaceProfileField(ctx, "T1", "U1", domain.ProfileFieldDefinition{Label: "Empty", Type: domain.ProfileFieldOptionsList}); !errors.Is(err, domain.ErrInvalidProfileField) {
 		t.Fatalf("empty options define = %v, want ErrInvalidProfileField", err)
 	}
 
@@ -68,15 +68,15 @@ func TestWorkspaceProfileFieldsAreAdminDefinedAndMemberSet(t *testing.T) {
 		t.Fatalf("set values: %v", err)
 	}
 	// A value the options_list does not offer is refused.
-	if err := messages.SetUserProfileFields(ctx, "T1", "U2", "U2", []domain.UserProfileFieldValue{{FieldID: team.ID, Value: "green"}}); !errors.Is(err, ErrInvalidProfile) {
+	if err := messages.SetUserProfileFields(ctx, "T1", "U2", "U2", []domain.UserProfileFieldValue{{FieldID: team.ID, Value: "green"}}); !errors.Is(err, domain.ErrInvalidProfile) {
 		t.Fatalf("bad option = %v, want ErrInvalidProfile", err)
 	}
 	// A value for an undefined field is refused.
-	if err := messages.SetUserProfileFields(ctx, "T1", "U2", "U2", []domain.UserProfileFieldValue{{FieldID: "Xf-nope", Value: "x"}}); !errors.Is(err, ErrInvalidProfile) {
+	if err := messages.SetUserProfileFields(ctx, "T1", "U2", "U2", []domain.UserProfileFieldValue{{FieldID: "Xf-nope", Value: "x"}}); !errors.Is(err, domain.ErrInvalidProfile) {
 		t.Fatalf("undefined field = %v, want ErrInvalidProfile", err)
 	}
 	// A member cannot set another member's fields.
-	if err := messages.SetUserProfileFields(ctx, "T1", "U2", "U3", []domain.UserProfileFieldValue{{FieldID: pronouns.ID, Value: "they/them"}}); !errors.Is(err, ErrInvalidProfile) {
+	if err := messages.SetUserProfileFields(ctx, "T1", "U2", "U3", []domain.UserProfileFieldValue{{FieldID: pronouns.ID, Value: "they/them"}}); !errors.Is(err, domain.ErrInvalidProfile) {
 		t.Fatalf("set other's fields = %v, want ErrInvalidProfile", err)
 	}
 
@@ -94,7 +94,7 @@ func TestWorkspaceProfileFieldsAreAdminDefinedAndMemberSet(t *testing.T) {
 		t.Fatalf("values after delete=%+v err=%v", after, err)
 	}
 	// A plain member cannot delete a field.
-	if err := messages.DeleteWorkspaceProfileField(ctx, "T1", "U2", team.ID); !errors.Is(err, ErrNotWorkspaceAdmin) {
+	if err := messages.DeleteWorkspaceProfileField(ctx, "T1", "U2", team.ID); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		t.Fatalf("member delete = %v, want ErrNotWorkspaceAdmin", err)
 	}
 }

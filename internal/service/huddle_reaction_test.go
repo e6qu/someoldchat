@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 )
 
@@ -28,15 +29,15 @@ func TestHuddleReactionReachesOnlyParticipants(t *testing.T) {
 		t.Fatalf("participant reaction with colons refused: %v", err)
 	}
 	// An emoji the workspace does not hold is refused.
-	if err := messages.SendHuddleReaction(ctx, "T1", "U1", call.ID, "definitely-not-an-emoji"); !errors.Is(err, ErrInvalidReaction) {
+	if err := messages.SendHuddleReaction(ctx, "T1", "U1", call.ID, "definitely-not-an-emoji"); !errors.Is(err, domain.ErrInvalidReaction) {
 		t.Fatalf("unknown emoji error = %v, want ErrInvalidReaction", err)
 	}
 	// A channel member who has not joined the huddle is not a participant.
-	if err := messages.SendHuddleReaction(ctx, "T1", "U3", call.ID, "tada"); !errors.Is(err, ErrInvalidCall) {
+	if err := messages.SendHuddleReaction(ctx, "T1", "U3", call.ID, "tada"); !errors.Is(err, domain.ErrInvalidCall) {
 		t.Fatalf("non-participant channel member error = %v, want ErrInvalidCall", err)
 	}
 	// A workspace member outside the conversation is refused the same way.
-	if err := messages.SendHuddleReaction(ctx, "T1", "U-outsider", call.ID, "tada"); !errors.Is(err, ErrInvalidCall) {
+	if err := messages.SendHuddleReaction(ctx, "T1", "U-outsider", call.ID, "tada"); !errors.Is(err, domain.ErrInvalidCall) {
 		t.Fatalf("outsider error = %v, want ErrInvalidCall", err)
 	}
 }

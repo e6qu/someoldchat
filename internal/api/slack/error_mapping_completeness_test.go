@@ -72,7 +72,9 @@ func exportedSentinels(t *testing.T, dir string, prefixes ...string) []string {
 //
 // This used to scan service.ErrInvalid* only, so every store.Err* sentinel — and
 // every non-ErrInvalid service sentinel such as ErrMessageNotOwned,
-// ErrEmojiAlreadyExists and ErrBlobUnavailable — escaped the net entirely.
+// ErrEmojiAlreadyExists and ErrBlobUnavailable — escaped the net entirely. The
+// service sentinels now live in internal/domain, so scanning domain also covers
+// the domain package's own sentinels.
 func TestMapServiceErrorNamesEveryTransportRelevantSentinel(t *testing.T) {
 	body := handlerSource(t)
 	// Sentinels that describe storage-engine internals rather than a client-visible
@@ -92,13 +94,16 @@ func TestMapServiceErrorNamesEveryTransportRelevantSentinel(t *testing.T) {
 		// block action, whose web handler names it (modalInteractionError).
 		"ErrViewFilesInvalid":    "returned only for a first-party modal's file_input, answered by the web /app/view routes",
 		"ErrCapabilityExhausted": "UseAppResponseURL's refusal, translated by HandleAppResponse to ErrAppResponseURLUsed",
+		// A row this system wrote and can no longer decode is a fault, not a
+		// caller mistake, so the unclassified fallback is the right answer.
+		"ErrInvalidStoredTimestamp": "stored state that cannot be decoded, which no request can correct",
 	}
 	missing := make([]string, 0)
 	for _, pkg := range []struct {
 		name string
 		dir  string
 	}{
-		{"service", filepath.Join("..", "..", "service")},
+		{"domain", filepath.Join("..", "..", "domain")},
 		{"store", filepath.Join("..", "..", "store")},
 	} {
 		for _, name := range exportedSentinels(t, pkg.dir, "Err") {

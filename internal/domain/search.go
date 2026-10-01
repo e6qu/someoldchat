@@ -201,3 +201,34 @@ func TextCarriesLink(text string) bool {
 	lowered := strings.ToLower(text)
 	return strings.Contains(lowered, "http://") || strings.Contains(lowered, "https://")
 }
+
+// SearchHighlightTerms are the free-text words of a search query that
+// highlight=true marks in each match: the ones a match must contain, without
+// modifiers, exclusions or wildcards.
+func SearchHighlightTerms(query string) []string {
+	tokens, err := SearchQueryTokens(query)
+	if err != nil {
+		return nil
+	}
+	terms := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if strings.HasPrefix(token, "-") && len(token) > 1 {
+			continue
+		}
+		if name, _, modifier := strings.Cut(token, ":"); modifier && searchModifiers[strings.ToLower(name)] {
+			continue
+		}
+		if term := strings.Trim(strings.TrimRight(token, "*"), "\""); term != "" {
+			terms = append(terms, term)
+		}
+	}
+	return terms
+}
+
+// searchModifiers are the `name:` prefixes the service's search query parser
+// reads as a modifier rather than as text; the two lists must name the same
+// modifiers.
+var searchModifiers = map[string]bool{
+	"in": true, "from": true, "with": true, "before": true, "after": true, "on": true,
+	"during": true, "is": true, "has": true, "type": true,
+}

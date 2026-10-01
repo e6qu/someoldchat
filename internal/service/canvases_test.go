@@ -130,7 +130,7 @@ func TestCanvasSectionMovePreservesIdentityAndOrder(t *testing.T) {
 	if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, `[{"operation":"move_after","section_id":"`+first+`","target_section_id":"nope"}]`); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing target = %v, want ErrNotFound", err)
 	}
-	if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, `[{"operation":"move_before","section_id":"`+first+`","target_section_id":"`+first+`"}]`); !errors.Is(err, ErrInvalidCanvas) {
+	if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, `[{"operation":"move_before","section_id":"`+first+`","target_section_id":"`+first+`"}]`); !errors.Is(err, domain.ErrInvalidCanvas) {
 		t.Fatalf("self move = %v, want ErrInvalidCanvas", err)
 	}
 }
@@ -274,10 +274,10 @@ func TestCanvasSearchMatchesProseAndRespectsAccess(t *testing.T) {
 func TestCanvasSearchRefusesAModifierItCannotHonour(t *testing.T) {
 	ctx, _, messages := canvasWorld(t)
 	page := domain.PageRequest{Limit: 10}
-	if _, err := messages.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "runbook in:#general", Page: page}); !errors.Is(err, ErrInvalidSearch) {
+	if _, err := messages.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "runbook in:#general", Page: page}); !errors.Is(err, domain.ErrInvalidSearch) {
 		t.Fatalf("scoped canvas search = %v, want ErrInvalidSearch", err)
 	}
-	if _, err := messages.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "   ", Page: page}); !errors.Is(err, ErrInvalidSearch) {
+	if _, err := messages.SearchCanvases(ctx, "T1", "U1", domain.CanvasSearchRequest{Query: "   ", Page: page}); !errors.Is(err, domain.ErrInvalidSearch) {
 		t.Fatalf("empty canvas search = %v, want ErrInvalidSearch", err)
 	}
 }

@@ -20,7 +20,7 @@ func (m Messages) CommentOnListItem(ctx context.Context, workspaceID domain.Work
 	}
 	text = strings.TrimSpace(text)
 	if text == "" || utf8.RuneCountInString(text) > domain.ListItemCommentLimit {
-		return domain.ListItemComment{}, ErrInvalidList
+		return domain.ListItemComment{}, domain.ErrInvalidList
 	}
 	identifier, err := domain.PublicID("temp:LIC:")
 	if err != nil {

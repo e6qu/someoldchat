@@ -26,7 +26,7 @@ const (
 //
 // A gRPC status code alone cannot express the contract: several distinct
 // sentinels share one code (store.ErrAlreadyExists and
-// service.ErrEmojiAlreadyExists are both AlreadyExists, and more than thirty
+// domain.ErrEmojiAlreadyExists are both AlreadyExists, and more than thirty
 // validation sentinels are all InvalidArgument), so a client that reconstructed
 // an error from the code alone either lost the sentinel or restored the wrong
 // one. `key` names exactly one sentinel, which is what lets errors.Is behave
@@ -45,7 +45,7 @@ type DomainError struct {
 	// keys is every class the error matched, most specific first.
 	//
 	// One error can carry several sentinels: errors.Join(store.ErrNotFound,
-	// service.ErrInvalidCanvas) is what a compensating delete produces after a
+	// domain.ErrInvalidCanvas) is what a compensating delete produces after a
 	// rejected create, and errors.Is answers true for both in process. While the
 	// wire carried one key, the caller restored one of the two, so the same
 	// failure was channel_not_found in the monolith and invalid_arg_name across

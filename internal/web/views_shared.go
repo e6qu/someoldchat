@@ -11,7 +11,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -369,7 +369,7 @@ func (h Handler) buildProfileView(r *http.Request, principal auth.Principal, id 
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, id)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrUserNotFound) {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, domain.ErrUserNotFound) {
 			return profileView{}, http.StatusNotFound, "That member is not in this workspace."
 		}
 		return profileView{}, http.StatusServiceUnavailable, "The profile is temporarily unavailable. Try again."

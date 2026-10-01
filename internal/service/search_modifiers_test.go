@@ -167,7 +167,7 @@ func TestSearchTrailingWildcardIsAPrefix(t *testing.T) {
 	if _, err := parseSearchQuery("*", utcSearchClock()); err == nil {
 		t.Fatal("a bare wildcard was accepted as a query")
 	}
-	if terms := SearchHighlightTerms(`depl* in:#general -noise "exact phrase" from:@alice`); len(terms) != 2 || terms[0] != "depl" || terms[1] != "exact phrase" {
+	if terms := domain.SearchHighlightTerms(`depl* in:#general -noise "exact phrase" from:@alice`); len(terms) != 2 || terms[0] != "depl" || terms[1] != "exact phrase" {
 		t.Fatalf("highlight terms=%q", terms)
 	}
 }

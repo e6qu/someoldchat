@@ -172,7 +172,7 @@ internal/
   web/            page and HTMX fragment handlers
   auth/           browser sessions, bearer tokens, scopes
   bearer/         the shared case-insensitive Authorization: Bearer parser
-  domain/         entities and domain invariants
+  domain/         entities, invariants, error vocabulary, and request limits
   service/        transactions and application use cases
   store/          persistence ports
     memory/       single-replica development store
@@ -203,9 +203,13 @@ chooses local bindings for local composition or generated transport bindings for
 distributed composition. Business packages do not inspect topology or choose a
 transport. See [separable module architecture](modules.md).
 
-Imports point inward: wire and storage adapters depend on service/domain
-packages, while domain packages know nothing about HTTP, HTMX, SQLite, dqlite,
-or a particular deployment platform.
+Imports point inward. Wire adapters (`api/slack`, `web`, `realtime`, `auth`)
+depend on module APIs, `domain`, and the store port's sentinels, never on
+`service` or a storage backend, so a process that reaches chat over gRPC does
+not link the implementation it calls; `internal/modules` asserts this for every
+adapter's import graph. Storage adapters implement the `store` ports, and
+domain packages know nothing about HTTP, HTMX, SQLite, dqlite, or a particular
+deployment platform.
 
 ## State model
 

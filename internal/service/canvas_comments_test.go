@@ -118,11 +118,11 @@ func TestACommentMustSaySomethingAndNotTooMuch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.CommentOnCanvas(ctx, "T1", "U1", canvas.ID, "", "   "); !errors.Is(err, ErrInvalidCanvas) {
+	if _, err := messages.CommentOnCanvas(ctx, "T1", "U1", canvas.ID, "", "   "); !errors.Is(err, domain.ErrInvalidCanvas) {
 		t.Fatalf("an empty comment = %v, want ErrInvalidCanvas", err)
 	}
 	tooLong := strings.Repeat("x", domain.CanvasCommentLimit+1)
-	if _, err := messages.CommentOnCanvas(ctx, "T1", "U1", canvas.ID, "", tooLong); !errors.Is(err, ErrInvalidCanvas) {
+	if _, err := messages.CommentOnCanvas(ctx, "T1", "U1", canvas.ID, "", tooLong); !errors.Is(err, domain.ErrInvalidCanvas) {
 		t.Fatalf("an over-long comment = %v, want ErrInvalidCanvas", err)
 	}
 }

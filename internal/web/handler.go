@@ -28,7 +28,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/huddlesfu"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/thumbnail"
@@ -1441,12 +1441,12 @@ func draftAttachmentsFromJSON(raw string) ([]domain.DraftAttachment, error) {
 	}
 	var values []draftAttachmentView
 	if err := json.Unmarshal([]byte(raw), &values); err != nil || len(values) > 10 {
-		return nil, service.ErrInvalidExternalUpload
+		return nil, domain.ErrInvalidExternalUpload
 	}
 	result := make([]domain.DraftAttachment, 0, len(values))
 	for _, value := range values {
 		if strings.TrimSpace(value.UploadID) == "" {
-			return nil, service.ErrInvalidExternalUpload
+			return nil, domain.ErrInvalidExternalUpload
 		}
 		result = append(result, domain.DraftAttachment{UploadID: domain.ExternalUploadID(value.UploadID), Title: value.Title})
 	}
@@ -4530,9 +4530,9 @@ func singleValues(values url.Values) (map[string]string, bool) {
 
 func (h Handler) writeOAuthAuthorizationError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, service.ErrInvalidOAuthClient):
+	case errors.Is(err, domain.ErrInvalidOAuthClient):
 		h.writePageError(w, http.StatusBadRequest, "That app could not be found", "The client ID does not identify an active app.")
-	case errors.Is(err, service.ErrInvalidOAuth), errors.Is(err, service.ErrInvalidAppManifest):
+	case errors.Is(err, domain.ErrInvalidOAuth), errors.Is(err, domain.ErrInvalidAppManifest):
 		h.writePageError(w, http.StatusBadRequest, "That authorization request is invalid", "The redirect address, requested permissions, or PKCE parameters do not match the app configuration.")
 	case errors.Is(err, store.ErrNotFound):
 		h.writePageError(w, http.StatusForbidden, "That app cannot be installed here", "Your account or workspace is not eligible for this installation.")
@@ -4591,7 +4591,7 @@ func (h Handler) markRead(w http.ResponseWriter, r *http.Request) {
 			h.writeMutationError(w, r, http.StatusNotFound, "That conversation is not available", "The unread marker could not be moved because that conversation is no longer available.")
 			return
 		}
-		if errors.Is(err, service.ErrNotInConversation) {
+		if errors.Is(err, domain.ErrNotInConversation) {
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this conversation", "The unread marker is only kept for conversations you have joined.")
 			return
 		}
@@ -7850,11 +7850,11 @@ func (h Handler) setNotificationSnooze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, strconv.ErrSyntax) {
+		if errors.Is(err, domain.ErrInvalidSnooze) || errors.Is(err, strconv.ErrSyntax) {
 			h.writeMutationError(w, r, http.StatusBadRequest, "That pause duration is not valid", "Choose a time in the future.")
 			return
 		}
-		if errors.Is(err, service.ErrSnoozeTooLong) {
+		if errors.Is(err, domain.ErrSnoozeTooLong) {
 			h.writeMutationError(w, r, http.StatusBadRequest, "That pause is too long", "Choose a time within the next month.")
 			return
 		}
@@ -8016,7 +8016,7 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	textTokens, tokenErr := domain.SearchQueryTokens(query)
 	if tokenErr != nil {
 		data.Shell = h.newShell(r, principal, shellRequest{SearchQuery: data.Query})
-		h.writeSearchError(w, data, service.ErrInvalidSearch)
+		h.writeSearchError(w, data, domain.ErrInvalidSearch)
 		return
 	}
 	// A modifier is an instruction, not a word anybody is looking for: marking
@@ -8466,7 +8466,7 @@ func (h Handler) writeSearchSuggestions(w http.ResponseWriter, status int, items
 
 func (h Handler) writeSearchError(w http.ResponseWriter, data searchData, err error) {
 	switch {
-	case errors.Is(err, service.ErrInvalidSearch):
+	case errors.Is(err, domain.ErrInvalidSearch):
 		data.Error = "Enter between one and 500 characters and use supported Slack search modifiers."
 	case errors.Is(err, store.ErrInvalidArgument):
 		data.Error = "Check the query and filters, then search again."
@@ -10164,7 +10164,7 @@ func (h Handler) setListItemCell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.Messages.UpdateListCells(r.Context(), principal.WorkspaceID, principal.UserID, listID, string(cells)); err != nil {
-		if errors.Is(err, service.ErrInvalidList) {
+		if errors.Is(err, domain.ErrInvalidList) {
 			h.writeMutationError(w, r, http.StatusBadRequest, "The cell was not saved", "That value does not fit the column. Choose one of its options, or enter a date or number where one is asked for.")
 			return
 		}
@@ -10594,7 +10594,7 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
 		// A rejected save keeps every submitted value and says which limit it
 		// crossed, instead of answering with a bare status line.
-		if errors.Is(err, service.ErrInvalidProfile) {
+		if errors.Is(err, domain.ErrInvalidProfile) {
 			h.renderMembers(w, r, principal, &profile, nil, "Your profile was not saved. A display name is at most 80 characters, a title at most 150, pronouns at most 40, a status at most 100, the status emoji must be a workspace emoji of at most 64 characters, and the profile photo URL at most 2048.", http.StatusBadRequest)
 			return
 		}
@@ -10612,7 +10612,7 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(customValues) > 0 {
 		if err := h.Messages.SetUserProfileFields(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, customValues); err != nil {
-			if errors.Is(err, service.ErrInvalidProfile) {
+			if errors.Is(err, domain.ErrInvalidProfile) {
 				h.renderMembers(w, r, principal, &profile, nil, "Your name and status were saved, but a custom field value was not accepted. A date must be a real calendar date and a link must be a web address.", http.StatusBadRequest)
 				return
 			}
@@ -10627,7 +10627,7 @@ func scheduledStatusTimes(fields map[string]string) (time.Time, time.Time, error
 	startSeconds, startErr := strconv.ParseInt(strings.TrimSpace(fields["starts_at"]), 10, 64)
 	endSeconds, endErr := strconv.ParseInt(strings.TrimSpace(fields["ends_at"]), 10, 64)
 	if startErr != nil || endErr != nil || startSeconds <= 0 || endSeconds <= 0 {
-		return time.Time{}, time.Time{}, service.ErrInvalidScheduledStatus
+		return time.Time{}, time.Time{}, domain.ErrInvalidScheduledStatus
 	}
 	return time.Unix(startSeconds, 0).UTC(), time.Unix(endSeconds, 0).UTC(), nil
 }
@@ -10656,11 +10656,11 @@ func (h Handler) scheduleStatus(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_, err = h.Messages.ScheduleUserStatus(r.Context(), principal.WorkspaceID, principal.UserID, fields["status_text"], fields["status_emoji"], startsAt, endsAt)
 	}
-	if errors.Is(err, service.ErrInvalidScheduledStatus) {
+	if errors.Is(err, domain.ErrInvalidScheduledStatus) {
 		h.renderMembers(w, r, principal, nil, &submitted, "The status was not scheduled. Choose a future start and a later end, and enter a valid workspace emoji and status of at most 100 characters.", http.StatusBadRequest)
 		return
 	}
-	if errors.Is(err, service.ErrScheduledStatusLimit) {
+	if errors.Is(err, domain.ErrScheduledStatusLimit) {
 		h.renderMembers(w, r, principal, nil, &submitted, "The status was not scheduled. Slack allows up to five scheduled statuses; edit or cancel one first.", http.StatusBadRequest)
 		return
 	}
@@ -10686,7 +10686,7 @@ func (h Handler) updateScheduledStatus(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_, err = h.Messages.UpdateScheduledUserStatus(r.Context(), principal.WorkspaceID, principal.UserID, domain.ScheduledStatusID(strings.TrimSpace(fields["id"])), fields["status_text"], fields["status_emoji"], startsAt, endsAt)
 	}
-	if errors.Is(err, service.ErrInvalidScheduledStatus) {
+	if errors.Is(err, domain.ErrInvalidScheduledStatus) {
 		h.renderMembers(w, r, principal, nil, &submitted, "The scheduled status was not updated. Choose a future start, a later end, and a valid workspace emoji.", http.StatusBadRequest)
 		return
 	}
@@ -10948,7 +10948,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		case !principal.HasScope(auth.ScopeFilesWrite):
 			err = auth.ErrMissingScope
 		case isSlashCommand:
-			err = service.ErrInvalidExternalUpload
+			err = domain.ErrInvalidExternalUpload
 		default:
 			completions := make([]domain.ExternalUploadCompletion, 0, len(draftAttachments))
 			for _, attachment := range draftAttachments {
@@ -10983,14 +10983,14 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		reason := "The message could not be sent because the workspace store is temporarily unavailable."
-		if errors.Is(err, service.ErrInvalidMessage) {
+		if errors.Is(err, domain.ErrInvalidMessage) {
 			status = http.StatusBadRequest
 			reason = "A message needs some text before it can be sent."
-			if over := utf8.RuneCountInString(fields["text"]) - service.MaxMessageTextRunes; over > 0 {
+			if over := utf8.RuneCountInString(fields["text"]) - domain.MaxMessageTextRunes; over > 0 {
 				reason = fmt.Sprintf("This message is %d characters too long. Shorten it to send it.", over)
 			}
 		}
-		if errors.Is(err, service.ErrInvalidExternalUpload) {
+		if errors.Is(err, domain.ErrInvalidExternalUpload) {
 			status = http.StatusBadRequest
 			reason = "One or more staged files are no longer available. Remove them from the draft or stage them again."
 		}
@@ -11001,39 +11001,39 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 				reason = "Your session cannot share files, so the staged attachments were not sent."
 			}
 		}
-		if errors.Is(err, service.ErrInvalidTimestamp) {
+		if errors.Is(err, domain.ErrInvalidTimestamp) {
 			status = http.StatusBadRequest
 			reason = "That thread is not a message in this conversation."
 		}
-		if errors.Is(err, service.ErrThreadNotFound) {
+		if errors.Is(err, domain.ErrThreadNotFound) {
 			status = http.StatusNotFound
 			reason = "That thread is no longer available, so the reply was not sent."
 		}
-		if errors.Is(err, service.ErrInvalidSearch) {
+		if errors.Is(err, domain.ErrInvalidSearch) {
 			status = http.StatusBadRequest
 			reason = "Add something to search for after /search."
 		}
-		if errors.Is(err, service.ErrInvalidLaterReminder) {
+		if errors.Is(err, domain.ErrInvalidLaterReminder) {
 			status = http.StatusBadRequest
 			reason = "Use /remind #channel what when, for example /remind #general stand-up tomorrow at 9am. Use /remind list to review channel reminders."
 		}
-		if errors.Is(err, service.ErrReminderTimeInPast) {
+		if errors.Is(err, domain.ErrReminderTimeInPast) {
 			status = http.StatusBadRequest
 			reason = "Choose a reminder time in the future."
 		}
 		// Posting into a channel now requires membership of it, which is a
 		// refusal the reader can act on and not an outage.
-		if errors.Is(err, service.ErrNotInConversation) {
+		if errors.Is(err, domain.ErrNotInConversation) {
 			status = http.StatusForbidden
 			reason = "You are not a member of this conversation, so the message was not sent."
 		}
 		// The channel's posting permissions refuse this member. It is a refusal
 		// the reader can act on — ask an administrator — not an outage.
-		if errors.Is(err, service.ErrConversationPostingRestricted) {
+		if errors.Is(err, domain.ErrConversationPostingRestricted) {
 			status = http.StatusForbidden
 			reason = "Posting in this channel is restricted, so the message was not sent."
 		}
-		if errors.Is(err, service.ErrConversationAlreadyArchived) {
+		if errors.Is(err, domain.ErrConversationAlreadyArchived) {
 			status = http.StatusConflict
 			reason = "This conversation is archived, so new messages cannot be sent."
 		}
@@ -11041,15 +11041,15 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusNotFound
 			reason = "That conversation is no longer available."
 		}
-		if errors.Is(err, service.ErrSlashCommandNotFound) {
+		if errors.Is(err, domain.ErrSlashCommandNotFound) {
 			status = http.StatusNotFound
 			reason = "That slash command is not installed in this workspace."
 		}
-		if errors.Is(err, service.ErrSlashCommandInThread) {
+		if errors.Is(err, domain.ErrSlashCommandInThread) {
 			status = http.StatusBadRequest
 			reason = "Slash commands cannot be used in threads."
 		}
-		if errors.Is(err, service.ErrAppInteractionUnavailable) || errors.Is(err, service.ErrInvalidAppResponse) {
+		if errors.Is(err, domain.ErrAppInteractionUnavailable) || errors.Is(err, domain.ErrInvalidAppResponse) {
 			status = http.StatusBadGateway
 			reason = "The app did not accept that command. Your command was not posted as a message."
 		}
@@ -11155,9 +11155,9 @@ func (h Handler) saveDraft(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status, reason := http.StatusServiceUnavailable, "The draft could not be saved because the workspace store is temporarily unavailable."
 		switch {
-		case errors.Is(err, service.ErrInvalidMessage), errors.Is(err, service.ErrInvalidTimestamp), errors.Is(err, service.ErrInvalidExternalUpload), errors.Is(err, store.ErrInvalidArgument):
+		case errors.Is(err, domain.ErrInvalidMessage), errors.Is(err, domain.ErrInvalidTimestamp), errors.Is(err, domain.ErrInvalidExternalUpload), errors.Is(err, store.ErrInvalidArgument):
 			status, reason = http.StatusBadRequest, "The draft text or thread is not valid."
-		case errors.Is(err, service.ErrNotInConversation), errors.Is(err, store.ErrNotFound):
+		case errors.Is(err, domain.ErrNotInConversation), errors.Is(err, store.ErrNotFound):
 			status, reason = http.StatusForbidden, "You can no longer save a draft in this conversation."
 		}
 		h.writeMutationError(w, r, status, "The draft was not saved", reason)
@@ -11227,28 +11227,28 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		Text:            fields["text"],
 		ThreadTimestamp: domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
 		PostAt:          time.Unix(postAtUnix, 0).UTC(),
-		CredentialHash:  service.InternalScheduledCredential(principal.WorkspaceID, principal.UserID),
+		CredentialHash:  domain.InternalScheduledCredential(principal.WorkspaceID, principal.UserID),
 		FileAttachments: attachments,
 	})
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		reason := "The message could not be scheduled because the workspace store is temporarily unavailable."
 		switch {
-		case errors.Is(err, service.ErrInvalidMessage):
+		case errors.Is(err, domain.ErrInvalidMessage):
 			status, reason = http.StatusBadRequest, "A scheduled message needs text or a staged file before it can be saved."
-		case errors.Is(err, service.ErrInvalidExternalUpload):
+		case errors.Is(err, domain.ErrInvalidExternalUpload):
 			status, reason = http.StatusBadRequest, "One or more staged files are no longer available. Remove them or stage the files again."
-		case errors.Is(err, service.ErrInvalidTimestamp):
+		case errors.Is(err, domain.ErrInvalidTimestamp):
 			status, reason = http.StatusBadRequest, "That thread is not a message in this conversation."
-		case errors.Is(err, service.ErrScheduledTimeInPast):
+		case errors.Is(err, domain.ErrScheduledTimeInPast):
 			status, reason = http.StatusBadRequest, "Choose a delivery time in the future."
-		case errors.Is(err, service.ErrScheduledTimeTooFar):
+		case errors.Is(err, domain.ErrScheduledTimeTooFar):
 			status, reason = http.StatusBadRequest, "Choose a delivery time within the next 120 days."
-		case errors.Is(err, service.ErrScheduledTooMany):
+		case errors.Is(err, domain.ErrScheduledTooMany):
 			status, reason = http.StatusConflict, "This channel already has 30 messages scheduled in that five-minute window."
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			status, reason = http.StatusForbidden, "You are not a member of this conversation, so the message was not scheduled."
-		case errors.Is(err, service.ErrConversationAlreadyArchived):
+		case errors.Is(err, domain.ErrConversationAlreadyArchived):
 			status, reason = http.StatusConflict, "This conversation is archived, so messages cannot be scheduled in it."
 		case errors.Is(err, store.ErrNotFound):
 			status, reason = http.StatusNotFound, "That conversation or thread is no longer available."
@@ -11299,15 +11299,15 @@ func (h Handler) updateScheduledMessage(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		status, reason := http.StatusServiceUnavailable, "The scheduled message could not be updated because the workspace store is temporarily unavailable."
 		switch {
-		case errors.Is(err, service.ErrInvalidMessage), errors.Is(err, store.ErrInvalidArgument):
+		case errors.Is(err, domain.ErrInvalidMessage), errors.Is(err, store.ErrInvalidArgument):
 			status, reason = http.StatusBadRequest, "A scheduled message needs valid text."
-		case errors.Is(err, service.ErrScheduledTimeInPast):
+		case errors.Is(err, domain.ErrScheduledTimeInPast):
 			status, reason = http.StatusBadRequest, "Choose a delivery time in the future."
-		case errors.Is(err, service.ErrScheduledTimeTooFar):
+		case errors.Is(err, domain.ErrScheduledTimeTooFar):
 			status, reason = http.StatusBadRequest, "Choose a delivery time within the next 120 days."
-		case errors.Is(err, service.ErrScheduledTooMany):
+		case errors.Is(err, domain.ErrScheduledTooMany):
 			status, reason = http.StatusConflict, "This channel already has 30 messages scheduled in that five-minute window."
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			status, reason = http.StatusForbidden, "You are no longer a member of this conversation."
 		case errors.Is(err, store.ErrNotFound):
 			status, reason = http.StatusNotFound, "That scheduled message was already sent, cancelled, or changed in another client."
@@ -11340,9 +11340,9 @@ func (h Handler) sendScheduledMessageNow(w http.ResponseWriter, r *http.Request)
 	if _, err := h.Messages.SendScheduledMessageNow(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
 		status, reason := http.StatusServiceUnavailable, "The scheduled message could not be sent because the workspace store is temporarily unavailable."
 		switch {
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			status, reason = http.StatusForbidden, "You are no longer a member of this conversation."
-		case errors.Is(err, service.ErrConversationAlreadyArchived):
+		case errors.Is(err, domain.ErrConversationAlreadyArchived):
 			status, reason = http.StatusConflict, "This conversation is archived."
 		case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrLeaseConflict):
 			status, reason = http.StatusConflict, "That scheduled message was already sent, cancelled, or is being delivered."
@@ -11457,7 +11457,7 @@ func (h Handler) stageDraftFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		if uploadErr != nil {
 			status, reason := http.StatusServiceUnavailable, "The file store is temporarily unavailable. Your existing draft is unchanged."
-			if errors.Is(uploadErr, service.ErrInvalidExternalUpload) {
+			if errors.Is(uploadErr, domain.ErrInvalidExternalUpload) {
 				status, reason = http.StatusBadRequest, "One selected file is empty or does not match its staged size."
 			}
 			h.writeMutationError(w, r, status, "Those files were not staged", reason)
@@ -11474,9 +11474,9 @@ func (h Handler) stageDraftFiles(w http.ResponseWriter, r *http.Request) {
 	draft, err := h.Messages.SaveDraftWithAttachments(r.Context(), principal.WorkspaceID, principal.UserID, channel, thread, r.FormValue("text"), attachments)
 	if err != nil {
 		status, reason := http.StatusServiceUnavailable, "The files were uploaded, but the draft store is temporarily unavailable. Try adding them again."
-		if errors.Is(err, service.ErrNotInConversation) {
+		if errors.Is(err, domain.ErrNotInConversation) {
 			status, reason = http.StatusForbidden, "You can no longer save a draft in this conversation."
-		} else if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) {
+		} else if errors.Is(err, domain.ErrInvalidMessage) || errors.Is(err, domain.ErrInvalidTimestamp) || errors.Is(err, domain.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) {
 			status, reason = http.StatusBadRequest, "The draft destination or staged files are no longer valid."
 		}
 		h.writeMutationError(w, r, status, "Those files were not added to the draft", reason)
@@ -11547,7 +11547,7 @@ func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			status, reason := http.StatusServiceUnavailable, "The file store is temporarily unavailable. Nothing was sent."
-			if errors.Is(err, service.ErrInvalidExternalUpload) {
+			if errors.Is(err, domain.ErrInvalidExternalUpload) {
 				status, reason = http.StatusBadRequest, "One selected file is empty or does not match its staged size."
 			}
 			h.writeMutationError(w, r, status, "Those files were not uploaded", reason)
@@ -11567,11 +11567,11 @@ func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
 	); err != nil {
 		reason := "The files remain staged but were not shared into the conversation."
 		status := http.StatusServiceUnavailable
-		if errors.Is(err, service.ErrNotInConversation) {
+		if errors.Is(err, domain.ErrNotInConversation) {
 			status, reason = http.StatusForbidden, "You are not a member of this conversation, so the files were not sent."
-		} else if errors.Is(err, service.ErrConversationAlreadyArchived) {
+		} else if errors.Is(err, domain.ErrConversationAlreadyArchived) {
 			status, reason = http.StatusConflict, "This conversation is archived, so the files were not sent."
-		} else if errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidExternalUpload) {
+		} else if errors.Is(err, domain.ErrInvalidTimestamp) || errors.Is(err, domain.ErrInvalidExternalUpload) {
 			status, reason = http.StatusBadRequest, "That thread is not a message in this conversation."
 		} else if errors.Is(err, store.ErrNotFound) {
 			status, reason = http.StatusNotFound, "That conversation or staged file is no longer available."
@@ -11715,12 +11715,12 @@ func (h Handler) channelReminderRequest(ctx context.Context, principal auth.Prin
 	input = strings.TrimSpace(input)
 	targetEnd := strings.IndexAny(input, " \t\r\n")
 	if targetEnd <= 1 || input[0] != '#' {
-		return domain.LaterReminderRequest{}, service.ErrInvalidLaterReminder
+		return domain.LaterReminderRequest{}, domain.ErrInvalidLaterReminder
 	}
 	targetName := strings.TrimSpace(input[1:targetEnd])
 	expression := strings.TrimSpace(input[targetEnd:])
 	if targetName == "" || expression == "" {
-		return domain.LaterReminderRequest{}, service.ErrInvalidLaterReminder
+		return domain.LaterReminderRequest{}, domain.ErrInvalidLaterReminder
 	}
 	target, err := h.joinedChannelByName(ctx, principal, targetName)
 	if err != nil {
@@ -11735,14 +11735,14 @@ func (h Handler) channelReminderRequest(ctx context.Context, principal auth.Prin
 			return domain.LaterReminderRequest{}, memberErr
 		}
 		if !member {
-			return domain.LaterReminderRequest{}, service.ErrNotInConversation
+			return domain.LaterReminderRequest{}, domain.ErrNotInConversation
 		}
 	}
 	location, err := time.LoadLocation(strings.TrimSpace(timeZone))
 	if err != nil {
-		return domain.LaterReminderRequest{}, service.ErrInvalidLaterReminder
+		return domain.LaterReminderRequest{}, domain.ErrInvalidLaterReminder
 	}
-	text, due, recurrence, err := service.ParseReminderExpression(expression, now, location)
+	text, due, recurrence, err := domain.ParseReminderExpression(expression, now, location)
 	if err != nil {
 		return domain.LaterReminderRequest{}, err
 	}
@@ -11822,9 +11822,9 @@ func (h Handler) appInteraction(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			status, reason = http.StatusNotFound, "That app message is no longer available."
-		case errors.Is(err, service.ErrAppInteractionUnavailable):
+		case errors.Is(err, domain.ErrAppInteractionUnavailable):
 			status, reason = http.StatusConflict, "This app has no interactive endpoint available."
-		case errors.Is(err, service.ErrInvalidAppResponse):
+		case errors.Is(err, domain.ErrInvalidAppResponse):
 			status, reason = http.StatusBadGateway, "The app returned a response that could not be applied."
 		}
 		h.writeMutationError(w, r, status, "That app action did not run", reason)
@@ -11860,7 +11860,7 @@ func (h Handler) appShortcut(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			status, reason = http.StatusNotFound, "That app shortcut is no longer available."
-		case errors.Is(err, service.ErrAppInteractionUnavailable):
+		case errors.Is(err, domain.ErrAppInteractionUnavailable):
 			status, reason = http.StatusConflict, "This app has no interactive endpoint available."
 		case errors.Is(err, store.ErrConflict):
 			status, reason = http.StatusConflict, "That shortcut configuration is ambiguous."
@@ -11948,8 +11948,8 @@ func (h Handler) decodeAppInteractionMutation(w http.ResponseWriter, r *http.Req
 
 func (h Handler) appResponse(w http.ResponseWriter, r *http.Request) {
 	secureHeaders(w, workspaceContentSecurityPolicy())
-	body, err := io.ReadAll(io.LimitReader(r.Body, service.MaxMessageBodyBytes+1))
-	if err != nil || len(body) > service.MaxMessageBodyBytes {
+	body, err := io.ReadAll(io.LimitReader(r.Body, domain.MaxMessageBodyBytes+1))
+	if err != nil || len(body) > domain.MaxMessageBodyBytes {
 		writeAppResponseError(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
@@ -11968,27 +11968,27 @@ func (h Handler) appResponse(w http.ResponseWriter, r *http.Request) {
 // nothing classified is a 500.
 func appResponseFailure(err error) (int, string) {
 	switch {
-	case errors.Is(err, service.ErrAppResponseNoText):
+	case errors.Is(err, domain.ErrAppResponseNoText):
 		return http.StatusBadRequest, "no_text"
-	case errors.Is(err, service.ErrAppResponsePayloadInvalid):
+	case errors.Is(err, domain.ErrAppResponsePayloadInvalid):
 		return http.StatusBadRequest, "invalid_payload"
-	case errors.Is(err, service.ErrInvalidBlocks):
+	case errors.Is(err, domain.ErrInvalidBlocks):
 		return http.StatusBadRequest, "invalid_blocks"
-	case errors.Is(err, service.ErrAppResponseURLUsed):
+	case errors.Is(err, domain.ErrAppResponseURLUsed):
 		return http.StatusNotFound, "used_url"
-	case errors.Is(err, service.ErrAppResponseURLExpired):
+	case errors.Is(err, domain.ErrAppResponseURLExpired):
 		return http.StatusNotFound, "expired_url"
-	case errors.Is(err, service.ErrConversationAlreadyArchived):
+	case errors.Is(err, domain.ErrConversationAlreadyArchived):
 		return http.StatusGone, "channel_is_archived"
-	case errors.Is(err, service.ErrConversationPostingRestricted):
+	case errors.Is(err, domain.ErrConversationPostingRestricted):
 		return http.StatusForbidden, "restricted_action"
-	case errors.Is(err, service.ErrMessageAlreadyDeleted):
+	case errors.Is(err, domain.ErrMessageAlreadyDeleted):
 		return http.StatusNotFound, "message_not_found"
-	case errors.Is(err, store.ErrNotFound), errors.Is(err, service.ErrNotInConversation):
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, domain.ErrNotInConversation):
 		// The capability was valid; what it points at — the channel, the
 		// original message, the app's bot — no longer exists.
 		return http.StatusNotFound, "channel_not_found"
-	case errors.Is(err, service.ErrInvalidAppResponse), errors.Is(err, store.ErrInvalidArgument), errors.Is(err, service.ErrInvalidMessage):
+	case errors.Is(err, domain.ErrInvalidAppResponse), errors.Is(err, store.ErrInvalidArgument), errors.Is(err, domain.ErrInvalidMessage):
 		return http.StatusBadRequest, "invalid_payload"
 	case errors.Is(err, store.ErrTransient), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		return http.StatusServiceUnavailable, "service_unavailable"
@@ -12064,22 +12064,22 @@ func (h Handler) writeMessageMutationError(w http.ResponseWriter, r *http.Reques
 	heading := "The message was not " + action
 	reason := "The message could not be " + action + " because the workspace store is temporarily unavailable."
 	switch {
-	case errors.Is(err, service.ErrInvalidMessage):
+	case errors.Is(err, domain.ErrInvalidMessage):
 		status = http.StatusBadRequest
 		reason = "A message needs some text before it can be saved."
-	case errors.Is(err, service.ErrInvalidTimestamp):
+	case errors.Is(err, domain.ErrInvalidTimestamp):
 		status = http.StatusBadRequest
 		reason = "That message link is not valid."
-	case errors.Is(err, service.ErrMessageNotOwned):
+	case errors.Is(err, domain.ErrMessageNotOwned):
 		status = http.StatusForbidden
 		reason = "Only the person who posted this message can change it."
-	case errors.Is(err, service.ErrNotInConversation):
+	case errors.Is(err, domain.ErrNotInConversation):
 		status = http.StatusForbidden
 		reason = "You are no longer a member of this conversation."
-	case errors.Is(err, service.ErrConversationPostingRestricted):
+	case errors.Is(err, domain.ErrConversationPostingRestricted):
 		status = http.StatusForbidden
 		reason = "Posting in that channel is restricted, so the message was not " + action + "."
-	case errors.Is(err, store.ErrNotFound), errors.Is(err, service.ErrMessageAlreadyDeleted):
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, domain.ErrMessageAlreadyDeleted):
 		status = http.StatusNotFound
 		heading = "That message is no longer available"
 		reason = "The message may already have been deleted."
@@ -12124,7 +12124,7 @@ func (h Handler) mutateReaction(w http.ResponseWriter, r *http.Request, add bool
 		status := http.StatusServiceUnavailable
 		reason := "The reaction could not be saved because the workspace store is temporarily unavailable."
 		heading := "The reaction was not saved"
-		if errors.Is(err, service.ErrInvalidReaction) {
+		if errors.Is(err, domain.ErrInvalidReaction) {
 			status = http.StatusBadRequest
 			reason = "That reaction name is not valid."
 		}
@@ -12332,11 +12332,11 @@ func (h Handler) writeLaterReminderError(w http.ResponseWriter, r *http.Request,
 	status := http.StatusServiceUnavailable
 	reason := "The reminder could not be changed because the workspace store is temporarily unavailable."
 	switch {
-	case errors.Is(err, service.ErrInvalidLaterReminder):
+	case errors.Is(err, domain.ErrInvalidLaterReminder):
 		status, reason = http.StatusBadRequest, "Add a description, a valid date and time, and a supported repeat option."
-	case errors.Is(err, service.ErrReminderTimeInPast):
+	case errors.Is(err, domain.ErrReminderTimeInPast):
 		status, reason = http.StatusBadRequest, "Choose a reminder time in the future."
-	case errors.Is(err, service.ErrNotInConversation):
+	case errors.Is(err, domain.ErrNotInConversation):
 		status, reason = http.StatusForbidden, "You cannot create a reminder for a conversation you have not joined."
 	case errors.Is(err, store.ErrNotFound):
 		status, reason = http.StatusNotFound, "That reminder or source message is no longer available, belongs to another member, or is being delivered now."
@@ -12374,7 +12374,7 @@ func (h Handler) saveForLater(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Messages.SaveForLater(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), timestamp); err != nil {
 		status, reason := http.StatusServiceUnavailable, "The message could not be saved because the workspace store is temporarily unavailable."
 		switch {
-		case errors.Is(err, service.ErrInvalidTimestamp):
+		case errors.Is(err, domain.ErrInvalidTimestamp):
 			status, reason = http.StatusBadRequest, "That message link is not valid."
 		case errors.Is(err, store.ErrNotFound):
 			status, reason = http.StatusNotFound, "That message is no longer available or you can no longer read it."
@@ -12487,12 +12487,12 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		reason := "The conversation could not be opened because the workspace store is temporarily unavailable."
-		if errors.Is(err, service.ErrInvalidConversation) {
+		if errors.Is(err, domain.ErrInvalidConversation) {
 			status = http.StatusBadRequest
 			reason = "That set of members cannot be opened as a conversation."
 		}
 		heading := "The conversation was not opened"
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrUserNotFound) {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, domain.ErrUserNotFound) {
 			status = http.StatusNotFound
 			heading = "That member is no longer here"
 			reason = "One of those members is no longer in the workspace."
@@ -12587,9 +12587,9 @@ func (h Handler) addPeopleToDirectConversation(w http.ResponseWriter, r *http.Re
 	conversation, err := h.Messages.AddPeopleToDirectConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel, selected, history)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this direct message", "No new group DM was created.")
-		case errors.Is(err, service.ErrInvalidConversation):
+		case errors.Is(err, domain.ErrInvalidConversation):
 			h.writeMutationError(w, r, http.StatusBadRequest, "Those people cannot be added", "A group DM can contain no more than nine people, and at least one selected person must be new.")
 		case errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That direct message or member is no longer available", "No history, membership, or files were changed.")
@@ -12642,11 +12642,11 @@ func (h Handler) convertGroupDirectToPrivate(w http.ResponseWriter, r *http.Requ
 	conversation, err := h.Messages.ConvertGroupDirectToPrivate(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["name"])
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this group DM", "Nothing was converted.")
-		case errors.Is(err, service.ErrNotWorkspaceAdmin):
+		case errors.Is(err, domain.ErrNotWorkspaceAdmin):
 			h.writeMutationError(w, r, http.StatusForbidden, "Your guest role cannot create this private channel", "Ask a full member or multi-channel guest in the group DM to convert it.")
-		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, store.ErrInvalidConversationType):
+		case errors.Is(err, domain.ErrInvalidConversation), errors.Is(err, store.ErrInvalidConversationType):
 			h.writeMutationError(w, r, http.StatusBadRequest, "That group DM cannot be converted", "Only a group direct message can become a private channel, and it needs a valid channel name.")
 		case errors.Is(err, store.ErrAlreadyExists):
 			h.writeMutationError(w, r, http.StatusConflict, "That channel name is already in use", "Choose another private channel name. The group DM was not changed.")
@@ -12677,7 +12677,7 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 		heading := "The channel was not created"
 		reason := "The channel could not be created because the workspace store is temporarily unavailable."
 		switch {
-		case errors.Is(err, service.ErrInvalidConversation):
+		case errors.Is(err, domain.ErrInvalidConversation):
 			status = http.StatusBadRequest
 			reason = "Use a channel name between one and 80 characters."
 		case errors.Is(err, store.ErrAlreadyExists):
@@ -12724,9 +12724,9 @@ func (h Handler) inviteConversationMember(w http.ResponseWriter, r *http.Request
 	}
 	if _, err := h.Messages.InviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, []domain.UserID{target}); err != nil {
 		switch {
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this channel", "Join the channel before inviting another person.")
-		case errors.Is(err, service.ErrInvalidConversation):
+		case errors.Is(err, domain.ErrInvalidConversation):
 			h.writeMutationError(w, r, http.StatusBadRequest, "That person cannot be added here", "Members can be added to public and private channels, not direct conversations.")
 		case errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That person is no longer available", "The member or channel no longer exists.")
@@ -12753,9 +12753,9 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 	channel := h.requestChannel(r)
 	if _, err := h.Messages.RenameConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["name"]); err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidConversation):
+		case errors.Is(err, domain.ErrInvalidConversation):
 			h.writeMutationError(w, r, http.StatusBadRequest, "That channel name is not valid", "Use a unique channel name between one and 80 characters.")
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this channel", "Only a channel member can rename it.")
 		case errors.Is(err, store.ErrAlreadyExists):
 			h.writeMutationError(w, r, http.StatusConflict, "That channel name is already in use", "Choose another name.")
@@ -12800,7 +12800,7 @@ func (h Handler) setConversationNotifications(w http.ResponseWriter, r *http.Req
 		switch {
 		case errors.Is(err, store.ErrInvalidArgument):
 			h.writeMutationError(w, r, http.StatusBadRequest, "That notification exception is not valid", "Choose the workspace default, all new posts, mentions, or mute.")
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this channel", "Only channel members can change its notification exception.")
 		case errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That channel is no longer available", "Nothing was changed.")
@@ -12836,9 +12836,9 @@ func (h Handler) setThreadFollow(w http.ResponseWriter, r *http.Request) {
 		r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), thread, followed,
 	); err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidTimestamp), errors.Is(err, store.ErrInvalidArgument):
+		case errors.Is(err, domain.ErrInvalidTimestamp), errors.Is(err, store.ErrInvalidArgument):
 			h.writeMutationError(w, r, http.StatusBadRequest, "That thread link is not valid", "Nothing was changed.")
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this channel", "Only channel members can follow its threads.")
 		case errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That thread is no longer available", "Nothing was changed.")
@@ -12878,11 +12878,11 @@ func (h Handler) setConversationText(w http.ResponseWriter, r *http.Request, fie
 	}
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrConversationTextTooLong):
-			h.writeMutationError(w, r, http.StatusBadRequest, "That channel "+field+" is too long", fmt.Sprintf("Use at most %d characters.", service.MaxConversationTextLength))
-		case errors.Is(err, service.ErrConversationArchived):
+		case errors.Is(err, domain.ErrConversationTextTooLong):
+			h.writeMutationError(w, r, http.StatusBadRequest, "That channel "+field+" is too long", fmt.Sprintf("Use at most %d characters.", domain.MaxConversationTextLength))
+		case errors.Is(err, domain.ErrConversationArchived):
 			h.writeMutationError(w, r, http.StatusConflict, "This channel is archived", "Unarchive it before changing its "+field+". Nothing was changed.")
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this conversation", "Only a conversation member can change its "+field+".")
 		case errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That conversation is no longer available", "Nothing was changed.")
@@ -12912,9 +12912,9 @@ func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request)
 	channel := h.requestChannel(r)
 	if _, err := h.Messages.SetConversationArchived(r.Context(), principal.WorkspaceID, principal.UserID, channel, archived); err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, service.ErrCannotArchiveDefault):
+		case errors.Is(err, domain.ErrInvalidConversation), errors.Is(err, domain.ErrCannotArchiveDefault):
 			h.writeMutationError(w, r, http.StatusBadRequest, "This conversation cannot be archived", "Only public and private channels that are not required by the workspace can be archived.")
-		case errors.Is(err, service.ErrConversationAlreadyArchived), errors.Is(err, service.ErrConversationNotArchived):
+		case errors.Is(err, domain.ErrConversationAlreadyArchived), errors.Is(err, domain.ErrConversationNotArchived):
 			h.redirectMutation(w, r, conversationDetailsURL(channel, detailsTabSettings))
 		case errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That channel is no longer available", "Nothing was changed.")
@@ -12945,11 +12945,11 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, store.ErrAlreadyExists) && (conversation.IsDirectOrGroup()):
 			h.redirectMutation(w, r, "/app/dms")
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusConflict, "You have already left this conversation", "No membership was changed.")
-		case errors.Is(err, service.ErrConversationArchived):
+		case errors.Is(err, domain.ErrConversationArchived):
 			h.writeMutationError(w, r, http.StatusConflict, "This conversation is archived", "An archived conversation cannot be left. Nothing was changed.")
-		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, service.ErrCannotLeaveDefault):
+		case errors.Is(err, domain.ErrInvalidConversation), errors.Is(err, domain.ErrCannotLeaveDefault):
 			h.writeMutationError(w, r, http.StatusBadRequest, "This conversation cannot be left", "Required workspace channels cannot be left.")
 		case errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That conversation is no longer available", "Nothing was changed.")

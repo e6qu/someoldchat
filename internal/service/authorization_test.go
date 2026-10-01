@@ -167,7 +167,7 @@ func TestUserGroupMutationsRequireWorkspaceAdmin(t *testing.T) {
 	refusals["AddUserGroupChannels"] = messages.AddUserGroupChannels(ctx, "T1", "U2", group.ID, []domain.ConversationID{"C1"})
 	refusals["RemoveUserGroupChannels"] = messages.RemoveUserGroupChannels(ctx, "T1", "U2", group.ID, []domain.ConversationID{"C1"})
 	for name, err := range refusals {
-		if !errors.Is(err, ErrNotWorkspaceAdmin) {
+		if !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 			t.Errorf("%s by a plain member: err=%v, want ErrNotWorkspaceAdmin", name, err)
 		}
 	}
@@ -231,7 +231,7 @@ func TestOperationsThatDeclareNotInChannelRequireMembership(t *testing.T) {
 	refusals["conversations.kick"] = messages.KickConversationMember(ctx, "T1", "U2", "C1", "U3")
 	refusals["conversations.leave"] = messages.LeaveConversation(ctx, "T1", "U2", "C1")
 	for name, err := range refusals {
-		if !errors.Is(err, ErrNotInConversation) {
+		if !errors.Is(err, domain.ErrNotInConversation) {
 			t.Errorf("%s from outside the channel: err=%v, want ErrNotInConversation", name, err)
 		}
 	}
@@ -262,10 +262,10 @@ func TestAdministrativeWorkspaceReadsRequireWorkspaceAdmin(t *testing.T) {
 	ctx := context.Background()
 	_, messages := twoMemberWorkspace(t)
 
-	if _, err := messages.IntegrationLogs(ctx, "T1", "U2", "", "", "", "", 10, 1); !errors.Is(err, ErrNotWorkspaceAdmin) {
+	if _, err := messages.IntegrationLogs(ctx, "T1", "U2", "", "", "", "", 10, 1); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		t.Errorf("IntegrationLogs by a plain member: err=%v, want ErrNotWorkspaceAdmin", err)
 	}
-	if _, err := messages.TeamBillableInfo(ctx, "T1", "U2", ""); !errors.Is(err, ErrNotWorkspaceAdmin) {
+	if _, err := messages.TeamBillableInfo(ctx, "T1", "U2", ""); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		t.Errorf("TeamBillableInfo by a plain member: err=%v, want ErrNotWorkspaceAdmin", err)
 	}
 	if _, err := messages.IntegrationLogs(ctx, "T1", "U1", "", "", "", "", 10, 1); err != nil {
@@ -290,13 +290,13 @@ func TestAdminSetConversationTeamsRefusesAForeignWorkspace(t *testing.T) {
 	}
 
 	foreign := messages.AdminSetConversationTeams(ctx, "T1", "U1", "C1", []domain.WorkspaceID{"T2"}, false)
-	if !errors.Is(foreign, ErrInvalidConversation) {
+	if !errors.Is(foreign, domain.ErrInvalidConversation) {
 		t.Fatalf("T1 administrator associated its channel with unrelated workspace T2: err=%v", foreign)
 	}
 	// A workspace that does not exist is refused identically, so the refusal
 	// discloses nothing about which tenants exist.
 	absent := messages.AdminSetConversationTeams(ctx, "T1", "U1", "C1", []domain.WorkspaceID{"T-absent"}, false)
-	if !errors.Is(absent, ErrInvalidConversation) || foreign.Error() != absent.Error() {
+	if !errors.Is(absent, domain.ErrInvalidConversation) || foreign.Error() != absent.Error() {
 		t.Fatalf("foreign=%v absent=%v: a foreign workspace must be indistinguishable from an absent one", foreign, absent)
 	}
 	if err := messages.AdminSetConversationTeams(ctx, "T1", "U1", "C1", []domain.WorkspaceID{"T1"}, false); err != nil {
@@ -443,7 +443,7 @@ func TestCreateListRefusesACopyAboveTheRecordCap(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := messages.CreateList(ctx, "T1", "U1", "Copy", "", "", source.ID, true, false); !errors.Is(err, ErrInvalidList) {
+	if _, err := messages.CreateList(ctx, "T1", "U1", "Copy", "", "", source.ID, true, false); !errors.Is(err, domain.ErrInvalidList) {
 		t.Fatalf("copying a list above the cap: err=%v, want ErrInvalidList", err)
 	}
 	// Nothing was written: the refusal happens before the list is created, so no
@@ -475,16 +475,16 @@ func TestRoleAndSettingRefusalsCarryAClassifiedSentinel(t *testing.T) {
 	ctx := context.Background()
 	_, messages := twoMemberWorkspace(t)
 
-	if err := messages.SetUserRole(ctx, "T1", "U1", "U2", domain.WorkspaceRole("superuser")); !errors.Is(err, ErrInvalidWorkspace) {
+	if err := messages.SetUserRole(ctx, "T1", "U1", "U2", domain.WorkspaceRole("superuser")); !errors.Is(err, domain.ErrInvalidWorkspace) {
 		t.Errorf("SetUserRole with an unknown role: err=%v, want ErrInvalidWorkspace", err)
 	}
-	if err := messages.SynchronizeExternalUserRole(ctx, "T1", "U2", domain.WorkspaceRole("superuser")); !errors.Is(err, ErrInvalidWorkspace) {
+	if err := messages.SynchronizeExternalUserRole(ctx, "T1", "U2", domain.WorkspaceRole("superuser")); !errors.Is(err, domain.ErrInvalidWorkspace) {
 		t.Errorf("SynchronizeExternalUserRole with an unknown role: err=%v, want ErrInvalidWorkspace", err)
 	}
-	if _, err := messages.AdminCreateUser(ctx, "T1", "U1", "new@example.com", "New", domain.WorkspaceRoleOwner); !errors.Is(err, ErrInvalidWorkspace) {
+	if _, err := messages.AdminCreateUser(ctx, "T1", "U1", "new@example.com", "New", domain.WorkspaceRoleOwner); !errors.Is(err, domain.ErrInvalidWorkspace) {
 		t.Errorf("AdminCreateUser conferring Owner: err=%v, want ErrInvalidWorkspace", err)
 	}
-	if err := messages.SetAuthMethod(ctx, domain.AuthMethod{WorkspaceID: "T1"}); !errors.Is(err, ErrInvalidWorkspace) {
+	if err := messages.SetAuthMethod(ctx, domain.AuthMethod{WorkspaceID: "T1"}); !errors.Is(err, domain.ErrInvalidWorkspace) {
 		t.Errorf("SetAuthMethod without a provider: err=%v, want ErrInvalidWorkspace", err)
 	}
 	if err := messages.CreateExternalIdentity(ctx, domain.ExternalIdentity{WorkspaceID: "T1"}); !errors.Is(err, store.ErrInvalidArgument) {

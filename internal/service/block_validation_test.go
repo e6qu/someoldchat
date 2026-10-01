@@ -32,13 +32,13 @@ func TestMessageWritesRefuseInvalidBlockKit(t *testing.T) {
 		"eleven fields":        `[{"type":"section","fields":[` + strings.TrimSuffix(strings.Repeat(`{"type":"mrkdwn","text":"f"},`, 11), ",") + `]}]`,
 		"51 blocks":            dividers(51),
 	} {
-		if _, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "x", blocks, "", "", "", ""); !errors.Is(err, ErrInvalidBlocks) {
+		if _, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "x", blocks, "", "", "", ""); !errors.Is(err, domain.ErrInvalidBlocks) {
 			t.Fatalf("post %s err=%v", name, err)
 		}
-		if _, err := messages.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", "x", blocks); !errors.Is(err, ErrInvalidBlocks) {
+		if _, err := messages.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", "x", blocks); !errors.Is(err, domain.ErrInvalidBlocks) {
 			t.Fatalf("ephemeral %s err=%v", name, err)
 		}
-		if _, err := messages.ScheduleMessageWithBlocks(ctx, "T1", "U1", "C1", "x", blocks, time.Now().UTC().Add(time.Hour)); !errors.Is(err, ErrInvalidBlocks) {
+		if _, err := messages.ScheduleMessageWithBlocks(ctx, "T1", "U1", "C1", "x", blocks, time.Now().UTC().Add(time.Hour)); !errors.Is(err, domain.ErrInvalidBlocks) {
 			t.Fatalf("schedule %s err=%v", name, err)
 		}
 	}
@@ -46,7 +46,7 @@ func TestMessageWritesRefuseInvalidBlockKit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("50 blocks: %v", err)
 	}
-	if _, err := messages.UpdateWithBlocks(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(posted.CreatedAt), "x", `[{"type":"image","alt_text":"a"}]`); !errors.Is(err, ErrInvalidBlocks) {
+	if _, err := messages.UpdateWithBlocks(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(posted.CreatedAt), "x", `[{"type":"image","alt_text":"a"}]`); !errors.Is(err, domain.ErrInvalidBlocks) {
 		t.Fatalf("update err=%v", err)
 	}
 	valid := `[{"type":"image","slack_file":{"id":"F1"},"alt_text":"a"},{"type":"call","call_id":"R1"},{"type":"section","fields":[{"type":"mrkdwn","text":"a"}],"accessory":{"type":"button","action_id":"b","text":{"type":"plain_text","text":"B"}}},{"type":"rich_text","elements":[{"type":"rich_text_section","elements":[{"type":"text","text":"t"}]}]},{"type":"context","elements":[{"type":"mrkdwn","text":"c"}]},{"type":"header","text":{"type":"plain_text","text":"h"}},{"type":"markdown","text":"**m**"}]`
