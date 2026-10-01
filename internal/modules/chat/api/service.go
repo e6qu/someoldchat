@@ -346,6 +346,14 @@ type Service interface {
 	AdminAppConfigs(context.Context, domain.WorkspaceID, domain.UserID, []domain.AppID) ([]domain.AppConfig, error)
 	AdminSetAppConfig(context.Context, domain.WorkspaceID, domain.UserID, domain.AppConfig) (domain.AppConfig, error)
 	AdminClearAppResolution(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error
+	AdminAppPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.AppPermission, error)
+	AdminSetAppPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppPermission) (domain.AppPermission, error)
+	AdminAddAppPermissionEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AppPermissionChange) (domain.AppPermission, error)
+	AdminRemoveAppPermissionEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AppPermissionChange) (domain.AppPermission, error)
+	AdminMCPServers(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.MCPServerPage, error)
+	AdminAppMCPServerPermissions(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) ([]domain.MCPServerAccess, error)
+	AdminSetMCPServerPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.MCPServerPermission) (domain.MCPServerPermission, error)
+	SetManagedAppPermissions(context.Context, string, domain.AppID, domain.ManagedAppPermission) error
 	AdminFunctionPermissions(context.Context, domain.WorkspaceID, domain.UserID, []string) ([]domain.AutomationPermission, error)
 	AdminWorkflowPermissions(context.Context, domain.WorkspaceID, domain.UserID, []domain.WorkflowID) ([]domain.AutomationPermission, error)
 	AdminTriggerTypePermission(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerType) (domain.AutomationPermission, error)

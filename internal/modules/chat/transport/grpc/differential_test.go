@@ -240,6 +240,33 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 	}}))
 }
 
+// seedAppAccessParity gives the fixture an approved app that declares two MCP
+// servers, a user group holding U2, and the app's owner a configuration
+// token, so every app access control has something real to act on.
+func seedAppAccessParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedBaseline(t, target)
+	now := time.Unix(1_700_000_600, 0).UTC()
+	requireSeed(t, target.CreateApp(context.Background(), domain.App{
+		ID: "AM", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Agent tools", ClientID: "agent-tools-client",
+		SigningSecretHash: "hash", SigningSecretCiphertext: "cipher", VerificationTokenHash: "hash", VerificationTokenCiphertext: "cipher",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "AM", Version: 1, CreatedBy: "U1", CreatedAt: now,
+		Manifest: `{"display_information":{"name":"Agent tools"},"features":{"mcp_servers":[{"name":"search","url":"https://mcp.example.test/search"},{"name":"tickets","url":"https://mcp.example.test/tickets"}]}}`,
+	}, domain.OAuthClient{ID: "agent-tools-client", SecretHash: "secret", AppID: "AM"}))
+	requireSeed(t, target.SetAppApproval(context.Background(), "T1", "AM", "RM", domain.AppApprovalApproved, now, events.Event{
+		ID: "evt_app_access_approved", WorkspaceID: "T1", Topic: "app.approved", CreatedAt: now,
+	}))
+	requireSeed(t, target.CreateUserGroup(context.Background(), domain.UserGroup{
+		WorkspaceID: "T1", ID: "S1", Name: "Support", Handle: "support", Creator: "UA", UpdatedBy: "UA",
+		CreatedAt: now, UpdatedAt: now, Enabled: true, Users: []domain.UserID{"U2"},
+	}, events.Event{ID: "evt_app_access_group", WorkspaceID: "T1", Topic: "subteam.created", CreatedAt: now}))
+	requireSeed(t, target.CreateAppConfigurationToken(context.Background(), "xoxe.xoxp-app-access", "xoxe-app-access-refresh", domain.AppConfigurationToken{
+		WorkspaceID: "T1", UserID: "U1", ExpiresAt: time.Now().Add(time.Hour).UTC(),
+	}))
+}
+
 // seedUserGroupParity gives the fixture two user groups, so a barrier has
 // something real to name on both compositions.
 // seedRequestedAppParity files one request that is still open and one that has
@@ -2275,6 +2302,90 @@ func parityCases() []parityCase {
 					defaults[0].WorkflowAuthStrategy, defaults[0].DomainURLs, defaults[0].DomainEmails,
 					written.WorkflowAuthStrategy, after[0].DomainURLs, after[0].WorkflowAuthStrategy,
 					badStrategy != nil, unknownApp != nil, undecided != nil,
+				}, nil
+			},
+		},
+		{
+			// The app access controls: the default list, a replacement that
+			// keeps its channel restriction, add and remove, the MCP server
+			// allowlist and its rules, and the managed-app refusal. Every
+			// refusal is compared by the sentinel it restores to, so a code
+			// lost on the wire shows up as a difference.
+			name: "app and MCP server access controls agree",
+			seed: seedAppAccessParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				initial, err := chat.AdminAppPermission(ctx, "T1", "UA", "AM")
+				if err != nil {
+					return nil, err
+				}
+				restricted, err := chat.AdminSetAppPermission(ctx, "T1", "UA", domain.AppPermission{
+					AppID: "AM", PermissionType: domain.AppPermissionEveryone,
+					ChannelRestrictionMode: domain.ChannelRestrictionSpecificChannels, ChannelIDs: []domain.ConversationID{"C1", "C2"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				named, err := chat.AdminSetAppPermission(ctx, "T1", "UA", domain.AppPermission{
+					AppID: "AM", PermissionType: domain.AppPermissionNamedEntities, UserGroupIDs: []domain.UserGroupID{"S1"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				added, err := chat.AdminAddAppPermissionEntities(ctx, "T1", "UA", domain.AppPermissionChange{AppID: "AM", UserIDs: []domain.UserID{"U1"}})
+				if err != nil {
+					return nil, err
+				}
+				removed, err := chat.AdminRemoveAppPermissionEntities(ctx, "T1", "UA", domain.AppPermissionChange{AppID: "AM", ChannelIDs: []domain.ConversationID{"C2"}})
+				if err != nil {
+					return nil, err
+				}
+				_, noApp := chat.AdminAddAppPermissionEntities(ctx, "T1", "UA", domain.AppPermissionChange{AppID: "A-none", UserIDs: []domain.UserID{"U1"}})
+				_, ghost := chat.AdminSetAppPermission(ctx, "T1", "UA", domain.AppPermission{AppID: "AM", PermissionType: domain.AppPermissionNamedEntities, UserIDs: []domain.UserID{"U-ghost"}})
+				_, nobody := chat.AdminSetAppPermission(ctx, "T1", "UA", domain.AppPermission{
+					AppID: "AM", PermissionType: domain.AppPermissionNoOne, ChannelRestrictionMode: domain.ChannelRestrictionAllChannels,
+				})
+				_, member := chat.AdminAppPermission(ctx, "T1", "U1", "AM")
+				firstPage, err := chat.AdminMCPServers(ctx, "T1", "UA", domain.PageRequest{Limit: 1})
+				if err != nil {
+					return nil, err
+				}
+				secondPage, err := chat.AdminMCPServers(ctx, "T1", "UA", domain.PageRequest{Limit: 1, Cursor: firstPage.NextCursor})
+				if err != nil {
+					return nil, err
+				}
+				access, err := chat.AdminAppMCPServerPermissions(ctx, "T1", "UA", "AM")
+				if err != nil {
+					return nil, err
+				}
+				server := access[0].Server.ID
+				narrowed, err := chat.AdminSetMCPServerPermission(ctx, "T1", "UA", domain.MCPServerPermission{
+					AppID: "AM", ServerID: server, PermissionType: domain.MCPServerPermissionNamedEntities, UserIDs: []domain.UserID{"U2"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, broader := chat.AdminSetMCPServerPermission(ctx, "T1", "UA", domain.MCPServerPermission{AppID: "AM", ServerID: server, PermissionType: domain.MCPServerPermissionEveryone})
+				_, outOfScope := chat.AdminSetMCPServerPermission(ctx, "T1", "UA", domain.MCPServerPermission{
+					AppID: "AM", ServerID: server, PermissionType: domain.MCPServerPermissionNamedEntities, UserIDs: []domain.UserID{"U2", "UA"},
+				})
+				_, unknownServer := chat.AdminSetMCPServerPermission(ctx, "T1", "UA", domain.MCPServerPermission{AppID: "AM", ServerID: "Amcp-none", PermissionType: domain.MCPServerPermissionNoOne})
+				after, err := chat.AdminAppMCPServerPermissions(ctx, "T1", "UA", "AM")
+				if err != nil {
+					return nil, err
+				}
+				managed := chat.SetManagedAppPermissions(ctx, "xoxe.xoxp-app-access", "AM", domain.ManagedAppPermissionEveryone)
+				badManaged := chat.SetManagedAppPermissions(ctx, "xoxe.xoxp-app-access", "AM", "whoever")
+				return []any{
+					initial.PermissionType, initial.UserIDs, initial.ChannelRestrictionMode,
+					restricted.ChannelIDs, restricted.ChannelRestrictionMode, named.ChannelIDs, named.UserGroupIDs,
+					added.UserIDs, removed.ChannelIDs,
+					noApp != nil, errors.Is(ghost, domain.ErrNoValidNamedEntities),
+					errors.Is(nobody, domain.ErrChannelRestrictionRequiresAppAccess), errors.Is(member, domain.ErrNotWorkspaceAdmin),
+					firstPage.Servers, firstPage.HasMore, secondPage.Servers, secondPage.HasMore,
+					len(access), narrowed.UserIDs, narrowed.PermissionType,
+					errors.Is(broader, domain.ErrServerPermissionBroaderThanApp), errors.Is(outOfScope, domain.ErrServerPermissionOutOfAppScope),
+					errors.Is(unknownServer, domain.ErrServerNotFound), after[0].Permission.UserIDs, after[1].Permission.PermissionType,
+					errors.Is(managed, domain.ErrAppNotManaged), errors.Is(badManaged, domain.ErrInvalidAppPermission),
 				}, nil
 			},
 		},

@@ -2530,33 +2530,134 @@ operations:
     deviations:
       - Enterprise organization and multi-workspace named-entity resolution has not been live-Slack qualified.
   - method: admin.apps.mcp.servers.list
-    status: unimplemented
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.mcp.servers.list/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppsMCPServersFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/service:TestAdminMCPServersPagesTheApprovedAllowlist
+      - go-test:internal/appmanifest:TestParseReadsDeclaredMCPServers
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference documents no response body. Servers are returned under mcp_servers as objects with id, app_id, name and url, with response_metadata.next_cursor; these names are a local decision until Slack publishes the shape.
+      - Slack's manifest schema for declaring an MCP server is unpublished; servers are declared under features.mcp_servers with a unique name and an HTTPS url, and a server id is Amcp followed by a digest of the app id and name.
+      - The organization's MCP server allowlist is the app approval decision, so the servers of approved, undeleted apps are listed.
+      - feature_not_enabled is never emitted because the feature is always available.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
   - method: admin.apps.mcp.servers.permissions.list
-    status: unimplemented
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.mcp.servers.permissions.list/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppsMCPServersFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/service:TestAdminSetMCPServerPermissionDropsEntitiesATypeDoesNotTake
+      - go-test:internal/appmanifest:TestParseReadsDeclaredMCPServers
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference documents no response body. The app's servers are returned under mcp_servers with id, app_id, name, url, permission_type and, for the named types, user_ids and usergroup_ids, beside app_id; these names are a local decision.
+      - feature_not_enabled is never emitted because the feature is always available.
+      - There is no MCP runtime, so the permissions are stored and reported but gate nothing.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
   - method: admin.apps.mcp.servers.permissions.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.mcp.servers.permissions.set/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppsMCPServersFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/service:TestAdminSetMCPServerPermissionDropsEntitiesATypeDoesNotTake
+      - go-test:internal/domain:TestAnMCPServerRuleMayOnlyNarrowItsApp
+      - go-test:internal/store/memory:TestAppPermissionsContract
+      - go-test:internal/store/sqlstore:TestSQLiteAppPermissionsContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference documents no response body; a successful call answers ok alone.
+      - user_ids or usergroup_ids given with everyone or no_one are dropped rather than refused, as the automation permission methods do; the reference does not state the case.
+      - A server rule is checked against the app-level list when it is written. Under named_entities, everyone and named_entities_exclude are broader, and a named user must be on the app's list directly or through a listed user group.
+      - feature_not_enabled is never emitted because the feature is always available.
+      - There is no MCP runtime, so the permission is stored and reported but gates nothing.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
   - method: admin.apps.permissions.add
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.add/
+    evidence:
+      - go-test:internal/service:TestAppAccessControlDecidesWhoMayInvokeAnApp
+      - go-test:internal/api/slack:TestAdminAppsPermissionsFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/service:TestAdminSetAppPermissionKeepsOrClearsTheChannelRestriction
+      - go-test:internal/domain:TestAppPermissionCheckHoldsTheAccessControlInvariant
+      - go-test:internal/store/memory:TestAppPermissionsContract
+      - go-test:internal/store/sqlstore:TestSQLiteAppPermissionsContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference documents no response body; the method answers the same permission_type, user_ids/usergroup_ids and channel_restriction_mode/channel_ids shape that admin.apps.permissions.remove and .set document.
+      - The reference states a 50-user maximum per call but no ceiling for the accumulated list; the accumulated list is held to admin.apps.permissions.set's 200-user maximum and answers too_many_named_entities beyond it.
+      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - failed_to_update_channels is never emitted because the list and its channels are written in one transaction, so a storage failure is reported with the shared engine codes instead.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
   - method: admin.apps.permissions.list
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.list/
+    evidence:
+      - go-test:internal/service:TestAppAccessControlDecidesWhoMayInvokeAnApp
+      - go-test:internal/api/slack:TestAdminAppsPermissionsFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/store/memory:TestAppPermissionsContract
+      - go-test:internal/store/sqlstore:TestSQLiteAppPermissionsContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference says a named_entities response includes the users and user groups but does not name the fields; they are reported as user_ids and usergroup_ids, the argument names .add, .remove and .set take, and the channel restriction in the shape .set documents.
+      - invalid_permission_type (an ACL holding an invalid type) cannot occur because the stored type is validated on every write.
+      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
   - method: admin.apps.permissions.remove
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.remove/
+    evidence:
+      - go-test:internal/service:TestAppAccessControlDecidesWhoMayInvokeAnApp
+      - go-test:internal/service:TestAdminRemoveAppPermissionEntitiesRemovesADeactivatedMember
+      - go-test:internal/api/slack:TestAdminAppsPermissionsFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/domain:TestAppPermissionCheckHoldsTheAccessControlInvariant
+      - go-test:internal/store/memory:TestAppPermissionsContract
+      - go-test:internal/store/sqlstore:TestSQLiteAppPermissionsContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - Removing the last user or user group from a named_entities list is refused with named_entities_cannot_be_empty, which is this local reading of that documented code; a usergroup_ids entry naming a group not on the list is a no-op because the reference declares no user-group error for remove.
+      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - failed_to_update_channels is never emitted because the list and its channels are written in one transaction, so a storage failure is reported with the shared engine codes instead.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
   - method: admin.apps.permissions.set
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.set/
+    evidence:
+      - go-test:internal/service:TestAppAccessControlDecidesWhoMayInvokeAnApp
+      - go-test:internal/api/slack:TestAdminAppsPermissionsFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/service:TestAdminSetAppPermissionKeepsOrClearsTheChannelRestriction
+      - go-test:internal/domain:TestAppPermissionCheckHoldsTheAccessControlInvariant
+      - go-test:internal/store/memory:TestAppPermissionsContract
+      - go-test:internal/store/sqlstore:TestSQLiteAppPermissionsContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - Omitting channel_restriction_mode keeps the app's current channel restriction, and channel_ids without a listing mode (omitted or all_channels) is refused with invalid_channel_restriction_mode; the reference does not state either case.
+      - channel_restrictions_not_available is never emitted because every workspace here can configure channel restrictions.
+      - More than 200 channel_ids is refused with invalid_arguments; the reference states the maximum but no code for it.
+      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
   - method: admin.conversations.bulkSetProperties
     status: unimplemented
     provenance: slack-reference
@@ -2690,9 +2791,16 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.sessions.setStatus/
   - method: apps.managed.permissions.set
-    status: unimplemented
+    status: schema-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.managed.permissions.set/
+    evidence:
+      - go-test:internal/api/slack:TestAppsManagedPermissionsSetFollowsTheSlackReference
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - There is no manager-app or partner-platform model. Every app is created by its developer through apps.manifest.*, so no app is managed. After the configuration token, app_id and permissions are validated, an app the token's user owns answers app_not_managed and any other app answers app_not_found; app_not_owned_by_manager_app, app_owner_not_found, manager_app_not_eligible, enterprise_only_feature and feature_not_enabled are never emitted, and no success response (the stored or current permissions) is ever produced.
+      - The reference's description speaks of a user token from the manager app while its token section names a configuration token with app_configurations:write; the method authenticates the configuration token, as apps.manifest.* does.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
   - method: canvases.getContent
     status: unimplemented
     provenance: slack-reference

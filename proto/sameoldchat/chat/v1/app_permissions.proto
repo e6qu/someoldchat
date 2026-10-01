@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+// One app's organization-level access control list: who may use the app and
+// in which channels. An empty channel_restriction_mode is an app whose channel
+// restriction nobody has configured.
+message AppPermission {
+  string app_id = 1;
+  string workspace_id = 2;
+  string permission_type = 3;
+  repeated string user_ids = 4;
+  repeated string usergroup_ids = 5;
+  string channel_restriction_mode = 6;
+  repeated string channel_ids = 7;
+  int64 updated_at = 8;
+}
+
+message AppAccessControlRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+}
+
+message AppPermissionMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  AppPermission permission = 3;
+}
+
+// The entities admin.apps.permissions.add grants or .remove revokes.
+message AppPermissionChangeRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  repeated string user_ids = 4;
+  repeated string usergroup_ids = 5;
+  repeated string channel_ids = 6;
+}
+
+message MCPServer {
+  string id = 1;
+  string app_id = 2;
+  string name = 3;
+  string url = 4;
+}
+
+message MCPServersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  bool descending = 5;
+}
+
+message MCPServerPage {
+  repeated MCPServer servers = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message MCPServerPermission {
+  string workspace_id = 1;
+  string app_id = 2;
+  string server_id = 3;
+  string permission_type = 4;
+  repeated string user_ids = 5;
+  repeated string usergroup_ids = 6;
+  int64 updated_at = 7;
+}
+
+message MCPServerAccess {
+  MCPServer server = 1;
+  MCPServerPermission permission = 2;
+}
+
+message MCPServerAccessResponse {
+  repeated MCPServerAccess servers = 1;
+}
+
+message MCPServerPermissionMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  MCPServerPermission permission = 3;
+}
+
+message ManagedAppPermissionRequest {
+  string configuration_token = 1;
+  string app_id = 2;
+  string permissions = 3;
+}

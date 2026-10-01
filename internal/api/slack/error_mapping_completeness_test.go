@@ -316,6 +316,20 @@ func recordedNonPinnedCodes() map[string]string {
 		"unable_to_parse_csv":        "current admin.usergroups.uploadUsers reference: the file is not a member id, email CSV",
 		"no_valid_users":             "current admin.usergroups.uploadUsers reference: the CSV names no user who can join",
 		"visible_group_needs_handle": "current admin.usergroups.update reference: a visible group's handle was removed",
+		// admin.apps.permissions.*, admin.apps.mcp.servers.* and
+		// apps.managed.permissions.set are absent from the pinned snapshot; each
+		// code below is declared by those methods' current Slack references.
+		"app_acl_not_found":                       "current admin.apps.permissions.add and .remove references",
+		"app_not_managed":                         "current apps.managed.permissions.set reference",
+		"channel_ids_required":                    "current admin.apps.permissions.set reference",
+		"channel_restriction_requires_app_access": "current admin.apps.permissions.set reference",
+		"invalid_channel_restriction_mode":        "current admin.apps.permissions.add, .remove and .set references",
+		"invalid_entities":                        "current admin.apps.permissions.add reference",
+		"no_valid_named_entities":                 "current admin.apps.permissions.add and .set and admin.apps.mcp.servers.permissions.set references",
+		"server_acl_entities_not_in_scope":        "current admin.apps.mcp.servers.permissions.set reference",
+		"server_acl_type_broader_than_app":        "current admin.apps.mcp.servers.permissions.set reference",
+		"server_not_found":                        "current admin.apps.mcp.servers.permissions.set reference",
+		"too_many_named_entities":                 "current admin.apps.permissions.* and admin.apps.mcp.servers.permissions.set references",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so

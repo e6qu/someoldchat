@@ -478,6 +478,19 @@ type Store interface {
 	// ListAppConfigs reports the configuration of the named apps. An app with
 	// none is absent rather than present with empty lists.
 	ListAppConfigs(context.Context, domain.WorkspaceID, []domain.AppID) ([]domain.AppConfig, error)
+	// GetAppPermission reads one app's access control list. An app nobody has
+	// set one on is ErrNotFound: admin.apps.permissions.add and .remove refuse
+	// it, while .list answers the default.
+	GetAppPermission(context.Context, domain.WorkspaceID, domain.AppID) (domain.AppPermission, error)
+	// SetAppPermission writes one app's access control list whole, replacing
+	// what was there. An unknown app is ErrNotFound.
+	SetAppPermission(context.Context, domain.AppPermission, events.Event) error
+	// ListMCPServerPermissions reports the permissions stored for one app's MCP
+	// servers. A server with none is absent rather than present as a default.
+	ListMCPServerPermissions(context.Context, domain.WorkspaceID, domain.AppID) ([]domain.MCPServerPermission, error)
+	// SetMCPServerPermission writes one MCP server's permission whole. An
+	// unknown app is ErrNotFound.
+	SetMCPServerPermission(context.Context, domain.MCPServerPermission, events.Event) error
 	// ClearAppApproval removes an app's approval decision, so the app is
 	// undecided again rather than approved or restricted.
 	ClearAppApproval(context.Context, domain.WorkspaceID, domain.AppID, events.Event) error

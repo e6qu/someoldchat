@@ -597,7 +597,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 193
+const schemaVersion = 194
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3569,6 +3569,33 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	// --- end schema 193 ---
+	// --- schema 194: app and MCP server access control lists ---
+	if version < 194 {
+		// admin.apps.permissions.* and admin.apps.mcp.servers.permissions.*:
+		// who in the organization may use an app, in which channels, and who
+		// may use each MCP server it declares. An app or server with no row has
+		// never been restricted. The lists are JSON because each is read and
+		// written whole and no query asks which apps name one entity.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_permissions (
+			app_id TEXT NOT NULL REFERENCES slack_apps(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			permission_type TEXT NOT NULL, user_ids TEXT NOT NULL DEFAULT '[]', usergroup_ids TEXT NOT NULL DEFAULT '[]',
+			channel_restriction_mode TEXT NOT NULL DEFAULT '', channel_ids TEXT NOT NULL DEFAULT '[]',
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_id, app_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate app permissions: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS mcp_server_permissions (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL REFERENCES slack_apps(id),
+			server_id TEXT NOT NULL, permission_type TEXT NOT NULL,
+			user_ids TEXT NOT NULL DEFAULT '[]', usergroup_ids TEXT NOT NULL DEFAULT '[]',
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_id, app_id, server_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate MCP server permissions: %w", err)
+		}
+	}
+	// --- end schema 194 ---
 	// --- schema 192: profile title, pronouns and time zone ---
 	if version < 192 {
 		// Slack's profile carries a title and pronouns, and its user object

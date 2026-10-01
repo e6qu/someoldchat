@@ -74,6 +74,9 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 	if err != nil {
 		return err
 	}
+	if err := m.requireAppUse(ctx, workspaceID, userID, snapshot.App.ID, conversationID); err != nil {
+		return err
+	}
 	if slash.ShouldEscape {
 		text, err = m.escapeSlashCommandText(ctx, workspaceID, userID, text)
 		if err != nil {
@@ -970,6 +973,14 @@ func (m Messages) ListAppShortcuts(ctx context.Context, workspaceID domain.Works
 		if len(problems) != 0 || !containsString(parsed.BotScopes, "commands") {
 			continue
 		}
+		// An app the member may not use offers them nothing to invoke. The
+		// listing names no channel, so only the permission type applies here;
+		// the channel restriction is decided when the member invokes it.
+		if err := m.requireAppUse(ctx, workspaceID, userID, snapshot.App.ID, ""); errors.Is(err, domain.ErrAppUseRestricted) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
 		if shortcutType == "slash" {
 			for _, command := range parsed.SlashCommands {
 				candidate := slashCandidate{
@@ -1039,6 +1050,9 @@ func (m Messages) DispatchAppShortcut(ctx context.Context, workspaceID domain.Wo
 	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.InteractivityRequestURL == "") ||
 		!containsString(parsed.BotScopes, "commands") {
 		return domain.ErrAppInteractionUnavailable
+	}
+	if err := m.requireAppUse(ctx, workspaceID, userID, appID, conversationID); err != nil {
+		return err
 	}
 	callbackID = strings.TrimSpace(callbackID)
 	shortcutType := "global"
