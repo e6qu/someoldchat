@@ -80,9 +80,9 @@ The PostgreSQL adapter MUST:
 - pass the shared repository and migration suite against a real PostgreSQL
   server.
 
-PostgreSQL is a separately selectable storage profile. It is not a fallback for
-SQLite or dqlite, and the application never changes storage profiles after
-startup.
+PostgreSQL is a separately selectable storage profile. It MUST NOT be a
+fallback for SQLite or dqlite, and the application MUST NOT change storage
+profiles after startup.
 
 ## dqlite adapter
 
@@ -137,4 +137,8 @@ MUST be atomic from the activator's perspective.
 
 Every migration and repository test MUST run against SQLite and a real dqlite
 cluster in CI or a required integration environment. Driver mocks do not count
-as dqlite compatibility evidence.
+as dqlite compatibility evidence. CI runs the shared contract in
+`tests/persistence-qualification` against SQLite, a native dqlite cluster
+(`make test-dqlite`), and a real PostgreSQL server (`make test-postgres`); see
+[dqlite qualification](../docs/dqlite.md) and
+[PostgreSQL storage](../docs/postgresql.md).

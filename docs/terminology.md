@@ -28,25 +28,26 @@ that the pinned Slack contracts do not specify.
 
 ## Composition and deployment terms
 
-One name per concept. The documentation previously used four competing names for
-each of the two compositions selected by the single flag `-chat-mode`, which made
-it impossible to tell whether two passages described the same thing.
+Use one name per concept. The single flag `-chat-mode` selects one of two
+compositions:
 
 - *Local composition* (`-chat-mode local`) runs the chat module by direct Go call
-  inside one process. It is the `monolith` target in `modules.json`. Not "monolith
-  mode", "monolithic mode", or "local mode".
+  inside one process. It corresponds to the `monolith` targets in
+  `modules.json`. Do not call it "monolith mode", "monolithic mode", or "local
+  mode".
 - *Distributed composition* (`-chat-mode grpc`) runs the chat module in
-  `sameoldchat-chatd` and reaches it through the generated gRPC adapters. It is
-  the `separate` target in `modules.json`. Not "grpc mode", "distributed mode",
-  "separate mode", or "split-process".
+  `sameoldchat-chatd` and reaches it through the generated gRPC adapters. It
+  corresponds to the `separate-chat` targets in `modules.json`. Do not call it
+  "grpc mode", "distributed mode", "separate mode", or "split-process".
 - An *activator* is a process that keeps a public endpoint reachable while the
   application is scaled to zero and restores it on demand. *Fencing generation*,
-  *snapshot manifest*, *outbox*, and *lease* are defined in the
+  *snapshot manifest*, *outbox*, and *lease* are described in the
   [scale-to-zero specification](../specs/scale-to-zero.md) and the
   [operations guide](operations.md).
 
-The project uses the fully qualified names of Go packages, commands, cloud
-services, and deployment components elsewhere in the documentation.
+Go packages, commands, cloud services, and deployment components are named by
+their fully qualified names.
 
 Related documents: [repository overview](../README.md),
-[architecture](architecture.md), and [Slack compatibility specification](../specs/api-compatibility.md).
+[architecture](architecture.md), [separable module architecture](modules.md),
+and [Slack compatibility specification](../specs/api-compatibility.md).

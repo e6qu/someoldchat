@@ -83,12 +83,9 @@ Snapshot failure MUST leave the previously selected manifest intact.
 ### Snapshot boundary by profile
 
 The persistence process is stopped **before** the snapshot boundary, inside
-`SNAPSHOTTING`. The ordering is: enter `SNAPSHOTTING`, stop persistence, create
-the snapshot, encrypt and upload it, verify it through an independent
-read/digest check, atomically select the manifest as current, enter `STOPPING`,
-release the active storage, enter `HIBERNATED`.
-
-The two snapshot profiles differ in why:
+`SNAPSHOTTING` (steps 6–9 above); active storage is released only in
+`STOPPING` (steps 11–12). The two snapshot profiles (the activator's
+`-snapshot-mode`) need the stopped boundary for different reasons:
 
 - **Directory profile** (`directory`, dqlite or a SQLite state directory). The
   boundary is an archive of the state directory, the filesystem shape dqlite's

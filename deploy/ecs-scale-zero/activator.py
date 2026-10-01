@@ -85,11 +85,9 @@ def request_headers(event):
 def response(status, error, retry_after=None):
     """Answers a refusal with the Slack error envelope, not plain text.
 
-    docs/operations.md states that a request the activator cannot serve receives
-    "the closest compatible Slack error envelope recorded in the compatibility
-    ledger". This path answered `text/plain`, so an official Slack SDK raised a
-    JSON decode error instead of surfacing a Slack error code — which is the
-    entire point of that claim.
+    An official Slack SDK decodes every response as JSON, so a text/plain
+    refusal surfaced as a decode error rather than as a Slack error code. See
+    "The refusal bodies differ" in docs/operations.md.
     """
     headers = {"content-type": "application/json; charset=utf-8"}
     if retry_after is not None:

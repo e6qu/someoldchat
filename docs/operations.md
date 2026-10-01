@@ -1,9 +1,13 @@
 # SameOldChat operations
 
+For the process topology and the crash-only rules these procedures rely on, see
+[architecture](architecture.md#runtime-topology). For the binaries' startup
+configuration, see the [deployment guide](deployment.md).
+
 ## Service states
 
-Operators and automation observe the same lifecycle states defined in the
-scale-to-zero specification:
+Operators and automation observe the lifecycle states defined in the
+[scale-to-zero specification](../specs/scale-to-zero.md):
 
 `ACTIVE`, `QUIESCING`, `SNAPSHOTTING`, `STOPPING`, `HIBERNATED`, `WAKING`, and
 `FAILED`.
@@ -13,6 +17,8 @@ is active it reverse-proxies traffic; otherwise it coordinates wake-up.
 Forwarding uses bounded request bodies and a configured wake deadline. Requests
 arriving during an in-progress wake wait for that same fenced generation rather
 than starting a second restoration.
+
+## Health and monitoring endpoints
 
 The HTTP server exposes `/healthz` for process liveness and `/readyz` for
 end-to-end readiness. Readiness performs a bounded chat-store operation through
@@ -25,6 +31,11 @@ The authenticated `e6qu.monitoring/v2` document reports the same end-to-end
 readiness check plus fixed-cardinality operation, duration, and process
 evidence. An unset token leaves the endpoint fail-closed.
 
+`-metrics-listen` / `SAMEOLDCHAT_METRICS_LISTEN` on `sameoldchat-server` and
+`sameoldchat-chatd` publishes `GET /metrics` on a separate operator-only
+address; empty serves no metrics endpoint. The activator's `/metrics` is
+described under [Observability](#observability).
+
 ## Replica termination
 
 `SIGTERM` and `SIGINT` are explicit drain signals. HTTP replicas stop admitting
@@ -33,6 +44,11 @@ deadline; chat gRPC replicas use `GracefulStop` for the same deadline and then
 force-stop. A process crash does not rely on either path for correctness:
 durable leases, idempotency records, outbox events, and state-store recovery
 remain the authoritative crash-recovery mechanisms.
+
+SQLite startup migrations acquire an immediate transaction on a pinned database
+connection. Concurrent replicas therefore serialize schema changes, and a
+process crash rolls back the in-flight migration instead of exposing a partial
+schema.
 
 ## Normal hibernation
 
@@ -87,21 +103,19 @@ generation. It then:
 7. Waits for end-to-end readiness, not merely process readiness.
 8. Moves to `ACTIVE` and forwards buffered requests.
 
-The activator returns a lightweight startup page to browsers. API requests may
-be held and replayed only within configured body, count, and deadline limits. A
-request whose body exceeds the configured maximum is rejected with HTTP 413
-before it is held. A request that cannot be held or replayed within the queue and
-deadline limits receives HTTP 503 and `Retry-After`. Both the provider-neutral
-`sameoldchat-activator` and the AWS Lambda activator in `deploy/ecs-scale-zero`
-enforce the same body and deadline limits.
+Requests may be held and replayed only within configured body, count, and
+deadline limits. A request whose body exceeds the configured maximum is
+rejected with HTTP 413 before it is held. A request that cannot be held or
+replayed within the queue and deadline limits receives HTTP 503 and
+`Retry-After`. Both the provider-neutral `sameoldchat-activator` and the AWS
+Lambda activator in `deploy/ecs-scale-zero` enforce the same body and deadline
+limits.
 
-The refusal body is where the two currently differ, and the difference is
-recorded rather than glossed: the Lambda answers with the Slack error envelope
+The refusal bodies differ. The Lambda answers with the Slack error envelope
 `{"ok":false,"error":"service_unavailable"}` and `application/json`, so an
-official SDK surfaces a Slack error code. `sameoldchat-activator` still answers
+official SDK surfaces a Slack error code. `sameoldchat-activator` answers
 `text/plain` through `http.Error`, which an SDK reports as a JSON decode
-failure. Giving `internal/activator` the same envelope is a pending change to
-that package.
+failure; giving `internal/activator` the same envelope is an open change.
 
 ## Scheduled work while hibernated
 
@@ -112,14 +126,12 @@ not contain the scheduled job payload.
 
 An external webhook or API call also wakes the stack. The activator must spool
 an accepted request body durably before acknowledging it if the sender cannot
-be expected to retry.
-Spool rows are claimed with durable per-replica leases; only the lease owner
-may delete a delivered row, and lease expiry is the crash-recovery path for a
-replica that dies during replay.
-
-The shared SQLite, dqlite, and PostgreSQL qualification contract also verifies
-event replay order, topic-specific claims, lease renewal, delayed release, and
-acknowledgement ownership for durable outbox records.
+be expected to retry. Spool rows are claimed with durable per-replica leases;
+only the lease owner may delete a delivered row, and lease expiry is the
+crash-recovery path for a replica that dies during replay. The activator claims
+one buffered request at a time and renews that request's lease while the
+selected application handler runs, so a slow handler does not look like a
+crashed replica, and it retains no unbounded in-memory batch.
 
 The standalone activator receives an explicit process context. Shutdown
 cancels wake and replay work owned by that process, while accepted spool rows
@@ -127,29 +139,45 @@ remain durable for a replacement replica to reclaim after lease expiry. A
 request context controls only that request's enqueue and response wait; it
 does not cancel the shared wake operation.
 
-The WebSocket activator uses the same termination rule. Signal handling
-cancels active request contexts, closes both sides of each proxied connection,
-and allows a bounded server drain. Lease release and scale-down cleanup use a
-separate short-lived cleanup context so a disconnected client cannot leave a
-live lease indefinitely. The proxy also applies a four-megabyte per-message
-read limit to bound memory use at the transport edge. Endpoint discovery reads
-all paginated Amazon Elastic Container Service task results and batches task
-description requests at the service limit, so replica counts do not silently
-truncate the active endpoint set.
+The shared SQLite, dqlite, and PostgreSQL qualification contract also verifies
+event replay order, topic-specific claims, lease renewal, delayed release, and
+acknowledgement ownership for durable outbox records.
+
+## WebSocket edge and RTM
+
+The WebSocket activator (`sameoldchat-ecs-ws-activator`) uses the same
+termination rule as the standalone activator. Signal handling cancels active
+request contexts, closes both sides of each proxied connection, and allows a
+bounded server drain. Lease release and scale-down cleanup use a separate
+short-lived cleanup context so a disconnected client cannot leave a live lease
+indefinitely. The proxy applies a four-megabyte per-message read limit to bound
+memory use at the transport edge. Endpoint discovery reads all paginated Amazon
+Elastic Container Service task results and batches task description requests
+at the service limit, so replica counts do not silently truncate the active
+endpoint set.
 
 The RTM WebSocket endpoint follows Slack's published legacy RTM protocol:
 successful ping messages return a `pong`, preserve scalar fields, and copy a
 positive client `id` into `reply_to`; nested ping fields fail as invalid input.
-The endpoint also rejects messages larger than 16 kilobytes at the WebSocket
+The endpoint rejects messages larger than 16 kilobytes at the WebSocket
 boundary. The server pings every RTM socket every ten seconds and closes one
 that answers neither that ping nor the next, and every write is bounded by a
 deadline, so a vanished or stalled client does not hold its stream. The URL
 `rtm.connect` returns follows the origin the client called it on: `wss://`
-when the request arrived over TLS or carries `X-Forwarded-Proto: https`.
-See [Slack's RTM protocol](https://api.slack.com/legacy/rtm) for the
-upstream wire contract.
+when the request arrived over TLS or carries `X-Forwarded-Proto: https`. The
+event stream rejects invalid or type-less JSON event payloads. See
+[Slack's RTM protocol](https://api.slack.com/legacy/rtm) for the upstream wire
+contract.
 
-### Socket Mode
+## Socket Mode
+
+Socket Mode follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/)
+and [the `apps.connections.open` method reference](https://docs.slack.dev/reference/methods/apps.connections.open/),
+and is available in both compositions: the HTTP process calls the repository
+directly in local composition and uses the generated gRPC boundary in
+distributed composition.
+
+### Connections
 
 Socket Mode uses an app-level token with the `connections:write` scope. The
 `apps.connections.open` method creates a short-lived, single-use connection
@@ -158,14 +186,17 @@ lease and returns a WebSocket URL. The WebSocket consumes that lease, sends a
 `debug_info`, and acknowledges each valid received envelope by returning its
 `envelope_id`. A missing envelope identifier closes the connection with a
 protocol error; an acknowledgement for an envelope the connection no longer
-holds (a late or duplicate one) is ignored. Approved app installations
-identify the workspaces whose durable outbox events can be delivered. The last
-acknowledged event sequence is stored per app, so a replacement process
-resumes after the last confirmed event instead of depending on process memory.
-The implementation allows up to ten active connections per app; an eleventh
+holds (a late or duplicate one) is ignored. Malformed event payloads are closed
+as protocol errors; the server does not synthesize a replacement payload from
+an internal topic and string.
+
+Approved app installations identify the workspaces whose durable outbox events
+can be delivered. The last acknowledged event sequence is stored per app, so a
+replacement process resumes after the last confirmed event instead of depending
+on process memory. Up to ten connections per app may be active; an eleventh
 `apps.connections.open` is answered with HTTP 429, `Retry-After`, and
-`ratelimited`, which official clients retry. Each active connection renews
-its durable lease and releases it when the WebSocket closes.
+`ratelimited`, which official clients retry. Each active connection renews its
+durable lease and releases it when the WebSocket closes.
 
 The connection URL follows the origin the client called
 `apps.connections.open` on, so no configuration is needed behind a
@@ -178,11 +209,12 @@ TLS-terminating proxy that sets `X-Forwarded-Proto`. Two settings override it:
   `-socket-host` it chooses the scheme; without it, it forces `wss://` behind a
   proxy that terminates TLS without sending `X-Forwarded-Proto`.
 
-`terraform/ecs-runtime` exports `SAMEOLDCHAT_SOCKET_TLS=1`, because its public
-URL is required to be HTTPS and its caller-owned ingress may not send
-`X-Forwarded-Proto`; the host still follows the request. The
-WebSocket upgrade accepts any `Origin` (the single-use ticket is the
-credential), and a request that cannot be upgraded does not spend the ticket.
+[`terraform/ecs-runtime`](../terraform/ecs-runtime/README.md) exports
+`SAMEOLDCHAT_SOCKET_TLS=1`. The WebSocket upgrade accepts any `Origin` (the
+single-use ticket is the credential), and a request that cannot be upgraded
+does not spend the ticket.
+
+### Delivery and retries
 
 Delivery is claimed, not polled: after every acknowledgement the connection
 claims the next envelope at once. Interaction envelopes (slash commands,
@@ -194,74 +226,79 @@ after it, and an app's connections lease different records at once. Each
 connection holds one event record in flight at a time; this is a recorded
 deviation from Slack, which delivers events concurrently on a connection. A
 record that fans out into several envelopes is retried only for the envelopes
-the app did not acknowledge. An envelope that is
-not acknowledged within thirty seconds goes back to the queue without closing
-the connection and is re-sent with `retry_attempt` and `retry_reason`
-(`timeout`); a first delivery carries `retry_attempt: 0` and an empty
-`retry_reason`. Retries follow Slack's Events API schedule — immediately, after
-one minute, after five minutes — and after the third retry the envelope is
-dropped and logged at error level. A dropped event is recorded in the app's
+the app did not acknowledge.
+
+An envelope that is not acknowledged within thirty seconds goes back to the
+queue without closing the connection and is re-sent with `retry_attempt` and
+`retry_reason` (`timeout`); a first delivery carries `retry_attempt: 0` and an
+empty `retry_reason`. Retries follow Slack's Events API schedule — immediately,
+after one minute, after five minutes — and after the third retry the envelope
+is dropped and logged at error level. A dropped event is recorded in the app's
 delivery-attempt history as delivered, because the store has no separate
 outcome for it.
+
+### Responses
 
 Response payloads are accepted only for envelopes the connection holds and
 must be a JSON object. An absent or `null` payload is a plain acknowledgement,
 and so is `{}` on an event envelope, which several official SDKs attach to
 every acknowledgement; on an interaction `{}` is still a response (an empty
-option list, or a modal closed). The HTTP process records each response durably by app identifier
-and envelope identifier before it advances the event cursor. Replaying the
+option list, or a modal closed). The HTTP process records each response durably
+by app identifier and envelope identifier before it advances the event cursor,
+through the same generated chat boundary in both compositions. Replaying the
 same response is idempotent; replaying the envelope with different payload
 bytes fails with a state conflict. The response record is the explicit handoff
 to the application response processor, so a process crash after the WebSocket
-ack does not erase the response input. The local and distributed compositions
-use the same generated chat boundary for this write.
+ack does not erase the response input.
 
 The response record is an input journal, not an implicit retry or a hidden
 fallback. The reusable response processor claims records with an owner and a
 lease, invokes an explicitly supplied handler, acknowledges each successful
-record, and releases failed records at an explicit retry time. A crash before
-acknowledgement leaves the record reclaimable after the lease expires.
-Acknowledged response and interaction rows are kept for 24 hours, so a replayed
-acknowledgement stays idempotent, and are then pruned on the write path in both
-storage profiles. The
-processor claims one response at a time and renews its lease while the handler
-runs. It does not guess application-specific response semantics or run an
-unbounded retry loop. See this section and the compatibility ledger for the
-supported wire contract.
+record, and releases failed records at an explicit retry time. It claims one
+response at a time and renews its lease while the handler runs; a crash before
+acknowledgement leaves the record reclaimable after the lease expires. It does
+not guess application-specific response semantics or run an unbounded retry
+loop. Acknowledged response and interaction rows are kept for 24 hours, so a
+replayed acknowledgement stays idempotent, and are then pruned on the write
+path in every storage profile. The supported wire contract is recorded in the
+[compatibility ledger](../specs/compatibility.yaml).
 
-The scale-to-zero activator applies the same lease rule to buffered HTTP
-requests. It claims one request at a time and renews that request's lease while
-the selected application handler is running. A slow handler therefore does not
-look like a crashed replica, while a process crash leaves the request
-reclaimable after the last durable lease expires. The activator does not retain
-an unbounded in-memory batch.
+## Workers
 
-The `cmd/socketmode-worker` process supplies the explicit HTTP handler for
+### Socket Mode response worker
+
+`sameoldchat-socketmode-worker` supplies the explicit HTTP handler for
 deployments that forward Socket Mode responses to another application. Run one
-or more replicas with the same application identifier and different owner
-identifiers against shared durable storage. Each replica claims a disjoint
-lease set, so a crash does not require a process-local queue or a coordinated
-shutdown.
-The worker continues after a handler delivery failure because it has released
-the records at an explicit retry time. It exits on claim, release, or
-acknowledgement failure so the deployment platform can restart it.
+or more replicas with the same `-app-id` and different `-owner` values against
+shared durable storage. Each replica claims a disjoint lease set, so a crash
+does not require a process-local queue or a coordinated shutdown. The worker
+continues after a handler delivery failure because it has released the records
+at an explicit retry time. It exits on claim, release, or acknowledgement
+failure so the deployment platform can restart it.
 
-The worker requires `-delivery-format`. Use `record` only for an
-integration that explicitly accepts the internal `events.Record` JSON shape.
-Use `slack-events` with the manifest-owned encrypted application credentials
-and `SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX`; manual `-app-id` and
-`-signing-secret` flags are rejected. That mode translates the durable topic
-through the shared Slack event table, sends only events whose inner shape is
-complete and allowed on the Events API surface, and signs each resulting
-`event_callback` body.
-Topics with no safe Slack representation are acknowledged without being sent;
-malformed or incomplete typed payloads are permanent producer failures rather
-than retry loops. A record may fan out into several callbacks (for example,
-one `member_joined_channel` event per invited user), each with its own stable
-`event_id`, which is what Slack apps deduplicate on. Each request carries
-`X-Slack-Request-Timestamp` and `X-Slack-Signature`; a retry adds
-`X-Slack-Retry-Num` and `X-Slack-Retry-Reason`. (The `record` format instead
-sends the event ID as `Idempotency-Key`.)
+### Event and scheduled-message worker
+
+`sameoldchat-worker` requires `-delivery-format`:
+
+- `record` sends the internal `events.Record` JSON shape, with the event ID as
+  `Idempotency-Key`. Use it only for an integration that explicitly accepts
+  that shape.
+- `slack-events` uses the manifest-owned encrypted application credentials and
+  `SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX`; the manual `-app-id` and
+  `-signing-secret` flags are rejected. It translates the durable topic through
+  the shared Slack event table, sends only events whose inner shape is complete
+  and allowed on the Events API surface, and signs each resulting
+  `event_callback` body as described in
+  [Slack's request-signing guide](https://docs.slack.dev/authentication/verifying-requests-from-slack/).
+
+In `slack-events` mode, topics with no safe Slack representation are
+acknowledged without being sent; malformed or incomplete typed payloads are
+permanent producer failures rather than retry loops. A record may fan out into
+several callbacks (for example, one `member_joined_channel` event per invited
+user), each with its own stable `event_id`, which is what Slack apps
+deduplicate on. Each request carries `X-Slack-Request-Timestamp` and
+`X-Slack-Signature`; a retry adds `X-Slack-Retry-Num` and
+`X-Slack-Retry-Reason`.
 
 Delivery state is kept per record, not per app. A callback an app fails is
 retried on Slack's schedule — immediately, after one minute, after five
@@ -284,32 +321,40 @@ the message — the app's bot for a bot token, the member and app for a user
 token, the member alone for the first-party client — not the bytes of one
 token, so `chat.scheduledMessages.list` and `chat.deleteScheduledMessage`
 keep working after a token is rotated or reissued, while another app's token
-still sees nothing. Permanent posting failures are recorded once rather than retried
-forever; transient failures retain their fenced lease and retry path.
+still sees nothing. Schedules recorded without app or bot attribution belong to
+their author with no app: they execute under that author and list and cancel
+through the author's first-party session, not through an app's token.
+Permanent posting failures are recorded once rather than retried forever;
+transient failures retain their fenced lease and retry path.
 
 When workers are stopped as part of a lifecycle profile, configure both
 `-wake-deadline-url`/`SAMEOLDCHAT_WAKE_DEADLINE_URL` and
 `-wake-deadline-token`/`SAMEOLDCHAT_WAKE_DEADLINE_TOKEN`. After each cycle the
 worker publishes the fenced minimum of scheduled-message and reminder due
-times. Supplying only one coordinate is a configuration error. The ECS module
-keeps its worker always on, so it does not require this optional publication.
+times. Supplying only one coordinate is a configuration error.
+`deploy/ecs-scale-zero` keeps its worker always on, so it does not need this
+publication.
 
-Schedules created before schema 102 never recorded an app or bot. Schema 186
-rekeys every schedule to its owner from the author, app, and bot it carries,
-so those older records belong to their author with no app: they execute under
-their original author and list and cancel through the author's first-party
-session, but not through an app's token.
+### Replicas and images
 
-The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/),
-[Slack's request-signing guide](https://docs.slack.dev/authentication/verifying-requests-from-slack/),
-and [the `apps.connections.open` method reference](https://docs.slack.dev/reference/methods/apps.connections.open/).
-Socket Mode is available in both local composition and distributed composition:
-the HTTP process calls the repository directly in local composition and uses
-the generated gRPC boundary in distributed composition.
-Malformed Socket Mode event payloads are closed as protocol errors; the server
-does not synthesize a replacement payload from an internal topic and string.
-The Real Time Messaging event stream applies the same rule and rejects invalid
-or type-less JSON event payloads.
+Outbox replicas run `sameoldchat-worker` with distinct `-owner` values and the
+same authoritative backend. Blob cleanup replicas run `sameoldchat-blobgc` with
+distinct owners and the same backend and blob store; its audit mode also takes
+`-min-orphan-age` (default `1h`), the grace period an unreferenced object must
+survive before it may be classified as an orphan; see
+[blob lifecycle](blob-lifecycle.md). Neither worker persists queue state
+locally; a failure releases the durable lease with its retry time, and a
+process crash is recovered by lease expiry.
+
+The published container image `ghcr.io/e6qu/someoldchat` contains only
+`cmd/server`. `sameoldchat-chatd`, `sameoldchat-worker`, `sameoldchat-blobgc`,
+`sameoldchat-socketmode-worker`, `sameoldchat-activator`, and
+`sameoldchat-ecs-ws-activator` have no published image: `make build` (or
+`make build-static`) builds all seven binaries, and
+`deploy/ecs-scale-zero/Dockerfile.worker` and
+`deploy/ecs-scale-zero/Dockerfile.websocket-edge` build images for the worker
+and the WebSocket edge. Publishing the other binaries is planned in
+[Phase 7](../PLAN.md#phase-7-compile-time-module-composition).
 
 ## Client addresses behind a reverse proxy
 
@@ -365,12 +410,11 @@ connects to.
   fencing generation.
 - A snapshot is not considered valid merely because upload succeeded.
 
-Snapshot retention is a stated target, not current behaviour. `internal/lifecycle`
-exposes snapshot creation, exact-generation selection, restore, and quarantine
-records, and no delete, prune, or retain operation at all; every published
-generation is retained forever, `retained_snapshots` in the deployment guide's
-configuration schema is read by no code, and no automated restore drill exists
-in `.github/workflows` or `scripts`. The target is:
+Snapshot retention is not implemented. `internal/lifecycle` exposes snapshot
+creation, exact-generation selection, restore, and quarantine records, and no
+delete, prune, or retain operation; every published generation is retained, so
+generations accumulate without bound, and no automated restore drill exists in
+`.github/workflows` or `scripts`. The target is:
 
 - retain the newest verified generation and at least two older verified
   generations by default;
@@ -378,36 +422,35 @@ in `.github/workflows` or `scripts`. The target is:
   never part of publication;
 - run restore drills automatically on disposable infrastructure.
 
-Until those are implemented, generations accumulate without bound and restore
-drills are a manual operator step in the release procedure below.
+Until then, restore drills are a manual operator step in the
+[release procedure](#release-procedure).
 
 ## Disaster recovery
 
 If the current snapshot fails verification or restoration, the activator marks
-that generation unusable, writes a durable
-`quarantine/<generation>.json` record for deterministic integrity failures,
-and the stack enters `FAILED`, preserving evidence and exposing an
-operator-safe status endpoint without leaking internal details publicly.
-Provider availability failures are not quarantined. Restoring an older retained
-generation is an explicit, authenticated operator action with its own
-generation and compatibility checks
-(`POST /restore` with the selected generation, guarded by `-control-token`). It
-is a recovery selection, not an implicit implementation fallback:
+that generation unusable, writes a durable `quarantine/<generation>.json`
+record for deterministic integrity failures, and the stack enters `FAILED`,
+preserving evidence. Lifecycle status is available to the operator through the
+token-guarded `GET /lifecycle`; the public `GET /healthz` answers
+`{"ok":true}` and nothing else. Provider availability failures are not
+quarantined.
+
+Restoring an older retained generation is an explicit, authenticated operator
+action with its own generation and compatibility checks:
+`POST /restore?generation=<n>`, guarded by `-control-token` and accepted only
+while the stack is `FAILED` or `HIBERNATED`. It restores exactly the generation
+named and refuses any generation that is not a verified known-good snapshot.
+There is no automatic walk-back through older generations:
 `specs/scale-to-zero.md` states that restore failure MUST NOT be converted into
-an implicit fallback, and the coordinator's automatic walk-back through older
-generations has been removed to match: `POST /restore` with an explicit
-generation is now the only way an older generation is selected, and it refuses
-any generation but the one the operator named. This paragraph said the removal
-"is being removed" for a release after it had happened, so a reader of the
-shipped documentation was told the implicit fallback was still live.
+an implicit fallback.
 
 The lifecycle controller rejects wake attempts while `FAILED`. An operator must
-explicitly acknowledge the failure, which advances the fencing generation and
-returns the stack to `HIBERNATED`, before a new wake can begin. A failed wake is
-therefore never converted into an implicit retry by an ingress replica.
-The standalone activator remains available in this state for authenticated
-operator inspection and exposes `POST /recover` for that acknowledgement; it
-does not accept ordinary activation until the acknowledgement succeeds.
+explicitly acknowledge the failure with `POST /recover`, which advances the
+fencing generation and returns the stack to `HIBERNATED`, before a new wake can
+begin. A failed wake is therefore never converted into an implicit retry by an
+ingress replica. The standalone activator remains available in this state for
+authenticated operator inspection; it does not accept ordinary activation until
+the acknowledgement succeeds.
 
 Linux/OCI deployments may bind the provider-neutral coordinator to the explicit
 command driver. Every command is required at construction time and receives
@@ -418,87 +461,50 @@ startup rather than selecting an alternate command.
 The authenticated activator exposes `POST /hibernate` for the deployment
 control plane. Hibernation runs with an operation context independent of the
 request context, so a control-plane client timeout cannot cancel fencing,
-snapshot verification, or storage release. `POST /activate` and public wake
-forwarding use the same property for shared recovery.
+snapshot verification, or storage release. `POST /activate`, `POST /restore`,
+and public wake forwarding use the same property for shared recovery.
 
-Three `sameoldchat-activator` settings bound those operations and have defaults,
-so they are easy to miss:
-
-| Flag | Default | Effect |
-|---|---|---|
-| `-wake-deadline` | `2m` | How long a caller waits for a cold start before the activator gives up on that request. |
-| `-wake-safety-margin` | `5m` | Measured restore time plus margin reserved before a scheduled wake deadline. Hibernation is refused with 409 and `Retry-After` when a published deadline falls inside it, and the scheduled-wake loop polls at a tenth of it. |
-| `-request-max-bytes` | `4194304` | One cap for both the spooled request body and the captured response. They must agree, so there is one flag rather than two that can diverge. |
-
-Every other activator setting is required, with one deliberate exception: the
-snapshot-store settings are *conditionally* required and mutually exclusive.
-`-snapshot-root` is required for `-snapshot-store=filesystem` and refused for
-`s3`; `-snapshot-s3-bucket` is required for `-snapshot-store=s3` and refused for
-`filesystem`, and `-snapshot-s3-prefix` applies only to `s3`. Otherwise the
-process exits 2 rather than choosing a snapshot store, key, or command for the
-operator. The
-`-control-token` value is what a WebSocket edge must be given as
-`-activator-token`, and what a `/metrics` scraper must present.
-
-SQLite startup migrations acquire an immediate transaction on a pinned database
-connection. Concurrent replicas therefore serialize schema changes, and a
-process crash rolls back the in-flight migration instead of exposing a partial
-schema.
+The activator's startup flags, including the three with defaults
+(`-wake-deadline`, `-wake-safety-margin`, `-request-max-bytes`), are listed in
+the [deployment guide](deployment.md#lifecycle-activator). Its `-control-token`
+is also the value a WebSocket edge must be given as `-activator-token`, and the
+token a `/metrics` scraper must present.
 
 ## Observability
 
-Record metrics and structured events for:
+The standalone activator publishes bounded Prometheus-compatible aggregates at
+`GET /metrics`: lifecycle state and generation, wake duration by stage,
+snapshot durations and sizes, last successful snapshot and restore, restore
+failures, migration schema version, and buffered or rejected request counts and
+bytes. It does not expose request identifiers, tenant data, credentials, or
+snapshot locations.
 
-- lifecycle state and generation;
-- last successful snapshot and restore;
-- wake duration by stage;
-- buffered request count/bytes and rejection count;
+`GET /metrics` requires the control-plane bearer token, like every other
+control route (`/activate`, `/hibernate`, `/recover`, `/restore`,
+`/wake-deadline`, `/lifecycle`); an unauthenticated scrape receives 401. The
+listener is shared with forwarded application traffic, so authorization is an
+allow-list of exactly two open routes — the forwarded catch-all, which the
+active stack authenticates itself, and `GET /healthz`, which a load balancer
+polls before any token exists. Every other route the activator registers
+requires the token by default, so a newly added operator endpoint cannot be
+unauthenticated by omission.
+
+No process exports these yet; they remain observability targets:
+
 - active SSE connections;
 - outbox depth and oldest age;
 - database leader, quorum, and transaction latency;
-- migration version;
 - dependency policy report age; and
 - Slack compatibility suite status.
-
-The standalone activator publishes bounded Prometheus-compatible aggregates at
-`GET /metrics`. The endpoint contains lifecycle state and generation, wake and
-snapshot durations, snapshot sizes, restore failures, and buffered or rejected
-request counts and bytes. It does not expose request identifiers, tenant data,
-credentials, or snapshot locations.
-
-`GET /metrics` requires the control-plane bearer token, like `POST /activate`,
-`POST /hibernate`, and `POST /recover`. A scraper must be configured with the
-token; an unauthenticated scrape receives 401. The listener is shared with
-forwarded application traffic, so authorization is an allow-list of exactly two
-open routes — the forwarded catch-all, which the active stack authenticates
-itself, and `GET /healthz`, which a load balancer polls before any token exists.
-Every other route the activator registers requires the token by default, so a
-newly added operator endpoint cannot be unauthenticated by omission.
-
-Outbox replicas run `sameoldchat-worker` with distinct owner IDs and the same
-authoritative backend. Blob cleanup replicas run `sameoldchat-blobgc` with
-distinct owner IDs and the same backend/blob store. `sameoldchat-blobgc` also
-takes `-min-orphan-age` (default `1h`), the grace period an unreferenced object
-must survive before an audit may classify it as an orphan; see
-[blob lifecycle](blob-lifecycle.md).
-
-The published container image at `ghcr.io/e6qu/someoldchat` contains only
-`cmd/server`. `sameoldchat-worker`, `sameoldchat-blobgc`,
-`sameoldchat-socketmode-worker`, `sameoldchat-chatd`, `sameoldchat-activator`,
-and `sameoldchat-ecs-ws-activator` have no published image, so on a container
-platform they must be built from this repository. The ECS module includes
-`deploy/ecs-scale-zero/Dockerfile.worker` and
-`deploy/ecs-scale-zero/Dockerfile.websocket-edge`; other binaries still require
-a repository build.
-`make build` and `make build-static` produce all seven for the systemd profile in
-the deployment guide. Neither worker persists
-queue state locally; a failure releases the durable lease with its retry time,
-and a process crash is recovered by lease expiry.
 
 Logs and traces must never contain bearer tokens, signing secrets, session
 cookies, raw private messages, or unredacted file contents.
 
 ## Release procedure
+
+The [publish workflow](deployment.md#published-container-verification) builds
+the server image and attests its provenance and SBOM; CI runs the test suites.
+Every other step below is an operator responsibility.
 
 1. Resolve only dependencies admitted by the dependency policy.
 2. Run all contract, SDK, persistence, lifecycle, browser, and security tests.

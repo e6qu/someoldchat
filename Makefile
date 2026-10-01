@@ -293,7 +293,7 @@ bench:
 	GOCACHE=$(GOCACHE) go test $(BENCH_PKG) -run '^$$' -bench '$(BENCH)' -benchtime=$(BENCHTIME) -benchmem
 
 # Writes CPU and allocation profiles for one package so a regression can be
-# attributed to a call site instead of guessed at. PKG must name a single
+# attributed to a call site instead of guessed at. PROFILE_PKG must name a single
 # package; profiles from several packages would overwrite each other.
 PROFILE_PKG ?= ./internal/domain
 

@@ -9,29 +9,30 @@ buffer as file storage.
 The Slack external upload flow has three explicit operations:
 
 1. `files.getUploadURLExternal` creates a durable upload ticket and returns an
-   opaque upload URL together with the identifier the finished file will carry.
-   That identifier is minted once, before any bytes exist, so a client can
-   record it and reference the file by it after completion; completion never
-   mints a new one.
+   opaque upload URL together with the file identifier. The identifier is
+   minted once, before any bytes exist, and completion keeps it, so a client
+   can record it up front.
 2. The client sends the declared number of bytes to that URL. The server
    streams the request into the blob store and records the ticket as uploaded
    only after the blob store accepts the complete object.
 3. `files.completeUploadExternal` atomically changes the ticket to completed,
    creates the durable file metadata, and appends the file-created event.
 
-An expired or already completed ticket fails. A process crash before the
-completion transaction leaves an uploaded ticket that can be completed again;
-the file metadata and ticket transition commit together. The upload URL is an
-opaque bearer capability, so operators must protect the application endpoint
-and avoid logging request URLs.
+An expired or already completed ticket fails. The file metadata and ticket
+transition commit together, so a crash before completion leaves an uploaded
+ticket that can be completed again.
 
-The same applies to the two token-bearing public read paths the server mints:
-`GET /files/public/{token}` serves a public file download and
-`GET /users/{workspace}/{user}/photo/{token}` serves a user avatar. Both are
-unauthenticated capability URLs — possession of the token is the authorization —
-so a CDN, WAF, or access-log configuration in front of the application must treat
-the whole path as a secret and must not log it. The server-minted upload target
-`POST /internal/files/external/{upload}` is the same class of URL.
+### Capability URLs
+
+Three server-minted paths are unauthenticated capability URLs, where
+possession of the token is the authorization:
+
+- `POST /internal/files/external/{upload}`, the external upload target;
+- `GET /files/public/{token}`, a public file download; and
+- `GET /users/{workspace}/{user}/photo/{token}`, a user avatar.
+
+A CDN, WAF, or access-log configuration in front of the application must treat
+these whole paths as secrets and must not log them.
 
 The upload URL answers with a plain HTTP status, as Slack's does, because the
 official SDKs judge the upload by the status alone: 200 when the bytes are
@@ -91,12 +92,12 @@ durable channel relation by supplying a different channel list.
 
 In local composition the HTTP handler calls the chat service directly. In
 distributed composition the same service methods cross the generated gRPC
-boundary.
-Byte transfer uses a client-streaming gRPC method and does not load the object
+boundary. Byte transfer uses a client-streaming gRPC method and does not load the object
 into application memory.
 
 The storage state machine is implemented by the in-memory development store
-and the SQL store used by SQLite, PostgreSQL compatibility, and dqlite. The
+and the shared SQL store (`internal/store/sqlstore`) used by SQLite,
+PostgreSQL, and dqlite. The
 blob store remains an explicit deployment choice; a disabled blob store fails
 file operations instead of reporting an empty file collection.
 

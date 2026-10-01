@@ -1,91 +1,102 @@
 # Browser qualification
 
-This suite runs the seeded journeys in Chromium, Firefox, and WebKit. It
-deliberately does not state how many: the count went stale the first time
-somebody added a test and stayed wrong for months. `npx playwright test --list`
-answers it, always correctly.
+This suite runs the seeded journeys in Chromium, Firefox, and WebKit.
+`npx playwright test --list` (from this directory) gives the current test count.
 
-The suite exercises behavior that server-side tests cannot observe: session-authenticated
-workspace entry, public-channel preview and joining, message posting with the
-advertised Enter and Shift+Enter behavior, Slack-style search shortcuts,
-Slack-style message focus, chronological arrow/Home/End navigation, and
-keyboard thread, edit, delete, pin, and searchable reaction-picker actions,
-typed workspace/current-conversation message, file, people, and channel search,
-durable recent-search selection and visibility-aware people/channel/file
-people/user-group/channel/emoji typeahead with keyboard navigation,
-theme switching, reactions, pins, and navigation to workspace
-members. It also exercises message editing and deletion, standard/custom emoji
-and channel autocomplete, custom emoji message/reaction rendering, private channel
-creation and duplicate-name errors, named mobile navigation, thread reflow,
-drawer focus containment, contextual mutation failures, unread bookkeeping,
-live delivery, history pagination, search-result positioning, JSON-authored
-blocks, attachments, link previews, draft preservation, reviewed DM
-participant expansion with selected history, and in-place group-DM conversion
-to a private channel. Activity qualification also creates a real private
-channel through the Slack-compatible API, invites the signed-in member, and
-checks its durable source-linked Invitations item. The current
-Slack Later journey is exercised through focused-message `A`, private
-save/unsave state, In progress, Completed, Archived, restore, source navigation,
-and removal. It also
-exercises message-reminder `M`, preset and custom local times, personal
-reminder editing/completion/deletion, `/remind` channel creation, and the
-private `/remind list` projection. It also
-creates and installs a remote-function app, builds and publishes a two-step
-workflow, creates a link trigger, starts one durable execution, reloads its run
-state, creates a webhook trigger, invokes its owner-revealed secret URL over
-HTTP, and observes the indistinguishable 404 for a wrong secret, and checks
-the builder and run views for automated accessibility. It also
-schedules a message in the browser's local time zone, verifies that the
-pending item does not appear in channel history, reviews it on the Scheduled
-surface, and cancels it. It signs out through the application UI,
-asserts the application-owned signed-out destination remains terminal across a
-reload, does not invent a sign-in route when the local fixture has no provider,
-and verifies the revoked session cannot reopen a protected page. For app
-surfaces the suite plays a Socket Mode app itself: it installs an app, issues
-its app-level token in the developer console, holds the app's socket, and
-acknowledges envelopes as Bolt does, so a global shortcut opening a modal
-(validation errors, submission, close), a legacy dialog with a
-`dialog_suggestion`-loaded select, and an App Home published on
-`app_home_opened` and re-rendered after a button are exercised end to end. Provider-backed
-qualification separately verifies the configured sign-in destination.
+## Running
 
-Every test title carries one or more stable IDs from the normative
-[Slack user-journey catalog](../../specs/journeys/README.md). The suite also
-runs `@axe-core/playwright` 4.12.1 against the desktop workspace, the
-conversation-switcher dialog, Browse channels, the status dialog, bookmarks
-and Pins, and a 320-pixel narrow viewport, and checks that the shell reflows
-without sideways scrolling at 320 pixels and at 200% zoom. Those automated
-WCAG 2.0/2.1 A/AA and WCAG 2.2 AA checks complement, but do not replace, manual
-screen-reader, keyboard, zoom, and live-Slack comparison evidence.
-
-Run it from the repository root:
+From the repository root:
 
 ```sh
-make browser-qualification
+make browser-qualification        # npm ci, install browsers, run the suite
+make browser-qualification-run    # run again without reinstalling
 ```
 
+The suite uses the Playwright and `@axe-core/playwright` versions pinned in
+`package.json` and the lock file. For each engine, and once more for
+administration, it starts `cmd/server` in local composition with the in-memory
+store and a disposable browser session. It does not test a production
+deployment or use a remote authorization provider.
+
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` may point at an already-installed
-Chromium-compatible executable. This is an explicit browser coordinate for
-developer workstations; CI otherwise installs and runs the lockfile-matched
-Playwright browser builds.
+Chromium-compatible executable on a developer workstation. It does not affect
+Firefox or WebKit, which always use Playwright's lockfile-matched builds, and
+CI otherwise installs and runs the lockfile-matched browsers.
 
-The suite uses the pinned Playwright version in `package.json` and the lock
-file. The explicit Chromium executable override does not weaken Firefox or
-WebKit qualification; those engines always use Playwright's lockfile-matched
-builds. It starts `cmd/server` with the local in-memory store and a disposable
-browser session. It does not test a production deployment or use a remote
-authorization provider.
+## What it covers
 
-The separate `make shauth-sso-qualification` gate requires
-`SHAUTH_SOURCE_DIR` to point at Shauth commit
-`0fda680cba964e5768ed75a9c3e5b7230c418ca6`. It uses the same pinned Playwright
-installation to exercise two real SameOldChat relying parties against real
-Shauth, Ory Hydra, and PostgreSQL services. The two applications use distinct
-databases and dynamically allocated loopback ports, while `.localhost` origins
-preserve secure relying-party origin behavior without fixed host-port
-collisions.
+The suite exercises behavior that server-side tests cannot observe:
 
-The browser qualification is separate from the official Slack SDK suites in
+- **Workspace and messaging:** session-authenticated workspace entry,
+  public-channel preview and joining, posting with Enter and Shift+Enter,
+  editing and deletion, JSON-authored blocks, attachments, link previews, draft
+  preservation, live delivery, history pagination, and unread bookkeeping.
+- **Keyboard and focus:** Slack-style message focus, chronological
+  arrow/Home/End navigation, keyboard thread, edit, delete, pin, and
+  searchable reaction-picker actions, named mobile navigation, thread reflow,
+  and drawer focus containment.
+- **Search and typeahead:** Slack-style search shortcuts; typed workspace and
+  current-conversation message, file, people, and channel search;
+  search-result positioning; durable recent-search selection; and
+  visibility-aware people, user-group, channel, file, and emoji typeahead with
+  keyboard navigation.
+- **Conversations:** reactions, pins, standard and custom emoji, channel
+  autocomplete, private channel creation and duplicate-name errors, reviewed
+  DM participant expansion with selected history, in-place group-DM conversion
+  to a private channel, and navigation to workspace members.
+- **Activity, Later, and reminders:** a private channel created through the
+  Slack-compatible API produces a durable, source-linked Invitations item;
+  focused-message `A` saves for Later, with In progress, Completed, Archived,
+  restore, source navigation, and removal; message-reminder `M` with preset and
+  custom local times; personal reminder editing, completion, and deletion;
+  `/remind` channel creation and the private `/remind list` projection.
+- **Scheduled messages:** scheduling in the browser's local time zone, absence
+  from channel history while pending, review on the Scheduled surface, and
+  cancellation.
+- **Workflows:** creating and installing a remote-function app, building and
+  publishing a two-step workflow, a link trigger that starts one durable
+  execution whose run state survives reload, and a webhook trigger invoked
+  over HTTP through its owner-revealed secret URL, with the indistinguishable
+  404 for a wrong secret.
+- **App surfaces:** the suite plays a Socket Mode app itself. It installs an
+  app, issues its app-level token in the developer console, holds the app's
+  socket, and acknowledges envelopes as Bolt does, so a global shortcut opening
+  a modal (validation errors, submission, close), a legacy dialog with a
+  `dialog_suggestion`-loaded select, and an App Home published on
+  `app_home_opened` and re-rendered after a button are exercised end to end.
+- **Sign-out:** signing out through the UI, a signed-out destination that stays
+  terminal across reload, no invented sign-in route when the fixture has no
+  provider, and a revoked session that cannot reopen a protected page.
+  Provider-backed qualification separately verifies the configured sign-in
+  destination.
+- **Theme switching.**
+
+Every test title carries one or more stable IDs from the normative
+[Slack user-journey catalog](../../specs/journeys/README.md).
+
+Accessibility scans run `@axe-core/playwright` with the WCAG 2.0/2.1 A/AA and
+WCAG 2.2 AA tags across many surfaces, including the desktop workspace, the
+conversation switcher, Browse channels, the status dialog, bookmarks and Pins,
+and the workflow builder and run views, and fail on serious or critical
+violations. The suite also checks that the shell reflows without sideways
+scrolling at 320 CSS pixels and at 200% zoom. These automated checks
+complement, but do not replace, manual screen-reader, keyboard, zoom, and
+live-Slack comparison evidence.
+
+The [`probes/`](probes/README.md) directory holds standalone reproductions
+that the suite never runs.
+
+## Shauth SSO qualification
+
+`make shauth-sso-qualification` requires `SHAUTH_SOURCE_DIR` to point at a
+Shauth checkout of commit `0fda680cba964e5768ed75a9c3e5b7230c418ca6`. It uses
+the same pinned Playwright installation to exercise two real SameOldChat
+relying parties against real Shauth, Ory Hydra, and PostgreSQL services. The
+two applications use distinct databases and dynamically allocated loopback
+ports, while `.localhost` origins preserve secure relying-party origin behavior
+without fixed host-port collisions.
+
+The official Slack SDK suites are separate; see
 [`../official-sdk-qualification`](../official-sdk-qualification/README.md).
-The repository's build and release checks are documented in
-[`../../README.md`](../../README.md).
+Repository build and release checks are listed in the
+[repository overview](../../README.md#development-commands).

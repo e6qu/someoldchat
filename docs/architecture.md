@@ -12,21 +12,19 @@ not call the Slack-compatible interface over HTTP.
 
 ## Implementation principles
 
-The engineering rules live in `CLAUDE.md` at the repository root and are not
-restated here. The two that shape this document: the program fails fast and
-loudly — missing, invalid or contradictory configuration is an error, never a
-silent default — and where several implementations are genuinely supported the
-caller selects one explicitly (`memory`, `sqlite`, `postgresql`, `dqlite`).
-Those are operating modes, not fallbacks, and an unavailable selected mode
-fails at startup.
+The engineering rules are in [`AGENTS.md`](../AGENTS.md). Two of them shape
+this document: the program fails fast and loudly (missing, invalid, or
+contradictory configuration is an error, never a silent default), and where
+several implementations are supported the caller selects one explicitly
+(`memory`, `sqlite`, `postgresql`, `dqlite`). Those are operating modes, not
+fallbacks, and an unavailable selected mode fails at startup.
 
 ## Crash-only operation
 
 SameOldChat follows the crash-only design described by the
 [Crash-Only Software](https://lwn.net/Articles/191059/) principle. A process,
 worker, database node, or active deployment may be terminated abruptly at any
-point; recovery uses the same validated
-startup path as ordinary activation. There is no correctness-critical graceful
+point; recovery uses the same validated startup path as ordinary activation. There is no correctness-critical graceful
 shutdown protocol and no user action required to repair a crashed component.
 
 This requires that:
@@ -53,15 +51,18 @@ recorded in the compatibility ledger.
 
 Distributed module links use mutual TLS. A module server requires a configured
 client CA and a caller presents a client certificate; incomplete TLS material
-fails startup rather than opening an unauthenticated internal port.
+fails startup rather than opening an unauthenticated internal port. The client
+and server authorities must differ; see
+[separable module architecture](modules.md).
 
 ## Stateless replicas and state stores
 
 Application replicas are stateless workers over authoritative state stores.
 They may hold request-local data and disposable caches, but correctness MUST
 NOT depend on process memory, replica affinity, local queues, local sessions,
-or local event subscriptions. Durable state belongs in SQLite/dqlite, object
-storage, or the explicitly designated lifecycle control store. Browser session
+or local event subscriptions. Durable state belongs in the selected SQL store
+(SQLite, PostgreSQL, or dqlite), object storage, or the explicitly designated
+lifecycle control store. Browser session
 validity and revocation are read and written through that durable store; a
 cookie is only a bearer reference and never local authority. Workspace
 membership and role are also durable records; a user’s workspace identifier
@@ -74,28 +75,29 @@ so lease expiry represents a crashed or fenced worker rather than a slow
 healthy worker; this is never an alternate implementation path.
 
 Both compositions may run multiple replicas. In local composition
-(`-chat-mode local`, the `monolith` target in `modules.json`) each replica
-contains the direct-call composition and all replicas use the same qualified
-durable stores. In distributed composition (`-chat-mode grpc`, the `separate`
-target) module processes have independent replica counts and communicate through the selected transport; each module's
-replicas still use the module's state store and must be replaceable without
-data migration or user repair. The in-memory store is a single-replica test
-backend only; selecting it for a multi-replica deployment is invalid.
+(`-chat-mode local`, the `monolith` targets in `modules.json`) each replica
+contains the direct-call composition and all replicas share one qualified
+durable store. In distributed composition (`-chat-mode grpc`, the
+`separate-chat` targets) module processes have independent replica counts and
+communicate over gRPC; each module's replicas share that module's store and
+must be replaceable without data migration or user repair. A process that owns
+a module may run more than one replica only on PostgreSQL or dqlite (dqlite
+needs at least three); `memory` and `sqlite` are single-replica.
 
 Direct and multi-person conversations use durable participant sets and a
 unique participant-set key, so concurrent `conversations.open` calls from
 different replicas converge on one conversation rather than creating
 replica-local duplicates. A participant set of one is the caller's self-DM.
 New one-to-one conversations receive Slack's D-prefixed identifiers; group
-DMs and channels keep the C prefix, and conversations created before that
-change keep the identifier every stored reference already names.
+DMs and channels use the C prefix. Existing one-to-one conversations with a C
+identifier keep it, because stored references already name it.
 
 Named channels likewise use a durable workspace-and-name unique index. The
 service normalizes the human input once and every storage profile enforces the
 same address invariant for creation and rename, so concurrent requests cannot
-create two destinations with one channel name. The migration that introduced
-the index preserves the first existing name, deterministically disambiguates
-only later duplicates, and records each repair in
+create two destinations with one channel name. When the index is created on an
+existing database, the first holder of a name keeps it, later duplicates are
+renamed deterministically, and each rename is recorded in
 `schema_migration_notices`.
 
 ## Runtime topology
@@ -114,6 +116,7 @@ Internet ──> activator/ingress ─────┼─────────
                            ▼
                     persistence port
                       ├─ SQLite 0..1
+                      ├─ PostgreSQL (external)
                       └─ dqlite 0 or 3..N
 ```
 
@@ -127,33 +130,41 @@ control store, verified snapshot manager, explicit command driver, and bounded
 reverse proxy. It requires its declared configuration and never becomes a no-op
 activator when lifecycle commands or snapshot credentials are absent.
 
-The runnable `cmd/worker` is a stateless outbox and scheduled-message replica.
-It requires an explicit state backend, workspace, unique owner, HTTP delivery
-target, and delivery format. `record` sends the internal event record to an
-explicit integration; `slack-events` validates a Slack Events API envelope,
-adds the configured application ID and signing-secret headers when the durable
-payload is an inner event, and fails loudly for identifier-only domain events.
-Both formats use durable leases and the event ID as their idempotency key. Due
+The runnable `cmd/worker` is a stateless outbox, scheduled-message, and
+reminder replica. It requires an explicit state backend, a unique `-owner`,
+and a `-delivery-format`. `record` sends the internal event record for one
+`-workspace` to one `-delivery-url`. `slack-events` is the multi-workspace
+production mode: it delivers each event to the request URL its installed app's
+manifest declares, signed with that app's stored signing secret, so it requires
+`-app-credential-key-hex` and `-auth-public-url` and rejects `-workspace`,
+`-delivery-url`, `-app-id`, and `-signing-secret`. Both formats use durable
+leases and the event ID as their idempotency key. Due
 scheduled messages, including normalized Block Kit and attachment payloads, are
 claimed with a separate durable lease and posted with the scheduled-message ID
-as their idempotency key before the scheduled record is acknowledged. A worker crash therefore leaves both committed events and
-scheduled records claimable after lease expiry rather than losing a
-process-local queue.
+as their idempotency key before the scheduled record is acknowledged. A worker
+crash therefore leaves committed events and scheduled records claimable after
+lease expiry rather than losing a process-local queue. With
+`-wake-deadline-url` and `-wake-deadline-token` the worker also publishes the
+earliest scheduled wake to the activator.
 
 The runnable `cmd/socketmode-worker` is a stateless Socket Mode response
-replica. It claims responses through the process-independent chat boundary and
-posts each response payload to an explicitly configured HTTP destination with
-the application identifier, envelope identifier, and idempotency key. A
-successful destination response acknowledges the durable record. A failed
-delivery releases it at the configured retry time, and a process crash leaves
-the lease available to another replica after expiry.
-The worker treats a destination failure as an explicit, bounded retry, but
-exits on durable-store or acknowledgement failure so the orchestrator can
-restart it rather than hiding a broken storage path.
+replica. It requires `-store` (with that backend's storage settings), `-app-id`,
+a unique `-owner`, and `-response-url`. It claims responses through the
+process-independent chat boundary and posts each payload to the response URL
+with the application identifier, envelope identifier, and idempotency key. A
+2xx response acknowledges the durable record. A failed delivery releases it at
+the configured retry time, and a process crash leaves the lease available to
+another replica after expiry.
+
+Both workers tolerate transient store, claim, or delivery failures up to
+`-max-consecutive-failures` (default 20) poll cycles without progress, then
+exit so the orchestrator restarts them and an alert fires, rather than hiding a
+broken storage path.
 
 The runnable `cmd/blobgc` is a separate stateless blob-cleanup replica. It
 claims only the durable `file.blob_delete` topic, uses the same lease/retry
 rules, and treats an already-missing object as an idempotent completed delete.
+Its `-audit` mode is described in [blob lifecycle](blob-lifecycle.md).
 
 ## Go package boundaries
 
@@ -165,6 +176,9 @@ cmd/
   socketmode-worker/  Socket Mode response process
   blobgc/         blob cleanup process
   activator/      wake coordinator and reverse proxy
+  ecs-ws-activator/  WebSocket edge for deploy/ecs-scale-zero
+  modulegen/, contractcheck/, journeycheck/, sdkcheck/, sdkcoverage/,
+  rebaseaudit/    build and qualification tools run by make targets
 internal/
   activator/      standalone wake coordinator handler and request spool
   api/slack/      Slack wire decoding and response mapping
@@ -176,13 +190,14 @@ internal/
   service/        transactions and application use cases
   store/          persistence ports
     memory/       single-replica development store
-    sqlstore/     portable SQLite repositories and lifecycle state
-    postgres/     PostgreSQL repositories
-    dqlite/       clustered lifecycle adapter
+    sqlstore/     shared SQL repositories (SQLite, PostgreSQL, dqlite) and lifecycle state
+    postgres/     PostgreSQL driver and dialect translation over sqlstore
+    dqlite/       dqlite node and cluster over sqlstore (`dqlite` build tag)
     dqlitetest/   dqlite cluster harness
+    storetest/    behavioral checks every repository must pass
   events/         event journal, outbox, webhook delivery
   outbox/         outbox delivery worker
-  scheduler/      scheduled-message worker
+  scheduler/      scheduled-message and reminder workers
   socketmode/     Socket Mode connection, envelope, and response handling
   observability/  bounded Prometheus-compatible aggregates
   realtime/       SSE registration and replay
@@ -190,6 +205,8 @@ internal/
   lifecycle/      state machine, fencing, snapshots
   modules/        stable module APIs and transport implementations
   generated/      generated composition bindings
+  ...             leaf helpers (blockkit, slackobject, slackemoji, secretbox,
+                  lease, thumbnail, huddlesfu, clientaddr, appmanifest, slackapp)
 proto/            gRPC service schemas
 specs/            project requirements and pinned contract sources
 deploy/           request-triggered activation infrastructure modules
@@ -198,10 +215,12 @@ tests/            application and official SDK qualification tests
 docs/             architecture, operations, and deployment guidance
 ```
 
-Module API packages are the separable seams. The generated composition root
-chooses local bindings for local composition or generated transport bindings for
-distributed composition. Business packages do not inspect topology or choose a
-transport. See [separable module architecture](modules.md).
+Module API packages are the separable seams. `cmd/server` chooses the generated
+local or remote chat provider at startup from `-chat-mode`, so today its binary
+links both; business packages do not inspect topology or choose a transport.
+Choosing the composition at build time instead is planned in
+[PLAN.md Phase 7](../PLAN.md#phase-7-compile-time-module-composition). See
+[separable module architecture](modules.md).
 
 Imports point inward. Wire adapters (`api/slack`, `web`, `realtime`, `auth`)
 depend on module APIs, `domain`, and the store port's sentinels, never on
@@ -215,13 +234,14 @@ deployment platform.
 
 Authoritative state is restricted to:
 
-- the active SQLite/dqlite database;
+- the active SQLite, PostgreSQL, or dqlite database;
 - immutable file objects;
 - verified database snapshots and manifests; and
 - minimal lifecycle metadata used while the database is absent.
 
 Caches and in-process broadcasts are disposable. Sessions, idempotency keys,
-read cursors, event offsets, job leases, scheduled work, and call lifecycles are durable.
+read cursors, event offsets, job leases, scheduled work, and call lifecycles
+are durable.
 
 ## Transaction and event model
 
@@ -252,21 +272,19 @@ Replica-local fan-out is an optimization only.
 
 Both live streams — SSE and RTM — read the journal only through the per-user
 projection (`ListUserEventsAfter`); the unfiltered workspace journal is not
-part of the chat service surface or its gRPC boundary. Records about conversations the reader is
-not a member of are withheld, and content-bearing records are hydrated only
-after membership is proven. `realtime.NewHandler` and `NewRTMHandler` accept
+part of the chat service surface or its gRPC boundary. Records about
+conversations the reader is not a member of are withheld, and content-bearing
+records are hydrated only after membership is proven. `realtime.NewHandler` and `NewRTMHandler` accept
 nothing else, so a stream cannot be wired to the raw workspace journal. Each
 projected page reports the last sequence it examined, visible or not, and a
 stream resumes after that sequence, so withheld records are read once rather
 than on every poll.
 
-Journal records written before the typed payload contract cannot be delivered
-and cannot be repaired. The upgrade quarantines them once — marked
-`undeliverable`, excluded from every consumer read, each recorded in
-`schema_migration_notices` — instead of letting every new stream re-scan and
-re-log the same head of the journal. Consumers still skip and log any
-undecodable record they encounter at runtime; the quarantine is what makes
-that skip durable for the rows history already holds.
+Journal records without a typed payload cannot be delivered or repaired.
+Migration quarantines them once: each is marked `undeliverable`, excluded from
+every consumer read, and recorded in `schema_migration_notices`, so new
+streams do not re-scan and re-log them. Consumers also skip and log any
+undecodable record they meet at runtime.
 
 Long-lived SSE connections are activity and intentionally prevent the web tier
 from scaling to zero. Once clients disconnect and the idle policy is satisfied,
@@ -286,47 +304,55 @@ web replicas may stop.
   PostgreSQL allocates an identity at insert time, so there a row is inserted
   with a provisional negative sequence and a deferred constraint trigger gives
   it its final sequence at commit, under a transaction-scoped advisory lock
-  held until the commit is visible. The cost is that event-producing commits
-  on PostgreSQL are serialized and forgo group commit: on a local PostgreSQL
-  16, sixteen concurrent writers doing nothing but appending events went from
-  roughly 4,300–6,500 to 1,600–2,500 appends a second. Writes that produce no
-  event, and everything a transaction does before its commit, are unaffected.
+  held until the commit is visible. Event-producing commits on PostgreSQL are
+  therefore serialized and forgo group commit (measured on local PostgreSQL 16
+  with sixteen append-only writers: roughly 1,600–2,500 instead of
+  4,300–6,500 appends a second). Writes that produce no event, and everything
+  a transaction does before its commit, are unaffected.
 - Every lifecycle and writer lease includes a fencing generation so a process
   from a previous activation cannot write after hibernation begins.
 
 ## Route inventory outside `/api`
 
 Every Slack Web API method is `/api/{method}` and is enumerated in
-[`specs/compatibility.yaml`](../specs/compatibility.yaml). These are the routes
-that are not, so the set is complete rather than merely representative — an
-operator configuring a CDN, WAF, or access-log redaction policy needs all of
-them.
+[`specs/compatibility.yaml`](../specs/compatibility.yaml). The table below
+lists the other route groups `cmd/server` serves, for operators configuring a
+CDN, WAF, or access-log redaction policy. The browser surface under `/app` is
+large and changes often, so it is listed by prefix; `internal/web` registers
+the individual routes.
 
 | Route | Purpose |
 |---|---|
 | `GET /healthz`, `GET /readyz` | liveness and end-to-end readiness |
+| `GET /monitoring/observation` | bearer-authenticated monitoring document; see [operations](operations.md#health-and-monitoring-endpoints) |
 | `GET /{$}` | redirect to `/app` |
-| `GET /app`, `/app/search`, `/app/members`, `/app/timeline` | HTMX application pages and fragments |
-| `POST /app/message`, `/app/message/update`, `/app/message/delete`, `/app/profile`, `/app/conversation/create`, `/app/conversation/open`, `/app/join`, `/app/reaction`, `/app/reaction/remove`, `/app/pin`, `/app/pin/remove`, `/app/read`, `/app/session/revoke` | Browser workspace mutations |
-| `GET /app/admin/auth` | administrative authorization surface |
+| `GET`/`POST /app`, `/app/...` | session-authenticated HTMX pages, fragments, and browser mutations, including `/app/admin/...` |
+| `GET /archives/{channel}/{timestamp}` | Slack-style message permalink |
+| `GET /favicon.ico`, `GET /favicon.svg` | site icon |
 | `GET /login`, `GET /auth/{provider}`, `GET /auth/{provider}/callback`, `POST /logout`, `GET /signed-out`, `GET /me`, `GET /auth/validation` | browser authorization; see [authentication](authentication.md) |
 | `POST /auth/oidc/backchannel-logout`, `GET /auth/shauth/logout/complete` | provider-initiated logout |
-| `GET /events` | server-sent event stream, 16 KiB message ceiling |
-| `GET /rtm` | Real Time Messaging WebSocket |
+| `GET`/`POST /oauth/authorize`, `/oauth/v2/authorize` | app installation consent |
+| `GET /events` | server-sent event stream |
+| `GET /rtm` | Real Time Messaging WebSocket; 16 KiB inbound message limit |
 | `/socket-mode` | Socket Mode WebSocket, mounted with the Web API and RTM by `slack.Mount` in every composition |
-| `POST /services/{workspace}/{app}/{secret}` | incoming webhook delivery; see [incoming webhooks](incoming-webhooks.md) |
 | `POST /internal/admin/incoming-webhooks/create`, `/enable` | webhook administration |
-| `GET /internal/slack-lists/download.csv` | `slackLists` CSV export |
-| `GET /avatars/{workspace}/{user}/{size}.png` | generated default avatar at one of the profile image sizes; unauthenticated, and it discloses only the member color every user object already carries |
+| `GET /internal/slack-lists/download.csv`, `GET /internal/exports/workflow-step-responses.csv` | token-authenticated CSV exports |
+| `GET /avatars/{workspace}/{user}/{size}.png`, `GET /team-icons/{workspace}/{size}.png` | generated default images; unauthenticated, and they disclose only the color every user or team object already carries |
 
-Three routes are **unauthenticated token-bearing capability URLs**: possession of
-the path is the authorization.
+`/metrics` is not on this listener; it is served only on the operator-only
+`-metrics-listen` address.
+
+These routes are **unauthenticated token-bearing capability URLs**: possession
+of the path is the authorization.
 
 | Route | Purpose |
 |---|---|
 | `GET /files/public/{token}` | public file download |
 | `GET /users/{workspace}/{user}/photo/{token}` | user avatar |
 | `POST /internal/files/external/{upload}` | server-minted external upload target |
+| `POST /services/{workspace}/{app}/{secret}` | incoming webhook delivery; see [incoming webhooks](incoming-webhooks.md) |
+| `POST /services/triggers/{workspace}/{trigger}/{secret}` | workflow webhook trigger |
+| `POST /app-response/{token}` | app `response_url` |
 
 Treat the whole path of each as a secret: do not log it, do not place it in a
 referrer-leaking context, and do not cache it under a shared key. See
@@ -336,18 +362,13 @@ referrer-leaking context, and do not cache it under a shared key. See
 
 ### Local
 
-One `cmd/server` process, a SQLite file, and a local blob directory. There is no
-combined server/worker process and no in-process activator: `cmd/server` imports
-neither `internal/outbox` nor `internal/scheduler` nor `internal/lifecycle`, so
-outbox delivery, scheduled messages, and blob cleanup still require the separate
-`cmd/worker` and `cmd/blobgc` processes and lifecycle testing requires the
-separate `cmd/activator`.
-
-This is deliberate rather than an omission. `cmd/worker` requires an explicit
-`-delivery-format` with no safe default, plus an owner identity that must be
-unique per replica, and `cmd/blobgc` needs its own lease owner; folding either
-into the server would mean inferring configuration the program is required to
-reject.
+One `cmd/server` process, a SQLite file, and a local blob directory. The server
+runs no background work: outbox delivery, scheduled messages, and blob cleanup
+require the separate `cmd/worker` and `cmd/blobgc` processes, and lifecycle
+testing requires `cmd/activator`. They stay separate because `cmd/worker`
+requires an explicit `-delivery-format` and a per-replica owner identity, and
+`cmd/blobgc` its own lease owner; folding them into the server would mean
+inferring configuration the program is required to reject.
 
 ### Small scale-to-zero
 
@@ -357,9 +378,9 @@ for blobs/snapshots. The volume or verified snapshot survives shutdown.
 ### Production
 
 Activator, independent 0..N web/API and worker deployments, object storage,
-and a three-or-more-node dqlite stateful deployment while active. During
-application hibernation those nodes stop after a verified snapshot is
-published.
+and either a three-or-more-node dqlite deployment while active or an external
+[PostgreSQL](postgresql.md) server. During application hibernation dqlite nodes
+stop after a verified snapshot is published.
 
 Managed-container platforms MAY place the stateless tiers directly on their
 serverless container service while using lifecycle-controlled companion compute

@@ -4,43 +4,57 @@ SameOldChat has explicit service seams so one deployment can be a static Go
 binary while another can place modules in separate processes. Business code
 depends on module APIs, never on a transport or on a composition decision.
 
-The module manifest is [modules.json](../modules.json). It is deliberately JSON
-and validated with the standard library so the generator has no hidden parser
-dependency. `internal/modules/*/api` contains stable interfaces; implementations
-live elsewhere; generated bindings live in `internal/generated`.
+## Manifest and generation
 
-Run:
+The module manifest is [modules.json](../modules.json). It is JSON so that
+`cmd/modulegen` can validate it with the standard library alone.
+`internal/modules/*/api` holds the stable interfaces, implementations live
+elsewhere, and generated bindings live in `internal/generated`.
 
 ```sh
 go generate ./...
 make generated-check
 ```
 
-`modulegen` validates module names, references, target placement, and explicit
-storage selection, then
-generates local bindings, remote client/server-registration bindings, and
-typed target profiles containing process replica counts.
-`go generate` is explicit and is never assumed to run as part of `go build`;
-stale generated files fail `make check`.
+`modulegen` validates module names and imports, target placement, explicit
+storage selection, and replica counts, then generates the local provider, the
+remote client and server-registration bindings, and typed target profiles with
+per-process replica counts. `go generate` is never assumed to run as part of
+`go build`; stale generated files fail `make check`.
 
-Build tags are reserved for coarse binary roles. They must not encode every
-local/remote combination. The current targets include local composition (the
-direct-call `monolith` target) and distributed composition (the `separate`
-target, a `sameoldchat-chatd` process reached through the explicit TLS gRPC
-adapter). The transport
-is selected by composition, not by business logic. No remote transport is
-silently substituted for local composition. The server and `sameoldchat-chatd` composition
-roots consume generated transport bindings, so the declared module seam is
-the source of truth for both local and distributed assembly.
+The manifest declares one module, `chat`, and four targets:
 
-Both targets can run multiple replicas. Monolith replicas contain the direct
-call composition and share the qualified state store. Separate module
-processes have independent replica counts and share the state store owned by
-that module. In-memory storage is restricted to one development replica;
-dqlite-owning processes require at least three replicas for the configured
-three-voter quorum.
+| Target | Composition | Storage | Replicas |
+|---|---|---|---|
+| `monolith` | local | memory | app 1 |
+| `monolith-replicated` | local | dqlite | app 3 |
+| `separate-chat` | distributed | memory | http 1, chat 1 |
+| `separate-chat-replicated` | distributed | dqlite | http 4, chat 3 |
 
-The runtime shapes are explicit:
+`modulegen` refuses more than one replica of a module-owning process on
+`memory` or `sqlite`, and fewer than three on `dqlite` (the configured
+three-voter quorum). PostgreSQL has no replica limit. A process that owns no
+module, such as `http` in the distributed targets, can scale freely.
+
+## Selecting the composition
+
+Today the composition is selected at runtime. `cmd/server` links both the
+local and the remote chat provider and picks one from `-chat-mode`:
+
+- `-chat-mode local` calls `generated.ProvideChatServiceLocal` (through
+  `internal/app/localchat`) and opens the selected store in process.
+- `-chat-mode grpc` calls `generated.ProvideChatServiceRemote` and reaches
+  `sameoldchat-chatd` over mutual-TLS gRPC.
+
+`sameoldchat-chatd` opens its store through the same local provider and serves
+it with the chat gRPC transport. The target profiles validate topology data;
+no build output corresponds to a target yet. Generating a composition root per
+target, so the transport is chosen at build time and `-chat-mode` is retired,
+is planned in [PLAN.md Phase 7](../PLAN.md#phase-7-compile-time-module-composition).
+
+Build tags are reserved for coarse binary roles (for example `dqlite`). They
+must not encode every local/remote combination. No remote transport is
+silently substituted for local composition.
 
 ```sh
 sameoldchat -chat-mode local -store sqlite -db 'file:sameoldchat.db' \
@@ -64,68 +78,60 @@ Both processes take the same `-auth-public-url`: the HTTP process builds the
 Web API's URLs on it and chatd builds the event payloads; see
 [Public URL](operations.md#public-url).
 
-The two authorities are deliberately different files, and this example used to
-name one `ca.crt` for both. `-tls-client-ca` answers "who may connect to chatd"
-and `-chat-ca` answers "which server is chatd". With one authority for both,
-every certificate that authority issues authenticates as a client to the whole
-internal data plane — including `chat.crt`, the chatd server certificate
-itself, so anything holding the server's own key becomes a privileged client.
-Issue the server certificate from `server-ca.crt` and the http process's client
-certificate from `client-ca.crt`, and give chatd only `client-ca.crt`.
+The two certificate authorities must be different files. `-tls-client-ca`
+answers "who may connect to chatd" and `-chat-ca` answers "which server is
+chatd". With one authority for both, every certificate it issues, including
+chatd's own server certificate, authenticates as a client to the whole internal
+data plane. Issue the server certificate from `server-ca.crt` and the HTTP
+process's client certificate from `client-ca.crt`, and give chatd only
+`client-ca.crt`. chatd refuses to start when its own certificate would verify
+as a client against `-tls-client-ca`.
 
-The HTTP process does not open a local database in `grpc` mode. A
-`SAMEOLDCHAT_DATABASE_URL` environment value is used only by the `local` mode;
-an explicit `-db` value in `grpc` mode is rejected as contradictory
-configuration.
-
-The separate example permits independent HTTP and chat replica counts behind
-their respective load balancers. The manifest also includes replicated targets
-(`monolith-replicated` and `separate-chat-replicated`) to validate that replica
-counts are topology data rather than transport fallbacks. No local chat store
-is opened by the HTTP process in gRPC mode.
+In distributed composition the HTTP process opens no local store. Settings
+that only the chat owner can act on (`-store`, `-db`, the `-dqlite-*` and
+`-blob-*` flags, `-bootstrap-admin-email`, `-app-credential-key-hex`,
+`-app-token`, `-app-id`) are rejected as contradictory configuration, and
+`SAMEOLDCHAT_DATABASE_URL` is read only in local composition. Give those
+settings to `sameoldchat-chatd`.
 
 Authentication lookups also cross the module seam: HTTP replicas use the
-generated remote token/session stores, while `sameoldchat-chatd` owns their durable records.
-No separate HTTP replica keeps authoritative authentication state in memory.
-Session revocation crosses the same seam as an explicit durable mutation; the
-HTTP replica never treats a local cookie or process cache as authoritative.
+generated remote token and session stores, while `sameoldchat-chatd` owns
+their durable records. Session revocation crosses the same seam as an explicit
+durable mutation. No HTTP replica keeps authoritative authentication state in
+memory or treats a local cookie or process cache as authoritative.
 
 The blob cleanup process is an operational worker, not a business module. It
 has its own binary and replica count, and shares the owning module's durable
 store and external blob store.
 
+## Boundary rules
+
 Adapters see a module only through its API package and the shared `domain`
 vocabulary: the error sentinels a module returns, its request limits, and the
 pure parsers its callers share (reminder phrases, dialog definitions, search
 highlight terms) live in `internal/domain`, not beside the implementation.
-They used to live in `internal/service`, so the HTTP and HTMX adapters linked
-the whole chat implementation even when it ran in another process.
 `internal/modules/boundary_test.go` walks each adapter's import graph and fails
 when it reaches `internal/service`, a storage backend, or the gRPC transport.
 
 Remote module APIs must be coarse enough to survive a process boundary: they
 carry explicit request objects, context cancellation, deadlines, typed errors,
-and bounded/streamable results. Directory, conversation reads/mutations,
-message reads/mutations, presence, and file metadata operations use typed
-protobuf contracts and generated gRPC service adapters. File uploads use a
-client-streaming gRPC method and downloads use a server-streaming method, both
-with typed streaming metadata and bounded byte chunks; the server feeds bytes
-directly between the transport and blob store without materializing the object
-in process memory. All chat services use generated protobuf gRPC client/server
-contracts, including the file streams whose metadata and bounded chunks are
-represented by explicit protobuf oneof parts. Transaction ownership and data ownership stay
-inside the module that owns the data. Transport generation must use a qualified
-RPC implementation rather than inventing framing, flow control, or schema
+and bounded or streamable results. Every chat operation uses typed protobuf
+contracts and generated gRPC client and server adapters. File uploads use a
+client-streaming method and downloads a server-streaming method; each stream
+carries typed metadata and bounded byte chunks as protobuf `oneof` parts, and
+the server moves bytes between the transport and the blob store without
+holding the object in memory. Transaction and data ownership stay inside the
+module that owns the data. Transport generation must use a qualified RPC
+implementation rather than inventing framing, flow control, or schema
 evolution in application code.
 
-The generated gRPC server bindings do not use `Unimplemented` server embeddings.
-Each declared RPC must therefore have an explicit implementation in the chat
-transport; adding an RPC without implementing it fails the build.
+The gRPC server does not embed the generated `Unimplemented` server, so each
+declared RPC must have an explicit implementation in the chat transport;
+adding an RPC without one fails the build.
 
-The transport source schema lives under [`proto/`](../proto/). Generated
-protobuf messages and service adapters are checked into the module transport
-package and regenerated through `go generate`; the dynamic envelope is not
-part of the transport contract.
+The transport schema lives under [`proto/`](../proto/). Generated protobuf
+messages and service adapters are checked into
+`internal/modules/chat/transport/grpc` and regenerated through `go generate`.
 
 Incoming Webhook delivery follows the same module boundary. See
 [Incoming Webhooks](incoming-webhooks.md) for its endpoint, administrative

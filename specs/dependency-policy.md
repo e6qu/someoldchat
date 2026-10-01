@@ -90,8 +90,7 @@ Every dependency-changing pull request MUST run:
 
 CI MUST fail closed when age or integrity evidence is unavailable.
 
-Implementation status of these controls, so the policy is not read as a
-description of enforcement that does not exist:
+Where each control is enforced today:
 
 | Control | Where it runs |
 |---|---|
@@ -115,13 +114,7 @@ provenance evidence.
 The inventory covers Go modules, npm packages, CI actions, container images,
 Terraform providers, pinned tools (`terraform`, `buf`, `protoc-gen-go-grpc`,
 `govulncheck`), and the third-party source checkout the Shauth qualification
-executes. Indirect Go modules are covered by `go.sum` checksums and `go mod
-verify` only; the inventory records the direct inputs, so a bump of an indirect
-module — for example the `golang.org/x/text` bump that cleared GO-2026-5970 — is
-integrity-checked but not quarantine-checked.
-
-Three gaps in that coverage, stated so the policy is not read as enforcement
-that does not exist:
+executes. Known gaps in that coverage:
 
 - Operating-system packages installed by CI (`dqlite-tools-v3`, `libdqlite*`,
   `libuv1-dev`) and the CI language runtimes (Node.js, CPython, Temurin, Deno)
@@ -133,11 +126,12 @@ that does not exist:
   but the two are not compared: the Makefile-to-inventory comparison covers only
   `PROTOC_GEN_GO_GRPC_VERSION` and `GOVULNCHECK_VERSION`. `terraform` is
   compared through its `*.tf` `required_version`, not through the `Makefile`.
-- Indirect Go modules, as above.
+- Indirect Go modules are covered only by `go.sum` checksums and
+  `go mod verify`: a bump is integrity-checked but not quarantine-checked.
 
-`make dependency-check` MUST run `go list -mod=readonly`
-and `go mod verify` before its repository checks. It MUST run in local checks
-and pull-request continuous integration. It fails when an entry
+`make dependency-check` MUST run `go list -mod=readonly` and `go mod verify`
+before its repository checks, and MUST run in local checks and pull-request
+continuous integration. It fails when an entry
 is incomplete, uses a mutable revision or checksum, lacks HTTPS evidence, uses
 a prerelease version, has a future publication time, or has not passed the
 publication quarantine.
