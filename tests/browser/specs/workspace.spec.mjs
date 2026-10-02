@@ -3029,9 +3029,13 @@ test('[WORKFLOW-02] a built-in message step posts and completes the run with no 
   const announcement = `deploy announced ${Date.now()}`;
   await page.getByLabel('Step 1 message text').fill(announcement);
   await page.getByRole('button', { name: 'Publish' }).click();
+  // Publishing navigates. Filling the trigger form before the published page
+  // arrives fills the page being left, and the trigger is never created.
+  await expect(page.getByText('Workflow published')).toBeVisible();
 
   await page.getByLabel('Trigger name').fill('Announce');
   await page.getByRole('button', { name: 'Create trigger' }).click();
+  await expect(page.getByText('Trigger created')).toBeVisible();
   await page.getByRole('button', { name: 'Run' }).click();
 
   // The run is finished the moment it returns: nothing is coming to move it.
@@ -3085,9 +3089,11 @@ test('[WORKFLOW-02] built-in steps add people and create a canvas, and chain int
   await page.getByLabel('Step 2 message conversation').selectOption('Cdev');
   await page.getByLabel('Step 2 people to add').fill('Udev');
   await page.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByText('Workflow published')).toBeVisible();
 
   await page.getByLabel('Trigger name').fill('Onboard');
   await page.getByRole('button', { name: 'Create trigger' }).click();
+  await expect(page.getByText('Trigger created')).toBeVisible();
   await page.getByRole('button', { name: 'Run' }).click();
   await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9A-Z]+$/);
   await expect(page.getByText('completed', { exact: true })).toBeVisible();
