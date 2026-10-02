@@ -11196,6 +11196,14 @@ func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	// team_id picks the workspace of an organization-wide token. The
+	// organization here is the token's own workspace, so it may name only
+	// that one; it used to be ignored, so a team the token cannot see listed
+	// the token's own schedules as if they were that team's.
+	if teamID := strings.TrimSpace(fields["team_id"]); teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	limit, err := clampLimit(fields["limit"], 100, 1000)
 	if err != nil {
 		writeDecodeError(w, err)

@@ -1109,7 +1109,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
-      - org-level team_id selection is not implemented
+      - team_id names the workspace of an organization-wide token; the organization here is the token's own workspace, so team_id may name only that one and another is invalid_arg_name
       - Web API rate limiting now answers 429 with Retry-After and ratelimited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
       - schedules created before schema 102 recorded no app or bot, so schema 186 assigns them to their author with no app; they list for the author's first-party session, not for an app's token
   - method: chat.unfurl
