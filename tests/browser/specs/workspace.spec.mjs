@@ -4526,12 +4526,21 @@ test('[LIST-01 LIST-02 A11Y-01] a list with declared columns shows and enforces 
   await expect(page).toHaveURL(/\/app\/lists\/.*view=table/);
   await expect(page.getByRole('columnheader', { name: /Status/ })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'ship it' })).toBeVisible();
-  // A cell is edited in place and saved when it changes.
-  await page.getByLabel('Status for ship it').selectOption('done');
+  // A cell is edited in place and saved when it changes. The change submits
+  // the cell's form, which navigates back to the table; reloading before that
+  // navigation lands interrupts it, so each edit waits for the page it returns.
+  const editCell = async (value) => {
+    const returned = page.waitForResponse((response) => response.request().method() === 'GET'
+      && (response.request().redirectedFrom()?.url() ?? '').includes('/cell'));
+    await page.getByLabel('Status for ship it').selectOption(value);
+    await returned;
+    await page.waitForLoadState('load');
+  };
+  await editCell('done');
   await expect(page.getByLabel('Status for ship it')).toHaveValue('done');
   await page.reload();
   await expect(page.getByLabel('Status for ship it')).toHaveValue('done');
-  await page.getByLabel('Status for ship it').selectOption('open');
+  await editCell('open');
   await expect(page.getByLabel('Status for ship it')).toHaveValue('open');
   await page.reload();
   await page.getByRole('link', { name: /Status/ }).click();

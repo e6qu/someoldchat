@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/thumbnail"
 )
 
 // Origin normalizes a configured public URL into the base every URL is
@@ -221,6 +222,15 @@ func (u FileURLs) Private(id string) string {
 	return u.Origin + "/api/files/" + url.PathEscape(id)
 }
 
+// Thumb is thumb_N: the image downscaled so neither side exceeds size, behind
+// the reader's bearer token as url_private is.
+func (u FileURLs) Thumb(id string, size int) string {
+	return u.Origin + "/api/files/" + url.PathEscape(id) + "/thumb/" + strconv.Itoa(size)
+}
+
+// ThumbSizes are the thumb_N sizes Slack's file object carries for an image.
+var ThumbSizes = []int{64, 80, 160, 360, 480, 720, 800, 960, 1024}
+
 // Permalink is the file's page for a signed-in member of the web client.
 func (u FileURLs) Permalink(id string) string {
 	return u.Origin + "/app/files/" + url.PathEscape(id)
@@ -260,6 +270,11 @@ func File(origin string, file domain.File) map[string]any {
 	}
 	if file.PublicToken != "" {
 		result["permalink_public"] = urls.Public(file.PublicToken)
+	}
+	if thumbnail.Supported(file.MIMEType) {
+		for _, size := range ThumbSizes {
+			result["thumb_"+strconv.Itoa(size)] = urls.Thumb(string(file.ID), size)
+		}
 	}
 	if len(file.SharedChannels) > 0 {
 		result["channels"] = file.SharedChannels

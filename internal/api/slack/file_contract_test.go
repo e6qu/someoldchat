@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -408,5 +410,48 @@ func TestFilesInfoReportsItsSharesByVisibility(t *testing.T) {
 	after, _ := f.call("files.info", url.Values{"file": {id}}, nil)["file"].(map[string]any)["shares"].(map[string]any)
 	if _, present := after["private"]; present || after["public"] == nil {
 		t.Fatalf("shares after leaving the private channel=%v", after)
+	}
+}
+
+// An image's file object carries thumb_N URLs, each behind the reader's token
+// as url_private is, serving the image downscaled so neither side exceeds N
+// and never enlarged; a file that is not an image carries none.
+func TestImageFilesCarryTokenAuthenticatedThumbnails(t *testing.T) {
+	f := newFileFixture(t, "https://chat.example.com/", true)
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 600, 300))); err != nil {
+		t.Fatal(err)
+	}
+	photo := f.uploadV2("photo.png", encoded.String(), url.Values{"channel_id": {"C1"}})
+	thumb, _ := photo["thumb_360"].(string)
+	if want := "https://chat.example.com/api/files/" + photo["id"].(string) + "/thumb/360"; thumb != want {
+		t.Fatalf("thumb_360=%v, want %s (file %v)", photo["thumb_360"], want, photo)
+	}
+	if info := f.call("files.info", url.Values{"file": {photo["id"].(string)}}, nil)["file"].(map[string]any); info["thumb_360"] != thumb || info["thumb_64"] == nil {
+		t.Fatalf("files.info thumbs = %v", info)
+	}
+	fetch := func(size string, token string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "http://chat.test/api/files/"+photo["id"].(string)+"/thumb/"+size, nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		return f.do(request)
+	}
+	for size, width := range map[string]int{"360": 360, "1024": 600} {
+		response := fetch(size, "token")
+		config, err := png.DecodeConfig(bytes.NewReader(response.Body.Bytes()))
+		if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/png" || err != nil || config.Width != width || config.Height != width/2 {
+			t.Fatalf("thumb %s = %d %q %dx%d err=%v", size, response.Code, response.Header().Get("Content-Type"), config.Width, config.Height, err)
+		}
+	}
+	if undeclared := fetch("123", "token"); !strings.Contains(undeclared.Body.String(), `"invalid_arg_name"`) {
+		t.Fatalf("an undeclared size = %d %s", undeclared.Code, undeclared.Body)
+	}
+	if anonymous := fetch("360", "nope"); anonymous.Code == http.StatusOK && anonymous.Header().Get("Content-Type") == "image/png" {
+		t.Fatal("a thumbnail was served without a valid token")
+	}
+	text := f.uploadV2("notes.txt", "hello", url.Values{"channel_id": {"C1"}})
+	for key := range text {
+		if strings.HasPrefix(key, "thumb_") {
+			t.Fatalf("a text file carries %s: %v", key, text)
+		}
 	}
 }

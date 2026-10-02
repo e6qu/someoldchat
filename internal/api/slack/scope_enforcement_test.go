@@ -396,6 +396,7 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/files.sharedPublicURL", auth.ScopeFilesWrite},
 		{http.MethodPost, "/api/files.revokePublicURL", auth.ScopeFilesWrite},
 		{http.MethodGet, "/api/files/{file}", auth.ScopeFilesRead},
+		{http.MethodGet, "/api/files/{file}/thumb/{size}", auth.ScopeFilesRead},
 		{http.MethodGet, "/api/files.getUploadURLExternal", auth.ScopeFilesWrite},
 		{http.MethodGet, "/api/files.completeUploadExternal", auth.ScopeFilesWrite},
 		// Routes that enforce a scope and were absent from this table, so nothing

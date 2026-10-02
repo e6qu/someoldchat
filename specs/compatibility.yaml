@@ -517,11 +517,15 @@ operations:
       - go-test:internal/api/slack:TestFileURLsAreAbsoluteOnTheConfiguredPublicURL
       - go-test:internal/api/slack:TestFilesInfoCarriesTheRequiredCommentsArray
       - go-test:internal/api/slack:TestFilesInfoReportsItsSharesByVisibility
+      - go-test:internal/api/slack:TestImageFilesCarryTokenAuthenticatedThumbnails
       - persistence:tests/persistence-qualification/files_oauth_test.go
     deviations:
       - >-
-        The file object carries no thumb_* URLs: no token-authenticated
-        thumbnail route exists on the Web API surface. A shares entry carries
+        An image's file object carries thumb_64 through thumb_1024 URLs,
+        served behind the reader's token like url_private and downscaled so
+        neither side exceeds the size, never enlarged; without stored image
+        dimensions it carries every size rather than only those below the
+        original, and no thumb_N_w/_h or thumb_tiny. A shares entry carries
         ts, channel_name, team_id and share_user_id, and thread_ts with
         reply_count, reply_users, reply_users_count and latest_reply when the
         sharing message starts a thread; shares appear on files.info only, not
