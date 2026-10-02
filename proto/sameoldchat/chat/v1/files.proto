@@ -31,6 +31,10 @@ message FileShare {
   string ts = 4;
   string thread_ts = 5;
   string shared_by = 6;
+  // The thread the sharing message starts, when it has replies.
+  int32 reply_count = 7;
+  repeated string reply_users = 8;
+  int64 latest_reply_unix_nano = 9;
 }
 
 message FilePage {

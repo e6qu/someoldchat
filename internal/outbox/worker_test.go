@@ -78,7 +78,11 @@ func TestWorkerRenewsLeaseDuringLongDelivery(t *testing.T) {
 	}
 	started := make(chan struct{})
 	release := make(chan struct{})
-	first, err := NewWorker(selected, "worker-1", 1, 30*time.Millisecond, func(context.Context, events.Record) error {
+	// The lease is renewed every third of its length. A lease of a few
+	// milliseconds was lost whenever the full suite starved the renewal for
+	// longer than two intervals; this one leaves 200ms of slack and still
+	// spans eight renewals while the delivery runs.
+	first, err := NewWorker(selected, "worker-1", 1, 300*time.Millisecond, func(context.Context, events.Record) error {
 		close(started)
 		<-release
 		return nil
@@ -92,7 +96,7 @@ func TestWorkerRenewsLeaseDuringLongDelivery(t *testing.T) {
 		result <- err
 	}()
 	<-started
-	time.Sleep(80 * time.Millisecond)
+	time.Sleep(800 * time.Millisecond)
 	second, err := NewWorker(selected, "worker-2", 1, time.Minute, func(context.Context, events.Record) error { return nil })
 	if err != nil {
 		t.Fatal(err)

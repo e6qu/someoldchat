@@ -24,6 +24,10 @@ message UserProfile {
   string pronouns = 14;
   // IANA zone name; empty when the member's client never reported one.
   string timezone = 15;
+  // The parts of the full name and the phone number a member sets.
+  string first_name = 16;
+  string last_name = 17;
+  string phone = 18;
 }
 
 message User {

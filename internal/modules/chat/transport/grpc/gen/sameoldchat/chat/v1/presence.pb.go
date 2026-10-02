@@ -39,7 +39,11 @@ type UserProfile struct {
 	Title                   string `protobuf:"bytes,13,opt,name=title,proto3" json:"title,omitempty"`
 	Pronouns                string `protobuf:"bytes,14,opt,name=pronouns,proto3" json:"pronouns,omitempty"`
 	// IANA zone name; empty when the member's client never reported one.
-	Timezone      string `protobuf:"bytes,15,opt,name=timezone,proto3" json:"timezone,omitempty"`
+	Timezone string `protobuf:"bytes,15,opt,name=timezone,proto3" json:"timezone,omitempty"`
+	// The parts of the full name and the phone number a member sets.
+	FirstName     string `protobuf:"bytes,16,opt,name=first_name,json=firstName,proto3" json:"first_name,omitempty"`
+	LastName      string `protobuf:"bytes,17,opt,name=last_name,json=lastName,proto3" json:"last_name,omitempty"`
+	Phone         string `protobuf:"bytes,18,opt,name=phone,proto3" json:"phone,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -175,6 +179,27 @@ func (x *UserProfile) GetPronouns() string {
 func (x *UserProfile) GetTimezone() string {
 	if x != nil {
 		return x.Timezone
+	}
+	return ""
+}
+
+func (x *UserProfile) GetFirstName() string {
+	if x != nil {
+		return x.FirstName
+	}
+	return ""
+}
+
+func (x *UserProfile) GetLastName() string {
+	if x != nil {
+		return x.LastName
+	}
+	return ""
+}
+
+func (x *UserProfile) GetPhone() string {
+	if x != nil {
+		return x.Phone
 	}
 	return ""
 }
@@ -1852,7 +1877,7 @@ var File_sameoldchat_chat_v1_presence_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/presence.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xf1\x03\n" +
+	"\"sameoldchat/chat/v1/presence.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xc3\x04\n" +
 	"\vUserProfile\x12!\n" +
 	"\fdisplay_name\x18\x01 \x01(\tR\vdisplayName\x12\x1f\n" +
 	"\vstatus_text\x18\x02 \x01(\tR\n" +
@@ -1871,7 +1896,11 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\x1aactive_scheduled_status_id\x18\f \x01(\tR\x17activeScheduledStatusId\x12\x14\n" +
 	"\x05title\x18\r \x01(\tR\x05title\x12\x1a\n" +
 	"\bpronouns\x18\x0e \x01(\tR\bpronouns\x12\x1a\n" +
-	"\btimezone\x18\x0f \x01(\tR\btimezone\"\x88\x04\n" +
+	"\btimezone\x18\x0f \x01(\tR\btimezone\x12\x1d\n" +
+	"\n" +
+	"first_name\x18\x10 \x01(\tR\tfirstName\x12\x1b\n" +
+	"\tlast_name\x18\x11 \x01(\tR\blastName\x12\x14\n" +
+	"\x05phone\x18\x12 \x01(\tR\x05phone\"\x88\x04\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x14\n" +

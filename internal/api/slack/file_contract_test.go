@@ -3,6 +3,7 @@ package slack
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -385,6 +386,21 @@ func TestFilesInfoReportsItsSharesByVisibility(t *testing.T) {
 	}
 	if private[0].(map[string]any)["channel_name"] != "hideout" {
 		t.Fatalf("private share=%v", private[0])
+	}
+	if _, present := entry["reply_count"]; present {
+		t.Fatalf("a share without replies carried a thread summary: %v", entry)
+	}
+
+	// A sharing message that starts a thread carries its summary, as the
+	// message object does.
+	if reply := f.call("chat.postMessage", url.Values{"channel": {"C1"}, "thread_ts": {shareTS.(string)}, "text": {"thanks"}}, nil); reply["ok"] != true {
+		t.Fatalf("reply=%v", reply)
+	}
+	threaded, _ := f.call("files.info", url.Values{"file": {id}}, nil)["file"].(map[string]any)["shares"].(map[string]any)
+	entry = threaded["public"].(map[string]any)["C1"].([]any)[0].(map[string]any)
+	if entry["thread_ts"] != shareTS || entry["reply_count"] != float64(1) || entry["reply_users_count"] != float64(1) ||
+		fmt.Sprint(entry["reply_users"]) != "[U1]" || entry["latest_reply"] == nil {
+		t.Fatalf("share with a reply=%v", entry)
 	}
 	if left := f.call("conversations.leave", url.Values{"channel": {"C2"}}, nil); left["ok"] != true {
 		t.Fatalf("leave=%v", left)

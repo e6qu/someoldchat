@@ -213,6 +213,9 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.InteractivityRequestURL == "") {
 		return domain.ErrAppInteractionUnavailable
 	}
+	if err := m.requireAppUse(ctx, workspaceID, userID, snapshot.App.ID, message.Conversation); err != nil {
+		return err
+	}
 	if !blocksContainDispatchableAction(message.Blocks, action.BlockID, action.ActionID, action.Type) {
 		return store.ErrNotFound
 	}
@@ -799,6 +802,9 @@ func (m Messages) viewInteractionContext(ctx context.Context, workspaceID domain
 	}
 	if !parsed.InteractivityEnabled || (!parsed.SocketModeEnabled && parsed.InteractivityRequestURL == "") {
 		return domain.View{}, domain.AppManifestSnapshot{}, appmanifest.Parsed{}, domain.Workspace{}, domain.User{}, domain.ErrAppInteractionUnavailable
+	}
+	if err := m.requireAppUse(ctx, workspaceID, userID, current.AppID, conversationID); err != nil {
+		return domain.View{}, domain.AppManifestSnapshot{}, appmanifest.Parsed{}, domain.Workspace{}, domain.User{}, err
 	}
 	if current.Type == "home" {
 		if !parsed.HomeTabEnabled {

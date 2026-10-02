@@ -69,6 +69,8 @@ func (h Handler) appOptions(w http.ResponseWriter, r *http.Request) {
 			message = "The app returned invalid options."
 		case errors.Is(err, domain.ErrAppInteractionUnavailable):
 			message = "The app did not provide options in time."
+		case errors.Is(err, domain.ErrAppUseRestricted):
+			status, message = http.StatusForbidden, appUseRestrictedReason
 		}
 		h.writeOptionsError(w, status, message)
 		return

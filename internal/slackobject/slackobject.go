@@ -107,12 +107,12 @@ func Timezone(user domain.User, at time.Time) (string, string, int) {
 // or one a member set: a photo uploaded here, an external URL, or the
 // generated default avatar this server serves at the requested size.
 func Profile(origin string, user domain.User) map[string]any {
-	firstName, lastName, _ := strings.Cut(strings.TrimSpace(user.RealName), " ")
+	firstName, lastName := user.NameParts()
 	profile := map[string]any{
 		"display_name": user.Profile.DisplayName, "display_name_normalized": user.Profile.DisplayName, "email": user.Email,
 		"real_name": user.RealName, "real_name_normalized": user.RealName,
-		"first_name": firstName, "last_name": strings.TrimSpace(lastName),
-		"title": user.Profile.Title, "phone": "", "skype": "", "pronouns": user.Profile.Pronouns, "fields": map[string]any{},
+		"first_name": firstName, "last_name": lastName,
+		"title": user.Profile.Title, "phone": user.Profile.Phone, "skype": "", "pronouns": user.Profile.Pronouns, "fields": map[string]any{},
 		"status_text": user.Profile.StatusText, "status_emoji": user.Profile.StatusEmoji, "status_expiration": unixSeconds(user.Profile.StatusExpiration),
 		"avatar_hash": AvatarHash(user),
 		"team":        user.WorkspaceID, "user_id": user.ID,
@@ -297,6 +297,20 @@ func fileShares(file domain.File) map[string]any {
 		entry := map[string]any{"ts": share.Timestamp, "channel_name": share.ConversationName, "team_id": file.WorkspaceID, "share_user_id": share.SharedBy}
 		if share.ThreadTimestamp != "" {
 			entry["thread_ts"] = share.ThreadTimestamp
+		} else if share.ReplyCount > 0 {
+			// A sharing message that starts a thread names its own ts as the
+			// thread's and summarizes it, as the message object does.
+			users := share.ReplyUsers
+			if users == nil {
+				users = []domain.UserID{}
+			}
+			entry["thread_ts"] = share.Timestamp
+			entry["reply_count"] = share.ReplyCount
+			entry["reply_users"] = users
+			entry["reply_users_count"] = len(share.ReplyUsers)
+			if !share.LatestReply.IsZero() {
+				entry["latest_reply"] = domain.NewMessageTimestamp(share.LatestReply)
+			}
 		}
 		existing, _ := byChannel[string(share.Conversation)].([]map[string]any)
 		byChannel[string(share.Conversation)] = append(existing, entry)

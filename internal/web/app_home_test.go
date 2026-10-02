@@ -158,6 +158,24 @@ func TestInstalledAppDirectoryRendersPublishedHomeAndDispatchesActions(t *testin
 	if json.Unmarshal(encodedEnvelope, &appHomeEnvelope) != nil || appHomeEnvelope.Payload.Event.Tab != "messages" {
 		t.Fatalf("messages tab envelope=%s", encodedEnvelope)
 	}
+	// An app whose access control does not admit the member is refused on
+	// every tab and action, with the reason, not as a missing page.
+	if err := repository.SetAppPermission(ctx, domain.AppPermission{WorkspaceID: "T1", AppID: "A1", PermissionType: domain.AppPermissionNoOne, UpdatedAt: now},
+		events.Event{ID: "EvACL", WorkspaceID: "T1", Topic: "app.permission_set", Payload: "{}", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	refused := map[string]*httptest.ResponseRecorder{
+		"home":         get(t, mux, "/app/apps/A1?channel=Cdev"),
+		"messages tab": postForm(t, mux, "/app/apps/A1/messages", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false),
+		"home action": postForm(t, mux, "/app/apps/A1/action?channel=Cdev", url.Values{
+			"_csrf": {auth.CSRFToken("session")}, "view_id": {string(published.ID)}, "home_action": {"0"}, "action_0": {"production"},
+		}.Encode(), false),
+	}
+	for use, response := range refused {
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "An administrator has restricted who may use this app") {
+			t.Errorf("restricted %s status=%d body=%s", use, response.Code, response.Body)
+		}
+	}
 }
 
 // The Home page listens for the app republishing it and re-renders only its

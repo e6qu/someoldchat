@@ -167,6 +167,15 @@ type UserProfile struct {
 	// profile carries beside the display name ("Title", "Pronouns").
 	Title    string
 	Pronouns string
+	// FirstName and LastName are the two parts of the member's full name, which
+	// Slack's profile carries beside real_name and lets the member set; the
+	// user's RealName is always the two joined. Both are empty for a member
+	// whose name was never written through the profile, whose parts are then
+	// read from RealName (see User.NameParts).
+	FirstName string
+	LastName  string
+	// Phone is the member-editable phone number Slack's profile carries.
+	Phone string
 	// Timezone is the member's IANA zone, which Slack reports on the user
 	// object as tz and uses for a profile's "local time". It travels with the
 	// profile because every member-editable fact about a member already does;
@@ -247,6 +256,22 @@ func (w Workspace) SlackDomain() string {
 		return value
 	}
 	return strings.ToLower(string(w.ID))
+}
+
+// NameParts is the member's first and last name as Slack's profile reports
+// them: the stored parts, or, for a member whose name was never written through
+// the profile, RealName split at its first space.
+func (u User) NameParts() (string, string) {
+	if u.Profile.FirstName != "" || u.Profile.LastName != "" {
+		return u.Profile.FirstName, u.Profile.LastName
+	}
+	first, last, _ := strings.Cut(strings.TrimSpace(u.RealName), " ")
+	return first, strings.TrimSpace(last)
+}
+
+// JoinRealName is the full name a first and last name make.
+func JoinRealName(first, last string) string {
+	return strings.TrimSpace(strings.TrimSpace(first) + " " + strings.TrimSpace(last))
 }
 
 // IsBot reports whether the account is an app's bot user rather than a person.
@@ -2313,6 +2338,12 @@ type FileShare struct {
 	Timestamp       MessageTimestamp
 	ThreadTimestamp MessageTimestamp
 	SharedBy        UserID
+	// ReplyCount, ReplyUsers and LatestReply summarize the thread the sharing
+	// message starts. They are empty for a message without replies and for a
+	// reply; the service, not the repository, fills them.
+	ReplyCount  int
+	ReplyUsers  []UserID
+	LatestReply time.Time
 }
 
 // IsSnippet reports whether this file is an inline text/code snippet rather than

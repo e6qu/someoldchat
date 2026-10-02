@@ -2361,6 +2361,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 .presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;margin-right:5px;vertical-align:middle}.presence.active{border-color:var(--ok);background:var(--ok)}.presence.auto{border-style:dashed}
 .status-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.status-suggestions button,.secondary{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:6px 9px}
 .profile-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.name-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:0 12px}
 .availability-form{display:grid;gap:6px;margin:0 0 16px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong)}
 .availability-form>label{font-weight:700;font-size:14px}
 .availability-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -2419,9 +2420,12 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
       </form>{{end}}
       {{if .CanEditProfile}}<form method="post" action="/app/profile">
         <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+        <div class="name-fields"><label class="field" for="profile_first_name">First name<input id="profile_first_name" name="first_name" maxlength="80" value="{{.Profile.FirstName}}" autocomplete="given-name"></label>
+        <label class="field" for="profile_last_name">Last name<input id="profile_last_name" name="last_name" maxlength="80" value="{{.Profile.LastName}}" autocomplete="family-name"></label></div>
         <label class="field" for="display_name">Display name<input id="display_name" name="display_name" maxlength="80" value="{{.Profile.DisplayName}}"><small>The name teammates see in messages.</small></label>
         <label class="field" for="profile_title">Title<input id="profile_title" name="title" maxlength="150" value="{{.Profile.Title}}" placeholder="What you do"><small>Shown on your profile, for example “Design lead”.</small></label>
         <label class="field" for="profile_pronouns">Pronouns<input id="profile_pronouns" name="pronouns" maxlength="40" value="{{.Profile.Pronouns}}" placeholder="she/her"></label>
+        <label class="field" for="profile_phone">Phone<input id="profile_phone" name="phone" type="tel" maxlength="64" value="{{.Profile.Phone}}" autocomplete="tel"></label>
         <div class="status-suggestions" aria-label="Suggested statuses"><button type="button" data-status-text="In a meeting" data-status-emoji=":calendar:">📅 In a meeting</button><button type="button" data-status-text="Commuting" data-status-emoji=":car:">🚗 Commuting</button><button type="button" data-status-text="Out sick" data-status-emoji=":face_with_thermometer:">🤒 Out sick</button><button type="button" data-status-text="Vacationing" data-status-emoji=":palm_tree:">🌴 Vacationing</button><button type="button" data-status-text="Working remotely" data-status-emoji=":house_with_garden:">🏠 Working remotely</button></div>
         <label class="field" for="status_text">Status<input id="status_text" name="status_text" maxlength="100" value="{{.Profile.StatusText}}" placeholder="What are you working on?"></label>
         <label class="field" for="status_emoji">Status emoji<input id="status_emoji" name="status_emoji" maxlength="64" value="{{.Profile.StatusEmoji}}" placeholder=":wave:"></label>
@@ -10541,6 +10545,9 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 	if submitted != nil {
 		profile = *submitted
 	}
+	if profile.FirstName == "" && profile.LastName == "" {
+		profile.FirstName, profile.LastName = current.NameParts()
+	}
 	data := membersData{
 		Members:        members,
 		Apps:           apps,
@@ -10638,6 +10645,18 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 	if value, present := fields["pronouns"]; present {
 		profile.Pronouns = value
 	}
+	// The name parts and phone are optional the same way. A member whose
+	// name was never written through the profile has no stored parts, so
+	// the form shows (and sends back) the parts of the name they have.
+	if value, present := fields["first_name"]; present {
+		profile.FirstName = value
+	}
+	if value, present := fields["last_name"]; present {
+		profile.LastName = value
+	}
+	if value, present := fields["phone"]; present {
+		profile.Phone = value
+	}
 	profile.StatusText = fields["status_text"]
 	profile.StatusEmoji = fields["status_emoji"]
 	if fields["clear_status"] != "" {
@@ -10671,7 +10690,7 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 		// A rejected save keeps every submitted value and says which limit it
 		// crossed, instead of answering with a bare status line.
 		if errors.Is(err, domain.ErrInvalidProfile) {
-			h.renderMembers(w, r, principal, &profile, nil, "Your profile was not saved. A display name is at most 80 characters, a title at most 150, pronouns at most 40, a status at most 100, the status emoji must be a workspace emoji of at most 64 characters, and the profile photo URL at most 2048.", http.StatusBadRequest)
+			h.renderMembers(w, r, principal, &profile, nil, "Your profile was not saved. A first or last name or a display name is at most 80 characters, a phone number at most 64, a title at most 150, pronouns at most 40, a status at most 100, the status emoji must be a workspace emoji of at most 64 characters, and the profile photo URL at most 2048.", http.StatusBadRequest)
 			return
 		}
 		h.renderMembers(w, r, principal, &profile, nil, "Your profile could not be saved because the workspace store is temporarily unavailable. Try again.", http.StatusServiceUnavailable)
@@ -11127,7 +11146,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, domain.ErrAppUseRestricted) {
 			status = http.StatusForbidden
-			reason = "An administrator has restricted who may use this app, or where. Your command was not posted as a message."
+			reason = appUseRestrictedReason + " Your command was not posted as a message."
 		}
 		if errors.Is(err, domain.ErrAppInteractionUnavailable) || errors.Is(err, domain.ErrInvalidAppResponse) {
 			status = http.StatusBadGateway
@@ -11906,6 +11925,8 @@ func (h Handler) appInteraction(w http.ResponseWriter, r *http.Request) {
 			status, reason = http.StatusConflict, "This app has no interactive endpoint available."
 		case errors.Is(err, domain.ErrInvalidAppResponse):
 			status, reason = http.StatusBadGateway, "The app returned a response that could not be applied."
+		case errors.Is(err, domain.ErrAppUseRestricted):
+			status, reason = http.StatusForbidden, appUseRestrictedReason
 		}
 		h.writeMutationError(w, r, status, "That app action did not run", reason)
 		return
@@ -11945,7 +11966,7 @@ func (h Handler) appShortcut(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, store.ErrConflict):
 			status, reason = http.StatusConflict, "That shortcut configuration is ambiguous."
 		case errors.Is(err, domain.ErrAppUseRestricted):
-			status, reason = http.StatusForbidden, "An administrator has restricted who may use this app, or where."
+			status, reason = http.StatusForbidden, appUseRestrictedReason
 		}
 		h.writeMutationError(w, r, status, "That app shortcut did not run", reason)
 		return

@@ -10724,6 +10724,7 @@ func (s *Server) setUserProfileProto(ctx context.Context, input *chatv1.SetUserP
 	p := input.GetProfile()
 	profile := domain.UserProfile{
 		DisplayName: p.GetDisplayName(), Title: p.GetTitle(), Pronouns: p.GetPronouns(), Timezone: p.GetTimezone(),
+		FirstName: p.GetFirstName(), LastName: p.GetLastName(), Phone: p.GetPhone(),
 		StatusText: p.GetStatusText(), StatusEmoji: p.GetStatusEmoji(),
 		Image24: p.GetImage_24(), Image32: p.GetImage_32(), Image48: p.GetImage_48(), Image72: p.GetImage_72(),
 		Image192: p.GetImage_192(), Image512: p.GetImage_512(), Image1024: p.GetImage_1024(),
@@ -11337,6 +11338,9 @@ func encodeProtoProfile(value domain.UserProfile) *chatv1.UserProfile {
 		DisplayName: value.DisplayName,
 		Title:       value.Title,
 		Pronouns:    value.Pronouns,
+		FirstName:   value.FirstName,
+		LastName:    value.LastName,
+		Phone:       value.Phone,
 		Timezone:    value.Timezone,
 		StatusText:  value.StatusText,
 		StatusEmoji: value.StatusEmoji,
@@ -13087,6 +13091,9 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 			DisplayName:             profile.GetDisplayName(),
 			Title:                   profile.GetTitle(),
 			Pronouns:                profile.GetPronouns(),
+			FirstName:               profile.GetFirstName(),
+			LastName:                profile.GetLastName(),
+			Phone:                   profile.GetPhone(),
 			Timezone:                profile.GetTimezone(),
 			StatusText:              profile.GetStatusText(),
 			StatusEmoji:             profile.GetStatusEmoji(),
@@ -15020,7 +15027,12 @@ func encodeFileShares(values []domain.FileShare) []*chatv1.FileShare {
 	}
 	shares := make([]*chatv1.FileShare, 0, len(values))
 	for _, value := range values {
-		shares = append(shares, &chatv1.FileShare{ConversationId: string(value.Conversation), ConversationName: value.ConversationName, Private: value.Private, Ts: string(value.Timestamp), ThreadTs: string(value.ThreadTimestamp), SharedBy: string(value.SharedBy)})
+		replyUsers := make([]string, 0, len(value.ReplyUsers))
+		for _, user := range value.ReplyUsers {
+			replyUsers = append(replyUsers, string(user))
+		}
+		shares = append(shares, &chatv1.FileShare{ConversationId: string(value.Conversation), ConversationName: value.ConversationName, Private: value.Private, Ts: string(value.Timestamp), ThreadTs: string(value.ThreadTimestamp), SharedBy: string(value.SharedBy),
+			ReplyCount: int32(value.ReplyCount), ReplyUsers: replyUsers, LatestReplyUnixNano: unixNanoOrZero(value.LatestReply)})
 	}
 	return shares
 }
@@ -15031,7 +15043,15 @@ func decodeFileShares(values []*chatv1.FileShare) []domain.FileShare {
 	}
 	shares := make([]domain.FileShare, 0, len(values))
 	for _, value := range values {
-		shares = append(shares, domain.FileShare{Conversation: domain.ConversationID(value.GetConversationId()), ConversationName: value.GetConversationName(), Private: value.GetPrivate(), Timestamp: domain.MessageTimestamp(value.GetTs()), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()), SharedBy: domain.UserID(value.GetSharedBy())})
+		share := domain.FileShare{Conversation: domain.ConversationID(value.GetConversationId()), ConversationName: value.GetConversationName(), Private: value.GetPrivate(), Timestamp: domain.MessageTimestamp(value.GetTs()), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()), SharedBy: domain.UserID(value.GetSharedBy())}
+		share.ReplyCount = int(value.GetReplyCount())
+		for _, user := range value.GetReplyUsers() {
+			share.ReplyUsers = append(share.ReplyUsers, domain.UserID(user))
+		}
+		if value.GetLatestReplyUnixNano() != 0 {
+			share.LatestReply = time.Unix(0, value.GetLatestReplyUnixNano()).UTC()
+		}
+		shares = append(shares, share)
 	}
 	return shares
 }

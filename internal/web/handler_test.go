@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"image"
 	"image/color"
 	"image/png"
@@ -851,6 +852,46 @@ func TestMemberEditsCustomProfileFieldFromTheDirectory(t *testing.T) {
 	}
 	after := get(t, mux, "/app/members").Body.String()
 	requireContains(t, "directory shows the saved value", after, `value="she/her"`)
+}
+
+// TestMemberSetsTheirFullNameAndPhoneFromTheDirectory covers the profile
+// form's name parts and phone: the form starts from the name the member has,
+// a save writes the parts and the full name they make, and the phone shows in
+// the profile panel's contact information.
+func TestMemberSetsTheirFullNameAndPhoneFromTheDirectory(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	current, err := s.GetUser(ctx, "U1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, last := current.NameParts()
+	page := get(t, mux, "/app/members").Body.String()
+	requireContains(t, "the form starts from the member's name", page,
+		`name="first_name" maxlength="80" value="`+template.HTMLEscapeString(first)+`"`,
+		`name="last_name" maxlength="80" value="`+template.HTMLEscapeString(last)+`"`,
+		`name="phone" type="tel"`)
+
+	saved := postForm(t, mux, "/app/profile", url.Values{"_csrf": {auth.CSRFToken("session")}, "display_name": {"alice"},
+		"first_name": {"Alice Mary"}, "last_name": {"Liddell"}, "phone": {"+44 20 7946 0000"}}.Encode(), false)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("save profile = %d: %s", saved.Code, saved.Body)
+	}
+	stored, err := s.GetUser(ctx, "U1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RealName != "Alice Mary Liddell" || stored.Profile.FirstName != "Alice Mary" || stored.Profile.Phone != "+44 20 7946 0000" {
+		t.Fatalf("stored user = %q %+v", stored.RealName, stored.Profile)
+	}
+	panel := getFragment(t, mux, "/app/members/profile?user=U1").Body.String()
+	requireContains(t, "the panel shows the phone", panel, "<dt>Phone</dt>", `href="tel:&#43;44%2020%207946%200000"`, "&#43;44 20 7946 0000")
+
+	rejected := postForm(t, mux, "/app/profile", url.Values{"_csrf": {auth.CSRFToken("session")}, "display_name": {"alice"},
+		"first_name": {strings.Repeat("a", 81)}}.Encode(), false)
+	if rejected.Code != http.StatusBadRequest || !strings.Contains(rejected.Body.String(), "a phone number at most 64") {
+		t.Fatalf("an overlong first name = %d: %s", rejected.Code, rejected.Body)
+	}
 }
 
 // TestListWithoutAGroupableColumnOffersNoBoard covers the fallback: a list whose

@@ -40,6 +40,8 @@ type EventStore interface {
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
 	GetApp(context.Context, domain.AppID) (domain.App, domain.AppManifestRevision, error)
 	IssueFunctionExecutionToken(context.Context, domain.FunctionExecutionToken, string) (domain.FunctionExecutionToken, error)
+	GetAppPermission(context.Context, domain.WorkspaceID, domain.AppID) (domain.AppPermission, error)
+	GetUserGroup(context.Context, domain.WorkspaceID, domain.UserGroupID) (domain.UserGroup, error)
 }
 
 // Delivery pacing. Each cycle drains up to BatchPerApp records per app, and
