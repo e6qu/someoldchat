@@ -168,6 +168,7 @@ func runQualification(t *testing.T, open opener) {
 		{"an assistant's loading messages travel with its status", assistantLoadingMessagesTravelWithTheStatus},
 		{"a profile's name parts and phone are durable", profileNamePartsAndPhoneAreDurable},
 		{"a weekly reminder's weekdays are durable", reminderWeekdaysAreDurable},
+		{"canvas and list retention deletes what went unedited", documentRetentionDeletesWhatWentUnedited},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
 		{"visible files are newest first", visibleFilesAreNewestFirst},
@@ -1212,6 +1213,103 @@ func reminderWeekdaysAreDurable(t *testing.T, open opener) {
 		if fmt.Sprint(stored.Weekdays) != fmt.Sprint(value.Weekdays) {
 			t.Fatalf("reminder %s weekdays = %v, want %v", value.ID, stored.Weekdays, value.Weekdays)
 		}
+	}
+}
+
+// documentRetentionDeletesWhatWentUnedited holds canvas and list retention on
+// every profile: a workspace with a duration is claimed once per pass and not
+// at all without one, and the sweep deletes the canvases and lists last edited
+// before the horizon - a list counting its items' edits - with their items,
+// leaving everything edited since.
+func documentRetentionDeletesWhatWentUnedited(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID, userID := domain.WorkspaceID("T-docs-"+suffix), domain.UserID("U-docs-"+suffix)
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Documents"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: "docs-" + suffix}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	old, fresh := now.AddDate(0, 0, -100), now.AddDate(0, 0, -1)
+	event := func(id string) events.Event {
+		return events.Event{ID: domain.EventID("E-docs-" + id + "-" + suffix), WorkspaceID: workspaceID, Topic: "canvas.created", Payload: "{}", CreatedAt: now}
+	}
+	canvas := func(id string, edited time.Time) domain.CanvasID {
+		t.Helper()
+		value := domain.Canvas{ID: domain.CanvasID("Fc" + id + suffix), WorkspaceID: workspaceID, OwnerID: userID, Title: id, DocumentContent: "{}", Version: 1, CreatedAt: old, UpdatedAt: edited}
+		if err := repository.CreateCanvas(ctx, value, event("canvas-"+id)); err != nil {
+			t.Fatal(err)
+		}
+		return value.ID
+	}
+	list := func(id string, edited, itemEdited time.Time) (domain.ListID, domain.ListItemID) {
+		t.Helper()
+		value := domain.List{ID: domain.ListID("Fl" + id + suffix), WorkspaceID: workspaceID, OwnerID: userID, Name: id, DescriptionBlocks: "[]", Schema: "[]", Version: 1, CreatedAt: old, UpdatedAt: edited}
+		if err := repository.CreateList(ctx, value, event("list-"+id)); err != nil {
+			t.Fatal(err)
+		}
+		item := domain.ListItem{ID: domain.ListItemID("Rec" + id + suffix), ListID: value.ID, WorkspaceID: workspaceID, Fields: "[]", CreatedBy: userID, UpdatedBy: userID, CreatedAt: old, UpdatedAt: itemEdited, Version: 1}
+		if err := repository.CreateListItem(ctx, item, event("item-"+id)); err != nil {
+			t.Fatal(err)
+		}
+		return value.ID, item.ID
+	}
+	staleCanvas, freshCanvas := canvas("stale", old), canvas("fresh", fresh)
+	staleList, staleItem := list("stale", old, old)
+	editedList, editedItem := list("edited", old, fresh)
+	if err := repository.CreateCanvasComment(ctx, domain.CanvasComment{ID: domain.CanvasCommentID("Cm" + suffix), CanvasID: staleCanvas, WorkspaceID: workspaceID, UserID: userID, Text: "note", CreatedAt: old}, event("comment")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateListItemComment(ctx, domain.ListItemComment{ID: domain.ListItemCommentID("Lc" + suffix), ListID: staleList, ItemID: staleItem, WorkspaceID: workspaceID, UserID: userID, Text: "note", CreatedAt: old}, event("item-comment")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without a duration the workspace is never claimed.
+	if claimed, err := repository.ClaimDocumentRetentionSweep(ctx, workspaceID, now.Add(-24*time.Hour), now, 10); err != nil || len(claimed) != 0 {
+		t.Fatalf("a workspace keeping documents forever was claimed: %v err=%v", claimed, err)
+	}
+	if err := repository.SetRetentionPolicy(ctx, workspaceID, domain.RetentionPolicy{CanvasListDays: 30}, event("policy")); err != nil {
+		t.Fatal(err)
+	}
+	if policy, err := repository.GetRetentionPolicy(ctx, workspaceID); err != nil || policy.CanvasListDays != 30 {
+		t.Fatalf("policy = %+v err=%v", policy, err)
+	}
+	if claimed, err := repository.ClaimDocumentRetentionSweep(ctx, workspaceID, now.Add(-24*time.Hour), now, 10); err != nil || fmt.Sprint(claimed) != fmt.Sprint([]domain.WorkspaceID{workspaceID}) {
+		t.Fatalf("first claim = %v err=%v", claimed, err)
+	}
+	if claimed, err := repository.ClaimDocumentRetentionSweep(ctx, workspaceID, now.Add(-24*time.Hour), now, 10); err != nil || len(claimed) != 0 {
+		t.Fatalf("a second claim in the same pass = %v err=%v", claimed, err)
+	}
+
+	swept, err := repository.SweepDocumentRetention(ctx, workspaceID, now.AddDate(0, 0, -30), 10)
+	if err != nil || swept.Canvases != 1 || swept.Lists != 1 {
+		t.Fatalf("sweep = %+v err=%v", swept, err)
+	}
+	if _, err := repository.GetCanvas(ctx, workspaceID, staleCanvas); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the stale canvas survived: %v", err)
+	}
+	if _, err := repository.GetList(ctx, workspaceID, staleList); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the stale list survived: %v", err)
+	}
+	if _, err := repository.GetListItem(ctx, workspaceID, staleList, staleItem); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the stale list's item survived: %v", err)
+	}
+	if _, err := repository.GetCanvas(ctx, workspaceID, freshCanvas); err != nil {
+		t.Fatalf("a canvas edited within the period was deleted: %v", err)
+	}
+	if _, err := repository.GetList(ctx, workspaceID, editedList); err != nil {
+		t.Fatalf("a list whose item was edited within the period was deleted: %v", err)
+	}
+	if _, err := repository.GetListItem(ctx, workspaceID, editedList, editedItem); err != nil {
+		t.Fatalf("the kept list lost its item: %v", err)
+	}
+	if again, err := repository.SweepDocumentRetention(ctx, workspaceID, now.AddDate(0, 0, -30), 10); err != nil || again.Canvases != 0 || again.Lists != 0 {
+		t.Fatalf("a second sweep = %+v err=%v", again, err)
 	}
 }
 

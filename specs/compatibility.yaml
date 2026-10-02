@@ -1841,7 +1841,6 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
-      - Retention deletes messages and files. Slack's retention also covers canvases and lists, which this deployment retains indefinitely.
       - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: admin.conversations.linkObjects
@@ -1870,7 +1869,6 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
-      - Retention deletes messages and files. Slack's retention also covers canvases and lists, which this deployment retains indefinitely.
       - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: admin.conversations.setCustomRetention
@@ -1883,7 +1881,6 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
-      - Retention deletes messages and files. Slack's retention also covers canvases and lists, which this deployment retains indefinitely.
       - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
       - Rate limits and controlled live-Slack outcomes remain unqualified.
   - method: admin.conversations.unlinkObjects

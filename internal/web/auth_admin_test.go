@@ -1068,9 +1068,11 @@ func TestWorkspaceSettingsWriteThroughAndNameWhatIsAbsent(t *testing.T) {
 	// have to be on the page before someone sets a limit.
 	before := page()
 	for _, expected := range []string{
-		"Message and file retention",
+		`id="retention-heading">Retention<`,
 		`name="message_days"`,
 		`name="file_days"`,
+		`name="canvas_list_days"`,
+		"Canvases and lists are kept forever",
 		"permanent and cannot be undone",
 		"runs on a schedule",
 		"Nothing is deleted by policy",
@@ -1617,19 +1619,26 @@ func TestRetentionControlWritesThroughAndReportsTheSweep(t *testing.T) {
 		t.Fatalf("a workspace that has never swept does not say so: %s", page())
 	}
 
-	saved := adminMutationRequest(http.MethodPost, "/app/admin/settings/retention", "message_days=90&file_days=0")
+	saved := adminMutationRequest(http.MethodPost, "/app/admin/settings/retention", "message_days=90&file_days=0&canvas_list_days=365")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, saved)
 	if response.Code != http.StatusOK {
 		t.Fatalf("save=%d body=%s", response.Code, response.Body.String())
 	}
 	policy, err := store.GetRetentionPolicy(ctx, "T1")
-	if err != nil || policy.MessageDays != 90 || policy.FileDays != 0 {
+	if err != nil || policy.MessageDays != 90 || policy.FileDays != 0 || policy.CanvasListDays != 365 {
 		t.Fatalf("policy=%+v err=%v", policy, err)
 	}
-	// The summary says in words what two numbers in adjacent boxes do not.
+	// A form without the canvas and list field keeps the stored duration.
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/app/admin/settings/retention", "message_days=90&file_days=0"))
+	if policy, err = store.GetRetentionPolicy(ctx, "T1"); err != nil || policy.CanvasListDays != 365 {
+		t.Fatalf("a form without canvas_list_days changed it: %+v err=%v", policy, err)
+	}
+	// The summary says in words what the numbers in adjacent boxes do not.
 	rendered := page()
-	if !strings.Contains(rendered, `value="90"`) || !strings.Contains(rendered, "Files are kept forever") {
+	if !strings.Contains(rendered, `value="90"`) || !strings.Contains(rendered, `value="365"`) || !strings.Contains(rendered, "Files are kept forever") ||
+		!strings.Contains(rendered, "Canvases and lists are deleted permanently once they go unedited past their limit") {
 		t.Fatalf("the page does not reflect what was saved: %s", rendered)
 	}
 

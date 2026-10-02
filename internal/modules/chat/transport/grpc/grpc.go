@@ -2828,11 +2828,11 @@ func decodeProtoSharedInvite(value *chatv1.SharedInvite) (domain.SharedInvite, e
 }
 
 func encodeProtoRetentionPolicy(value domain.RetentionPolicy) *chatv1.RetentionPolicy {
-	return &chatv1.RetentionPolicy{MessageDays: int32(value.MessageDays), FileDays: int32(value.FileDays)}
+	return &chatv1.RetentionPolicy{MessageDays: int32(value.MessageDays), FileDays: int32(value.FileDays), CanvasListDays: int32(value.CanvasListDays)}
 }
 
 func decodeProtoRetentionPolicy(value *chatv1.RetentionPolicy) (domain.RetentionPolicy, error) {
-	policy := domain.RetentionPolicy{MessageDays: int(value.GetMessageDays()), FileDays: int(value.GetFileDays())}
+	policy := domain.RetentionPolicy{MessageDays: int(value.GetMessageDays()), FileDays: int(value.GetFileDays()), CanvasListDays: int(value.GetCanvasListDays())}
 	if !policy.Valid() {
 		return domain.RetentionPolicy{}, errors.New("typed retention policy is outside the permitted range")
 	}

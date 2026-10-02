@@ -36,7 +36,9 @@ rewritten.
 ## ADMIN-05 — Enforce data retention
 
 An authorized administrator sets how long messages and files are kept, at the
-workspace and — for messages — per conversation. The control states before it
+workspace and — for messages — per conversation, and how long canvases and
+lists are kept after their last edit, which Slack sets apart from messages and
+files and which every edit restarts. The control states before it
 is used that deletion is permanent and that it is applied on a schedule rather
 than the instant content expires, and reports when the sweep last ran so a
 stopped worker is visible rather than silently breaking the policy's promise.
@@ -46,7 +48,9 @@ left pointing at a message that no longer exists. A thread is retained until
 its newest reply expires. Conversation types that cannot carry a policy, and
 durations outside the permitted range, are explicit refusals rather than
 silent no-ops. Content past the horizon remains readable until the sweep
-reaches it.
+reaches it. A canvas or list goes with its version history and comments, and
+a list with its items, their attachments' links and its exports; a list is
+edited when any of its items is.
 
 ## ADMIN-03 — Review audit and analytics
 
@@ -174,15 +178,12 @@ qualify it either way.
 
 **Administration** carries the settings with a durable backend and an enforced
 effect: workspace name, description, icon, discoverability, default channels
-and message/file retention; the invitation and app-request queues; analytics counted from the
+and message, file, canvas and list retention; the invitation and app-request queues; analytics counted from the
 durable rows on each load; and an audit view over the durable event journal and
 the access log, whose export comes from the same query as the page.
 
 Absent, and named on the page rather than rendered as an inert control:
 
-- **Retention of canvases and lists.** Slack's retention covers them; this
-  deployment retains them indefinitely. Messages and files are governed — see
-  ADMIN-05.
 - **Audit visibility across private conversations.** The audit view reads the
   journal through the same visibility-filtered path the event stream uses, so
   it cannot show an administrator that a private conversation they are not in
@@ -240,7 +241,7 @@ Absent, and named on the page rather than rendered as an inert control:
 | ADMIN-01 | [Roles in Slack](https://slack.com/help/articles/360018112273-Roles-in-Slack) | Slack distinguishes owners, admins, members, guests, and role-specific authority. |
 | ADMIN-02 | [Slack Enterprise APIs](https://docs.slack.dev/enterprise/) | Workspace and organization policies govern channels, members, apps, and data. |
 | ADMIN-03 | [Slack Enterprise APIs](https://docs.slack.dev/enterprise/) | Enterprise APIs expose scoped audit and analytics administration. |
-| ADMIN-05 | [Customize message and file retention policies](https://slack.com/help/articles/203457187-Customize-message-and-file-retention-policies) | Workspace and per-conversation retention delete messages and files permanently on a daily schedule. |
+| ADMIN-05 | [Customize message and file retention policies](https://slack.com/help/articles/203457187-Customize-message-and-file-retention-policies) | Workspace and per-conversation retention delete messages and files, and canvases and lists unedited past their own duration, permanently on a daily schedule. |
 | ADMIN-04 | [App approval settings](https://slack.com/help/articles/222386767-Guide-to-app-approval-settings) | Administrators approve, restrict, and manage workspace app installation. |
 | CONNECT-01 | [Use Slack Connect with other companies](https://slack.com/help/articles/360035092414-What-is-Slack-Connect) | Slack Connect invites external people and supports up to 250 organizations in a channel. |
 | CONNECT-02 | [Use Slack Connect with other companies](https://slack.com/help/articles/360035092414-What-is-Slack-Connect) | External channel invitations have approval, acceptance, decline, and revocation states. |

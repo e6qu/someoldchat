@@ -95,6 +95,7 @@ type Store struct {
 	retentionPolicies             map[domain.WorkspaceID]domain.RetentionPolicy
 	conversationRetention         map[domain.ConversationID]domain.ConversationRetention
 	retentionSweptAt              map[domain.ConversationID]time.Time
+	documentsSweptAt              map[domain.WorkspaceID]time.Time
 	nextAttempt                   map[uint64]time.Time
 	readCursors                   map[string]domain.ReadCursor
 	workspaceNotificationPrefs    map[string]domain.WorkspaceNotificationPreferences
@@ -372,6 +373,7 @@ func New() *Store {
 		retentionPolicies:             make(map[domain.WorkspaceID]domain.RetentionPolicy),
 		conversationRetention:         make(map[domain.ConversationID]domain.ConversationRetention),
 		retentionSweptAt:              make(map[domain.ConversationID]time.Time),
+		documentsSweptAt:              make(map[domain.WorkspaceID]time.Time),
 		nextAttempt:                   make(map[uint64]time.Time),
 		readCursors:                   make(map[string]domain.ReadCursor),
 		workspaceNotificationPrefs:    make(map[string]domain.WorkspaceNotificationPreferences),
@@ -6956,6 +6958,104 @@ func (s *Store) RemoveConversationRetention(_ context.Context, workspace domain.
 	delete(s.conversationRetention, conversation)
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+func (s *Store) ClaimDocumentRetentionSweep(_ context.Context, workspace domain.WorkspaceID, before, sweptAt time.Time, limit int) ([]domain.WorkspaceID, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("a retention claim requires a positive limit")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var due []domain.WorkspaceID
+	for id, policy := range s.retentionPolicies {
+		if policy.CanvasListDays <= 0 || (workspace != "" && id != workspace) {
+			continue
+		}
+		if swept, exists := s.documentsSweptAt[id]; exists && swept.After(before) {
+			continue
+		}
+		due = append(due, id)
+	}
+	slices.Sort(due)
+	due = due[:min(limit, len(due))]
+	for _, id := range due {
+		s.documentsSweptAt[id] = sweptAt.UTC()
+	}
+	return due, nil
+}
+
+func (s *Store) SweepDocumentRetention(_ context.Context, workspace domain.WorkspaceID, horizon time.Time, limit int) (domain.DocumentRetentionSweep, error) {
+	if limit <= 0 {
+		return domain.DocumentRetentionSweep{}, store.InvalidArgument("a retention sweep requires a positive limit")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := domain.DocumentRetentionSweep{WorkspaceID: workspace}
+	var canvases []domain.CanvasID
+	for id, canvas := range s.canvases {
+		if canvas.WorkspaceID == workspace && canvas.UpdatedAt.Before(horizon) {
+			canvases = append(canvases, id)
+		}
+	}
+	slices.Sort(canvases)
+	for _, id := range canvases[:min(limit, len(canvases))] {
+		delete(s.canvases, id)
+		delete(s.canvasRevisions, id)
+		for key, access := range s.canvasAccess {
+			if access.CanvasID == id {
+				delete(s.canvasAccess, key)
+			}
+		}
+		for key, comment := range s.canvasComments {
+			if comment.CanvasID == id {
+				delete(s.canvasComments, key)
+			}
+		}
+		result.Canvases++
+	}
+	var lists []domain.ListID
+	for id, list := range s.lists {
+		if list.WorkspaceID != workspace || !list.UpdatedAt.Before(horizon) {
+			continue
+		}
+		edited := false
+		for _, item := range s.listItems[id] {
+			if !item.UpdatedAt.Before(horizon) {
+				edited = true
+				break
+			}
+		}
+		if !edited {
+			lists = append(lists, id)
+		}
+	}
+	slices.Sort(lists)
+	for _, id := range lists[:min(limit, len(lists))] {
+		delete(s.lists, id)
+		delete(s.listItems, id)
+		for key, comment := range s.listItemComments {
+			if comment.ListID == id {
+				delete(s.listItemComments, key)
+			}
+		}
+		for key, file := range s.listItemFiles {
+			if file.ListID == id {
+				delete(s.listItemFiles, key)
+			}
+		}
+		for key, access := range s.listAccess {
+			if access.ListID == id {
+				delete(s.listAccess, key)
+			}
+		}
+		for key, download := range s.listDownloads {
+			if download.ListID == id {
+				delete(s.listDownloads, key)
+			}
+		}
+		result.Lists++
+	}
+	return result, nil
 }
 
 func (s *Store) ClaimRetentionSweep(_ context.Context, workspace domain.WorkspaceID, before, sweptAt time.Time, limit int) ([]domain.ConversationID, error) {

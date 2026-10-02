@@ -482,11 +482,13 @@ func (x *ConversationsRequest) GetIncludeClosedDirects() bool {
 }
 
 type RetentionPolicy struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MessageDays   int32                  `protobuf:"varint,1,opt,name=message_days,json=messageDays,proto3" json:"message_days,omitempty"`
-	FileDays      int32                  `protobuf:"varint,2,opt,name=file_days,json=fileDays,proto3" json:"file_days,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	MessageDays int32                  `protobuf:"varint,1,opt,name=message_days,json=messageDays,proto3" json:"message_days,omitempty"`
+	FileDays    int32                  `protobuf:"varint,2,opt,name=file_days,json=fileDays,proto3" json:"file_days,omitempty"`
+	// Days a canvas or list is kept after its last edit; zero keeps them.
+	CanvasListDays int32 `protobuf:"varint,3,opt,name=canvas_list_days,json=canvasListDays,proto3" json:"canvas_list_days,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RetentionPolicy) Reset() {
@@ -529,6 +531,13 @@ func (x *RetentionPolicy) GetMessageDays() int32 {
 func (x *RetentionPolicy) GetFileDays() int32 {
 	if x != nil {
 		return x.FileDays
+	}
+	return 0
+}
+
+func (x *RetentionPolicy) GetCanvasListDays() int32 {
+	if x != nil {
+		return x.CanvasListDays
 	}
 	return 0
 }
@@ -1742,10 +1751,11 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\x05types\x18\x05 \x03(\tR\x05types\x12)\n" +
 	"\x10exclude_archived\x18\x06 \x01(\bR\x0fexcludeArchived\x12$\n" +
 	"\x0emember_user_id\x18\a \x01(\tR\fmemberUserId\x124\n" +
-	"\x16include_closed_directs\x18\b \x01(\bR\x14includeClosedDirects\"Q\n" +
+	"\x16include_closed_directs\x18\b \x01(\bR\x14includeClosedDirects\"{\n" +
 	"\x0fRetentionPolicy\x12!\n" +
 	"\fmessage_days\x18\x01 \x01(\x05R\vmessageDays\x12\x1b\n" +
-	"\tfile_days\x18\x02 \x01(\x05R\bfileDays\"\x92\x01\n" +
+	"\tfile_days\x18\x02 \x01(\x05R\bfileDays\x12(\n" +
+	"\x10canvas_list_days\x18\x03 \x01(\x05R\x0ecanvasListDays\"\x92\x01\n" +
 	"\x16RetentionPolicyRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12<\n" +

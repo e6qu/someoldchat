@@ -1806,6 +1806,21 @@ const RetentionMaximumDays = 36500
 type RetentionPolicy struct {
 	MessageDays int
 	FileDays    int
+	// CanvasListDays is how long a canvas or list is kept after it was last
+	// edited. Slack gives canvases and lists one retention setting of their
+	// own, apart from messages and files, and restarts the period on every
+	// edit. Zero keeps them for the life of the workspace.
+	CanvasListDays int
+}
+
+// DocumentRetentionSweep reports one workspace's canvas and list retention
+// pass: how many of each it deleted, with their content, version history,
+// comments and sharing.
+type DocumentRetentionSweep struct {
+	WorkspaceID WorkspaceID
+	Canvases    int
+	Lists       int
+	SweptAt     time.Time
 }
 
 // ValidRetentionDays reports whether a duration may be stored. Zero is
@@ -1816,7 +1831,7 @@ func ValidRetentionDays(days int) bool {
 }
 
 func (policy RetentionPolicy) Valid() bool {
-	return ValidRetentionDays(policy.MessageDays) && ValidRetentionDays(policy.FileDays)
+	return ValidRetentionDays(policy.MessageDays) && ValidRetentionDays(policy.FileDays) && ValidRetentionDays(policy.CanvasListDays)
 }
 
 // ConversationRetention is one channel's override of the workspace message
