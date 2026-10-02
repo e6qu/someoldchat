@@ -10333,6 +10333,18 @@ func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 	}
 	now := domain.MessageInstant(time.Now().UTC())
 	value := domain.EphemeralMessage{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, AppID: appID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Timestamp: domain.NewMessageTimestamp(now), ThreadTimestamp: threadTimestamp, CreatedAt: now}
+	if err := m.createEphemeralMessage(ctx, value); err != nil {
+		if idempotencyKey != "" && errors.Is(err, store.ErrAlreadyExists) {
+			return value, nil
+		}
+		return domain.EphemeralMessage{}, err
+	}
+	return value, nil
+}
+
+// createEphemeralMessage stores an ephemeral message with the event that
+// carries it to its one recipient.
+func (m Messages) createEphemeralMessage(ctx context.Context, value domain.EphemeralMessage) error {
 	// user_id names the single recipient. Every consumer that fans this record
 	// out has to filter on it, which is why it is a first-class payload field.
 	payload := events.NewPayload(events.EphemeralMessageTopic,
@@ -10347,17 +10359,11 @@ func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 		events.String("ts", string(value.Timestamp)),
 		events.String("thread_ts", string(value.ThreadTimestamp)),
 	)
-	event, err := newEvent(workspaceID, authorID, payload, now)
+	event, err := newEvent(value.WorkspaceID, value.AuthorID, payload, value.CreatedAt)
 	if err != nil {
-		return domain.EphemeralMessage{}, err
+		return err
 	}
-	if err := m.Store.CreateEphemeralMessage(ctx, value, event); err != nil {
-		if idempotencyKey != "" && errors.Is(err, store.ErrAlreadyExists) {
-			return value, nil
-		}
-		return domain.EphemeralMessage{}, err
-	}
-	return value, nil
+	return m.Store.CreateEphemeralMessage(ctx, value, event)
 }
 
 func (m Messages) ListEphemeralMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, limit int) ([]domain.EphemeralMessage, error) {

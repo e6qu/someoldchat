@@ -768,9 +768,26 @@ func parityCases() []parityCase {
 				_, appless := chat.Unfurl(ctx, "T1", "UA", "", "C1", timestamp, map[string]string{
 					"https://docs.example.test/page": `{"title":"A page"}`,
 				})
+				// The same app invites the member who shared the link to
+				// connect their account; the invitation is theirs alone.
+				if err := chat.PromptUnfurlAuthentication(ctx, "T1", "UA", "AL", "C1", timestamp, domain.UnfurlAuthPrompt{Message: "Connect Links", URL: "https://links.example.test/connect"}); err != nil {
+					return nil, err
+				}
+				prompts, err := chat.ListEphemeralMessages(ctx, "T1", "U1", "C1", 10)
+				if err != nil {
+					return nil, err
+				}
+				if len(prompts) != 1 {
+					return nil, fmt.Errorf("the sharer holds %d authentication prompts, want 1", len(prompts))
+				}
+				promptTexts := make([]string, 0, len(prompts))
+				for _, prompt := range prompts {
+					promptTexts = append(promptTexts, string(prompt.RecipientID)+":"+prompt.Text)
+				}
 				return []any{
 					unfurled.Unfurls["https://docs.example.test/page"],
 					errors.Is(foreign, domain.ErrCannotUnfurlURL), errors.Is(appless, domain.ErrNotInConversation),
+					promptTexts,
 				}, nil
 			},
 		},

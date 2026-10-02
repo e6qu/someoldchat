@@ -1257,6 +1257,17 @@ const unfurled = await client.chat.unfurl({
   unfurls: { "https://example.com/qualification": { text: "unfurled" } },
 });
 assert.equal(unfurled.ok, true);
+// The SDK encodes the authentication prompt's blocks as a JSON array beside
+// the other user_auth_* arguments, and the server reads them.
+const unfurlAuthPrompt = await client.chat.unfurl({
+  channel: "C1",
+  ts: root.ts,
+  unfurls: {},
+  user_auth_message: "Connect to preview",
+  user_auth_url: "https://example.com/connect",
+  user_auth_blocks: [{ type: "section", text: { type: "mrkdwn", text: "Connect your account" } }],
+});
+assert.equal(unfurlAuthPrompt.ok, true);
 const reply = await client.chat.postMessage({ channel: "C1", text: "thread reply", thread_ts: root.ts });
 assert.equal(reply.ok, true);
 const replies = await client.conversations.replies({ channel: "C1", ts: root.ts, limit: 2 });

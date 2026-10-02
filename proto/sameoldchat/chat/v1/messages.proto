@@ -4,6 +4,7 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+import "sameoldchat/chat/v1/conversation_mutations.proto";
 import "sameoldchat/chat/v1/files.proto";
 
 message Message {
@@ -202,6 +203,19 @@ message UnfurlRequest {
   string app_id = 6;
 }
 
+// UnfurlAuthPromptRequest is chat.unfurl's user_auth_* invitation to the
+// member who shared a message's links.
+message UnfurlAuthPromptRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string conversation_id = 4;
+  string timestamp = 5;
+  string message = 6;
+  string url = 7;
+  string blocks = 8;
+}
+
 message DeleteRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -350,6 +364,7 @@ service MessagesService {
   rpc AppendMessageStream(MutateMessageStreamRequest) returns (Message);
   rpc StopMessageStream(MutateMessageStreamRequest) returns (Message);
   rpc Unfurl(UnfurlRequest) returns (Message);
+  rpc PromptUnfurlAuthentication(UnfurlAuthPromptRequest) returns (MutationResponse);
   rpc Delete(DeleteRequest) returns (Message);
   rpc Permalink(PermalinkRequest) returns (PermalinkResponse);
   rpc History(HistoryRequest) returns (MessagePage);

@@ -463,6 +463,17 @@ func (r Remote) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, user
 	return decodeProtoMessage(out)
 }
 
+func (r Remote) PromptUnfurlAuthentication(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, prompt domain.UnfurlAuthPrompt) error {
+	out, err := r.messages.PromptUnfurlAuthentication(ctx, &chatv1.UnfurlAuthPromptRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), ConversationId: string(conversation), Timestamp: string(timestamp), Message: prompt.Message, Url: prompt.URL, Blocks: prompt.Blocks})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("unfurl authentication prompt was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {
 	return r.PostEphemeralWithBlocks(ctx, workspaceID, userID, conversationID, recipientID, text, "")
 }
@@ -8669,6 +8680,13 @@ func (s *Server) Unfurl(ctx context.Context, input *chatv1.UnfurlRequest) (*chat
 		return nil, mapError(err)
 	}
 	return encodeProtoMessage(value), nil
+}
+
+func (s *Server) PromptUnfurlAuthentication(ctx context.Context, input *chatv1.UnfurlAuthPromptRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.PromptUnfurlAuthentication(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), domain.UnfurlAuthPrompt{Message: input.GetMessage(), URL: input.GetUrl(), Blocks: input.GetBlocks()}); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
 }
 
 func (s *Server) PostEphemeral(ctx context.Context, input *chatv1.PostEphemeralRequest) (*chatv1.EphemeralMessage, error) {

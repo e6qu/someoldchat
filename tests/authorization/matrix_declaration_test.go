@@ -525,6 +525,7 @@ func authorityMatrix() map[string]authority {
 		"TypingIn":                            authorityAnyMember,
 		"TypingSignals":                       authorityAnyMember,
 		"Unfurl":                              authorityAnyMember,
+		"PromptUnfurlAuthentication":          authorityAnyMember,
 		"Update":                              authorityAnyMember,
 		"UpdateCall":                          authorityAnyMember,
 		"UpdateLaterReminder":                 authorityAnyMember,
