@@ -43,6 +43,7 @@ const (
 	MessagesService_AdminCreateIncomingWebhook_FullMethodName     = "/sameoldchat.chat.v1.MessagesService/AdminCreateIncomingWebhook"
 	MessagesService_AdminSetIncomingWebhookEnabled_FullMethodName = "/sameoldchat.chat.v1.MessagesService/AdminSetIncomingWebhookEnabled"
 	MessagesService_PostIncomingWebhook_FullMethodName            = "/sameoldchat.chat.v1.MessagesService/PostIncomingWebhook"
+	MessagesService_PostAsSlackbot_FullMethodName                 = "/sameoldchat.chat.v1.MessagesService/PostAsSlackbot"
 )
 
 // MessagesServiceClient is the client API for MessagesService service.
@@ -73,6 +74,7 @@ type MessagesServiceClient interface {
 	AdminCreateIncomingWebhook(ctx context.Context, in *IncomingWebhookCreateRequest, opts ...grpc.CallOption) (*IncomingWebhookCreateResponse, error)
 	AdminSetIncomingWebhookEnabled(ctx context.Context, in *IncomingWebhookEnableRequest, opts ...grpc.CallOption) (*IncomingWebhookMutationResponse, error)
 	PostIncomingWebhook(ctx context.Context, in *IncomingWebhookPostRequest, opts ...grpc.CallOption) (*Message, error)
+	PostAsSlackbot(ctx context.Context, in *SlackbotPostRequest, opts ...grpc.CallOption) (*Message, error)
 }
 
 type messagesServiceClient struct {
@@ -323,6 +325,16 @@ func (c *messagesServiceClient) PostIncomingWebhook(ctx context.Context, in *Inc
 	return out, nil
 }
 
+func (c *messagesServiceClient) PostAsSlackbot(ctx context.Context, in *SlackbotPostRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, MessagesService_PostAsSlackbot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MessagesServiceServer is the server API for MessagesService service.
 // All implementations should embed UnimplementedMessagesServiceServer
 // for forward compatibility.
@@ -351,6 +363,7 @@ type MessagesServiceServer interface {
 	AdminCreateIncomingWebhook(context.Context, *IncomingWebhookCreateRequest) (*IncomingWebhookCreateResponse, error)
 	AdminSetIncomingWebhookEnabled(context.Context, *IncomingWebhookEnableRequest) (*IncomingWebhookMutationResponse, error)
 	PostIncomingWebhook(context.Context, *IncomingWebhookPostRequest) (*Message, error)
+	PostAsSlackbot(context.Context, *SlackbotPostRequest) (*Message, error)
 }
 
 // UnimplementedMessagesServiceServer should be embedded to have
@@ -431,6 +444,9 @@ func (UnimplementedMessagesServiceServer) AdminSetIncomingWebhookEnabled(context
 }
 func (UnimplementedMessagesServiceServer) PostIncomingWebhook(context.Context, *IncomingWebhookPostRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method PostIncomingWebhook not implemented")
+}
+func (UnimplementedMessagesServiceServer) PostAsSlackbot(context.Context, *SlackbotPostRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method PostAsSlackbot not implemented")
 }
 func (UnimplementedMessagesServiceServer) testEmbeddedByValue() {}
 
@@ -884,6 +900,24 @@ func _MessagesService_PostIncomingWebhook_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessagesService_PostAsSlackbot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SlackbotPostRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).PostAsSlackbot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_PostAsSlackbot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).PostAsSlackbot(ctx, req.(*SlackbotPostRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MessagesService_ServiceDesc is the grpc.ServiceDesc for MessagesService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -986,6 +1020,10 @@ var MessagesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PostIncomingWebhook",
 			Handler:    _MessagesService_PostIncomingWebhook_Handler,
+		},
+		{
+			MethodName: "PostAsSlackbot",
+			Handler:    _MessagesService_PostAsSlackbot_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

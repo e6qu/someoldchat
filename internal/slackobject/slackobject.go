@@ -14,6 +14,7 @@ package slackobject
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -91,17 +93,56 @@ func User(origin string, user domain.User, includeEmail bool) map[string]any {
 }
 
 // Timezone is the tz, tz_label and tz_offset triple Slack's user object
-// carries, at the instant given. A member whose client never reported a zone
-// (or reported one this host cannot load) is on UTC rather than on a zone
-// somebody guessed for them.
+// carries, at the instant given. tz_label is the zone's long name in force at
+// that instant, as Slack reports it ("Pacific Daylight Time" in summer,
+// "Pacific Standard Time" in winter). A member whose client never reported a
+// zone (or reported one this host cannot load) is on UTC rather than on a
+// zone somebody guessed for them.
 func Timezone(user domain.User, at time.Time) (string, string, int) {
 	if name := strings.TrimSpace(user.Profile.Timezone); name != "" {
 		if location, err := time.LoadLocation(name); err == nil {
 			abbreviation, offset := at.In(location).Zone()
-			return name, abbreviation, offset
+			return name, zoneLongName(name, offset, abbreviation), offset
 		}
 	}
 	return "UTC", "Coordinated Universal Time", 0
+}
+
+// zoneNames is each zone's long name at each UTC offset it uses, generated
+// from ICU by scripts/update-zone-names.mjs. Go carries only abbreviations.
+//
+//go:embed zone_names.json
+var zoneNamesJSON []byte
+
+var zoneNames = sync.OnceValue(func() map[string]map[int]string {
+	var encoded map[string][][2]json.RawMessage
+	if err := json.Unmarshal(zoneNamesJSON, &encoded); err != nil {
+		panic("slackobject: zone_names.json is malformed: " + err.Error())
+	}
+	names := make(map[string]map[int]string, len(encoded))
+	for zone, entries := range encoded {
+		byOffset := make(map[int]string, len(entries))
+		for _, entry := range entries {
+			var offset int
+			var name string
+			if json.Unmarshal(entry[0], &offset) != nil || json.Unmarshal(entry[1], &name) != nil {
+				panic("slackobject: zone_names.json has a malformed entry for " + zone)
+			}
+			byOffset[offset] = name
+		}
+		names[zone] = byOffset
+	}
+	return names
+})
+
+// zoneLongName is a zone's long name at an offset. A zone or offset the table
+// does not know - a rule tzdata gained after the table was generated - keeps
+// the abbreviation rather than borrowing another offset's name.
+func zoneLongName(zone string, offset int, abbreviation string) string {
+	if name, ok := zoneNames()[zone][offset]; ok {
+		return name
+	}
+	return abbreviation
 }
 
 // Profile renders Slack's user profile object. Every image is a URL on origin
@@ -127,6 +168,9 @@ func Profile(origin string, user domain.User) map[string]any {
 	}
 	if user.IsBot() {
 		profile["bot_id"], profile["api_app_id"], profile["always_active"] = user.BotID, user.AppID, false
+	}
+	if user.IsSlackbot() {
+		profile["always_active"] = true
 	}
 	return profile
 }

@@ -80,8 +80,32 @@ func mustJSON(t *testing.T, value any) string {
 func TestUserTimezoneFollowsTheStoredZone(t *testing.T) {
 	at := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	zone, label, offset := Timezone(domain.User{Profile: domain.UserProfile{Timezone: "America/New_York"}}, at)
-	if zone != "America/New_York" || label != "EDT" || offset != -4*3600 {
+	if zone != "America/New_York" || label != "Eastern Daylight Time" || offset != -4*3600 {
 		t.Fatalf("tz=%q label=%q offset=%d", zone, label, offset)
+	}
+	// tz_label is the long name in force at the instant, as Slack reports it:
+	// winter's is the standard name, a zone whose rules invert the daylight
+	// flag (Dublin) still gets its name by offset, and a zone without
+	// daylight time has one name all year.
+	winter := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	for _, want := range []struct {
+		zone  string
+		at    time.Time
+		label string
+	}{
+		{"America/New_York", winter, "Eastern Standard Time"},
+		{"Europe/Dublin", at, "Irish Standard Time"},
+		{"Europe/Dublin", winter, "Greenwich Mean Time"},
+		{"Asia/Kolkata", at, "India Standard Time"},
+		{"Australia/Sydney", winter, "Australian Eastern Daylight Time"},
+	} {
+		if _, label, _ := Timezone(domain.User{Profile: domain.UserProfile{Timezone: want.zone}}, want.at); label != want.label {
+			t.Errorf("%s at %s: tz_label=%q, want %q", want.zone, want.at.Format("2006-01-02"), label, want.label)
+		}
+	}
+	// A zone the table does not know keeps its abbreviation.
+	if label := zoneLongName("Nowhere/Unknown", 0, "XYZ"); label != "XYZ" {
+		t.Fatalf("an unknown zone's label = %q", label)
 	}
 	for _, stored := range []string{"", "Nowhere/Invalid"} {
 		if zone, _, offset := Timezone(domain.User{Profile: domain.UserProfile{Timezone: stored}}, at); zone != "UTC" || offset != 0 {

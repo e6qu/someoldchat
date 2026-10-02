@@ -86,6 +86,8 @@ service ConversationsService {
 message RetentionPolicy {
   int32 message_days = 1;
   int32 file_days = 2;
+  // Days a canvas or list is kept after its last edit; zero keeps them.
+  int32 canvas_list_days = 3;
 }
 
 message RetentionPolicyRequest {

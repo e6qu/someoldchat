@@ -346,6 +346,16 @@ message IncomingWebhookPostRequest {
   string attachments = 8;
 }
 
+// SlackbotPostRequest is domain.SlackbotPost: a message Slackbot posts for a
+// member, to the member's Slackbot DM when conversation_id is empty.
+message SlackbotPostRequest {
+  string workspace_id = 1;
+  string member_id = 2;
+  string conversation_id = 3;
+  string text = 4;
+  string idempotency_key = 5;
+}
+
 message IncomingWebhookMutationResponse {
   bool ok = 1;
 }
@@ -375,4 +385,5 @@ service MessagesService {
   rpc AdminCreateIncomingWebhook(IncomingWebhookCreateRequest) returns (IncomingWebhookCreateResponse);
   rpc AdminSetIncomingWebhookEnabled(IncomingWebhookEnableRequest) returns (IncomingWebhookMutationResponse);
   rpc PostIncomingWebhook(IncomingWebhookPostRequest) returns (Message);
+  rpc PostAsSlackbot(SlackbotPostRequest) returns (Message);
 }

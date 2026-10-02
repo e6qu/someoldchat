@@ -183,7 +183,8 @@ CREATE TABLE IF NOT EXISTS socket_mode_interactions (
 CREATE INDEX IF NOT EXISTS socket_mode_interactions_claim ON socket_mode_interactions(app_id, acknowledged_at, retry_at, lease_expires_at, created_at, envelope_id);
 CREATE TABLE IF NOT EXISTS workspace_retention (
  workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
- message_days INTEGER NOT NULL DEFAULT 0, file_days INTEGER NOT NULL DEFAULT 0
+ message_days INTEGER NOT NULL DEFAULT 0, file_days INTEGER NOT NULL DEFAULT 0,
+ canvas_list_days INTEGER NOT NULL DEFAULT 0, documents_swept_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS conversation_retention (
  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),
@@ -605,7 +606,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 202
+const schemaVersion = 204
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3582,6 +3583,25 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 203: canvas and list retention ---
+	if version < 203 {
+		// Slack keeps canvases and lists under a retention setting of their
+		// own, counted from their last edit. Existing workspaces keep them
+		// forever, as they did; the watermark is when their canvas and list
+		// pass last ran.
+		columns, err := s.tableColumns(ctx, db, "workspace_retention")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{"canvas_list_days", "documents_swept_at"} {
+			if !columns[column] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE workspace_retention ADD COLUMN `+column+` INTEGER NOT NULL DEFAULT 0`); err != nil {
+					return fmt.Errorf("migrate workspace retention %s: %w", column, err)
+				}
+			}
+		}
+	}
+	// --- end schema 203 ---
 	// --- schema 202: the weekdays of a weekly reminder ---
 	if version < 202 {
 		// reminders.add's recurrence names the days a weekly reminder
@@ -4736,6 +4756,25 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	// --- schema 204: Slackbot ---
+	if version < 204 {
+		// Slackbot posts reminders into each member's Slackbot DM. Its ID is
+		// USLACKBOT in every workspace, as on Slack, so it has one identity
+		// row, owned by a reserved workspace nobody can sign in to; its DMs
+		// and messages belong to the member's workspace. See
+		// domain.SlackbotUserID. It runs after the ladder because it writes
+		// columns older steps add.
+		if _, err := db.ExecContext(ctx, `INSERT INTO workspaces(id, name, discoverability) VALUES (?, 'Slackbot', 'closed') ON CONFLICT(id) DO NOTHING`, domain.SlackbotHomeWorkspaceID); err != nil {
+			return fmt.Errorf("migrate Slackbot workspace: %w", err)
+		}
+		slackbot := domain.SlackbotUser(domain.SlackbotHomeWorkspaceID)
+		if _, err := db.ExecContext(ctx, `INSERT INTO users(id, workspace_id, name, real_name, display_name, name_folded, real_name_folded, display_name_folded, first_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+			slackbot.ID, slackbot.WorkspaceID, slackbot.Name, slackbot.RealName, slackbot.Profile.DisplayName,
+			domain.FoldSearchText(slackbot.Name), domain.FoldSearchText(slackbot.RealName), domain.FoldSearchText(slackbot.Profile.DisplayName), slackbot.Profile.FirstName); err != nil {
+			return fmt.Errorf("migrate Slackbot user: %w", err)
+		}
+	}
+	// --- end schema 204 ---
 	// Every ladder step has run, so each column a base-schema index covers now
 	// exists on databases of every age; see the phase split at the top.
 	for _, statement := range baseIndexes {
@@ -5186,6 +5225,7 @@ var migratableTables = []string{
 	"workspaces",
 	"reminders",
 	"assistant_threads",
+	"workspace_retention",
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
@@ -7858,13 +7898,14 @@ func (s *Store) CreateDirectConversation(ctx context.Context, conversation domai
 	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_teams(conversation_id, team_id, org_channel) VALUES (?, ?, 0)`, conversation.ID, conversation.WorkspaceID); err != nil {
 		return err
 	}
+	// Slackbot is in every workspace; see domain.SlackbotUserID.
 	seen := make(map[domain.UserID]struct{}, len(members))
 	for _, member := range members {
 		if _, exists := seen[member]; exists {
 			return store.InvalidArgument("direct conversation contains duplicate members")
 		}
 		seen[member] = struct{}{}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0`, conversation.ID, member, conversation.WorkspaceID); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) SELECT ?, id FROM users WHERE id = ? AND (workspace_id = ? OR id = ?) AND deleted = 0`, conversation.ID, member, conversation.WorkspaceID, domain.SlackbotUserID); err != nil {
 			return err
 		}
 		var count int
@@ -12805,9 +12846,9 @@ func conversationBelongsToWorkspace(ctx context.Context, tx txRunner, workspace 
 }
 
 func (s *Store) GetRetentionPolicy(ctx context.Context, workspace domain.WorkspaceID) (domain.RetentionPolicy, error) {
-	var messageDays, fileDays sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT r.message_days, r.file_days FROM workspaces w
-		LEFT JOIN workspace_retention r ON r.workspace_id = w.id WHERE w.id = ?`, workspace).Scan(&messageDays, &fileDays)
+	var messageDays, fileDays, canvasListDays sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT r.message_days, r.file_days, r.canvas_list_days FROM workspaces w
+		LEFT JOIN workspace_retention r ON r.workspace_id = w.id WHERE w.id = ?`, workspace).Scan(&messageDays, &fileDays, &canvasListDays)
 	if err != nil {
 		return domain.RetentionPolicy{}, translateNotFound(err)
 	}
@@ -12817,6 +12858,9 @@ func (s *Store) GetRetentionPolicy(ctx context.Context, workspace domain.Workspa
 	}
 	if fileDays.Valid {
 		policy.FileDays = int(fileDays.Int64)
+	}
+	if canvasListDays.Valid {
+		policy.CanvasListDays = int(canvasListDays.Int64)
 	}
 	return policy, nil
 }
@@ -12834,15 +12878,142 @@ func (s *Store) SetRetentionPolicy(ctx context.Context, workspace domain.Workspa
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces WHERE id = ?`, workspace).Scan(&present); err != nil {
 		return translateNotFound(err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_retention(workspace_id, message_days, file_days)
-		VALUES (?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET message_days = excluded.message_days, file_days = excluded.file_days`,
-		workspace, policy.MessageDays, policy.FileDays); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_retention(workspace_id, message_days, file_days, canvas_list_days)
+		VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET message_days = excluded.message_days, file_days = excluded.file_days, canvas_list_days = excluded.canvas_list_days`,
+		workspace, policy.MessageDays, policy.FileDays, policy.CanvasListDays); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// queryStrings reads one text column from every row a query returns.
+func queryStrings(ctx context.Context, tx *writeTx, query string, arguments ...any) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var values []string
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+// ClaimDocumentRetentionSweep advances each claimed workspace's canvas and
+// list watermark in the statement that tests it, so only one worker's UPDATE
+// matches the stale value. A workspace without a duration is never claimed.
+func (s *Store) ClaimDocumentRetentionSweep(ctx context.Context, workspace domain.WorkspaceID, before, sweptAt time.Time, limit int) ([]domain.WorkspaceID, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("a retention claim requires a positive limit")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace_id FROM workspace_retention
+		WHERE canvas_list_days > 0 AND documents_swept_at <= ? AND (? = '' OR workspace_id = ?) ORDER BY workspace_id LIMIT ?`,
+		before.UTC().Unix(), workspace, workspace, limit)
+	if err != nil {
+		return nil, err
+	}
+	var due []domain.WorkspaceID
+	for rows.Next() {
+		var id domain.WorkspaceID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		due = append(due, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	claimed := make([]domain.WorkspaceID, 0, len(due))
+	for _, id := range due {
+		var won bool
+		err := underContention(ctx, func() error {
+			result, err := s.db.ExecContext(ctx, `UPDATE workspace_retention SET documents_swept_at = ?
+				WHERE workspace_id = ? AND canvas_list_days > 0 AND documents_swept_at <= ?`,
+				sweptAt.UTC().Unix(), id, before.UTC().Unix())
+			if err != nil {
+				return err
+			}
+			changed, err := result.RowsAffected()
+			won = changed == 1
+			return err
+		})
+		if err != nil {
+			return claimed, err
+		}
+		if won {
+			claimed = append(claimed, id)
+		}
+	}
+	return claimed, nil
+}
+
+// SweepDocumentRetention deletes the workspace's canvases and lists whose last
+// edit is older than horizon, with everything that belongs to them, in one
+// transaction. The stored list instants are fixed-width, so the comparison is
+// a time comparison.
+func (s *Store) SweepDocumentRetention(ctx context.Context, workspace domain.WorkspaceID, horizon time.Time, limit int) (domain.DocumentRetentionSweep, error) {
+	if limit <= 0 {
+		return domain.DocumentRetentionSweep{}, store.InvalidArgument("a retention sweep requires a positive limit")
+	}
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return domain.DocumentRetentionSweep{}, err
+	}
+	defer tx.Rollback()
+	result := domain.DocumentRetentionSweep{WorkspaceID: workspace}
+	canvases, err := queryStrings(ctx, tx, `SELECT id FROM canvases WHERE workspace_id = ? AND updated_at < ? ORDER BY id LIMIT ?`,
+		workspace, horizon.UTC().Unix(), limit)
+	if err != nil {
+		return domain.DocumentRetentionSweep{}, err
+	}
+	for _, id := range canvases {
+		for _, statement := range []string{
+			`DELETE FROM canvas_access WHERE canvas_id = ?`,
+			`DELETE FROM canvas_revisions WHERE canvas_id = ?`,
+			`DELETE FROM canvas_comments WHERE canvas_id = ?`,
+			`DELETE FROM canvases WHERE id = ?`,
+		} {
+			if _, err := tx.ExecContext(ctx, statement, id); err != nil {
+				return domain.DocumentRetentionSweep{}, err
+			}
+		}
+		result.Canvases++
+	}
+	stored := domain.NewStoredTime(horizon)
+	lists, err := queryStrings(ctx, tx, `SELECT l.id FROM lists l WHERE l.workspace_id = ? AND l.updated_at < ?
+		AND NOT EXISTS (SELECT 1 FROM list_items i WHERE i.list_id = l.id AND i.updated_at >= ?) ORDER BY l.id LIMIT ?`,
+		workspace, stored, stored, limit)
+	if err != nil {
+		return domain.DocumentRetentionSweep{}, err
+	}
+	for _, id := range lists {
+		for _, statement := range []string{
+			`DELETE FROM list_item_comments WHERE list_id = ?`,
+			`DELETE FROM list_item_files WHERE list_id = ?`,
+			`DELETE FROM list_items WHERE list_id = ?`,
+			`DELETE FROM list_access WHERE list_id = ?`,
+			`DELETE FROM list_downloads WHERE list_id = ?`,
+			`DELETE FROM lists WHERE id = ?`,
+		} {
+			if _, err := tx.ExecContext(ctx, statement, id); err != nil {
+				return domain.DocumentRetentionSweep{}, err
+			}
+		}
+		result.Lists++
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.DocumentRetentionSweep{}, err
+	}
+	return result, nil
 }
 
 // ClaimRetentionSweep advances each returned conversation's watermark in the
@@ -18164,28 +18335,8 @@ func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.Work
 	if changed == 0 {
 		return false, nil
 	}
-	// The notice and the Activity row are written with the claim, so a member
-	// cannot be marked reminded without being shown the reminder.
-	var owner domain.UserID
-	if err := tx.QueryRowContext(ctx, `SELECT user_id FROM reminders WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&owner); err != nil {
-		return false, err
-	}
-	activityReminders := 1
-	if err := tx.QueryRowContext(ctx, `SELECT activity_reminders FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, owner).
-		Scan(&activityReminders); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-	if owner != "" && activityReminders != 0 {
-		activityID := domain.ActivityIDFor(owner, "app-reminder:"+string(id)+":"+string(domain.NewStoredTime(deliveredAt)))
-		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, app_reminder_id, occurred_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-			activityID, workspace, owner, id, deliveredAt.UTC().UnixNano()); err != nil {
-			return false, err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`,
-			activityID, domain.ActivityReminder); err != nil {
-			return false, err
-		}
-	}
+	// The member is shown the reminder by the Slackbot DM the delivery worker
+	// posts before it claims the occurrence; see scheduler.ReminderDeliveryWorker.
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return false, err
 	}

@@ -27,6 +27,8 @@ type RetentionSource interface {
 	GetRetentionPolicy(context.Context, domain.WorkspaceID) (domain.RetentionPolicy, error)
 	GetConversationRetention(context.Context, domain.WorkspaceID, domain.ConversationID) (domain.ConversationRetention, error)
 	SweepRetention(context.Context, domain.RetentionSweepRequest) (domain.RetentionSweep, error)
+	ClaimDocumentRetentionSweep(context.Context, domain.WorkspaceID, time.Time, time.Time, int) ([]domain.WorkspaceID, error)
+	SweepDocumentRetention(context.Context, domain.WorkspaceID, time.Time, int) (domain.DocumentRetentionSweep, error)
 	// AppendRetentionEvents journals the sweep's announcements after the
 	// deletion has committed. It is a second transaction on purpose: the
 	// counts an event carries are only known once the rows are gone, and
@@ -81,7 +83,63 @@ func (w RetentionWorker) RunOnceAt(ctx context.Context, workspaceID domain.Works
 		completed++
 		_ = swept
 	}
+	if err := w.sweepDocuments(ctx, workspaceID, now); err != nil {
+		failures = errors.Join(failures, err)
+	}
 	return completed, failures
+}
+
+// sweepDocuments applies canvas and list retention, once per
+// RetentionInterval per workspace, as Slack applies it: a canvas or list not
+// edited within the period is deleted with its history and comments.
+// Canvases and lists belong to a workspace rather than to one conversation,
+// so the pass is the workspace's own, claimed by its own watermark. An empty
+// workspace sweeps every workspace that is due.
+func (w RetentionWorker) sweepDocuments(ctx context.Context, workspaceID domain.WorkspaceID, now time.Time) error {
+	claimed, err := w.Source.ClaimDocumentRetentionSweep(ctx, workspaceID, now.Add(-RetentionInterval), now, w.Limit)
+	if err != nil {
+		return err
+	}
+	var failures error
+	for _, workspace := range claimed {
+		if err := w.sweepWorkspaceDocuments(ctx, workspace, now); err != nil {
+			failures = errors.Join(failures, err)
+		}
+	}
+	return failures
+}
+
+func (w RetentionWorker) sweepWorkspaceDocuments(ctx context.Context, workspaceID domain.WorkspaceID, now time.Time) error {
+	policy, err := w.Source.GetRetentionPolicy(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	horizon := domain.RetentionHorizon(policy.CanvasListDays, now)
+	if horizon.IsZero() {
+		return nil
+	}
+	for {
+		swept, err := w.Source.SweepDocumentRetention(ctx, workspaceID, horizon, w.Limit)
+		if err != nil {
+			return err
+		}
+		if swept.Canvases == 0 && swept.Lists == 0 {
+			return nil
+		}
+		summary, err := newRetentionEvent(workspaceID, events.NewPayload("retention.documents_swept",
+			events.String("canvases", strconv.Itoa(swept.Canvases)),
+			events.String("lists", strconv.Itoa(swept.Lists)),
+		), now)
+		if err != nil {
+			return err
+		}
+		if err := w.Source.AppendRetentionEvents(ctx, workspaceID, []events.Event{summary}); err != nil {
+			return err
+		}
+		if swept.Canvases < w.Limit && swept.Lists < w.Limit {
+			return nil
+		}
+	}
 }
 
 func (w RetentionWorker) sweep(ctx context.Context, conversationID domain.ConversationID, now time.Time) (domain.RetentionSweep, error) {

@@ -108,7 +108,7 @@ func TestReminderWorkerChannelRetryUsesOneMessageForTheOccurrence(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Messages) != 1 || page.Messages[0].Text != "Reminder: stand-up" {
+	if len(page.Messages) != 1 || page.Messages[0].Text != "Reminder: stand-up." || page.Messages[0].AuthorID != domain.SlackbotUserID {
 		t.Fatalf("channel reminder messages = %+v", page.Messages)
 	}
 }

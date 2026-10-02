@@ -3036,6 +3036,84 @@ func (x *IncomingWebhookPostRequest) GetAttachments() string {
 	return ""
 }
 
+// SlackbotPostRequest is domain.SlackbotPost: a message Slackbot posts for a
+// member, to the member's Slackbot DM when conversation_id is empty.
+type SlackbotPostRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	MemberId       string                 `protobuf:"bytes,2,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	Text           string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
+	IdempotencyKey string                 `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SlackbotPostRequest) Reset() {
+	*x = SlackbotPostRequest{}
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SlackbotPostRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SlackbotPostRequest) ProtoMessage() {}
+
+func (x *SlackbotPostRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SlackbotPostRequest.ProtoReflect.Descriptor instead.
+func (*SlackbotPostRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *SlackbotPostRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SlackbotPostRequest) GetMemberId() string {
+	if x != nil {
+		return x.MemberId
+	}
+	return ""
+}
+
+func (x *SlackbotPostRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *SlackbotPostRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *SlackbotPostRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
 type IncomingWebhookMutationResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
@@ -3045,7 +3123,7 @@ type IncomingWebhookMutationResponse struct {
 
 func (x *IncomingWebhookMutationResponse) Reset() {
 	*x = IncomingWebhookMutationResponse{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[34]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3057,7 +3135,7 @@ func (x *IncomingWebhookMutationResponse) String() string {
 func (*IncomingWebhookMutationResponse) ProtoMessage() {}
 
 func (x *IncomingWebhookMutationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[34]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3070,7 +3148,7 @@ func (x *IncomingWebhookMutationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IncomingWebhookMutationResponse.ProtoReflect.Descriptor instead.
 func (*IncomingWebhookMutationResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{34}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *IncomingWebhookMutationResponse) GetOk() bool {
@@ -3365,9 +3443,15 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x10thread_timestamp\x18\x05 \x01(\tR\x0fthreadTimestamp\x12'\n" +
 	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\x12\x16\n" +
 	"\x06blocks\x18\a \x01(\tR\x06blocks\x12 \n" +
-	"\vattachments\x18\b \x01(\tR\vattachments\"1\n" +
+	"\vattachments\x18\b \x01(\tR\vattachments\"\xbb\x01\n" +
+	"\x13SlackbotPostRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1b\n" +
+	"\tmember_id\x18\x02 \x01(\tR\bmemberId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x12\n" +
+	"\x04text\x18\x04 \x01(\tR\x04text\x12'\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\"1\n" +
 	"\x1fIncomingWebhookMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2\xa5\x12\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok2\xff\x12\n" +
 	"\x0fMessagesService\x12F\n" +
 	"\x04Post\x12 .sameoldchat.chat.v1.PostRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12Z\n" +
 	"\x0ePostWithBlocks\x12*.sameoldchat.chat.v1.PostWithBlocksRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12P\n" +
@@ -3392,7 +3476,8 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x0eRecentSearches\x12*.sameoldchat.chat.v1.RecentSearchesRequest\x1a*.sameoldchat.chat.v1.SearchHistoryResponse\x12\x83\x01\n" +
 	"\x1aAdminCreateIncomingWebhook\x121.sameoldchat.chat.v1.IncomingWebhookCreateRequest\x1a2.sameoldchat.chat.v1.IncomingWebhookCreateResponse\x12\x89\x01\n" +
 	"\x1eAdminSetIncomingWebhookEnabled\x121.sameoldchat.chat.v1.IncomingWebhookEnableRequest\x1a4.sameoldchat.chat.v1.IncomingWebhookMutationResponse\x12d\n" +
-	"\x13PostIncomingWebhook\x12/.sameoldchat.chat.v1.IncomingWebhookPostRequest\x1a\x1c.sameoldchat.chat.v1.MessageBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x13PostIncomingWebhook\x12/.sameoldchat.chat.v1.IncomingWebhookPostRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12X\n" +
+	"\x0ePostAsSlackbot\x12(.sameoldchat.chat.v1.SlackbotPostRequest\x1a\x1c.sameoldchat.chat.v1.MessageBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_messages_proto_rawDescOnce sync.Once
@@ -3406,7 +3491,7 @@ func file_sameoldchat_chat_v1_messages_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_messages_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
+var file_sameoldchat_chat_v1_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
 var file_sameoldchat_chat_v1_messages_proto_goTypes = []any{
 	(*Message)(nil),                         // 0: sameoldchat.chat.v1.Message
 	(*PostRequest)(nil),                     // 1: sameoldchat.chat.v1.PostRequest
@@ -3442,17 +3527,18 @@ var file_sameoldchat_chat_v1_messages_proto_goTypes = []any{
 	(*IncomingWebhookCreateResponse)(nil),   // 31: sameoldchat.chat.v1.IncomingWebhookCreateResponse
 	(*IncomingWebhookEnableRequest)(nil),    // 32: sameoldchat.chat.v1.IncomingWebhookEnableRequest
 	(*IncomingWebhookPostRequest)(nil),      // 33: sameoldchat.chat.v1.IncomingWebhookPostRequest
-	(*IncomingWebhookMutationResponse)(nil), // 34: sameoldchat.chat.v1.IncomingWebhookMutationResponse
-	nil,                                     // 35: sameoldchat.chat.v1.Message.UnfurlsEntry
-	nil,                                     // 36: sameoldchat.chat.v1.UnfurlRequest.UnfurlsEntry
-	(*File)(nil),                            // 37: sameoldchat.chat.v1.File
-	(*MutationResponse)(nil),                // 38: sameoldchat.chat.v1.MutationResponse
+	(*SlackbotPostRequest)(nil),             // 34: sameoldchat.chat.v1.SlackbotPostRequest
+	(*IncomingWebhookMutationResponse)(nil), // 35: sameoldchat.chat.v1.IncomingWebhookMutationResponse
+	nil,                                     // 36: sameoldchat.chat.v1.Message.UnfurlsEntry
+	nil,                                     // 37: sameoldchat.chat.v1.UnfurlRequest.UnfurlsEntry
+	(*File)(nil),                            // 38: sameoldchat.chat.v1.File
+	(*MutationResponse)(nil),                // 39: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_messages_proto_depIdxs = []int32{
-	35, // 0: sameoldchat.chat.v1.Message.unfurls:type_name -> sameoldchat.chat.v1.Message.UnfurlsEntry
-	37, // 1: sameoldchat.chat.v1.Message.files:type_name -> sameoldchat.chat.v1.File
+	36, // 0: sameoldchat.chat.v1.Message.unfurls:type_name -> sameoldchat.chat.v1.Message.UnfurlsEntry
+	38, // 1: sameoldchat.chat.v1.Message.files:type_name -> sameoldchat.chat.v1.File
 	6,  // 2: sameoldchat.chat.v1.EphemeralMessagesResponse.messages:type_name -> sameoldchat.chat.v1.EphemeralMessage
-	36, // 3: sameoldchat.chat.v1.UnfurlRequest.unfurls:type_name -> sameoldchat.chat.v1.UnfurlRequest.UnfurlsEntry
+	37, // 3: sameoldchat.chat.v1.UnfurlRequest.unfurls:type_name -> sameoldchat.chat.v1.UnfurlRequest.UnfurlsEntry
 	0,  // 4: sameoldchat.chat.v1.MessagePage.messages:type_name -> sameoldchat.chat.v1.Message
 	22, // 5: sameoldchat.chat.v1.HistoryRequest.window:type_name -> sameoldchat.chat.v1.MessageWindow
 	22, // 6: sameoldchat.chat.v1.RepliesRequest.window:type_name -> sameoldchat.chat.v1.MessageWindow
@@ -3482,32 +3568,34 @@ var file_sameoldchat_chat_v1_messages_proto_depIdxs = []int32{
 	29, // 30: sameoldchat.chat.v1.MessagesService.AdminCreateIncomingWebhook:input_type -> sameoldchat.chat.v1.IncomingWebhookCreateRequest
 	32, // 31: sameoldchat.chat.v1.MessagesService.AdminSetIncomingWebhookEnabled:input_type -> sameoldchat.chat.v1.IncomingWebhookEnableRequest
 	33, // 32: sameoldchat.chat.v1.MessagesService.PostIncomingWebhook:input_type -> sameoldchat.chat.v1.IncomingWebhookPostRequest
-	0,  // 33: sameoldchat.chat.v1.MessagesService.Post:output_type -> sameoldchat.chat.v1.Message
-	0,  // 34: sameoldchat.chat.v1.MessagesService.PostWithBlocks:output_type -> sameoldchat.chat.v1.Message
-	0,  // 35: sameoldchat.chat.v1.MessagesService.ShareFile:output_type -> sameoldchat.chat.v1.Message
-	5,  // 36: sameoldchat.chat.v1.MessagesService.ShareUploadedFile:output_type -> sameoldchat.chat.v1.ShareUploadedFileResponse
-	6,  // 37: sameoldchat.chat.v1.MessagesService.PostEphemeral:output_type -> sameoldchat.chat.v1.EphemeralMessage
-	9,  // 38: sameoldchat.chat.v1.MessagesService.ListEphemeral:output_type -> sameoldchat.chat.v1.EphemeralMessagesResponse
-	0,  // 39: sameoldchat.chat.v1.MessagesService.Update:output_type -> sameoldchat.chat.v1.Message
-	0,  // 40: sameoldchat.chat.v1.MessagesService.UpdateWithBlocks:output_type -> sameoldchat.chat.v1.Message
-	0,  // 41: sameoldchat.chat.v1.MessagesService.UpdateMessage:output_type -> sameoldchat.chat.v1.Message
-	0,  // 42: sameoldchat.chat.v1.MessagesService.StartMessageStream:output_type -> sameoldchat.chat.v1.Message
-	0,  // 43: sameoldchat.chat.v1.MessagesService.AppendMessageStream:output_type -> sameoldchat.chat.v1.Message
-	0,  // 44: sameoldchat.chat.v1.MessagesService.StopMessageStream:output_type -> sameoldchat.chat.v1.Message
-	0,  // 45: sameoldchat.chat.v1.MessagesService.Unfurl:output_type -> sameoldchat.chat.v1.Message
-	38, // 46: sameoldchat.chat.v1.MessagesService.PromptUnfurlAuthentication:output_type -> sameoldchat.chat.v1.MutationResponse
-	0,  // 47: sameoldchat.chat.v1.MessagesService.Delete:output_type -> sameoldchat.chat.v1.Message
-	19, // 48: sameoldchat.chat.v1.MessagesService.Permalink:output_type -> sameoldchat.chat.v1.PermalinkResponse
-	20, // 49: sameoldchat.chat.v1.MessagesService.History:output_type -> sameoldchat.chat.v1.MessagePage
-	20, // 50: sameoldchat.chat.v1.MessagesService.Replies:output_type -> sameoldchat.chat.v1.MessagePage
-	20, // 51: sameoldchat.chat.v1.MessagesService.Search:output_type -> sameoldchat.chat.v1.MessagePage
-	28, // 52: sameoldchat.chat.v1.MessagesService.RecordSearch:output_type -> sameoldchat.chat.v1.SearchHistoryResponse
-	28, // 53: sameoldchat.chat.v1.MessagesService.RecentSearches:output_type -> sameoldchat.chat.v1.SearchHistoryResponse
-	31, // 54: sameoldchat.chat.v1.MessagesService.AdminCreateIncomingWebhook:output_type -> sameoldchat.chat.v1.IncomingWebhookCreateResponse
-	34, // 55: sameoldchat.chat.v1.MessagesService.AdminSetIncomingWebhookEnabled:output_type -> sameoldchat.chat.v1.IncomingWebhookMutationResponse
-	0,  // 56: sameoldchat.chat.v1.MessagesService.PostIncomingWebhook:output_type -> sameoldchat.chat.v1.Message
-	33, // [33:57] is the sub-list for method output_type
-	9,  // [9:33] is the sub-list for method input_type
+	34, // 33: sameoldchat.chat.v1.MessagesService.PostAsSlackbot:input_type -> sameoldchat.chat.v1.SlackbotPostRequest
+	0,  // 34: sameoldchat.chat.v1.MessagesService.Post:output_type -> sameoldchat.chat.v1.Message
+	0,  // 35: sameoldchat.chat.v1.MessagesService.PostWithBlocks:output_type -> sameoldchat.chat.v1.Message
+	0,  // 36: sameoldchat.chat.v1.MessagesService.ShareFile:output_type -> sameoldchat.chat.v1.Message
+	5,  // 37: sameoldchat.chat.v1.MessagesService.ShareUploadedFile:output_type -> sameoldchat.chat.v1.ShareUploadedFileResponse
+	6,  // 38: sameoldchat.chat.v1.MessagesService.PostEphemeral:output_type -> sameoldchat.chat.v1.EphemeralMessage
+	9,  // 39: sameoldchat.chat.v1.MessagesService.ListEphemeral:output_type -> sameoldchat.chat.v1.EphemeralMessagesResponse
+	0,  // 40: sameoldchat.chat.v1.MessagesService.Update:output_type -> sameoldchat.chat.v1.Message
+	0,  // 41: sameoldchat.chat.v1.MessagesService.UpdateWithBlocks:output_type -> sameoldchat.chat.v1.Message
+	0,  // 42: sameoldchat.chat.v1.MessagesService.UpdateMessage:output_type -> sameoldchat.chat.v1.Message
+	0,  // 43: sameoldchat.chat.v1.MessagesService.StartMessageStream:output_type -> sameoldchat.chat.v1.Message
+	0,  // 44: sameoldchat.chat.v1.MessagesService.AppendMessageStream:output_type -> sameoldchat.chat.v1.Message
+	0,  // 45: sameoldchat.chat.v1.MessagesService.StopMessageStream:output_type -> sameoldchat.chat.v1.Message
+	0,  // 46: sameoldchat.chat.v1.MessagesService.Unfurl:output_type -> sameoldchat.chat.v1.Message
+	39, // 47: sameoldchat.chat.v1.MessagesService.PromptUnfurlAuthentication:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 48: sameoldchat.chat.v1.MessagesService.Delete:output_type -> sameoldchat.chat.v1.Message
+	19, // 49: sameoldchat.chat.v1.MessagesService.Permalink:output_type -> sameoldchat.chat.v1.PermalinkResponse
+	20, // 50: sameoldchat.chat.v1.MessagesService.History:output_type -> sameoldchat.chat.v1.MessagePage
+	20, // 51: sameoldchat.chat.v1.MessagesService.Replies:output_type -> sameoldchat.chat.v1.MessagePage
+	20, // 52: sameoldchat.chat.v1.MessagesService.Search:output_type -> sameoldchat.chat.v1.MessagePage
+	28, // 53: sameoldchat.chat.v1.MessagesService.RecordSearch:output_type -> sameoldchat.chat.v1.SearchHistoryResponse
+	28, // 54: sameoldchat.chat.v1.MessagesService.RecentSearches:output_type -> sameoldchat.chat.v1.SearchHistoryResponse
+	31, // 55: sameoldchat.chat.v1.MessagesService.AdminCreateIncomingWebhook:output_type -> sameoldchat.chat.v1.IncomingWebhookCreateResponse
+	35, // 56: sameoldchat.chat.v1.MessagesService.AdminSetIncomingWebhookEnabled:output_type -> sameoldchat.chat.v1.IncomingWebhookMutationResponse
+	0,  // 57: sameoldchat.chat.v1.MessagesService.PostIncomingWebhook:output_type -> sameoldchat.chat.v1.Message
+	0,  // 58: sameoldchat.chat.v1.MessagesService.PostAsSlackbot:output_type -> sameoldchat.chat.v1.Message
+	34, // [34:59] is the sub-list for method output_type
+	9,  // [9:34] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name
 	9,  // [9:9] is the sub-list for extension extendee
 	0,  // [0:9] is the sub-list for field type_name
@@ -3527,7 +3615,7 @@ func file_sameoldchat_chat_v1_messages_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_messages_proto_rawDesc), len(file_sameoldchat_chat_v1_messages_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   37,
+			NumMessages:   38,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

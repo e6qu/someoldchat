@@ -41,6 +41,7 @@ type workspaceSettingsData struct {
 	// policy is actually being applied.
 	MessageRetentionDays  int
 	FileRetentionDays     int
+	CanvasRetentionDays   int
 	RetentionSummary      string
 	RetentionSweptAt      string
 	RetentionSweptMachine string
@@ -140,16 +141,17 @@ const workspaceSettingsMarkup = `{{define "title"}}Workspace settings · SameOld
 </form>
 </section>
 <section class="card" aria-labelledby="retention-heading">
-<div class="section-head"><h2 id="retention-heading">Message and file retention</h2><p>Deletion under this policy is permanent and cannot be undone. It runs on a schedule rather than the instant something expires, so content stays readable for up to a day after its age passes the limit.</p></div>
+<div class="section-head"><h2 id="retention-heading">Retention</h2><p>Deletion under this policy is permanent and cannot be undone. It runs on a schedule rather than the instant something expires, so content stays readable for up to a day after its age passes the limit.</p></div>
 <form class="setup" method="post" action="/app/admin/settings/retention">
 <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
 <label>Keep messages for<input name="message_days" type="number" min="0" max="36499" value="{{.MessageRetentionDays}}" {{if not .CanWrite}}disabled{{end}}><span class="read-only">days · 0 keeps them forever</span></label>
 <label>Keep files for<input name="file_days" type="number" min="0" max="36499" value="{{.FileRetentionDays}}" {{if not .CanWrite}}disabled{{end}}><span class="read-only">days · 0 keeps them forever</span></label>
+<label>Keep canvases and lists for<input name="canvas_list_days" type="number" min="0" max="36499" value="{{.CanvasRetentionDays}}" {{if not .CanWrite}}disabled{{end}}><span class="read-only">days after their last edit · 0 keeps them forever</span></label>
 {{if .CanWrite}}<button class="toggle" type="submit">Save retention</button>{{end}}
 </form>
 <p class="read-only">{{.RetentionSummary}}</p>
 {{if .RetentionSweptAt}}<p class="read-only">Last swept <time datetime="{{.RetentionSweptMachine}}" data-local-time>{{.RetentionSweptAt}}</time>. A conversation is swept about once a day; if this is much older, the retention worker is not running.</p>{{else}}<p class="read-only">Nothing has been swept yet.</p>{{end}}
-<p class="read-only">A channel can be given a shorter limit of its own from its conversation details. Canvases and lists are not covered by retention here and are kept indefinitely.</p>
+<p class="read-only">A channel can be given a shorter message limit of its own from its conversation details. A canvas or list is counted from its last edit, so editing one restarts its period; deleting it removes its version history and comments too.</p>
 </section>
 <section class="card" aria-labelledby="profile-fields-heading">
 <div class="section-head"><h2 id="profile-fields-heading">Custom profile fields</h2><p>Fields every member can fill in on their profile. A hidden field's value is visible only to the member and to administrators; everyone else does not see it at all.</p></div>
@@ -274,6 +276,7 @@ func (h Handler) workspaceSettingsPage(w http.ResponseWriter, r *http.Request) {
 	if policy, policyErr := h.Messages.WorkspaceRetention(r.Context(), principal.WorkspaceID, principal.UserID); policyErr == nil {
 		data.MessageRetentionDays = policy.MessageDays
 		data.FileRetentionDays = policy.FileDays
+		data.CanvasRetentionDays = policy.CanvasListDays
 		data.RetentionSummary = retentionSummary(policy)
 	} else {
 		// A policy that cannot be read must not render as "keep forever": that
@@ -327,6 +330,14 @@ func (h Handler) workspaceSettingsPage(w http.ResponseWriter, r *http.Request) {
 // "90" and "0" in adjacent boxes do not tell an administrator that their files
 // outlive their messages.
 func retentionSummary(policy domain.RetentionPolicy) string {
+	documents := " Canvases and lists are kept forever."
+	if policy.CanvasListDays > 0 {
+		documents = " Canvases and lists are deleted permanently once they go unedited past their limit."
+	}
+	return messageFileRetentionSummary(policy) + documents
+}
+
+func messageFileRetentionSummary(policy domain.RetentionPolicy) string {
 	switch {
 	case policy.MessageDays == 0 && policy.FileDays == 0:
 		return "Nothing is deleted by policy. Messages and files are kept until someone removes them."
@@ -350,7 +361,23 @@ func (h Handler) workspaceRetentionSet(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_duration", Title: "Request rejected", Message: "A retention limit is a number of days, or 0 to keep everything."})
 		return
 	}
-	if _, err := h.Messages.SetWorkspaceRetention(r.Context(), principal.WorkspaceID, principal.UserID, domain.RetentionPolicy{MessageDays: messageDays, FileDays: fileDays}); err != nil {
+	policy := domain.RetentionPolicy{MessageDays: messageDays, FileDays: fileDays}
+	// A form without the canvas and list field (a page opened before it
+	// existed) keeps the stored duration rather than turning it off.
+	if raw, present := fields["canvas_list_days"]; present {
+		days, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil {
+			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_duration", Title: "Request rejected", Message: "A retention limit is a number of days, or 0 to keep everything."})
+			return
+		}
+		policy.CanvasListDays = days
+	} else if current, err := h.Messages.WorkspaceRetention(r.Context(), principal.WorkspaceID, principal.UserID); err == nil {
+		policy.CanvasListDays = current.CanvasListDays
+	} else {
+		h.writeAuthAdminProblem(w, r, workspaceSettingsProblem(err, "The retention policy was not changed."))
+		return
+	}
+	if _, err := h.Messages.SetWorkspaceRetention(r.Context(), principal.WorkspaceID, principal.UserID, policy); err != nil {
 		if errors.Is(err, domain.ErrInvalidRetentionDuration) {
 			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_duration", Title: "Request rejected", Message: "A retention limit must be between 0 and 36499 days."})
 			return

@@ -1424,7 +1424,10 @@ assert.equal(Array.isArray(allSearch.files.matches), true);
 
 const users = await client.users.list({ limit: 10 });
 assert.equal(users.ok, true);
-assert.equal(users.members.length, 3);
+// Slackbot ends the directory, as USLACKBOT in every Slack workspace.
+assert.equal(users.members.length, 4);
+assert.equal(users.members[3].id, "USLACKBOT");
+assert.equal(users.members[3].profile.always_active, true);
 assert.equal(users.response_metadata?.next_cursor ?? "", "");
 assert.equal((await client.apiCall("users.setActive")).ok, true);
 assert.equal((await adminClient.admin.users.assign({

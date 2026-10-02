@@ -179,3 +179,63 @@ func TestRetentionWorkerHonoursAConversationOverride(t *testing.T) {
 		t.Fatalf("messages=%+v err=%v, want the channel's stricter override to have applied", page.Messages, err)
 	}
 }
+
+// Canvas and list retention is the workspace's own daily pass: a canvas left
+// unedited past the duration is deleted and announced once, a pass across all
+// workspaces reaches it, and a second run inside the interval does nothing.
+func TestRetentionWorkerDeletesUneditedCanvasesOncePerInterval(t *testing.T) {
+	ctx := context.Background()
+	store := retentionStore(t)
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	for id, edited := range map[domain.CanvasID]time.Time{"Fstale": now.AddDate(0, 0, -91), "Ffresh": now.AddDate(0, 0, -89)} {
+		if err := store.CreateCanvas(ctx, domain.Canvas{ID: id, WorkspaceID: "T1", OwnerID: "U1", Title: string(id), DocumentContent: "{}", Version: 1, CreatedAt: edited, UpdatedAt: edited},
+			events.Event{ID: domain.EventID("E-" + id), WorkspaceID: "T1", Topic: "canvas.created", Payload: "{}", CreatedAt: edited}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SetRetentionPolicy(ctx, "T1", domain.RetentionPolicy{CanvasListDays: 90},
+		events.Event{ID: "E-policy", WorkspaceID: "T1", Topic: "retention.policy_changed", Payload: "{}", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := NewRetentionWorker(store, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	announced := func() int {
+		count := 0
+		for _, event := range store.Outbox() {
+			if event.Topic == "retention.documents_swept" {
+				count++
+			}
+		}
+		return count
+	}
+	if _, err := worker.RunOnceAt(ctx, "", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetCanvas(ctx, "T1", "Fstale"); err == nil {
+		t.Fatal("a canvas unedited past the duration survived the sweep")
+	}
+	if _, err := store.GetCanvas(ctx, "T1", "Ffresh"); err != nil {
+		t.Fatalf("a canvas edited within the duration was deleted: %v", err)
+	}
+	if announced() != 1 {
+		t.Fatalf("the sweep was announced %d times, want once", announced())
+	}
+	if err := store.CreateCanvas(ctx, domain.Canvas{ID: "Flater", WorkspaceID: "T1", OwnerID: "U1", Title: "later", DocumentContent: "{}", Version: 1, CreatedAt: now.AddDate(-1, 0, 0), UpdatedAt: now.AddDate(-1, 0, 0)},
+		events.Event{ID: "E-later", WorkspaceID: "T1", Topic: "canvas.created", Payload: "{}", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.RunOnceAt(ctx, "", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetCanvas(ctx, "T1", "Flater"); err != nil || announced() != 1 {
+		t.Fatalf("a second run inside the interval swept again: %v, %d announcements", err, announced())
+	}
+	if _, err := worker.RunOnceAt(ctx, "", now.Add(RetentionInterval+time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetCanvas(ctx, "T1", "Flater"); err == nil || announced() != 2 {
+		t.Fatalf("the next day's pass did not sweep: %v, %d announcements", err, announced())
+	}
+}

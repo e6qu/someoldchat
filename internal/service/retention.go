@@ -40,6 +40,7 @@ func (m Messages) SetWorkspaceRetention(ctx context.Context, workspaceID domain.
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("retention.policy_changed",
 		events.String("message_days", retentionDays(policy.MessageDays)),
 		events.String("file_days", retentionDays(policy.FileDays)),
+		events.String("canvas_list_days", retentionDays(policy.CanvasListDays)),
 	), time.Now().UTC())
 	if err != nil {
 		return domain.RetentionPolicy{}, err

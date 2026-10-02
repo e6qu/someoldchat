@@ -6173,7 +6173,9 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 				return nil, err
 			}
 			for _, user := range page.Users {
-				if user.Deleted {
+				// Slackbot is in every workspace's directory but cannot be
+				// added to a channel, as on Slack.
+				if user.Deleted || user.IsSlackbot() {
 					continue
 				}
 				if _, exists := membersByID[user.ID]; exists {
@@ -10528,7 +10530,7 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		_, isVIP := vips[user.ID]
 		// A member never seen active has no presence to report; "auto" says
 		// so rather than claiming they are active.
-		presence := user.Presence.CurrentAt(user.LastActiveAt, now)
+		presence := user.PresenceAt(now)
 		if isSelf {
 			presence = webPresence(user.Presence, true)
 		} else if user.LastActiveAt.IsZero() && user.Presence != domain.PresenceAway {
@@ -10556,7 +10558,7 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		Truncated:      truncated,
 		Profile:        profile,
 		StatusDisplay:  statusEmojiDisplay(profile.StatusEmoji, emojiImages),
-		Presence:       current.Presence.CurrentAt(current.LastActiveAt, time.Now().UTC()),
+		Presence:       current.PresenceAt(time.Now().UTC()),
 		StatusExpires:  webUnixSeconds(profile.StatusExpiration),
 		AvatarURL:      profileImageURL(profile),
 		UserInitial:    initial(displayName(current)),

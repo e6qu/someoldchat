@@ -95,6 +95,7 @@ type Store struct {
 	retentionPolicies             map[domain.WorkspaceID]domain.RetentionPolicy
 	conversationRetention         map[domain.ConversationID]domain.ConversationRetention
 	retentionSweptAt              map[domain.ConversationID]time.Time
+	documentsSweptAt              map[domain.WorkspaceID]time.Time
 	nextAttempt                   map[uint64]time.Time
 	readCursors                   map[string]domain.ReadCursor
 	workspaceNotificationPrefs    map[string]domain.WorkspaceNotificationPreferences
@@ -298,7 +299,7 @@ func New() *Store {
 	// One field per line, and TestNewInitialisesEveryMap holds it: this used to
 	// be a single 103-field literal, and a map field added to Store but not
 	// here compiles and panics on the first write to it.
-	return &Store{
+	s := &Store{
 		lists:                         make(map[domain.ListID]domain.List),
 		listTemplates:                 make(map[domain.ListTemplateID]domain.ListTemplate),
 		listItems:                     make(map[domain.ListID]map[domain.ListItemID]domain.ListItem),
@@ -372,6 +373,7 @@ func New() *Store {
 		retentionPolicies:             make(map[domain.WorkspaceID]domain.RetentionPolicy),
 		conversationRetention:         make(map[domain.ConversationID]domain.ConversationRetention),
 		retentionSweptAt:              make(map[domain.ConversationID]time.Time),
+		documentsSweptAt:              make(map[domain.WorkspaceID]time.Time),
 		nextAttempt:                   make(map[uint64]time.Time),
 		readCursors:                   make(map[string]domain.ReadCursor),
 		workspaceNotificationPrefs:    make(map[string]domain.WorkspaceNotificationPreferences),
@@ -435,6 +437,11 @@ func New() *Store {
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
 	}
+	// Slackbot's identity row, as the SQL profiles' schema 204 writes it; see
+	// domain.SlackbotUserID.
+	s.workspaces[domain.SlackbotHomeWorkspaceID] = domain.Workspace{ID: domain.SlackbotHomeWorkspaceID, Name: "Slackbot", Discoverability: domain.WorkspaceDiscoverabilityClosed}
+	s.users[domain.SlackbotUserID] = domain.SlackbotUser(domain.SlackbotHomeWorkspaceID)
+	return s
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -3697,7 +3704,8 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 			return store.InvalidArgument("direct conversation contains duplicate members")
 		}
 		user, exists := s.users[member]
-		if !exists || user.WorkspaceID != conversation.WorkspaceID || user.Deleted {
+		// Slackbot is in every workspace; see domain.SlackbotUserID.
+		if !exists || (user.WorkspaceID != conversation.WorkspaceID && !user.IsSlackbot()) || user.Deleted {
 			return store.ErrNotFound
 		}
 		memberSet[member] = struct{}{}
@@ -6958,6 +6966,104 @@ func (s *Store) RemoveConversationRetention(_ context.Context, workspace domain.
 	return nil
 }
 
+func (s *Store) ClaimDocumentRetentionSweep(_ context.Context, workspace domain.WorkspaceID, before, sweptAt time.Time, limit int) ([]domain.WorkspaceID, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("a retention claim requires a positive limit")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var due []domain.WorkspaceID
+	for id, policy := range s.retentionPolicies {
+		if policy.CanvasListDays <= 0 || (workspace != "" && id != workspace) {
+			continue
+		}
+		if swept, exists := s.documentsSweptAt[id]; exists && swept.After(before) {
+			continue
+		}
+		due = append(due, id)
+	}
+	slices.Sort(due)
+	due = due[:min(limit, len(due))]
+	for _, id := range due {
+		s.documentsSweptAt[id] = sweptAt.UTC()
+	}
+	return due, nil
+}
+
+func (s *Store) SweepDocumentRetention(_ context.Context, workspace domain.WorkspaceID, horizon time.Time, limit int) (domain.DocumentRetentionSweep, error) {
+	if limit <= 0 {
+		return domain.DocumentRetentionSweep{}, store.InvalidArgument("a retention sweep requires a positive limit")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := domain.DocumentRetentionSweep{WorkspaceID: workspace}
+	var canvases []domain.CanvasID
+	for id, canvas := range s.canvases {
+		if canvas.WorkspaceID == workspace && canvas.UpdatedAt.Before(horizon) {
+			canvases = append(canvases, id)
+		}
+	}
+	slices.Sort(canvases)
+	for _, id := range canvases[:min(limit, len(canvases))] {
+		delete(s.canvases, id)
+		delete(s.canvasRevisions, id)
+		for key, access := range s.canvasAccess {
+			if access.CanvasID == id {
+				delete(s.canvasAccess, key)
+			}
+		}
+		for key, comment := range s.canvasComments {
+			if comment.CanvasID == id {
+				delete(s.canvasComments, key)
+			}
+		}
+		result.Canvases++
+	}
+	var lists []domain.ListID
+	for id, list := range s.lists {
+		if list.WorkspaceID != workspace || !list.UpdatedAt.Before(horizon) {
+			continue
+		}
+		edited := false
+		for _, item := range s.listItems[id] {
+			if !item.UpdatedAt.Before(horizon) {
+				edited = true
+				break
+			}
+		}
+		if !edited {
+			lists = append(lists, id)
+		}
+	}
+	slices.Sort(lists)
+	for _, id := range lists[:min(limit, len(lists))] {
+		delete(s.lists, id)
+		delete(s.listItems, id)
+		for key, comment := range s.listItemComments {
+			if comment.ListID == id {
+				delete(s.listItemComments, key)
+			}
+		}
+		for key, file := range s.listItemFiles {
+			if file.ListID == id {
+				delete(s.listItemFiles, key)
+			}
+		}
+		for key, access := range s.listAccess {
+			if access.ListID == id {
+				delete(s.listAccess, key)
+			}
+		}
+		for key, download := range s.listDownloads {
+			if download.ListID == id {
+				delete(s.listDownloads, key)
+			}
+		}
+		result.Lists++
+	}
+	return result, nil
+}
+
 func (s *Store) ClaimRetentionSweep(_ context.Context, workspace domain.WorkspaceID, before, sweptAt time.Time, limit int) ([]domain.ConversationID, error) {
 	if limit <= 0 {
 		return nil, store.InvalidArgument("a retention claim requires a positive limit")
@@ -9663,20 +9769,8 @@ func (s *Store) MarkReminderDelivered(_ context.Context, workspace domain.Worksp
 		reminder.Time = next.UTC().Truncate(time.Second)
 		s.reminders[id] = reminder
 	}
-	// The notice and the Activity row are written with the claim, so a member
-	// cannot be marked reminded without being shown the reminder.
-	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, reminder.User)
-	if stored, ok := s.workspaceNotificationPrefs[workspaceNotificationKey(workspace, reminder.User)]; ok {
-		preferences = stored
-	}
-	if reminder.User != "" && preferences.ActivityReminders {
-		activityID := domain.ActivityIDFor(reminder.User, "app-reminder:"+string(id)+":"+string(domain.NewStoredTime(deliveredAt)))
-		s.activityItems[activityID] = domain.ActivityItem{
-			ID: activityID, WorkspaceID: workspace, UserID: reminder.User,
-			Kinds: []domain.ActivityKind{domain.ActivityReminder}, AppReminderID: id,
-			OccurredAt: deliveredAt.UTC(),
-		}
-	}
+	// The member is shown the reminder by the Slackbot DM the delivery worker
+	// posts before it claims the occurrence; see scheduler.ReminderDeliveryWorker.
 	s.outbox = append(s.outbox, event)
 	return true, nil
 }

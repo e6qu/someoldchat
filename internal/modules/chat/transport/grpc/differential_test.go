@@ -1255,6 +1255,37 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Slackbot delivers a reminder into the member's Slackbot DM, or
+			// into a channel the member can post in, and the DM is the same
+			// conversation the second time.
+			name: "Slackbot posts for a member into their DM or their channel",
+			seed: seedBaseline,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				first, err := chat.PostAsSlackbot(ctx, "T1", "U1", domain.SlackbotPost{Text: "Reminder: stretch.", IdempotencyKey: "first"})
+				if err != nil {
+					return nil, err
+				}
+				second, err := chat.PostAsSlackbot(ctx, "T1", "U1", domain.SlackbotPost{Text: "Reminder: drink water.", IdempotencyKey: "second"})
+				if err != nil {
+					return nil, err
+				}
+				replayed, err := chat.PostAsSlackbot(ctx, "T1", "U1", domain.SlackbotPost{Text: "Reminder: stretch.", IdempotencyKey: "first"})
+				if err != nil {
+					return nil, err
+				}
+				channel, err := chat.PostAsSlackbot(ctx, "T1", "U1", domain.SlackbotPost{Conversation: "C1", Text: "Reminder: stand-up."})
+				if err != nil {
+					return nil, err
+				}
+				_, stranger := chat.PostAsSlackbot(ctx, "T1", "U-nobody", domain.SlackbotPost{Text: "Reminder: nothing."})
+				_, empty := chat.PostAsSlackbot(ctx, "T1", "U1", domain.SlackbotPost{Text: " "})
+				return []any{
+					first.AuthorID, first.Conversation == second.Conversation, replayed.ID == first.ID,
+					channel.Conversation, channel.AuthorID, stranger != nil, empty != nil,
+				}, nil
+			},
+		},
+		{
 			// The administrative half of a channel. It reaches channels the
 			// administrator is not in, which is exactly why each refusal has to
 			// answer the same on both compositions.

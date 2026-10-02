@@ -867,6 +867,18 @@ type Store interface {
 	// nothing here, and deleting a root while its replies survive would leave
 	// replies with no parent to render under.
 	SweepRetention(context.Context, domain.RetentionSweepRequest) (domain.RetentionSweep, error)
+	// ClaimDocumentRetentionSweep claims up to limit workspaces whose canvas
+	// and list retention pass has not run since before, each by advancing its
+	// watermark to sweptAt in the statement that tests it. An empty workspace
+	// claims across workspaces. A workspace that keeps canvases and lists
+	// forever is never claimed.
+	ClaimDocumentRetentionSweep(ctx context.Context, workspace domain.WorkspaceID, before, sweptAt time.Time, limit int) ([]domain.WorkspaceID, error)
+	// SweepDocumentRetention permanently deletes up to limit canvases and up
+	// to limit lists in the workspace last edited before horizon, each with
+	// its content, version history, comments, sharing and, for a list, its
+	// items, item attachments and exports. A list's last edit is the newest
+	// of its own and its items'. Like SweepRetention, it is idempotent.
+	SweepDocumentRetention(ctx context.Context, workspace domain.WorkspaceID, horizon time.Time, limit int) (domain.DocumentRetentionSweep, error)
 	// LastRetentionSweep is the most recent instant any conversation in the
 	// workspace was swept, which is the signal that the worker is alive. The
 	// oldest watermark would say how far behind it is, but the newest is what
