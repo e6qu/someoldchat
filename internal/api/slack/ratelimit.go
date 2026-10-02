@@ -40,12 +40,13 @@ import (
 // specs/compatibility.yaml):
 //
 //   - Slack's current reference defines per-method tiers, counted per app per
-//     workspace, with Tier 4 documented as "100+ per minute". Every method
-//     here gets a uniform budget at that most-permissive floor rather than a
-//     per-method tier assignment: enforcing a laxer limit than real Slack can
-//     never break a conforming client, while a hand-written 310-method tier
-//     table would be guesswork the pinned material does not settle. The
-//     per-method assignments therefore remain a recorded deviation.
+//     workspace: Tier 1 "1+ per minute", Tier 2 "20+", Tier 3 "50+" and
+//     Tier 4 "100+". A method whose stricter tier its reference page names is
+//     enforced at that tier (methodTiers); every other method gets the
+//     uniform budget at Tier 4's floor. Enforcing a laxer limit than real
+//     Slack can never break a conforming client, while a tier written from
+//     memory could refuse one, so the table holds only cited tiers and the
+//     rest remain a recorded deviation.
 //   - chat.postMessage's special allowance IS documented method-level
 //     behavior — one message per second per channel with short bursts
 //     tolerated — and is enforced per credential and channel. The burst
@@ -71,9 +72,65 @@ type rateBucket struct {
 	last      time.Time
 }
 
+// rateTier is a documented Web API tier: its per-minute floor, and how many
+// calls may arrive at once. Slack documents bursts for every tier without a
+// number ("a small amount of burst behavior" for Tier 1); a full minute's
+// budget is the burst for Tiers 2 to 4, and Tier 1's is a chosen constant.
+type rateTier struct {
+	perMinute float64
+	burst     float64
+}
+
+var (
+	tier1 = rateTier{perMinute: 1, burst: tier1Burst}
+	tier2 = rateTier{perMinute: 20, burst: 20}
+	tier3 = rateTier{perMinute: 50, burst: 50}
+	tier4 = rateTier{perMinute: methodBudgetPerMinute, burst: methodBudgetPerMinute}
+)
+
+// methodTiers is each method enforced below Tier 4, at the tier its Slack
+// reference page names. A method absent here is held to Tier 4.
+var methodTiers = map[string]rateTier{
+	"admin.apps.mcp.servers.list":             tier3,
+	"admin.apps.mcp.servers.permissions.list": tier3,
+	"admin.apps.mcp.servers.permissions.set":  tier3,
+	"admin.apps.permissions.add":              tier2,
+	"admin.apps.permissions.list":             tier3,
+	"admin.apps.permissions.remove":           tier2,
+	"admin.apps.permissions.set":              tier2,
+	"admin.usergroups.addUsers":               tier2,
+	"admin.usergroups.create":                 tier1,
+	"admin.usergroups.fetch":                  tier1,
+	"admin.usergroups.removeTeams":            tier2,
+	"admin.usergroups.removeUsers":            tier2,
+	"admin.usergroups.update":                 tier1,
+	"admin.usergroups.uploadUsers":            tier2,
+	"agents.sessions.rename":                  tier3,
+	"agents.sessions.setStatus":               tier3,
+	"apps.managed.permissions.set":            tier2,
+	"auth.teams.list":                         tier2,
+	"chat.scheduleMessage":                    tier3,
+	"chat.scheduledMessages.list":             tier3,
+	"functions.workflows.steps.list":          tier3,
+	"team.preferences.list":                   tier3,
+	"workflows.featured.set":                  tier3,
+}
+
+// methodTier is the tier the method is enforced at.
+func methodTier(method string) rateTier {
+	if tier, ok := methodTiers[method]; ok {
+		return tier
+	}
+	return tier4
+}
+
 const (
-	// methodBudgetPerMinute is Tier 4's documented floor, applied uniformly.
+	// methodBudgetPerMinute is Tier 4's documented floor, the budget of every
+	// method methodTiers does not name.
 	methodBudgetPerMinute = 100
+	// tier1Burst is how many Tier 1 calls may arrive at once before the
+	// one-per-minute refill governs.
+	tier1Burst = 3
 	// postMessagePerSecond and postMessageBurst enforce the documented
 	// one-per-second-per-channel posting allowance with a short burst.
 	postMessagePerSecond = 1
@@ -100,7 +157,8 @@ func (l *RateLimiter) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		credential := rateLimitCredential(r)
-		if retryAfter, limited := l.take("method\x00"+method+"\x00"+credential, methodBudgetPerMinute, float64(methodBudgetPerMinute)/60); limited {
+		tier := methodTier(method)
+		if retryAfter, limited := l.take("method\x00"+method+"\x00"+credential, tier.burst, tier.perMinute/60); limited {
 			writeRateLimited(w, retryAfter)
 			return
 		}
