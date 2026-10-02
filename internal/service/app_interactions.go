@@ -199,6 +199,13 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, message.Conversation); err != nil {
 		return err
 	}
+	// The buttons Slack adds to an unfurl authentication prompt are answered
+	// here and never reach the app, which may have no interactivity at all.
+	if ephemeral && blocksContainDispatchableAction(message.Blocks, action.BlockID, action.ActionID, action.Type) {
+		if answered, err := m.answerUnfurlAuthPrompt(ctx, workspaceID, userID, message, action); answered {
+			return err
+		}
+	}
 	snapshot, parsed, err := m.installedApp(ctx, workspaceID, message.AppID)
 	if err != nil {
 		return err

@@ -164,6 +164,7 @@ func runQualification(t *testing.T, open opener) {
 		{"an external credential keeps its secret in the store", externalCredentialKeepsItsSecret},
 		{"the OpenID signing key is one key for every replica", openIDSigningKeyIsSingular},
 		{"a workspace's primary owner is one owner who cannot be removed", primaryOwnerIsOneProtectedOwner},
+		{"never being asked again by an app outlives the prompt", unfurlAuthDeclineIsDurable},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
 		{"visible files are newest first", visibleFilesAreNewestFirst},
@@ -1068,6 +1069,37 @@ func primaryOwnerIsOneProtectedOwner(t *testing.T, open opener) {
 	// Handed on, the previous primary owner is an ordinary owner again.
 	if err := repository.SetWorkspaceRole(ctx, workspaceID, first, domain.WorkspaceRoleAdmin, event()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// unfurlAuthDeclineIsDurable holds a member's "Never ask me again" on an app's
+// unfurl authentication prompt: it is recorded once, idempotently, for that
+// member and that app alone.
+func unfurlAuthDeclineIsDurable(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID, userID, appID := domain.WorkspaceID("T-unfurl-"+suffix), domain.UserID("U-unfurl-"+suffix), domain.AppID("A-unfurl-"+suffix)
+	declined := func(user domain.UserID, app domain.AppID) bool {
+		t.Helper()
+		value, err := repository.UnfurlAuthDeclined(ctx, workspaceID, user, app)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	if declined(userID, appID) {
+		t.Fatal("a member declined before choosing to")
+	}
+	for range 2 {
+		if err := repository.DeclineUnfurlAuth(ctx, workspaceID, userID, appID, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !declined(userID, appID) || declined(userID, appID+"-other") || declined(userID+"-other", appID) {
+		t.Fatal("the decline does not belong to exactly that member and app")
 	}
 }
 

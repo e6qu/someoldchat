@@ -32,6 +32,7 @@ const (
 	MessagesService_AppendMessageStream_FullMethodName            = "/sameoldchat.chat.v1.MessagesService/AppendMessageStream"
 	MessagesService_StopMessageStream_FullMethodName              = "/sameoldchat.chat.v1.MessagesService/StopMessageStream"
 	MessagesService_Unfurl_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Unfurl"
+	MessagesService_PromptUnfurlAuthentication_FullMethodName     = "/sameoldchat.chat.v1.MessagesService/PromptUnfurlAuthentication"
 	MessagesService_Delete_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Delete"
 	MessagesService_Permalink_FullMethodName                      = "/sameoldchat.chat.v1.MessagesService/Permalink"
 	MessagesService_History_FullMethodName                        = "/sameoldchat.chat.v1.MessagesService/History"
@@ -61,6 +62,7 @@ type MessagesServiceClient interface {
 	AppendMessageStream(ctx context.Context, in *MutateMessageStreamRequest, opts ...grpc.CallOption) (*Message, error)
 	StopMessageStream(ctx context.Context, in *MutateMessageStreamRequest, opts ...grpc.CallOption) (*Message, error)
 	Unfurl(ctx context.Context, in *UnfurlRequest, opts ...grpc.CallOption) (*Message, error)
+	PromptUnfurlAuthentication(ctx context.Context, in *UnfurlAuthPromptRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*Message, error)
 	Permalink(ctx context.Context, in *PermalinkRequest, opts ...grpc.CallOption) (*PermalinkResponse, error)
 	History(ctx context.Context, in *HistoryRequest, opts ...grpc.CallOption) (*MessagePage, error)
@@ -211,6 +213,16 @@ func (c *messagesServiceClient) Unfurl(ctx context.Context, in *UnfurlRequest, o
 	return out, nil
 }
 
+func (c *messagesServiceClient) PromptUnfurlAuthentication(ctx context.Context, in *UnfurlAuthPromptRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, MessagesService_PromptUnfurlAuthentication_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *messagesServiceClient) Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*Message, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Message)
@@ -328,6 +340,7 @@ type MessagesServiceServer interface {
 	AppendMessageStream(context.Context, *MutateMessageStreamRequest) (*Message, error)
 	StopMessageStream(context.Context, *MutateMessageStreamRequest) (*Message, error)
 	Unfurl(context.Context, *UnfurlRequest) (*Message, error)
+	PromptUnfurlAuthentication(context.Context, *UnfurlAuthPromptRequest) (*MutationResponse, error)
 	Delete(context.Context, *DeleteRequest) (*Message, error)
 	Permalink(context.Context, *PermalinkRequest) (*PermalinkResponse, error)
 	History(context.Context, *HistoryRequest) (*MessagePage, error)
@@ -385,6 +398,9 @@ func (UnimplementedMessagesServiceServer) StopMessageStream(context.Context, *Mu
 }
 func (UnimplementedMessagesServiceServer) Unfurl(context.Context, *UnfurlRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method Unfurl not implemented")
+}
+func (UnimplementedMessagesServiceServer) PromptUnfurlAuthentication(context.Context, *UnfurlAuthPromptRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PromptUnfurlAuthentication not implemented")
 }
 func (UnimplementedMessagesServiceServer) Delete(context.Context, *DeleteRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
@@ -670,6 +686,24 @@ func _MessagesService_Unfurl_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessagesService_PromptUnfurlAuthentication_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnfurlAuthPromptRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).PromptUnfurlAuthentication(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_PromptUnfurlAuthentication_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).PromptUnfurlAuthentication(ctx, req.(*UnfurlAuthPromptRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _MessagesService_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteRequest)
 	if err := dec(in); err != nil {
@@ -908,6 +942,10 @@ var MessagesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Unfurl",
 			Handler:    _MessagesService_Unfurl_Handler,
+		},
+		{
+			MethodName: "PromptUnfurlAuthentication",
+			Handler:    _MessagesService_PromptUnfurlAuthentication_Handler,
 		},
 		{
 			MethodName: "Delete",

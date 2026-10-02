@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TE
 CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, installer_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (app_id, workspace_id));
 CREATE TABLE IF NOT EXISTS file_access_grants (file_id TEXT NOT NULL, user_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), granted_at INTEGER NOT NULL, PRIMARY KEY (file_id, user_id));
 CREATE TABLE IF NOT EXISTS short_token_rotations (token_hash TEXT PRIMARY KEY, new_token_hash TEXT NOT NULL, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS unfurl_auth_declines (workspace_id TEXT NOT NULL, user_id TEXT NOT NULL, app_id TEXT NOT NULL, declined_at INTEGER NOT NULL, PRIMARY KEY (workspace_id, user_id, app_id));
 CREATE TABLE IF NOT EXISTS openid_signing_keys (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), key_id TEXT NOT NULL, private_key_ciphertext TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS function_execution_tokens (token_hash TEXT PRIMARY KEY, execution_id TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, callback_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL, bot_id TEXT NOT NULL DEFAULT '', scopes TEXT NOT NULL DEFAULT '', token_ciphertext TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS incoming_webhooks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id), user_id TEXT NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
@@ -602,7 +603,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 198
+const schemaVersion = 199
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3579,6 +3580,15 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 199: unfurl authentication declines ---
+	if version < 199 {
+		// A member's "Never ask me again" on an app's chat.unfurl
+		// authentication prompt outlives the prompt, so it is durable.
+		if _, err := db.ExecContext(ctx, unfurlAuthDeclinesTable); err != nil {
+			return fmt.Errorf("migrate unfurl authentication declines: %w", err)
+		}
+	}
+	// --- end schema 199 ---
 	// --- schema 198: the primary owner ---
 	if version < 198 {
 		// Slack names one owner of each workspace its primary owner. A

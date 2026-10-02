@@ -149,6 +149,7 @@ type Store struct {
 	aiExcludedConversations       map[domain.ConversationID]struct{}
 	shortTokenRotations           map[string]domain.ShortTokenRotation
 	openIDSigningKey              *domain.OpenIDSigningKey
+	unfurlAuthDeclines            map[string]struct{}
 	conversationObjects           map[string]domain.LinkedObject
 	appActivities                 []domain.AppActivity
 	anomalyAllowLists             map[domain.WorkspaceID]domain.AnomalyAllowList
@@ -424,6 +425,7 @@ func New() *Store {
 		mcpServerPermissions:          make(map[string]domain.MCPServerPermission),
 		aiExcludedConversations:       make(map[domain.ConversationID]struct{}),
 		shortTokenRotations:           make(map[string]domain.ShortTokenRotation),
+		unfurlAuthDeclines:            make(map[string]struct{}),
 		conversationObjects:           make(map[string]domain.LinkedObject),
 		anomalyAllowLists:             make(map[domain.WorkspaceID]domain.AnomalyAllowList),
 		externalAuthTokens:            make(map[string]domain.ExternalAuthToken),

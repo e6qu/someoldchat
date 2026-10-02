@@ -1120,11 +1120,12 @@ operations:
       - go-test:internal/service:TestAnAppUnfurlsItsOwnDomainsInAPublicChannelItHasNotJoined
       - go-test:internal/service:TestPostedLinksReachEachAppWhoseUnfurlDomainsClaimThem
       - go-test:internal/service:TestMessageEventSnapshotsPreserveEveryMutationVersion
+      - go-test:internal/api/slack:TestChatUnfurlInvitesTheSharerToAuthenticate
+      - go-test:tests/persistence-qualification:unfurlAuthDeclineIsDurable
       - go-test:internal/slackapp:TestEventProcessorDeliversLinkSharedForTheAppsUnfurlDomains
       - official-sdk:tests/official-sdk-qualification/node-bolt/qualification.mjs
     deviations:
       - link_shared always carries source=conversations_history; source=composer is answered cannot_unfurl_url because the first-party client previews no unsent draft, so no composer unfurl_id exists.
-      - The user_auth_* parameters (unfurling behind an ephemeral authentication prompt) are accepted but not acted on.
   - method: dialog.open
     status: behavior-compatible
     provenance: slack-api-specs-openapi

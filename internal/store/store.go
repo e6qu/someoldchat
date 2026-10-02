@@ -1109,6 +1109,10 @@ type Store interface {
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
 	UpdateEphemeralMessage(context.Context, domain.EphemeralMessage, events.Event) error
 	DeleteEphemeralMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID, events.Event) error
+	// DeclineUnfurlAuth records that a member chose "Never ask me again" on an
+	// app's unfurl authentication prompt, and UnfurlAuthDeclined reads it back.
+	DeclineUnfurlAuth(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, at time.Time) error
+	UnfurlAuthDeclined(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (bool, error)
 	GetMessage(context.Context, domain.MessageID) (domain.Message, error)
 	// ListMessages pages the non-deleted messages in one conversation in either
 	// direction. Deleted rows remain individually addressable through GetMessage

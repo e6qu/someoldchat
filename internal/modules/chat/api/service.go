@@ -85,6 +85,8 @@ type Service interface {
 	ShareFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
 	ShareUploadedFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID, []domain.ConversationID, string, domain.MessageTimestamp) ([]domain.ConversationID, error)
 	Unfurl(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, domain.MessageTimestamp, map[string]string) (domain.Message, error)
+	// PromptUnfurlAuthentication is chat.unfurl's user_auth_* invitation to the member who shared the links.
+	PromptUnfurlAuthentication(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, prompt domain.UnfurlAuthPrompt) error
 	PostEphemeral(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string) (domain.EphemeralMessage, error)
 	PostEphemeralWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string) (domain.EphemeralMessage, error)
 	PostWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, domain.MessageTimestamp, string, domain.AppID) (domain.Message, error)

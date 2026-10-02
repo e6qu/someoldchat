@@ -10449,6 +10449,11 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	prompt, prompted, ok := unfurlAuthPromptArguments(fields)
+	if !ok {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	if _, err := h.Messages.Unfurl(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, channel, timestamp, unfurls); err != nil {
 		// /chat.unfurl declares cannot_unfurl_url; message_not_found and
 		// not_in_channel are not in its enum.
@@ -10459,9 +10464,45 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "cannot_unfurl_url"))
 		return
 	}
+	if prompted {
+		if err := h.Messages.PromptUnfurlAuthentication(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, channel, timestamp, prompt); err != nil {
+			writeError(w, mapServiceError(err, "cannot_prompt"))
+			return
+		}
+	}
 	// The pinned success schema is exactly {"ok": true}: additionalProperties
 	// is false, so the message this used to echo was outside the contract.
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// unfurlAuthPromptArguments reads chat.unfurl's user_auth_* arguments. Naming
+// a message, a URL or blocks implies user_auth_required, as Slack documents;
+// the URL must be one a member's browser can open, and the blocks must be a
+// block array.
+func unfurlAuthPromptArguments(fields map[string]string) (domain.UnfurlAuthPrompt, bool, bool) {
+	prompt := domain.UnfurlAuthPrompt{Message: strings.TrimSpace(fields["user_auth_message"]), URL: strings.TrimSpace(fields["user_auth_url"])}
+	required := false
+	if raw := strings.TrimSpace(fields["user_auth_required"]); raw != "" {
+		value, err := parseBoolField(raw)
+		if err != nil {
+			return domain.UnfurlAuthPrompt{}, false, false
+		}
+		required = value
+	}
+	if raw := strings.TrimSpace(fields["user_auth_blocks"]); raw != "" {
+		blocks, err := domain.NormalizeBlocks([]byte(raw))
+		if err != nil {
+			return domain.UnfurlAuthPrompt{}, false, false
+		}
+		prompt.Blocks = blocks
+	}
+	if prompt.URL != "" {
+		parsed, err := url.Parse(prompt.URL)
+		if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" {
+			return domain.UnfurlAuthPrompt{}, false, false
+		}
+	}
+	return prompt, required || prompt.Message != "" || prompt.URL != "" || prompt.Blocks != "", true
 }
 
 func (h Handler) meMessage(w http.ResponseWriter, r *http.Request) {
