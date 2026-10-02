@@ -2797,23 +2797,26 @@ operations:
       - 'A row naming nobody who is an active member of the organization is listed in invalid_users with reason user_not_found (its member ID, or its email address when it gave none), and a guest with reason guest_user; the reference shows only guest_user. successful_user_count counts the distinct users the file names who are members of the group afterwards, including any who already were.'
       - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: agents.sessions.rename
-    status: schema-compatible
+    status: sdk-compatible
     evidence:
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - go-test:internal/api/slack:TestAgentsSessionsRenameAnswersTheReferenceShapes
       - go-test:internal/service:TestAgentSessionRenameIsTheAgentsOwn
       - go-test:internal/store/memory:TestAgentSessionsKeepTheSharedContract
       - go-test:internal/store/sqlstore:TestSQLiteAgentSessionsKeepTheSharedContract
       - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
     deviations:
-      - Not sdk-compatible because the pinned official SDKs (@slack/web-api 8.0.0, slack_sdk 3.43.0) predate the method; @slack/web-api 8.2.0 and slack_sdk 3.44.1 declare it, and the argument names were checked against @slack/web-api 8.2.0's AgentsSessionsRenameArguments, but no pinned SDK suite calls it.
       - Session channels do not exist here, so every session is a thread session. A missing thread_ts is always thread_ts_required, and thread_ts_not_allowed, invalid_name, name_taken and is_archived — the codes for renaming a session channel — are never produced. channel_id is required (invalid_arguments when absent) even though the page makes it optional outside public channels, because the page does not say how the session is found without it.
       - An agent's own rename is journaled for the first-party client only; agent_session_title_changed is sent for a member's change from the client, as the event page describes, never for the app's own rename. Renaming to the current title changes nothing and is reported to nobody.
       - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited answers at this method's Tier 3 budget, enforced per web replica.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.sessions.rename/
   - method: agents.sessions.setStatus
-    status: schema-compatible
+    status: sdk-compatible
     evidence:
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - go-test:internal/api/slack:TestAgentsSessionsSetStatusAnswersTheReferenceShapes
       - go-test:internal/service:TestAgentSessionSetStatusFollowsTheReference
       - go-test:internal/service:TestAgentSessionIdentityOverridesTravelAsOneSet
@@ -2824,7 +2827,6 @@ operations:
       - go-test:internal/web:TestTheThreadPaneShowsTheAgentSessionAndItsControls
       - go-test:tests/lifecycle:TestTheProductRefusesEveryTransitionTheMachineForbids
     deviations:
-      - Not sdk-compatible because the pinned official SDKs (@slack/web-api 8.0.0, slack_sdk 3.43.0) predate the method; @slack/web-api 8.2.0 and slack_sdk 3.44.1 declare it, and the argument names were checked against @slack/web-api 8.2.0's AgentsSessionsSetStatusArguments, but no pinned SDK suite calls it.
       - Session channels do not exist here, so every session is a thread session scoped to a live top-level message of the conversation (another thread_ts is invalid_arguments when it would create a session); thread_ts_not_allowed is never produced, and channel_id is required (invalid_arguments when absent) because the page does not say how a session is found without it.
       - The page requires initiator_user_id to be a member of the channel without naming a code; a non-member is invalid_arguments, and an unknown user is user_not_found as listed.
       - The missing_agent_session_stopped_event_subscription warning is answered, as the agent_session_stopped page states, on every call while the app's manifest subscribes to neither the bot nor the user event, in both `warning` and `response_metadata.warnings`; the page calls it a warning, so the call still succeeds. `title` is omitted from the response while the session has none.
@@ -2999,7 +3001,7 @@ decisions:
       chat.update, as the posting limit ("Application has posted too many
       messages"); the per-channel posting allowance answers it. A method's
       tier budget, and apps.connections.open's connection limit, answer
-      ratelimited: python-slack-sdk 3.43.0 (sha256 recorded in
+      ratelimited: python-slack-sdk 3.45.0 (sha256 recorded in
       specs/sdk-compatibility.yaml) waits out Retry-After and retries
       apps.connections.open (socket_mode/client.py, async_client.py) and
       rtm.connect (rtm_v2/__init__.py) only when error == "ratelimited" and

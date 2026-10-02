@@ -83,8 +83,8 @@ DENO_SLACK_RUNTIME_URL="file://$work/deno/deno-slack-runtime-1.1.3/src/mod.ts" e
 
 start_fixture
 
-npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/web-api@8.0.0')
-require_hash "$work/npm/$npm_tarball" 6044ac0b7bae06bce3c4d10a124f4f51bb72b9afa2c0f655e46f9433e9efa054
+npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/web-api@8.2.0')
+require_hash "$work/npm/$npm_tarball" 5d046d13a3cda62aae3cc49092542d32655424120ffcbbc0c4d601986b0b00aa
 # The same suite installs an app through @slack/oauth's InstallProvider.
 oauth_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/oauth@4.0.0')
 require_hash "$work/npm/$oauth_tarball" 4cfc0b04698885a41a50e902cc57e0fa3cb08fa96b8a13d7d9e5f1d7c024abc4
@@ -118,9 +118,9 @@ cp "$root/tests/official-sdk-qualification/node-bolt/qualification.mjs" "$work/n
 stop_fixture
 start_fixture
 
-python3 -m pip download --disable-pip-version-check --no-deps --only-binary=:all: --dest "$work/python" slack-sdk==3.43.0
-python_wheel=$(find "$work/python" -maxdepth 1 -type f -name 'slack_sdk-3.43.0-*.whl' -print -quit)
-require_hash "$python_wheel" 4b6557c65577fc172f685af218b811f9f3b4909e24cddd839ada09565f10c585
+python3 -m pip download --disable-pip-version-check --no-deps --only-binary=:all: --dest "$work/python" slack-sdk==3.45.0
+python_wheel=$(find "$work/python" -maxdepth 1 -type f -name 'slack_sdk-3.45.0-*.whl' -print -quit)
+require_hash "$python_wheel" 6356d4486d1a3ad156462c5544ab1b9c076ff426a250495c08f51b7ad71eb8fb
 python3 -m pip install --disable-pip-version-check --no-index --no-deps --target "$work/python-slack-sdk" "$python_wheel"
 PYTHONPATH="$work/python-slack-sdk" SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ python3 "$root/tests/official-sdk-qualification/python-slack-sdk/qualification.py"
 stop_fixture

@@ -4,11 +4,11 @@ Qualification is fail-closed. A suite is recorded as passed only after the
 exact pinned artifact has been installed and its executable suite has passed
 against the seeded local fixture.
 
-The Node Web API suite uses `@slack/web-api` 8.0.0 and `@slack/oauth` 4.0.0, the Node Bolt suite uses
+The Node Web API suite uses `@slack/web-api` 8.2.0 and `@slack/oauth` 4.0.0, the Node Bolt suite uses
 `@slack/bolt` 5.0.0, the Node Socket Mode suite uses `@slack/socket-mode`
 3.0.0, and the Node Real Time Messaging suite uses `@slack/rtm-api` 7.0.4.
 The Python Web API, Socket Mode, and Real Time Messaging (`slack_sdk.rtm_v2`)
-suites use `slack-sdk` 3.43.0, the
+suites use `slack-sdk` 3.45.0, the
 Python Bolt suite uses `slack-bolt` 1.28.0, the Java Web API and Socket Mode
 suites use `com.slack.api:slack-api-client` 1.49.0, the Java Bolt suite uses
 `com.slack.api:bolt` 1.49.0, and the Deno suite uses `deno-slack-runtime` 1.1.3. Their immutable artifact
@@ -84,11 +84,11 @@ The individual suite commands remain useful for debugging:
 
 ```sh
 go run ./tests/official-sdk-qualification/node-web-api/fixture
-npm install --prefix /tmp/soc-sdk-web-run @slack/web-api@8.0.0 @slack/oauth@4.0.0
+npm install --prefix /tmp/soc-sdk-web-run @slack/web-api@8.2.0 @slack/oauth@4.0.0
 cp tests/official-sdk-qualification/node-web-api/qualification.mjs /tmp/soc-sdk-web-run/qualification.mjs
 node /tmp/soc-sdk-web-run/qualification.mjs
 
-python3 -m pip install --target /tmp/soc-sdk-python slack-sdk==3.43.0
+python3 -m pip install --target /tmp/soc-sdk-python slack-sdk==3.45.0
 PYTHONPATH=/tmp/soc-sdk-python python3 tests/official-sdk-qualification/python-slack-sdk/qualification.py
 
 python3 -m pip install --target /tmp/soc-sdk-python-bolt slack-bolt==1.28.0

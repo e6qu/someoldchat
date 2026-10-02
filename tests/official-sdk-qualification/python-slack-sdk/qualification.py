@@ -820,6 +820,27 @@ replies = client.conversations_replies(channel="C1", ts=root["ts"], limit=2)
 assert replies["ok"] is True
 assert len(replies["messages"]) == 2
 
+# agents.sessions.*: a thread session is created by its first setStatus,
+# keeps the title it was created with, and is renamed by the agent.
+agent_session = client.agents_sessions_setStatus(
+    channel_id="C1", thread_ts=root["ts"], status="processing", title="Trip research", initiator_user_id="U1"
+)
+assert agent_session["ok"] is True
+assert agent_session["status"] == "processing"
+assert agent_session["title"] == "Trip research"
+agent_session_again = client.agents_sessions_setStatus(
+    channel_id="C1", thread_ts=root["ts"], status="active", title="Ignored once the session exists"
+)
+assert agent_session_again["status"] == "active"
+assert agent_session_again["title"] == "Trip research"
+renamed_session = client.agents_sessions_rename(channel_id="C1", thread_ts=root["ts"], title="Scuba trip")
+assert renamed_session["ok"] is True
+try:
+    client.agents_sessions_rename(channel_id="C1", title="No thread")
+    raise AssertionError("agents.sessions.rename without thread_ts succeeded")
+except SlackApiError as error:
+    assert error.response["error"] == "thread_ts_required", error.response
+
 reaction = client.reactions_add(channel="C1", timestamp=root["ts"], name="thumbsup")
 assert reaction["ok"] is True
 reactions = client.reactions_get(channel="C1", timestamp=root["ts"])
