@@ -408,8 +408,15 @@ func (s *Store) ResetBackfill(ctx context.Context, name string) error {
 	if _, ok := columnBackfills[name]; !ok && name != messagesIdentityBackfill && name != outboxQuarantineBackfill {
 		return fmt.Errorf("unknown column backfill %q", name)
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO schema_backfills(name, cursor, done, rejected) VALUES (?, '', 0, 0) ON CONFLICT(name) DO UPDATE SET cursor = '', done = 0, rejected = 0`, name)
-	return err
+	return s.execUnderContention(ctx, `INSERT INTO schema_backfills(name, cursor, done, rejected) VALUES (?, '', 0, 0) ON CONFLICT(name) DO UPDATE SET cursor = '', done = 0, rejected = 0`, name)
+}
+
+// execUnderContention runs one write of the drain, waiting out the replicas
+// and live traffic it competes with as every other drain write does. A bare
+// ExecContext gave up after a single busy_timeout, so four replicas finishing
+// a pass together could fail it with "database is locked".
+func (s *Store) execUnderContention(ctx context.Context, statement string, arguments ...any) error {
+	return underContention(ctx, func() error { _, err := s.db.ExecContext(ctx, statement, arguments...); return err })
 }
 
 // runPendingBackfills drains every registered rewrite. It runs OUTSIDE the
@@ -520,7 +527,7 @@ func (s *Store) createBackfillIndex(ctx context.Context, task columnBackfill) er
 		return nil
 	}
 	statement := fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s(%s)`, backfillIndexName(task), task.table, task.key)
-	if err := underContention(ctx, func() error { _, err := s.db.ExecContext(ctx, statement); return err }); err != nil {
+	if err := s.execUnderContention(ctx, statement); err != nil {
 		return fmt.Errorf("create backfill index on %s: %w", task.name, err)
 	}
 	return nil
@@ -530,7 +537,7 @@ func (s *Store) dropBackfillIndex(ctx context.Context, task columnBackfill) erro
 	if !task.index {
 		return nil
 	}
-	if _, err := s.db.ExecContext(ctx, `DROP INDEX IF EXISTS `+backfillIndexName(task)); err != nil {
+	if err := s.execUnderContention(ctx, `DROP INDEX IF EXISTS `+backfillIndexName(task)); err != nil {
 		return fmt.Errorf("drop backfill index on %s: %w", task.name, err)
 	}
 	return nil
@@ -751,8 +758,7 @@ func (s *Store) finishColumnBackfill(ctx context.Context, task columnBackfill) e
 }
 
 func (s *Store) finishBackfill(ctx context.Context, name string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE schema_backfills SET done = 1 WHERE name = ?`, name)
-	return err
+	return s.execUnderContention(ctx, `UPDATE schema_backfills SET done = 1 WHERE name = ?`, name)
 }
 
 // outboxQuarantineBackfill is the pass that walks the event journal once and
@@ -1153,11 +1159,19 @@ func (s *Store) applyMessageInstantChunk(ctx context.Context, conversation, at s
 // would leave the store permanently un-drained over data no rewrite can repair.
 func (s *Store) finishMessageIdentityBackfill(ctx context.Context) error {
 	statement := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS %s ON messages(conversation, created_at)`, messagesConversationCreatedUniqueIndex)
-	if _, err := s.db.ExecContext(ctx, statement); err != nil {
-		if noticeErr := recordMigrationNotice(ctx, s.db, MigrationNoticeMessageInstantsNotUnique, messagesIdentityBackfill, err.Error(), s.now().UTC()); noticeErr != nil {
+	if err := s.execUnderContention(ctx, statement); err != nil {
+		// Contention that outlasted every retry is not a finding about the
+		// data: recording it as duplicate identifiers would tell an operator to
+		// repair rows that are fine, and mark the pass done without the index.
+		if contended(err) {
+			return err
+		}
+		if noticeErr := underContention(ctx, func() error {
+			return recordMigrationNotice(ctx, s.db, MigrationNoticeMessageInstantsNotUnique, messagesIdentityBackfill, err.Error(), s.now().UTC())
+		}); noticeErr != nil {
 			return noticeErr
 		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE schema_backfills SET rejected = rejected + 1 WHERE name = ?`, messagesIdentityBackfill); err != nil {
+		if err := s.execUnderContention(ctx, `UPDATE schema_backfills SET rejected = rejected + 1 WHERE name = ?`, messagesIdentityBackfill); err != nil {
 			return err
 		}
 	}

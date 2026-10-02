@@ -31,10 +31,22 @@ func (m Messages) SetAssistantThreadTitle(ctx context.Context, workspaceID domai
 
 // SetAssistantThreadStatus shows what the assistant is doing. It is transient
 // by design: an app clears it by setting an empty status, which is why the
-// empty string is accepted here and refused for a title.
-func (m Messages) SetAssistantThreadStatus(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, thread domain.MessageTimestamp, status string) error {
+// empty string is accepted here and refused for a title. loadingMessages are
+// the lines a client rotates through while the status shows, at most ten; they
+// are cleared with the status.
+func (m Messages) SetAssistantThreadStatus(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, thread domain.MessageTimestamp, status string, loadingMessages []string) error {
+	if len(loadingMessages) > domain.AssistantLoadingMessageLimit {
+		return domain.ErrInvalidAssistantThread
+	}
+	status = strings.TrimSpace(status)
+	cleaned := make([]string, 0, len(loadingMessages))
+	for _, message := range loadingMessages {
+		if message = strings.TrimSpace(message); message != "" && status != "" {
+			cleaned = append(cleaned, message)
+		}
+	}
 	return m.setAssistantThread(ctx, workspaceID, actor, conversationID, thread, domain.AssistantThreadStatus,
-		func(value *domain.AssistantThread) { value.Status = strings.TrimSpace(status) })
+		func(value *domain.AssistantThread) { value.Status, value.LoadingMessages = status, cleaned })
 }
 
 // SetAssistantThreadSuggestedPrompts offers openings a member can click.

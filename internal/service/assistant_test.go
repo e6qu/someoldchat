@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -43,7 +44,7 @@ func TestAssistantWritesTouchOneFieldEach(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking..."); err != nil {
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", []string{"Reading the runbook", " ", "Checking the deploy"}); err != nil {
 		t.Fatal(err)
 	}
 	value, err := messages.AssistantThread(ctx, "T1", "U1", "C1", thread)
@@ -53,17 +54,24 @@ func TestAssistantWritesTouchOneFieldEach(t *testing.T) {
 	if value.Title != "Deploy help" || value.Status != "is thinking..." || value.PromptsTitle != "Try one" || len(value.Prompts) != 1 {
 		t.Fatalf("state = %+v, want all three fields kept", value)
 	}
+	// The loading messages travel with the status, blank lines dropped.
+	if strings.Join(value.LoadingMessages, "|") != "Reading the runbook|Checking the deploy" {
+		t.Fatalf("loading messages = %q", value.LoadingMessages)
+	}
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", make([]string, domain.AssistantLoadingMessageLimit+1)); !errors.Is(err, domain.ErrInvalidAssistantThread) {
+		t.Fatalf("eleven loading messages error = %v, want %v", err, domain.ErrInvalidAssistantThread)
+	}
 
 	// Clearing the status is how an assistant says it has stopped working, so
 	// the empty string is accepted here and must leave the rest alone.
-	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, ""); err != nil {
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	after, err := messages.AssistantThread(ctx, "T1", "U1", "C1", thread)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Status != "" || after.Title != "Deploy help" || len(after.Prompts) != 1 {
+	if after.Status != "" || len(after.LoadingMessages) != 0 || after.Title != "Deploy help" || len(after.Prompts) != 1 {
 		t.Fatalf("state after clearing the status = %+v, want only the status gone", after)
 	}
 }
@@ -73,7 +81,7 @@ func TestAssistantWritesTouchOneFieldEach(t *testing.T) {
 // moment it describes.
 func TestAssistantStateIsNotAMessage(t *testing.T) {
 	ctx, repository, messages, thread := assistantWorld(t)
-	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking..."); err != nil {
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", nil); err != nil {
 		t.Fatal(err)
 	}
 	page, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
@@ -121,7 +129,7 @@ func TestAssistantWriteRequiresConversationMembership(t *testing.T) {
 	if err := repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "outsider"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U2", "C1", thread, "meddling"); err == nil {
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U2", "C1", thread, "meddling", nil); err == nil {
 		t.Fatal("a non-member set assistant state")
 	}
 }

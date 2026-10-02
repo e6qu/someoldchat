@@ -403,7 +403,7 @@ type Service interface {
 	FollowedThreads(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FollowedThreadPage, error)
 	ResumeWorkflowDelays(context.Context, domain.WorkspaceID, time.Time, int) (int, error)
 	SetAssistantThreadTitle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) error
-	SetAssistantThreadStatus(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) error
+	SetAssistantThreadStatus(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, []string) error
 	SetAssistantThreadSuggestedPrompts(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, []domain.AssistantPrompt) error
 	AssistantThread(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.AssistantThread, error)
 	SetTyping(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error

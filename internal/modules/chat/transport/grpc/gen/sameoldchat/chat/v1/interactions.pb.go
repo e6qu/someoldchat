@@ -427,6 +427,7 @@ type AssistantThread struct {
 	PromptsTitle      string                 `protobuf:"bytes,6,opt,name=prompts_title,json=promptsTitle,proto3" json:"prompts_title,omitempty"`
 	Prompts           []*AssistantPrompt     `protobuf:"bytes,7,rep,name=prompts,proto3" json:"prompts,omitempty"`
 	UpdatedAtUnixNano int64                  `protobuf:"varint,8,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
+	LoadingMessages   []string               `protobuf:"bytes,9,rep,name=loading_messages,json=loadingMessages,proto3" json:"loading_messages,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -517,19 +518,27 @@ func (x *AssistantThread) GetUpdatedAtUnixNano() int64 {
 	return 0
 }
 
+func (x *AssistantThread) GetLoadingMessages() []string {
+	if x != nil {
+		return x.LoadingMessages
+	}
+	return nil
+}
+
 type SetAssistantThreadRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Conversation  string                 `protobuf:"bytes,3,opt,name=conversation,proto3" json:"conversation,omitempty"`
-	ThreadTs      string                 `protobuf:"bytes,4,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
-	Field         string                 `protobuf:"bytes,5,opt,name=field,proto3" json:"field,omitempty"`
-	Title         string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"`
-	Status        string                 `protobuf:"bytes,7,opt,name=status,proto3" json:"status,omitempty"`
-	PromptsTitle  string                 `protobuf:"bytes,8,opt,name=prompts_title,json=promptsTitle,proto3" json:"prompts_title,omitempty"`
-	Prompts       []*AssistantPrompt     `protobuf:"bytes,9,rep,name=prompts,proto3" json:"prompts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Conversation    string                 `protobuf:"bytes,3,opt,name=conversation,proto3" json:"conversation,omitempty"`
+	ThreadTs        string                 `protobuf:"bytes,4,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
+	Field           string                 `protobuf:"bytes,5,opt,name=field,proto3" json:"field,omitempty"`
+	Title           string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"`
+	Status          string                 `protobuf:"bytes,7,opt,name=status,proto3" json:"status,omitempty"`
+	PromptsTitle    string                 `protobuf:"bytes,8,opt,name=prompts_title,json=promptsTitle,proto3" json:"prompts_title,omitempty"`
+	Prompts         []*AssistantPrompt     `protobuf:"bytes,9,rep,name=prompts,proto3" json:"prompts,omitempty"`
+	LoadingMessages []string               `protobuf:"bytes,10,rep,name=loading_messages,json=loadingMessages,proto3" json:"loading_messages,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *SetAssistantThreadRequest) Reset() {
@@ -621,6 +630,13 @@ func (x *SetAssistantThreadRequest) GetPromptsTitle() string {
 func (x *SetAssistantThreadRequest) GetPrompts() []*AssistantPrompt {
 	if x != nil {
 		return x.Prompts
+	}
+	return nil
+}
+
+func (x *SetAssistantThreadRequest) GetLoadingMessages() []string {
+	if x != nil {
+		return x.LoadingMessages
 	}
 	return nil
 }
@@ -3405,7 +3421,7 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\aresumed\x18\x01 \x01(\x05R\aresumed\"A\n" +
 	"\x0fAssistantPrompt\x12\x14\n" +
 	"\x05title\x18\x01 \x01(\tR\x05title\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xb9\x02\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xe4\x02\n" +
 	"\x0fAssistantThread\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\"\n" +
 	"\fconversation\x18\x02 \x01(\tR\fconversation\x12\x1b\n" +
@@ -3414,7 +3430,8 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\x06status\x18\x05 \x01(\tR\x06status\x12#\n" +
 	"\rprompts_title\x18\x06 \x01(\tR\fpromptsTitle\x12>\n" +
 	"\aprompts\x18\a \x03(\v2$.sameoldchat.chat.v1.AssistantPromptR\aprompts\x12/\n" +
-	"\x14updated_at_unix_nano\x18\b \x01(\x03R\x11updatedAtUnixNano\"\xc1\x02\n" +
+	"\x14updated_at_unix_nano\x18\b \x01(\x03R\x11updatedAtUnixNano\x12)\n" +
+	"\x10loading_messages\x18\t \x03(\tR\x0floadingMessages\"\xec\x02\n" +
 	"\x19SetAssistantThreadRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
@@ -3424,7 +3441,9 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\x05title\x18\x06 \x01(\tR\x05title\x12\x16\n" +
 	"\x06status\x18\a \x01(\tR\x06status\x12#\n" +
 	"\rprompts_title\x18\b \x01(\tR\fpromptsTitle\x12>\n" +
-	"\aprompts\x18\t \x03(\v2$.sameoldchat.chat.v1.AssistantPromptR\aprompts\",\n" +
+	"\aprompts\x18\t \x03(\v2$.sameoldchat.chat.v1.AssistantPromptR\aprompts\x12)\n" +
+	"\x10loading_messages\x18\n" +
+	" \x03(\tR\x0floadingMessages\",\n" +
 	"\x1aSetAssistantThreadResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\"\x95\x01\n" +
 	"\x16AssistantThreadRequest\x12!\n" +

@@ -2167,9 +2167,9 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:internal/service:TestAssistantWritesTouchOneFieldEach
       - go-test:internal/api/slack:TestAssistantThreadWritesAcceptTheSDKsJSONArrays
+      - go-test:internal/web:TestThreadShowsTheAssistantStatusWithItsLoadingMessages
+      - go-test:tests/persistence-qualification:assistantLoadingMessagesTravelWithTheStatus
     deviations:
-      - The transient status an assistant shows while it works. Clearing it is an empty status, which is why an empty value is accepted here and refused for a title.
-      - loading_messages is accepted in every encoding (python-slack-sdk sends it as a JSON array) and validated — a list of at most ten strings, otherwise invalid_arguments — but it is not stored or rendered; the thread shows the status alone. Carrying it needs an assistant_threads column (a schema migration), a SetAssistantThreadRequest/AssistantThread wire field and a rotating renderer in the web client.
       - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.threads.setStatus/
