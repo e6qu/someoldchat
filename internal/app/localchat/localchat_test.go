@@ -50,9 +50,21 @@ func TestBootstrapSeedsOIDCResolvableAdministrator(t *testing.T) {
 	if user.ID != "Udev" || user.Email != "admin@example.com" {
 		t.Fatalf("user=%+v", user)
 	}
+	// The bootstrap administrator is the workspace's primary owner, as Slack
+	// makes a workspace's creator; without it no owner could ever exist.
 	membership, err := store.GetWorkspaceMembership(context.Background(), "Tdev", "Udev")
-	if err != nil || membership.Role != domain.WorkspaceRoleAdmin {
+	if err != nil || membership.Role != domain.WorkspaceRoleOwner || !membership.PrimaryOwner {
 		t.Fatalf("bootstrap membership=%+v err=%v", membership, err)
+	}
+	// An operator can demote the bootstrap identity once it has handed primary
+	// ownership on, and a restart must not undo that.
+	if err := store.SeedUser(context.Background(), domain.User{ID: "Unext", WorkspaceID: "Tdev", Name: "next-owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.TransferPrimaryOwnership(context.Background(), "Tdev", "Udev", "Unext", events.Event{
+		ID: "operator-transfer", WorkspaceID: "Tdev", Topic: "workspace.role_changed", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if err := store.SetWorkspaceRole(context.Background(), "Tdev", "Udev", domain.WorkspaceRoleMember, events.Event{
 		ID: "operator-demotion", WorkspaceID: "Tdev", Topic: "workspace.role_changed", CreatedAt: time.Now().UTC(),
@@ -114,7 +126,7 @@ func TestOpenMemoryProvidesAuthSeeders(t *testing.T) {
 		t.Fatal(err)
 	}
 	membership, err := runtime.Store.GetWorkspaceMembership(ctx, "Tdev", "Udev")
-	if err != nil || membership.Role != domain.WorkspaceRoleAdmin {
+	if err != nil || membership.Role != domain.WorkspaceRoleOwner || !membership.PrimaryOwner {
 		t.Fatalf("memory bootstrap membership=%+v err=%v", membership, err)
 	}
 }

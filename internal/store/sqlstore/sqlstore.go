@@ -59,8 +59,10 @@ CREATE TABLE IF NOT EXISTS workspace_members (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
  restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0,
+ primary_owner INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY (workspace_id, user_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS workspace_members_primary_owner ON workspace_members(workspace_id) WHERE primary_owner = 1;
 CREATE TABLE IF NOT EXISTS tokens (
  token_hash TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  user_id TEXT NOT NULL REFERENCES users(id), app_id TEXT NOT NULL DEFAULT '', bot_id TEXT NOT NULL DEFAULT '',
@@ -600,7 +602,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 197
+const schemaVersion = 198
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -1646,7 +1648,33 @@ func (s *Store) SeedBootstrapAdministrator(ctx context.Context, value domain.Use
 	if domain.NormalizeEmail(value.Email) == "" {
 		return store.InvalidArgument("bootstrap administrator email is required")
 	}
-	return s.seedUser(ctx, value, domain.WorkspaceRoleAdmin, true)
+	if err := s.seedUser(ctx, value, domain.WorkspaceRoleAdmin, true); err != nil {
+		return err
+	}
+	return s.seedPrimaryOwner(ctx, value.WorkspaceID, value.ID)
+}
+
+// seedPrimaryOwner makes the bootstrap administrator the primary owner of a
+// workspace that has none, as Slack makes a workspace's creator its primary
+// owner. Without it no owner existed at all: only an owner may appoint one, so
+// admin.users.setOwner could never succeed. An identity an operator demoted to
+// member keeps that role, and a workspace that already has a primary owner
+// keeps it.
+func (s *Store) seedPrimaryOwner(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ? AND active = 1 AND role IN (?, ?)
+		AND NOT EXISTS (SELECT 1 FROM workspace_members primary_member WHERE primary_member.workspace_id = ? AND primary_member.primary_owner = 1)`,
+		domain.WorkspaceRoleOwner, workspaceID, userID, domain.WorkspaceRoleAdmin, domain.WorkspaceRoleOwner, workspaceID); err != nil {
+		return err
+	}
+	if err := claimPrimaryOwnership(ctx, tx, workspaceID, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) seedUser(ctx context.Context, value domain.User, initialRole domain.WorkspaceRole, promoteBlankIdentity bool) error {
@@ -3551,6 +3579,31 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 198: the primary owner ---
+	if version < 198 {
+		// Slack names one owner of each workspace its primary owner. A
+		// workspace that already has owners gets one deterministically, the
+		// first active owner by member ID, so is_primary_owner is true for
+		// exactly one member from the first read after the upgrade.
+		columns, err := s.tableColumns(ctx, db, "workspace_members")
+		if err != nil {
+			return fmt.Errorf("inspect workspace members: %w", err)
+		}
+		if !columns["primary_owner"] {
+			if _, err := db.ExecContext(ctx, primaryOwnerColumn); err != nil {
+				return fmt.Errorf("migrate primary owner: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE workspace_members SET primary_owner = 1 WHERE role = 'owner' AND active = 1
+			AND user_id = (SELECT MIN(owner.user_id) FROM workspace_members owner WHERE owner.workspace_id = workspace_members.workspace_id AND owner.role = 'owner' AND owner.active = 1)
+			AND NOT EXISTS (SELECT 1 FROM workspace_members primary_member WHERE primary_member.workspace_id = workspace_members.workspace_id AND primary_member.primary_owner = 1)`); err != nil {
+			return fmt.Errorf("backfill primary owners: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, primaryOwnerIndex); err != nil {
+			return fmt.Errorf("index primary owners: %w", err)
+		}
+	}
+	// --- end schema 198 ---
 	// --- schema 197: Sign in with Slack ---
 	if version < 197 {
 		// An authorization code remembers the relying party's nonce and when
@@ -5293,11 +5346,12 @@ func (s *Store) SetWorkspaceDefaultChannels(ctx context.Context, id domain.Works
 
 func (s *Store) GetWorkspaceMembership(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspaceMembership, error) {
 	var value domain.WorkspaceMembership
-	var active, restricted, ultraRestricted int
-	err := s.db.QueryRowContext(ctx, `SELECT workspace_id, user_id, role, active, restricted, ultra_restricted FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID).Scan(&value.WorkspaceID, &value.UserID, &value.Role, &active, &restricted, &ultraRestricted)
+	var active, restricted, ultraRestricted, primaryOwner int
+	err := s.db.QueryRowContext(ctx, `SELECT workspace_id, user_id, role, active, restricted, ultra_restricted, primary_owner FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID).Scan(&value.WorkspaceID, &value.UserID, &value.Role, &active, &restricted, &ultraRestricted, &primaryOwner)
 	value.Active = active != 0
 	value.Restricted = restricted != 0
 	value.UltraRestricted = ultraRestricted != 0
+	value.PrimaryOwner = primaryOwner != 0
 	return value, translateNotFound(err)
 }
 
@@ -6660,6 +6714,9 @@ func (s *Store) ExpireUserAccount(ctx context.Context, workspaceID domain.Worksp
 	if present == 0 {
 		return false, store.ErrNotFound
 	}
+	if err := refusePrimaryOwnerChange(ctx, tx, workspaceID, userID); err != nil {
+		return false, err
+	}
 	// The claim is the deactivation, and the expiration instant is what is
 	// claimed against: a caller that reads a due account and finds the instant
 	// moved, or the account already deactivated, has lost the race and must
@@ -6711,6 +6768,9 @@ func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.Workspace
 	// from the state this transaction reads.
 	var guestEvent []events.Event
 	if deleted {
+		if err := refusePrimaryOwnerChange(ctx, tx, workspaceID, userID); err != nil {
+			return err
+		}
 		var wasDeleted int
 		if err := tx.QueryRowContext(ctx, `SELECT deleted FROM users WHERE id = ? AND workspace_id = ?`, userID, workspaceID).Scan(&wasDeleted); err != nil {
 			return translateNotFound(err)
@@ -6810,6 +6870,11 @@ func (s *Store) SetWorkspaceRole(ctx context.Context, workspaceID domain.Workspa
 	if (restricted != 0 || ultraRestricted != 0) && role != domain.WorkspaceRoleMember {
 		return store.InvalidArgument("guest membership cannot be promoted")
 	}
+	if role != domain.WorkspaceRoleOwner {
+		if err := refusePrimaryOwnerChange(ctx, tx, workspaceID, userID); err != nil {
+			return err
+		}
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE workspace_members SET role = ?, active = 1 WHERE workspace_id = ? AND user_id = ?`, role, workspaceID, userID)
 	if err != nil {
 		return err
@@ -6820,6 +6885,9 @@ func (s *Store) SetWorkspaceRole(ctx context.Context, workspaceID domain.Workspa
 	}
 	if changed != 1 {
 		return store.ErrNotFound
+	}
+	if err := claimPrimaryOwnership(ctx, tx, workspaceID, userID); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -7000,7 +7068,7 @@ func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID
 	if err != nil {
 		return domain.AdminUserPage{}, err
 	}
-	query := `SELECT ` + qualifiedUserColumns + `, m.role, m.active, m.restricted, m.ultra_restricted FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = u.workspace_id WHERE u.workspace_id = ?`
+	query := `SELECT ` + qualifiedUserColumns + `, m.role, m.active, m.restricted, m.ultra_restricted, m.primary_owner FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = u.workspace_id WHERE u.workspace_id = ?`
 	args := []any{workspace}
 	if after != "" {
 		query += ` AND u.id > ?`
@@ -7016,9 +7084,9 @@ func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID
 	values := make([]domain.AdminUser, 0, request.Limit+1)
 	for rows.Next() {
 		var value domain.AdminUser
-		var active, restricted, ultraRestricted int
+		var active, restricted, ultraRestricted, primaryOwner int
 		var err error
-		value.User, err = scanUserRow(rows, &value.Membership.Role, &active, &restricted, &ultraRestricted)
+		value.User, err = scanUserRow(rows, &value.Membership.Role, &active, &restricted, &ultraRestricted, &primaryOwner)
 		if err != nil {
 			return domain.AdminUserPage{}, err
 		}
@@ -7027,6 +7095,7 @@ func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID
 		value.Membership.Active = active != 0
 		value.Membership.Restricted = restricted != 0
 		value.Membership.UltraRestricted = ultraRestricted != 0
+		value.Membership.PrimaryOwner = primaryOwner != 0
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {

@@ -135,6 +135,9 @@ func seedBaseline(t *testing.T, target *memory.Store) {
 	// authority it is claiming instead of relying on membership alone.
 	requireSeed(t, target.SeedUser(domain.User{ID: "UA", WorkspaceID: "T1", Name: "admin", Email: "admin@example.com"}))
 	requireSeed(t, seedWorkspaceRole(target, "T1", "UA", domain.WorkspaceRoleAdmin))
+	// UO is the workspace's primary owner: the first owner of a workspace is.
+	requireSeed(t, target.SeedUser(domain.User{ID: "UO", WorkspaceID: "T1", Name: "owner", Email: "owner@example.com"}))
+	requireSeed(t, seedWorkspaceRole(target, "T1", "UO", domain.WorkspaceRoleOwner))
 	requireSeed(t, target.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}))
 	requireSeed(t, target.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "second"}))
 	requireSeed(t, target.SeedConversationMember("C1", "U1"))
@@ -3295,6 +3298,34 @@ func parityCases() []parityCase {
 				}
 				membership, err := chat.WorkspaceMembership(ctx, "T1", "U1", "U1")
 				return membership, err
+			},
+		},
+		{
+			name:         "an administrator cannot hand on primary ownership",
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				return nil, chat.TransferPrimaryOwnership(ctx, "T1", "UA", "U1")
+			},
+		},
+		{
+			name:         "the primary owner cannot be demoted",
+			wantSentinel: domain.ErrPrimaryOwner,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				return nil, chat.SetUserRole(ctx, "T1", "UO", "UO", domain.WorkspaceRoleAdmin)
+			},
+		},
+		{
+			name: "the primary owner hands the role to an administrator",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.TransferPrimaryOwnership(ctx, "T1", "UO", "UA"); err != nil {
+					return nil, err
+				}
+				previous, err := chat.WorkspaceMembership(ctx, "T1", "UO", "UO")
+				if err != nil {
+					return nil, err
+				}
+				next, err := chat.WorkspaceMembership(ctx, "T1", "UA", "UA")
+				return []any{previous, next}, err
 			},
 		},
 		{

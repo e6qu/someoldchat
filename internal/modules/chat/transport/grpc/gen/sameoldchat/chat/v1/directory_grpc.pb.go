@@ -27,6 +27,7 @@ const (
 	DirectoryService_TeamBillableInfo_FullMethodName                   = "/sameoldchat.chat.v1.DirectoryService/TeamBillableInfo"
 	DirectoryService_RemoveUser_FullMethodName                         = "/sameoldchat.chat.v1.DirectoryService/RemoveUser"
 	DirectoryService_SetUserRole_FullMethodName                        = "/sameoldchat.chat.v1.DirectoryService/SetUserRole"
+	DirectoryService_TransferPrimaryOwnership_FullMethodName           = "/sameoldchat.chat.v1.DirectoryService/TransferPrimaryOwnership"
 	DirectoryService_SetUserExpiration_FullMethodName                  = "/sameoldchat.chat.v1.DirectoryService/SetUserExpiration"
 	DirectoryService_UserExpiration_FullMethodName                     = "/sameoldchat.chat.v1.DirectoryService/UserExpiration"
 	DirectoryService_DiscoverableContacts_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/DiscoverableContacts"
@@ -105,6 +106,7 @@ type DirectoryServiceClient interface {
 	TeamBillableInfo(ctx context.Context, in *BillableInfoRequest, opts ...grpc.CallOption) (*BillableInfo, error)
 	RemoveUser(ctx context.Context, in *RemoveUserRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetUserRole(ctx context.Context, in *SetUserRoleRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	TransferPrimaryOwnership(ctx context.Context, in *WorkspaceMembershipRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetUserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	UserExpiration(ctx context.Context, in *SetUserExpirationRequest, opts ...grpc.CallOption) (*UserExpirationResponse, error)
 	DiscoverableContacts(ctx context.Context, in *DiscoverableContactsRequest, opts ...grpc.CallOption) (*DiscoverableContactsResponse, error)
@@ -259,6 +261,16 @@ func (c *directoryServiceClient) SetUserRole(ctx context.Context, in *SetUserRol
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
 	err := c.cc.Invoke(ctx, DirectoryService_SetUserRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) TransferPrimaryOwnership(ctx context.Context, in *WorkspaceMembershipRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_TransferPrimaryOwnership_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -917,6 +929,7 @@ type DirectoryServiceServer interface {
 	TeamBillableInfo(context.Context, *BillableInfoRequest) (*BillableInfo, error)
 	RemoveUser(context.Context, *RemoveUserRequest) (*MutationResponse, error)
 	SetUserRole(context.Context, *SetUserRoleRequest) (*MutationResponse, error)
+	TransferPrimaryOwnership(context.Context, *WorkspaceMembershipRequest) (*MutationResponse, error)
 	SetUserExpiration(context.Context, *SetUserExpirationRequest) (*MutationResponse, error)
 	UserExpiration(context.Context, *SetUserExpirationRequest) (*UserExpirationResponse, error)
 	DiscoverableContacts(context.Context, *DiscoverableContactsRequest) (*DiscoverableContactsResponse, error)
@@ -1019,6 +1032,9 @@ func (UnimplementedDirectoryServiceServer) RemoveUser(context.Context, *RemoveUs
 }
 func (UnimplementedDirectoryServiceServer) SetUserRole(context.Context, *SetUserRoleRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetUserRole not implemented")
+}
+func (UnimplementedDirectoryServiceServer) TransferPrimaryOwnership(context.Context, *WorkspaceMembershipRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TransferPrimaryOwnership not implemented")
 }
 func (UnimplementedDirectoryServiceServer) SetUserExpiration(context.Context, *SetUserExpirationRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetUserExpiration not implemented")
@@ -1372,6 +1388,24 @@ func _DirectoryService_SetUserRole_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).SetUserRole(ctx, req.(*SetUserRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_TransferPrimaryOwnership_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceMembershipRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).TransferPrimaryOwnership(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_TransferPrimaryOwnership_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).TransferPrimaryOwnership(ctx, req.(*WorkspaceMembershipRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2566,6 +2600,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetUserRole",
 			Handler:    _DirectoryService_SetUserRole_Handler,
+		},
+		{
+			MethodName: "TransferPrimaryOwnership",
+			Handler:    _DirectoryService_TransferPrimaryOwnership_Handler,
 		},
 		{
 			MethodName: "SetUserExpiration",

@@ -550,6 +550,10 @@ type Store interface {
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error
 	AssignUser(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, events.Event) error
 	SetWorkspaceRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole, events.Event) error
+	// TransferPrimaryOwnership moves the primary owner's role from fromID, who
+	// must hold it, to toID, an active full member, who becomes an owner if
+	// not one already. fromID stays an owner.
+	TransferPrimaryOwnership(ctx context.Context, workspaceID domain.WorkspaceID, fromID, toID domain.UserID, event events.Event) error
 	// AssignWorkspaceRole is the administrative role assignment
 	// (admin.users.setRegular, setAdmin, setOwner): it sets the role and, for
 	// a guest, ends the guest tier, appending events.GuestStatusChangedEvent

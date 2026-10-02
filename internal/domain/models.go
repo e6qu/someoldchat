@@ -101,6 +101,9 @@ type WorkspaceMembership struct {
 	Active          bool
 	Restricted      bool
 	UltraRestricted bool
+	// PrimaryOwner marks the one owner Slack calls the primary owner. A
+	// workspace has at most one, and has one whenever it has any owner.
+	PrimaryOwner bool
 }
 
 // Guest reports Slack's two guest membership tiers. Restricted is a
@@ -232,6 +235,7 @@ type User struct {
 	Role            WorkspaceRole
 	Restricted      bool
 	UltraRestricted bool
+	PrimaryOwner    bool
 }
 
 // SlackDomain is the workspace's subdomain as Slack reports it. A workspace

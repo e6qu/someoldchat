@@ -138,7 +138,9 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 		memoryStore.SeedWorkspace(domain.Workspace{ID: "Tdev", Name: "SameOldChat"})
 		memoryStore.SeedUser(domain.User{ID: "Udev", WorkspaceID: "Tdev", Email: strings.TrimSpace(config.BootstrapAdminEmail), Name: "sameoldchat", RealName: "SameOldChat"})
 		if strings.TrimSpace(config.BootstrapAdminEmail) != "" {
-			if err := memoryStore.SeedWorkspaceRole("Tdev", "Udev", domain.WorkspaceRoleAdmin); err != nil {
+			// The bootstrap administrator is the workspace's primary owner, as
+			// the SQL profiles make it: the owner a workspace's creator is.
+			if err := memoryStore.SeedWorkspaceRole("Tdev", "Udev", domain.WorkspaceRoleOwner); err != nil {
 				return Runtime{}, fmt.Errorf("seed bootstrap administrator role: %w", err)
 			}
 		}

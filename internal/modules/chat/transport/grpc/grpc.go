@@ -1848,6 +1848,17 @@ func (r Remote) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return nil
 }
 
+func (r Remote) TransferPrimaryOwnership(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID) error {
+	out, err := r.directory.TransferPrimaryOwnership(ctx, &chatv1.WorkspaceMembershipRequest{WorkspaceId: string(workspaceID), UserId: string(actorID), TargetUserId: string(targetID)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("primary ownership transfer was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, role domain.WorkspaceRole) error {
 	out, err := r.directory.SetUserRole(ctx, &chatv1.SetUserRoleRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Role: string(role)})
 	if err != nil {
@@ -6605,6 +6616,13 @@ func (s *Server) RemoveUser(ctx context.Context, input *chatv1.RemoveUserRequest
 	return &chatv1.MutationResponse{Ok: true}, nil
 }
 
+func (s *Server) TransferPrimaryOwnership(ctx context.Context, input *chatv1.WorkspaceMembershipRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.TransferPrimaryOwnership(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) SetUserRole(ctx context.Context, input *chatv1.SetUserRoleRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.SetUserRole(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), domain.WorkspaceRole(input.GetRole())); err != nil {
 		return nil, mapError(err)
@@ -11243,6 +11261,7 @@ func encodeProtoUser(value domain.User) *chatv1.User {
 		Role:                 string(value.Role),
 		Restricted:           value.Restricted,
 		UltraRestricted:      value.UltraRestricted,
+		PrimaryOwner:         value.PrimaryOwner,
 	}
 }
 
@@ -11425,20 +11444,20 @@ func encodeProtoUserPage(page domain.UserPage) *chatv1.UserPage {
 }
 
 func encodeProtoWorkspaceMembership(value domain.WorkspaceMembership) *chatv1.WorkspaceMembership {
-	return &chatv1.WorkspaceMembership{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Role: string(value.Role), Active: value.Active, Restricted: value.Restricted, UltraRestricted: value.UltraRestricted}
+	return &chatv1.WorkspaceMembership{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Role: string(value.Role), Active: value.Active, Restricted: value.Restricted, UltraRestricted: value.UltraRestricted, PrimaryOwner: value.PrimaryOwner}
 }
 
 func decodeProtoWorkspaceMembership(value *chatv1.WorkspaceMembership) (domain.WorkspaceMembership, error) {
 	if value == nil {
 		return domain.WorkspaceMembership{}, errors.New("missing workspace membership")
 	}
-	return domain.WorkspaceMembership{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Role: domain.WorkspaceRole(value.GetRole()), Active: value.GetActive(), Restricted: value.GetRestricted(), UltraRestricted: value.GetUltraRestricted()}, nil
+	return domain.WorkspaceMembership{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Role: domain.WorkspaceRole(value.GetRole()), Active: value.GetActive(), Restricted: value.GetRestricted(), UltraRestricted: value.GetUltraRestricted(), PrimaryOwner: value.GetPrimaryOwner()}, nil
 }
 
 func encodeProtoAdminUserPage(page domain.AdminUserPage) *chatv1.AdminUserPage {
 	users := make([]*chatv1.AdminUser, 0, len(page.Users))
 	for _, value := range page.Users {
-		users = append(users, &chatv1.AdminUser{User: encodeProtoUser(value.User), Role: string(value.Membership.Role), Active: value.Membership.Active, Restricted: value.Membership.Restricted, UltraRestricted: value.Membership.UltraRestricted})
+		users = append(users, &chatv1.AdminUser{User: encodeProtoUser(value.User), Role: string(value.Membership.Role), Active: value.Membership.Active, Restricted: value.Membership.Restricted, UltraRestricted: value.Membership.UltraRestricted, PrimaryOwner: value.Membership.PrimaryOwner})
 	}
 	return &chatv1.AdminUserPage{Users: users, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
 }
@@ -11456,7 +11475,7 @@ func decodeProtoAdminUserPage(value *chatv1.AdminUserPage) (domain.AdminUserPage
 		if err != nil {
 			return domain.AdminUserPage{}, err
 		}
-		users = append(users, domain.AdminUser{User: user, Membership: domain.WorkspaceMembership{WorkspaceID: user.WorkspaceID, UserID: user.ID, Role: domain.WorkspaceRole(item.GetRole()), Active: item.GetActive(), Restricted: item.GetRestricted(), UltraRestricted: item.GetUltraRestricted()}})
+		users = append(users, domain.AdminUser{User: user, Membership: domain.WorkspaceMembership{WorkspaceID: user.WorkspaceID, UserID: user.ID, Role: domain.WorkspaceRole(item.GetRole()), Active: item.GetActive(), Restricted: item.GetRestricted(), UltraRestricted: item.GetUltraRestricted(), PrimaryOwner: item.GetPrimaryOwner()}})
 	}
 	return domain.AdminUserPage{Users: users, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
 }
@@ -13070,6 +13089,7 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 		Role:            domain.WorkspaceRole(value.GetRole()),
 		Restricted:      value.GetRestricted(),
 		UltraRestricted: value.GetUltraRestricted(),
+		PrimaryOwner:    value.GetPrimaryOwner(),
 	}
 	if profile.GetStatusExpiration() != 0 {
 		result.Profile.StatusExpiration = time.Unix(profile.GetStatusExpiration(), 0).UTC()

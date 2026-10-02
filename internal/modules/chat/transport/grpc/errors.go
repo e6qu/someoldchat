@@ -278,6 +278,7 @@ var errorClasses = []errorClass{
 	// a permission failure: the actor has the authority, and the operation is
 	// refused because the workspace would become unadministrable.
 	{key: "service.last_workspace_owner", code: codes.FailedPrecondition, sentinel: domain.ErrLastWorkspaceOwner},
+	{key: "service.primary_owner", code: codes.FailedPrecondition, sentinel: domain.ErrPrimaryOwner},
 	{key: "service.conversation_already_archived", code: codes.FailedPrecondition, sentinel: domain.ErrConversationAlreadyArchived},
 	{key: "service.conversation_not_archived", code: codes.FailedPrecondition, sentinel: domain.ErrConversationNotArchived},
 	{key: "service.cannot_archive_default", code: codes.FailedPrecondition, sentinel: domain.ErrCannotArchiveDefault},

@@ -155,7 +155,7 @@ func prepareUserEvent(ctx context.Context, state UserEventProjectionStore, origi
 	if record.Event.WorkspaceID != workspaceID {
 		return record, false, nil
 	}
-	if record.Event.Topic != "message.created" && record.Event.Topic != "message.changed" && record.Event.Topic != "message.deleted" {
+	if !messageEventTopic(record.Event.Topic) {
 		visible, err := userCanSeeChannelEvent(ctx, state, userID, record.Event)
 		return record, visible, err
 	}
@@ -291,7 +291,7 @@ func prepareAppEvent(ctx context.Context, state AppEventProjectionStore, credent
 		// the event reports, not a reason to withhold it. Target routing in
 		// the payload keeps it addressed to the uninstalled app alone.
 		return record, true, nil
-	case "message.created", "message.changed", "message.deleted":
+	case "message.created", "message.changed", "message.unfurled", "message.deleted":
 		return prepareAppMessageEvent(ctx, state, origin, authorizations, record)
 	case "file.created", "file.shared", "file.unshared":
 		return prepareAppFileEvent(ctx, state, origin, authorizations, record)
@@ -542,6 +542,16 @@ func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, 
 	return projectMessageEvent(ctx, state, origin, record, message, appBotUserID(authorizations))
 }
 
+// messageEventTopic names the records that carry a message snapshot and are
+// projected as Slack message events.
+func messageEventTopic(topic string) bool {
+	switch topic {
+	case "message.created", "message.changed", "message.unfurled", "message.deleted":
+		return true
+	}
+	return false
+}
+
 func projectMessageEvent(ctx context.Context, state any, origin string, record events.Record, message domain.Message, botUserID domain.UserID) (events.Record, bool, error) {
 	return projectMessageSnapshot(ctx, state, origin, record, messageEventSnapshot{Current: message}, botUserID)
 }
@@ -561,7 +571,7 @@ func appBotUserID(authorizations []domain.AppAuthorization) domain.UserID {
 
 func projectMessageSnapshot(ctx context.Context, state any, origin string, record events.Record, snapshot messageEventSnapshot, botUserID domain.UserID) (events.Record, bool, error) {
 	switch record.Event.Topic {
-	case "message.changed":
+	case "message.changed", "message.unfurled":
 		if snapshot.Previous == nil {
 			return events.Record{}, false, events.ErrPayloadFieldInvalid
 		}
@@ -581,7 +591,9 @@ func projectMessageSnapshot(ctx context.Context, state any, origin string, recor
 		// the edit time. appEventMessage now carries `edited` from the
 		// message; this only supplies the envelope's own timestamp.
 		editedAt := string(domain.NewMessageTimestamp(record.Event.CreatedAt))
-		if _, recorded := current["edited"]; !recorded {
+		// An attached unfurl changes the message without editing it, so it
+		// gains no edited stamp.
+		if _, recorded := current["edited"]; !recorded && record.Event.Topic == "message.changed" {
 			current["edited"] = map[string]any{"user": record.Event.ActorID, "ts": editedAt}
 		}
 		// The outer ts is the change's own timestamp, as Slack sends it; the

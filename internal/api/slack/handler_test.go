@@ -2252,16 +2252,55 @@ func TestAdminUsersAssignReactivatesAndJoinsChannels(t *testing.T) {
 	}
 }
 
-func TestAdminUsersRoleMutationsUseTypedRoles(t *testing.T) {
-	for _, endpoint := range []string{"admin.users.setAdmin", "admin.users.setOwner", "admin.users.setRegular"} {
-		handler := testHandler()
-		request := httptest.NewRequest(http.MethodPost, "/api/"+endpoint, strings.NewReader("team_id=T1&user_id=U2"))
+// TestAdminUsersRoleMutationsKeepOnePrimaryOwner drives admin.users.setAdmin,
+// setOwner and setRegular as the workspace's primary owner. Each answer is read,
+// not just its status: Slack reports a refusal as ok:false under HTTP 200, so a
+// status check alone passed while every call was being refused. The primary
+// owner appoints a second owner, who is not primary, and cannot be demoted or
+// removed: Slack's cannot_modify_primary_owner.
+func TestAdminUsersRoleMutationsKeepOnePrimaryOwner(t *testing.T) {
+	handler, store := testUserHandlerWithStore()
+	if err := store.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleOwner); err != nil {
+		t.Fatal(err)
+	}
+	call := func(t *testing.T, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/"+endpoint, strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		request.Header.Set("Authorization", "Bearer token")
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusOK {
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || response.Code != http.StatusOK {
 			t.Fatalf("%s status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		return payload
+	}
+	for _, endpoint := range []string{"admin.users.setAdmin", "admin.users.setRegular", "admin.users.setOwner"} {
+		if answer := call(t, endpoint, "team_id=T1&user_id=U2"); answer["ok"] != true {
+			t.Fatalf("%s = %v, want ok", endpoint, answer)
+		}
+	}
+	for user, want := range map[string][2]bool{"U1": {true, true}, "U2": {true, false}} {
+		info := call(t, "users.info", "user="+user)
+		profile, _ := info["user"].(map[string]any)
+		if profile["is_owner"] != want[0] || profile["is_primary_owner"] != want[1] {
+			t.Fatalf("%s is_owner=%v is_primary_owner=%v, want %v", user, profile["is_owner"], profile["is_primary_owner"], want)
+		}
+	}
+	members, _ := call(t, "users.list", "")["members"].([]any)
+	primaries := 0
+	for _, member := range members {
+		if profile, _ := member.(map[string]any); profile["is_primary_owner"] == true {
+			primaries++
+		}
+	}
+	if primaries != 1 {
+		t.Fatalf("users.list reports %d primary owners among %d members, want 1", primaries, len(members))
+	}
+	for _, endpoint := range []string{"admin.users.setRegular", "admin.users.setAdmin", "admin.users.remove"} {
+		if answer := call(t, endpoint, "team_id=T1&user_id=U1"); answer["error"] != "cannot_modify_primary_owner" {
+			t.Fatalf("%s on the primary owner = %v, want cannot_modify_primary_owner", endpoint, answer)
 		}
 	}
 }

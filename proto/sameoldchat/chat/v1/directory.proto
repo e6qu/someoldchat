@@ -20,6 +20,7 @@ message AdminUser {
   bool active = 3;
   bool restricted = 4;
   bool ultra_restricted = 5;
+  bool primary_owner = 6;
 }
 
 message AdminUserPage {
@@ -341,6 +342,7 @@ message WorkspaceMembership {
   bool active = 4;
   bool restricted = 5;
   bool ultra_restricted = 6;
+  bool primary_owner = 7;
 }
 
 // ProvisionExternalUserRequest carries no actor. The operation is the first-login
@@ -631,6 +633,7 @@ service DirectoryService {
   rpc TeamBillableInfo(BillableInfoRequest) returns (BillableInfo);
   rpc RemoveUser(RemoveUserRequest) returns (MutationResponse);
   rpc SetUserRole(SetUserRoleRequest) returns (MutationResponse);
+  rpc TransferPrimaryOwnership(WorkspaceMembershipRequest) returns (MutationResponse);
   rpc SetUserExpiration(SetUserExpirationRequest) returns (MutationResponse);
   rpc UserExpiration(SetUserExpirationRequest) returns (UserExpirationResponse);
   rpc DiscoverableContacts(DiscoverableContactsRequest) returns (DiscoverableContactsResponse);

@@ -53,6 +53,11 @@ func (s *Store) AssignWorkspaceRole(ctx context.Context, workspaceID domain.Work
 	if err := tx.QueryRowContext(ctx, `SELECT restricted, ultra_restricted FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID).Scan(&restricted, &ultraRestricted); err != nil {
 		return translateNotFound(err)
 	}
+	if role != domain.WorkspaceRoleOwner {
+		if err := refusePrimaryOwnerChange(ctx, tx, workspaceID, userID); err != nil {
+			return err
+		}
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE workspace_members SET role = ?, active = 1, restricted = 0, ultra_restricted = 0 WHERE workspace_id = ? AND user_id = ?`, role, workspaceID, userID)
 	if err != nil {
 		return err
@@ -63,6 +68,9 @@ func (s *Store) AssignWorkspaceRole(ctx context.Context, workspaceID domain.Work
 	}
 	if changed != 1 {
 		return store.ErrNotFound
+	}
+	if err := claimPrimaryOwnership(ctx, tx, workspaceID, userID); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err

@@ -231,6 +231,15 @@ func TestMessageEventSnapshotsPreserveEveryMutationVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// An attached unfurl is announced as message_changed too, with no edited
+	// stamp: the message changed but nobody edited it.
+	unfurled := original
+	unfurled.Unfurls = map[string]string{"https://example.com/": `{"title":"Example"}`}
+	unfurlEvent, err := messageEventAt("T1", "message.unfurled", unfurled, &original, createdAt.Add(90*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	deleted := changed
 	deleted.Deleted = true
 	deleteEvent, err := messageEventAt("T1", "message.deleted", deleted, &changed, createdAt.Add(2*time.Minute))
@@ -248,10 +257,12 @@ func TestMessageEventSnapshotsPreserveEveryMutationVersion(t *testing.T) {
 		event     events.Event
 		fragments []string
 		outer     map[string]string
+		absent    []string
 	}{
-		"created": {createdEvent, []string{`"text":"version one"`}, map[string]string{"channel_type": "group", "ts": "1700001000.123456"}},
-		"changed": {changeEvent, []string{`"subtype":"message_changed"`, `"text":"version two"`, `"text":"version one"`, `"previous_message"`}, map[string]string{"channel_type": "group", "ts": "1700001060.123456", "event_ts": "1700001060.123456"}},
-		"deleted": {deleteEvent, []string{`"subtype":"message_deleted"`, `"text":"version two"`, `"deleted_ts":"1700001000.123456"`}, map[string]string{"channel_type": "group", "ts": "1700001120.123456", "event_ts": "1700001120.123456", "deleted_ts": "1700001000.123456"}},
+		"created":  {createdEvent, []string{`"text":"version one"`}, map[string]string{"channel_type": "group", "ts": "1700001000.123456"}, nil},
+		"changed":  {changeEvent, []string{`"subtype":"message_changed"`, `"text":"version two"`, `"text":"version one"`, `"previous_message"`}, map[string]string{"channel_type": "group", "ts": "1700001060.123456", "event_ts": "1700001060.123456"}, nil},
+		"unfurled": {unfurlEvent, []string{`"subtype":"message_changed"`, `"previous_message"`, `"text":"version one"`}, map[string]string{"channel_type": "group", "ts": "1700001090.123456", "event_ts": "1700001090.123456"}, []string{`"edited"`}},
+		"deleted":  {deleteEvent, []string{`"subtype":"message_deleted"`, `"text":"version two"`, `"deleted_ts":"1700001000.123456"`}, map[string]string{"channel_type": "group", "ts": "1700001120.123456", "event_ts": "1700001120.123456", "deleted_ts": "1700001000.123456"}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			prepared, visible, err := PrepareAppEvent(ctx, state, appEventTestKey, "", "A1", events.Record{Sequence: 1, Event: test.event})
@@ -273,6 +284,11 @@ func TestMessageEventSnapshotsPreserveEveryMutationVersion(t *testing.T) {
 			}
 			if err := json.Unmarshal(bodies[0], &envelope); err != nil {
 				t.Fatal(err)
+			}
+			for _, fragment := range test.absent {
+				if strings.Contains(body, fragment) {
+					t.Fatalf("callback carries %s: %s", fragment, body)
+				}
 			}
 			for field, want := range test.outer {
 				if got, _ := envelope.Event[field].(string); got != want {

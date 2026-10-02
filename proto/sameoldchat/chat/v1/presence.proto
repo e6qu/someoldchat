@@ -44,6 +44,7 @@ message User {
   string role = 13;
   bool restricted = 14;
   bool ultra_restricted = 15;
+  bool primary_owner = 16;
 }
 
 message SetUserPresenceRequest {

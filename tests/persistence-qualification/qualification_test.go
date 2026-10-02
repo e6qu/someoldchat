@@ -163,6 +163,7 @@ func runQualification(t *testing.T, open opener) {
 		{"an unset anomaly allow list is empty and not missing", anomalyAllowListIsEmptyNotMissing},
 		{"an external credential keeps its secret in the store", externalCredentialKeepsItsSecret},
 		{"the OpenID signing key is one key for every replica", openIDSigningKeyIsSingular},
+		{"a workspace's primary owner is one owner who cannot be removed", primaryOwnerIsOneProtectedOwner},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
 		{"visible files are newest first", visibleFilesAreNewestFirst},
@@ -1000,6 +1001,73 @@ func openIDSigningKeyIsSingular(t *testing.T, open opener) {
 	}
 	if _, err := repository.EnsureOpenIDSigningKey(ctx, domain.OpenIDSigningKey{KeyID: "kid-c-" + suffix}); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("incomplete key error=%v, want %v", err, store.ErrInvalidArgument)
+	}
+}
+
+// primaryOwnerIsOneProtectedOwner holds Slack's primary owner on every
+// profile: the first owner becomes it, a second owner does not, it can be
+// neither demoted nor deactivated, and a hand-over moves it to another full
+// member, who becomes an owner, leaving the previous one an owner.
+func primaryOwnerIsOneProtectedOwner(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-owner-" + suffix)
+	first, second, member := domain.UserID("U-first-"+suffix), domain.UserID("U-second-"+suffix), domain.UserID("U-member-"+suffix)
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Owners"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range []domain.UserID{first, second, member} {
+		if err := repository.SeedUser(ctx, domain.User{ID: user, WorkspaceID: workspaceID, Name: string(user)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sequence := 0
+	event := func() events.Event {
+		sequence++
+		return events.Event{ID: domain.EventID(fmt.Sprintf("E-owner-%s-%d", suffix, sequence)), WorkspaceID: workspaceID, Topic: "workspace.role_changed", Payload: "{}", CreatedAt: time.Now().UTC()}
+	}
+	primary := func(user domain.UserID) bool {
+		t.Helper()
+		membership, err := repository.GetWorkspaceMembership(ctx, workspaceID, user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return membership.PrimaryOwner
+	}
+	for _, owner := range []domain.UserID{first, second} {
+		if err := repository.SetWorkspaceRole(ctx, workspaceID, owner, domain.WorkspaceRoleOwner, event()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !primary(first) || primary(second) {
+		t.Fatalf("primary owner: first=%v second=%v, want only the first owner", primary(first), primary(second))
+	}
+	if err := repository.SetWorkspaceRole(ctx, workspaceID, first, domain.WorkspaceRoleAdmin, event()); !errors.Is(err, domain.ErrPrimaryOwner) {
+		t.Fatalf("demoting the primary owner error=%v, want %v", err, domain.ErrPrimaryOwner)
+	}
+	if err := repository.SetUserDeleted(ctx, workspaceID, first, true, event()); !errors.Is(err, domain.ErrPrimaryOwner) {
+		t.Fatalf("deactivating the primary owner error=%v, want %v", err, domain.ErrPrimaryOwner)
+	}
+	if err := repository.TransferPrimaryOwnership(ctx, workspaceID, second, member, event()); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
+		t.Fatalf("a hand-over by an owner who is not primary error=%v, want %v", err, domain.ErrNotWorkspaceAdmin)
+	}
+	if err := repository.TransferPrimaryOwnership(ctx, workspaceID, first, member, event()); err != nil {
+		t.Fatal(err)
+	}
+	membership, err := repository.GetWorkspaceMembership(ctx, workspaceID, member)
+	if err != nil || !membership.PrimaryOwner || membership.Role != domain.WorkspaceRoleOwner {
+		t.Fatalf("new primary owner membership=%+v err=%v", membership, err)
+	}
+	previous, err := repository.GetWorkspaceMembership(ctx, workspaceID, first)
+	if err != nil || previous.PrimaryOwner || previous.Role != domain.WorkspaceRoleOwner {
+		t.Fatalf("previous primary owner membership=%+v err=%v", previous, err)
+	}
+	// Handed on, the previous primary owner is an ordinary owner again.
+	if err := repository.SetWorkspaceRole(ctx, workspaceID, first, domain.WorkspaceRoleAdmin, event()); err != nil {
+		t.Fatal(err)
 	}
 }
 
