@@ -83,10 +83,11 @@ var scopeDescriptions = map[Scope]string{
 	ScopeCallsRead:       "View calls",
 	ScopeCallsWrite:      "Start and manage calls",
 
-	ScopeWorkflowStepsExecute: "Run the app's custom workflow steps",
-	ScopeTriggersRead:         "View workflow triggers",
-	ScopeTriggersWrite:        "Create and manage workflow triggers",
-	ScopeTokensBasic:          "Exchange the authorization for an access token",
+	ScopeWorkflowStepsExecute:   "Run the app's custom workflow steps",
+	ScopeTriggersRead:           "View workflow triggers",
+	ScopeTriggersWrite:          "Create and manage workflow triggers",
+	ScopeTokensBasic:            "Exchange the authorization for an access token",
+	ScopeAppConfigurationsWrite: "Change how the apps you collaborate on present themselves",
 
 	ScopeConversationsConnectRead:   "View Slack Connect invitations",
 	ScopeConversationsConnectWrite:  "Create and accept Slack Connect invitations",

@@ -62,6 +62,11 @@ type Handler struct {
 
 var errAccessLogging = errors.New("access logging failed")
 
+// errAdminScopeNeedsUserToken is a bot token presented to a method that needs
+// an admin scope. Slack grants admin scopes to user tokens only, so it answers
+// every such method with not_allowed_token_type, whatever scopes the bot holds.
+var errAdminScopeNeedsUserToken = errors.New("admin scopes are granted to user tokens only")
+
 const oauthTokenLifetime = 12 * time.Hour
 
 // HandlerOption configures a Handler at construction, before any route can
@@ -3093,8 +3098,14 @@ func (h Handler) teamPreferencesList(w http.ResponseWriter, r *http.Request) {
 // workspace is connected to is a statement about the workspace, where the
 // organizations in one channel are already reported by conversations.info to
 // anyone in that channel.
+// team.externalTeams.list is a Slack Connect method, not an admin one: Slack
+// grants it to the bot of an app an administrator installed, holding both
+// conversations.connect:manage and team:read.
 func (h Handler) externalTeamsList(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeAdminTeamsRead)
+	principal, err := h.authenticate(r, auth.ScopeConversationsConnectManage)
+	if err == nil && !principal.HasScope(auth.ScopeTeamRead) {
+		err = missingScopeError{needed: []auth.Scope{auth.ScopeTeamRead}, provided: permissionScopes(principal)}
+	}
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -3133,7 +3144,7 @@ func (h Handler) externalTeamsList(w http.ResponseWriter, r *http.Request) {
 // admin.conversations.disconnectShared; this is not that repeated, because an
 // administrator ending a relationship wants it ended everywhere.
 func (h Handler) externalTeamsDisconnect(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeAdminTeamsWrite)
+	principal, err := h.authenticate(r, auth.ScopeConversationsConnectManage)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -3723,9 +3734,10 @@ func (h Handler) adminWorkflowsUnpublish(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// apps.icon.set records what a client draws beside an app's messages.
+// apps.icon.set records what a client draws beside an app's messages. It is an
+// app configuration method, so Slack asks for app_configurations:write.
 func (h Handler) appsIconSet(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	principal, err := h.authenticate(r, auth.ScopeAppConfigurationsWrite)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -3789,11 +3801,14 @@ func (h Handler) appsAuthExternalDelete(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// appCredentialRequest resolves which app the caller speaks for. A credential
-// that carries an app speaks for that app and no other, so an app_id argument
-// cannot widen it: an app that could name another app could read its secrets.
+// appCredentialRequest resolves which app the caller speaks for. Slack asks for
+// no scope here: the app's own token is the authority. A credential that
+// carries an app speaks for that app and no other, so an app_id argument cannot
+// widen it: an app that could name another app could read its secrets. A token
+// that carries no app may name only an app its holder owns, and any other app
+// answers as a missing credential, so the call reveals nothing about it.
 func (h Handler) appCredentialRequest(w http.ResponseWriter, r *http.Request) (auth.Principal, domain.AppID, map[string]string, bool) {
-	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	principal, err := h.authenticate(r, "")
 	if err != nil {
 		writeAuthError(w, err)
 		return auth.Principal{}, "", nil, false
@@ -3803,12 +3818,16 @@ func (h Handler) appCredentialRequest(w http.ResponseWriter, r *http.Request) (a
 		writeDecodeError(w, err)
 		return auth.Principal{}, "", nil, false
 	}
-	appID := principal.AppID
-	if appID == "" {
-		appID = domain.AppID(strings.TrimSpace(fields["app_id"]))
+	if principal.AppID != "" {
+		return principal, principal.AppID, fields, true
 	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
 	if appID == "" {
 		writeError(w, "invalid_arguments")
+		return auth.Principal{}, "", nil, false
+	}
+	if _, _, err := h.Messages.GetDeveloperApp(r.Context(), principal.WorkspaceID, principal.UserID, appID); err != nil {
+		writeError(w, mapServiceError(err, "token_not_found"))
 		return auth.Principal{}, "", nil, false
 	}
 	return principal, appID, fields, true
@@ -12969,6 +12988,9 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 		return auth.Principal{}, err
 	}
 	recordGrantedScopes(r, principal)
+	if auth.IsControlPlaneScope(scope) && isBotPrincipal(principal) {
+		return auth.Principal{}, errAdminScopeNeedsUserToken
+	}
 	if err := requireAnyScope(r, principal, scope); err != nil {
 		return auth.Principal{}, err
 	}
@@ -13008,6 +13030,10 @@ func writeAuthError(w http.ResponseWriter, err error) {
 	// them to retry with the credential they already hold.
 	if errors.Is(err, auth.ErrCredentialStoreUnavailable) {
 		writeError(w, "fatal_error")
+		return
+	}
+	if errors.Is(err, errAdminScopeNeedsUserToken) {
+		writeError(w, "not_allowed_token_type")
 		return
 	}
 	var missing missingScopeError

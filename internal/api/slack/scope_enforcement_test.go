@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"context"
 	"encoding/json"
 	"go/ast"
 	"go/parser"
@@ -11,9 +12,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/service"
 )
 
 // scopedRoute records the scope a Slack method requires.
@@ -119,10 +123,7 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/admin.users.setAdmin", auth.ScopeAdminUsersWrite},
 		{http.MethodPost, "/api/admin.users.setOwner", auth.ScopeAdminUsersWrite},
 		{http.MethodPost, "/api/admin.users.setRegular", auth.ScopeAdminUsersWrite},
-		{http.MethodPost, "/api/apps.icon.set", auth.ScopeAdminAppsWrite},
-		{http.MethodGet, "/api/apps.auth.external.get", auth.ScopeAdminAppsWrite},
-		{http.MethodPost, "/api/apps.auth.external.get", auth.ScopeAdminAppsWrite},
-		{http.MethodPost, "/api/apps.auth.external.delete", auth.ScopeAdminAppsWrite},
+		{http.MethodPost, "/api/apps.icon.set", auth.ScopeAppConfigurationsWrite},
 		{http.MethodPost, "/api/apps.user.connection.update", auth.ScopeAuthorizationsRead},
 		{http.MethodGet, "/api/assistant.search.info", auth.ScopeSearchRead},
 		{http.MethodPost, "/api/assistant.search.info", auth.ScopeSearchRead},
@@ -233,8 +234,8 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/admin.users.session.list", auth.ScopeAdminUsersRead},
 		{http.MethodPost, "/api/admin.users.getExpiration", auth.ScopeAdminUsersRead},
 		{http.MethodPost, "/api/admin.users.session.resetBulk", auth.ScopeAdminUsersWrite},
-		{http.MethodPost, "/api/team.externalTeams.list", auth.ScopeAdminTeamsRead},
-		{http.MethodPost, "/api/team.externalTeams.disconnect", auth.ScopeAdminTeamsWrite},
+		{http.MethodPost, "/api/team.externalTeams.list", auth.ScopeConversationsConnectManage},
+		{http.MethodPost, "/api/team.externalTeams.disconnect", auth.ScopeConversationsConnectManage},
 		{http.MethodGet, "/api/admin.conversations.ekm.listOriginalConnectedChannelInfo", auth.ScopeAdminConversationsRead},
 		{http.MethodPost, "/api/admin.emoji.add", auth.ScopeAdminTeamsWrite},
 		{http.MethodPost, "/api/admin.emoji.addAlias", auth.ScopeAdminTeamsWrite},
@@ -442,7 +443,13 @@ func TestEveryScopedMethodRejectsATokenMissingItsScope(t *testing.T) {
 				granted = append(granted, scope)
 			}
 		}
+		// Slack grants admin scopes to user tokens only and refuses a bot on
+		// those methods before looking at its scopes, so they are probed with a
+		// user token missing the scope.
 		handler, _ := testHandlerWithScopes(granted...)
+		if auth.IsControlPlaneScope(route.scope) {
+			handler, _ = testUserHandlerWithScopes(granted...)
+		}
 		request := httptest.NewRequest(route.method, route.path, nil)
 		request.Header.Set("Authorization", "Bearer token")
 		response := httptest.NewRecorder()
@@ -519,7 +526,7 @@ func TestNarrowScopeTokenCannotReadConversationsOrUsers(t *testing.T) {
 // pinned contract requires admin.teams:read for it, so a read-only admin token
 // has to succeed.
 func TestAdminEmojiListAcceptsAReadOnlyAdminToken(t *testing.T) {
-	handler, _ := testHandlerWithScopes(auth.ScopeAdminTeamsRead)
+	handler, _ := testUserHandlerWithScopes(auth.ScopeAdminTeamsRead)
 	request := httptest.NewRequest(http.MethodGet, "/api/admin.emoji.list", nil)
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
@@ -551,7 +558,7 @@ func TestAdministrativeMutationsRefuseAMemberHoldingAdminScopes(t *testing.T) {
 		{"/api/admin.conversations.delete", "channel_id=C1"},
 		{"/api/admin.teams.settings.setName", "team_id=T1&name=seized"},
 	} {
-		handler, store := testHandlerWithStore()
+		handler, store := testUserHandlerWithStore()
 		if err := store.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleMember); err != nil {
 			t.Fatal(err)
 		}
@@ -579,7 +586,7 @@ func TestAdministrativeMutationsRefuseAMemberHoldingAdminScopes(t *testing.T) {
 // actual administrator, or the fix would simply have broken workspace
 // administration instead of securing it.
 func TestAdministrativeMutationsStillAcceptAnAdministrator(t *testing.T) {
-	handler, _ := testHandlerWithStore()
+	handler, _ := testUserHandlerWithStore()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.rename", strings.NewReader("channel_id=C1&name=renamed"))
 	request.Header.Set("Authorization", "Bearer token")
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -662,4 +669,90 @@ func scopeConstantNames(t *testing.T) map[auth.Scope]string {
 		t.Fatal("no auth.Scope constants discovered; the scan is broken")
 	}
 	return names
+}
+
+// Slack grants admin scopes to user tokens only, so every method that needs
+// one refuses a bot token with not_allowed_token_type: a bot holding the scope
+// is refused, and so is one without it, rather than being told which scope to
+// add. The bare admin scope of team.accessLogs is an admin scope too.
+func TestBotTokensAreRefusedOnEveryAdminScopedMethod(t *testing.T) {
+	for _, path := range []string{"/api/admin.users.list", "/api/admin.conversations.search", "/api/admin.apps.approved.list", "/api/team.accessLogs"} {
+		for _, scopes := range [][]auth.Scope{defaultTestScopes(), {auth.ScopeChatWrite}} {
+			handler, _ := testHandlerWithScopes(scopes...)
+			request := httptest.NewRequest(http.MethodPost, path, nil)
+			request.Header.Set("Authorization", "Bearer token")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if body := response.Body.String(); response.Code != http.StatusOK || !strings.Contains(body, `"error":"not_allowed_token_type"`) {
+				t.Errorf("%s with a bot holding %d scopes: status=%d body=%s, want not_allowed_token_type", path, len(scopes), response.Code, body)
+			}
+		}
+		handler, _ := testUserHandlerWithStore()
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if strings.Contains(response.Body.String(), "not_allowed_token_type") {
+			t.Errorf("%s refused an administrator's user token: %s", path, response.Body)
+		}
+	}
+}
+
+// Methods outside admin.* keep the token types Slack grants them, so moving
+// admin scopes to user tokens must not strand a bot Slack would accept.
+// team.externalTeams.list wants team:read beside conversations.connect:manage,
+// and apps.auth.external.* want no scope at all: the app's own token is the
+// authority. A token that carries no app may name only an app its holder owns.
+func TestNonAdminMethodsKeepSlacksTokenTypes(t *testing.T) {
+	call := func(t *testing.T, handler http.Handler, token, endpoint, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/"+endpoint, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("%s: status=%d body=%s", endpoint, response.Code, response.Body)
+		}
+		return payload
+	}
+
+	connectOnly, _ := testFixture(false, auth.ScopeConversationsConnectManage)
+	if got := call(t, connectOnly, "token", "team.externalTeams.list", ""); got["error"] != "missing_scope" || got["needed"] != "team:read" {
+		t.Fatalf("list without team:read = %v, want missing_scope naming team:read", got)
+	}
+
+	bot, botStore := testFixture(false, auth.ScopeChatWrite)
+	now := time.Now().UTC()
+	if err := botStore.SetExternalAuthToken(context.Background(), domain.ExternalAuthToken{
+		ID: "Et1", AppID: "A1", WorkspaceID: "T1", UserID: "U1", Provider: "example",
+		Ciphertext: "sealed", ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}, events.Event{ID: "evt-external", WorkspaceID: "T1", Topic: "app.external_token_set", Payload: "Et1", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if got := call(t, bot, "token", "apps.auth.external.get", "external_token_id=Et1"); got["ok"] != true {
+		t.Fatalf("bot reading its own app's credential = %v, want ok", got)
+	}
+
+	// Tokens that carry no app: U1 owns A1, U2 does not.
+	for _, tc := range []struct {
+		user domain.UserID
+		want any
+	}{{"U1", true}, {"U2", "token_not_found"}} {
+		authenticator, err := auth.NewStatic("appless", auth.Principal{WorkspaceID: "T1", UserID: tc.user, TokenType: domain.TokenUser, Scopes: map[auth.Scope]struct{}{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := NewHandler(service.Messages{Store: botStore}, authenticator)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mux := http.NewServeMux()
+		h.Register(mux)
+		got := call(t, mux, "appless", "apps.auth.external.get", "app_id=A1&external_token_id=Et1")
+		if tc.want == true && got["ok"] != true || tc.want != true && got["error"] != tc.want {
+			t.Fatalf("%s naming A1 = %v, want %v", tc.user, got, tc.want)
+		}
+	}
 }

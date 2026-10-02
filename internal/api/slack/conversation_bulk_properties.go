@@ -20,10 +20,6 @@ func (h Handler) adminConversationsBulkSetProperties(w http.ResponseWriter, r *h
 		writeAuthError(w, err)
 		return
 	}
-	if isBotPrincipal(principal) {
-		writeError(w, "not_allowed_token_type")
-		return
-	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)

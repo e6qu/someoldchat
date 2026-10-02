@@ -580,6 +580,7 @@ func sentinelDrivenCodes() map[string]string {
 		"invalid_auth":               "authentication outcome; writeAuthError, reached by every scoped route",
 		"account_inactive":           "authentication outcome; writeAuthError, reached by every scoped route",
 		"token_revoked":              "authentication outcome; the snapshot omits it from 122 operations that do declare invalid_auth and account_inactive for the same credential check",
+		"not_allowed_token_type":     "authorization outcome; writeAuthError's name for a bot token on any method needing an admin scope, which Slack grants to user tokens only",
 		"missing_scope":              "authorization outcome; the snapshot omits it from ~60 operations that nonetheless declare a token scope",
 		"fatal_error":                "the unclassified fallback of mapServiceErrorNamed and writeAuthError; no operation chooses it",
 		"no_permission":              "domain.ErrMessageNotOwned / ErrNotWorkspaceAdmin, classified by sentinel",

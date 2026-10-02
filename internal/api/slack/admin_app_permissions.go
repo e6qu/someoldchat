@@ -13,9 +13,9 @@ import (
 // The organization-level app access controls: admin.apps.permissions.*,
 // admin.apps.mcp.servers.* and apps.managed.permissions.set.
 //
-// The admin.* methods here document a user token only, and each lists
-// not_allowed_token_type, so a bot token is refused once its scope has been
-// checked. apps.managed.permissions.set takes an app configuration token, the
+// The admin.* methods here take a user token only; authenticate refuses a bot
+// with not_allowed_token_type, as it does for every admin scope.
+// apps.managed.permissions.set takes an app configuration token, the
 // credential the apps.manifest.* methods authenticate with.
 func (h Handler) registerAdminAppPermissions(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/admin.apps.permissions.add", h.adminAppsPermissionsAdd)
@@ -37,15 +37,11 @@ func (h Handler) registerAdminAppPermissions(mux *http.ServeMux) {
 }
 
 // adminAppAccessFields finishes what each admin.apps access-control handler
-// starts by authenticating for its own scope: it refuses a bot token and
-// decodes the arguments, answering the request itself when it cannot proceed.
+// starts by authenticating for its own scope: it decodes the arguments,
+// answering the request itself when it cannot proceed.
 func adminAppAccessFields(w http.ResponseWriter, r *http.Request, principal auth.Principal, err error) (map[string]string, bool) {
 	if err != nil {
 		writeAuthError(w, err)
-		return nil, false
-	}
-	if isBotPrincipal(principal) {
-		writeError(w, "not_allowed_token_type")
 		return nil, false
 	}
 	fields, err := decodeFields(w, r)
