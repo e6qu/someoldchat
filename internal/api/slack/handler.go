@@ -21,6 +21,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store"
+	"github.com/sameoldchat/sameoldchat/internal/thumbnail"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -812,6 +813,7 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/files.completeUploadExternal", h.filesCompleteUploadExternal)
 	// Not a method: the authenticated download of a stored file.
 	mux.HandleFunc("GET /api/files/{file}", h.downloadFile)
+	mux.HandleFunc("GET /api/files/{file}/thumb/{size}", h.downloadFileThumb)
 	// Registered last and least specifically, so it claims only what nothing else
 	// does: an unknown method name and a verb no route declares.
 	mux.HandleFunc("/api/", h.unknownMethod)
@@ -9907,6 +9909,55 @@ func (h Handler) downloadFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 	blobHeaders(w, file.MIMEType, file.Name)
 	_, _ = io.Copy(w, source)
+}
+
+// thumbSourceLimit bounds how large an image the server decodes to build a
+// thumb_N, so one request cannot pull an enormous file into memory; a larger
+// image is served at full size, as is one that cannot be downscaled.
+const thumbSourceLimit = 25 << 20
+
+// downloadFileThumb serves thumb_N, the image downscaled so neither side
+// exceeds N, to a token that may read the file, as url_private serves the
+// original. An image already within N is re-encoded at its own size; a file
+// that is not an image this can downscale is served as it is.
+func (h Handler) downloadFileThumb(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeFilesRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fileID := domain.FileID(strings.TrimSpace(r.PathValue("file")))
+	size, err := strconv.Atoi(r.PathValue("size"))
+	if fileID == "" || err != nil || !slices.Contains(slackobject.ThumbSizes, size) {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	file, source, err := h.Messages.OpenFile(r.Context(), principal.WorkspaceID, principal.UserID, fileID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "file_not_found"))
+		return
+	}
+	defer source.Close()
+	if !thumbnail.Supported(file.MIMEType) || file.Size > thumbSourceLimit {
+		w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
+		blobHeaders(w, file.MIMEType, file.Name)
+		_, _ = io.Copy(w, source)
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(source, thumbSourceLimit+1))
+	if err != nil {
+		writeError(w, mapServiceError(err, "file_not_found"))
+		return
+	}
+	preview, previewType, err := thumbnail.Generate(data, size)
+	if err != nil {
+		// Bytes that do not decode as the image their type claims are served
+		// as they are rather than as a broken thumbnail.
+		preview, previewType = data, file.MIMEType
+	}
+	w.Header().Set("Content-Length", strconv.Itoa(len(preview)))
+	blobHeaders(w, previewType, file.Name)
+	_, _ = w.Write(preview)
 }
 
 // capabilityHeaders protect a download whose URL is itself the credential.
