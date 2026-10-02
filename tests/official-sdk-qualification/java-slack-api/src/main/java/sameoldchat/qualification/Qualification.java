@@ -1158,7 +1158,9 @@ public final class Qualification {
             UsersListResponse users = methods.usersList(
                     com.slack.api.methods.request.users.UsersListRequest.builder().limit(10).build());
             require(users.isOk(), "users.list failed: " + users.getError());
-            require(users.getMembers() != null && users.getMembers().size() == 3, "users page mismatch");
+            require(users.getMembers() != null && users.getMembers().size() == 4
+                    // Slackbot ends the directory, as USLACKBOT in every Slack workspace.
+                    && "USLACKBOT".equals(users.getMembers().get(3).getId()), "users page mismatch");
             require(users.getResponseMetadata() != null
                             && (users.getResponseMetadata().getNextCursor() == null
                                     || users.getResponseMetadata().getNextCursor().isBlank()),

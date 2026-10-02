@@ -954,7 +954,9 @@ assert isinstance(all_search["files"]["matches"], list)
 
 users = client.users_list(limit=10)
 assert users["ok"] is True
-assert len(users["members"]) == 3
+# Slackbot ends the directory, as USLACKBOT in every Slack workspace.
+assert len(users["members"]) == 4
+assert users["members"][3]["id"] == "USLACKBOT"
 assert client.api_call("users.setActive")["ok"] is True
 assert admin_client.admin_users_assign(
     team_id="T1", user_id="U2", channel_ids=["C1"], is_restricted=False, is_ultra_restricted=False
