@@ -187,6 +187,11 @@ func (h Handler) composerPeople(ctx context.Context, principal auth.Principal, c
 			if len(people) >= composerPeopleLimit {
 				break
 			}
+			// Slackbot cannot be added to a channel, so it is never offered
+			// as someone to mention into one.
+			if user.IsSlackbot() && !members[user.ID] {
+				continue
+			}
 			if !members[user.ID] && !user.Deleted && !seen[user.ID] {
 				nonMembers = true
 			}

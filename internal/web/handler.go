@@ -6173,7 +6173,9 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 				return nil, err
 			}
 			for _, user := range page.Users {
-				if user.Deleted {
+				// Slackbot is in every workspace's directory but cannot be
+				// added to a channel, as on Slack.
+				if user.Deleted || user.IsSlackbot() {
 					continue
 				}
 				if _, exists := membersByID[user.ID]; exists {

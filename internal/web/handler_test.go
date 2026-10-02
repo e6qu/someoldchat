@@ -1746,6 +1746,18 @@ func TestConversationMemberPanelShowsPresenceAndStatus(t *testing.T) {
 		`data-member-name="Bob Builder"><span class="conversation-member-avatar" aria-hidden="true">B<span class="presence-dot `)
 }
 
+// TestSlackbotIsNeverOfferedAsAChannelInvitee holds what Slack does: Slackbot
+// is in every workspace's directory and cannot be added to a channel, so the
+// details panel's Add people picker and the composer's offer to mention someone
+// outside the channel leave it out. With everyone else in the channel, the
+// panel says so instead of offering Slackbot.
+func TestSlackbotIsNeverOfferedAsAChannelInvitee(t *testing.T) {
+	_, mux := browserWorkspace(t, auth.AllScopes())
+	body := get(t, mux, "/app?channel=Cdev&details=1").Body.String()
+	requireContains(t, "details with only Slackbot outside", body, "Every available workspace member is already in this channel.")
+	requireMissing(t, "Slackbot as an invitee", body, `<option value="USLACKBOT">`)
+}
+
 // TestMemberDirectoryMarksAndRemovesVIPs covers the VIP toggle: the directory
 // offers to mark another member, the toggle persists and flips its label, and
 // removing it returns the row to "Mark VIP".
