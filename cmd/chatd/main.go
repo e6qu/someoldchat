@@ -321,9 +321,8 @@ func metricsListener(addr string, metrics *observability.Registry) *http.Server 
 // authority that decides *who may connect to chatd* also issued the certificate
 // that says *which server chatd is*.
 //
-// docs/modules.md gave one `ca.crt` to both `-tls-client-ca` here and
-// `-chat-ca` on the HTTP process, which is the shape this refuses. With one
-// authority, every certificate it issues authenticates as a client to the whole
+// One `ca.crt` given to both `-tls-client-ca` here and `-chat-ca` on the HTTP
+// process is the shape this refuses. With one authority, every certificate it issues authenticates as a client to the whole
 // internal data plane — including this server's own certificate, so anything
 // that holds the server key is a privileged client of the service it is
 // serving. Two authorities make the two roles independent, and a document

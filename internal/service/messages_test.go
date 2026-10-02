@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,8 +80,8 @@ func TestGuestCanCreatePersonalButNotChannelReminder(t *testing.T) {
 	}
 	if _, err := messages.CreateLaterReminder(ctx, "T1", guest.ID, domain.LaterReminderRequest{
 		Target: domain.LaterReminderChannel, Channel: "C1", Text: "public", DueAt: due, TimeZone: "UTC",
-	}); !errors.Is(err, ErrInvalidLaterReminder) {
-		t.Fatalf("channel reminder error=%v, want %v", err, ErrInvalidLaterReminder)
+	}); !errors.Is(err, domain.ErrInvalidLaterReminder) {
+		t.Fatalf("channel reminder error=%v, want %v", err, domain.ErrInvalidLaterReminder)
 	}
 }
 
@@ -118,8 +119,8 @@ func TestCompleteReminderDistinguishesOthersAndRecurring(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add reminder for U2: %v", err)
 	}
-	if err := messages.CompleteReminder(ctx, "T1", "U1", forOther.ID); !errors.Is(err, ErrReminderOwnedByOther) {
-		t.Fatalf("complete other's reminder error = %v, want %v", err, ErrReminderOwnedByOther)
+	if err := messages.CompleteReminder(ctx, "T1", "U1", forOther.ID); !errors.Is(err, domain.ErrReminderOwnedByOther) {
+		t.Fatalf("complete other's reminder error = %v, want %v", err, domain.ErrReminderOwnedByOther)
 	}
 	// The refusal did not complete it: U2 can still see it as outstanding.
 	if outstanding, infoErr := messages.ReminderInfo(ctx, "T1", "U2", forOther.ID); infoErr != nil || !outstanding.CompleteAt.IsZero() {
@@ -156,8 +157,8 @@ func TestCompleteReminderDistinguishesOthersAndRecurring(t *testing.T) {
 	if err != nil || !recurring.Recurring || recurring.Recurrence != domain.ReminderDaily || recurring.TimeZone != "Europe/Paris" {
 		t.Fatalf("add recurring reminder = %+v err=%v", recurring, err)
 	}
-	if err := messages.CompleteReminder(ctx, "T1", "U1", recurring.ID); !errors.Is(err, ErrReminderRecurring) {
-		t.Fatalf("complete recurring reminder error = %v, want %v", err, ErrReminderRecurring)
+	if err := messages.CompleteReminder(ctx, "T1", "U1", recurring.ID); !errors.Is(err, domain.ErrReminderRecurring) {
+		t.Fatalf("complete recurring reminder error = %v, want %v", err, domain.ErrReminderRecurring)
 	}
 
 	// A reminder that does not exist is still not_found, not one of the above.
@@ -173,8 +174,8 @@ func TestPostMessageRejectsArchivedConversation(t *testing.T) {
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "archive", Archived: true})
 	s.SeedConversationMember("C1", "U1")
 
-	if _, err := (Messages{Store: s}).Post(context.Background(), "T1", "U1", "C1", "hello", "", ""); !errors.Is(err, ErrConversationAlreadyArchived) {
-		t.Fatalf("Post error = %v, want %v", err, ErrConversationAlreadyArchived)
+	if _, err := (Messages{Store: s}).Post(context.Background(), "T1", "U1", "C1", "hello", "", ""); !errors.Is(err, domain.ErrConversationAlreadyArchived) {
+		t.Fatalf("Post error = %v, want %v", err, domain.ErrConversationAlreadyArchived)
 	}
 	messages, err := s.ListMessages(context.Background(), "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 100}})
 	if err != nil {
@@ -207,8 +208,8 @@ func TestOAuthExchangeConsumesAuthorizationCode(t *testing.T) {
 	if err != nil || len(issued.Scopes) != 1 || issued.Scopes[0] != "chat:write" {
 		t.Fatalf("issued token not usable: %v", err)
 	}
-	if _, err := (Messages{Store: s}).OAuthExchange(ctx, "client", "secret", "code", "https://callback"); !errors.Is(err, ErrInvalidOAuth) {
-		t.Fatalf("second exchange error = %v, want %v", err, ErrInvalidOAuth)
+	if _, err := (Messages{Store: s}).OAuthExchange(ctx, "client", "secret", "code", "https://callback"); !errors.Is(err, domain.ErrInvalidOAuth) {
+		t.Fatalf("second exchange error = %v, want %v", err, domain.ErrInvalidOAuth)
 	}
 }
 
@@ -290,8 +291,52 @@ func TestOpenIDConnectTokenRotatesRefreshTokenAndUserInfoUsesIssuedScope(t *test
 	if rotated.AccessToken == token.AccessToken || rotated.RefreshToken == token.RefreshToken || rotated.IDToken == "" {
 		t.Fatalf("refresh did not rotate credentials: old=%+v new=%+v", token, rotated)
 	}
-	if _, err := service.OpenIDConnectToken(ctx, "client", "secret", "", "", "refresh_token", token.RefreshToken, ""); !errors.Is(err, ErrInvalidOAuth) {
-		t.Fatalf("reused refresh token error=%v, want %v", err, ErrInvalidOAuth)
+	if _, err := service.OpenIDConnectToken(ctx, "client", "secret", "", "", "refresh_token", token.RefreshToken, ""); !errors.Is(err, domain.ErrInvalidOAuth) {
+		t.Fatalf("reused refresh token error=%v, want %v", err, domain.ErrInvalidOAuth)
+	}
+}
+
+// A relying party that pointed Slack's OpenID endpoints at this deployment
+// validates iss against the issuer it was configured with. The ID token used to
+// claim https://slack.com, which only a client hardcoded to Slack would accept.
+func TestOpenIDTokenNamesTheDeploymentAsItsIssuer(t *testing.T) {
+	for _, publicURL := range []string{"https://chat.example.com/", ""} {
+		s := memory.New()
+		s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test", Domain: "test.example"})
+		s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com"})
+		ctx := context.Background()
+		if err := s.CreateOAuthClient(ctx, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("secret"), AppID: "A1"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CreateOAuthCode(ctx, domain.OAuthCode{Code: "code", ClientID: "client", WorkspaceID: "T1", UserID: "U1", Scopes: []string{"openid"}, RedirectURI: "https://callback", CodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", CodeChallengeMethod: "S256"}); err != nil {
+			t.Fatal(err)
+		}
+		token, err := Messages{Store: s, PublicURL: publicURL}.OpenIDConnectToken(ctx, "client", "secret", "code", "https://callback", "authorization_code", "", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parts := strings.Split(token.IDToken, ".")
+		if len(parts) != 3 {
+			t.Fatalf("id_token=%q is not a JWT", token.IDToken)
+		}
+		payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var claims map[string]any
+		if err := json.Unmarshal(payload, &claims); err != nil {
+			t.Fatal(err)
+		}
+		issuer, present := claims["iss"]
+		switch {
+		case publicURL != "" && issuer != "https://chat.example.com":
+			t.Fatalf("iss=%v, want the deployment's public URL", issuer)
+		case publicURL == "" && present:
+			t.Fatalf("iss=%v without a public URL, want no issuer rather than slack.com", issuer)
+		}
+		if claims["https://slack.com/user_id"] != "U1" || claims["https://slack.com/team_id"] != "T1" {
+			t.Fatalf("claims=%v, want Slack's literal user and team claim keys", claims)
+		}
 	}
 }
 
@@ -615,34 +660,34 @@ func TestViewsAreTypedDurableAndHashChecked(t *testing.T) {
 	if _, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"modal"}`, opened.Hash); err == nil {
 		t.Fatal("stale view hash unexpectedly succeeded")
 	}
-	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal"}`, ""); !errors.Is(err, ErrInvalidView) {
-		t.Fatalf("malformed view error=%v, want %v", err, ErrInvalidView)
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal"}`, ""); !errors.Is(err, domain.ErrInvalidView) {
+		t.Fatalf("malformed view error=%v, want %v", err, domain.ErrInvalidView)
 	}
-	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`, ""); !errors.Is(err, ErrTriggerExchanged) {
-		t.Fatalf("replayed trigger error=%v, want %v", err, ErrTriggerExchanged)
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`, ""); !errors.Is(err, domain.ErrTriggerExchanged) {
+		t.Fatalf("replayed trigger error=%v, want %v", err, domain.ErrTriggerExchanged)
 	}
-	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "unknown", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`, ""); !errors.Is(err, ErrInvalidTrigger) {
-		t.Fatalf("unknown trigger error=%v, want %v", err, ErrInvalidTrigger)
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "unknown", `{"type":"modal","title":{"type":"plain_text","text":"Again"},"blocks":[]}`, ""); !errors.Is(err, domain.ErrInvalidTrigger) {
+		t.Fatalf("unknown trigger error=%v, want %v", err, domain.ErrInvalidTrigger)
 	}
 	// A malformed view must not spend the trigger, and a Home view cannot be
 	// opened, pushed, or reached by updating a modal.
 	seedInteractionTrigger(t, s, "trigger-3")
-	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, ErrInvalidView) {
-		t.Fatalf("home via views.open error=%v, want %v", err, ErrInvalidView)
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, domain.ErrInvalidView) {
+		t.Fatalf("home via views.open error=%v, want %v", err, domain.ErrInvalidView)
 	}
-	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"x"},"blocks":[{"type":"bogus"}]}`, ""); !errors.Is(err, ErrInvalidView) {
-		t.Fatalf("invalid block error=%v, want %v", err, ErrInvalidView)
+	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"x"},"blocks":[{"type":"bogus"}]}`, ""); !errors.Is(err, domain.ErrInvalidView) {
+		t.Fatalf("invalid block error=%v, want %v", err, domain.ErrInvalidView)
 	}
-	if _, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, ErrInvalidView) {
-		t.Fatalf("modal->home update error=%v, want %v", err, ErrInvalidView)
+	if _, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, domain.ErrInvalidView) {
+		t.Fatalf("modal->home update error=%v, want %v", err, domain.ErrInvalidView)
 	}
 	third, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-3", `{"type":"modal","title":{"type":"plain_text","text":"Third"},"blocks":[]}`, "")
 	if err != nil || third.PreviousViewID != pushed.ID {
 		t.Fatalf("third=%+v err=%v", third, err)
 	}
 	seedInteractionTrigger(t, s, "trigger-4")
-	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-4", `{"type":"modal","title":{"type":"plain_text","text":"Fourth"},"blocks":[]}`, ""); !errors.Is(err, ErrViewPushLimit) {
-		t.Fatalf("fourth push error=%v, want %v", err, ErrViewPushLimit)
+	if _, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-4", `{"type":"modal","title":{"type":"plain_text","text":"Fourth"},"blocks":[]}`, ""); !errors.Is(err, domain.ErrViewPushLimit) {
+		t.Fatalf("fourth push error=%v, want %v", err, domain.ErrViewPushLimit)
 	}
 }
 
@@ -755,7 +800,7 @@ func TestWorkflowStepLifecycleNormalizesJSONAndPersists(t *testing.T) {
 	if err := messages.WorkflowStepFailed(ctx, "T1", "U1", "execute-2", `{"message":"failed"}`); err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.WorkflowStepFailed(ctx, "T1", "U1", "execute-3", `{"detail":"missing message"}`); err != ErrInvalidWorkflowStep {
+	if err := messages.WorkflowStepFailed(ctx, "T1", "U1", "execute-3", `{"detail":"missing message"}`); err != domain.ErrInvalidWorkflowStep {
 		t.Fatalf("invalid failure err=%v", err)
 	}
 }
@@ -771,7 +816,7 @@ func TestDialogOpenValidatesAndPersistsPayload(t *testing.T) {
 	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-1", `{"callback_id":"callback","title":"Title","elements":[{"type":"text","name":"summary","label":"Summary"}]}`); err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-2", `{"callback_id":"callback","title":"Title"}`); err != ErrInvalidDialog {
+	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-2", `{"callback_id":"callback","title":"Title"}`); err != domain.ErrInvalidDialog {
 		t.Fatalf("invalid dialog err=%v", err)
 	}
 }
@@ -843,7 +888,7 @@ func TestConversationTeamsAreDurableAndDisconnectable(t *testing.T) {
 	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "shared"})
 	messages := Messages{Store: s}
-	if err := messages.AdminSetConversationTeams(context.Background(), "T1", "U1", "C1", []domain.WorkspaceID{"T1", "T2"}, false); !errors.Is(err, ErrInvalidConversation) {
+	if err := messages.AdminSetConversationTeams(context.Background(), "T1", "U1", "C1", []domain.WorkspaceID{"T1", "T2"}, false); !errors.Is(err, domain.ErrInvalidConversation) {
 		t.Fatalf("association with the unrelated workspace T2: err=%v, want ErrInvalidConversation", err)
 	}
 	if err := messages.AdminSetConversationTeams(context.Background(), "T1", "U1", "C1", []domain.WorkspaceID{"T1"}, false); err != nil {
@@ -983,7 +1028,7 @@ func TestAdminConversationConversionEnforcesConversationType(t *testing.T) {
 	if err != nil || !value.PrivateFlag() {
 		t.Fatalf("conversion=%+v err=%v", value, err)
 	}
-	if _, err := messages.AdminConvertConversationToPrivate(context.Background(), "T1", "U1", "C1"); err != ErrInvalidConversation {
+	if _, err := messages.AdminConvertConversationToPrivate(context.Background(), "T1", "U1", "C1"); err != domain.ErrInvalidConversation {
 		t.Fatalf("second conversion err=%v", err)
 	}
 }
@@ -1035,7 +1080,7 @@ func TestRemoteFileLifecycleIsDurableAndBounded(t *testing.T) {
 	if err != nil || updated.Title != "Updated title" || len(updated.SharedChannels) != 1 || updated.SharedChannels[0] != "C1" {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
-	if _, err := messages.UpdateRemoteFile(context.Background(), "T1", "U1", domain.RemoteFileUpdate{Lookup: domain.RemoteFileLookup{ID: value.ID}}); !errors.Is(err, ErrInvalidRemoteFile) {
+	if _, err := messages.UpdateRemoteFile(context.Background(), "T1", "U1", domain.RemoteFileUpdate{Lookup: domain.RemoteFileLookup{ID: value.ID}}); !errors.Is(err, domain.ErrInvalidRemoteFile) {
 		t.Fatalf("empty update error=%v", err)
 	}
 	if err := messages.RemoveRemoteFile(context.Background(), "T1", "U1", domain.RemoteFileLookup{ID: value.ID}); err != nil {
@@ -1173,10 +1218,10 @@ func TestUnfurlPersistsNormalizedMetadata(t *testing.T) {
 	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "", "C1", timestamp, map[string]string{"https://example.com": `{"title":"Again"}`}); err != nil {
 		t.Fatalf("member unfurl err=%v", err)
 	}
-	if _, err := messages.Unfurl(context.Background(), "T1", "U3", "", "C1", timestamp, map[string]string{"https://example.com": `{"title":"X"}`}); !errors.Is(err, ErrNotInConversation) {
+	if _, err := messages.Unfurl(context.Background(), "T1", "U3", "", "C1", timestamp, map[string]string{"https://example.com": `{"title":"X"}`}); !errors.Is(err, domain.ErrNotInConversation) {
 		t.Fatalf("non-member unfurl err=%v", err)
 	}
-	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "", "C1", timestamp, map[string]string{"https://other.example": `{"title":"X"}`}); !errors.Is(err, ErrCannotUnfurlURL) {
+	if _, err := messages.Unfurl(context.Background(), "T1", "U2", "", "C1", timestamp, map[string]string{"https://other.example": `{"title":"X"}`}); !errors.Is(err, domain.ErrCannotUnfurlURL) {
 		t.Fatalf("foreign URL unfurl err=%v", err)
 	}
 }
@@ -1240,7 +1285,7 @@ func TestCustomEmojiLifecycleNormalizesAndPersists(t *testing.T) {
 		{name: "javascript", url: "javascript:alert(1)"},
 		{name: "relative", url: "/emoji.png"},
 	} {
-		if err := messages.AdminAddEmoji(ctx, "T1", "U1", invalid.name, invalid.url); !errors.Is(err, ErrInvalidEmoji) {
+		if err := messages.AdminAddEmoji(ctx, "T1", "U1", invalid.name, invalid.url); !errors.Is(err, domain.ErrInvalidEmoji) {
 			t.Fatalf("AdminAddEmoji(%q, %q) error=%v", invalid.name, invalid.url, err)
 		}
 	}
@@ -1248,13 +1293,13 @@ func TestCustomEmojiLifecycleNormalizesAndPersists(t *testing.T) {
 	// ":smile:", and the built-in set is the catalog this product already ships.
 	// The refusal reports the name as taken, on every write path — creation, an
 	// alias, and a rename onto the shadowed name.
-	if err := messages.AdminAddEmoji(ctx, "T1", "U1", "smile", "https://cdn.example/smile.png"); !errors.Is(err, ErrEmojiAlreadyExists) {
+	if err := messages.AdminAddEmoji(ctx, "T1", "U1", "smile", "https://cdn.example/smile.png"); !errors.Is(err, domain.ErrEmojiAlreadyExists) {
 		t.Fatalf("AdminAddEmoji(smile) error=%v, want ErrEmojiAlreadyExists", err)
 	}
 	if err := messages.AdminAddEmoji(ctx, "T1", "U1", " Shipit ", "https://cdn.example/shipit.png"); err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.AdminAddEmojiAlias(ctx, "T1", "U1", "joy", "SHIPIT"); !errors.Is(err, ErrEmojiAlreadyExists) {
+	if err := messages.AdminAddEmojiAlias(ctx, "T1", "U1", "joy", "SHIPIT"); !errors.Is(err, domain.ErrEmojiAlreadyExists) {
 		t.Fatalf("AdminAddEmojiAlias(joy) error=%v, want ErrEmojiAlreadyExists", err)
 	}
 	if err := messages.AdminAddEmojiAlias(ctx, "T1", "U1", "hello", "SHIPIT"); err != nil {
@@ -1264,7 +1309,7 @@ func TestCustomEmojiLifecycleNormalizesAndPersists(t *testing.T) {
 	if err != nil || len(values) != 2 {
 		t.Fatalf("values=%+v err=%v", values, err)
 	}
-	if err := messages.AdminRenameEmoji(ctx, "T1", "U1", "hello", "grin"); !errors.Is(err, ErrEmojiAlreadyExists) {
+	if err := messages.AdminRenameEmoji(ctx, "T1", "U1", "hello", "grin"); !errors.Is(err, domain.ErrEmojiAlreadyExists) {
 		t.Fatalf("AdminRenameEmoji(hello->grin) error=%v, want ErrEmojiAlreadyExists", err)
 	}
 	if err := messages.AdminRenameEmoji(ctx, "T1", "U1", "hello", "greeting"); err != nil {
@@ -1393,7 +1438,7 @@ func TestAdminWorkspaceDiscoverabilityIsTypedAndDurable(t *testing.T) {
 	if err != nil || value.Discoverability != domain.WorkspaceDiscoverabilityInviteOnly {
 		t.Fatalf("value=%+v err=%v", value, err)
 	}
-	if _, err := messages.AdminSetWorkspaceDiscoverability(context.Background(), "T1", "U1", "invalid"); err != ErrInvalidWorkspace {
+	if _, err := messages.AdminSetWorkspaceDiscoverability(context.Background(), "T1", "U1", "invalid"); err != domain.ErrInvalidWorkspace {
 		t.Fatalf("invalid discoverability err=%v", err)
 	}
 	loaded, err := s.GetWorkspace(context.Background(), "T1")
@@ -1412,7 +1457,7 @@ func TestAdminWorkspaceIconRequiresAbsoluteHTTPURL(t *testing.T) {
 	if err != nil || value.IconURL != "https://cdn.example/icon.png" {
 		t.Fatalf("value=%+v err=%v", value, err)
 	}
-	if _, err := messages.AdminSetWorkspaceIcon(context.Background(), "T1", "U1", "relative/icon.png"); err != ErrInvalidWorkspace {
+	if _, err := messages.AdminSetWorkspaceIcon(context.Background(), "T1", "U1", "relative/icon.png"); err != domain.ErrInvalidWorkspace {
 		t.Fatalf("relative icon err=%v", err)
 	}
 }
@@ -1469,7 +1514,7 @@ func TestCallLifecycleNormalizesParticipants(t *testing.T) {
 	// An entry that names both a member and an external participant, or
 	// neither, is not a participant.
 	for _, invalid := range []domain.CallParticipant{{}, {SlackID: "U1", External: guest}} {
-		if err := messages.AddCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.CallParticipant{invalid}); !errors.Is(err, ErrInvalidCall) {
+		if err := messages.AddCallParticipants(context.Background(), "T1", "U1", value.ID, []domain.CallParticipant{invalid}); !errors.Is(err, domain.ErrInvalidCall) {
 			t.Fatalf("AddCallParticipants(%+v) error=%v", invalid, err)
 		}
 	}
@@ -1630,7 +1675,7 @@ func TestEphemeralMessageIsDurableAndRecipientScoped(t *testing.T) {
 	if err != nil || len(hidden) != 0 {
 		t.Fatalf("non-recipient ephemerals=%+v err=%v", hidden, err)
 	}
-	if _, err := (Messages{Store: s}).PostEphemeral(context.Background(), "T1", "U1", "C1", "U3", "secret"); !errors.Is(err, ErrRecipientNotInConversation) {
+	if _, err := (Messages{Store: s}).PostEphemeral(context.Background(), "T1", "U1", "C1", "U3", "secret"); !errors.Is(err, domain.ErrRecipientNotInConversation) {
 		t.Fatalf("foreign recipient err=%v", err)
 	}
 	records, err := s.ListEventsAfter(context.Background(), "T1", 0, 10)
@@ -1711,7 +1756,7 @@ func TestUpdateAndDeleteMessageUseTypedTimestampAndOutbox(t *testing.T) {
 	if err != nil || !deleted.Deleted {
 		t.Fatalf("deleted=%+v err=%v", deleted, err)
 	}
-	if _, err := messages.Delete(context.Background(), "T1", "U1", "C1", timestamp); err != ErrMessageAlreadyDeleted {
+	if _, err := messages.Delete(context.Background(), "T1", "U1", "C1", timestamp); err != domain.ErrMessageAlreadyDeleted {
 		t.Fatalf("second delete err=%v", err)
 	}
 	if got := len(s.Outbox()); got != 3 {
@@ -1802,7 +1847,7 @@ func TestReactionsAreDurableAndIdempotentlyRejected(t *testing.T) {
 	if err := messages.AddReaction(context.Background(), "T1", "U1", "C1", timestamp, "thumbsup"); err != store.ErrAlreadyExists {
 		t.Fatalf("duplicate reaction err=%v", err)
 	}
-	if err := messages.AddReaction(context.Background(), "T1", "U1", "C1", timestamp, "not_a_real_emoji"); !errors.Is(err, ErrInvalidReaction) {
+	if err := messages.AddReaction(context.Background(), "T1", "U1", "C1", timestamp, "not_a_real_emoji"); !errors.Is(err, domain.ErrInvalidReaction) {
 		t.Fatalf("unknown reaction err=%v", err)
 	}
 	values, _, more, err := messages.Reactions(context.Background(), "T1", "U1", "C1", timestamp, domain.PageRequest{Limit: 10})
@@ -1937,10 +1982,10 @@ func TestRecentSearchesRequireMembershipAndRemainPrivate(t *testing.T) {
 	if err := messages.RecordSearch(ctx, "T1", "missing", "query"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("foreign user error = %v, want not found", err)
 	}
-	if err := messages.RecordSearch(ctx, "T1", "U1", " "); !errors.Is(err, ErrInvalidSearch) {
+	if err := messages.RecordSearch(ctx, "T1", "U1", " "); !errors.Is(err, domain.ErrInvalidSearch) {
 		t.Fatalf("blank query error = %v, want invalid search", err)
 	}
-	if _, err := messages.RecentSearches(ctx, "T1", "U1", 0); !errors.Is(err, ErrInvalidSearch) {
+	if _, err := messages.RecentSearches(ctx, "T1", "U1", 0); !errors.Is(err, domain.ErrInvalidSearch) {
 		t.Fatalf("invalid limit error = %v, want invalid search", err)
 	}
 }
@@ -1972,7 +2017,7 @@ func TestSearchResolvesSlackModifiersAndPreservesDeterministicOrder(t *testing.T
 	if err != nil || page.Total != 1 || len(page.Messages) != 1 || page.Messages[0].ID != "M1" {
 		t.Fatalf("search=%+v err=%v", page, err)
 	}
-	if _, err := messages.SearchMessages(ctx, "T1", "U1", domain.MessageSearchRequest{Query: "release before:not-a-date", Page: domain.PageRequest{Limit: 10}}); !errors.Is(err, ErrInvalidSearch) {
+	if _, err := messages.SearchMessages(ctx, "T1", "U1", domain.MessageSearchRequest{Query: "release before:not-a-date", Page: domain.PageRequest{Limit: 10}}); !errors.Is(err, domain.ErrInvalidSearch) {
 		t.Fatalf("malformed modifier err=%v, want ErrInvalidSearch", err)
 	}
 }
@@ -2075,10 +2120,10 @@ func TestSetUserProfileNormalizesAndPersists(t *testing.T) {
 	if err != nil || stored.Profile.DisplayName != "alice" {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
-	if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusText: string(make([]byte, 101))}); err != ErrInvalidProfile {
+	if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusText: string(make([]byte, 101))}); err != domain.ErrInvalidProfile {
 		t.Fatalf("oversized profile err=%v", err)
 	}
-	if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusText: "Unknown emoji", StatusEmoji: ":not_a_workspace_emoji:"}); !errors.Is(err, ErrInvalidProfile) {
+	if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusText: "Unknown emoji", StatusEmoji: ":not_a_workspace_emoji:"}); !errors.Is(err, domain.ErrInvalidProfile) {
 		t.Fatalf("unknown status emoji err=%v", err)
 	}
 }
@@ -2100,7 +2145,7 @@ func TestScheduledStatusesFollowSlackCreateEditCancelAndFiveItemContracts(t *tes
 			t.Fatalf("schedule %d: %v", index+1, err)
 		}
 	}
-	if _, err := messages.ScheduleUserStatus(ctx, "T1", "U1", "Sixth", ":six:", start.Add(10*time.Hour), start.Add(11*time.Hour)); !errors.Is(err, ErrScheduledStatusLimit) {
+	if _, err := messages.ScheduleUserStatus(ctx, "T1", "U1", "Sixth", ":six:", start.Add(10*time.Hour), start.Add(11*time.Hour)); !errors.Is(err, domain.ErrScheduledStatusLimit) {
 		t.Fatalf("sixth scheduled status err=%v", err)
 	}
 	updated, err := messages.UpdateScheduledUserStatus(ctx, "T1", "U1", first.ID, "Deep work", ":headphones:", start.Add(15*time.Minute), start.Add(2*time.Hour))
@@ -2114,10 +2159,10 @@ func TestScheduledStatusesFollowSlackCreateEditCancelAndFiveItemContracts(t *tes
 	if err != nil || len(values) != 4 {
 		t.Fatalf("scheduled statuses=%+v err=%v", values, err)
 	}
-	if _, err := messages.ScheduleUserStatus(ctx, "T1", "U1", "Past", ":clock:", time.Now().Add(-time.Minute), time.Now().Add(time.Hour)); !errors.Is(err, ErrInvalidScheduledStatus) {
+	if _, err := messages.ScheduleUserStatus(ctx, "T1", "U1", "Past", ":clock:", time.Now().Add(-time.Minute), time.Now().Add(time.Hour)); !errors.Is(err, domain.ErrInvalidScheduledStatus) {
 		t.Fatalf("past scheduled status err=%v", err)
 	}
-	if _, err := messages.ScheduleUserStatus(ctx, "T1", "U1", "Unknown emoji", ":not_a_workspace_emoji:", start.Add(20*time.Hour), start.Add(21*time.Hour)); !errors.Is(err, ErrInvalidScheduledStatus) {
+	if _, err := messages.ScheduleUserStatus(ctx, "T1", "U1", "Unknown emoji", ":not_a_workspace_emoji:", start.Add(20*time.Hour), start.Add(21*time.Hour)); !errors.Is(err, domain.ErrInvalidScheduledStatus) {
 		t.Fatalf("unknown scheduled status emoji err=%v", err)
 	}
 }
@@ -2186,8 +2231,8 @@ func TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts(t *testin
 		postAt time.Time
 		want   error
 	}{
-		{name: "past", postAt: now.Add(-time.Second), want: ErrScheduledTimeInPast},
-		{name: "too far", postAt: now.Add(120*24*time.Hour + time.Minute), want: ErrScheduledTimeTooFar},
+		{name: "past", postAt: now.Add(-time.Second), want: domain.ErrScheduledTimeInPast},
+		{name: "too far", postAt: now.Add(120*24*time.Hour + time.Minute), want: domain.ErrScheduledTimeTooFar},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{Channel: "C1", Text: testCase.name, PostAt: testCase.postAt, CredentialHash: "token-one"})
@@ -2206,8 +2251,8 @@ func TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts(t *testin
 			t.Fatalf("schedule %d: %v", index, err)
 		}
 	}
-	if _, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{Channel: "C1", Text: "over quota", PostAt: window.Add(31 * time.Second), CredentialHash: "token-one"}); !errors.Is(err, ErrScheduledTooMany) {
-		t.Fatalf("31st schedule error=%v, want %v", err, ErrScheduledTooMany)
+	if _, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{Channel: "C1", Text: "over quota", PostAt: window.Add(31 * time.Second), CredentialHash: "token-one"}); !errors.Is(err, domain.ErrScheduledTooMany) {
+		t.Fatalf("31st schedule error=%v, want %v", err, domain.ErrScheduledTooMany)
 	}
 }
 
@@ -2266,7 +2311,7 @@ func TestFirstPartyDraftAndScheduledManagementLifecycle(t *testing.T) {
 	if err != nil || len(history.Items) != 1 || history.Items[0].ID != scheduled.ID {
 		t.Fatalf("scheduled history=%+v err=%v", history, err)
 	}
-	if _, err := s.ClaimScheduledMessageForCredential(ctx, "T1", InternalScheduledCredential("T1", "U1"), scheduled.ID, "worker", time.Minute); err != nil {
+	if _, err := s.ClaimScheduledMessageForCredential(ctx, "T1", domain.InternalScheduledCredential("T1", "U1"), scheduled.ID, "worker", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	failedAt := time.Now().UTC()
@@ -2327,7 +2372,7 @@ func TestScheduledComposerFilesSurviveTicketExpiryAndDeliverIdempotently(t *test
 		t.Fatalf("expired durable draft could not be saved: draft=%+v err=%v", draft, err)
 	}
 	scheduled, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{
-		Channel: "C1", PostAt: now.Add(time.Hour), CredentialHash: InternalScheduledCredential("T1", "U1"),
+		Channel: "C1", PostAt: now.Add(time.Hour), CredentialHash: domain.InternalScheduledCredential("T1", "U1"),
 		FileAttachments: draft.Attachments,
 	})
 	if err != nil || scheduled.Text != "" || len(scheduled.FileAttachments) != 1 {
@@ -2448,7 +2493,7 @@ func TestDirectConversationCloseKeepsMembershipHistoryAndCanonicalReopen(t *test
 	if _, err := messages.OpenConversation(ctx, "T1", "U1", eightOthers); err != nil {
 		t.Fatalf("nine-person DM rejected: %v", err)
 	}
-	if _, err := messages.OpenConversation(ctx, "T1", "U1", append(eightOthers, "U10")); !errors.Is(err, ErrInvalidConversation) {
+	if _, err := messages.OpenConversation(ctx, "T1", "U1", append(eightOthers, "U10")); !errors.Is(err, domain.ErrInvalidConversation) {
 		t.Fatalf("ten-person DM error=%v, want invalid conversation", err)
 	}
 }
@@ -2513,7 +2558,7 @@ func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesI
 	if err != nil || len(convertedMembers.Users) != 3 {
 		t.Fatalf("converted members = %+v err=%v", convertedMembers, err)
 	}
-	if _, err := messages.ConvertGroupDirectToPrivate(ctx, "T1", "U1", converted.ID, "another-name"); !errors.Is(err, ErrInvalidConversation) {
+	if _, err := messages.ConvertGroupDirectToPrivate(ctx, "T1", "U1", converted.ID, "another-name"); !errors.Is(err, domain.ErrInvalidConversation) {
 		t.Fatalf("second conversion error = %v, want invalid conversation", err)
 	}
 
@@ -2654,18 +2699,18 @@ func TestEveryMessageWriteUsesOneUnicodeCharacterLimit(t *testing.T) {
 	s.SeedConversationMember("C1", "U2")
 	messages := Messages{Store: s}
 	ctx := context.Background()
-	atLimit := strings.Repeat("界", MaxMessageTextRunes)
+	atLimit := strings.Repeat("界", domain.MaxMessageTextRunes)
 	overLimit := atLimit + "界"
 
 	message, err := messages.Post(ctx, "T1", "U1", "C1", atLimit, "", "")
 	if err != nil {
 		t.Fatalf("post at the Unicode character limit: %v", err)
 	}
-	if _, err := messages.Post(ctx, "T1", "U1", "C1", overLimit, "", ""); !errors.Is(err, ErrInvalidMessage) {
-		t.Fatalf("oversized post error=%v, want %v", err, ErrInvalidMessage)
+	if _, err := messages.Post(ctx, "T1", "U1", "C1", overLimit, "", ""); !errors.Is(err, domain.ErrInvalidMessage) {
+		t.Fatalf("oversized post error=%v, want %v", err, domain.ErrInvalidMessage)
 	}
-	if _, err := messages.Update(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), overLimit); !errors.Is(err, ErrInvalidMessage) {
-		t.Fatalf("oversized edit error=%v, want %v", err, ErrInvalidMessage)
+	if _, err := messages.Update(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), overLimit); !errors.Is(err, domain.ErrInvalidMessage) {
+		t.Fatalf("oversized edit error=%v, want %v", err, domain.ErrInvalidMessage)
 	}
 	stored, err := s.GetMessage(ctx, message.ID)
 	if err != nil || stored.Text != atLimit {
@@ -2674,14 +2719,14 @@ func TestEveryMessageWriteUsesOneUnicodeCharacterLimit(t *testing.T) {
 	if _, err := messages.ScheduleMessageWithBlocks(ctx, "T1", "U1", "C1", atLimit, "", time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatalf("schedule at the Unicode character limit: %v", err)
 	}
-	if _, err := messages.ScheduleMessageWithBlocks(ctx, "T1", "U1", "C1", overLimit, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, ErrInvalidMessage) {
-		t.Fatalf("oversized schedule error=%v, want %v", err, ErrInvalidMessage)
+	if _, err := messages.ScheduleMessageWithBlocks(ctx, "T1", "U1", "C1", overLimit, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, domain.ErrInvalidMessage) {
+		t.Fatalf("oversized schedule error=%v, want %v", err, domain.ErrInvalidMessage)
 	}
 	if _, err := messages.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", atLimit, ""); err != nil {
 		t.Fatalf("ephemeral post at the Unicode character limit: %v", err)
 	}
-	if _, err := messages.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", overLimit, ""); !errors.Is(err, ErrInvalidEphemeral) {
-		t.Fatalf("oversized ephemeral error=%v, want %v", err, ErrInvalidEphemeral)
+	if _, err := messages.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", overLimit, ""); !errors.Is(err, domain.ErrInvalidEphemeral) {
+		t.Fatalf("oversized ephemeral error=%v, want %v", err, domain.ErrInvalidEphemeral)
 	}
 }
 
@@ -2694,27 +2739,27 @@ func TestEveryMessageWriteUsesOneStructuredBodyLimit(t *testing.T) {
 	s.SeedConversationMember("C1", "U1")
 	s.SeedConversationMember("C1", "U2")
 	messages := Messages{Store: s}
-	oversized := `[{"type":"section","text":{"type":"plain_text","text":"` + strings.Repeat("x", MaxMessageBodyBytes) + `"}}]`
+	oversized := `[{"type":"section","text":{"type":"plain_text","text":"` + strings.Repeat("x", domain.MaxMessageBodyBytes) + `"}}]`
 
-	if _, err := messages.PostWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", "", "", ""); !errors.Is(err, ErrInvalidMessage) {
+	if _, err := messages.PostWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", "", "", ""); !errors.Is(err, domain.ErrInvalidMessage) {
 		t.Fatalf("post oversized body err=%v", err)
 	}
 	plain, err := messages.Post(context.Background(), "T1", "U1", "C1", "before", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.UpdateWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(plain.CreatedAt), "", oversized, ""); !errors.Is(err, ErrInvalidMessage) {
+	if _, err := messages.UpdateWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(plain.CreatedAt), "", oversized, ""); !errors.Is(err, domain.ErrInvalidMessage) {
 		t.Fatalf("update oversized body err=%v", err)
 	}
-	if _, err := messages.ScheduleMessageWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, ErrInvalidMessage) {
+	if _, err := messages.ScheduleMessageWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, domain.ErrInvalidMessage) {
 		t.Fatalf("schedule oversized body err=%v", err)
 	}
-	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", ""); !errors.Is(err, ErrInvalidEphemeral) {
+	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", ""); !errors.Is(err, domain.ErrInvalidEphemeral) {
 		t.Fatalf("ephemeral oversized body err=%v", err)
 	}
 	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{
-		"https://example.test": `{"text":"` + strings.Repeat("x", MaxMessageBodyBytes) + `"}`,
-	}); !errors.Is(err, ErrInvalidMessage) {
+		"https://example.test": `{"text":"` + strings.Repeat("x", domain.MaxMessageBodyBytes) + `"}`,
+	}); !errors.Is(err, domain.ErrInvalidMessage) {
 		t.Fatalf("unfurl oversized body err=%v", err)
 	}
 
@@ -2910,7 +2955,7 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	if err != nil || len(retry) != 2 || retry[0].ID != files[1].ID || retry[1].ID != files[0].ID {
 		t.Fatalf("retry=%+v err=%v", retry, err)
 	}
-	if _, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: first.ID}, {ID: second.ID}}, []domain.ConversationID{"C2"}, "wrong destination", "", ""); !errors.Is(err, ErrInvalidExternalUpload) {
+	if _, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: first.ID}, {ID: second.ID}}, []domain.ConversationID{"C2"}, "wrong destination", "", ""); !errors.Is(err, domain.ErrInvalidExternalUpload) {
 		t.Fatalf("completed tickets reused in another channel: %v", err)
 	}
 	page, err = messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
@@ -3104,8 +3149,8 @@ func TestMessageSubtypeIsRefusedUnlessItIsVocabulary(t *testing.T) {
 	}
 	if _, err := messages.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{
 		Conversation: "C1", Text: "hello", Subtype: domain.MessageSubtype("not_a_slack_subtype"),
-	}); !errors.Is(err, ErrInvalidMessage) {
-		t.Fatalf("invented subtype error=%v, want %v", err, ErrInvalidMessage)
+	}); !errors.Is(err, domain.ErrInvalidMessage) {
+		t.Fatalf("invented subtype error=%v, want %v", err, domain.ErrInvalidMessage)
 	}
 }
 
@@ -3140,7 +3185,7 @@ func TestALapsedInviteRequestCannotBeApprovedButCanBeDenied(t *testing.T) {
 
 	t.Run("approval is refused", func(t *testing.T) {
 		s, messages := newFixture(t, "IR-lapsed")
-		if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", "IR-lapsed"); !errors.Is(err, ErrInvitationExpired) {
+		if err := messages.AdminApproveInviteRequest(ctx, "T1", "U1", "IR-lapsed"); !errors.Is(err, domain.ErrInvitationExpired) {
 			t.Fatalf("approving a lapsed request err=%v, want ErrInvitationExpired", err)
 		}
 		// The refusal changed nothing: the request is still pending.
@@ -3177,12 +3222,12 @@ func TestAGuestCannotReachAChannelNobodyAddedThemTo(t *testing.T) {
 		{
 			name:    "single-channel guest",
 			tier:    domain.WorkspaceMembership{Role: domain.WorkspaceRoleMember, Active: true, UltraRestricted: true},
-			refusal: ErrUserIsUltraRestricted,
+			refusal: domain.ErrUserIsUltraRestricted,
 		},
 		{
 			name:    "multi-channel guest",
 			tier:    domain.WorkspaceMembership{Role: domain.WorkspaceRoleMember, Active: true, Restricted: true},
-			refusal: ErrUserIsRestricted,
+			refusal: domain.ErrUserIsRestricted,
 		},
 	} {
 		t.Run(guest.name, func(t *testing.T) {
@@ -3304,7 +3349,7 @@ func TestListingTeamUsersRefusesAnUnsupportedRoleAsAWorkspaceError(t *testing.T)
 	seedWorkspaceAdmin(t, s, "T1", "U1")
 	messages := Messages{Store: s}
 
-	if _, err := messages.AdminTeamUsers(ctx, "T1", "U1", domain.WorkspaceRoleMember, domain.PageRequest{Limit: 10}); !errors.Is(err, ErrInvalidWorkspace) {
+	if _, err := messages.AdminTeamUsers(ctx, "T1", "U1", domain.WorkspaceRoleMember, domain.PageRequest{Limit: 10}); !errors.Is(err, domain.ErrInvalidWorkspace) {
 		t.Fatalf("listing members err=%v, want ErrInvalidWorkspace", err)
 	}
 	// The two roles the routes do pass still work.
@@ -3329,7 +3374,7 @@ func TestSetUserProfileStoresTitlePronounsAndAKnownTimezone(t *testing.T) {
 		t.Fatalf("user=%+v err=%v", user.Profile, err)
 	}
 	for _, zone := range []string{"Mars/Olympus_Mons", "Local"} {
-		if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{Timezone: zone}); !errors.Is(err, ErrInvalidProfile) {
+		if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{Timezone: zone}); !errors.Is(err, domain.ErrInvalidProfile) {
 			t.Fatalf("zone %q err=%v, want ErrInvalidProfile", zone, err)
 		}
 	}

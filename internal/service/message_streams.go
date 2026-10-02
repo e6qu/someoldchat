@@ -13,20 +13,9 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
-const MaxStreamMarkdownRunes = 12_000
-
-var (
-	ErrInvalidMessageStream       = errors.New("message stream arguments are invalid")
-	ErrInvalidStreamChunks        = errors.New("message stream chunks are invalid")
-	ErrMessageNotStreaming        = errors.New("message is not in streaming state")
-	ErrMessageNotOwnedByApp       = errors.New("message is not owned by app")
-	ErrMissingStreamRecipientTeam = errors.New("message stream recipient team is required")
-	ErrMissingStreamRecipientUser = errors.New("message stream recipient user is required")
-)
-
 func (m Messages) StartMessageStream(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.MessageStreamStart) (domain.Message, error) {
 	if request.AppID == "" || request.Conversation == "" || request.ThreadTimestamp == "" {
-		return domain.Message{}, ErrInvalidMessageStream
+		return domain.Message{}, domain.ErrInvalidMessageStream
 	}
 	mode := strings.TrimSpace(request.TaskDisplayMode)
 	if mode == "" {
@@ -38,7 +27,7 @@ func (m Messages) StartMessageStream(ctx context.Context, workspaceID domain.Wor
 	if !oneOf(mode, "timeline", "plan", "dense") ||
 		utf8.RuneCountInString(username) > 80 || utf8.RuneCountInString(iconEmoji) > 255 ||
 		(iconURL != "" && !validMessageIconURL(iconURL)) {
-		return domain.Message{}, ErrInvalidMessageStream
+		return domain.Message{}, domain.ErrInvalidMessageStream
 	}
 	if iconEmoji != "" {
 		iconURL = ""
@@ -52,10 +41,10 @@ func (m Messages) StartMessageStream(ctx context.Context, workspaceID domain.Wor
 	}
 	if !conversation.IsDirectOrGroup() {
 		if request.RecipientTeamID == "" {
-			return domain.Message{}, ErrMissingStreamRecipientTeam
+			return domain.Message{}, domain.ErrMissingStreamRecipientTeam
 		}
 		if request.RecipientUserID == "" {
-			return domain.Message{}, ErrMissingStreamRecipientUser
+			return domain.Message{}, domain.ErrMissingStreamRecipientUser
 		}
 		if request.RecipientTeamID != workspaceID {
 			return domain.Message{}, store.ErrNotFound
@@ -71,7 +60,7 @@ func (m Messages) StartMessageStream(ctx context.Context, workspaceID domain.Wor
 	}
 	threadAt, err := domain.ParseMessageTimestamp(request.ThreadTimestamp)
 	if err != nil {
-		return domain.Message{}, ErrInvalidTimestamp
+		return domain.Message{}, domain.ErrInvalidTimestamp
 	}
 	parent, err := m.Store.GetMessageByCreatedAt(ctx, request.Conversation, threadAt)
 	if err != nil || parent.WorkspaceID != workspaceID || parent.Deleted {
@@ -154,7 +143,7 @@ func (m Messages) StopMessageStream(ctx context.Context, workspaceID domain.Work
 	if strings.TrimSpace(request.Blocks) != "" {
 		message.Blocks, err = domain.NormalizeBlocks([]byte(request.Blocks))
 		if err != nil {
-			return domain.Message{}, ErrInvalidMessageStream
+			return domain.Message{}, domain.ErrInvalidMessageStream
 		}
 	}
 	if strings.TrimSpace(request.Metadata) != "" {
@@ -170,7 +159,7 @@ func (m Messages) StopMessageStream(ctx context.Context, workspaceID domain.Work
 	}
 	message.StreamState = string(encoded)
 	if messagePayloadTooLong(message.Blocks, message.Attachments) || messageTextTooLong(message.Text) {
-		return domain.Message{}, ErrInvalidMessageStream
+		return domain.Message{}, domain.ErrInvalidMessageStream
 	}
 	event, err := messageEvent(workspaceID, "message.changed", message)
 	if err != nil {
@@ -184,46 +173,46 @@ func (m Messages) StopMessageStream(ctx context.Context, workspaceID domain.Work
 
 func (m Messages) messageStreamForMutation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.MessageStreamMutation) (domain.Message, domain.MessageStreamState, error) {
 	if request.AppID == "" || request.Conversation == "" || request.Timestamp == "" {
-		return domain.Message{}, domain.MessageStreamState{}, ErrInvalidMessageStream
+		return domain.Message{}, domain.MessageStreamState{}, domain.ErrInvalidMessageStream
 	}
 	if err := m.authorizeConversation(ctx, workspaceID, userID, request.Conversation); err != nil {
 		return domain.Message{}, domain.MessageStreamState{}, err
 	}
 	createdAt, err := domain.ParseMessageTimestamp(request.Timestamp)
 	if err != nil {
-		return domain.Message{}, domain.MessageStreamState{}, ErrInvalidTimestamp
+		return domain.Message{}, domain.MessageStreamState{}, domain.ErrInvalidTimestamp
 	}
 	message, err := m.Store.GetMessageByCreatedAt(ctx, request.Conversation, createdAt)
 	if err != nil || message.WorkspaceID != workspaceID {
 		return domain.Message{}, domain.MessageStreamState{}, store.ErrNotFound
 	}
 	if message.AppID != request.AppID {
-		return domain.Message{}, domain.MessageStreamState{}, ErrMessageNotOwnedByApp
+		return domain.Message{}, domain.MessageStreamState{}, domain.ErrMessageNotOwnedByApp
 	}
 	var state domain.MessageStreamState
 	if json.Unmarshal([]byte(message.StreamState), &state) != nil || !state.Active {
-		return domain.Message{}, domain.MessageStreamState{}, ErrMessageNotStreaming
+		return domain.Message{}, domain.MessageStreamState{}, domain.ErrMessageNotStreaming
 	}
 	return message, state, nil
 }
 
 func applyMessageStreamContent(state *domain.MessageStreamState, existingText, markdownText, rawChunks string) (string, error) {
-	if utf8.RuneCountInString(markdownText) > MaxStreamMarkdownRunes {
-		return "", ErrInvalidMessageStream
+	if utf8.RuneCountInString(markdownText) > domain.MaxStreamMarkdownRunes {
+		return "", domain.ErrInvalidMessageStream
 	}
 	text := existingText + markdownText
 	if strings.TrimSpace(rawChunks) == "" {
 		if markdownText == "" {
-			return "", ErrInvalidMessageStream
+			return "", domain.ErrInvalidMessageStream
 		}
 		if messageTextTooLong(text) {
-			return "", ErrInvalidMessageStream
+			return "", domain.ErrInvalidMessageStream
 		}
 		return text, nil
 	}
 	var chunks []map[string]any
 	if err := json.Unmarshal([]byte(rawChunks), &chunks); err != nil || chunks == nil || len(chunks) == 0 {
-		return "", ErrInvalidStreamChunks
+		return "", domain.ErrInvalidStreamChunks
 	}
 	taskIndex := make(map[string]int, len(state.Tasks))
 	for index, raw := range state.Tasks {
@@ -236,14 +225,14 @@ func applyMessageStreamContent(state *domain.MessageStreamState, existingText, m
 		switch strings.TrimSpace(stringMapValue(chunk, "type")) {
 		case "markdown_text":
 			value := stringMapValue(chunk, "text")
-			if value == "" || utf8.RuneCountInString(value) > MaxStreamMarkdownRunes {
-				return "", ErrInvalidStreamChunks
+			if value == "" || utf8.RuneCountInString(value) > domain.MaxStreamMarkdownRunes {
+				return "", domain.ErrInvalidStreamChunks
 			}
 			text += value
 		case "plan_update":
 			title := strings.TrimSpace(stringMapValue(chunk, "title"))
 			if title == "" || utf8.RuneCountInString(title) > 256 {
-				return "", ErrInvalidStreamChunks
+				return "", domain.ErrInvalidStreamChunks
 			}
 			state.PlanTitle = title
 		case "task_update":
@@ -254,11 +243,11 @@ func applyMessageStreamContent(state *domain.MessageStreamState, existingText, m
 				utf8.RuneCountInString(id) > 256 || utf8.RuneCountInString(title) > 256 ||
 				utf8.RuneCountInString(stringMapValue(chunk, "details")) > 256 ||
 				utf8.RuneCountInString(stringMapValue(chunk, "output")) > 256 {
-				return "", ErrInvalidStreamChunks
+				return "", domain.ErrInvalidStreamChunks
 			}
 			encoded, err := json.Marshal(chunk)
 			if err != nil {
-				return "", ErrInvalidStreamChunks
+				return "", domain.ErrInvalidStreamChunks
 			}
 			if index, exists := taskIndex[id]; exists {
 				state.Tasks[index] = encoded
@@ -269,15 +258,15 @@ func applyMessageStreamContent(state *domain.MessageStreamState, existingText, m
 		case "blocks":
 			encoded, err := json.Marshal(chunk["blocks"])
 			if err != nil {
-				return "", ErrInvalidStreamChunks
+				return "", domain.ErrInvalidStreamChunks
 			}
 			normalized, err := domain.NormalizeBlocks(encoded)
 			if err != nil {
-				return "", ErrInvalidStreamChunks
+				return "", domain.ErrInvalidStreamChunks
 			}
 			var blocks []json.RawMessage
 			if json.Unmarshal([]byte(normalized), &blocks) != nil {
-				return "", ErrInvalidStreamChunks
+				return "", domain.ErrInvalidStreamChunks
 			}
 			remaining := 50 - len(state.ChunkBlocks)
 			if remaining < 0 {
@@ -289,11 +278,11 @@ func applyMessageStreamContent(state *domain.MessageStreamState, existingText, m
 			}
 			state.ChunkBlocks = append(state.ChunkBlocks, blocks...)
 		default:
-			return "", ErrInvalidStreamChunks
+			return "", domain.ErrInvalidStreamChunks
 		}
 	}
 	if messageTextTooLong(text) {
-		return "", ErrInvalidMessageStream
+		return "", domain.ErrInvalidMessageStream
 	}
 	return text, nil
 }
@@ -313,8 +302,8 @@ func validMessageIconURL(raw string) bool {
 }
 
 func normalizeMessageMetadata(raw string) (string, error) {
-	if len(raw) > MaxMessageBodyBytes {
-		return "", ErrInvalidMessageStream
+	if len(raw) > domain.MaxMessageBodyBytes {
+		return "", domain.ErrInvalidMessageStream
 	}
 	var value struct {
 		EventType    string         `json:"event_type"`
@@ -322,11 +311,11 @@ func normalizeMessageMetadata(raw string) (string, error) {
 	}
 	if json.Unmarshal([]byte(raw), &value) != nil || strings.TrimSpace(value.EventType) == "" ||
 		value.EventPayload == nil || utf8.RuneCountInString(value.EventType) > 255 {
-		return "", ErrInvalidMessageStream
+		return "", domain.ErrInvalidMessageStream
 	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return "", ErrInvalidMessageStream
+		return "", domain.ErrInvalidMessageStream
 	}
 	return string(encoded), nil
 }

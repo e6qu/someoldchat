@@ -3933,7 +3933,7 @@ var File_sameoldchat_chat_v1_apps_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\n" +
-	"\x1esameoldchat/chat/v1/apps.proto\x12\x13sameoldchat.chat.v1\x1a\"sameoldchat/chat/v1/messages.proto\"Z\n" +
+	"\x1esameoldchat/chat/v1/apps.proto\x12\x13sameoldchat.chat.v1\x1a)sameoldchat/chat/v1/app_permissions.proto\x1a\"sameoldchat/chat/v1/messages.proto\"Z\n" +
 	"\x1cAppConfigurationTokenRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\"I\n" +
@@ -4266,7 +4266,7 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\x14AppResolutionRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
-	"\x06app_id\x18\x03 \x01(\tR\x05appId2\x9b\"\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId2\xb8)\n" +
 	"\vAppsService\x12[\n" +
 	"\n" +
 	"SetAppIcon\x12#.sameoldchat.chat.v1.AppIconRequest\x1a(.sameoldchat.chat.v1.AppMutationResponse\x12o\n" +
@@ -4283,7 +4283,15 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\x12AdminAppActivities\x12).sameoldchat.chat.v1.AppActivitiesRequest\x1a$.sameoldchat.chat.v1.AppActivityPage\x12b\n" +
 	"\x0fAdminAppConfigs\x12&.sameoldchat.chat.v1.AppConfigsRequest\x1a'.sameoldchat.chat.v1.AppConfigsResponse\x12b\n" +
 	"\x11AdminSetAppConfig\x12-.sameoldchat.chat.v1.AppConfigMutationRequest\x1a\x1e.sameoldchat.chat.v1.AppConfig\x12n\n" +
-	"\x17AdminClearAppResolution\x12).sameoldchat.chat.v1.AppResolutionRequest\x1a(.sameoldchat.chat.v1.AppMutationResponse\x12\x81\x01\n" +
+	"\x17AdminClearAppResolution\x12).sameoldchat.chat.v1.AppResolutionRequest\x1a(.sameoldchat.chat.v1.AppMutationResponse\x12f\n" +
+	"\x12AdminAppPermission\x12,.sameoldchat.chat.v1.AppAccessControlRequest\x1a\".sameoldchat.chat.v1.AppPermission\x12n\n" +
+	"\x15AdminSetAppPermission\x121.sameoldchat.chat.v1.AppPermissionMutationRequest\x1a\".sameoldchat.chat.v1.AppPermission\x12t\n" +
+	"\x1dAdminAddAppPermissionEntities\x12/.sameoldchat.chat.v1.AppPermissionChangeRequest\x1a\".sameoldchat.chat.v1.AppPermission\x12w\n" +
+	" AdminRemoveAppPermissionEntities\x12/.sameoldchat.chat.v1.AppPermissionChangeRequest\x1a\".sameoldchat.chat.v1.AppPermission\x12]\n" +
+	"\x0fAdminMCPServers\x12&.sameoldchat.chat.v1.MCPServersRequest\x1a\".sameoldchat.chat.v1.MCPServerPage\x12z\n" +
+	"\x1cAdminAppMCPServerPermissions\x12,.sameoldchat.chat.v1.AppAccessControlRequest\x1a,.sameoldchat.chat.v1.MCPServerAccessResponse\x12\x80\x01\n" +
+	"\x1bAdminSetMCPServerPermission\x127.sameoldchat.chat.v1.MCPServerPermissionMutationRequest\x1a(.sameoldchat.chat.v1.MCPServerPermission\x12v\n" +
+	"\x18SetManagedAppPermissions\x120.sameoldchat.chat.v1.ManagedAppPermissionRequest\x1a(.sameoldchat.chat.v1.AppMutationResponse\x12\x81\x01\n" +
 	"\x1aIssueAppConfigurationToken\x121.sameoldchat.chat.v1.AppConfigurationTokenRequest\x1a0.sameoldchat.chat.v1.AppConfigurationCredentials\x12\x88\x01\n" +
 	"\x1bRotateAppConfigurationToken\x127.sameoldchat.chat.v1.AppConfigurationTokenRotateRequest\x1a0.sameoldchat.chat.v1.AppConfigurationCredentials\x12j\n" +
 	"\x13ValidateAppManifest\x12'.sameoldchat.chat.v1.AppManifestRequest\x1a*.sameoldchat.chat.v1.AppManifestValidation\x12h\n" +
@@ -4376,7 +4384,17 @@ var file_sameoldchat_chat_v1_apps_proto_goTypes = []any{
 	(*AppConfigsResponse)(nil),                    // 50: sameoldchat.chat.v1.AppConfigsResponse
 	(*AppConfigMutationRequest)(nil),              // 51: sameoldchat.chat.v1.AppConfigMutationRequest
 	(*AppResolutionRequest)(nil),                  // 52: sameoldchat.chat.v1.AppResolutionRequest
-	(*MessagePage)(nil),                           // 53: sameoldchat.chat.v1.MessagePage
+	(*AppAccessControlRequest)(nil),               // 53: sameoldchat.chat.v1.AppAccessControlRequest
+	(*AppPermissionMutationRequest)(nil),          // 54: sameoldchat.chat.v1.AppPermissionMutationRequest
+	(*AppPermissionChangeRequest)(nil),            // 55: sameoldchat.chat.v1.AppPermissionChangeRequest
+	(*MCPServersRequest)(nil),                     // 56: sameoldchat.chat.v1.MCPServersRequest
+	(*MCPServerPermissionMutationRequest)(nil),    // 57: sameoldchat.chat.v1.MCPServerPermissionMutationRequest
+	(*ManagedAppPermissionRequest)(nil),           // 58: sameoldchat.chat.v1.ManagedAppPermissionRequest
+	(*MessagePage)(nil),                           // 59: sameoldchat.chat.v1.MessagePage
+	(*AppPermission)(nil),                         // 60: sameoldchat.chat.v1.AppPermission
+	(*MCPServerPage)(nil),                         // 61: sameoldchat.chat.v1.MCPServerPage
+	(*MCPServerAccessResponse)(nil),               // 62: sameoldchat.chat.v1.MCPServerAccessResponse
+	(*MCPServerPermission)(nil),                   // 63: sameoldchat.chat.v1.MCPServerPermission
 }
 var file_sameoldchat_chat_v1_apps_proto_depIdxs = []int32{
 	5,  // 0: sameoldchat.chat.v1.AppManifestValidation.errors:type_name -> sameoldchat.chat.v1.AppManifestError
@@ -4408,71 +4426,87 @@ var file_sameoldchat_chat_v1_apps_proto_depIdxs = []int32{
 	49, // 26: sameoldchat.chat.v1.AppsService.AdminAppConfigs:input_type -> sameoldchat.chat.v1.AppConfigsRequest
 	51, // 27: sameoldchat.chat.v1.AppsService.AdminSetAppConfig:input_type -> sameoldchat.chat.v1.AppConfigMutationRequest
 	52, // 28: sameoldchat.chat.v1.AppsService.AdminClearAppResolution:input_type -> sameoldchat.chat.v1.AppResolutionRequest
-	0,  // 29: sameoldchat.chat.v1.AppsService.IssueAppConfigurationToken:input_type -> sameoldchat.chat.v1.AppConfigurationTokenRequest
-	1,  // 30: sameoldchat.chat.v1.AppsService.RotateAppConfigurationToken:input_type -> sameoldchat.chat.v1.AppConfigurationTokenRotateRequest
-	3,  // 31: sameoldchat.chat.v1.AppsService.ValidateAppManifest:input_type -> sameoldchat.chat.v1.AppManifestRequest
-	3,  // 32: sameoldchat.chat.v1.AppsService.CreateAppFromManifest:input_type -> sameoldchat.chat.v1.AppManifestRequest
-	3,  // 33: sameoldchat.chat.v1.AppsService.ExportAppManifest:input_type -> sameoldchat.chat.v1.AppManifestRequest
-	3,  // 34: sameoldchat.chat.v1.AppsService.UpdateAppFromManifest:input_type -> sameoldchat.chat.v1.AppManifestRequest
-	4,  // 35: sameoldchat.chat.v1.AppsService.SetAppDistribution:input_type -> sameoldchat.chat.v1.AppDistributionRequest
-	3,  // 36: sameoldchat.chat.v1.AppsService.DeleteDeveloperApp:input_type -> sameoldchat.chat.v1.AppManifestRequest
-	11, // 37: sameoldchat.chat.v1.AppsService.ListDeveloperApps:input_type -> sameoldchat.chat.v1.AppListRequest
-	11, // 38: sameoldchat.chat.v1.AppsService.ListWorkspaceApps:input_type -> sameoldchat.chat.v1.AppListRequest
-	11, // 39: sameoldchat.chat.v1.AppsService.AdminFunctions:input_type -> sameoldchat.chat.v1.AppListRequest
-	27, // 40: sameoldchat.chat.v1.AppsService.PutAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
-	27, // 41: sameoldchat.chat.v1.AppsService.GetAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
-	27, // 42: sameoldchat.chat.v1.AppsService.QueryAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
-	27, // 43: sameoldchat.chat.v1.AppsService.CountAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
-	27, // 44: sameoldchat.chat.v1.AppsService.DeleteAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
-	12, // 45: sameoldchat.chat.v1.AppsService.GetDeveloperApp:input_type -> sameoldchat.chat.v1.AppGetRequest
-	12, // 46: sameoldchat.chat.v1.AppsService.GetDeveloperAppDeliveryHealth:input_type -> sameoldchat.chat.v1.AppGetRequest
-	13, // 47: sameoldchat.chat.v1.AppsService.IssueDeveloperAppToken:input_type -> sameoldchat.chat.v1.AppTokenIssueRequest
-	14, // 48: sameoldchat.chat.v1.AppsService.RevokeDeveloperAppTokens:input_type -> sameoldchat.chat.v1.AppTokenRevokeRequest
-	17, // 49: sameoldchat.chat.v1.AppsService.ListDeveloperAppTokens:input_type -> sameoldchat.chat.v1.AppTokenListRequest
-	19, // 50: sameoldchat.chat.v1.AppsService.RevokeDeveloperAppToken:input_type -> sameoldchat.chat.v1.AppTokenRevokeOneRequest
-	30, // 51: sameoldchat.chat.v1.AppsService.InspectOAuthAuthorization:input_type -> sameoldchat.chat.v1.OAuthAuthorizationRequest
-	30, // 52: sameoldchat.chat.v1.AppsService.AuthorizeOAuth:input_type -> sameoldchat.chat.v1.OAuthAuthorizationRequest
-	29, // 53: sameoldchat.chat.v1.AppsService.SetAppIcon:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	32, // 54: sameoldchat.chat.v1.AppsService.ExternalAuthToken:output_type -> sameoldchat.chat.v1.ExternalAuthTokenValue
-	29, // 55: sameoldchat.chat.v1.AppsService.DeleteExternalAuthToken:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	29, // 56: sameoldchat.chat.v1.AppsService.SetAppExternalAuthProvider:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	39, // 57: sameoldchat.chat.v1.AppsService.AppExternalAuthProviders:output_type -> sameoldchat.chat.v1.ExternalAuthProvidersResponse
-	41, // 58: sameoldchat.chat.v1.AppsService.StartExternalAuthConnection:output_type -> sameoldchat.chat.v1.ExternalAuthConnectionResponse
-	29, // 59: sameoldchat.chat.v1.AppsService.CompleteExternalAuthConnection:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	29, // 60: sameoldchat.chat.v1.AppsService.UpdateUserAppConnection:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	43, // 61: sameoldchat.chat.v1.AppsService.AssistantSearchAvailability:output_type -> sameoldchat.chat.v1.AssistantSearchAvailabilityValue
-	53, // 62: sameoldchat.chat.v1.AppsService.AssistantSearchContext:output_type -> sameoldchat.chat.v1.MessagePage
-	47, // 63: sameoldchat.chat.v1.AppsService.AppActivities:output_type -> sameoldchat.chat.v1.AppActivityPage
-	47, // 64: sameoldchat.chat.v1.AppsService.AdminAppActivities:output_type -> sameoldchat.chat.v1.AppActivityPage
-	50, // 65: sameoldchat.chat.v1.AppsService.AdminAppConfigs:output_type -> sameoldchat.chat.v1.AppConfigsResponse
-	48, // 66: sameoldchat.chat.v1.AppsService.AdminSetAppConfig:output_type -> sameoldchat.chat.v1.AppConfig
-	29, // 67: sameoldchat.chat.v1.AppsService.AdminClearAppResolution:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	2,  // 68: sameoldchat.chat.v1.AppsService.IssueAppConfigurationToken:output_type -> sameoldchat.chat.v1.AppConfigurationCredentials
-	2,  // 69: sameoldchat.chat.v1.AppsService.RotateAppConfigurationToken:output_type -> sameoldchat.chat.v1.AppConfigurationCredentials
-	6,  // 70: sameoldchat.chat.v1.AppsService.ValidateAppManifest:output_type -> sameoldchat.chat.v1.AppManifestValidation
-	9,  // 71: sameoldchat.chat.v1.AppsService.CreateAppFromManifest:output_type -> sameoldchat.chat.v1.AppCreateResponse
-	10, // 72: sameoldchat.chat.v1.AppsService.ExportAppManifest:output_type -> sameoldchat.chat.v1.AppExportResponse
-	29, // 73: sameoldchat.chat.v1.AppsService.UpdateAppFromManifest:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	29, // 74: sameoldchat.chat.v1.AppsService.SetAppDistribution:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	29, // 75: sameoldchat.chat.v1.AppsService.DeleteDeveloperApp:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	22, // 76: sameoldchat.chat.v1.AppsService.ListDeveloperApps:output_type -> sameoldchat.chat.v1.AppListResponse
-	26, // 77: sameoldchat.chat.v1.AppsService.ListWorkspaceApps:output_type -> sameoldchat.chat.v1.InstalledAppListResponse
-	25, // 78: sameoldchat.chat.v1.AppsService.AdminFunctions:output_type -> sameoldchat.chat.v1.AppFunctionListResponse
-	28, // 79: sameoldchat.chat.v1.AppsService.PutAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
-	28, // 80: sameoldchat.chat.v1.AppsService.GetAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
-	28, // 81: sameoldchat.chat.v1.AppsService.QueryAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
-	28, // 82: sameoldchat.chat.v1.AppsService.CountAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
-	29, // 83: sameoldchat.chat.v1.AppsService.DeleteAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	10, // 84: sameoldchat.chat.v1.AppsService.GetDeveloperApp:output_type -> sameoldchat.chat.v1.AppExportResponse
-	20, // 85: sameoldchat.chat.v1.AppsService.GetDeveloperAppDeliveryHealth:output_type -> sameoldchat.chat.v1.AppDeliveryHealth
-	15, // 86: sameoldchat.chat.v1.AppsService.IssueDeveloperAppToken:output_type -> sameoldchat.chat.v1.AppTokenCredentials
-	29, // 87: sameoldchat.chat.v1.AppsService.RevokeDeveloperAppTokens:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	18, // 88: sameoldchat.chat.v1.AppsService.ListDeveloperAppTokens:output_type -> sameoldchat.chat.v1.AppTokenListResponse
-	29, // 89: sameoldchat.chat.v1.AppsService.RevokeDeveloperAppToken:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	31, // 90: sameoldchat.chat.v1.AppsService.InspectOAuthAuthorization:output_type -> sameoldchat.chat.v1.OAuthAuthorization
-	31, // 91: sameoldchat.chat.v1.AppsService.AuthorizeOAuth:output_type -> sameoldchat.chat.v1.OAuthAuthorization
-	53, // [53:92] is the sub-list for method output_type
-	14, // [14:53] is the sub-list for method input_type
+	53, // 29: sameoldchat.chat.v1.AppsService.AdminAppPermission:input_type -> sameoldchat.chat.v1.AppAccessControlRequest
+	54, // 30: sameoldchat.chat.v1.AppsService.AdminSetAppPermission:input_type -> sameoldchat.chat.v1.AppPermissionMutationRequest
+	55, // 31: sameoldchat.chat.v1.AppsService.AdminAddAppPermissionEntities:input_type -> sameoldchat.chat.v1.AppPermissionChangeRequest
+	55, // 32: sameoldchat.chat.v1.AppsService.AdminRemoveAppPermissionEntities:input_type -> sameoldchat.chat.v1.AppPermissionChangeRequest
+	56, // 33: sameoldchat.chat.v1.AppsService.AdminMCPServers:input_type -> sameoldchat.chat.v1.MCPServersRequest
+	53, // 34: sameoldchat.chat.v1.AppsService.AdminAppMCPServerPermissions:input_type -> sameoldchat.chat.v1.AppAccessControlRequest
+	57, // 35: sameoldchat.chat.v1.AppsService.AdminSetMCPServerPermission:input_type -> sameoldchat.chat.v1.MCPServerPermissionMutationRequest
+	58, // 36: sameoldchat.chat.v1.AppsService.SetManagedAppPermissions:input_type -> sameoldchat.chat.v1.ManagedAppPermissionRequest
+	0,  // 37: sameoldchat.chat.v1.AppsService.IssueAppConfigurationToken:input_type -> sameoldchat.chat.v1.AppConfigurationTokenRequest
+	1,  // 38: sameoldchat.chat.v1.AppsService.RotateAppConfigurationToken:input_type -> sameoldchat.chat.v1.AppConfigurationTokenRotateRequest
+	3,  // 39: sameoldchat.chat.v1.AppsService.ValidateAppManifest:input_type -> sameoldchat.chat.v1.AppManifestRequest
+	3,  // 40: sameoldchat.chat.v1.AppsService.CreateAppFromManifest:input_type -> sameoldchat.chat.v1.AppManifestRequest
+	3,  // 41: sameoldchat.chat.v1.AppsService.ExportAppManifest:input_type -> sameoldchat.chat.v1.AppManifestRequest
+	3,  // 42: sameoldchat.chat.v1.AppsService.UpdateAppFromManifest:input_type -> sameoldchat.chat.v1.AppManifestRequest
+	4,  // 43: sameoldchat.chat.v1.AppsService.SetAppDistribution:input_type -> sameoldchat.chat.v1.AppDistributionRequest
+	3,  // 44: sameoldchat.chat.v1.AppsService.DeleteDeveloperApp:input_type -> sameoldchat.chat.v1.AppManifestRequest
+	11, // 45: sameoldchat.chat.v1.AppsService.ListDeveloperApps:input_type -> sameoldchat.chat.v1.AppListRequest
+	11, // 46: sameoldchat.chat.v1.AppsService.ListWorkspaceApps:input_type -> sameoldchat.chat.v1.AppListRequest
+	11, // 47: sameoldchat.chat.v1.AppsService.AdminFunctions:input_type -> sameoldchat.chat.v1.AppListRequest
+	27, // 48: sameoldchat.chat.v1.AppsService.PutAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
+	27, // 49: sameoldchat.chat.v1.AppsService.GetAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
+	27, // 50: sameoldchat.chat.v1.AppsService.QueryAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
+	27, // 51: sameoldchat.chat.v1.AppsService.CountAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
+	27, // 52: sameoldchat.chat.v1.AppsService.DeleteAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
+	12, // 53: sameoldchat.chat.v1.AppsService.GetDeveloperApp:input_type -> sameoldchat.chat.v1.AppGetRequest
+	12, // 54: sameoldchat.chat.v1.AppsService.GetDeveloperAppDeliveryHealth:input_type -> sameoldchat.chat.v1.AppGetRequest
+	13, // 55: sameoldchat.chat.v1.AppsService.IssueDeveloperAppToken:input_type -> sameoldchat.chat.v1.AppTokenIssueRequest
+	14, // 56: sameoldchat.chat.v1.AppsService.RevokeDeveloperAppTokens:input_type -> sameoldchat.chat.v1.AppTokenRevokeRequest
+	17, // 57: sameoldchat.chat.v1.AppsService.ListDeveloperAppTokens:input_type -> sameoldchat.chat.v1.AppTokenListRequest
+	19, // 58: sameoldchat.chat.v1.AppsService.RevokeDeveloperAppToken:input_type -> sameoldchat.chat.v1.AppTokenRevokeOneRequest
+	30, // 59: sameoldchat.chat.v1.AppsService.InspectOAuthAuthorization:input_type -> sameoldchat.chat.v1.OAuthAuthorizationRequest
+	30, // 60: sameoldchat.chat.v1.AppsService.AuthorizeOAuth:input_type -> sameoldchat.chat.v1.OAuthAuthorizationRequest
+	29, // 61: sameoldchat.chat.v1.AppsService.SetAppIcon:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	32, // 62: sameoldchat.chat.v1.AppsService.ExternalAuthToken:output_type -> sameoldchat.chat.v1.ExternalAuthTokenValue
+	29, // 63: sameoldchat.chat.v1.AppsService.DeleteExternalAuthToken:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	29, // 64: sameoldchat.chat.v1.AppsService.SetAppExternalAuthProvider:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	39, // 65: sameoldchat.chat.v1.AppsService.AppExternalAuthProviders:output_type -> sameoldchat.chat.v1.ExternalAuthProvidersResponse
+	41, // 66: sameoldchat.chat.v1.AppsService.StartExternalAuthConnection:output_type -> sameoldchat.chat.v1.ExternalAuthConnectionResponse
+	29, // 67: sameoldchat.chat.v1.AppsService.CompleteExternalAuthConnection:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	29, // 68: sameoldchat.chat.v1.AppsService.UpdateUserAppConnection:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	43, // 69: sameoldchat.chat.v1.AppsService.AssistantSearchAvailability:output_type -> sameoldchat.chat.v1.AssistantSearchAvailabilityValue
+	59, // 70: sameoldchat.chat.v1.AppsService.AssistantSearchContext:output_type -> sameoldchat.chat.v1.MessagePage
+	47, // 71: sameoldchat.chat.v1.AppsService.AppActivities:output_type -> sameoldchat.chat.v1.AppActivityPage
+	47, // 72: sameoldchat.chat.v1.AppsService.AdminAppActivities:output_type -> sameoldchat.chat.v1.AppActivityPage
+	50, // 73: sameoldchat.chat.v1.AppsService.AdminAppConfigs:output_type -> sameoldchat.chat.v1.AppConfigsResponse
+	48, // 74: sameoldchat.chat.v1.AppsService.AdminSetAppConfig:output_type -> sameoldchat.chat.v1.AppConfig
+	29, // 75: sameoldchat.chat.v1.AppsService.AdminClearAppResolution:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	60, // 76: sameoldchat.chat.v1.AppsService.AdminAppPermission:output_type -> sameoldchat.chat.v1.AppPermission
+	60, // 77: sameoldchat.chat.v1.AppsService.AdminSetAppPermission:output_type -> sameoldchat.chat.v1.AppPermission
+	60, // 78: sameoldchat.chat.v1.AppsService.AdminAddAppPermissionEntities:output_type -> sameoldchat.chat.v1.AppPermission
+	60, // 79: sameoldchat.chat.v1.AppsService.AdminRemoveAppPermissionEntities:output_type -> sameoldchat.chat.v1.AppPermission
+	61, // 80: sameoldchat.chat.v1.AppsService.AdminMCPServers:output_type -> sameoldchat.chat.v1.MCPServerPage
+	62, // 81: sameoldchat.chat.v1.AppsService.AdminAppMCPServerPermissions:output_type -> sameoldchat.chat.v1.MCPServerAccessResponse
+	63, // 82: sameoldchat.chat.v1.AppsService.AdminSetMCPServerPermission:output_type -> sameoldchat.chat.v1.MCPServerPermission
+	29, // 83: sameoldchat.chat.v1.AppsService.SetManagedAppPermissions:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	2,  // 84: sameoldchat.chat.v1.AppsService.IssueAppConfigurationToken:output_type -> sameoldchat.chat.v1.AppConfigurationCredentials
+	2,  // 85: sameoldchat.chat.v1.AppsService.RotateAppConfigurationToken:output_type -> sameoldchat.chat.v1.AppConfigurationCredentials
+	6,  // 86: sameoldchat.chat.v1.AppsService.ValidateAppManifest:output_type -> sameoldchat.chat.v1.AppManifestValidation
+	9,  // 87: sameoldchat.chat.v1.AppsService.CreateAppFromManifest:output_type -> sameoldchat.chat.v1.AppCreateResponse
+	10, // 88: sameoldchat.chat.v1.AppsService.ExportAppManifest:output_type -> sameoldchat.chat.v1.AppExportResponse
+	29, // 89: sameoldchat.chat.v1.AppsService.UpdateAppFromManifest:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	29, // 90: sameoldchat.chat.v1.AppsService.SetAppDistribution:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	29, // 91: sameoldchat.chat.v1.AppsService.DeleteDeveloperApp:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	22, // 92: sameoldchat.chat.v1.AppsService.ListDeveloperApps:output_type -> sameoldchat.chat.v1.AppListResponse
+	26, // 93: sameoldchat.chat.v1.AppsService.ListWorkspaceApps:output_type -> sameoldchat.chat.v1.InstalledAppListResponse
+	25, // 94: sameoldchat.chat.v1.AppsService.AdminFunctions:output_type -> sameoldchat.chat.v1.AppFunctionListResponse
+	28, // 95: sameoldchat.chat.v1.AppsService.PutAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
+	28, // 96: sameoldchat.chat.v1.AppsService.GetAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
+	28, // 97: sameoldchat.chat.v1.AppsService.QueryAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
+	28, // 98: sameoldchat.chat.v1.AppsService.CountAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
+	29, // 99: sameoldchat.chat.v1.AppsService.DeleteAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	10, // 100: sameoldchat.chat.v1.AppsService.GetDeveloperApp:output_type -> sameoldchat.chat.v1.AppExportResponse
+	20, // 101: sameoldchat.chat.v1.AppsService.GetDeveloperAppDeliveryHealth:output_type -> sameoldchat.chat.v1.AppDeliveryHealth
+	15, // 102: sameoldchat.chat.v1.AppsService.IssueDeveloperAppToken:output_type -> sameoldchat.chat.v1.AppTokenCredentials
+	29, // 103: sameoldchat.chat.v1.AppsService.RevokeDeveloperAppTokens:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	18, // 104: sameoldchat.chat.v1.AppsService.ListDeveloperAppTokens:output_type -> sameoldchat.chat.v1.AppTokenListResponse
+	29, // 105: sameoldchat.chat.v1.AppsService.RevokeDeveloperAppToken:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	31, // 106: sameoldchat.chat.v1.AppsService.InspectOAuthAuthorization:output_type -> sameoldchat.chat.v1.OAuthAuthorization
+	31, // 107: sameoldchat.chat.v1.AppsService.AuthorizeOAuth:output_type -> sameoldchat.chat.v1.OAuthAuthorization
+	61, // [61:108] is the sub-list for method output_type
+	14, // [14:61] is the sub-list for method input_type
 	14, // [14:14] is the sub-list for extension type_name
 	14, // [14:14] is the sub-list for extension extendee
 	0,  // [0:14] is the sub-list for field type_name
@@ -4483,6 +4517,7 @@ func file_sameoldchat_chat_v1_apps_proto_init() {
 	if File_sameoldchat_chat_v1_apps_proto != nil {
 		return
 	}
+	file_sameoldchat_chat_v1_app_permissions_proto_init()
 	file_sameoldchat_chat_v1_messages_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{

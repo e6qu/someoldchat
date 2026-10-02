@@ -45,13 +45,13 @@ func TestASelectColumnNeedsOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.AddListColumn(ctx, "T1", "U1", list.ID, "Status", domain.ListColumnSelect, nil); !errors.Is(err, ErrInvalidList) {
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", list.ID, "Status", domain.ListColumnSelect, nil); !errors.Is(err, domain.ErrInvalidList) {
 		t.Fatalf("a select with no options = %v, want ErrInvalidList", err)
 	}
-	if _, err := messages.AddListColumn(ctx, "T1", "U1", list.ID, "", domain.ListColumnText, nil); !errors.Is(err, ErrInvalidList) {
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", list.ID, "", domain.ListColumnText, nil); !errors.Is(err, domain.ErrInvalidList) {
 		t.Fatalf("a nameless column = %v, want ErrInvalidList", err)
 	}
-	if _, err := messages.AddListColumn(ctx, "T1", "U1", list.ID, "Status", "colour", nil); !errors.Is(err, ErrInvalidList) {
+	if _, err := messages.AddListColumn(ctx, "T1", "U1", list.ID, "Status", "colour", nil); !errors.Is(err, domain.ErrInvalidList) {
 		t.Fatalf("a type nobody defined = %v, want ErrInvalidList", err)
 	}
 }
@@ -80,11 +80,11 @@ func TestDeclaringAColumnDoesNotStrandExistingItems(t *testing.T) {
 	}
 	// A new undeclared cell is still refused, so the rule tightens going
 	// forward without breaking what is there.
-	if _, err := messages.UpdateListItem(ctx, "T1", "U1", list.ID, item.ID, `[{"column_id":"invented","value":"x"}]`, false); !errors.Is(err, ErrInvalidList) {
+	if _, err := messages.UpdateListItem(ctx, "T1", "U1", list.ID, item.ID, `[{"column_id":"invented","value":"x"}]`, false); !errors.Is(err, domain.ErrInvalidList) {
 		t.Fatalf("a newly invented column was accepted: %v", err)
 	}
 	// And a declared column is enforced as usual.
-	if _, err := messages.UpdateListItem(ctx, "T1", "U1", list.ID, item.ID, `[{"column_id":"status","value":"blocked"}]`, false); !errors.Is(err, ErrInvalidList) {
+	if _, err := messages.UpdateListItem(ctx, "T1", "U1", list.ID, item.ID, `[{"column_id":"status","value":"blocked"}]`, false); !errors.Is(err, domain.ErrInvalidList) {
 		t.Fatalf("an unoffered option was accepted: %v", err)
 	}
 }

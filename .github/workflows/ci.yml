@@ -281,7 +281,29 @@ jobs:
           deno-version: 2.8.1
 
       - name: Verify current official Slack contracts
+        env:
+          SAMEOLDCHAT_REFERENCE_CAPTURE: ${{ runner.temp }}/slack-reference-drift
         run: make external-contract-qualification
+
+      # A method or event Slack added is adopted from its reference page, which
+      # the gate saves when it reports the addition.
+      - name: Keep the reference pages of Slack's changes
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: slack-reference-drift
+          path: ${{ runner.temp }}/slack-reference-drift
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # The same pages as text, for a workspace that can read the job log but
+      # cannot download artifacts or reach docs.slack.dev.
+      - name: Print the reference pages of Slack's changes
+        if: failure()
+        run: |
+          if [ -d "$RUNNER_TEMP/slack-reference-drift" ]; then
+            python3 tests/external-contract-qualification/reference-text.py "$RUNNER_TEMP/slack-reference-drift"
+          fi
 
       - name: Run official SDK qualification
         run: make sdk-qualification

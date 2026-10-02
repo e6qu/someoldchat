@@ -1,12 +1,29 @@
 # SameOldChat Slack API and SDK compatibility specification
 
+## What compatibility means
+
+A Slack client, official SDK, or Slack app MUST be able to use SameOldChat by
+changing only the endpoints it is configured with: the Web API base URL, the
+OAuth and OpenID endpoints, the Events API and interactivity request URLs it
+already declares, and the Socket Mode and RTM URLs the API hands out. Given
+that change, SameOldChat MUST answer with Slack's documented API and behavior:
+the same methods, arguments, response and error shapes, status codes,
+headers, event envelopes, signatures, and ordering.
+
+SameOldChat MUST NOT accommodate a client that hardcodes Slack and cannot be
+pointed elsewhere. It does not impersonate Slack's hosts, issuers, or
+certificates, and it does not emit `slack.com` URLs or identities in place of
+its own. Where Slack's format embeds a literal Slack string that is part of
+the format rather than a location, such as the `https://slack.com/team_id`
+OpenID claim name, the literal is kept exactly as Slack sends it.
+
 ## Compatibility sources
 
 The current official SDK inventory is maintained in
 [`sdk-compatibility.yaml`](sdk-compatibility.yaml). It records immutable
-artifacts, provenance, and executable suite results. `make sdk-inventory-check`
-validates its structure; a release qualification additionally runs
-`go run ./cmd/sdkcheck -require-qualified`.
+artifacts, provenance, and executable suite results.
+`make sdk-inventory-check` (`cmd/sdkcheck -require-qualified`) validates its
+structure and requires immutable artifacts and passing suite records.
 
 The repository MUST pin and retain exact revisions of:
 
@@ -29,55 +46,54 @@ evidence:
 5. `verified-against-slack`: controlled comparison with Slack has passed.
 
 The repository must not remove an operation or silently lower its status.
-Pull-request CI runs `make contract-ratchet` against the pull request base
-branch. A downgrade is accepted only when the operation carries an `audit`
-record naming the exact prior status, a concrete reason, and reviewable
-evidence. This exception exists so an audit can correct an overstated claim
-instead of making it permanent; it is not a way to remove working behavior
-without review. The first code pull request may use a README-only base that has
-no ledger; CI treats that case as an explicit bootstrap and validates the new
-ledger with `make contract-check`. Later pull requests use the existing ledger
-as their ratchet baseline. New operations may enter the ledger at
-`unimplemented`, which makes unfinished work visible without weakening an
-existing claim. A current official method that is absent from the pinned
-OpenAPI snapshot may enter the ledger with `provenance: slack-reference` only
-when its official method reference and an executable qualification are
-recorded.
+CI runs `make contract-ratchet` against the base revision (the pull request
+base branch, or the pushed commit's parent). A downgrade is accepted only when
+the operation carries an `audit` record naming the exact prior status, a
+concrete reason, and reviewable evidence, so an audit can correct an overstated
+claim without making it permanent. A base revision with no ledger is treated as
+an explicit bootstrap and validated with `make contract-check` instead. New
+operations may enter the ledger at `unimplemented`.
 
-The current official Slack method reference documents the `canvases` method
-family separately from the pinned OpenAPI snapshot. The six canvases methods are
-therefore tracked as supplemental reference-backed operations in the ledger and
-are exercised by the local Web API qualification suites. This does not claim
-that the vendored OpenAPI snapshot contains those methods.
+### Methods outside the pinned OpenAPI snapshot
 
-Run `make compatibility-report` to print the current operation count and the
-number at or above each evidence level. The report separates the 310-method
-current Slack reference from retained legacy methods so compatibility aliases
-cannot inflate the current denominator. It also reports how many methods name
-method-level executable evidence, how many `sdk-compatible`-or-better claims
-still lack that evidence, and how many retain known deviations. The
-implementation target is
-`verified-against-slack` for every operation; the report does not treat a
-schema-compatible handler as behavior verification. A higher status includes
-the evidence represented by every lower status, so the report uses
-`<status>-or-better` for those cumulative counts.
+A current official method absent from the pinned OpenAPI snapshot may enter
+the ledger with `provenance: slack-reference` only when its official method
+reference and an executable qualification are recorded. This covers, among
+others, the `canvases.*`, `bookmarks.*`, `slackLists.*`, `entity.*` (Work
+Objects), and `openid.connect.*` families. Their request, response, scope, and
+error behavior MUST stay aligned with the individual official method
+references, against which they are qualified before their provenance is
+promoted; tracking them does not claim the vendored snapshot contains them.
 
-`make sdk-qualification` independently records the exact Web API paths emitted
-by the pinned official clients and runs `cmd/sdkcoverage -require-claimed`.
-Every method at `sdk-compatible` or above must therefore be observed in the
-qualification run; success elsewhere in the same large SDK script cannot
-supply method evidence. Deno function-completion methods are recorded only
-after the runtime's requests and payloads pass at that suite's receiver.
+`openid.connect.token` keeps authorization codes single-use and rotates refresh
+tokens in the selected durable store. Its ID token names the deployment's
+`-auth-public-url` as its issuer. It is signed HS256 with the OAuth client
+secret, where Slack signs RS256 against a published key set; the missing
+discovery document, key set, and `/openid/connect/authorize` route are a
+recorded deviation in the ledger and open work in the
+[project plan](../PLAN.md#phase-5-compatibility-evidence).
+
+### Reporting
+
+`make compatibility-report` prints the operation count and the number at or
+above each evidence level, using `<status>-or-better` for those cumulative
+counts. It separates the current Slack reference from retained legacy methods
+so compatibility aliases cannot inflate the current denominator, and reports
+how many methods name method-level executable evidence, how many
+`sdk-compatible`-or-better claims lack it, and how many carry known deviations.
+The [project status](../PLAN.md#status) records its current figures. The
+target is `verified-against-slack` for every operation; a schema-compatible handler is
+not behavior verification.
+
+`make sdk-qualification` records the exact Web API paths emitted by the pinned
+official clients and runs `cmd/sdkcoverage -require-claimed`. Every method at
+`sdk-compatible` or above must be observed in that run; success elsewhere in
+the same SDK script cannot supply method evidence. Deno function-completion
+methods are recorded only after the runtime's requests and payloads pass at
+that suite's receiver.
 
 Community SDKs, including Go SDKs, MAY be test targets but MUST NOT override an
 official source merely because their behavior differs.
-
-The current Slack reference also defines `bookmarks.add`, `bookmarks.edit`,
-`bookmarks.list`, and `bookmarks.remove`. These methods are tracked with
-`slack-reference` provenance because they were introduced after the pinned
-OpenAPI snapshot; their request, response, scope, and error behavior must be
-qualified against the current official references before the provenance can be
-promoted.
 
 ## Provenance hierarchy
 
@@ -115,31 +131,13 @@ SDK convenience behavior MUST be distinguished from server obligations. A
 client-side retry loop, for example, implies required server status/headers but
 is not server logic to reproduce.
 
-The current official Slack method reference also defines the `slackLists`
-family. These methods are tracked as supplemental reference-backed contracts
-because the pinned OpenAPI snapshot predates them. Their request and response
-behavior must remain aligned with the individual official method references.
-
-The same reference defines the `entity` Work Objects methods. They are
-stateless response acknowledgements and are tracked separately from the
-pinned OpenAPI snapshot for the same reason.
-
-The same reference defines `openid.connect.token` and
-`openid.connect.userInfo` for Sign in with Slack. The implementation keeps
-authorization codes single-use and rotates refresh tokens in the selected
-durable store. It signs the returned JSON Web Token with the OAuth client
-secret because this local compatibility service does not publish a separate
-JSON Web Key Set. The methods are tracked separately from the pinned OpenAPI
-snapshot for the same reason.
-
 ## HTTP behavior
 
 - Web API methods MUST be served beneath `/api/{method}`.
 - Every Web API method MUST accept both `GET` and `POST`, as Slack does; the
-  verb the OpenAPI snapshot lists for an operation is not a restriction.
-  Official SDKs differ in which they send (python-slack-sdk's async client
-  sends `GET` for several methods). An unknown method name, and any other
-  verb, answers the `unknown_method` envelope.
+  verb the OpenAPI snapshot lists is not a restriction, because official SDKs
+  differ in which they send. An unknown method name, and any other verb,
+  answers the `unknown_method` envelope.
 - Routes outside `/api/` (external upload URLs, incoming and trigger
   webhooks, public file and photo URLs) MUST be reachable in the default,
   rate-limited deployment configuration; the Web API limiter fronts `/api/`

@@ -1,41 +1,46 @@
 # Blob lifecycle
 
 SameOldChat stores file and user-photo bytes outside the state store. The state
-store remains authoritative for which objects are live. A successful mutation
-first writes the bounded object and then commits metadata and a durable cleanup
-event when the previous object must be removed. The cleanup worker claims those
-events with a lease, deletes the object, and acknowledges the event. It renews
-the event lease while the object store operation is running, claims at most the
-configured worker limit one event at a time, and does not retain an unbounded
-batch. An expired lease makes the work visible to another replica after a
-crash.
+store remains authoritative for which objects are live. A mutation first writes
+the bounded object, then commits its metadata together with a durable cleanup
+event when a previous object must be removed.
 
-The `sameoldchat-blobgc` binary also supports a bounded reconciliation audit.
-It enumerates provider objects from the selected blob store **first**, then
-streams live file and user-photo references from the selected state store. It
-reports orphan objects and metadata that points at missing objects. It fails on
-malformed provider records, invalid references, provider errors, and result
-limits; it does not silently treat an unavailable provider as empty.
+## Cleanup worker
 
-That order is a correctness requirement, not a preference. A mutation writes the
-object before it commits the metadata that references it, so walking references
-first classified every blob uploaded during the audit as an orphan — and with
-`-enqueue-orphans` deleted its bytes while its metadata stayed live.
+`sameoldchat-blobgc` without `-audit` is the cleanup worker. It claims cleanup
+events under a lease, deletes each object, and acknowledges the event. It claims
+one event at a time, up to `-batch-size` per cleanup topic (file and user photo) per pass, renews the lease while the
+object-store call runs, and treats an already absent object as success. An
+expired lease makes the work visible to another replica after a crash. Each
+replica needs a distinct `-owner`; `-lease` and `-poll` tune the claim cycle.
 
-Two further rules close the remaining windows:
+## Reconciliation audit
 
-- an unreferenced object is an orphan only once it is older than
+`-audit` runs a bounded reconciliation instead. It enumerates provider objects
+from the selected blob store **first**, then streams live file and user-photo
+references from the state store, and reports orphan objects and metadata that
+points at missing objects. It fails on malformed provider records, invalid
+references, provider errors, and result limits; an unavailable provider is
+never treated as empty.
+
+The walk order is a correctness requirement. A mutation writes the object
+before committing the metadata that references it, so walking references first
+would classify every blob uploaded during the audit as an orphan. Two further
+rules close the remaining windows:
+
+- an unreferenced object counts as an orphan only once it is older than
   `-min-orphan-age` (default `1h`). A younger one, or one whose modification
-  time the provider does not report, is held back and counted in the audit line
-  as `too_recent_for_orphan_cleanup`. Deleting live bytes is unrecoverable,
-  while deferring an orphan costs one audit cycle; `-min-orphan-age` must be
-  positive, and it must comfortably exceed the longest upload the deployment
-  accepts;
+  time the provider does not report, is held back and counted as
+  `too_recent_for_orphan_cleanup` in the audit log line. `-min-orphan-age`
+  must be at least the 15-minute external upload window and should comfortably
+  exceed the longest upload the deployment accepts, because deleting live bytes
+  is unrecoverable while deferring an orphan costs one audit cycle;
 - a reference with no enumerated object is re-read directly from the provider
-  before it is reported as missing, because a reference committed after the
+  before it is reported missing, because a reference committed after the
   object walk finished is present but was not enumerated.
 
-Run an audit for one workspace:
+Run an audit for one workspace (cleanup-only flags such as `-owner` are
+rejected in audit mode):
 
 ```sh
 ./bin/sameoldchat-blobgc \
@@ -43,31 +48,26 @@ Run an audit for one workspace:
   -db "$SAMEOLDCHAT_POSTGRES_DSN" \
   -blob-s3-bucket sameoldchat \
   -workspace T1 \
-  -owner blob-auditor \
   -audit \
   -min-orphan-age 24h
 ```
 
 `-enqueue-orphans` requires `-audit` and writes the reported orphan keys to the
-durable cleanup outbox. The regular cleanup worker performs the deletion under
-its existing lease and treats an already absent object as success. Missing
-objects are never repaired by guessing a replacement.
+durable cleanup outbox; the cleanup worker then deletes them under its lease.
+Missing objects are never repaired by guessing a replacement.
 
-Reviewing the audit output before enqueueing is no longer the mitigation for
-false orphans — the walk order and `-min-orphan-age` are. Review is still worth
-doing for what it does tell an operator: an unexpected orphan or missing count
-is evidence of a real defect or of an interrupted cleanup, and a nonzero
+Review the audit output anyway: an unexpected orphan or missing count is
+evidence of a real defect or an interrupted cleanup, and a nonzero
 `too_recent_for_orphan_cleanup` means a later audit will report more orphans.
 
-The audit keeps the result set bounded by `-max-audit-results`. A large result
-is an operational condition that requires an explicit larger limit or a
-separate investigation. It is not truncated silently.
+`-max-audit-results` (default 1000) bounds the result set. Exceeding it is an
+error, not a silent truncation; raise the limit explicitly or investigate
+separately.
 
-Filesystem and Amazon Simple Storage Service providers implement the same
-bounded enumeration contract. In local composition the reconciler calls the
-state store directly. In distributed composition the module boundary remains
-explicit;
-the state and blob owners must expose the same durable contract before a
+The filesystem (`-blob-dir`) and Amazon S3 (`-blob-s3-bucket`) providers
+implement the same bounded enumeration contract. In local composition the
+reconciler calls the state store directly. In distributed composition the
+state and blob owners must expose the same durable contract before a
 reconciler is started.
 
 Related documents:

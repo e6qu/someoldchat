@@ -1,12 +1,11 @@
 # PostgreSQL storage
 
-SameOldChat supports PostgreSQL as an explicit durable SQL storage profile. The
-application uses the pinned `github.com/jackc/pgx/v5` driver through
-`database/sql` and applies the PostgreSQL-specific SQL at the storage adapter
-boundary.
+PostgreSQL is an explicit durable storage profile. The application uses the
+pinned `github.com/jackc/pgx/v5` driver through `database/sql` and applies the
+PostgreSQL-specific SQL at the storage adapter boundary.
 
-Select PostgreSQL at startup. The `-db` value is a PostgreSQL connection string
-and the application fails at startup when it is missing or invalid:
+Select it at startup. `-db` is the connection string; startup fails when it is
+missing or invalid:
 
 ```sh
 ./bin/sameoldchat \
@@ -18,35 +17,37 @@ and the application fails at startup when it is missing or invalid:
   -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 ```
 
-For container deployments, set `SAMEOLDCHAT_DATABASE_URL` instead of placing a
-connection string in the command line. The environment value is the default for
-`-db`; an explicit `-db` flag takes precedence. This lets the runtime obtain
-the tenant-specific URL from its secret store without exposing it in task
-definitions or process arguments.
+In container deployments, set `SAMEOLDCHAT_DATABASE_URL` instead, so the
+runtime can inject the URL from its secret store without exposing it in task
+definitions or process arguments. It is the default for `-db` in
+`cmd/server` local composition and in `cmd/worker`; an explicit `-db` takes
+precedence. `-chat-mode grpc` rejects a database DSN because the separate
+`chatd` process owns storage.
 
-PostgreSQL is a separate storage selection. SameOldChat does not switch to
-PostgreSQL when SQLite or dqlite configuration fails, and it does not change
-storage profiles after startup.
+PostgreSQL is never a fallback: SameOldChat does not switch to it when SQLite or
+dqlite configuration fails, and never changes storage profile after startup.
 
 The PostgreSQL server owns durable state and may serve multiple stateless
-SameOldChat replicas. Configure PostgreSQL backups, replication, connection
-limits, transport security, and failover according to the selected PostgreSQL
-deployment. SameOldChat does not claim PostgreSQL high availability from the
-client driver alone.
+SameOldChat replicas. Backups, replication, connection limits, transport
+security, and failover belong to the PostgreSQL deployment; SameOldChat does
+not claim high availability from the client driver alone.
 
-Run the repository qualification against a real PostgreSQL server with:
+## Qualification
 
 ```sh
 SAMEOLDCHAT_POSTGRES_DSN='postgres://sameoldchat:sameoldchat@localhost:5432/sameoldchat?sslmode=disable' \
   make test-postgres
 ```
 
-The qualification requires `SAMEOLDCHAT_POSTGRES_DSN`; an absent value is an
-error. It runs the shared repository contract, including the published storage
-waves, integration state, and migration path, against the configured server.
-The adapter translates shared SQLite `INTEGER` declarations to PostgreSQL
-`BIGINT` because the repository stores some timestamps as nanoseconds and must
-retain the `int64` range on both backends.
+`SAMEOLDCHAT_POSTGRES_DSN` is required. The target runs the shared repository
+contract (storage waves, integration state, and migration path),
+`internal/store/postgres`, and `internal/web` against that server with
+`-p 1`, because every package shares the one database. CI runs it in the
+`postgres` job.
+
+The adapter translates the shared schema's `INTEGER` declarations to
+`BIGINT`, because some timestamps are stored as nanoseconds and need the
+`int64` range on both backends.
 
 Related documents:
 

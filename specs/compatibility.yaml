@@ -904,6 +904,8 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminUserGroupAddTeamsValidatesWorkspaceTopology
+      - go-test:internal/api/slack:TestAdminUserGroupsRemoveTeams
+      - go-test:internal/service:TestAdminUserGroupTeamsAreRecorded
   - method: admin.usergroups.listChannels
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1594,11 +1596,29 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestEntityMethodsAcceptStructuredWorkObjectPayloads
   - method: openid.connect.token
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/openid.connect.token/
     evidence:
       - go-test:internal/api/slack:TestOpenIDConnectTokenRefusesCredentialsInTheURL
+      - go-test:internal/service:TestOpenIDTokenNamesTheDeploymentAsItsIssuer
+    deviations:
+      - >-
+        The id_token is signed HS256 with the OAuth client secret and names the
+        deployment's -auth-public-url as its issuer. Slack signs RS256 and
+        publishes the key set and an OpenID discovery document; this
+        deployment serves neither, nor Slack's /openid/connect/authorize
+        route, so a relying party that discovers and verifies the token as it
+        does Slack's cannot verify it.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: >-
+        The id_token claimed https://slack.com as its issuer and is verified
+        differently from Slack's, so the behavior claim overstated what a
+        relying party pointed at this deployment can rely on.
+      evidence:
+        - source:internal/service/openid.go
+        - https://docs.slack.dev/reference/methods/openid.connect.token/
   - method: openid.connect.userInfo
     status: behavior-compatible
     provenance: slack-reference
@@ -2509,6 +2529,355 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
       - Enterprise organization and multi-workspace named-entity resolution has not been live-Slack qualified.
+  - method: admin.apps.mcp.servers.list
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.mcp.servers.list/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppsMCPServersFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/service:TestAdminMCPServersPagesTheApprovedAllowlist
+      - go-test:internal/appmanifest:TestParseReadsDeclaredMCPServers
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference documents no response body. Servers are returned under mcp_servers as objects with id, app_id, name and url, with response_metadata.next_cursor; these names are a local decision until Slack publishes the shape.
+      - Slack's manifest schema for declaring an MCP server is unpublished; servers are declared under features.mcp_servers with a unique name and an HTTPS url, and a server id is Amcp followed by a digest of the app id and name.
+      - The organization's MCP server allowlist is the app approval decision, so the servers of approved, undeleted apps are listed.
+      - feature_not_enabled is never emitted because the feature is always available.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
+  - method: admin.apps.mcp.servers.permissions.list
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.mcp.servers.permissions.list/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppsMCPServersFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/service:TestAdminSetMCPServerPermissionDropsEntitiesATypeDoesNotTake
+      - go-test:internal/appmanifest:TestParseReadsDeclaredMCPServers
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference documents no response body. The app's servers are returned under mcp_servers with id, app_id, name, url, permission_type and, for the named types, user_ids and usergroup_ids, beside app_id; these names are a local decision.
+      - feature_not_enabled is never emitted because the feature is always available.
+      - There is no MCP runtime, so the permissions are stored and reported but gate nothing.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
+  - method: admin.apps.mcp.servers.permissions.set
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.mcp.servers.permissions.set/
+    evidence:
+      - go-test:internal/api/slack:TestAdminAppsMCPServersFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/service:TestAdminSetMCPServerPermissionDropsEntitiesATypeDoesNotTake
+      - go-test:internal/domain:TestAnMCPServerRuleMayOnlyNarrowItsApp
+      - go-test:internal/store/memory:TestAppPermissionsContract
+      - go-test:internal/store/sqlstore:TestSQLiteAppPermissionsContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference documents no response body; a successful call answers ok alone.
+      - user_ids or usergroup_ids given with everyone or no_one are dropped rather than refused, as the automation permission methods do; the reference does not state the case.
+      - A server rule is checked against the app-level list when it is written. Under named_entities, everyone and named_entities_exclude are broader, and a named user must be on the app's list directly or through a listed user group.
+      - feature_not_enabled is never emitted because the feature is always available.
+      - There is no MCP runtime, so the permission is stored and reported but gates nothing.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
+  - method: admin.apps.permissions.add
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.add/
+    evidence:
+      - go-test:internal/service:TestAppAccessControlDecidesWhoMayInvokeAnApp
+      - go-test:internal/api/slack:TestAdminAppsPermissionsFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/service:TestAdminSetAppPermissionKeepsOrClearsTheChannelRestriction
+      - go-test:internal/domain:TestAppPermissionCheckHoldsTheAccessControlInvariant
+      - go-test:internal/store/memory:TestAppPermissionsContract
+      - go-test:internal/store/sqlstore:TestSQLiteAppPermissionsContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference documents no response body; the method answers the same permission_type, user_ids/usergroup_ids and channel_restriction_mode/channel_ids shape that admin.apps.permissions.remove and .set document.
+      - The reference states a 50-user maximum per call but no ceiling for the accumulated list; the accumulated list is held to admin.apps.permissions.set's 200-user maximum and answers too_many_named_entities beyond it.
+      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - failed_to_update_channels is never emitted because the list and its channels are written in one transaction, so a storage failure is reported with the shared engine codes instead.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
+  - method: admin.apps.permissions.list
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.list/
+    evidence:
+      - go-test:internal/service:TestAppAccessControlDecidesWhoMayInvokeAnApp
+      - go-test:internal/api/slack:TestAdminAppsPermissionsFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/store/memory:TestAppPermissionsContract
+      - go-test:internal/store/sqlstore:TestSQLiteAppPermissionsContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference says a named_entities response includes the users and user groups but does not name the fields; they are reported as user_ids and usergroup_ids, the argument names .add, .remove and .set take, and the channel restriction in the shape .set documents.
+      - invalid_permission_type (an ACL holding an invalid type) cannot occur because the stored type is validated on every write.
+      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
+  - method: admin.apps.permissions.remove
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.remove/
+    evidence:
+      - go-test:internal/service:TestAppAccessControlDecidesWhoMayInvokeAnApp
+      - go-test:internal/service:TestAdminRemoveAppPermissionEntitiesRemovesADeactivatedMember
+      - go-test:internal/api/slack:TestAdminAppsPermissionsFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/domain:TestAppPermissionCheckHoldsTheAccessControlInvariant
+      - go-test:internal/store/memory:TestAppPermissionsContract
+      - go-test:internal/store/sqlstore:TestSQLiteAppPermissionsContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - Removing the last user or user group from a named_entities list is refused with named_entities_cannot_be_empty, which is this local reading of that documented code; a usergroup_ids entry naming a group not on the list is a no-op because the reference declares no user-group error for remove.
+      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - failed_to_update_channels is never emitted because the list and its channels are written in one transaction, so a storage failure is reported with the shared engine codes instead.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
+  - method: admin.apps.permissions.set
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.set/
+    evidence:
+      - go-test:internal/service:TestAppAccessControlDecidesWhoMayInvokeAnApp
+      - go-test:internal/api/slack:TestAdminAppsPermissionsFollowTheSlackReference
+      - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
+      - go-test:internal/service:TestAdminSetAppPermissionKeepsOrClearsTheChannelRestriction
+      - go-test:internal/domain:TestAppPermissionCheckHoldsTheAccessControlInvariant
+      - go-test:internal/store/memory:TestAppPermissionsContract
+      - go-test:internal/store/sqlstore:TestSQLiteAppPermissionsContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - Omitting channel_restriction_mode keeps the app's current channel restriction, and channel_ids without a listing mode (omitted or all_channels) is refused with invalid_channel_restriction_mode; the reference does not state either case.
+      - channel_restrictions_not_available is never emitted because every workspace here can configure channel restrictions.
+      - More than 200 channel_ids is refused with invalid_arguments; the reference states the maximum but no code for it.
+      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
+  - method: admin.conversations.bulkSetProperties
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkSetProperties/
+    evidence:
+      - go-test:internal/api/slack:TestAdminConversationsBulkSetPropertiesSetsTheChannelsThatExist
+      - go-test:internal/domain:TestParseConversationPropertyUsesTheReferenceCodes
+      - go-test:internal/store/sqlstore:TestSQLiteExistingConversationsExcludedFromAI
+      - go-test:internal/store/memory:TestExistingConversationsExcludedFromAI
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The reference names exclude_from_slack_ai only as its example and lists no other property, so that is the one property accepted (the flag admin.conversations.bulkSetExcludeFromSlackAi writes); every other key answers property_not_allowed, and a value that is not a JSON boolean answers invalid_arguments.
+      - The reference documents no response body and reserves no_valid_channels for a request whose channels are all invalid, so the channels of the workspace are set, the others are skipped in the same transaction, and a successful request answers only {"ok":true}; which channels were skipped is not reported. An invalid channel is one that is not a conversation of the caller's workspace; the property applies to every conversation type here, so disallowed_action is never returned.
+      - The change is applied synchronously in one transaction, so action_already_in_progress is never returned; feature_not_enabled and restricted_plan_level are never returned because this deployment has no plan tiers. A non-administrator answers restricted_action and a bot token not_allowed_token_type. Enterprise organization behavior and live-Slack outcomes remain unqualified.
+  - method: admin.usergroups.addUsers
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.addUsers/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUserGroupsAddRemoveAndUploadUsers
+      - go-test:internal/api/slack:TestAdminUserGroupsRefuseBotTokensAndMembers
+      - go-test:internal/service:TestAdminAddUserGroupUsersAddsMembersAndListsTheRefused
+      - go-test:internal/store/sqlstore:TestSQLiteOrganizationUserGroups
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - 'This deployment has no Enterprise Grid organization above its workspace: the organization is the single workspace, so team_id and enterprise_id both name it and an organization administrator is that workspace''s administrator or owner. The Enterprise and platform conditions behind not_an_enterprise, enterprise_is_restricted, feature_not_enabled, team_access_not_granted, org_login_required, team_added_to_org, ekm_access_denied, two_factor_setup_required, accesslimited, deprecated_endpoint and method_deprecated never arise, so those codes are never emitted.'
+      - 'No group here is managed by an identity provider (is_idp_group is always false), so the SCIM-managed branch of restricted_action never arises; restricted_action is the answer to a caller who is not an administrator.'
+      - 'Slack does not document the member limit for a visible group, so it is not enforced: member_count_would_exceed_visible_limit is never emitted.'
+      - 'There are no role-assignment groups, so cannot_modify_role_admin is never emitted.'
+      - 'The reference does not say which users are listed in invalid_users and which fail the call. Here a user who is not an active member of the organization (unknown, deactivated, or of another workspace) fails the whole call with user_not_found and changes nothing; a guest is listed with reason guest_user while the others are added; a call in which every user is a guest is invalid_users.'
+      - 'users is accepted as a comma-separated string, a JSON-encoded array string, or a JSON array in a JSON body; more than 15000 users or none is invalid_arguments.'
+      - 'The documented rate-limit tier is not enforced per method beyond the Web API''s uniform per-method budget.'
+  - method: admin.usergroups.create
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.create/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUserGroupsCreateFetchAndUpdateReturnTheSubteam
+      - go-test:internal/api/slack:TestAdminUserGroupsRefuseBotTokensAndMembers
+      - go-test:internal/service:TestAdminCreateUserGroupMakesAnOrganizationGroup
+      - go-test:internal/store/sqlstore:TestSQLiteOrganizationUserGroups
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - 'This deployment has no Enterprise Grid organization above its workspace: the organization is the single workspace, so team_id and enterprise_id both name it and an organization administrator is that workspace''s administrator or owner. The Enterprise and platform conditions behind not_an_enterprise, enterprise_is_restricted, feature_not_enabled, team_access_not_granted, org_login_required, team_added_to_org, ekm_access_denied, two_factor_setup_required, accesslimited, deprecated_endpoint and method_deprecated never arise, so those codes are never emitted.'
+      - 'No group here is managed by an identity provider (is_idp_group is always false), so the SCIM-managed branch of restricted_action never arises; restricted_action is the answer to a caller who is not an administrator.'
+      - 'handle_already_exists and name_already_exists are checked against the workspace''s other user groups (names without regard to case); a handle that collides with another kind of entity is not refused. A group created without a handle is given one derived from its name, as usergroups.create does.'
+      - 'is_visible defaults to true when omitted; the reference states no default.'
+      - 'is_visible is stored and reported, but the reference does not say what hiding a group changes, so a hidden group is still listed by usergroups.list and can still be mentioned by its handle.'
+      - 'The documented rate-limit tier is not enforced per method beyond the Web API''s uniform per-method budget.'
+  - method: admin.usergroups.fetch
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.fetch/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUserGroupsCreateFetchAndUpdateReturnTheSubteam
+      - go-test:internal/api/slack:TestAdminUserGroupsRemoveTeams
+      - go-test:internal/api/slack:TestAdminUserGroupsRefuseBotTokensAndMembers
+      - go-test:internal/service:TestAdminCreateUserGroupMakesAnOrganizationGroup
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - 'This deployment has no Enterprise Grid organization above its workspace: the organization is the single workspace, so team_id and enterprise_id both name it and an organization administrator is that workspace''s administrator or owner. The Enterprise and platform conditions behind not_an_enterprise, enterprise_is_restricted, feature_not_enabled, team_access_not_granted, org_login_required, team_added_to_org, ekm_access_denied, two_factor_setup_required, accesslimited, deprecated_endpoint and method_deprecated never arise, so those codes are never emitted.'
+      - 'No group here is managed by an identity provider (is_idp_group is always false), so the SCIM-managed branch of restricted_action never arises; restricted_action is the answer to a caller who is not an administrator.'
+      - 'Any user group of the workspace may be fetched, as admin.usergroups.listChannels reads any; one usergroups.create made reports is_org_level false. teams lists the workspaces admin.usergroups.addTeams assigned the group to.'
+      - 'The documented rate-limit tier is not enforced per method beyond the Web API''s uniform per-method budget.'
+  - method: admin.usergroups.removeTeams
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.removeTeams/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUserGroupsRemoveTeams
+      - go-test:internal/api/slack:TestAdminUserGroupsRefuseBotTokensAndMembers
+      - go-test:internal/service:TestAdminUserGroupTeamsAreRecorded
+      - go-test:internal/store/sqlstore:TestSQLiteOrganizationUserGroups
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - 'This deployment has no Enterprise Grid organization above its workspace: the organization is the single workspace, so team_id and enterprise_id both name it and an organization administrator is that workspace''s administrator or owner. The Enterprise and platform conditions behind not_an_enterprise, enterprise_is_restricted, feature_not_enabled, team_access_not_granted, org_login_required, team_added_to_org, ekm_access_denied, two_factor_setup_required, accesslimited, deprecated_endpoint and method_deprecated never arise, so those codes are never emitted.'
+      - 'No group here is managed by an identity provider (is_idp_group is always false), so the SCIM-managed branch of restricted_action never arises; restricted_action is the answer to a caller who is not an administrator.'
+      - 'The organization''s only workspace is the token''s own, so any other team ID is invalid_team_ids. The reference does not give the shape of the errors field; it is the list of the invalid team IDs.'
+      - 'A missing usergroup_id, or more than 100 team IDs, is invalid_arguments; an empty team_ids is no_team_ids_given.'
+      - 'The documented rate-limit tier is not enforced per method beyond the Web API''s uniform per-method budget.'
+  - method: admin.usergroups.removeUsers
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.removeUsers/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUserGroupsAddRemoveAndUploadUsers
+      - go-test:internal/api/slack:TestAdminUserGroupsRefuseBotTokensAndMembers
+      - go-test:internal/service:TestAdminRemoveUserGroupUsersRemovesOnlyThoseNamed
+      - go-test:internal/store/sqlstore:TestSQLiteOrganizationUserGroups
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - 'This deployment has no Enterprise Grid organization above its workspace: the organization is the single workspace, so team_id and enterprise_id both name it and an organization administrator is that workspace''s administrator or owner. The Enterprise and platform conditions behind not_an_enterprise, enterprise_is_restricted, feature_not_enabled, team_access_not_granted, org_login_required, team_added_to_org, ekm_access_denied, two_factor_setup_required, accesslimited, deprecated_endpoint and method_deprecated never arise, so those codes are never emitted.'
+      - 'No group here is managed by an identity provider (is_idp_group is always false), so the SCIM-managed branch of restricted_action never arises; restricted_action is the answer to a caller who is not an administrator.'
+      - 'invalid_users is never emitted: the reference does not say which users cannot be removed, no member here is un-removable, and removing a user who is not in the group succeeds without change, as admin.usergroups.removeChannels does for a channel. A user of no account in the organization is user_not_found and changes nothing; a deactivated member may be removed.'
+      - 'users is accepted as a comma-separated string, a JSON-encoded array string, or a JSON array in a JSON body; more than 15000 users or none is invalid_arguments.'
+      - 'The documented rate-limit tier is not enforced per method beyond the Web API''s uniform per-method budget.'
+  - method: admin.usergroups.update
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.update/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUserGroupsCreateFetchAndUpdateReturnTheSubteam
+      - go-test:internal/api/slack:TestAdminUserGroupsRefuseBotTokensAndMembers
+      - go-test:internal/service:TestAdminUpdateUserGroupChangesOnlyWhatItNames
+      - go-test:internal/store/sqlstore:TestSQLiteOrganizationUserGroups
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - 'This deployment has no Enterprise Grid organization above its workspace: the organization is the single workspace, so team_id and enterprise_id both name it and an organization administrator is that workspace''s administrator or owner. The Enterprise and platform conditions behind not_an_enterprise, enterprise_is_restricted, feature_not_enabled, team_access_not_granted, org_login_required, team_added_to_org, ekm_access_denied, two_factor_setup_required, accesslimited, deprecated_endpoint and method_deprecated never arise, so those codes are never emitted.'
+      - 'No group here is managed by an identity provider (is_idp_group is always false), so the SCIM-managed branch of restricted_action never arises; restricted_action is the answer to a caller who is not an administrator.'
+      - 'Slack does not document the member limit for a visible group, so too_many_usergroup_members_to_make_visible is never emitted.'
+      - 'is_visible is stored and reported, but the reference does not say what hiding a group changes, so a hidden group is still listed by usergroups.list and can still be mentioned by its handle.'
+      - 'The reference does not name the preference cannot_modify_pref_after_creation protects, and the method takes no channels, so neither it nor user_channel_limit_exceeded is emitted.'
+      - 'Every group here has a handle. Naming an empty handle for a group that is or becomes visible is visible_group_needs_handle; for a hidden group it is invalid_arguments, because a handle cannot be removed.'
+      - 'Name and handle collisions are checked against the workspace''s other user groups only, as for admin.usergroups.create. An argument that is present but empty clears the description.'
+      - 'The documented rate-limit tier is not enforced per method beyond the Web API''s uniform per-method budget.'
+  - method: admin.usergroups.uploadUsers
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.usergroups.uploadUsers/
+    evidence:
+      - go-test:internal/api/slack:TestAdminUserGroupsAddRemoveAndUploadUsers
+      - go-test:internal/api/slack:TestAdminUserGroupsRefuseBotTokensAndMembers
+      - go-test:internal/service:TestAdminUploadUserGroupUsersReadsTheCSV
+      - go-test:internal/domain:TestParseUserGroupCSV
+      - go-test:internal/store/sqlstore:TestSQLiteOrganizationUserGroups
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - 'This deployment has no Enterprise Grid organization above its workspace: the organization is the single workspace, so team_id and enterprise_id both name it and an organization administrator is that workspace''s administrator or owner. The Enterprise and platform conditions behind not_an_enterprise, enterprise_is_restricted, feature_not_enabled, team_access_not_granted, org_login_required, team_added_to_org, ekm_access_denied, two_factor_setup_required, accesslimited, deprecated_endpoint and method_deprecated never arise, so those codes are never emitted.'
+      - 'No group here is managed by an identity provider (is_idp_group is always false), so the SCIM-managed branch of restricted_action never arises; restricted_action is the answer to a caller who is not an administrator.'
+      - 'Slack does not document the member limit for a visible group, so it is not enforced: member_count_would_exceed_visible_limit is never emitted.'
+      - 'There are no role-assignment groups, so cannot_modify_role_admin is never emitted.'
+      - 'The file is read from a form or JSON string argument, or from a multipart file part. Each record is a member ID and an optional email address, the user being found by email when the ID is empty; a first record naming the columns is skipped. More than two columns, an empty record, or malformed CSV is unable_to_parse_csv. An omitted file names no users and is no_valid_users.'
+      - 'A row naming nobody who is an active member of the organization is listed in invalid_users with reason user_not_found (its member ID, or its email address when it gave none), and a guest with reason guest_user; the reference shows only guest_user. successful_user_count counts the distinct users the file names who are members of the group afterwards, including any who already were.'
+      - 'The documented rate-limit tier is not enforced per method beyond the Web API''s uniform per-method budget.'
+  - method: agents.sessions.rename
+    status: schema-compatible
+    evidence:
+      - go-test:internal/api/slack:TestAgentsSessionsRenameAnswersTheReferenceShapes
+      - go-test:internal/service:TestAgentSessionRenameIsTheAgentsOwn
+      - go-test:internal/store/memory:TestAgentSessionsKeepTheSharedContract
+      - go-test:internal/store/sqlstore:TestSQLiteAgentSessionsKeepTheSharedContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - Not sdk-compatible because the pinned official SDKs (@slack/web-api 8.0.0, slack_sdk 3.43.0) predate the method; @slack/web-api 8.2.0 and slack_sdk 3.44.1 declare it, and the argument names were checked against @slack/web-api 8.2.0's AgentsSessionsRenameArguments, but no pinned SDK suite calls it.
+      - Session channels do not exist here, so every session is a thread session. A missing thread_ts is always thread_ts_required, and thread_ts_not_allowed, invalid_name, name_taken and is_archived — the codes for renaming a session channel — are never produced. channel_id is required (invalid_arguments when absent) even though the page makes it optional outside public channels, because the page does not say how the session is found without it.
+      - An agent's own rename is journaled for the first-party client only; agent_session_title_changed is sent for a member's change from the client, as the event page describes, never for the app's own rename. Renaming to the current title changes nothing and is reported to nobody.
+      - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited follows the deployment's shared Web API limiter rather than a per-method Tier 3 budget.
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/agents.sessions.rename/
+  - method: agents.sessions.setStatus
+    status: schema-compatible
+    evidence:
+      - go-test:internal/api/slack:TestAgentsSessionsSetStatusAnswersTheReferenceShapes
+      - go-test:internal/service:TestAgentSessionSetStatusFollowsTheReference
+      - go-test:internal/service:TestAgentSessionIdentityOverridesTravelAsOneSet
+      - go-test:internal/service:TestStoppingASessionSendsAgentSessionStoppedAndLeavesTheStatus
+      - go-test:internal/store/memory:TestAgentSessionsKeepTheSharedContract
+      - go-test:internal/store/sqlstore:TestSQLiteAgentSessionsKeepTheSharedContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+      - go-test:internal/web:TestTheThreadPaneShowsTheAgentSessionAndItsControls
+      - go-test:tests/lifecycle:TestTheProductRefusesEveryTransitionTheMachineForbids
+    deviations:
+      - Not sdk-compatible because the pinned official SDKs (@slack/web-api 8.0.0, slack_sdk 3.43.0) predate the method; @slack/web-api 8.2.0 and slack_sdk 3.44.1 declare it, and the argument names were checked against @slack/web-api 8.2.0's AgentsSessionsSetStatusArguments, but no pinned SDK suite calls it.
+      - Session channels do not exist here, so every session is a thread session scoped to a live top-level message of the conversation (another thread_ts is invalid_arguments when it would create a session); thread_ts_not_allowed is never produced, and channel_id is required (invalid_arguments when absent) because the page does not say how a session is found without it.
+      - The page requires initiator_user_id to be a member of the channel without naming a code; a non-member is invalid_arguments, and an unknown user is user_not_found as listed.
+      - The missing_agent_session_stopped_event_subscription warning is answered, as the agent_session_stopped page states, on every call while the app's manifest subscribes to neither the bot nor the user event, in both `warning` and `response_metadata.warnings`; the page calls it a warning, so the call still succeeds. `title` is omitted from the response while the session has none.
+      - The agent's icon_emoji, icon_url and username are stored with the page's set semantics (a JSON null is the same as leaving one out) and shown in the first-party session panel; they do not restyle the app's messages.
+      - The agent_session_stopped page lets an app leave processing with chat.stopStream, but no page says which status that sets, so chat.stopStream does not change a session's status here; the app moves it with this method.
+      - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited follows the deployment's shared Web API limiter rather than a per-method Tier 3 budget.
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/agents.sessions.setStatus/
+  - method: apps.managed.permissions.set
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.managed.permissions.set/
+    evidence:
+      - go-test:internal/api/slack:TestAppsManagedPermissionsSetFollowsTheSlackReference
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - There is no manager-app or partner-platform model. Every app is created by its developer through apps.manifest.*, so no app is managed. After the configuration token, app_id and permissions are validated, an app the token's user owns answers app_not_managed and any other app answers app_not_found; app_not_owned_by_manager_app, app_owner_not_found, manager_app_not_eligible, enterprise_only_feature and feature_not_enabled are never emitted, and no success response (the stored or current permissions) is ever produced.
+      - The reference's description speaks of a user token from the manager app while its token section names a configuration token with app_configurations:write; the method authenticates the configuration token, as apps.manifest.* does.
+      - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
+  - method: canvases.getContent
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/canvases.getContent/
+    evidence:
+      - go-test:internal/api/slack:TestCanvasesGetContentReturnsMarkdownAndHTML
+      - go-test:internal/domain:TestCanvasDocumentMarkdownRoundTripsThroughTheCreateSplitter
+      - go-test:internal/domain:TestCanvasDocumentMarkdownMatchesTheReferenceExample
+      - go-test:internal/domain:TestCanvasDocumentHTMLUsesTheSharedRendererAndEscapesEverything
+    deviations:
+      - The reference does not show its HTML, so html is this deployment's rendering of the canvas (domain.CanvasDocumentHTML, the renderer the product's reading view uses), with a heading section as h1-h3, checklists as disabled checkboxes and a mention as a span naming the member id; it is not byte-compatible with Slack's HTML.
+      - Markdown is the stored sections joined by blank lines, headings as "#" lines, which canvases.create reads back to the same sections; section kinds this deployment does not model beyond h1-h3 and markdown are returned as their text. A stored body that cannot be decoded answers internal_error. canvas_disabled_user_team is never returned because canvases cannot be disabled per workspace here.
+  - method: oauth.v2.beginShortTokenRotation
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/oauth.v2.beginShortTokenRotation/
+    evidence:
+      - go-test:internal/api/slack:TestShortTokenRotationReplacesTheSecretOnlyWhenCompleted
+      - go-test:internal/api/slack:TestShortTokenRotationAnswersEachDeclaredRefusal
+      - go-test:internal/domain:TestShortSecretFollowsTheReferenceExamples
+      - go-test:internal/domain:TestLengthenTokenSecretKeepsEverySectionButTheSecret
+      - go-test:internal/store/sqlstore:TestSQLiteShortTokenRotation
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - This deployment did not exist before August 19, 2016 and keeps no token creation time, so eligibility is the test the reference gives for tokens of unknown age, a secret (the section after the final "-") shorter than 32 characters, and a token whose secret is 32 or longer answers token_too_long. The xoxp- tokens this deployment issues carry a 20-character hexadecimal secret, which that test calls short, so each of them may be rotated once to a 32-character secret; a token in Slack's pre-2016 sectioned form (xoxp-111-222-333-d6bc76) keeps its sections exactly as the reference describes.
+      - Only a non-expiring user token beginning xoxp- is rotated; a bot, execution-scoped or expiring rotating (xoxe.xoxp-) token answers not_allowed_token_type. The token authenticates the request like any other (not_authed, invalid_auth, token_revoked, token_expired, account_inactive) before client_id and client_secret are checked; a token issued to another app answers invalid_client_id. Beginning again replaces the pending replacement. Live-Slack outcomes remain unqualified.
+  - method: oauth.v2.completeShortTokenRotation
+    status: schema-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/oauth.v2.completeShortTokenRotation/
+    evidence:
+      - go-test:internal/api/slack:TestShortTokenRotationReplacesTheSecretOnlyWhenCompleted
+      - go-test:internal/api/slack:TestShortTokenRotationAnswersEachDeclaredRefusal
+      - go-test:internal/store/sqlstore:TestSQLiteShortTokenRotation
+      - go-test:internal/store/memory:TestShortTokenRotation
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - The pending rotation is durable (schema 196) and completable for ten minutes; after that, or with nothing begun, the answer is rotation_not_found. A new_token other than the one begin issued answers invalid_token and a missing one invalid_arguments. Completion moves the original credential to the replacement's hash in one transaction, so the original answers invalid_auth afterwards rather than token_revoked, and no tokens_revoked event is sent for it. Eligibility and authentication follow oauth.v2.beginShortTokenRotation's recorded deviation. Live-Slack outcomes remain unqualified.
 
 decisions:
   # The two Events-API sources above are pinned and hashed, and until this entry
@@ -2536,7 +2905,12 @@ decisions:
       its current-catalog user_profile_changed and user_status_changed
       companions, dnd_updated, presence_change (RTM only), team_rename and
       file_public, each from a producer-snapshotted payload pinned by builder
-      and producer-seam tests. The user object team_join and user_change carry
+      and producer-seam tests. user_guest_status_changed (current catalog,
+      users:read, Events API and Socket Mode only) is minted by the store
+      inside the mutation that ends a guest tier (admin.users.setRegular,
+      setAdmin, setOwner and the admin page's role control) or deactivates
+      an active guest (admin.users.remove, the admin page's Disable, guest
+      expiry), with the user object as the change leaves it and cache_ts. The user object team_join and user_change carry
       is users.info's own (internal/slackobject), and every URL an event
       carries — a file's url_private, a user's image_* — is built on
       -auth-public-url at delivery, origin-relative when none is configured. user_typing is delivered on RTM and on the

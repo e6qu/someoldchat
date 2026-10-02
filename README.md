@@ -24,23 +24,23 @@ request-triggered restoration for deployments that support scale-to-zero.
 
 - Slack compatibility is derived from pinned published specifications, official
   open-source SDKs, current documentation, and recorded behavioral evidence.
-- SQLite and PostgreSQL are explicit SQL storage profiles; dqlite is the
-  explicit replicated SQLite-compatible profile and requires the `dqlite` build
-  tag plus native libraries.
+- Storage is selected explicitly with `-store memory|sqlite|postgresql|dqlite`.
+  These are operating modes, not fallbacks; unsupported or incomplete
+  configuration fails at startup. dqlite requires the `dqlite` build tag and
+  native libraries.
 - All paid SameOldChat compute, including database processes, can hibernate at
-  zero after a snapshot is independently verified.
-- A small logical activator endpoint remains reachable to restore the stack.
+  zero after a snapshot is independently verified. A small logical activator
+  endpoint remains reachable to restore the stack.
 - Runtime and build inputs use the newest eligible stable release only after a
   mandatory 24-hour publication quarantine.
 - The repository contains deployment guidance for Linux virtual machines,
   Amazon Elastic Container Service (ECS) on AWS Fargate, Google Cloud Run, and
-  Azure Container Apps. The two Amazon ECS Terraform modules —
+  Azure Container Apps. Only Amazon ECS ships Terraform:
   [`terraform/ecs-runtime`](terraform/ecs-runtime/README.md) for durable
   application resources and
   [`deploy/ecs-scale-zero`](deploy/ecs-scale-zero/README.md) for
-  request-triggered activation — are the current provider-specific
-  infrastructure implementation; the other profiles ship no templates and
-  require their stated qualification work.
+  request-triggered activation. The other profiles require their stated
+  qualification work.
 - The production container uses standard OpenID Connect discovery, so a
   conforming identity provider is configured by issuer URL rather than by a
   cloud-specific integration.
@@ -48,23 +48,34 @@ request-triggered restoration for deployments that support scale-to-zero.
 The documents distinguish implemented behavior from qualification work. The same
 module interfaces support direct Go calls in local composition
 (`-chat-mode local`) and generated gRPC adapters in distributed composition
-(`-chat-mode grpc`); see [Terminology](docs/terminology.md).
+(`-chat-mode grpc`); see [Terminology](docs/terminology.md) and
+[separable module architecture](docs/modules.md).
 
-## License
+## Binaries
 
-SameOldChat is licensed under the GNU Affero General Public License, version 3
-or any later version. See [LICENSE](LICENSE).
+`make build` writes these to `bin/`; their roles and contracts are in
+[Architecture](docs/architecture.md).
+
+| Binary | Source | Role |
+|---|---|---|
+| `sameoldchat` | `cmd/server` | web UI and Slack-compatible API |
+| `sameoldchat-chatd` | `cmd/chatd` | chat module behind gRPC in distributed composition |
+| `sameoldchat-worker` | `cmd/worker` | outbox, scheduled-message, and reminder delivery |
+| `sameoldchat-socketmode-worker` | `cmd/socketmode-worker` | Socket Mode response delivery |
+| `sameoldchat-blobgc` | `cmd/blobgc` | blob cleanup and reconciliation audit |
+| `sameoldchat-activator` | `cmd/activator` | wake coordinator and reverse proxy |
+| `sameoldchat-ecs-ws-activator` | `cmd/ecs-ws-activator` | WebSocket edge for `deploy/ecs-scale-zero` |
 
 ## Development commands
 
 ```sh
 make check                  # every offline gate, including go vet and the activator tests
-make check-full             # adds the Terraform, vulnerability, race, load, and fuzz gates
-# check-full covers the CI `go`, `terraform`, and `scale-zero-artifacts` jobs. It
-# deliberately does not reach `sdk`, `browser`, `shauth-sso`, `dqlite`, or
-# `postgres`, or the dual-architecture edge image build, each of which needs a
-# service, a second language runtime, or a container build; run those explicitly.
-make module-startup-check   # starts the server with terraform/ecs-runtime's own outputs
+make check-full             # adds Terraform, vulnerability, race, load, mutation, and fuzz gates
+# check-full covers the CI `go`, `race`, `mutation`, and `terraform` jobs and the
+# activator tests of `scale-zero-artifacts`. It does not run the `sdk`,
+# `browser`, `shauth-sso`, `dqlite`, or `postgres` jobs or the dual-architecture
+# edge image build; each needs a service, a second language runtime, or a
+# container build, so run those explicitly.
 # The two ratchets compare against a base revision, so they take BASE_REF and are
 # not part of `make check`. CI runs both with the pull request's base branch.
 make contract-ratchet BASE_REF=origin/main   # Slack HTTP compatibility ledger
@@ -75,17 +86,15 @@ make build
 make build-static
 make run                    # local composition, memory store, dev credentials, and a .cache/dev-blobs file store
 ./bin/sameoldchat -chat-mode local -store sqlite -db 'file:sameoldchat.db' \
+  -app-credential-key-hex "$SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX" \
   -api-token "$SAMEOLDCHAT_API_TOKEN" -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 ```
 
-The `sameoldchat-socketmode-worker` binary claims durable Socket Mode
-responses and delivers them to an explicitly configured HTTP destination. It
-requires `-store`, `-app-id`, `-owner`, and `-response-url`, together with
-the storage settings for the selected backend. A delivery failure releases
-the response at the configured retry time; a process crash leaves the lease
-for another replica to reclaim.
+Every durable store (anything but `memory`) requires `-app-credential-key-hex`.
+`sameoldchat -check-config` validates the full startup configuration and exits
+without opening a store or binding a listener.
 
-Storage selection is mandatory. `memory` and `sqlite` are separate operating
-modes, not fallback behavior; unsupported or incomplete configuration fails at
-startup. The architecture also treats typed domain values, boundary
-normalization, minimal seams, and easy deletion as correctness constraints.
+## License
+
+SameOldChat is licensed under the GNU Affero General Public License, version 3
+or any later version. See [LICENSE](LICENSE).

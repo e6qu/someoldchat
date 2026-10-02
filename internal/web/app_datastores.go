@@ -13,7 +13,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -284,7 +284,7 @@ func (h Handler) developerDatastoreDefinition(r *http.Request, principal auth.Pr
 		return domain.App{}, appmanifest.Parsed{}, appmanifest.Datastore{}, fmt.Errorf("%w: the saved manifest is invalid", store.ErrConflict)
 	}
 	if len(parsed.Datastores) == 0 {
-		return domain.App{}, appmanifest.Parsed{}, appmanifest.Datastore{}, service.ErrAppDatastoreNotFound
+		return domain.App{}, appmanifest.Parsed{}, appmanifest.Datastore{}, domain.ErrAppDatastoreNotFound
 	}
 	if requestedName == "" {
 		names := make([]string, 0, len(parsed.Datastores))
@@ -296,7 +296,7 @@ func (h Handler) developerDatastoreDefinition(r *http.Request, principal auth.Pr
 	}
 	definition, exists := parsed.Datastores[requestedName]
 	if !exists {
-		return domain.App{}, appmanifest.Parsed{}, appmanifest.Datastore{}, service.ErrAppDatastoreNotFound
+		return domain.App{}, appmanifest.Parsed{}, appmanifest.Datastore{}, domain.ErrAppDatastoreNotFound
 	}
 	return app, parsed, definition, nil
 }
@@ -319,14 +319,14 @@ func cloneQuery(values url.Values) url.Values {
 
 func developerDatastoreStatus(err error) int {
 	switch {
-	case errors.Is(err, service.ErrInvalidDatastoreItem),
-		errors.Is(err, service.ErrInvalidDatastoreQuery),
+	case errors.Is(err, domain.ErrInvalidDatastoreItem),
+		errors.Is(err, domain.ErrInvalidDatastoreQuery),
 		errors.Is(err, store.ErrInvalidArgument),
 		errors.Is(err, domain.ErrInvalidCursor):
 		return http.StatusBadRequest
-	case errors.Is(err, service.ErrAppNotHosted), errors.Is(err, store.ErrConflict):
+	case errors.Is(err, domain.ErrAppNotHosted), errors.Is(err, store.ErrConflict):
 		return http.StatusConflict
-	case errors.Is(err, service.ErrAppDatastoreNotFound), errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, domain.ErrAppDatastoreNotFound), errors.Is(err, store.ErrNotFound):
 		return http.StatusNotFound
 	default:
 		return http.StatusServiceUnavailable
@@ -335,15 +335,15 @@ func developerDatastoreStatus(err error) int {
 
 func developerDatastoreError(err error) string {
 	switch {
-	case errors.Is(err, service.ErrInvalidDatastoreItem):
+	case errors.Is(err, domain.ErrInvalidDatastoreItem):
 		return "The item does not match the datastore schema. Check its primary key, attribute names, types, and JSON syntax."
-	case errors.Is(err, service.ErrInvalidDatastoreQuery):
+	case errors.Is(err, domain.ErrInvalidDatastoreQuery):
 		return "The query is invalid. Check its expression, attribute aliases, values, and supported Slack operators."
 	case errors.Is(err, domain.ErrInvalidCursor), errors.Is(err, store.ErrInvalidArgument):
 		return "The datastore request is invalid. Start again without the cursor and check each field."
-	case errors.Is(err, service.ErrAppNotHosted):
+	case errors.Is(err, domain.ErrAppNotHosted):
 		return "This datastore is unavailable because the app is not configured as a Slack-hosted app."
-	case errors.Is(err, service.ErrAppDatastoreNotFound):
+	case errors.Is(err, domain.ErrAppDatastoreNotFound):
 		return "That datastore is not declared in this app's current manifest."
 	case errors.Is(err, store.ErrConflict):
 		return "The app manifest is inconsistent. Save a valid hosted-app manifest before managing data."

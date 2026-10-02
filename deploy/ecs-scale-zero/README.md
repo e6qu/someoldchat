@@ -1,7 +1,9 @@
 # ECS scale-to-zero
 
-This is the current Amazon Elastic Container Service (ECS) infrastructure
-module. See the [deployment guide](../../docs/deployment.md),
+This module deploys SameOldChat's HTTP and WebSocket tiers on Amazon Elastic
+Container Service (ECS) with scale-to-zero. Its sibling
+[`terraform/ecs-runtime`](../../terraform/ecs-runtime/README.md) owns the
+durable application resources. See the [deployment guide](../../docs/deployment.md),
 [hosting specification](../../specs/hosting.md), and
 [scale-to-zero specification](../../specs/scale-to-zero.md) for the
 provider-neutral requirements.
@@ -12,21 +14,18 @@ tasks with `ecs:RunTask`, waits for the task ENI and `/readyz`, then forwards
 the original HTTP request. When no request is active, the application has zero
 running tasks.
 
-Configure the AWS provider in the parent configuration and call this directory as a child module. The module intentionally does not configure a provider itself.
-There is deliberately no `region` input: the module reads `data.aws_region.current`
-for every `awslogs-region` and dashboard widget. A separate input could disagree
-with the provider's region, and a root module that passed the wrong one planned
-and applied cleanly and then failed every task start with
-`ResourceInitializationError: failed to validate logger args`, because the log
-group was created in one region and the awslogs driver targeted another.
+Configure the AWS provider in the parent configuration and call this directory
+as a child module; the module does not configure a provider itself. There is
+deliberately no `region` input: the module reads `data.aws_region.current` for
+every `awslogs-region` and dashboard widget, because a separate input that
+disagreed with the provider's region would make every task start fail with
+`ResourceInitializationError: failed to validate logger args`.
 
 Every variable shown in the example below is required; the WebSocket tier is
-part of this module, not an optional add-on, so a call that omits those
-variables fails `terraform plan` with "No value for required variable". The
-module has roughly thirty further variables that do have defaults; see
-[`variables.tf`](variables.tf). `make module-docs-check` verifies both
-directions of this example: every variable without a default appears, and no
-argument names a variable the module does not declare.
+part of this module, not an optional add-on. The other variables have defaults;
+see [`variables.tf`](variables.tf). `make module-docs-check` verifies that the
+example passes every variable without a default and no variable the module does
+not declare, and `make module-example-check` runs `terraform validate` on it.
 
 ```hcl
 provider "aws" { region = "eu-central-1" }
@@ -74,7 +73,7 @@ There is deliberately no Application Load Balancer and no Amazon ECS service
 managing the application task count. The task definition is launched
 directly so the zero-task state is real. The activator is the always-available
 HTTP entry point; the application is stateless and must keep durable state in
-its configured store, which the variable validations below now enforce.
+its configured store, which the variable validations described below enforce.
 
 This module implements request-triggered ECS task activation and scale-down.
 It does not deploy `sameoldchat-activator` or perform the provider-neutral
@@ -84,18 +83,17 @@ the explicit `-snapshot-store s3` settings and permissions to use the selected
 snapshot bucket. The Lambda activator is not a substitute for that lifecycle
 component.
 
-Stated plainly, because it is the constraint the HTTP tier lives under: the
-Lambda's idle sweep stops application tasks with `ecs:StopTask`, which sends
-`SIGTERM` and then `SIGKILL` after the stop timeout. There is no fence, no
-drain, no snapshot, and no manifest — it is the ungated stop that
-[WebSockets](#websockets) below calls "the blind shutdown scale-to-zero
-forbids". That is safe only because the HTTP tier keeps no state in the task,
-and the module now enforces it rather than asking for it: `application_command`
-and `application_environment` reject `-store sqlite`, `-store dqlite`, `-db`,
+The HTTP tier lives under one constraint: the Lambda's idle sweep stops
+application tasks with `ecs:StopTask`, which sends `SIGTERM` and then `SIGKILL`
+after the stop timeout. There is no fence, no drain, no snapshot, and no
+manifest — it is the ungated stop that [WebSockets](#websockets) below calls
+"the blind shutdown scale-to-zero forbids". That is safe only because the HTTP
+tier keeps no state in the task, so `application_command` and
+`application_environment` reject `-store sqlite`, `-store dqlite`, `-db`,
 `-dqlite-*`, and `SAMEOLDCHAT_STORE=sqlite|dqlite` at plan time. Use
 `-store memory` or `-store postgresql`. Giving the HTTP tier the same
 lifecycle-activator delegation the WebSocket tier has would lift the
-restriction, and is not part of this module today.
+restriction; this module does not do that.
 
 The WebSocket tier is not merely compatible with that lifecycle activator, it
 **requires** one: the edge delegates every wake and hibernate decision to it
@@ -107,12 +105,21 @@ separate deployment paths inside this module. Neither transfers an
 already-established WebSocket between processes: the edge task terminates the
 client socket for its whole lifetime. See [WebSockets](#websockets) below.
 
-The image should be immutable (prefer a digest), contain `/readyz`, and start the server without migrations or other work that is not required for serving requests. `application_task_role_arn` is deliberately required: the application’s AWS permissions must be explicit.
+`application_image` and `websocket_application_image` run `cmd/server`, which
+is published as `ghcr.io/e6qu/someoldchat` (see
+[published container verification](../../docs/deployment.md#published-container-verification)).
+Pin the image by digest; it must serve `/readyz` and start the server without
+migrations or other work that is not required for serving requests.
+`application_task_role_arn` is deliberately required: the application's AWS
+permissions must be explicit.
 
 The worker is not scaled with the HTTP tier. It executes scheduled messages,
 personal and channel reminders, and installed-app events for every workspace
-from the shared PostgreSQL store, including while the request tier is at zero. Build
-`Dockerfile.worker` from the repository root and pin `worker_image` by digest.
+from the shared PostgreSQL store, including while the request tier is at zero.
+No worker image is published: build `Dockerfile.worker` from the repository
+root with
+`docker buildx build --platform linux/amd64 -f deploy/ecs-scale-zero/Dockerfile.worker .`
+and pin `worker_image` by digest.
 `worker_command` is validated to select PostgreSQL, the multi-workspace
 `slack-events` mode, and a unique lease owner. The service is a singleton and
 replacements do not overlap, because two tasks sharing that static owner would
@@ -126,13 +133,9 @@ for these ARNs. A customer-managed KMS key additionally requires a scoped
 
 `alarm_topic_arn` is required and receives alarms for activator errors and
 loss of all healthy WebSocket edge targets. The edge target group's health check
-is `GET /healthz` with a `200-299` matcher: `cmd/ecs-ws-activator` answers 204
-and `internal/activator` answers 200, and an exact `200` made every edge target
-permanently unhealthy, which with `deployment_minimum_healthy_percent = 100` and
-the deployment circuit breaker meant the service never converged and the alarm
-fired continuously. The module also creates a
-CloudWatch dashboard with activator, ECS task, and Network Load Balancer
-metrics.
+is `GET /healthz` with a `200-299` matcher, because `cmd/ecs-ws-activator`
+answers 204. The module also creates a CloudWatch dashboard with activator, ECS
+task, and Network Load Balancer metrics.
 
 The Lambda subnets must have a route to the ECS and DynamoDB APIs through NAT or the corresponding VPC endpoints. The application subnets must have ECR, CloudWatch Logs, and any application-store connectivity needed by the task. Fargate task startup is bounded by API Gateway’s HTTP integration timeout; keep the image small and pin its digest to reduce pull and bootstrap latency.
 
@@ -149,13 +152,14 @@ client → NLB TLS listener → websocket-edge ECS service (always on)
                          → proxied WebSocket → websocket application task
 ```
 
-`websocket_edge_image` must contain `cmd/ecs-ws-activator`; the repository includes `Dockerfile.websocket-edge`, built from the repository root with
+`websocket_edge_image` must contain `cmd/ecs-ws-activator`. No edge image is
+published: build `Dockerfile.websocket-edge` from the repository root with
 `docker buildx build --platform linux/amd64 -f deploy/ecs-scale-zero/Dockerfile.websocket-edge .`.
-The `--platform` argument matters: the task definitions declare
-`cpu_architecture = "X86_64"`, and the `scale-zero-artifacts` job in
-`.github/workflows/ci.yml` builds this file for both published architectures and
-asserts the resulting binary's machine type so a host-architecture binary cannot
-reach an image again. The edge accepts the upgrade, asks the lifecycle activator
+The `--platform` argument matters because the task definitions declare
+`cpu_architecture = "X86_64"`; the `scale-zero-artifacts` job in
+[`ci.yml`](../../.github/workflows/ci.yml) builds both Dockerfiles for
+`linux/amd64` and `linux/arm64` and asserts each binary's machine type. The
+edge accepts the upgrade, asks the lifecycle activator
 to wake the stack with `POST /activate`, waits for `/readyz` on a running task,
 performs the backend WebSocket handshake, and proxies messages in both
 directions. When the last connection closes and
@@ -197,15 +201,15 @@ The role supplied through `websocket_edge_task_role_arn` must allow the edge to
 `ecs:ListTasks` and `ecs:DescribeTasks` for the configured WebSocket application
 service, and to use `GetItem`, `PutItem`, `UpdateItem`, `DeleteItem`, `Scan`, and
 `TransactWriteItems` on the configured lifecycle table. It must **not** be
-granted `ecs:UpdateService`: the edge no longer changes the desired count, and
-the permission would only restore the blind-shutdown path. There is no IAM
+granted `ecs:UpdateService`: the edge does not change the desired count, and
+the permission would only open the blind-shutdown path. There is no IAM
 action for reaching the lifecycle activator; that call is authorized by the
 bearer token and needs only network reachability from the edge subnets. The role
 supplied through `application_task_role_arn` is separate and belongs to the
 application tasks. This module does not attach policies to either externally
 supplied role.
 
-### Known boundary
+### Known boundary: the Lambda role attaches an AWS-managed policy
 
 `aws_iam_role_policy.activator` is scoped to this deployment's log group, task
 ARNs, and lifecycle table, and its `iam:PassRole` statement is conditioned on
@@ -224,8 +228,12 @@ the stop decision. The edge also polls for idleness rather than deciding only on
 disconnect, because the last disconnect is not the moment the idle interval
 elapses.
 
-The NLB terminates TLS, so `websocket_certificate_arn` is required. `websocket_allowed_origin` is required and must be the exact absolute
+The NLB terminates TLS, so `websocket_certificate_arn` is required.
+`websocket_allowed_origin` is required and must be the exact absolute
 `https://` origin browsers will connect from. `cmd/ecs-ws-activator` admits a
 handshake when `Origin` is absent **or** equal to this value, so an empty value
 admits only clients that send no `Origin` at all — which rejects every browser,
-since browsers always send it. That is why the variable has no default. NLB TCP listeners preserve individual connections and support WebSockets. [AWS NLB listeners](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-listeners.html), [ECS service desired count](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service_definition_parameters.html)
+since browsers always send it. That is why the variable has no default. NLB TCP
+listeners preserve individual connections and support WebSockets; see
+[AWS NLB listeners](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-listeners.html)
+and [ECS service desired count](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service_definition_parameters.html).

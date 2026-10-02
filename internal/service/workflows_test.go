@@ -236,7 +236,7 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	if err != nil || republished.PublishedVersion != head.Version+1 {
 		t.Fatalf("republished workflow=%+v err=%v", republished, err)
 	}
-	if err := messages.CompleteFunction(ctx, "T1", "UB", "wrong-app", domain.WorkflowStepID(executionID), `{"priority":1}`, ""); !errors.Is(err, ErrFunctionAccessDenied) {
+	if err := messages.CompleteFunction(ctx, "T1", "UB", "wrong-app", domain.WorkflowStepID(executionID), `{"priority":1}`, ""); !errors.Is(err, domain.ErrFunctionAccessDenied) {
 		t.Fatalf("wrong app error=%v", err)
 	}
 	if err := messages.CompleteFunction(ctx, "T1", "UB", "A1", domain.WorkflowStepID(executionID), `{"priority":1}`, ""); err != nil {
@@ -269,7 +269,7 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	if _, err := messages.WorkflowRunSteps(ctx, "T1", "U-absent", run.ID); err == nil {
 		t.Fatal("a stranger read the run steps")
 	}
-	if err := messages.CompleteFunction(ctx, "T1", "UB", "A1", domain.WorkflowStepID(executionID), `{}`, ""); !errors.Is(err, ErrFunctionNotRunning) {
+	if err := messages.CompleteFunction(ctx, "T1", "UB", "A1", domain.WorkflowStepID(executionID), `{}`, ""); !errors.Is(err, domain.ErrFunctionNotRunning) {
 		t.Fatalf("duplicate completion error=%v", err)
 	}
 	if _, err := repository.GetWorkflowRunByIdempotency(ctx, "T1", "request-1"); err != nil {
@@ -411,7 +411,7 @@ func TestUnpublishCancelsRunningExecutions(t *testing.T) {
 	}
 
 	// A late function completion is refused: the run is no longer executing.
-	if err := messages.CompleteFunction(ctx, "T1", "U1", workflow.AppID, executionID, `{"result":"late"}`, ""); !errors.Is(err, ErrFunctionNotRunning) {
+	if err := messages.CompleteFunction(ctx, "T1", "U1", workflow.AppID, executionID, `{"result":"late"}`, ""); !errors.Is(err, domain.ErrFunctionNotRunning) {
 		t.Fatalf("late complete error=%v, want ErrFunctionNotRunning", err)
 	}
 }
@@ -437,7 +437,7 @@ func TestDiscardWorkflowStagedChangesRevertsToThePublishedRevision(t *testing.T)
 		t.Fatalf("after discard=%+v err=%v", after, err)
 	}
 	// Discarding with no staged changes is a user error, not a conflict.
-	if err := messages.DiscardWorkflowStagedChanges(ctx, "T1", "U1", workflow.ID, after.Version); !errors.Is(err, ErrInvalidWorkflowStep) {
+	if err := messages.DiscardWorkflowStagedChanges(ctx, "T1", "U1", workflow.ID, after.Version); !errors.Is(err, domain.ErrInvalidWorkflowStep) {
 		t.Fatalf("discard with no staged changes error=%v, want ErrInvalidWorkflowStep", err)
 	}
 }
@@ -598,10 +598,10 @@ func TestNormalizeWorkflowStepsAssignsUniqueIDs(t *testing.T) {
 	if !strings.Contains(encoded, `"type":"function"`) || !strings.Contains(encoded, `"id":"triage-2"`) {
 		t.Fatalf("normalized encoding=%s", encoded)
 	}
-	if _, _, err := normalizeWorkflowSteps(`[{"id":"a","function_id":"triage"},{"id":"a","function_id":"notify"}]`); !errors.Is(err, ErrInvalidWorkflowStep) {
+	if _, _, err := normalizeWorkflowSteps(`[{"id":"a","function_id":"triage"},{"id":"a","function_id":"notify"}]`); !errors.Is(err, domain.ErrInvalidWorkflowStep) {
 		t.Fatalf("duplicate explicit id error=%v, want ErrInvalidWorkflowStep", err)
 	}
-	if _, _, err := normalizeWorkflowSteps(`[{"type":"branch","function_id":"triage"}]`); !errors.Is(err, ErrInvalidWorkflowStep) {
+	if _, _, err := normalizeWorkflowSteps(`[{"type":"branch","function_id":"triage"}]`); !errors.Is(err, domain.ErrInvalidWorkflowStep) {
 		t.Fatalf("unknown step type error=%v, want ErrInvalidWorkflowStep", err)
 	}
 	// An explicit id that survives defaulting wins over a later defaulted
@@ -789,7 +789,7 @@ func TestWorkflowFormAndButtonStepsPauseForHumanInput(t *testing.T) {
 	}
 
 	// A waiting step rejects a duplicate submission once it has advanced.
-	if err := messages.SubmitWorkflowForm(ctx, "T1", "U1", run.ID, formStep.ID, `{}`); !errors.Is(err, ErrFunctionNotRunning) {
+	if err := messages.SubmitWorkflowForm(ctx, "T1", "U1", run.ID, formStep.ID, `{}`); !errors.Is(err, domain.ErrFunctionNotRunning) {
 		t.Fatalf("duplicate submit error=%v, want ErrFunctionNotRunning", err)
 	}
 	if err := messages.CompleteWorkflowButton(ctx, "T1", "U1", run.ID, "FxMissing"); !errors.Is(err, store.ErrNotFound) {
@@ -800,13 +800,13 @@ func TestWorkflowFormAndButtonStepsPauseForHumanInput(t *testing.T) {
 	if _, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
 		AppID: "A1", Title: "Bad form", InputSchema: `{}`,
 		Steps: `[{"type":"form","id":"f","function_id":"triage","form":{"title":"X"}}]`,
-	}); !errors.Is(err, ErrInvalidWorkflowStep) {
+	}); !errors.Is(err, domain.ErrInvalidWorkflowStep) {
 		t.Fatalf("form with function error=%v, want ErrInvalidWorkflowStep", err)
 	}
 	if _, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
 		AppID: "A1", Title: "Bad button", InputSchema: `{}`,
 		Steps: `[{"type":"button","id":"b","button":{}}]`,
-	}); !errors.Is(err, ErrInvalidWorkflowStep) {
+	}); !errors.Is(err, domain.ErrInvalidWorkflowStep) {
 		t.Fatalf("button without label error=%v, want ErrInvalidWorkflowStep", err)
 	}
 }
@@ -877,13 +877,13 @@ func TestWorkflowStepInputMappingResolvesVariables(t *testing.T) {
 	if _, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
 		AppID: "A1", Title: "Bad mapping", InputSchema: `{}`,
 		Steps: `[{"function_id":"triage","input_mapping":{"item":"steps.later.outputs.x"}},{"id":"later","function_id":"notify"}]`,
-	}); !errors.Is(err, ErrInvalidWorkflowStep) {
+	}); !errors.Is(err, domain.ErrInvalidWorkflowStep) {
 		t.Fatalf("forward mapping error=%v, want ErrInvalidWorkflowStep", err)
 	}
 	if _, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
 		AppID: "A1", Title: "Bad variable", InputSchema: `{}`,
 		Steps: `[{"function_id":"triage","input_mapping":{"item":"steps."}}]`,
-	}); !errors.Is(err, ErrInvalidWorkflowStep) {
+	}); !errors.Is(err, domain.ErrInvalidWorkflowStep) {
 		t.Fatalf("malformed mapping error=%v, want ErrInvalidWorkflowStep", err)
 	}
 }
@@ -1096,7 +1096,7 @@ func TestNormalizeWorkflowStepsValidatesConditions(t *testing.T) {
 		`[{"id":"self","function_id":"triage","condition":{"source":"steps.self.outputs.x","operator":"equals","value":"y"}}]`,
 		`[{"function_id":"triage","condition":{"operator":"equals","value":"y"}}]`,
 	} {
-		if _, _, err := normalizeWorkflowSteps(raw); !errors.Is(err, ErrInvalidWorkflowStep) {
+		if _, _, err := normalizeWorkflowSteps(raw); !errors.Is(err, domain.ErrInvalidWorkflowStep) {
 			t.Fatalf("steps %s error=%v, want ErrInvalidWorkflowStep", raw, err)
 		}
 	}

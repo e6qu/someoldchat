@@ -182,7 +182,7 @@ func TestUserPhotoRefusesAStreamThatIsNotTheImageItClaims(t *testing.T) {
 				t.Fatal(err)
 			}
 			messages := Messages{Store: s, Blob: objects}
-			if _, err := messages.SetUserPhoto(ctx, "T1", "U1", testCase.declared, int64(len(testCase.content)), bytes.NewReader(testCase.content)); !errors.Is(err, ErrInvalidProfile) {
+			if _, err := messages.SetUserPhoto(ctx, "T1", "U1", testCase.declared, int64(len(testCase.content)), bytes.NewReader(testCase.content)); !errors.Is(err, domain.ErrInvalidProfile) {
 				t.Fatalf("%s was accepted (err=%v)", testCase.name, err)
 			}
 			user, err := s.GetUser(ctx, "U1")

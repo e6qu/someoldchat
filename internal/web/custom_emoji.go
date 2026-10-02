@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
+	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -104,11 +105,11 @@ func (h Handler) mutateCustomEmoji(w http.ResponseWriter, r *http.Request, add b
 	if err != nil {
 		status, heading, reason := http.StatusServiceUnavailable, "The emoji was not saved", "The workspace store is temporarily unavailable."
 		switch {
-		case errors.Is(err, service.ErrNotWorkspaceAdmin):
+		case errors.Is(err, domain.ErrNotWorkspaceAdmin):
 			status, reason = http.StatusForbidden, "Only workspace admins and owners can manage custom emoji."
-		case errors.Is(err, service.ErrInvalidEmoji):
+		case errors.Is(err, domain.ErrInvalidEmoji):
 			status, reason = http.StatusBadRequest, "Use a name of lowercase letters, numbers, hyphens and underscores, and an http or https image URL."
-		case errors.Is(err, service.ErrEmojiAlreadyExists):
+		case errors.Is(err, domain.ErrEmojiAlreadyExists):
 			status, reason = http.StatusConflict, "That name is already a standard or custom emoji. Choose another name."
 		case errors.Is(err, store.ErrNotFound):
 			status, reason = http.StatusNotFound, "That emoji no longer exists."

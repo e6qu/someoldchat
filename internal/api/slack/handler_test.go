@@ -1421,12 +1421,12 @@ func TestMapServiceErrorNamesHandledFailuresFromThePinnedEnums(t *testing.T) {
 		notFound string
 		want     string
 	}{
-		{"already deleted", service.ErrMessageAlreadyDeleted, "message_not_found", "message_not_found"},
-		{"blob unavailable", service.ErrBlobUnavailable, "file_not_found", "file_storage_unavailable"},
+		{"already deleted", domain.ErrMessageAlreadyDeleted, "message_not_found", "message_not_found"},
+		{"blob unavailable", domain.ErrBlobUnavailable, "file_not_found", "file_storage_unavailable"},
 		{"not found", store.ErrNotFound, "channel_not_found", "channel_not_found"},
-		{"validation", service.ErrInvalidAppApproval, "app_not_found", "invalid_arg_name"},
-		{"denied", service.ErrMessageNotOwned, "message_not_found", "no_permission"},
-		{"role denied", service.ErrNotWorkspaceAdmin, "channel_not_found", "no_permission"},
+		{"validation", domain.ErrInvalidAppApproval, "app_not_found", "invalid_arg_name"},
+		{"denied", domain.ErrMessageNotOwned, "message_not_found", "no_permission"},
+		{"role denied", domain.ErrNotWorkspaceAdmin, "channel_not_found", "no_permission"},
 		// A gRPC status this handler cannot recognise is a genuine transport
 		// failure, not a handled domain error, so it takes the catch-all. Cases
 		// asserting that a bare status code names a specific domain error were
@@ -1447,7 +1447,7 @@ func TestMapServiceErrorNamesHandledFailuresFromThePinnedEnums(t *testing.T) {
 			t.Errorf("%s: mapServiceError = %q, want %q", testCase.name, reason, testCase.want)
 		}
 	}
-	if reason := mapServiceErrorNamed(service.ErrInvalidConversation, "channel_not_found", "restricted_action", ""); reason != "restricted_action" {
+	if reason := mapServiceErrorNamed(domain.ErrInvalidConversation, "channel_not_found", "restricted_action", ""); reason != "restricted_action" {
 		t.Errorf("named validation reason = %q, want restricted_action", reason)
 	}
 }

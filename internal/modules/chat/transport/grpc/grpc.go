@@ -54,6 +54,7 @@ type Remote struct {
 	oauth         chatv1.OAuthServiceClient
 	rtm           chatv1.RTMServiceClient
 	canvases      chatv1.CanvasesServiceClient
+	agentSessions chatv1.AgentSessionsServiceClient
 }
 
 // mappedClientConn preserves the domain error contract when an implementation is
@@ -133,6 +134,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 		oauth:         chatv1.NewOAuthServiceClient(conn),
 		rtm:           chatv1.NewRTMServiceClient(conn),
 		canvases:      chatv1.NewCanvasesServiceClient(conn),
+		agentSessions: chatv1.NewAgentSessionsServiceClient(conn),
 	}, nil
 }
 
@@ -5953,6 +5955,7 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterCanvasesServiceServer(registrar, server)
 	chatv1.RegisterEntityServiceServer(registrar, server)
 	chatv1.RegisterAppsServiceServer(registrar, server)
+	chatv1.RegisterAgentSessionsServiceServer(registrar, server)
 	return nil
 }
 
@@ -10469,7 +10472,7 @@ func (s *Server) UploadFile(stream chatv1.ChatService_UploadFileServer) error {
 			// A write fails because the implementation stopped reading, so its
 			// error is the cause and the pipe error is the symptom. Reporting the
 			// symptom made the seam answer codes.Unavailable with no domain class
-			// for a failure the monolith reports as service.ErrBlobUnavailable.
+			// for a failure the monolith reports as domain.ErrBlobUnavailable.
 			if completed := <-result; completed.err != nil {
 				return mapError(completed.err)
 			}
@@ -13117,7 +13120,11 @@ func encodeProtoUserGroup(value domain.UserGroup) *chatv1.UserGroup {
 	for _, channel := range value.Channels {
 		channels = append(channels, string(channel))
 	}
-	result := &chatv1.UserGroup{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), Name: value.Name, Handle: value.Handle, Description: value.Description, CreatorId: string(value.Creator), UpdatedBy: string(value.UpdatedBy), CreatedAt: value.CreatedAt.Unix(), UpdatedAt: value.UpdatedAt.Unix(), Enabled: value.Enabled, Users: users, Channels: channels}
+	teams := make([]string, 0, len(value.Teams))
+	for _, team := range value.Teams {
+		teams = append(teams, string(team))
+	}
+	result := &chatv1.UserGroup{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), Name: value.Name, Handle: value.Handle, Description: value.Description, CreatorId: string(value.Creator), UpdatedBy: string(value.UpdatedBy), CreatedAt: value.CreatedAt.Unix(), UpdatedAt: value.UpdatedAt.Unix(), Enabled: value.Enabled, Users: users, Channels: channels, OrgLevel: value.OrgLevel, Hidden: value.Hidden, Teams: teams}
 	if !value.DeletedAt.IsZero() {
 		result.DeletedAt = value.DeletedAt.Unix()
 	}
@@ -13144,7 +13151,14 @@ func decodeProtoUserGroup(value *chatv1.UserGroup) (domain.UserGroup, error) {
 		}
 		channels = append(channels, domain.ConversationID(channel))
 	}
-	result := domain.UserGroup{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.UserGroupID(value.GetId()), Name: value.GetName(), Handle: value.GetHandle(), Description: value.GetDescription(), Creator: domain.UserID(value.GetCreatorId()), UpdatedBy: domain.UserID(value.GetUpdatedBy()), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), UpdatedAt: time.Unix(value.GetUpdatedAt(), 0).UTC(), Enabled: value.GetEnabled(), Users: users, Channels: channels}
+	var teams []domain.WorkspaceID
+	for _, team := range value.GetTeams() {
+		if team == "" {
+			return domain.UserGroup{}, errors.New("typed user group team is empty")
+		}
+		teams = append(teams, domain.WorkspaceID(team))
+	}
+	result := domain.UserGroup{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.UserGroupID(value.GetId()), Name: value.GetName(), Handle: value.GetHandle(), Description: value.GetDescription(), Creator: domain.UserID(value.GetCreatorId()), UpdatedBy: domain.UserID(value.GetUpdatedBy()), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), UpdatedAt: time.Unix(value.GetUpdatedAt(), 0).UTC(), Enabled: value.GetEnabled(), Users: users, Channels: channels, OrgLevel: value.GetOrgLevel(), Hidden: value.GetHidden(), Teams: teams}
 	if value.GetDeletedAt() != 0 {
 		result.DeletedAt = time.Unix(value.GetDeletedAt(), 0).UTC()
 	}

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -25,7 +25,7 @@ func TestMapErrorPreservesCanonicalDomainClasses(t *testing.T) {
 		{name: "lease conflict", err: store.ErrLeaseConflict, code: codes.Aborted},
 		{name: "idempotency conflict", err: store.ErrIdempotencyConflict, code: codes.Aborted},
 		{name: "socket mode limit", err: store.ErrSocketModeConnectionLimit, code: codes.ResourceExhausted},
-		{name: "invalid workspace", err: service.ErrInvalidWorkspace, code: codes.InvalidArgument},
+		{name: "invalid workspace", err: domain.ErrInvalidWorkspace, code: codes.InvalidArgument},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

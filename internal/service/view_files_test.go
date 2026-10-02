@@ -58,7 +58,7 @@ func TestViewFileInputAcceptsOnlyTheMembersOwnAcceptedFiles(t *testing.T) {
 		"more than max_files":      {"Fmine", "Fsecond"},
 		"an unknown file":          {"Fmissing"},
 	} {
-		if _, err := messages.attachViewFiles(ctx, view, "U1", state(ids...)); !errors.Is(err, ErrViewFilesInvalid) {
+		if _, err := messages.attachViewFiles(ctx, view, "U1", state(ids...)); !errors.Is(err, domain.ErrViewFilesInvalid) {
 			t.Fatalf("%s: err=%v, want ErrViewFilesInvalid", name, err)
 		}
 	}

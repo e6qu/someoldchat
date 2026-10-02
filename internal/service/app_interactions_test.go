@@ -152,8 +152,8 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	if err != nil {
 		t.Fatalf("consume trigger: %v", err)
 	}
-	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Replay"},"blocks":[]}`, ""); err != ErrTriggerExchanged {
-		t.Fatalf("trigger replay error=%v, want %v", err, ErrTriggerExchanged)
+	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Replay"},"blocks":[]}`, ""); err != domain.ErrTriggerExchanged {
+		t.Fatalf("trigger replay error=%v, want %v", err, domain.ErrTriggerExchanged)
 	}
 
 	blocks := `[{"type":"actions","block_id":"deployment","elements":[{"type":"static_select","action_id":"view_build","placeholder":{"type":"plain_text","text":"View build"},"options":[{"text":{"type":"plain_text","text":"Build 842"},"value":"842"}]}]}]`
@@ -358,8 +358,8 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	mu.Unlock()
 	if _, err := messages.LoadAppOptions(ctx, "T1", "U2", "C1", domain.AppOptionQuery{
 		AppID: "A1", MessageID: externalMessage.ID, BlockID: "project", ActionID: "project_select", Value: "prod",
-	}, "https://chat.example.test"); !errors.Is(err, ErrNotInConversation) {
-		t.Fatalf("a non-member loading a channel message's external options: err=%v, want %v", err, ErrNotInConversation)
+	}, "https://chat.example.test"); !errors.Is(err, domain.ErrNotInConversation) {
+		t.Fatalf("a non-member loading a channel message's external options: err=%v, want %v", err, domain.ErrNotInConversation)
 	}
 	mu.Lock()
 	requestsAfter := len(requests)
@@ -408,11 +408,11 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	// A body that can never be applied is refused before a use is spent:
 	// every one of the URL's uses is still available below.
 	for body, want := range map[string]error{
-		`not json`:                       ErrAppResponsePayloadInvalid,
-		`{"text":`:                       ErrAppResponsePayloadInvalid,
-		`{"blocks":{"type":"divider"}}`:  ErrAppResponsePayloadInvalid,
-		`{}`:                             ErrAppResponseNoText,
-		`{"response_type":"in_channel"}`: ErrAppResponseNoText,
+		`not json`:                       domain.ErrAppResponsePayloadInvalid,
+		`{"text":`:                       domain.ErrAppResponsePayloadInvalid,
+		`{"blocks":{"type":"divider"}}`:  domain.ErrAppResponsePayloadInvalid,
+		`{}`:                             domain.ErrAppResponseNoText,
+		`{"response_type":"in_channel"}`: domain.ErrAppResponseNoText,
 	} {
 		if err := messages.HandleAppResponse(ctx, responseToken, body); !errors.Is(err, want) {
 			t.Fatalf("response body %q error=%v, want %v", body, err, want)
@@ -423,11 +423,11 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 			t.Fatalf("response URL use %d: %v", index+1, err)
 		}
 	}
-	if err := messages.HandleAppResponse(ctx, responseToken, `{"response_type":"in_channel","text":"exhausted"}`); !errors.Is(err, ErrAppResponseURLUsed) {
-		t.Fatalf("exhausted response URL error=%v, want %v", err, ErrAppResponseURLUsed)
+	if err := messages.HandleAppResponse(ctx, responseToken, `{"response_type":"in_channel","text":"exhausted"}`); !errors.Is(err, domain.ErrAppResponseURLUsed) {
+		t.Fatalf("exhausted response URL error=%v, want %v", err, domain.ErrAppResponseURLUsed)
 	}
-	if err := messages.HandleAppResponse(ctx, "never-issued", `{"text":"hello"}`); !errors.Is(err, ErrAppResponseURLExpired) {
-		t.Fatalf("unknown response URL error=%v, want %v", err, ErrAppResponseURLExpired)
+	if err := messages.HandleAppResponse(ctx, "never-issued", `{"text":"hello"}`); !errors.Is(err, domain.ErrAppResponseURLExpired) {
+		t.Fatalf("unknown response URL error=%v, want %v", err, domain.ErrAppResponseURLExpired)
 	}
 
 	// A message shortcut on a person's message: the message has no app, and
@@ -933,8 +933,8 @@ func TestParseAppOptionsEnforcesSlackOptionContracts(t *testing.T) {
 		"empty object":          `{}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := parseAppOptions([]byte(body)); err != ErrInvalidAppResponse {
-				t.Fatalf("error=%v, want %v", err, ErrInvalidAppResponse)
+			if _, err := parseAppOptions([]byte(body)); err != domain.ErrInvalidAppResponse {
+				t.Fatalf("error=%v, want %v", err, domain.ErrInvalidAppResponse)
 			}
 		})
 	}
@@ -959,8 +959,8 @@ func TestParseDialogOptionsEnforcesSlackDialogOptionContracts(t *testing.T) {
 		"empty object":          `{}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := parseDialogOptions([]byte(body)); err != ErrInvalidAppResponse {
-				t.Fatalf("error=%v, want %v", err, ErrInvalidAppResponse)
+			if _, err := parseDialogOptions([]byte(body)); err != domain.ErrInvalidAppResponse {
+				t.Fatalf("error=%v, want %v", err, domain.ErrInvalidAppResponse)
 			}
 		})
 	}

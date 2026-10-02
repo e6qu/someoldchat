@@ -13,10 +13,10 @@ func (m Messages) PresentEntityDetails(ctx context.Context, workspaceID domain.W
 		return err
 	}
 	if strings.TrimSpace(triggerID) == "" || !validEntityObject(metadata) || !validEntityError(errorPayload) {
-		return ErrInvalidEntity
+		return domain.ErrInvalidEntity
 	}
 	if userAuthRequired && strings.TrimSpace(userAuthURL) == "" {
-		return ErrInvalidEntity
+		return domain.ErrInvalidEntity
 	}
 	return nil
 }
@@ -26,13 +26,13 @@ func (m Messages) PresentEntityComments(ctx context.Context, workspaceID domain.
 		return err
 	}
 	if strings.TrimSpace(triggerID) == "" || strings.TrimSpace(comments) == "" || !validEntityArray(comments) || !validEntityError(errorPayload) {
-		return ErrInvalidEntity
+		return domain.ErrInvalidEntity
 	}
 	if userAuthRequired && strings.TrimSpace(userAuthURL) == "" {
-		return ErrInvalidEntity
+		return domain.ErrInvalidEntity
 	}
 	if strings.TrimSpace(deleteActionID) == "" && entityCommentsAllowDelete(comments) {
-		return ErrInvalidEntity
+		return domain.ErrInvalidEntity
 	}
 	return nil
 }
@@ -42,7 +42,7 @@ func (m Messages) AcknowledgeEntityCommentAction(ctx context.Context, workspaceI
 		return err
 	}
 	if strings.TrimSpace(triggerID) == "" || !validEntityObjectOrEmpty(comment) || !validEntityError(errorPayload) {
-		return ErrInvalidEntity
+		return domain.ErrInvalidEntity
 	}
 	return nil
 }

@@ -135,11 +135,11 @@ func TestAuthorizeOAuthRequiresWebhookChannelMembership(t *testing.T) {
 		}
 	}
 	// No channel named for the webhook scope: refused.
-	if _, err := m.AuthorizeOAuth(ctx, request("")); !errors.Is(err, ErrInvalidOAuth) {
+	if _, err := m.AuthorizeOAuth(ctx, request("")); !errors.Is(err, domain.ErrInvalidOAuth) {
 		t.Fatalf("no-channel authorize = %v, want ErrInvalidOAuth", err)
 	}
 	// A channel the installer is not a member of: refused by the membership guard.
-	if _, err := m.AuthorizeOAuth(ctx, request("C1")); !errors.Is(err, ErrInvalidOAuth) {
+	if _, err := m.AuthorizeOAuth(ctx, request("C1")); !errors.Is(err, domain.ErrInvalidOAuth) {
 		t.Fatalf("non-member channel authorize = %v, want ErrInvalidOAuth", err)
 	}
 	// Once the installer is in the channel, the grant is created.

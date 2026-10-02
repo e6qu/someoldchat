@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -125,18 +126,26 @@ func (h Handler) RegisterForwarding(mux *http.ServeMux) {
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.recordLifecycleState()
 	if h.forward == nil {
-		http.Error(w, "forwarding unavailable", http.StatusServiceUnavailable)
+		refuse(w, http.StatusServiceUnavailable, "service_unavailable")
 		return
 	}
 	if h.spool != nil && !h.servingDirectly() {
 		h.serveDurable(w, r)
 		return
 	}
+	// A declared length over the limit is refused before anything is
+	// forwarded; MaxBytesReader catches a chunked body that grows past it, and
+	// ProxyErrorHandler turns that abort into the same refusal.
+	if r.ContentLength > h.maxBody {
+		h.recordRejected(r.ContentLength)
+		refuse(w, http.StatusRequestEntityTooLarge, "request_entity_too_large")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxBody)
 	if err := h.ensureActive(r.Context()); err != nil {
 		h.recordRejected(0)
 		w.Header().Set("Retry-After", "1")
-		http.Error(w, "service waking", http.StatusServiceUnavailable)
+		refuse(w, http.StatusServiceUnavailable, "service_unavailable")
 		return
 	}
 	h.forward.ServeHTTP(w, r)
@@ -170,15 +179,15 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.recordRejected(0)
 		if isBodyTooLargeError(err) {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			refuse(w, http.StatusRequestEntityTooLarge, "request_entity_too_large")
 			return
 		}
-		http.Error(w, "request body unavailable", http.StatusBadRequest)
+		refuse(w, http.StatusBadRequest, "invalid_form_data")
 		return
 	}
 	if int64(len(body)) > h.maxBody {
 		h.recordRejected(int64(len(body)))
-		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		refuse(w, http.StatusRequestEntityTooLarge, "request_entity_too_large")
 		return
 	}
 	// Enqueue and waiter registration are one step: a drain that claimed the
@@ -191,14 +200,15 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 		h.recordRejected(int64(len(body)))
 		w.Header().Set("Retry-After", "1")
 		if errors.Is(err, ErrSpoolCapacity) {
-			// Overload is a bounded, expected condition. It must be
-			// distinguishable in logs and metrics from a broken control store.
+			// Overload is a bounded, expected condition. Its own counter keeps
+			// it distinguishable from a broken control store; the client sees
+			// Slack's service_unavailable either way.
 			h.metrics.AddCounter("sameoldchat_activator_spool_overflow_total", 1)
-			http.Error(w, "request spool is full", http.StatusServiceUnavailable)
+			refuse(w, http.StatusServiceUnavailable, "service_unavailable")
 			return
 		}
 		h.metrics.AddCounter("sameoldchat_activator_spool_failures_total", 1)
-		http.Error(w, "request spool unavailable", http.StatusServiceUnavailable)
+		refuse(w, http.StatusServiceUnavailable, "service_unavailable")
 		return
 	}
 	h.spoolDrained.Store(false)
@@ -223,7 +233,7 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 		if value.err != nil && value.response.status == 0 {
 			h.recordRejected(int64(len(body)))
 			w.Header().Set("Retry-After", "1")
-			http.Error(w, "service waking", http.StatusServiceUnavailable)
+			refuse(w, http.StatusServiceUnavailable, "service_unavailable")
 			return
 		}
 		writeCapturedResponse(w, value.response)
@@ -235,7 +245,7 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 		// retry rather than held open indefinitely.
 		h.recordRejected(int64(len(body)))
 		w.Header().Set("Retry-After", "1")
-		http.Error(w, "service waking", http.StatusServiceUnavailable)
+		refuse(w, http.StatusServiceUnavailable, "service_unavailable")
 	}
 }
 
@@ -693,5 +703,36 @@ func (h Handler) recordLifecycleState() {
 			value = 1
 		}
 		h.metrics.SetGauge("sameoldchat_lifecycle_state_"+string(candidate), value)
+	}
+}
+
+// refuse answers a request the activator cannot serve with Slack's error
+// envelope, the shape the Lambda activator in deploy/ecs-scale-zero sends. An
+// official Slack SDK decodes every Web API response as JSON, so a text/plain
+// refusal reached it as a decode error instead of a Slack error code.
+func refuse(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(`{"ok":false,"error":"` + code + `"}`))
+}
+
+// ProxyErrorHandler returns the httputil.ReverseProxy error handler for the
+// forwarded application. The proxy's default answered every failure with a
+// bare 502, so a body that outgrew the limit mid-stream and an application
+// that could not be reached both reached a Slack SDK as an undecodable
+// response. A body over the limit is Slack's request_entity_too_large; any
+// other failure to reach the application is logged and answered
+// service_unavailable with a retry hint, as the Lambda activator answers it.
+func ProxyErrorHandler(logger *slog.Logger) func(http.ResponseWriter, *http.Request, error) {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			refuse(w, http.StatusRequestEntityTooLarge, "request_entity_too_large")
+			return
+		}
+		logger.Error("forward to application", "method", r.Method, "path", r.URL.Path, "error", err)
+		w.Header().Set("Retry-After", "1")
+		refuse(w, http.StatusServiceUnavailable, "service_unavailable")
 	}
 }

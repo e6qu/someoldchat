@@ -63,4 +63,8 @@ package mutation
 // own dialog and drives AddStar in its channel form; service tests refuse a
 // non-member the options load, an outsider the Messages tab before the app is
 // examined, and a non-member a private channel's star.
-const survivingGuardCeiling = 75
+//
+// 75 to 73: measured after adopting the 21 methods Slack added to its
+// reference; the suites that arrived with them catch two more operations
+// whose guard used to run on unnoticed.
+const survivingGuardCeiling = 73

@@ -9,7 +9,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -18,7 +18,7 @@ import (
 // so failures keyed by name (the app's {"errors":[{"name","error"}]}) land
 // on the right field.
 func (h Handler) newDialogView(ctx context.Context, principal auth.Principal, value domain.Dialog, failures map[string]string, submitted modalFormState) (*modalView, error) {
-	definition, err := service.ParseDialog(value.Payload)
+	definition, err := domain.ParseDialog(value.Payload)
 	if err != nil {
 		return nil, err
 	}

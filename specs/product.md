@@ -4,8 +4,10 @@
 
 SameOldChat MUST provide a multi-workspace Slack-compatible chat experience and a
 Slack-compatible platform API implemented in Go. The human interface MUST use
-server-rendered HTML enhanced with HTMX. SQLite MUST be the default persistence
-implementation and dqlite MUST be selectable without changing domain logic.
+server-rendered HTML enhanced with HTMX. SQLite MUST be the persistence
+profile for local and small deployments, and dqlite and PostgreSQL MUST be
+selectable without changing domain logic. Every profile is selected
+explicitly; none is an implicit default.
 
 ## Functional requirements
 
@@ -56,9 +58,9 @@ The product MUST support:
 
 - SameOldChat MUST support self-hosting on ordinary Linux virtual machines.
 - It MUST provide qualified deployment profiles for Amazon Elastic Container
-  Service (ECS) on AWS Fargate, Google
-  Cloud Run, and Azure Container Apps, subject to the qualification levels in
-  the hosting specification.
+  Service (ECS) on AWS Fargate, Google Cloud Run, and Azure Container Apps,
+  subject to the qualification levels in the
+  [hosting specification](hosting.md).
 - Hosting adapters MUST preserve the same snapshot, fencing, wake, and
   compatibility semantics.
 - A profile MUST NOT claim pure managed-container dqlite support unless stable
@@ -66,23 +68,19 @@ The product MUST support:
 
 ## Compatibility reporting
 
-Each published operation MUST be labeled as one of:
-
-- `unimplemented`;
-- `schema-compatible`;
-- `sdk-compatible`;
-- `behavior-compatible`; or
-- `verified-against-slack`.
+Each published operation MUST be labeled with one of the evidence levels
+defined in the [compatibility specification](api-compatibility.md#implementation-tracking-and-ratchet),
+from `unimplemented` to `verified-against-slack`.
 
 No operation MAY be advertised above the level demonstrated by automated tests
 and retained evidence.
 
-## Non-goals of the initial milestone
+## Non-goals
 
-The initial milestone does not promise visual pixel equivalence, voice/video
-huddles, every enterprise administration workflow, or behavior that exists
-only in Slack's private clients. Those may be added through explicit,
-source-backed compatibility entries.
+SameOldChat does not promise visual pixel equivalence, every enterprise
+administration workflow, or behavior that exists only in Slack's private
+clients. Those may be added through explicit, source-backed compatibility
+entries.
 
 Related documents: [terminology](../docs/terminology.md),
 [architecture](../docs/architecture.md), and [compatibility specification](api-compatibility.md).

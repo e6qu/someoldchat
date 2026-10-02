@@ -193,11 +193,11 @@ func holderOf(required authority) domain.UserID {
 // that something is there.
 func isStandingRefusal(err error) bool {
 	switch {
-	case errors.Is(err, service.ErrNotWorkspaceAdmin),
-		errors.Is(err, service.ErrUserIsRestricted),
-		errors.Is(err, service.ErrUserIsUltraRestricted),
-		errors.Is(err, service.ErrNotInConversation),
-		errors.Is(err, service.ErrBarrieredFromMember),
+	case errors.Is(err, domain.ErrNotWorkspaceAdmin),
+		errors.Is(err, domain.ErrUserIsRestricted),
+		errors.Is(err, domain.ErrUserIsUltraRestricted),
+		errors.Is(err, domain.ErrNotInConversation),
+		errors.Is(err, domain.ErrBarrieredFromMember),
 		errors.Is(err, store.ErrNotFound):
 		return true
 	}
@@ -408,8 +408,11 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		}
 		return reflect.Zero(argument)
 	case reflect.TypeOf([]domain.WorkspaceID(nil)):
-		if method == "AdminAddUserGroupTeams" {
-			return reflect.ValueOf([]domain.WorkspaceID{"T2"})
+		// The organization's one workspace, which the holder may assign the
+		// fixture group to and release it from.
+		switch method {
+		case "AdminAddUserGroupTeams", "AdminRemoveUserGroupTeams":
+			return reflect.ValueOf([]domain.WorkspaceID{"T1"})
 		}
 		return reflect.Zero(argument)
 	case reflect.TypeOf(domain.MessageID("")):
@@ -438,6 +441,9 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		// A real column type, so AddListColumn passes schema validation and the
 		// holder's write grant carries it to success.
 		return reflect.ValueOf(domain.ListColumnText)
+	case reflect.TypeOf(domain.AgentSessionStatusRequest{}):
+		// A valid status, so the holder's write on the seeded session succeeds.
+		return reflect.ValueOf(domain.AgentSessionStatusRequest{Status: domain.AgentSessionActive})
 	case reflect.TypeOf(domain.LaterReminderRequest{}):
 		// A valid personal reminder edit, so UpdateLaterReminder — acting on the
 		// holder's own seeded reminder after authorizeWorkspace — reaches success
@@ -545,11 +551,17 @@ func fixtureStringArgument(method string) reflect.Value {
 	case "LookupCanvasSections":
 		// An empty criteria object matches every section, so the read succeeds.
 		return reflect.ValueOf("{}")
+	case "AdminUploadUserGroupUsers":
+		// A one-row CSV naming a member the holder can add to the fixture group.
+		return reflect.ValueOf("U-member")
 	case "UserByEmail":
 		// The seeded member's own address, so the lookup finds a user.
 		return reflect.ValueOf("U-member@example.test")
 	case "RenameConversation":
 		return reflect.ValueOf("renamed-fixture")
+	case "RenameAgentSession", "ChangeAgentSessionTitle":
+		// A session title, the only free string these take.
+		return reflect.ValueOf("Renamed fixture session")
 	case "UpdateCall":
 		// Both the external id and the join URL are required and are the only
 		// strings this operation takes, so one non-empty value reaches success.
@@ -741,7 +753,7 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		VerificationTokenCiphertext: "fixture-verification-ciphertext",
 		ManifestVersion:             1, Distribution: "private", CreatedAt: at, UpdatedAt: at,
 	}, domain.AppManifestRevision{
-		AppID: fixtureAppID, Version: 1, CreatedBy: "U-member", Manifest: `{"display_information":{"name":"Fixture app"},"features":{"app_home":{"messages_tab_enabled":true}}}`, CreatedAt: at,
+		AppID: fixtureAppID, Version: 1, CreatedBy: "U-member", Manifest: `{"display_information":{"name":"Fixture app"},"features":{"app_home":{"messages_tab_enabled":true}},"settings":{"socket_mode_enabled":true,"event_subscriptions":{"bot_events":["agent_session_stopped"]}}}`, CreatedAt: at,
 	}, domain.OAuthClient{
 		ID: "fixture-client", AppID: fixtureAppID, SecretHash: "fixture-client-secret-hash",
 	}))
@@ -757,6 +769,15 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	// the dialog operations have one to find.
 	seed("app bot user", repository.SeedUser(domain.User{ID: "U-fixture-bot", WorkspaceID: "T1", Name: "fixture-bot"}))
 	seed("app bot", repository.CreateBot(ctx, domain.Bot{ID: "F-bot", WorkspaceID: "T1", AppID: fixtureAppID, UserID: "U-fixture-bot", Name: "fixture-bot", UpdatedAt: at}))
+	// The app is processing in an agent session on the seeded message, and
+	// its manifest subscribes to agent_session_stopped, so the session
+	// operations — read, status, rename, retitle and stop — each find what
+	// they act on and the holder reaches success.
+	_, sessionErr := repository.SetAgentSessionStatus(ctx, domain.AgentSessionStatusWrite{
+		WorkspaceID: "T1", Conversation: "C1", ThreadTimestamp: fixtureMessageTimestamp, AppID: fixtureAppID,
+		Status: domain.AgentSessionProcessing, Title: "Fixture session", At: at,
+	}, event("E-agent-session", "agent_session.status_set"))
+	seed("agent session", sessionErr)
 	seed("dialog", repository.CreateDialog(ctx, domain.Dialog{
 		ID: fixtureDialogID, WorkspaceID: "T1", UserID: "U-owner", AppID: fixtureAppID, CreatedAt: at,
 		Payload: `{"callback_id":"fixture","title":"Fixture","elements":[{"type":"text","name":"answer","label":"Answer"}]}`,

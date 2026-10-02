@@ -25,10 +25,10 @@ func TestEntityWorkObjectResponsesValidateRequiredRelationships(t *testing.T) {
 	if err := service.AcknowledgeEntityCommentAction(ctx, "T1", "U1", "trigger-comment", `{"id":"comment-1","value":"saved"}`, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.PresentEntityComments(ctx, "T1", "U1", "trigger-comments", `[{"id":"comment-1","can_delete":true}]`, "", false, "", false, "", ""); !errors.Is(err, ErrInvalidEntity) {
+	if err := service.PresentEntityComments(ctx, "T1", "U1", "trigger-comments", `[{"id":"comment-1","can_delete":true}]`, "", false, "", false, "", ""); !errors.Is(err, domain.ErrInvalidEntity) {
 		t.Fatalf("missing delete action error=%v", err)
 	}
-	if err := service.PresentEntityDetails(ctx, "T1", "U1", "", "{}", false, "", ""); !errors.Is(err, ErrInvalidEntity) {
+	if err := service.PresentEntityDetails(ctx, "T1", "U1", "", "{}", false, "", ""); !errors.Is(err, domain.ErrInvalidEntity) {
 		t.Fatalf("missing trigger error=%v", err)
 	}
 }

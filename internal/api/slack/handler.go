@@ -16,7 +16,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
@@ -124,6 +124,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	// rate-limited production configuration.
 	api := http.NewServeMux()
 	h.registerWebAPI(api)
+	h.registerAdminAppPermissions(api)
 	var front http.Handler = api
 	if h.Limiter != nil {
 		front = h.Limiter.Middleware(front)
@@ -154,6 +155,10 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/oauth.v2.access", h.oauthV2Access)
 	mux.HandleFunc("GET /api/oauth.v2.exchange", h.oauthV2ExchangeToken)
 	mux.HandleFunc("POST /api/oauth.v2.exchange", h.oauthV2ExchangeToken)
+	mux.HandleFunc("GET /api/oauth.v2.beginShortTokenRotation", h.oauthV2BeginShortTokenRotation)
+	mux.HandleFunc("POST /api/oauth.v2.beginShortTokenRotation", h.oauthV2BeginShortTokenRotation)
+	mux.HandleFunc("GET /api/oauth.v2.completeShortTokenRotation", h.oauthV2CompleteShortTokenRotation)
+	mux.HandleFunc("POST /api/oauth.v2.completeShortTokenRotation", h.oauthV2CompleteShortTokenRotation)
 	mux.HandleFunc("GET /api/oauth.v2.user.access", h.oauthV2UserAccess)
 	mux.HandleFunc("POST /api/oauth.v2.user.access", h.oauthV2UserAccess)
 	mux.HandleFunc("GET /api/auth.revoke", h.authRevoke)
@@ -350,6 +355,8 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.conversations.bulkMove", h.adminConversationsBulkMove)
 	mux.HandleFunc("GET /api/admin.conversations.bulkSetExcludeFromSlackAi", h.adminConversationsBulkSetExcludeFromAI)
 	mux.HandleFunc("POST /api/admin.conversations.bulkSetExcludeFromSlackAi", h.adminConversationsBulkSetExcludeFromAI)
+	mux.HandleFunc("GET /api/admin.conversations.bulkSetProperties", h.adminConversationsBulkSetProperties)
+	mux.HandleFunc("POST /api/admin.conversations.bulkSetProperties", h.adminConversationsBulkSetProperties)
 	mux.HandleFunc("GET /api/admin.conversations.linkObjects", h.adminConversationsLinkObjects)
 	mux.HandleFunc("POST /api/admin.conversations.linkObjects", h.adminConversationsLinkObjects)
 	mux.HandleFunc("GET /api/admin.conversations.unlinkObjects", h.adminConversationsUnlinkObjects)
@@ -610,6 +617,10 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/assistant.threads.setStatus", h.setAssistantThreadStatus)
 	mux.HandleFunc("GET /api/assistant.threads.setSuggestedPrompts", h.setAssistantThreadSuggestedPrompts)
 	mux.HandleFunc("POST /api/assistant.threads.setSuggestedPrompts", h.setAssistantThreadSuggestedPrompts)
+	mux.HandleFunc("GET /api/agents.sessions.setStatus", h.setAgentSessionStatus)
+	mux.HandleFunc("POST /api/agents.sessions.setStatus", h.setAgentSessionStatus)
+	mux.HandleFunc("GET /api/agents.sessions.rename", h.renameAgentSession)
+	mux.HandleFunc("POST /api/agents.sessions.rename", h.renameAgentSession)
 	mux.HandleFunc("GET /api/pins.add", h.addPin)
 	mux.HandleFunc("POST /api/pins.add", h.addPin)
 	mux.HandleFunc("GET /api/pins.remove", h.removePin)
@@ -642,6 +653,8 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/canvases.access.delete", h.deleteCanvasAccess)
 	mux.HandleFunc("GET /api/canvases.sections.lookup", h.lookupCanvasSections)
 	mux.HandleFunc("POST /api/canvases.sections.lookup", h.lookupCanvasSections)
+	mux.HandleFunc("GET /api/canvases.getContent", h.getCanvasContent)
+	mux.HandleFunc("POST /api/canvases.getContent", h.getCanvasContent)
 	mux.HandleFunc("GET /api/conversations.canvases.create", h.createConversationCanvas)
 	mux.HandleFunc("POST /api/conversations.canvases.create", h.createConversationCanvas)
 	mux.HandleFunc("GET /api/slackLists.create", h.createList)
@@ -706,6 +719,20 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.usergroups.removeChannels", h.adminUserGroupRemoveChannels)
 	mux.HandleFunc("GET /api/admin.usergroups.listChannels", h.adminUserGroupListChannels)
 	mux.HandleFunc("POST /api/admin.usergroups.listChannels", h.adminUserGroupListChannels)
+	mux.HandleFunc("GET /api/admin.usergroups.addUsers", h.adminUserGroupAddUsers)
+	mux.HandleFunc("POST /api/admin.usergroups.addUsers", h.adminUserGroupAddUsers)
+	mux.HandleFunc("GET /api/admin.usergroups.create", h.adminUserGroupCreate)
+	mux.HandleFunc("POST /api/admin.usergroups.create", h.adminUserGroupCreate)
+	mux.HandleFunc("GET /api/admin.usergroups.fetch", h.adminUserGroupFetch)
+	mux.HandleFunc("POST /api/admin.usergroups.fetch", h.adminUserGroupFetch)
+	mux.HandleFunc("GET /api/admin.usergroups.removeTeams", h.adminUserGroupRemoveTeams)
+	mux.HandleFunc("POST /api/admin.usergroups.removeTeams", h.adminUserGroupRemoveTeams)
+	mux.HandleFunc("GET /api/admin.usergroups.removeUsers", h.adminUserGroupRemoveUsers)
+	mux.HandleFunc("POST /api/admin.usergroups.removeUsers", h.adminUserGroupRemoveUsers)
+	mux.HandleFunc("GET /api/admin.usergroups.update", h.adminUserGroupUpdate)
+	mux.HandleFunc("POST /api/admin.usergroups.update", h.adminUserGroupUpdate)
+	mux.HandleFunc("GET /api/admin.usergroups.uploadUsers", h.adminUserGroupUploadUsers)
+	mux.HandleFunc("POST /api/admin.usergroups.uploadUsers", h.adminUserGroupUploadUsers)
 	mux.HandleFunc("GET /api/admin.teams.settings.info", h.adminTeamSettingsInfo)
 	mux.HandleFunc("POST /api/admin.teams.settings.info", h.adminTeamSettingsInfo)
 	mux.HandleFunc("GET /api/admin.teams.settings.setName", h.adminTeamSettingsSetName)
@@ -1175,21 +1202,21 @@ func datastoreIDs(raw string) []string {
 
 func writeAppDatastoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, service.ErrAppDatastoreNotFound):
+	case errors.Is(err, domain.ErrAppDatastoreNotFound):
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": false, "error": "datastore_error",
 			"errors": []map[string]string{{
 				"code": "datastore_config_not_found", "message": "The datastore configuration could not be found", "pointer": "/datastores",
 			}},
 		})
-	case errors.Is(err, service.ErrInvalidDatastoreItem):
+	case errors.Is(err, domain.ErrInvalidDatastoreItem):
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": false, "error": "datastore_error",
 			"errors": []map[string]string{{"code": "invalid_item", "message": err.Error(), "pointer": "/item"}},
 		})
-	case errors.Is(err, service.ErrInvalidDatastoreQuery), errors.Is(err, domain.ErrInvalidCursor), errors.Is(err, store.ErrInvalidArgument):
+	case errors.Is(err, domain.ErrInvalidDatastoreQuery), errors.Is(err, domain.ErrInvalidCursor), errors.Is(err, store.ErrInvalidArgument):
 		writeError(w, "invalid_arguments")
-	case errors.Is(err, service.ErrAppNotHosted):
+	case errors.Is(err, domain.ErrAppNotHosted):
 		writeError(w, "app_not_hosted")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, "invalid_app_id")
@@ -1709,7 +1736,7 @@ func (h Handler) viewsPublish(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.PublishView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, target, fields["view"], strings.TrimSpace(fields["hash"]))
 	if err != nil {
-		if errors.Is(err, service.ErrAppHomeNotEnabled) {
+		if errors.Is(err, domain.ErrAppHomeNotEnabled) {
 			writeError(w, "not_enabled")
 			return
 		}
@@ -1763,13 +1790,13 @@ func (h Handler) viewsUpdate(w http.ResponseWriter, r *http.Request) {
 // error_mapping_completeness_test.go.
 func viewMethodError(err error) string {
 	switch {
-	case errors.Is(err, service.ErrTriggerExchanged):
+	case errors.Is(err, domain.ErrTriggerExchanged):
 		return "exchanged_trigger_id"
-	case errors.Is(err, service.ErrTriggerExpired):
+	case errors.Is(err, domain.ErrTriggerExpired):
 		return "expired_trigger_id"
-	case errors.Is(err, service.ErrInvalidTrigger):
+	case errors.Is(err, domain.ErrInvalidTrigger):
 		return "invalid_trigger_id"
-	case errors.Is(err, service.ErrViewPushLimit):
+	case errors.Is(err, domain.ErrViewPushLimit):
 		return "push_limit_reached"
 	}
 	return mapServiceErrorNamed(err, "not_found", "invalid_arguments", "duplicate_external_id")
@@ -1918,13 +1945,13 @@ func (h Handler) functionCompletionFields(w http.ResponseWriter, r *http.Request
 
 func writeFunctionCompletionError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, service.ErrFunctionAccessDenied):
+	case errors.Is(err, domain.ErrFunctionAccessDenied):
 		writeError(w, "access_denied")
-	case errors.Is(err, service.ErrFunctionNotRunning), errors.Is(err, store.ErrConflict):
+	case errors.Is(err, domain.ErrFunctionNotRunning), errors.Is(err, store.ErrConflict):
 		writeError(w, "execution_not_in_running_state")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, "function_execution_not_found")
-	case errors.Is(err, service.ErrInvalidWorkflowStep), errors.Is(err, store.ErrInvalidArgument):
+	case errors.Is(err, domain.ErrInvalidWorkflowStep), errors.Is(err, store.ErrInvalidArgument):
 		writeError(w, "invalid_arguments")
 	default:
 		writeError(w, mapServiceError(err, "invalid_arguments"))
@@ -1991,16 +2018,16 @@ func writeFunctionPermissionError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, "function_not_found")
-	case errors.Is(err, service.ErrAutomationUserNotFound):
+	case errors.Is(err, domain.ErrAutomationUserNotFound):
 		writeError(w, "user_not_found")
-	case errors.Is(err, service.ErrAutomationChannelNotFound),
-		errors.Is(err, service.ErrAutomationTeamNotFound),
-		errors.Is(err, service.ErrAutomationOrgNotFound),
-		errors.Is(err, service.ErrAutomationEntitiesEmpty):
+	case errors.Is(err, domain.ErrAutomationChannelNotFound),
+		errors.Is(err, domain.ErrAutomationTeamNotFound),
+		errors.Is(err, domain.ErrAutomationOrgNotFound),
+		errors.Is(err, domain.ErrAutomationEntitiesEmpty):
 		writeError(w, "invalid_named_entities")
-	case errors.Is(err, service.ErrFunctionAccessDenied):
+	case errors.Is(err, domain.ErrFunctionAccessDenied):
 		writeError(w, "access_denied")
-	case errors.Is(err, service.ErrInvalidWorkflowStep), errors.Is(err, store.ErrInvalidArgument):
+	case errors.Is(err, domain.ErrInvalidWorkflowStep), errors.Is(err, store.ErrInvalidArgument):
 		writeError(w, "invalid_arguments")
 	default:
 		writeError(w, mapServiceError(err, "invalid_arguments"))
@@ -2156,19 +2183,19 @@ func writeTriggerPermissionError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, "trigger_not_found")
-	case errors.Is(err, service.ErrAutomationUserNotFound):
+	case errors.Is(err, domain.ErrAutomationUserNotFound):
 		writeError(w, "user_not_found")
-	case errors.Is(err, service.ErrAutomationChannelNotFound):
+	case errors.Is(err, domain.ErrAutomationChannelNotFound):
 		writeError(w, "channel_not_found")
-	case errors.Is(err, service.ErrAutomationTeamNotFound):
+	case errors.Is(err, domain.ErrAutomationTeamNotFound):
 		writeError(w, "team_not_found")
-	case errors.Is(err, service.ErrAutomationOrgNotFound):
+	case errors.Is(err, domain.ErrAutomationOrgNotFound):
 		writeError(w, "org_not_found")
-	case errors.Is(err, service.ErrAutomationEntitiesEmpty):
+	case errors.Is(err, domain.ErrAutomationEntitiesEmpty):
 		writeError(w, "named_entities_cannot_be_empty")
-	case errors.Is(err, service.ErrFunctionAccessDenied), errors.Is(err, service.ErrWorkflowPermissionDenied):
+	case errors.Is(err, domain.ErrFunctionAccessDenied), errors.Is(err, domain.ErrWorkflowPermissionDenied):
 		writeError(w, "access_denied")
-	case errors.Is(err, service.ErrInvalidWorkflowStep), errors.Is(err, store.ErrInvalidArgument):
+	case errors.Is(err, domain.ErrInvalidWorkflowStep), errors.Is(err, store.ErrInvalidArgument):
 		writeError(w, "invalid_arguments")
 	default:
 		writeError(w, mapServiceError(err, "invalid_arguments"))
@@ -2370,7 +2397,7 @@ func (h Handler) setFeaturedWorkflows(w http.ResponseWriter, r *http.Request, mo
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			writeError(w, "channel_not_found")
-		case errors.Is(err, service.ErrWorkflowPermissionDenied):
+		case errors.Is(err, domain.ErrWorkflowPermissionDenied):
 			writeError(w, "access_denied")
 		default:
 			writeError(w, mapServiceError(err, "error_modifying_workflows"))
@@ -2407,7 +2434,7 @@ func (h Handler) functionsWorkflowsStepsList(w http.ResponseWriter, r *http.Requ
 		strings.TrimSpace(fields["function_id"]), domain.WorkflowID(strings.TrimSpace(fields["workflow_id"])),
 		strings.TrimSpace(fields["workflow"]), domain.AppID(strings.TrimSpace(fields["workflow_app_id"])))
 	if err != nil {
-		if errors.Is(err, service.ErrWorkflowFunctionNotFound) {
+		if errors.Is(err, domain.ErrWorkflowFunctionNotFound) {
 			writeError(w, "function_not_found")
 		} else if errors.Is(err, store.ErrNotFound) {
 			writeError(w, "unknown_workflow_id")
@@ -2444,13 +2471,13 @@ func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {
 	if err := h.Messages.OpenDialog(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["trigger_id"]), fields["dialog"]); err != nil {
 		reason := mapServiceErrorNamed(err, "validation_errors", "validation_errors", "")
 		switch {
-		case errors.Is(err, service.ErrTriggerExchanged):
+		case errors.Is(err, domain.ErrTriggerExchanged):
 			reason = "trigger_exchanged"
-		case errors.Is(err, service.ErrTriggerExpired):
+		case errors.Is(err, domain.ErrTriggerExpired):
 			reason = "trigger_expired"
-		case errors.Is(err, service.ErrInvalidTrigger):
+		case errors.Is(err, domain.ErrInvalidTrigger):
 			reason = "invalid_trigger"
-		case errors.Is(err, service.ErrAppMissingActionURL):
+		case errors.Is(err, domain.ErrAppMissingActionURL):
 			reason = "app_missing_action_url"
 		}
 		writeError(w, reason)
@@ -2495,11 +2522,11 @@ func (h Handler) appsUninstall(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Messages.UninstallApp(r.Context(), clientID, clientSecret, principal.WorkspaceID, principal.AppID); err != nil {
 		switch {
-		case errors.Is(err, service.ErrBadOAuthClientSecret):
+		case errors.Is(err, domain.ErrBadOAuthClientSecret):
 			writeError(w, "bad_client_secret")
-		case errors.Is(err, service.ErrInvalidOAuthClient):
+		case errors.Is(err, domain.ErrInvalidOAuthClient):
 			writeError(w, "invalid_client_id")
-		case errors.Is(err, service.ErrOAuthAppMismatch):
+		case errors.Is(err, domain.ErrOAuthAppMismatch):
 			writeError(w, "client_id_token_mismatch")
 		default:
 			writeError(w, mapServiceError(err, "fatal_error"))
@@ -2753,7 +2780,7 @@ func (h Handler) toolingTokensRotate(w http.ResponseWriter, r *http.Request) {
 	value, err := h.Messages.RotateAppConfigurationToken(r.Context(), refreshToken)
 	if err != nil {
 		reason := "fatal_error"
-		if errors.Is(err, service.ErrAppConfigurationAuthentication) {
+		if errors.Is(err, domain.ErrAppConfigurationAuthentication) {
 			reason = "invalid_refresh_token"
 		}
 		writeError(w, reason)
@@ -2787,9 +2814,9 @@ func appConfigurationToken(r *http.Request, fields map[string]string) (string, s
 
 func appManifestServiceError(err error) string {
 	switch {
-	case errors.Is(err, service.ErrAppConfigurationAuthentication):
+	case errors.Is(err, domain.ErrAppConfigurationAuthentication):
 		return "invalid_auth"
-	case errors.Is(err, service.ErrInvalidAppManifest):
+	case errors.Is(err, domain.ErrInvalidAppManifest):
 		return "invalid_manifest"
 	case errors.Is(err, store.ErrNotFound):
 		return "invalid_app_id"
@@ -2891,13 +2918,13 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2, userO
 // the code was bad.
 func oauthExchangeFailure(err error, notFound string) string {
 	switch {
-	case errors.Is(err, service.ErrBadOAuthClientSecret):
+	case errors.Is(err, domain.ErrBadOAuthClientSecret):
 		return "bad_client_secret"
-	case errors.Is(err, service.ErrInvalidOAuthClient):
+	case errors.Is(err, domain.ErrInvalidOAuthClient):
 		return "invalid_client_id"
 	case errors.Is(err, store.ErrOAuthRedirectMismatch):
 		return "bad_redirect_uri"
-	case errors.Is(err, service.ErrInvalidOAuth):
+	case errors.Is(err, domain.ErrInvalidOAuth):
 		return notFound
 	default:
 		return mapServiceError(err, notFound)
@@ -3278,7 +3305,7 @@ func (h Handler) accessLogs(w http.ResponseWriter, r *http.Request) {
 		before = time.Unix(seconds, 0).UTC()
 	}
 	// Slack serves at most 100 pages of access logs and names the refusal.
-	if page > service.MaxAccessLogPages {
+	if page > domain.MaxAccessLogPages {
 		writeError(w, "over_pagination_limit")
 		return
 	}
@@ -5630,11 +5657,11 @@ func (h Handler) adminConversationArchive(w http.ResponseWriter, r *http.Request
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
-	case errors.Is(err, service.ErrConversationAlreadyArchived):
+	case errors.Is(err, domain.ErrConversationAlreadyArchived):
 		writeError(w, "already_archived")
-	case errors.Is(err, service.ErrCannotArchiveDefault):
+	case errors.Is(err, domain.ErrCannotArchiveDefault):
 		writeError(w, "cant_archive_general")
-	case errors.Is(err, service.ErrInvalidConversation):
+	case errors.Is(err, domain.ErrInvalidConversation):
 		writeError(w, "channel_type_not_supported")
 	default:
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -5649,9 +5676,9 @@ func (h Handler) adminConversationUnarchive(w http.ResponseWriter, r *http.Reque
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
-	case errors.Is(err, service.ErrConversationNotArchived):
+	case errors.Is(err, domain.ErrConversationNotArchived):
 		writeError(w, "channel_not_archived")
-	case errors.Is(err, service.ErrInvalidConversation):
+	case errors.Is(err, domain.ErrInvalidConversation):
 		writeError(w, "channel_type_not_supported")
 	default:
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -6928,7 +6955,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile)
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidProfile) {
+		if errors.Is(err, domain.ErrInvalidProfile) {
 			writeError(w, "invalid_profile")
 			return
 		}
@@ -6937,7 +6964,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if profileFields.HasFields {
 		if err := h.Messages.SetUserProfileFields(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, profileFields.Fields); err != nil {
-			if errors.Is(err, service.ErrInvalidProfile) {
+			if errors.Is(err, domain.ErrInvalidProfile) {
 				writeError(w, "invalid_profile")
 				return
 			}
@@ -7027,7 +7054,7 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if stat.Size() > service.MaxUserPhotoBytes {
+	if stat.Size() > domain.MaxUserPhotoBytes {
 		writeError(w, "too_large")
 		return
 	}
@@ -7045,7 +7072,7 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 		// The service refuses bytes that are not an allow-listed image, or
 		// that disagree with their declared type, as an invalid profile; the
 		// pinned enum names that bad_image.
-		if errors.Is(err, service.ErrInvalidProfile) {
+		if errors.Is(err, domain.ErrInvalidProfile) {
 			writeError(w, "bad_image")
 			return
 		}
@@ -7474,11 +7501,11 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, conversation); err != nil {
 		switch {
-		case errors.Is(err, service.ErrCannotLeaveDefault):
+		case errors.Is(err, domain.ErrCannotLeaveDefault):
 			writeError(w, "cant_leave_general")
-		case errors.Is(err, service.ErrConversationArchived):
+		case errors.Is(err, domain.ErrConversationArchived):
 			writeError(w, "is_archived")
-		case errors.Is(err, service.ErrNotInConversation):
+		case errors.Is(err, domain.ErrNotInConversation):
 			// The pinned success schema: leaving a channel you are not in
 			// succeeds and says so, rather than failing.
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "not_in_channel": true})
@@ -7516,11 +7543,11 @@ func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Messages.KickConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel, target); err != nil {
 		switch {
-		case errors.Is(err, service.ErrCannotKickSelf):
+		case errors.Is(err, domain.ErrCannotKickSelf):
 			writeError(w, "cant_kick_self")
-		case errors.Is(err, service.ErrCannotKickFromDefault):
+		case errors.Is(err, domain.ErrCannotKickFromDefault):
 			writeError(w, "cant_kick_from_general")
-		case errors.Is(err, service.ErrInvalidConversation):
+		case errors.Is(err, domain.ErrInvalidConversation):
 			writeError(w, "method_not_supported_for_channel_type")
 		default:
 			writeError(w, mapServiceError(err, "channel_not_found"))
@@ -7593,9 +7620,9 @@ func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
 	conversation, err := h.Messages.SetConversationTopic(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["topic"])
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrConversationArchived):
+		case errors.Is(err, domain.ErrConversationArchived):
 			writeError(w, "is_archived")
-		case errors.Is(err, service.ErrConversationTextTooLong):
+		case errors.Is(err, domain.ErrConversationTextTooLong):
 			writeError(w, "too_long")
 		default:
 			writeError(w, mapServiceError(err, "channel_not_found"))
@@ -7631,9 +7658,9 @@ func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) 
 	conversation, err := h.Messages.SetConversationPurpose(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["purpose"])
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrConversationArchived):
+		case errors.Is(err, domain.ErrConversationArchived):
 			writeError(w, "is_archived")
-		case errors.Is(err, service.ErrConversationTextTooLong):
+		case errors.Is(err, domain.ErrConversationTextTooLong):
 			writeError(w, "too_long")
 		default:
 			writeError(w, mapServiceError(err, "channel_not_found"))
@@ -7651,11 +7678,11 @@ func (h Handler) archiveConversation(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	case errors.Is(err, service.ErrConversationAlreadyArchived):
+	case errors.Is(err, domain.ErrConversationAlreadyArchived):
 		writeError(w, "already_archived")
-	case errors.Is(err, service.ErrCannotArchiveDefault):
+	case errors.Is(err, domain.ErrCannotArchiveDefault):
 		writeError(w, "cant_archive_general")
-	case errors.Is(err, service.ErrInvalidConversation):
+	case errors.Is(err, domain.ErrInvalidConversation):
 		writeError(w, "method_not_supported_for_channel_type")
 	default:
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -7670,9 +7697,9 @@ func (h Handler) unarchiveConversation(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	case errors.Is(err, service.ErrConversationNotArchived):
+	case errors.Is(err, domain.ErrConversationNotArchived):
 		writeError(w, "not_archived")
-	case errors.Is(err, service.ErrInvalidConversation):
+	case errors.Is(err, domain.ErrInvalidConversation):
 		writeError(w, "method_not_supported_for_channel_type")
 	default:
 		writeError(w, mapServiceError(err, "channel_not_found"))
@@ -7839,7 +7866,7 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	opening, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidConversation) && len(users) > 8 {
+		if errors.Is(err, domain.ErrInvalidConversation) && len(users) > 8 {
 			writeError(w, "too_many_users")
 			return
 		}
@@ -8333,7 +8360,7 @@ func (h Handler) removeStar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.RemoveStar(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
-		// service.ErrNotStarred is the pinned not_starred.
+		// domain.ErrNotStarred is the pinned not_starred.
 		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
@@ -8671,11 +8698,11 @@ func (h Handler) completeReminder(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Messages.CompleteReminder(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
 		switch {
-		case errors.Is(err, service.ErrReminderRecurring):
+		case errors.Is(err, domain.ErrReminderRecurring):
 			// reminders.complete refuses a recurring reminder: it has no single
 			// occurrence to mark done.
 			writeError(w, "cannot_complete_recurring")
-		case errors.Is(err, service.ErrReminderOwnedByOther):
+		case errors.Is(err, domain.ErrReminderOwnedByOther):
 			// A reminder belongs to the member it is for; another member cannot
 			// complete it, and Slack says so rather than hiding it as not_found.
 			writeError(w, "cannot_complete_others")
@@ -8958,7 +8985,7 @@ func (h Handler) searchMessageEnvelope(ctx context.Context, origin string, princ
 	matches := make([]map[string]any, 0, len(page.Messages))
 	var highlightTerms []string
 	if arguments.highlight {
-		highlightTerms = service.SearchHighlightTerms(arguments.query)
+		highlightTerms = domain.SearchHighlightTerms(arguments.query)
 	}
 	// A page of matches usually repeats a handful of channels and authors, so
 	// each is resolved once; the permalink needs no call at all, because it is
@@ -9780,7 +9807,7 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 	if channels := parseIDList[domain.ConversationID](fields["channels"]); len(channels) > 0 {
 		shared, shareErr := h.Messages.ShareUploadedFile(r.Context(), principal.WorkspaceID, principal.UserID, file.ID, channels, fields["initial_comment"], domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
 		if shareErr != nil {
-			if errors.Is(shareErr, service.ErrConversationAlreadyArchived) {
+			if errors.Is(shareErr, domain.ErrConversationAlreadyArchived) {
 				// As in files.completeUploadExternal: the current reference does not
 				// enumerate is_archived, and names a channel that cannot accept the
 				// share message posting_to_channel_denied.
@@ -10292,8 +10319,8 @@ func parseBoolField(value string) (bool, error) {
 // A shared decoder cannot pick the code: `invalid_cursor` appears in only 6 of
 // the 99 pinned enums, so emitting it everywhere leaked a code most operations
 // forbid, while the endpoints that skipped validation altogether let
-// domain.ErrInvalidCursor reach the service mapper — which names service.Err*
-// and store.Err* only — so `?cursor=!!!!` was answered `fatal_error`, a handled
+// domain.ErrInvalidCursor reach the service mapper — which then named only the
+// service and store sentinels — so `?cursor=!!!!` was answered `fatal_error`, a handled
 // input error presented as a server fault.
 func decodeCursor(raw, invalidReason string) (domain.Cursor, error) {
 	cursor := domain.Cursor(strings.TrimSpace(raw))
@@ -10406,7 +10433,7 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Messages.Unfurl(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, channel, timestamp, unfurls); err != nil {
 		// /chat.unfurl declares cannot_unfurl_url; message_not_found and
 		// not_in_channel are not in its enum.
-		if errors.Is(err, service.ErrNotInConversation) || errors.Is(err, service.ErrMessageAlreadyDeleted) {
+		if errors.Is(err, domain.ErrNotInConversation) || errors.Is(err, domain.ErrMessageAlreadyDeleted) {
 			writeError(w, "cannot_unfurl_url")
 			return
 		}
@@ -10474,15 +10501,15 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks, attachments, principal.AppID, domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
 	switch {
-	case errors.Is(err, service.ErrRecipientNotInConversation):
+	case errors.Is(err, domain.ErrRecipientNotInConversation):
 		writeError(w, "user_not_in_channel")
 		return
-	case errors.Is(err, service.ErrThreadNotFound), errors.Is(err, service.ErrInvalidTimestamp):
+	case errors.Is(err, domain.ErrThreadNotFound), errors.Is(err, domain.ErrInvalidTimestamp):
 		// The enum declares no thread code; the thread named is not a
 		// message of this channel.
 		writeError(w, "channel_not_found")
 		return
-	case errors.Is(err, service.ErrConversationAlreadyArchived):
+	case errors.Is(err, domain.ErrConversationAlreadyArchived):
 		writeError(w, "is_archived")
 		return
 	case err != nil:
@@ -10518,8 +10545,8 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 // is 150,000 characters — leaving room for the JSON framing around them without
 // admitting an unbounded structured body.
 const (
-	maxMessageTextRunes = service.MaxMessageTextRunes
-	maxMessageBodyBytes = service.MaxMessageBodyBytes
+	maxMessageTextRunes = domain.MaxMessageTextRunes
+	maxMessageBodyBytes = domain.MaxMessageBodyBytes
 )
 
 // checkMessageLength refuses a message body above the ceiling with the code the
@@ -10613,11 +10640,11 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 	}
 	blocks, err := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	if err != nil {
-		return domain.Message{}, service.ErrInvalidBlocks
+		return domain.Message{}, domain.ErrInvalidBlocks
 	}
 	attachments, err := domain.NormalizeAttachments([]byte(fields["attachments"]))
 	if err != nil {
-		return domain.Message{}, service.ErrInvalidMessage
+		return domain.Message{}, domain.ErrInvalidMessage
 	}
 	text := fields["text"]
 	if markdownText != "" {
@@ -10668,16 +10695,16 @@ func postMessageError(err error) string {
 	if errors.Is(err, store.ErrNotFound) {
 		return "channel_not_found"
 	}
-	if errors.Is(err, service.ErrConversationAlreadyArchived) {
+	if errors.Is(err, domain.ErrConversationAlreadyArchived) {
 		return "is_archived"
 	}
-	if errors.Is(err, service.ErrInvalidMessage) {
+	if errors.Is(err, domain.ErrInvalidMessage) {
 		return "no_text"
 	}
-	if errors.Is(err, service.ErrInvalidBlocks) {
+	if errors.Is(err, domain.ErrInvalidBlocks) {
 		return "invalid_blocks"
 	}
-	if errors.Is(err, service.ErrThreadNotFound) {
+	if errors.Is(err, domain.ErrThreadNotFound) {
 		return "thread_not_found"
 	}
 	return mapServiceError(err, "channel_not_found")
@@ -10729,12 +10756,12 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	message, err := h.Messages.UpdateMessage(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp), patch)
 	switch {
-	case errors.Is(err, service.ErrMessageNotOwned):
+	case errors.Is(err, domain.ErrMessageNotOwned):
 		// Slack's own code for editing somebody else's message; no_permission
 		// named a scope problem the caller does not have.
 		writeError(w, "cant_update_message")
 		return
-	case errors.Is(err, service.ErrInvalidMessage):
+	case errors.Is(err, domain.ErrInvalidMessage):
 		// An edit that would leave the message with nothing to show.
 		writeError(w, "no_text")
 		return
@@ -10848,7 +10875,7 @@ func (h Handler) messageStreamRequest(w http.ResponseWriter, r *http.Request) (a
 		writeDecodeError(w, err)
 		return auth.Principal{}, nil, false
 	}
-	if utf8.RuneCountInString(fields["markdown_text"]) > service.MaxStreamMarkdownRunes {
+	if utf8.RuneCountInString(fields["markdown_text"]) > domain.MaxStreamMarkdownRunes {
 		writeError(w, "msg_too_long")
 		return auth.Principal{}, nil, false
 	}
@@ -10857,19 +10884,19 @@ func (h Handler) messageStreamRequest(w http.ResponseWriter, r *http.Request) (a
 
 func messageStreamError(err error) string {
 	switch {
-	case errors.Is(err, service.ErrMissingStreamRecipientTeam):
+	case errors.Is(err, domain.ErrMissingStreamRecipientTeam):
 		return "missing_recipient_team_id"
-	case errors.Is(err, service.ErrMissingStreamRecipientUser):
+	case errors.Is(err, domain.ErrMissingStreamRecipientUser):
 		return "missing_recipient_user_id"
-	case errors.Is(err, service.ErrInvalidStreamChunks):
+	case errors.Is(err, domain.ErrInvalidStreamChunks):
 		return "invalid_chunks"
-	case errors.Is(err, service.ErrMessageNotStreaming):
+	case errors.Is(err, domain.ErrMessageNotStreaming):
 		return "message_not_in_streaming_state"
-	case errors.Is(err, service.ErrMessageNotOwnedByApp):
+	case errors.Is(err, domain.ErrMessageNotOwnedByApp):
 		return "message_not_owned_by_app"
-	case errors.Is(err, service.ErrInvalidTimestamp), errors.Is(err, service.ErrInvalidMessageStream):
+	case errors.Is(err, domain.ErrInvalidTimestamp), errors.Is(err, domain.ErrInvalidMessageStream):
 		return "invalid_arguments"
-	case errors.Is(err, service.ErrNotInConversation):
+	case errors.Is(err, domain.ErrNotInConversation):
 		return "not_in_channel"
 	case errors.Is(err, store.ErrNotFound):
 		return "message_not_found"
@@ -10895,7 +10922,7 @@ func (h Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message, err := h.Messages.Delete(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp))
-	if errors.Is(err, service.ErrMessageNotOwned) {
+	if errors.Is(err, domain.ErrMessageNotOwned) {
 		writeError(w, "cant_delete_message")
 		return
 	}
@@ -11038,19 +11065,19 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		CredentialHash: scheduledMessageOwner(principal),
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrScheduledTimeInPast) {
+		if errors.Is(err, domain.ErrScheduledTimeInPast) {
 			writeError(w, "time_in_past")
 			return
 		}
-		if errors.Is(err, service.ErrScheduledTimeTooFar) {
+		if errors.Is(err, domain.ErrScheduledTimeTooFar) {
 			writeError(w, "time_too_far")
 			return
 		}
-		if errors.Is(err, service.ErrScheduledTooMany) {
+		if errors.Is(err, domain.ErrScheduledTooMany) {
 			writeError(w, "restricted_too_many")
 			return
 		}
-		if errors.Is(err, service.ErrConversationAlreadyArchived) {
+		if errors.Is(err, domain.ErrConversationAlreadyArchived) {
 			writeError(w, "is_archived")
 			return
 		}
@@ -11229,7 +11256,7 @@ func (h Handler) mutateUserGroup(w http.ResponseWriter, r *http.Request, denied 
 		return
 	}
 	value, err := operation(principal, fields)
-	if errors.Is(err, service.ErrNotWorkspaceAdmin) {
+	if errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		denied(w)
 		return
 	}
@@ -11341,7 +11368,7 @@ func (h Handler) updateUserGroupUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	value, err := h.Messages.SetUserGroupUsers(r.Context(), principal.WorkspaceID, principal.UserID, group, users)
-	if errors.Is(err, service.ErrNotWorkspaceAdmin) {
+	if errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		userGroupPermissionDenied(w)
 		return
 	}
@@ -12058,9 +12085,9 @@ func messageAttachmentsWithUnfurls(message domain.Message) json.RawMessage {
 // failure on those operations is a role failure, and reporting it as the generic
 // `no_permission` hides which grant is missing.
 //
-// Two failures reach it: service.ErrNotWorkspaceAdmin, the role denial every
+// Two failures reach it: domain.ErrNotWorkspaceAdmin, the role denial every
 // admin.* method raises for an actor whose durable membership is not an
-// administrator or owner, and service.ErrMessageNotOwned, an ownership denial.
+// administrator or owner, and domain.ErrMessageNotOwned, an ownership denial.
 // Both land in the permission branch of mapServiceErrorNamed below.
 func mapAdminError(err error, notFoundReason string) string {
 	if reason := mapServiceError(err, notFoundReason); reason != "no_permission" {
@@ -12094,7 +12121,7 @@ func mapServiceErrorExists(err error, notFoundReason, existsReason string) strin
 // coarser than a sentinel, so they misclassified:
 //
 //   - codes.AlreadyExists is store.ErrAlreadyExists as well as
-//     service.ErrEmojiAlreadyExists, so a duplicate reaction was reported as
+//     domain.ErrEmojiAlreadyExists, so a duplicate reaction was reported as
 //     `emoji_already_exists`, a code no pinned operation declares for
 //     reactions.add, instead of the `already_reacted` its enum does declare;
 //   - codes.Aborted is store.ErrConflict, store.ErrLeaseConflict and
@@ -12102,87 +12129,87 @@ func mapServiceErrorExists(err error, notFoundReason, existsReason string) strin
 //     ErrIdempotencyConflict branch below and answered `hash_conflict` where the
 //     idempotency contract requires `rate_limited`.
 func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason string) string {
-	if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrSlashCommandNotFound) || errors.Is(err, service.ErrWebhookTriggerSecret) || errors.Is(err, service.ErrAssistantThreadNotFound) {
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, domain.ErrSlashCommandNotFound) || errors.Is(err, domain.ErrWebhookTriggerSecret) || errors.Is(err, domain.ErrAssistantThreadNotFound) {
 		return notFoundReason
 	}
 	// The person an operation names is missing, as distinct from the
 	// conversation it acts on: every enum that can say so declares
 	// user_not_found.
-	if errors.Is(err, service.ErrUserNotFound) {
+	if errors.Is(err, domain.ErrUserNotFound) {
 		return "user_not_found"
 	}
-	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, service.ErrScheduledStatusLimit) {
+	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, domain.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, domain.ErrScheduledStatusLimit) {
 		return "restricted_too_many"
 	}
-	if errors.Is(err, service.ErrInvalidBlocks) {
+	if errors.Is(err, domain.ErrInvalidBlocks) {
 		return "invalid_blocks"
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidProfileField) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidSharedInvite) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrBadOAuthClientSecret) || errors.Is(err, store.ErrOAuthRedirectMismatch) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidListTemplate) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrInvalidActivitySavedView) || errors.Is(err, service.ErrInvalidSidebarSection) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrTriggerExchanged) || errors.Is(err, service.ErrTriggerExpired) || errors.Is(err, store.ErrTriggerExchanged) || errors.Is(err, store.ErrTriggerExpired) || errors.Is(err, service.ErrViewPushLimit) || errors.Is(err, service.ErrSlashCommandInThread) || errors.Is(err, service.ErrInvalidAssistantThread) || errors.Is(err, service.ErrAppNotDistributable) || errors.Is(err, service.ErrInvalidExternalAuthProvider) || errors.Is(err, service.ErrExternalAuthConnection) {
+	if errors.Is(err, domain.ErrInvalidMessage) || errors.Is(err, domain.ErrInvalidTimestamp) || errors.Is(err, domain.ErrInvalidMessageTimestamp) || errors.Is(err, domain.ErrInvalidConversation) || errors.Is(err, domain.ErrInvalidReaction) || errors.Is(err, domain.ErrInvalidFile) || errors.Is(err, domain.ErrInvalidProfile) || errors.Is(err, domain.ErrInvalidProfileField) || errors.Is(err, domain.ErrInvalidScheduledStatus) || errors.Is(err, domain.ErrInvalidSnooze) || errors.Is(err, domain.ErrInvalidCall) || errors.Is(err, domain.ErrInvalidUserGroup) || errors.Is(err, domain.ErrInvalidEphemeral) || errors.Is(err, domain.ErrInvalidEmoji) || errors.Is(err, domain.ErrInvalidView) || errors.Is(err, domain.ErrInvalidDialog) || errors.Is(err, domain.ErrInvalidBot) || errors.Is(err, domain.ErrInvalidConversationPrefs) || errors.Is(err, domain.ErrInvalidRemoteFile) || errors.Is(err, domain.ErrInvalidInviteRequest) || errors.Is(err, domain.ErrInvalidSharedInvite) || errors.Is(err, domain.ErrInvalidAppApproval) || errors.Is(err, domain.ErrInvalidIntegrationLogs) || errors.Is(err, domain.ErrInvalidOAuth) || errors.Is(err, domain.ErrInvalidOAuthClient) || errors.Is(err, domain.ErrBadOAuthClientSecret) || errors.Is(err, store.ErrOAuthRedirectMismatch) || errors.Is(err, domain.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, domain.ErrInvalidCanvas) || errors.Is(err, domain.ErrInvalidList) || errors.Is(err, domain.ErrInvalidListTemplate) || errors.Is(err, domain.ErrInvalidEntity) || errors.Is(err, domain.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, domain.ErrInvalidAccessLog) || errors.Is(err, domain.ErrInvalidMigration) || errors.Is(err, domain.ErrInvalidReminder) || errors.Is(err, domain.ErrInvalidLaterReminder) || errors.Is(err, domain.ErrInvalidActivitySavedView) || errors.Is(err, domain.ErrInvalidSidebarSection) || errors.Is(err, domain.ErrReminderTimeInPast) || errors.Is(err, domain.ErrInvalidSearch) || errors.Is(err, domain.ErrInvalidWorkflowStep) || errors.Is(err, domain.ErrInvalidTriggerConfig) || errors.Is(err, domain.ErrInvalidWorkspace) || errors.Is(err, domain.ErrInvalidAppResponse) || errors.Is(err, domain.ErrInvalidTrigger) || errors.Is(err, domain.ErrTriggerExchanged) || errors.Is(err, domain.ErrTriggerExpired) || errors.Is(err, store.ErrTriggerExchanged) || errors.Is(err, store.ErrTriggerExpired) || errors.Is(err, domain.ErrViewPushLimit) || errors.Is(err, domain.ErrSlashCommandInThread) || errors.Is(err, domain.ErrInvalidAssistantThread) || errors.Is(err, domain.ErrAppNotDistributable) || errors.Is(err, domain.ErrInvalidExternalAuthProvider) || errors.Is(err, domain.ErrExternalAuthConnection) {
 		return invalidReason
 	}
-	if errors.Is(err, service.ErrAppInteractionUnavailable) {
+	if errors.Is(err, domain.ErrAppInteractionUnavailable) {
 		return "fatal_error"
 	}
 	// An information barrier is a refusal about who may reach whom, which is
 	// neither a malformed request nor a member who is not here. Reporting it as
 	// either would send the caller looking for the wrong thing.
-	if errors.Is(err, service.ErrBarrieredFromMember) {
+	if errors.Is(err, domain.ErrBarrieredFromMember) {
 		return "barriered_from_member"
 	}
 	// The two guest tiers are reported separately because the pinned enums for
 	// conversations.join and conversations.invite declare both codes, and they
 	// say different things: user_is_ultra_restricted tells the caller the
 	// person is confined to a single channel, which no other code does.
-	if errors.Is(err, service.ErrUserIsUltraRestricted) {
+	if errors.Is(err, domain.ErrUserIsUltraRestricted) {
 		return "user_is_ultra_restricted"
 	}
-	if errors.Is(err, service.ErrUserIsRestricted) {
+	if errors.Is(err, domain.ErrUserIsRestricted) {
 		return "user_is_restricted"
 	}
-	if errors.Is(err, service.ErrEmojiAlreadyExists) {
+	if errors.Is(err, domain.ErrEmojiAlreadyExists) {
 		return "emoji_already_exists"
 	}
 	// Each of these is raised by one operation family and names the code that
 	// family's contract declares for it.
 	switch {
-	case errors.Is(err, service.ErrSnoozeNotActive):
+	case errors.Is(err, domain.ErrSnoozeNotActive):
 		return "snooze_not_active"
-	case errors.Is(err, service.ErrSnoozeTooLong):
+	case errors.Is(err, domain.ErrSnoozeTooLong):
 		return "too_long"
-	case errors.Is(err, service.ErrReminderUnparseable):
+	case errors.Is(err, domain.ErrReminderUnparseable):
 		return "cannot_parse"
-	case errors.Is(err, service.ErrNotStarred):
+	case errors.Is(err, domain.ErrNotStarred):
 		return "not_starred"
-	case errors.Is(err, service.ErrUserGroupNameTaken):
+	case errors.Is(err, domain.ErrUserGroupNameTaken):
 		return "name_already_exists"
-	case errors.Is(err, service.ErrUserGroupHandleTaken):
+	case errors.Is(err, domain.ErrUserGroupHandleTaken):
 		return "handle_already_exists"
-	case errors.Is(err, service.ErrInvalidUserGroupUsers):
+	case errors.Is(err, domain.ErrInvalidUserGroupUsers):
 		return "invalid_users"
-	case errors.Is(err, service.ErrCannotUnfurlURL):
+	case errors.Is(err, domain.ErrCannotUnfurlURL):
 		return "cannot_unfurl_url"
 	}
-	// service.ErrNotWorkspaceAdmin is the role denial raised by every admin.*
+	// domain.ErrNotWorkspaceAdmin is the role denial raised by every admin.*
 	// method. It belongs in the permission branch so mapAdminError can name it
 	// `not_an_admin` on the five operations whose pinned enum declares that code,
 	// while every other operation reports `no_permission`, which 66 pinned enums
 	// declare and which is the closest code those operations do declare.
-	if errors.Is(err, service.ErrMessageNotOwned) || errors.Is(err, service.ErrNotWorkspaceAdmin) {
+	if errors.Is(err, domain.ErrMessageNotOwned) || errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		return "no_permission"
 	}
 	// A refusal to leave the workspace ownerless is not a permission failure —
 	// the actor holds the authority — so it must not be reported as one, or an
 	// administrator is told they lack a right they actually have.
-	if errors.Is(err, service.ErrLastWorkspaceOwner) {
+	if errors.Is(err, domain.ErrLastWorkspaceOwner) {
 		return "cant_delete_primary_owner"
 	}
-	if errors.Is(err, service.ErrMessageAlreadyDeleted) {
+	if errors.Is(err, domain.ErrMessageAlreadyDeleted) {
 		return "message_not_found"
 	}
-	if errors.Is(err, service.ErrInvalidPresence) {
+	if errors.Is(err, domain.ErrInvalidPresence) {
 		return "invalid_presence"
 	}
-	if errors.Is(err, service.ErrBlobUnavailable) {
+	if errors.Is(err, domain.ErrBlobUnavailable) {
 		return "file_storage_unavailable"
 	}
 	// A cursor that reaches the store unvalidated is still a client argument, not
@@ -12193,25 +12220,30 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	}
 	// A membership requirement the pinned contract states: 9 enums declare
 	// not_in_channel, and it was reachable from no route.
-	if errors.Is(err, service.ErrNotInConversation) {
+	if errors.Is(err, domain.ErrNotInConversation) {
 		return "not_in_channel"
 	}
 	// The channel's posting permissions refused a member who may read it. Slack's
 	// chat.postMessage enum declares restricted_action for exactly this — "a team
 	// preference prevents the authenticated user from posting" — and it is not a
 	// membership or argument failure.
-	if errors.Is(err, service.ErrConversationPostingRestricted) {
+	if errors.Is(err, domain.ErrConversationPostingRestricted) {
 		return "restricted_action"
 	}
 	// A function an administrator restricted is refused the same way: the builder
 	// may act in general but not with this resource, which is restricted_action.
-	if errors.Is(err, service.ErrFunctionUseRestricted) {
+	if errors.Is(err, domain.ErrFunctionUseRestricted) {
 		return "restricted_action"
 	}
-	if errors.Is(err, service.ErrTriggerTypeRestricted) {
+	if errors.Is(err, domain.ErrTriggerTypeRestricted) {
 		return "restricted_action"
 	}
-	if errors.Is(err, service.ErrCannotInviteSelf) {
+	// An app whose access control list does not admit the member, or not in
+	// this channel, is refused the same way.
+	if errors.Is(err, domain.ErrAppUseRestricted) {
+		return "restricted_action"
+	}
+	if errors.Is(err, domain.ErrCannotInviteSelf) {
 		return "cant_invite_self"
 	}
 	if errors.Is(err, store.ErrAlreadyExists) {
@@ -12235,13 +12267,13 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	}
 	// An expired invitation is not a malformed request: nothing the caller can
 	// correct will make it work, and a new invitation is the only remedy.
-	if errors.Is(err, service.ErrInvitationExpired) {
+	if errors.Is(err, domain.ErrInvitationExpired) {
 		return "invitation_expired"
 	}
 	// Ending a huddle removes everyone else from it, so only the person who
 	// started it or an administrator may. That is an authorization answer, not
 	// a malformed request.
-	if errors.Is(err, service.ErrHuddleNotOwned) {
+	if errors.Is(err, domain.ErrHuddleNotOwned) {
 		return "not_allowed"
 	}
 	// An invitation somebody else already decided is not a malformed request:
@@ -12249,24 +12281,24 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	// A duration outside Slack's range is a caller mistake with its own
 	// documented code, and a conversation type that cannot carry a policy is a
 	// refusal rather than a missing channel.
-	if errors.Is(err, service.ErrInvalidRetentionDuration) {
+	if errors.Is(err, domain.ErrInvalidRetentionDuration) {
 		return "invalid_duration"
 	}
-	if errors.Is(err, service.ErrRetentionNotSupported) {
+	if errors.Is(err, domain.ErrRetentionNotSupported) {
 		return "channel_type_not_supported"
 	}
-	if errors.Is(err, service.ErrSharedInviteSettled) {
+	if errors.Is(err, domain.ErrSharedInviteSettled) {
 		return "already_resolved"
 	}
 	// A connected organization the host has restricted from inviting further
 	// organizations. Slack answers external invitation refusals with a
 	// permission code rather than a not-found.
-	if errors.Is(err, service.ErrExternalInviteNotPermitted) {
+	if errors.Is(err, domain.ErrExternalInviteNotPermitted) {
 		return "not_allowed"
 	}
 	// The channel is full. Slack documents this as a hard capacity, so it is
 	// reported as one rather than as a temporary failure to retry.
-	if errors.Is(err, service.ErrSlackConnectFull) {
+	if errors.Is(err, domain.ErrSlackConnectFull) {
 		return "too_many_teams"
 	}
 	// An Idempotency-Key replayed with a different body is a permanently
@@ -12302,7 +12334,7 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrMessageTimestampTaken) || errors.Is(err, store.ErrTransient) {
 		return "internal_error"
 	}
-	if errors.Is(err, service.ErrAppCredentialKeyUnavailable) {
+	if errors.Is(err, domain.ErrAppCredentialKeyUnavailable) {
 		return "fatal_error"
 	}
 	return "fatal_error"
@@ -12723,7 +12755,7 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // methods answered invalid_array_arg to the SDK's own request.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages", "property":
 		return true
 	default:
 		return false
@@ -13535,7 +13567,7 @@ func (h Handler) memberLocation(ctx context.Context, principal auth.Principal) *
 func reminderSchedule(raw string, now time.Time, location *time.Location) (domain.ReminderSchedule, error) {
 	raw = strings.TrimSpace(raw)
 	if _, err := strconv.ParseInt(raw, 10, 64); err != nil {
-		due, recurrence, parseErr := service.ParseReminderTime(raw, now, location)
+		due, recurrence, parseErr := domain.ParseReminderTime(raw, now, location)
 		if parseErr != nil || !due.After(now) || due.After(now.AddDate(5, 0, 0)) {
 			return domain.ReminderSchedule{}, decodeFailure("cannot_parse", "time is not a timestamp, a number of seconds, or a reminder phrase")
 		}
@@ -13715,7 +13747,7 @@ func (h Handler) openIDConnectToken(w http.ResponseWriter, r *http.Request) {
 	token, err := h.Messages.OpenIDConnectToken(r.Context(), clientID, clientSecret, fields["code"], fields["redirect_uri"], fields["grant_type"], fields["refresh_token"], fields["code_verifier"])
 	if err != nil {
 		reason := "invalid_grant"
-		if errors.Is(err, service.ErrInvalidOAuthClient) {
+		if errors.Is(err, domain.ErrInvalidOAuthClient) {
 			reason = "invalid_client"
 		} else if strings.TrimSpace(fields["grant_type"]) != "" && strings.TrimSpace(fields["grant_type"]) != "authorization_code" && strings.TrimSpace(fields["grant_type"]) != "refresh_token" {
 			reason = "unsupported_grant_type"
@@ -13832,11 +13864,11 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 		// hooks.slack.com is a plain-text body with a non-200 status. An unknown
 		// workspace, app, secret, or a disabled hook is indistinguishable to the
 		// caller by design, so all of them answer 404 `no_team`.
-		if errors.Is(err, service.ErrConversationAlreadyArchived) {
+		if errors.Is(err, domain.ErrConversationAlreadyArchived) {
 			writeIncomingWebhookError(w, http.StatusGone, "channel_is_archived")
 			return
 		}
-		if errors.Is(err, service.ErrInvalidBlocks) {
+		if errors.Is(err, domain.ErrInvalidBlocks) {
 			writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_blocks")
 			return
 		}
@@ -13878,7 +13910,7 @@ func (h Handler) workflowTriggerWebhook(w http.ResponseWriter, r *http.Request) 
 		inputs = trimmed
 	}
 	if _, err := h.Messages.RunWebhookTrigger(r.Context(), workspaceID, triggerID, secret, inputs); err != nil {
-		if errors.Is(err, service.ErrWebhookTriggerSecret) || errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, domain.ErrWebhookTriggerSecret) || errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 			writeIncomingWebhookError(w, http.StatusNotFound, "no_team")
 			return
 		}
@@ -13923,7 +13955,7 @@ func (h Handler) adminIncomingWebhookCreate(w http.ResponseWriter, r *http.Reque
 		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "incoming_webhook": map[string]any{"id": webhook.ID, "channel_id": webhook.ConversationID, "url": originURL(h.origin(r), service.IncomingWebhookPath(webhook.WorkspaceID, webhook.AppID, secret))}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "incoming_webhook": map[string]any{"id": webhook.ID, "channel_id": webhook.ConversationID, "url": originURL(h.origin(r), domain.IncomingWebhookPath(webhook.WorkspaceID, webhook.AppID, secret))}})
 }
 
 func (h Handler) adminIncomingWebhookEnable(w http.ResponseWriter, r *http.Request) {
@@ -14039,9 +14071,9 @@ func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			writeUploadFailure(w, http.StatusNotFound, "file_not_found")
-		case errors.Is(err, service.ErrBlobUnavailable):
+		case errors.Is(err, domain.ErrBlobUnavailable):
 			writeUploadFailure(w, http.StatusServiceUnavailable, "file_storage_unavailable")
-		case errors.Is(err, service.ErrInvalidExternalUpload):
+		case errors.Is(err, domain.ErrInvalidExternalUpload):
 			writeUploadFailure(w, http.StatusBadRequest, "invalid_arg_name")
 		default:
 			writeUploadFailure(w, http.StatusInternalServerError, "fatal_error")
@@ -14102,7 +14134,7 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 	}
 	files, err := h.Messages.CompleteExternalUploads(r.Context(), principal.WorkspaceID, principal.UserID, completions, channels, fields["initial_comment"], fields["blocks"], domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
 	if err != nil {
-		if errors.Is(err, service.ErrConversationAlreadyArchived) {
+		if errors.Is(err, domain.ErrConversationAlreadyArchived) {
 			// The current method reference does not enumerate chat.postMessage's
 			// is_archived code. It names a channel that cannot accept the
 			// resulting file-share message as posting_to_channel_denied.

@@ -1,4 +1,6 @@
 accounts_changed
+agent_session_stopped
+agent_session_title_changed
 app_context_changed
 app_deleted
 app_home_opened
@@ -144,6 +146,7 @@ tokens_revoked
 url_verification
 user_change
 user_connection
+user_guest_status_changed
 user_huddle_changed
 user_profile_changed
 user_status_changed

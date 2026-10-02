@@ -2843,6 +2843,17 @@ type UserGroup struct {
 	Enabled     bool
 	Users       []UserID
 	Channels    []ConversationID
+	// OrgLevel marks a group admin.usergroups.create made for the whole
+	// organization, as distinct from one usergroups.create made in a workspace.
+	// It is fixed when the group is created.
+	OrgLevel bool
+	// Hidden is the inverse of Slack's is_visible, so that the zero value is
+	// the visible group every existing record and every usergroups.create
+	// group is.
+	Hidden bool
+	// Teams are the workspaces an organization group is assigned to by
+	// admin.usergroups.addTeams and released from by removeTeams.
+	Teams []WorkspaceID
 }
 
 type UserGroupPage struct {
@@ -4411,4 +4422,13 @@ const (
 type ExternalUploadCompletion struct {
 	ID    ExternalUploadID
 	Title string
+}
+
+// InternalScheduledCredential is the owner of a message a member schedules
+// through the first-party client: the member, with no app. Keeping this
+// coordinate in one place lets the web client preserve thread context through
+// ScheduleMessageAs without duplicating the ownership contract that list and
+// delete use.
+func InternalScheduledCredential(workspaceID WorkspaceID, userID UserID) string {
+	return ScheduledMessageOwner(workspaceID, userID, "", "")
 }

@@ -7,6 +7,13 @@ admin.apps.approved.list
 admin.apps.clearresolution
 admin.apps.config.lookup
 admin.apps.config.set
+admin.apps.mcp.servers.list
+admin.apps.mcp.servers.permissions.list
+admin.apps.mcp.servers.permissions.set
+admin.apps.permissions.add
+admin.apps.permissions.list
+admin.apps.permissions.remove
+admin.apps.permissions.set
 admin.apps.requests.cancel
 admin.apps.requests.list
 admin.apps.restrict
@@ -26,6 +33,7 @@ admin.conversations.bulkarchive
 admin.conversations.bulkdelete
 admin.conversations.bulkmove
 admin.conversations.bulksetexcludefromslackai
+admin.conversations.bulksetproperties
 admin.conversations.converttoprivate
 admin.conversations.converttopublic
 admin.conversations.create
@@ -78,8 +86,15 @@ admin.teams.settings.seticon
 admin.teams.settings.setname
 admin.usergroups.addchannels
 admin.usergroups.addteams
+admin.usergroups.addusers
+admin.usergroups.create
+admin.usergroups.fetch
 admin.usergroups.listchannels
 admin.usergroups.removechannels
+admin.usergroups.removeteams
+admin.usergroups.removeusers
+admin.usergroups.update
+admin.usergroups.uploadusers
 admin.users.assign
 admin.users.getexpiration
 admin.users.invite
@@ -104,6 +119,8 @@ admin.workflows.search
 admin.workflows.triggers.types.permissions.lookup
 admin.workflows.triggers.types.permissions.set
 admin.workflows.unpublish
+agents.sessions.rename
+agents.sessions.setstatus
 api.test
 apps.activities.list
 apps.auth.external.delete
@@ -120,6 +137,7 @@ apps.datastore.query
 apps.datastore.update
 apps.event.authorizations.list
 apps.icon.set
+apps.managed.permissions.set
 apps.manifest.create
 apps.manifest.delete
 apps.manifest.export
@@ -152,6 +170,7 @@ canvases.access.set
 canvases.create
 canvases.delete
 canvases.edit
+canvases.getcontent
 canvases.sections.lookup
 chat.appendstream
 chat.delete
@@ -230,6 +249,8 @@ functions.workflows.steps.responses.export
 migration.exchange
 oauth.access
 oauth.v2.access
+oauth.v2.beginshorttokenrotation
+oauth.v2.completeshorttokenrotation
 oauth.v2.exchange
 oauth.v2.user.access
 openid.connect.token

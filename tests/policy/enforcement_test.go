@@ -40,6 +40,7 @@ type enforcement struct {
 func enforced() map[string]enforcement {
 	return map[string]enforcement{
 		"GetAppApproval":                         {at: "internal/service/messages.go", why: "a decided request cannot be cancelled, and restriction uninstalls the app"},
+		"GetAppPermission":                       {at: "internal/service/admin_app_permissions.go", why: "requireAppUse refuses a slash command or shortcut to a member the app's list does not admit, or in a channel its restriction leaves out"},
 		"GetExternalInvitePermission":            {at: "internal/service/connect.go", why: "a connected organization a host has restricted is refused when it tries to invite another"},
 		"GetAutomationPermission":                {at: "internal/service/workflows.go", why: "who may run a workflow, a trigger and a function"},
 		"GetConversationRetention":               {at: "internal/scheduler/retention.go", why: "the sweep deletes against the conversation's own horizon"},
@@ -77,10 +78,13 @@ func unenforced() map[string]string {
 			"guess denies legitimate posts, which is worse than the present permissiveness.",
 		"ListAuthPolicyEntities": "admin.auth.policy.assignEntities records entities against a policy that no sign-in path " +
 			"consults. Same undefined vocabulary as channel posting policy, and here a wrong guess denies sign-in.",
+		"ListMCPServerPermissions": "admin.apps.mcp.servers.permissions.set records who may use an app's MCP server, and " +
+			"this product has no MCP runtime for the rule to gate: no member reaches an app's MCP server through it. It is " +
+			"closed when that runtime exists, by consulting the rule where a member's request reaches the server.",
 	}
 }
 
-const unenforcedCeiling = 2
+const unenforcedCeiling = 3
 
 // policyShaped is how a policy reader is recognised. It is a name test, which
 // is a real limit: a policy whose reader is named outside this vocabulary is

@@ -92,7 +92,7 @@ func TestMessageStreamLifecyclePersistsMarkdownChunksBlocksAndMetadata(t *testin
 
 	if _, err := messages.StopMessageStream(ctx, "T1", "UBOT", domain.MessageStreamMutation{
 		Conversation: "C1", Timestamp: domain.NewMessageTimestamp(stream.CreatedAt), AppID: "A2",
-	}); !errors.Is(err, ErrMessageNotOwnedByApp) {
+	}); !errors.Is(err, domain.ErrMessageNotOwnedByApp) {
 		t.Fatalf("foreign app stop error=%v", err)
 	}
 	stream, err = messages.StopMessageStream(ctx, "T1", "UBOT", domain.MessageStreamMutation{
@@ -109,7 +109,7 @@ func TestMessageStreamLifecyclePersistsMarkdownChunksBlocksAndMetadata(t *testin
 	}
 	if _, err := messages.AppendMessageStream(ctx, "T1", "UBOT", domain.MessageStreamMutation{
 		Conversation: "C1", Timestamp: domain.NewMessageTimestamp(stream.CreatedAt), AppID: "A1", MarkdownText: "late",
-	}); !errors.Is(err, ErrMessageNotStreaming) {
+	}); !errors.Is(err, domain.ErrMessageNotStreaming) {
 		t.Fatalf("append after stop error=%v", err)
 	}
 }
@@ -131,26 +131,26 @@ func TestMessageStreamRequiresChannelRecipientsAndValidChunks(t *testing.T) {
 	request := domain.MessageStreamStart{
 		Conversation: "C1", ThreadTimestamp: domain.NewMessageTimestamp(parent.CreatedAt), AppID: "A1",
 	}
-	if _, err := messages.StartMessageStream(ctx, "T1", "UBOT", request); !errors.Is(err, ErrMissingStreamRecipientTeam) {
+	if _, err := messages.StartMessageStream(ctx, "T1", "UBOT", request); !errors.Is(err, domain.ErrMissingStreamRecipientTeam) {
 		t.Fatalf("missing team error=%v", err)
 	}
 	request.RecipientTeamID = "T1"
-	if _, err := messages.StartMessageStream(ctx, "T1", "UBOT", request); !errors.Is(err, ErrMissingStreamRecipientUser) {
+	if _, err := messages.StartMessageStream(ctx, "T1", "UBOT", request); !errors.Is(err, domain.ErrMissingStreamRecipientUser) {
 		t.Fatalf("missing user error=%v", err)
 	}
 	request.RecipientUserID = "U1"
 	request.TaskDisplayMode = "invented"
-	if _, err := messages.StartMessageStream(ctx, "T1", "UBOT", request); !errors.Is(err, ErrInvalidMessageStream) {
+	if _, err := messages.StartMessageStream(ctx, "T1", "UBOT", request); !errors.Is(err, domain.ErrInvalidMessageStream) {
 		t.Fatalf("invalid task mode error=%v", err)
 	}
 	request.TaskDisplayMode = "dense"
 	request.IconURL = "javascript:alert(1)"
-	if _, err := messages.StartMessageStream(ctx, "T1", "UBOT", request); !errors.Is(err, ErrInvalidMessageStream) {
+	if _, err := messages.StartMessageStream(ctx, "T1", "UBOT", request); !errors.Is(err, domain.ErrInvalidMessageStream) {
 		t.Fatalf("invalid icon URL error=%v", err)
 	}
 	request.IconURL = ""
 	request.Chunks = `[{"type":"task_update","id":"task","title":"Task","status":"invented"}]`
-	if _, err := messages.StartMessageStream(ctx, "T1", "UBOT", request); !errors.Is(err, ErrInvalidStreamChunks) {
+	if _, err := messages.StartMessageStream(ctx, "T1", "UBOT", request); !errors.Is(err, domain.ErrInvalidStreamChunks) {
 		t.Fatalf("invalid chunks error=%v", err)
 	}
 }

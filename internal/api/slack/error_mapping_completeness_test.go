@@ -72,7 +72,9 @@ func exportedSentinels(t *testing.T, dir string, prefixes ...string) []string {
 //
 // This used to scan service.ErrInvalid* only, so every store.Err* sentinel — and
 // every non-ErrInvalid service sentinel such as ErrMessageNotOwned,
-// ErrEmojiAlreadyExists and ErrBlobUnavailable — escaped the net entirely.
+// ErrEmojiAlreadyExists and ErrBlobUnavailable — escaped the net entirely. The
+// service sentinels now live in internal/domain, so scanning domain also covers
+// the domain package's own sentinels.
 func TestMapServiceErrorNamesEveryTransportRelevantSentinel(t *testing.T) {
 	body := handlerSource(t)
 	// Sentinels that describe storage-engine internals rather than a client-visible
@@ -92,13 +94,19 @@ func TestMapServiceErrorNamesEveryTransportRelevantSentinel(t *testing.T) {
 		// block action, whose web handler names it (modalInteractionError).
 		"ErrViewFilesInvalid":    "returned only for a first-party modal's file_input, answered by the web /app/view routes",
 		"ErrCapabilityExhausted": "UseAppResponseURL's refusal, translated by HandleAppResponse to ErrAppResponseURLUsed",
+		// A member's stop control on a session is a web route, not a Web API
+		// method: only the web handler's agent session stop answers it.
+		"ErrAgentSessionNotStoppable": "returned only by StopAgentSession, answered by the web /app/agent-session/stop route",
+		// A row this system wrote and can no longer decode is a fault, not a
+		// caller mistake, so the unclassified fallback is the right answer.
+		"ErrInvalidStoredTimestamp": "stored state that cannot be decoded, which no request can correct",
 	}
 	missing := make([]string, 0)
 	for _, pkg := range []struct {
 		name string
 		dir  string
 	}{
-		{"service", filepath.Join("..", "..", "service")},
+		{"domain", filepath.Join("..", "..", "domain")},
 		{"store", filepath.Join("..", "..", "store")},
 	} {
 		for _, name := range exportedSentinels(t, pkg.dir, "Err") {
@@ -278,6 +286,9 @@ func recordedNonPinnedCodes() map[string]string {
 		"restricted_too_many":       "current chat.scheduleMessage method reference; the immutable legacy OpenAPI snapshot predates the documented 30-messages-per-five-minute restriction",
 		"no_query":                  "current search.* method references require query; the immutable legacy OpenAPI snapshot omits the Web API error enum",
 		"auth_mismatch":             "current apps.event.authorizations.list method reference; the supplied app token belongs to a different app than event_context",
+		"thread_ts_required":        "current agents.sessions.setStatus and agents.sessions.rename method references; a thread-based session named without its thread root",
+		"invalid_status":            "current agents.sessions.setStatus method reference; a status outside active, processing, suspended and closed",
+		"session_not_found":         "current agents.sessions.rename method reference; no agent session exists for the channel and thread",
 		"invalid_event_context":     "current apps.event.authorizations.list method reference; event_context does not resolve to an event visible to the authenticated app",
 		// The immutable legacy OpenAPI snapshot predates current custom
 		// functions and Workflow Builder management methods. These names come
@@ -303,6 +314,28 @@ func recordedNonPinnedCodes() map[string]string {
 		"name_already_exists":   "usergroups.create and usergroups.update: the name is taken by another group",
 		"handle_already_exists": "usergroups.create and usergroups.update: the handle is taken by another group",
 		"invalid_users":         "usergroups.users.update: a named member is not in the workspace; the snapshot's enum declares no code for it, and usergroup_not_found named the wrong missing thing",
+		// admin.usergroups.* organization methods are absent from the pinned
+		// snapshot; each code is in its current method reference.
+		"invalid_usergroup":          "current admin.usergroups.addUsers, fetch, removeUsers, update and uploadUsers references: no group has the ID",
+		"invalid_team_ids":           "current admin.usergroups.removeTeams reference: a team_ids entry is not a workspace of the organization",
+		"no_team_ids_given":          "current admin.usergroups.removeTeams reference: team_ids is empty",
+		"unable_to_parse_csv":        "current admin.usergroups.uploadUsers reference: the file is not a member id, email CSV",
+		"no_valid_users":             "current admin.usergroups.uploadUsers reference: the CSV names no user who can join",
+		"visible_group_needs_handle": "current admin.usergroups.update reference: a visible group's handle was removed",
+		// admin.apps.permissions.*, admin.apps.mcp.servers.* and
+		// apps.managed.permissions.set are absent from the pinned snapshot; each
+		// code below is declared by those methods' current Slack references.
+		"app_acl_not_found":                       "current admin.apps.permissions.add and .remove references",
+		"app_not_managed":                         "current apps.managed.permissions.set reference",
+		"channel_ids_required":                    "current admin.apps.permissions.set reference",
+		"channel_restriction_requires_app_access": "current admin.apps.permissions.set reference",
+		"invalid_channel_restriction_mode":        "current admin.apps.permissions.add, .remove and .set references",
+		"invalid_entities":                        "current admin.apps.permissions.add reference",
+		"no_valid_named_entities":                 "current admin.apps.permissions.add and .set and admin.apps.mcp.servers.permissions.set references",
+		"server_acl_entities_not_in_scope":        "current admin.apps.mcp.servers.permissions.set reference",
+		"server_acl_type_broader_than_app":        "current admin.apps.mcp.servers.permissions.set reference",
+		"server_not_found":                        "current admin.apps.mcp.servers.permissions.set reference",
+		"too_many_named_entities":                 "current admin.apps.permissions.* and admin.apps.mcp.servers.permissions.set references",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so
@@ -310,7 +343,8 @@ func recordedNonPinnedCodes() map[string]string {
 		// declares. net/http.ServeMux answered both with text/plain at a non-200
 		// status, which no SDK can parse. `unknown_method` is the name Slack itself
 		// uses for the case.
-		"unknown_method": "the pinned snapshot declares no routing error code; this is the name Slack uses for an unrecognised method",
+		"unknown_method":    "the pinned snapshot declares no routing error code; this is the name Slack uses for an unrecognised method",
+		"no_valid_channels": "current admin.conversations.bulkSetProperties method reference: all input channels are invalid",
 	}
 }
 

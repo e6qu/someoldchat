@@ -1,13 +1,23 @@
 # Incoming Webhooks
 
-Someoldchat implements Slack Incoming Webhook delivery through the
+SameOldChat implements Slack Incoming Webhook delivery through the
 `/services/{workspace_id}/{app_id}/{secret}` endpoint. It accepts JSON with
 `text`, `blocks`, `attachments`, an optional `thread_ts`, and an optional
 `Idempotency-Key` header. The JSON is either the request body or, as Slack also
 accepts, the `payload` field of an `application/x-www-form-urlencoded` body;
-either encoding is limited to 1 MiB. A request carrying none of `text`, `blocks`, or
-`attachments` is rejected with `invalid_payload`. A successful request returns
-the plain-text body `ok`.
+either encoding is limited to 1 MiB. A successful request returns the
+plain-text body `ok`.
+
+Failures are plain-text bodies with a non-200 status, as on
+`hooks.slack.com`:
+
+- 400 `invalid_payload`: an oversized or undecodable body, none of `text`,
+  `blocks`, or `attachments`, an invalid `attachments` array, or another
+  rejected message;
+- 400 `invalid_blocks`: an invalid `blocks` array;
+- 404 `no_team`: an unknown workspace, app, or secret, or a disabled webhook,
+  which are deliberately indistinguishable;
+- 410 `channel_is_archived`: the destination conversation is archived.
 
 With `-api-rate-limit` on (the default), each webhook URL carries Slack's
 documented allowance of one message per second with a short burst. A delivery
@@ -33,16 +43,14 @@ and `bot_user_id`. They enable or disable it with
 `/internal/admin/incoming-webhooks/enable`, providing `webhook_id` and an
 explicit `enabled` value.
 
-Local composition invokes the typed service methods directly. Distributed
-composition uses the generated gRPC adapters for the same methods. The SQLite migration and
-memory store both enforce the enabled state and never store the plaintext
+Local composition invokes the typed service methods directly; distributed
+composition uses the generated gRPC adapters for the same methods. Every
+storage backend enforces the enabled state and never stores the plaintext
 secret.
 
-The message model stores Block Kit and legacy attachment payloads as normalized
-JSON arrays. The payload travels through the direct service boundary or
-generated gRPC and is persisted by every storage backend. Each array accepts at
-most 100 JSON objects. Invalid arrays receive `invalid_payload`; the
-implementation does not silently discard them.
+Block Kit and legacy attachment payloads are stored as normalized JSON arrays
+of at most 100 objects each. An invalid array is refused, never silently
+discarded.
 
 For upstream behavior, see [Sending messages using incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks)
 and the [`incoming-webhook` scope](https://docs.slack.dev/reference/scopes/incoming-webhook/).

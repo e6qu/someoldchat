@@ -56,6 +56,8 @@ type Parsed struct {
 	// unfurls: a message sharing a link on one of them, or on a subdomain of
 	// one, reaches the app as a link_shared event.
 	UnfurlDomains []string
+	// MCPServers are the Model Context Protocol servers the app declares.
+	MCPServers []MCPServer
 }
 
 type AgentView struct {
@@ -368,6 +370,7 @@ func Parse(raw string) (Parsed, []Error) {
 		}
 	}
 	unfurlDomains := parseUnfurlDomains(features, &problems)
+	mcpServers := parseMCPServers(features, &problems)
 	functions := parseFunctions(document["functions"], &problems)
 	if len(functions) != 0 && functionRuntime == "" {
 		problems = append(problems, Error{Message: "function_runtime is required when functions are declared", Pointer: "/settings/function_runtime"})
@@ -421,6 +424,7 @@ func Parse(raw string) (Parsed, []Error) {
 		Datastores:              datastores,
 		Functions:               functions,
 		UnfurlDomains:           unfurlDomains,
+		MCPServers:              mcpServers,
 	}, nil
 }
 

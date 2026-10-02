@@ -13,6 +13,7 @@ import (
 // Service is the process-independent chat boundary. Implementations may be
 // local or generated remote clients; callers do not select transport per call.
 type Service interface {
+	AgentSessions
 	RevokeToken(context.Context, string) error
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
@@ -235,6 +236,11 @@ type Service interface {
 	OAuthV2Exchange(context.Context, string, string, string, string, bool) (domain.OAuthToken, error)
 	OAuthV2Refresh(context.Context, string, string, string) (domain.OAuthToken, error)
 	OAuthV2ExchangeToken(context.Context, string, string, string) (domain.OAuthToken, error)
+	// BeginShortTokenRotation and CompleteShortTokenRotation are the
+	// one-time short-secret rotation pair: client id, client secret, the
+	// token being rotated and, to complete, the replacement begin returned.
+	BeginShortTokenRotation(context.Context, string, string, string) (string, error)
+	CompleteShortTokenRotation(context.Context, string, string, string, string) (string, error)
 	OpenIDConnectToken(context.Context, string, string, string, string, string, string, string) (domain.OpenIDToken, error)
 	OpenIDConnectUserInfo(context.Context, string) (domain.OpenIDUserInfo, error)
 	CreateRTMConnection(context.Context, domain.WorkspaceID, domain.UserID) (domain.RTMConnection, error)
@@ -266,6 +272,15 @@ type Service interface {
 	UserGroupChannels(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) ([]domain.ConversationID, error)
 	AddUserGroupChannels(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.ConversationID) error
 	AdminAddUserGroupTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.WorkspaceID) error
+	AdminRemoveUserGroupTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.WorkspaceID) error
+	// AdminCreateUserGroup creates an organization group; the bool is is_visible.
+	AdminCreateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, bool) (domain.UserGroup, error)
+	AdminFetchUserGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) (domain.UserGroup, error)
+	AdminUpdateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, domain.UserGroupPatch) (domain.UserGroup, error)
+	AdminAddUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserID) (domain.UserGroupMembershipResult, error)
+	AdminRemoveUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserID) error
+	// AdminUploadUserGroupUsers takes the uploaded "member id, email" CSV text.
+	AdminUploadUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, string) (domain.UserGroupMembershipResult, error)
 	RemoveUserGroupChannels(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.ConversationID) error
 	AdminSetWorkspaceName(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.Workspace, error)
 	AdminSetWorkspaceDescription(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.Workspace, error)
@@ -329,6 +344,7 @@ type Service interface {
 	AdminLookupConversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationLookup, domain.PageRequest) (domain.ConversationPage, error)
 	AdminBulkMoveConversations(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, domain.WorkspaceID) error
 	AdminSetConversationsExcludedFromAI(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, bool) error
+	AdminBulkSetConversationProperties(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, domain.ConversationProperty) error
 	AdminConversationsExcludedFromAI(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) ([]domain.ConversationID, error)
 	AdminLinkConversationObjects(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, []string) error
 	AdminUnlinkConversationObjects(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) error
@@ -337,6 +353,14 @@ type Service interface {
 	AdminAppConfigs(context.Context, domain.WorkspaceID, domain.UserID, []domain.AppID) ([]domain.AppConfig, error)
 	AdminSetAppConfig(context.Context, domain.WorkspaceID, domain.UserID, domain.AppConfig) (domain.AppConfig, error)
 	AdminClearAppResolution(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error
+	AdminAppPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.AppPermission, error)
+	AdminSetAppPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppPermission) (domain.AppPermission, error)
+	AdminAddAppPermissionEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AppPermissionChange) (domain.AppPermission, error)
+	AdminRemoveAppPermissionEntities(context.Context, domain.WorkspaceID, domain.UserID, domain.AppPermissionChange) (domain.AppPermission, error)
+	AdminMCPServers(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.MCPServerPage, error)
+	AdminAppMCPServerPermissions(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) ([]domain.MCPServerAccess, error)
+	AdminSetMCPServerPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.MCPServerPermission) (domain.MCPServerPermission, error)
+	SetManagedAppPermissions(context.Context, string, domain.AppID, domain.ManagedAppPermission) error
 	AdminFunctionPermissions(context.Context, domain.WorkspaceID, domain.UserID, []string) ([]domain.AutomationPermission, error)
 	AdminWorkflowPermissions(context.Context, domain.WorkspaceID, domain.UserID, []domain.WorkflowID) ([]domain.AutomationPermission, error)
 	AdminTriggerTypePermission(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerType) (domain.AutomationPermission, error)

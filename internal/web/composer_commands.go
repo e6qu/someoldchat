@@ -12,7 +12,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -85,7 +85,7 @@ func (h Handler) dispatchBuiltInSlashCommand(ctx context.Context, principal auth
 		return message, "", true, err
 	case "/search":
 		if text == "" {
-			return domain.Message{}, "", true, service.ErrInvalidSearch
+			return domain.Message{}, "", true, domain.ErrInvalidSearch
 		}
 		values := url.Values{"q": {text}, "channel": {string(channel)}}
 		return domain.Message{}, "/app/search?" + values.Encode(), true, nil
@@ -95,7 +95,7 @@ func (h Handler) dispatchBuiltInSlashCommand(ctx context.Context, principal auth
 		return domain.Message{}, "/app/activity?channel=" + url.QueryEscape(string(channel)), true, nil
 	case "/remind":
 		if thread != "" {
-			return domain.Message{}, "", true, service.ErrSlashCommandInThread
+			return domain.Message{}, "", true, domain.ErrSlashCommandInThread
 		}
 		if strings.EqualFold(text, "list") {
 			values := url.Values{"channel": {string(channel)}, "filter": {"channel-reminders"}}
@@ -230,7 +230,7 @@ func (h Handler) commandStatus(ctx context.Context, principal auth.Principal, ch
 	}
 	profile.StatusExpiration = time.Time{}
 	if _, err := h.Messages.SetUserProfile(ctx, principal.WorkspaceID, principal.UserID, profile); err != nil {
-		if errors.Is(err, service.ErrInvalidProfile) {
+		if errors.Is(err, domain.ErrInvalidProfile) {
 			return "", refuse(http.StatusBadRequest, "Use /status with a known emoji and up to 100 characters, for example /status :palm_tree: On holiday, or /status clear.")
 		}
 		return "", err
@@ -240,7 +240,7 @@ func (h Handler) commandStatus(ctx context.Context, principal auth.Principal, ch
 
 func (h Handler) commandTopic(ctx context.Context, principal auth.Principal, channel domain.ConversationID, thread domain.MessageTimestamp, text string) (string, error) {
 	if _, err := h.Messages.SetConversationTopic(ctx, principal.WorkspaceID, principal.UserID, channel, text); err != nil {
-		if errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidMessage) {
+		if errors.Is(err, domain.ErrInvalidConversation) || errors.Is(err, domain.ErrInvalidMessage) {
 			return "", refuse(http.StatusBadRequest, "That topic cannot be set here. A topic is up to 250 characters and belongs to a channel.")
 		}
 		return "", err
@@ -349,7 +349,7 @@ func (h Handler) commandInvite(ctx context.Context, principal auth.Principal, ch
 		switch {
 		case errors.Is(err, store.ErrAlreadyExists):
 			return "", refuse(http.StatusConflict, strings.Join(names, ", ")+" is already in that channel.")
-		case errors.Is(err, service.ErrInvalidConversation):
+		case errors.Is(err, domain.ErrInvalidConversation):
 			return "", refuse(http.StatusBadRequest, "People can be added to channels, not to direct messages.")
 		}
 		return "", err
@@ -384,7 +384,7 @@ func (h Handler) commandLeave(ctx context.Context, principal auth.Principal, cha
 		return "", err
 	}
 	if err := h.Messages.LeaveConversation(ctx, principal.WorkspaceID, principal.UserID, channel); err != nil {
-		if errors.Is(err, service.ErrCannotLeaveDefault) {
+		if errors.Is(err, domain.ErrCannotLeaveDefault) {
 			return "", refuse(http.StatusForbidden, "Everyone in the workspace stays in #"+conversationName(conversation)+", so it cannot be left.")
 		}
 		return "", err

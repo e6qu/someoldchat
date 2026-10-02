@@ -141,6 +141,7 @@ func machines() map[string]machine {
 			transitions: map[string][]string{"pending": {"uploaded"}, "uploaded": {"completed"}},
 			why:         "a completed upload is a durable file; the ticket that produced it is spent",
 		},
+		"AgentSessionStatus": agentSessionMachine(),
 	}
 }
 

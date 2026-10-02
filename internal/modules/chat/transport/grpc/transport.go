@@ -468,7 +468,7 @@ func sendChunks(source io.Reader, what string, send func(chunk []byte) error) er
 // grpc-go answers Send with io.EOF once the server has ended the stream, and the
 // reason is only available on the receive side. Returning the send error alone
 // surfaced "EOF" to a caller for a failure the monolith reports as a domain error
-// — service.ErrBlobUnavailable, for instance — and which of the two a caller saw
+// — domain.ErrBlobUnavailable, for instance — and which of the two a caller saw
 // depended on how fast the server tore the stream down.
 func uploadFailure(sendErr error, receive func() error) error {
 	if recvErr := receive(); recvErr != nil && !errors.Is(recvErr, io.EOF) {

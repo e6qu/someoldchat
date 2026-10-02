@@ -24,7 +24,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -725,7 +725,7 @@ func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, 
 		switch {
 		case inviteErr == nil:
 			user, err = invited, nil
-		case errors.Is(inviteErr, service.ErrInvitationExpired):
+		case errors.Is(inviteErr, domain.ErrInvitationExpired):
 			return domain.User{}, "", inviteErr
 		case !errors.Is(inviteErr, store.ErrNotFound):
 			return domain.User{}, "", inviteErr

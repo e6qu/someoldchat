@@ -254,6 +254,8 @@ var topicRules = []topicRule{
 		note: "pinned topic user_change; user_profile_changed always accompanies it and user_status_changed joins when the payload marks a status change — both are current-catalog names an app subscribes to separately"},
 	{topic: "user.removed", slack: translated("user_change", everySurface, userEvent("user_change")),
 		note: "inference: Slack reports deletion as user_change whose user object carries deleted true, which the producer's snapshot records"},
+	{topic: GuestStatusChangedTopic, slack: translated("user_guest_status_changed", appSurfaces, userGuestStatusChanged),
+		note: "current Slack event reference (users:read; compatible APIs: Events, so RTM does not carry it): the inner event is {type, user, cache_ts, event_ts} with the user object as the change leaves it; the repositories mint the record inside the mutation that changes the guest tier or deactivates a guest"},
 	{topic: "user.dnd_snoozed", slack: translated("dnd_updated", everySurface, dndUpdated),
 		note: "pinned topic; the payload carries the dnd_status fields. dnd_updated_user, the variant Slack addresses to everyone but the subject, remains a recorded gap: this delivery does not vary the event name per recipient"},
 	{topic: "user.dnd_snooze_ended", slack: translated("dnd_updated", everySurface, dndUpdated),
@@ -427,6 +429,14 @@ var topicRules = []topicRule{
 	{topic: "invite_request.approved", note: "not pinned: invite requests have no Slack event"},
 	{topic: "invite_request.denied", note: "not pinned: invite requests have no Slack event"},
 	{topic: "incoming_webhook.enabled", note: "not pinned: integration administration has no Slack event"},
+	{topic: AgentSessionStoppedTopic, slack: translated("agent_session_stopped", appSurfaces, agentSessionStopped),
+		note: "current agent_session_stopped reference: a member pressed stop on a processing session; chat:write, Events API only, one record per stopped agent routed by target_app_id"},
+	{topic: AgentSessionTitleChangedTopic, slack: translated("agent_session_title_changed", appSurfaces, agentSessionTitleChanged),
+		note: "current agent_session_title_changed reference: a member retitled a session; chat:write, Events API only, one record per agent of the session routed by target_app_id"},
+	{topic: AgentSessionStatusSetTopic,
+		note: "not a Slack event: agents.sessions.setStatus answers the app itself, and the record exists so an open client re-renders the session"},
+	{topic: AgentSessionRenamedTopic,
+		note: "not a Slack event: agent_session_title_changed is for a member's change, and an app is not told of its own agents.sessions.rename"},
 }
 
 // rulesByTopic indexes the table. A duplicate row would make one of the two

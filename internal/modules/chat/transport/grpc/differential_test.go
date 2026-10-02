@@ -98,7 +98,7 @@ type parityCase struct {
 	name string
 
 	// blobs provisions blob storage. A case that leaves it false exercises the
-	// service.ErrBlobUnavailable path.
+	// domain.ErrBlobUnavailable path.
 	blobs bool
 
 	// seed prepares a store. It runs once per composition with an empty store, so
@@ -238,6 +238,33 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 	requireSeed(t, target.CreateWorkflowRun(context.Background(), run, &execution, []events.Event{{
 		ID: "evt_run_parity", WorkspaceID: "T1", Topic: "workflow.run_started", CreatedAt: now,
 	}}))
+}
+
+// seedAppAccessParity gives the fixture an approved app that declares two MCP
+// servers, a user group holding U2, and the app's owner a configuration
+// token, so every app access control has something real to act on.
+func seedAppAccessParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedBaseline(t, target)
+	now := time.Unix(1_700_000_600, 0).UTC()
+	requireSeed(t, target.CreateApp(context.Background(), domain.App{
+		ID: "AM", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Agent tools", ClientID: "agent-tools-client",
+		SigningSecretHash: "hash", SigningSecretCiphertext: "cipher", VerificationTokenHash: "hash", VerificationTokenCiphertext: "cipher",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "AM", Version: 1, CreatedBy: "U1", CreatedAt: now,
+		Manifest: `{"display_information":{"name":"Agent tools"},"features":{"mcp_servers":[{"name":"search","url":"https://mcp.example.test/search"},{"name":"tickets","url":"https://mcp.example.test/tickets"}]}}`,
+	}, domain.OAuthClient{ID: "agent-tools-client", SecretHash: "secret", AppID: "AM"}))
+	requireSeed(t, target.SetAppApproval(context.Background(), "T1", "AM", "RM", domain.AppApprovalApproved, now, events.Event{
+		ID: "evt_app_access_approved", WorkspaceID: "T1", Topic: "app.approved", CreatedAt: now,
+	}))
+	requireSeed(t, target.CreateUserGroup(context.Background(), domain.UserGroup{
+		WorkspaceID: "T1", ID: "S1", Name: "Support", Handle: "support", Creator: "UA", UpdatedBy: "UA",
+		CreatedAt: now, UpdatedAt: now, Enabled: true, Users: []domain.UserID{"U2"},
+	}, events.Event{ID: "evt_app_access_group", WorkspaceID: "T1", Topic: "subteam.created", CreatedAt: now}))
+	requireSeed(t, target.CreateAppConfigurationToken(context.Background(), "xoxe.xoxp-app-access", "xoxe-app-access-refresh", domain.AppConfigurationToken{
+		WorkspaceID: "T1", UserID: "U1", ExpiresAt: time.Now().Add(time.Hour).UTC(),
+	}))
 }
 
 // seedUserGroupParity gives the fixture two user groups, so a barrier has
@@ -464,6 +491,17 @@ func seedUserGroupParity(t *testing.T, target *memory.Store) {
 	}
 }
 
+// seedOrgUserGroupParity adds a multi-channel guest, whom an organization
+// group refuses, to the user-group fixture.
+func seedOrgUserGroupParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedUserGroupParity(t, target)
+	requireSeed(t, target.CreateUser(context.Background(),
+		domain.User{ID: "UG", WorkspaceID: "T1", Name: "guest", Email: "guest@example.com"},
+		domain.WorkspaceMembership{WorkspaceID: "T1", UserID: "UG", Role: domain.WorkspaceRoleMember, Active: true, Restricted: true},
+		events.Event{ID: "evt_seed_guest", WorkspaceID: "T1", Topic: "user.created", CreatedAt: time.Unix(1_700_000_300, 0).UTC()}))
+}
+
 func seedFormParity(t *testing.T, target *memory.Store) {
 	t.Helper()
 	seedWorkflowParity(t, target)
@@ -663,7 +701,7 @@ func TestCompositionsAgreeOnEveryErrorClassAndValue(t *testing.T) {
 
 			// The sweep is the point of the harness: the two compositions must
 			// agree about every sentinel, so restoring a plausible neighbour
-			// (service.ErrEmojiAlreadyExists for store.ErrAlreadyExists) fails
+			// (domain.ErrEmojiAlreadyExists for store.ErrAlreadyExists) fails
 			// here even though the case only names one sentinel.
 			for _, class := range errorClasses {
 				if errors.Is(localErr, class.sentinel) != errors.Is(remoteErr, class.sentinel) {
@@ -728,7 +766,7 @@ func parityCases() []parityCase {
 				})
 				return []any{
 					unfurled.Unfurls["https://docs.example.test/page"],
-					errors.Is(foreign, service.ErrCannotUnfurlURL), errors.Is(appless, service.ErrNotInConversation),
+					errors.Is(foreign, domain.ErrCannotUnfurlURL), errors.Is(appless, domain.ErrNotInConversation),
 				}, nil
 			},
 		},
@@ -1742,6 +1780,73 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// An organization group's whole admin.usergroups.* life: created
+			// hidden, its members added, uploaded and removed with each refusal
+			// the methods name, assigned to and released from its workspace, made
+			// visible, and fetched.
+			name: "an organization user group is administered identically",
+			seed: seedOrgUserGroupParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.AdminCreateUserGroup(ctx, "T1", "UA", "Org Admins", "", "Runs the org", false)
+				if err != nil {
+					return nil, err
+				}
+				_, memberCreate := chat.AdminCreateUserGroup(ctx, "T1", "U1", "Members", "", "", true)
+				_, duplicate := chat.AdminCreateUserGroup(ctx, "T1", "UA", "org admins", "", "", true)
+				added, err := chat.AdminAddUserGroupUsers(ctx, "T1", "UA", created.ID, []domain.UserID{"U1", "UG"})
+				if err != nil {
+					return nil, err
+				}
+				_, unknownUser := chat.AdminAddUserGroupUsers(ctx, "T1", "UA", created.ID, []domain.UserID{"U1", "U-nobody"})
+				_, onlyGuests := chat.AdminAddUserGroupUsers(ctx, "T1", "UA", created.ID, []domain.UserID{"UG"})
+				_, missingGroup := chat.AdminAddUserGroupUsers(ctx, "T1", "UA", "S-nobody", []domain.UserID{"U1"})
+				uploaded, err := chat.AdminUploadUserGroupUsers(ctx, "T1", "UA", created.ID, "member id,email\n,bob@example.com\nU-nobody,\n")
+				if err != nil {
+					return nil, err
+				}
+				_, unparseable := chat.AdminUploadUserGroupUsers(ctx, "T1", "UA", created.ID, "U1,a,b")
+				_, noneValid := chat.AdminUploadUserGroupUsers(ctx, "T1", "UA", created.ID, "U-nobody\n")
+				if err := chat.AdminRemoveUserGroupUsers(ctx, "T1", "UA", created.ID, []domain.UserID{"U1"}); err != nil {
+					return nil, err
+				}
+				removeUnknown := chat.AdminRemoveUserGroupUsers(ctx, "T1", "UA", created.ID, []domain.UserID{"U-nobody"})
+				if err := chat.AdminAddUserGroupTeams(ctx, "T1", "UA", created.ID, []domain.WorkspaceID{"T1"}); err != nil {
+					return nil, err
+				}
+				assigned, err := chat.AdminFetchUserGroup(ctx, "T1", "UA", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminRemoveUserGroupTeams(ctx, "T1", "UA", created.ID, []domain.WorkspaceID{"T1"}); err != nil {
+					return nil, err
+				}
+				foreignTeam := chat.AdminRemoveUserGroupTeams(ctx, "T1", "UA", created.ID, []domain.WorkspaceID{"T2"})
+				visible, description := true, "Runs everything"
+				updated, err := chat.AdminUpdateUserGroup(ctx, "T1", "UA", created.ID, domain.UserGroupPatch{Visible: &visible, Description: &description})
+				if err != nil {
+					return nil, err
+				}
+				noHandle := ""
+				_, needsHandle := chat.AdminUpdateUserGroup(ctx, "T1", "UA", created.ID, domain.UserGroupPatch{Handle: &noHandle})
+				fetched, err := chat.AdminFetchUserGroup(ctx, "T1", "UA", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				_, memberFetch := chat.AdminFetchUserGroup(ctx, "T1", "U1", created.ID)
+				return []any{
+					created.Name, created.Handle, created.Description, created.OrgLevel, created.Hidden,
+					errors.Is(memberCreate, domain.ErrNotWorkspaceAdmin), errors.Is(duplicate, domain.ErrUserGroupNameTaken),
+					added.Group.Users, added.Succeeded, added.Invalid,
+					errors.Is(unknownUser, domain.ErrUserNotFound), errors.Is(onlyGuests, domain.ErrInvalidUserGroupUsers), missingGroup != nil,
+					uploaded.Group.Users, uploaded.Succeeded, uploaded.Invalid,
+					errors.Is(unparseable, domain.ErrUnparseableUserGroupFile), errors.Is(noneValid, domain.ErrNoValidUserGroupUsers),
+					errors.Is(removeUnknown, domain.ErrUserNotFound), assigned.Teams, errors.Is(foreignTeam, domain.ErrInvalidUserGroup),
+					updated.Hidden, updated.Description, errors.Is(needsHandle, domain.ErrUserGroupNeedsHandle),
+					fetched.Users, fetched.Teams, fetched.OrgLevel, errors.Is(memberFetch, domain.ErrNotWorkspaceAdmin),
+				}, nil
+			},
+		},
+		{
 			// A reminder is read, completed, and deleted. Completing one that
 			// is already complete and deleting one that is gone are the two
 			// answers most likely to drift between compositions.
@@ -1785,7 +1890,7 @@ func parityCases() []parityCase {
 				}
 				return []any{read.Text, read.Time.Equal(due), len(listed.Reminders), len(after.Reminders),
 					somebodyElse != nil, missing != nil, completedTwice != nil, deletedTwice != nil,
-					errors.Is(completingOther, service.ErrReminderOwnedByOther)}, nil
+					errors.Is(completingOther, domain.ErrReminderOwnedByOther)}, nil
 			},
 		},
 		{
@@ -2170,6 +2275,83 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// bulkSetProperties sets the channels that are here and skips the
+			// ones that are not; both compositions must agree on what was set.
+			name: "bulk channel properties set the channels that exist",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.AdminBulkSetConversationProperties(ctx, "T1", "UA", []domain.ConversationID{"C1", "C-nobody"}, domain.ConversationProperty{ExcludeFromSlackAI: true}); err != nil {
+					return nil, err
+				}
+				excluded, err := chat.AdminConversationsExcludedFromAI(ctx, "T1", "UA", []domain.ConversationID{"C1", "C2"})
+				if err != nil {
+					return nil, err
+				}
+				member := chat.AdminBulkSetConversationProperties(ctx, "T1", "U1", []domain.ConversationID{"C2"}, domain.ConversationProperty{ExcludeFromSlackAI: true})
+				return []any{excluded, errors.Is(member, domain.ErrNotWorkspaceAdmin)}, nil
+			},
+		},
+		{
+			name:         "bulk channel properties naming no channel of the workspace",
+			wantSentinel: domain.ErrNoValidChannels,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				return nil, chat.AdminBulkSetConversationProperties(ctx, "T1", "UA", []domain.ConversationID{"C-nobody"}, domain.ConversationProperty{ExcludeFromSlackAI: true})
+			},
+		},
+		{
+			// The replacement is random, so the compositions compare its shape
+			// and its effect: the kept sections, a 32-character secret, the
+			// original no longer authenticating and the replacement doing so.
+			name: "a short-secret token rotates once",
+			seed: seedShortTokenRotationParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, badSecret := chat.BeginShortTokenRotation(ctx, "short-client", "wrong", shortTokenParityToken)
+				_, otherApp := chat.BeginShortTokenRotation(ctx, "other-client", "other-secret", shortTokenParityToken)
+				_, botToken := chat.BeginShortTokenRotation(ctx, "short-client", "short-secret", "xoxb-111-222-d6bc76")
+				_, early := chat.CompleteShortTokenRotation(ctx, "short-client", "short-secret", shortTokenParityToken, "xoxp-111-222-333-"+strings.Repeat("0", 32))
+				replacement, err := chat.BeginShortTokenRotation(ctx, "short-client", "short-secret", shortTokenParityToken)
+				if err != nil {
+					return nil, err
+				}
+				_, mismatch := chat.CompleteShortTokenRotation(ctx, "short-client", "short-secret", shortTokenParityToken, "xoxp-111-222-333-"+strings.Repeat("0", 32))
+				live, err := chat.CompleteShortTokenRotation(ctx, "short-client", "short-secret", shortTokenParityToken, replacement)
+				if err != nil {
+					return nil, err
+				}
+				_, original := chat.Tokens.LookupToken(ctx, shortTokenParityToken)
+				record, err := chat.Tokens.LookupToken(ctx, live)
+				if err != nil {
+					return nil, err
+				}
+				_, again := chat.BeginShortTokenRotation(ctx, "short-client", "short-secret", live)
+				return []any{
+					errors.Is(badSecret, domain.ErrBadOAuthClientSecret), errors.Is(otherApp, domain.ErrOAuthAppMismatch),
+					errors.Is(botToken, domain.ErrTokenTypeNotRotatable), errors.Is(early, domain.ErrShortTokenRotationNotFound),
+					errors.Is(mismatch, domain.ErrShortTokenRotationMismatch),
+					live == replacement, strings.HasPrefix(live, "xoxp-111-222-333-"), len(strings.TrimPrefix(live, "xoxp-111-222-333-")),
+					errors.Is(original, storepkg.ErrNotFound), string(record.UserID), string(record.AppID), record.Scopes,
+					errors.Is(again, domain.ErrTokenSecretTooLong),
+				}, nil
+			},
+		},
+		{
+			name:         "a rotated token is not short enough to rotate again",
+			seed:         seedShortTokenRotationParity,
+			wantSentinel: domain.ErrTokenSecretTooLong,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, err := chat.BeginShortTokenRotation(ctx, "short-client", "short-secret", "xoxp-111-222-333-"+strings.Repeat("a", 32))
+				return nil, err
+			},
+		},
+		{
+			name:         "a completion with no begun rotation",
+			seed:         seedShortTokenRotationParity,
+			wantSentinel: domain.ErrShortTokenRotationNotFound,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, err := chat.CompleteShortTokenRotation(ctx, "short-client", "short-secret", shortTokenParityToken, "xoxp-111-222-333-"+strings.Repeat("0", 32))
+				return nil, err
+			},
+		},
+		{
 			// An app nobody has configured answers the defaults, so both
 			// compositions must report the same effective configuration.
 			name: "app configuration defaults and resolution clearance agree",
@@ -2197,6 +2379,90 @@ func parityCases() []parityCase {
 					defaults[0].WorkflowAuthStrategy, defaults[0].DomainURLs, defaults[0].DomainEmails,
 					written.WorkflowAuthStrategy, after[0].DomainURLs, after[0].WorkflowAuthStrategy,
 					badStrategy != nil, unknownApp != nil, undecided != nil,
+				}, nil
+			},
+		},
+		{
+			// The app access controls: the default list, a replacement that
+			// keeps its channel restriction, add and remove, the MCP server
+			// allowlist and its rules, and the managed-app refusal. Every
+			// refusal is compared by the sentinel it restores to, so a code
+			// lost on the wire shows up as a difference.
+			name: "app and MCP server access controls agree",
+			seed: seedAppAccessParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				initial, err := chat.AdminAppPermission(ctx, "T1", "UA", "AM")
+				if err != nil {
+					return nil, err
+				}
+				restricted, err := chat.AdminSetAppPermission(ctx, "T1", "UA", domain.AppPermission{
+					AppID: "AM", PermissionType: domain.AppPermissionEveryone,
+					ChannelRestrictionMode: domain.ChannelRestrictionSpecificChannels, ChannelIDs: []domain.ConversationID{"C1", "C2"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				named, err := chat.AdminSetAppPermission(ctx, "T1", "UA", domain.AppPermission{
+					AppID: "AM", PermissionType: domain.AppPermissionNamedEntities, UserGroupIDs: []domain.UserGroupID{"S1"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				added, err := chat.AdminAddAppPermissionEntities(ctx, "T1", "UA", domain.AppPermissionChange{AppID: "AM", UserIDs: []domain.UserID{"U1"}})
+				if err != nil {
+					return nil, err
+				}
+				removed, err := chat.AdminRemoveAppPermissionEntities(ctx, "T1", "UA", domain.AppPermissionChange{AppID: "AM", ChannelIDs: []domain.ConversationID{"C2"}})
+				if err != nil {
+					return nil, err
+				}
+				_, noApp := chat.AdminAddAppPermissionEntities(ctx, "T1", "UA", domain.AppPermissionChange{AppID: "A-none", UserIDs: []domain.UserID{"U1"}})
+				_, ghost := chat.AdminSetAppPermission(ctx, "T1", "UA", domain.AppPermission{AppID: "AM", PermissionType: domain.AppPermissionNamedEntities, UserIDs: []domain.UserID{"U-ghost"}})
+				_, nobody := chat.AdminSetAppPermission(ctx, "T1", "UA", domain.AppPermission{
+					AppID: "AM", PermissionType: domain.AppPermissionNoOne, ChannelRestrictionMode: domain.ChannelRestrictionAllChannels,
+				})
+				_, member := chat.AdminAppPermission(ctx, "T1", "U1", "AM")
+				firstPage, err := chat.AdminMCPServers(ctx, "T1", "UA", domain.PageRequest{Limit: 1})
+				if err != nil {
+					return nil, err
+				}
+				secondPage, err := chat.AdminMCPServers(ctx, "T1", "UA", domain.PageRequest{Limit: 1, Cursor: firstPage.NextCursor})
+				if err != nil {
+					return nil, err
+				}
+				access, err := chat.AdminAppMCPServerPermissions(ctx, "T1", "UA", "AM")
+				if err != nil {
+					return nil, err
+				}
+				server := access[0].Server.ID
+				narrowed, err := chat.AdminSetMCPServerPermission(ctx, "T1", "UA", domain.MCPServerPermission{
+					AppID: "AM", ServerID: server, PermissionType: domain.MCPServerPermissionNamedEntities, UserIDs: []domain.UserID{"U2"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, broader := chat.AdminSetMCPServerPermission(ctx, "T1", "UA", domain.MCPServerPermission{AppID: "AM", ServerID: server, PermissionType: domain.MCPServerPermissionEveryone})
+				_, outOfScope := chat.AdminSetMCPServerPermission(ctx, "T1", "UA", domain.MCPServerPermission{
+					AppID: "AM", ServerID: server, PermissionType: domain.MCPServerPermissionNamedEntities, UserIDs: []domain.UserID{"U2", "UA"},
+				})
+				_, unknownServer := chat.AdminSetMCPServerPermission(ctx, "T1", "UA", domain.MCPServerPermission{AppID: "AM", ServerID: "Amcp-none", PermissionType: domain.MCPServerPermissionNoOne})
+				after, err := chat.AdminAppMCPServerPermissions(ctx, "T1", "UA", "AM")
+				if err != nil {
+					return nil, err
+				}
+				managed := chat.SetManagedAppPermissions(ctx, "xoxe.xoxp-app-access", "AM", domain.ManagedAppPermissionEveryone)
+				badManaged := chat.SetManagedAppPermissions(ctx, "xoxe.xoxp-app-access", "AM", "whoever")
+				return []any{
+					initial.PermissionType, initial.UserIDs, initial.ChannelRestrictionMode,
+					restricted.ChannelIDs, restricted.ChannelRestrictionMode, named.ChannelIDs, named.UserGroupIDs,
+					added.UserIDs, removed.ChannelIDs,
+					noApp != nil, errors.Is(ghost, domain.ErrNoValidNamedEntities),
+					errors.Is(nobody, domain.ErrChannelRestrictionRequiresAppAccess), errors.Is(member, domain.ErrNotWorkspaceAdmin),
+					firstPage.Servers, firstPage.HasMore, secondPage.Servers, secondPage.HasMore,
+					len(access), narrowed.UserIDs, narrowed.PermissionType,
+					errors.Is(broader, domain.ErrServerPermissionBroaderThanApp), errors.Is(outOfScope, domain.ErrServerPermissionOutOfAppScope),
+					errors.Is(unknownServer, domain.ErrServerNotFound), after[0].Permission.UserIDs, after[1].Permission.PermissionType,
+					errors.Is(managed, domain.ErrAppNotManaged), errors.Is(badManaged, domain.ErrInvalidAppPermission),
 				}, nil
 			},
 		},
@@ -2881,7 +3147,7 @@ func parityCases() []parityCase {
 				}
 				return []any{
 					webhook.Type, strings.HasPrefix(invokeURL, "/services/triggers/T1/"+string(webhook.ID)+"/"),
-					errors.Is(deniedErr, storepkg.ErrNotFound), errors.Is(wrongSecretErr, service.ErrWebhookTriggerSecret),
+					errors.Is(deniedErr, storepkg.ErrNotFound), errors.Is(wrongSecretErr, domain.ErrWebhookTriggerSecret),
 					hookRun.Status, hookRun.ActorID,
 					autoRun.Status, autoRun.ID == autoReplay.ID,
 					!scheduled.NextRunAt.IsZero(), weekdays.Config, weekdays.NextRunAt.Format(time.RFC3339),
@@ -2999,14 +3265,14 @@ func parityCases() []parityCase {
 		// transient failure instead of a denial.
 		{
 			name:         "a member cannot promote themselves",
-			wantSentinel: service.ErrNotWorkspaceAdmin,
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				return nil, chat.SetUserRole(ctx, "T1", "U1", "U1", domain.WorkspaceRoleOwner)
 			},
 		},
 		{
 			name:         "a member cannot list the workspace directory administratively",
-			wantSentinel: service.ErrNotWorkspaceAdmin,
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.AdminListUsers(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
 				return nil, err
@@ -3014,7 +3280,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "a member cannot rename the workspace",
-			wantSentinel: service.ErrNotWorkspaceAdmin,
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.AdminSetWorkspaceName(ctx, "T1", "U1", "Taken Over")
 				return nil, err
@@ -3038,7 +3304,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "a member cannot read another member's membership",
-			wantSentinel: service.ErrNotWorkspaceAdmin,
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.WorkspaceMembership(ctx, "T1", "U1", "U2")
 				return nil, err
@@ -3095,7 +3361,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "post rejects empty text",
-			wantSentinel: service.ErrInvalidMessage,
+			wantSentinel: domain.ErrInvalidMessage,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.Post(ctx, "T1", "U1", "C1", "", "", "")
 				return nil, err
@@ -3147,7 +3413,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "search rejects an empty query",
-			wantSentinel: service.ErrInvalidSearch,
+			wantSentinel: domain.ErrInvalidSearch,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.Search(ctx, "T1", "U1", "   ", domain.PageRequest{Limit: 10})
 				return nil, err
@@ -3213,7 +3479,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "reaction rejects an invalid name",
-			wantSentinel: service.ErrInvalidReaction,
+			wantSentinel: domain.ErrInvalidReaction,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				message, err := chat.Post(ctx, "T1", "U1", "C1", "reactable", "", "")
 				if err != nil {
@@ -3242,7 +3508,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "duplicate custom emoji",
-			wantSentinel: service.ErrEmojiAlreadyExists,
+			wantSentinel: domain.ErrEmojiAlreadyExists,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				if err := chat.AdminAddEmoji(ctx, "T1", "UA", "party", "https://example.test/party.png"); err != nil {
 					return nil, err
@@ -3252,14 +3518,14 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "custom emoji rejects an empty name",
-			wantSentinel: service.ErrInvalidEmoji,
+			wantSentinel: domain.ErrInvalidEmoji,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				return nil, chat.AdminAddEmoji(ctx, "T1", "UA", "  ", "https://example.test/party.png")
 			},
 		},
 		{
 			name:         "presence rejects an unknown value",
-			wantSentinel: service.ErrInvalidPresence,
+			wantSentinel: domain.ErrInvalidPresence,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.SetUserPresence(ctx, "T1", "U1", domain.Presence("sleepy"))
 				return nil, err
@@ -3267,7 +3533,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "profile rejects an oversized display name",
-			wantSentinel: service.ErrInvalidProfile,
+			wantSentinel: domain.ErrInvalidProfile,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.SetUserProfile(ctx, "T1", "U1", domain.UserProfile{DisplayName: string(bytes.Repeat([]byte("a"), 81))})
 				return nil, err
@@ -3275,7 +3541,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "conversation rejects an empty name",
-			wantSentinel: service.ErrInvalidConversation,
+			wantSentinel: domain.ErrInvalidConversation,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.CreateConversation(ctx, "T1", "U1", "   ", false)
 				return nil, err
@@ -3283,7 +3549,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "bookmark rejects an unsupported type",
-			wantSentinel: service.ErrInvalidBookmark,
+			wantSentinel: domain.ErrInvalidBookmark,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.AddBookmark(ctx, "T1", "U1", "C1", "Title", "video", "https://example.test", ":link:", "", "", "")
 				return nil, err
@@ -3306,7 +3572,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "update rejects a message owned by another user",
-			wantSentinel: service.ErrMessageNotOwned,
+			wantSentinel: domain.ErrMessageNotOwned,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				message, err := chat.Post(ctx, "T1", "U2", "C1", "bob wrote this", "", "")
 				if err != nil {
@@ -3318,7 +3584,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "delete rejects an already deleted message",
-			wantSentinel: service.ErrMessageAlreadyDeleted,
+			wantSentinel: domain.ErrMessageAlreadyDeleted,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				message, err := chat.Post(ctx, "T1", "U1", "C1", "delete me", "", "")
 				if err != nil {
@@ -3424,7 +3690,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "upload without blob storage",
-			wantSentinel: service.ErrBlobUnavailable,
+			wantSentinel: domain.ErrBlobUnavailable,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", "", 5, bytes.NewReader([]byte("hello")))
 				return nil, err
@@ -3450,7 +3716,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "upload with an empty title while blob storage is down",
-			wantSentinel: service.ErrBlobUnavailable,
+			wantSentinel: domain.ErrBlobUnavailable,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "", "text/plain", "", 5, bytes.NewReader([]byte("hello")))
 				return nil, err
@@ -3990,13 +4256,13 @@ func parityCases() []parityCase {
 					pushed.Type, pushed.RootViewID == opened.ID, pushed.PreviousViewID == opened.ID,
 					staleErr != nil, errors.Is(staleErr, storepkg.ErrConflict),
 					updated.ID == pushed.ID, updated.Hash != pushed.Hash, normalizeViewPayload(updated.Payload),
-					replayErr != nil, errors.Is(replayErr, service.ErrTriggerExchanged),
+					replayErr != nil, errors.Is(replayErr, domain.ErrTriggerExchanged),
 					published.Type, published.UserID, normalizeViewPayload(published.Payload),
 					installed.ID, installed.Name, installed.HomeTabEnabled, normalizeViewPayload(home.Payload),
 					openedApp.ID, openedHome.Payload == home.Payload,
 					messagesTab.Kind, messagesTab.ID != "",
 					dialogErr == nil, invalidDialogErr != nil,
-					errors.Is(invalidDialogErr, service.ErrInvalidDialog),
+					errors.Is(invalidDialogErr, domain.ErrInvalidDialog),
 					currentErr == nil, openDialog.AppID, openDialog.UserID, openDialog.Payload != "",
 					submitErr == nil, refused.Errors["summary"], refused.Pending,
 					cancelErr == nil, errors.Is(afterCancelErr, storepkg.ErrNotFound),
@@ -4119,7 +4385,7 @@ func parityCases() []parityCase {
 					string(accepted.ConversationID), string(accepted.TargetWorkspaceID),
 					string(accepted.Status), accepted.InvitedBy,
 					string(approved.Status), settledErr != nil,
-					errors.Is(settledErr, service.ErrSharedInviteSettled),
+					errors.Is(settledErr, domain.ErrSharedInviteSettled),
 					string(conversation.ID), conversation.WorkspaceID,
 					// Denying and revoking both end an invitation and are both
 					// recorded as revoked, which is only correct if the reason
@@ -4358,7 +4624,7 @@ func parityCases() []parityCase {
 				}
 				sort.Strings(left)
 				return []any{
-					foreignErr != nil, errors.Is(foreignErr, service.ErrInvalidConversation),
+					foreignErr != nil, errors.Is(foreignErr, domain.ErrInvalidConversation),
 					attached, hasMore, connected, infoMore, left,
 				}, nil
 			},
@@ -4458,13 +4724,8 @@ func parityCases() []parityCase {
 				if err := chat.WorkflowUpdateStep(ctx, "T1", "U1", "triage", `{"item":{"value":"request"}}`, `[{"name":"result","type":"text"}]`, "Triage request", "https://example.test/icon.png"); err != nil {
 					return nil, err
 				}
-				// No seam method returns a stored workflow step, so what these
-				// three write is observable only through the run they move and
-				// through whether they were accepted at all. That bounds this
-				// case honestly: dropping an identifier is caught, dropping a
-				// payload field is not, because nothing can read the payload
-				// back. The product gap audit records that separately — an app
-				// completes a step with outputs and no method reports them.
+				// WorkflowRunSteps reads back what these write, so a dropped
+				// payload field is caught as well as a dropped identifier.
 				configured, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxParity")
 				if err != nil {
 					return nil, err
@@ -4478,11 +4739,26 @@ func parityCases() []parityCase {
 				// payload that is not an object is refused rather than stored.
 				repeatErr := chat.WorkflowStepCompleted(ctx, "T1", "U1", "FxParity", `{"result":"again"}`)
 				malformedErr := chat.WorkflowStepFailed(ctx, "T1", "U1", "FxParity", `not-json`)
+				steps, err := chat.WorkflowRunSteps(ctx, "T1", "U1", "WxParity")
+				if err != nil {
+					return nil, err
+				}
+				if len(steps) == 0 {
+					return nil, errors.New("the run reports no steps, so the read-back compares nothing")
+				}
+				stored := make([]any, 0, len(steps))
+				for _, step := range steps {
+					stored = append(stored, []any{
+						step.FunctionID, step.EditID, string(step.Status), step.StepName, step.ImageURL,
+						step.Inputs, step.Outputs, step.Error,
+					})
+				}
 				return []any{
 					string(configured.Status), configured.Inputs,
 					completeErr == nil, string(completed.Status), completed.Outputs,
 					repeatErr != nil, malformedErr != nil,
-					errors.Is(malformedErr, service.ErrInvalidWorkflowStep),
+					errors.Is(malformedErr, domain.ErrInvalidWorkflowStep),
+					stored,
 				}, nil
 			},
 		},
@@ -4508,7 +4784,7 @@ func parityCases() []parityCase {
 					switch {
 					case err == nil:
 						return "ok"
-					case errors.Is(err, service.ErrInvalidEntity):
+					case errors.Is(err, domain.ErrInvalidEntity):
 						return "invalid_entity"
 					default:
 						return "other:" + err.Error()
@@ -4780,13 +5056,13 @@ func parityCases() []parityCase {
 				}
 				sort.Strings(texts)
 				return []any{
-					slashErr == nil, threadErr != nil, errors.Is(threadErr, service.ErrSlashCommandInThread),
-					unknownErr != nil, errors.Is(unknownErr, service.ErrSlashCommandNotFound),
+					slashErr == nil, threadErr != nil, errors.Is(threadErr, domain.ErrSlashCommandInThread),
+					unknownErr != nil, errors.Is(unknownErr, domain.ErrSlashCommandNotFound),
 					actionErr == nil, viewActionErr == nil,
 					optionsErr == nil, loaded,
 					responseErr == nil, spentErr != nil,
-					errors.Is(spentErr, service.ErrAppResponseURLExpired),
-					errors.Is(malformedErr, service.ErrAppResponsePayloadInvalid), errors.Is(emptyErr, service.ErrAppResponseNoText),
+					errors.Is(spentErr, domain.ErrAppResponseURLExpired),
+					errors.Is(malformedErr, domain.ErrAppResponsePayloadInvalid), errors.Is(emptyErr, domain.ErrAppResponseNoText),
 					texts,
 				}, nil
 			},
@@ -5041,6 +5317,62 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				return []any{away.Presence, updated.Profile, edited.StatusText, edited.StatusEmoji, edited.StartsAt.Unix(), len(statuses), len(remaining)}, nil
+			},
+		},
+		{
+			// An agent session crosses the seam whole: the session and every
+			// agent's status and identity, the setStatus warning, the stop
+			// control, and each refusal's sentinel.
+			name: "agent sessions keep their lifecycle, warnings and refusals",
+			seed: seedAgentSessionParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				root, err := chat.Post(ctx, "T1", "U1", "C1", "agent root", "", "")
+				if err != nil {
+					return nil, err
+				}
+				thread := timestampOf(root)
+				created, err := chat.SetAgentSessionStatus(ctx, "T1", "UB", "AG", "C1", thread, domain.AgentSessionStatusRequest{
+					Status: domain.AgentSessionProcessing, Title: "Research", InitiatorUserID: "U1",
+					Identity: domain.AgentIdentity{IconEmoji: ":robot_face:", Username: "Agent"},
+				})
+				if err != nil {
+					return nil, err
+				}
+				warned, err := chat.SetAgentSessionStatus(ctx, "T1", "UH", "AH", "C1", thread, domain.AgentSessionStatusRequest{Status: domain.AgentSessionActive})
+				if err != nil {
+					return nil, err
+				}
+				_, invalid := chat.SetAgentSessionStatus(ctx, "T1", "UB", "AG", "C1", thread, domain.AgentSessionStatusRequest{Status: "thinking"})
+				_, threadless := chat.SetAgentSessionStatus(ctx, "T1", "UB", "AG", "C1", "", domain.AgentSessionStatusRequest{Status: domain.AgentSessionActive})
+				renamed, err := chat.RenameAgentSession(ctx, "T1", "UB", "AG", "C1", thread, "Renamed")
+				if err != nil {
+					return nil, err
+				}
+				_, unnamed := chat.RenameAgentSession(ctx, "T1", "UB", "AG", "C2", thread, "Elsewhere")
+				retitled, err := chat.ChangeAgentSessionTitle(ctx, "T1", "U2", "C1", thread, "Member title")
+				if err != nil {
+					return nil, err
+				}
+				view, err := chat.AgentSession(ctx, "T1", "U1", "C1", thread)
+				if err != nil {
+					return nil, err
+				}
+				stopped, err := chat.StopAgentSession(ctx, "T1", "U2", "C1", thread)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetAgentSessionStatus(ctx, "T1", "UB", "AG", "C1", thread, domain.AgentSessionStatusRequest{Status: domain.AgentSessionSuspended}); err != nil {
+					return nil, err
+				}
+				_, notStoppable := chat.StopAgentSession(ctx, "T1", "U2", "C1", thread)
+				return []any{
+					projectAgentSession(created.Session), created.AgentStatus, created.Warnings,
+					projectAgentSession(warned.Session), warned.AgentStatus, warned.Warnings,
+					errors.Is(invalid, domain.ErrInvalidAgentSessionStatus), errors.Is(threadless, domain.ErrAgentSessionThreadRequired),
+					projectAgentSession(renamed), errors.Is(unnamed, domain.ErrNotInConversation),
+					projectAgentSession(retitled), projectAgentSession(view.Session), view.Stoppable,
+					projectAgentSession(stopped), errors.Is(notStoppable, domain.ErrAgentSessionNotStoppable),
+				}, nil
 			},
 		},
 		{
@@ -6151,7 +6483,7 @@ func parityCases() []parityCase {
 				}
 				scheduled, err := chat.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{
 					Channel: "C1", Text: "old text", PostAt: time.Now().UTC().Add(2 * time.Hour),
-					CredentialHash:  service.InternalScheduledCredential("T1", "U1"),
+					CredentialHash:  domain.InternalScheduledCredential("T1", "U1"),
 					FileAttachments: draft.Attachments,
 				})
 				if err != nil {
@@ -6281,7 +6613,7 @@ func parityCases() []parityCase {
 		},
 		{
 			name:         "a member cannot create a user group",
-			wantSentinel: service.ErrNotWorkspaceAdmin,
+			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.CreateUserGroup(ctx, "T1", "U1", "Engineers", "engineers", "builds things", nil)
 				return nil, err
@@ -6335,7 +6667,7 @@ func parityCases() []parityCase {
 				for _, reaction := range reactions {
 					names = append(names, reaction.Name)
 				}
-				return []any{names, reactionsMore, len(pins), pinsMore, len(stars), starsMore, starred.Total, channelStars, errors.Is(notStarred, service.ErrNotStarred)}, nil
+				return []any{names, reactionsMore, len(pins), pinsMore, len(stars), starsMore, starred.Total, channelStars, errors.Is(notStarred, domain.ErrNotStarred)}, nil
 			},
 		},
 		{
@@ -6439,7 +6771,7 @@ func parityCases() []parityCase {
 				reference := time.Now().UTC()
 				return []any{
 					initial.Enabled, snoozed.SnoozeEnabled(reference), ended.SnoozeEnabled(reference),
-					paused.SnoozeEnabled(reference), paused.SnoozeUntil.Sub(reference) > 47*time.Hour, errors.Is(pastErr, service.ErrInvalidSnooze),
+					paused.SnoozeEnabled(reference), paused.SnoozeUntil.Sub(reference) > 47*time.Hour, errors.Is(pastErr, domain.ErrInvalidSnooze),
 					afterEndDND.Enabled, afterEndDND.SnoozeEnabled(reference),
 				}, nil
 			},
@@ -6889,7 +7221,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				if _, err := chat.OAuthV2ExchangeToken(ctx, credentials.ClientID, credentials.ClientSecret, oauthToken.AccessToken); !errors.Is(err, service.ErrInvalidOAuth) {
+				if _, err := chat.OAuthV2ExchangeToken(ctx, credentials.ClientID, credentials.ClientSecret, oauthToken.AccessToken); !errors.Is(err, domain.ErrInvalidOAuth) {
 					return nil, fmt.Errorf("rotating token accepted by oauth.v2.exchange: %w", err)
 				}
 				// External auth: the owner declares a provider, any member lists it
@@ -7039,11 +7371,8 @@ func methodsExercisedByParityCases(t *testing.T) map[string]bool {
 // either gets a case or this constant has to be raised, which is a decision
 // somebody has to argue for rather than a list somebody can quietly append to.
 //
-// Two limits are worth knowing rather than discovering. The workflow step
-// methods can be checked for a dropped identifier but not for a dropped
-// payload, because nothing on this seam reads a stored step back; the case says
-// so and the product gap audit records the underlying gap. And a case whose
-// methods call an app over HTTP must use seedWithApp: the receiver has to be
+// One limit is worth knowing rather than discovering: a case whose methods
+// call an app over HTTP must use seedWithApp: the receiver has to be
 // TLS and the app's credentials sealed for real, or every dispatch fails
 // identically in both compositions and the case reports an agreement it has
 // not established.

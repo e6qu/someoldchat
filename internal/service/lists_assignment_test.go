@@ -67,7 +67,7 @@ func TestAssigningAnItemTellsTheAssignee(t *testing.T) {
 // assigned it.
 func TestAssigningToSomeoneWhoCannotSeeTheListIsRefused(t *testing.T) {
 	ctx, messages, listID, itemID := assignmentWorld(t)
-	if _, err := messages.AssignListItem(ctx, "T1", "U1", listID, itemID, "U3", time.Time{}); !errors.Is(err, ErrInvalidList) {
+	if _, err := messages.AssignListItem(ctx, "T1", "U1", listID, itemID, "U3", time.Time{}); !errors.Is(err, domain.ErrInvalidList) {
 		t.Fatalf("assigning to a stranger = %v, want ErrInvalidList", err)
 	}
 	told, err := messages.Activity(ctx, "T1", "U3", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})

@@ -176,7 +176,7 @@ func (m Messages) sanitizeViewState(current domain.View, stateJSON string) (stri
 		Values map[string]map[string]map[string]any `json:"values"`
 	}
 	if json.Unmarshal([]byte(stateJSON), &state) != nil {
-		return "", ErrInvalidAppResponse
+		return "", domain.ErrInvalidAppResponse
 	}
 	var accepted struct {
 		Values map[string]map[string]map[string]any `json:"values"`

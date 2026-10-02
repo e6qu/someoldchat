@@ -80,8 +80,8 @@ func TestHostedAppDatastoreCRUDValidatesManifestSchema(t *testing.T) {
 	}
 	if _, err := messages.QueryAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", domain.AppDatastoreQuery{
 		Expression: "#id = :id", ExpressionAttributes: `{"#id":"id"}`, ExpressionValues: `{":id":"INC-1"}`, Page: domain.PageRequest{Limit: 100},
-	}); !errors.Is(err, ErrInvalidDatastoreQuery) {
-		t.Fatalf("primary-key query error=%v, want %v", err, ErrInvalidDatastoreQuery)
+	}); !errors.Is(err, domain.ErrInvalidDatastoreQuery) {
+		t.Fatalf("primary-key query error=%v, want %v", err, domain.ErrInvalidDatastoreQuery)
 	}
 	if err := messages.DeleteAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{"INC-2"}); err != nil {
 		t.Fatal(err)
@@ -98,13 +98,13 @@ func TestHostedAppDatastoreCRUDValidatesManifestSchema(t *testing.T) {
 		"trailing JSON":     `{"id":"INC-3"} true`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := messages.PutAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{raw}, false); !errors.Is(err, ErrInvalidDatastoreItem) {
-				t.Fatalf("error=%v, want %v", err, ErrInvalidDatastoreItem)
+			if _, err := messages.PutAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{raw}, false); !errors.Is(err, domain.ErrInvalidDatastoreItem) {
+				t.Fatalf("error=%v, want %v", err, domain.ErrInvalidDatastoreItem)
 			}
 		})
 	}
-	if _, err := messages.GetAppDatastoreItems(ctx, "T1", "U1", "A1", "missing", []string{"INC-1"}); !errors.Is(err, ErrAppDatastoreNotFound) {
-		t.Fatalf("missing datastore error=%v, want %v", err, ErrAppDatastoreNotFound)
+	if _, err := messages.GetAppDatastoreItems(ctx, "T1", "U1", "A1", "missing", []string{"INC-1"}); !errors.Is(err, domain.ErrAppDatastoreNotFound) {
+		t.Fatalf("missing datastore error=%v, want %v", err, domain.ErrAppDatastoreNotFound)
 	}
 	if _, err := messages.GetAppDatastoreItems(ctx, "T1", "U1", "missing-app", "incidents", []string{"INC-1"}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing app error=%v, want %v", err, store.ErrNotFound)
@@ -135,7 +135,7 @@ func TestAppDatastoreRejectsNonHostedApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := Messages{Store: repository}
-	if _, err := messages.GetAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{"INC-1"}); !errors.Is(err, ErrAppNotHosted) {
-		t.Fatalf("error=%v, want %v", err, ErrAppNotHosted)
+	if _, err := messages.GetAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{"INC-1"}); !errors.Is(err, domain.ErrAppNotHosted) {
+		t.Fatalf("error=%v, want %v", err, domain.ErrAppNotHosted)
 	}
 }

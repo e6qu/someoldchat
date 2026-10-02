@@ -5,7 +5,7 @@ session authentication. The browser login flow uses OAuth 2.0 with one or more
 explicitly configured authorization sources:
 
 - Google;
-- GitHub; and
+- GitHub;
 - Microsoft Entra ID; and
 - any standards-compliant OpenID Connect issuer discovered from its issuer URL.
 
@@ -30,44 +30,47 @@ write scopes for the mutators (a bot token manages public channels with
 `channels:manage`, a user token with `channels:write`). A token holding none of
 a method's family is refused with `missing_scope` naming the whole family;
 `conversations.list` narrows its listing to the requested types the token can
-read. Upgrading changes what an existing grant reaches: a stored token whose
-grant names only the `channels:` scopes used to read private channels and
-direct messages and now reaches public channels only, so an app that needs the
-others must request the per-type scopes and be reinstalled. The seeded
-`-api-token` is created with the member role's scopes, which include them, but
-seeding never rewrites an existing token, so a durable development database
-seeded before the upgrade keeps the old grant until the token is rotated (a
-new `-api-token` value) or the database is recreated.
+read. A token whose grant names only the `channels:` scopes therefore reaches
+public channels only; an app that needs private channels or direct messages
+must request the per-type scopes and be reinstalled. The seeded `-api-token` is
+created with the member role's scopes, which include every type, but seeding
+never rewrites an existing token: a durable database keeps the grant its token
+was seeded with until the token is rotated (a new `-api-token` value) or the
+database is recreated.
 
 ## Configuration
 
-The server command accepts these credentials and settings:
+`sameoldchat-server` accepts these authentication settings. Where an
+environment variable is listed, it provides the flag's default; the Google,
+GitHub, and Microsoft Entra ID settings are flags only.
 
-```text
--google-client-id
--google-client-secret
--github-client-id
--github-client-secret
--entra-client-id
--entra-client-secret
--entra-tenant
--oidc-issuer
--oidc-client-id
--oidc-client-secret
--auth-workspace
--auth-lookup-user
--auth-public-url
--auth-cookie-domain
--auth-state-key-hex
--release-revision
-```
+| Flag | Environment variable |
+|---|---|
+| `-google-client-id`, `-google-client-secret` | — |
+| `-github-client-id`, `-github-client-secret` | — |
+| `-entra-client-id`, `-entra-client-secret`, `-entra-tenant` | — |
+| `-oidc-issuer` | `SAMEOLDCHAT_OIDC_ISSUER` |
+| `-oidc-client-id` | `SAMEOLDCHAT_OIDC_CLIENT_ID` |
+| `-oidc-client-secret` | `SAMEOLDCHAT_OIDC_CLIENT_SECRET` |
+| `-auth-workspace` | `SAMEOLDCHAT_AUTH_WORKSPACE` |
+| `-auth-lookup-user` | `SAMEOLDCHAT_AUTH_LOOKUP_USER` |
+| `-auth-public-url` | `SAMEOLDCHAT_AUTH_PUBLIC_URL` |
+| `-auth-cookie-domain` | `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` |
+| `-auth-state-key-hex` | `SAMEOLDCHAT_AUTH_STATE_KEY_HEX` |
+| `-api-token` | `SAMEOLDCHAT_API_TOKEN` |
+| `-session-token` | `SAMEOLDCHAT_SESSION_TOKEN` |
+| `-session-admin` | `SAMEOLDCHAT_SESSION_ADMIN=1` |
+| `-app-credential-key-hex` | `SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX` |
+| `-bootstrap-admin-email` | `SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL` |
+| `-release-revision` | `SAMEOLDCHAT_RELEASE_REVISION` |
 
 Supplying an incomplete provider configuration is invalid. OpenID Connect
 discovery requires an HTTPS issuer whose discovery document reports the same
-issuer and HTTPS authorization, token, and user-info endpoints. If any external authorization
-credential is supplied, the workspace, lookup user, public HTTPS URL, and
-32-byte state key are required. GitHub login also requires the GitHub email
-endpoint, which the server configures as `https://api.github.com/user/emails`.
+issuer and HTTPS authorization, token, and user-info endpoints. If any external
+authorization credential is supplied, the workspace, lookup user, public HTTPS
+URL, and a state key of at least 32 bytes are required. GitHub login also
+requires the GitHub email endpoint, which the server configures as
+`https://api.github.com/user/emails`.
 
 `-auth-public-url` is also the origin of every absolute URL the Slack Web API
 emits: file downloads (`url_private`, `permalink_public`), the v2 upload URL,
@@ -81,20 +84,16 @@ value is the origin of the URLs in event payloads, which `sameoldchat-chatd`
 and the `slack-events` worker also take; see
 [Public URL](operations.md#public-url).
 
-For container deployment, `SAMEOLDCHAT_API_TOKEN`,
-`SAMEOLDCHAT_SESSION_TOKEN`, `SAMEOLDCHAT_AUTH_STATE_KEY_HEX`,
-`SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX`,
-`SAMEOLDCHAT_OIDC_ISSUER`, `SAMEOLDCHAT_OIDC_CLIENT_ID`, and
-`SAMEOLDCHAT_OIDC_CLIENT_SECRET` provide the corresponding flag defaults.
-`SAMEOLDCHAT_SESSION_TOKEN` and any configured provider are mutually exclusive
-and the server exits 2 when both are present, so a deployment with single
-sign-on must not set it; `terraform/ecs-runtime` therefore creates no
-session-token secret at all.
+`-session-token` seeds one static browser session shared by every holder of
+the value. It and any configured provider are mutually exclusive and the server
+exits 2 when both are present, so a deployment with single sign-on must not set
+it; [`terraform/ecs-runtime`](../terraform/ecs-runtime/README.md) creates no
+session-token secret.
 
-`-session-admin` (`SAMEOLDCHAT_SESSION_ADMIN=1`) gives that static session
-workspace-administrator scopes. It exists so a deployment with no identity
-provider can reach its own administration, and so the ADMIN journeys can be
-qualified at all — the browser suite runs in exactly that mode. It is refused
+`-session-admin` gives that static session workspace-administrator scopes. It
+exists so a deployment with no identity provider can reach its own
+administration, and so the ADMIN journeys can be qualified at all — the browser
+suite runs in exactly that mode. It is refused
 without `-session-token`, refused alongside any configured provider, and
 announced with a startup warning naming what it granted. It escalates only the
 browser session: the API token keeps member scopes, because nothing about
@@ -110,18 +109,21 @@ is required for durable local storage or the separate `sameoldchat-chatd`
 process; losing it prevents Events API, interactivity, and slash-command
 requests from being signed, and function-scoped interactions of executions
 still running from carrying their token.
-`SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` optionally scopes SameOldChat's own session
-cookies to a parent DNS hostname used only by this SameOldChat deployment. It
-must never be set to a parent shared with unrelated relying applications;
-cross-application single sign-on comes from the issuer session instead.
-`SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL`
-provides the email address of the initial
-workspace user. `SAMEOLDCHAT_RELEASE_REVISION` provides the immutable deployed
-commit or image digest exposed by the authenticated validation page. A
-configured OpenID Connect issuer is an authorization
-boundary: an identity carrying a `developer` or `admin` role is provisioned as
-an active workspace member on first sign-in, and its workspace role is kept in
-sync on later sign-ins. Other external providers still require an existing
+
+`-auth-cookie-domain` optionally scopes SameOldChat's own session cookies to a
+parent DNS hostname used only by this SameOldChat deployment. It must never be
+set to a parent shared with unrelated relying applications; cross-application
+single sign-on comes from the issuer session instead (see
+[Single sign-on and logout](#single-sign-on-and-logout)).
+`-bootstrap-admin-email` provides the email address of the initial workspace
+user. `-release-revision` provides the immutable deployed commit or image
+digest exposed by the authenticated validation page; it defaults to the commit
+embedded at build time.
+
+A configured OpenID Connect issuer is an authorization boundary: an identity
+carrying a `developer` or `admin` role is provisioned as an active workspace
+member on first sign-in, and its workspace role is kept in sync on later
+sign-ins. Other external providers still require an existing
 workspace user with the same verified email.
 
 ## Single sign-on and logout
@@ -130,9 +132,9 @@ Cross-application single sign-on comes from the configured OpenID Connect
 issuer session. Each relying application keeps its own host-scoped session;
 when a new application starts authorization, the identity provider recognizes
 the existing identity session and completes the authorization-code flow
-without asking the user to authenticate again. `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN`
-controls only the scope of SameOldChat's own secure, HTTP-only cookie. It is
-not the cross-application identity boundary.
+without asking the user to authenticate again. `-auth-cookie-domain` controls
+only the scope of SameOldChat's own secure, HTTP-only cookie; it is not the
+cross-application identity boundary.
 
 `POST /logout` revokes the current SameOldChat session and expires its cookie.
 For a session created through the configured OpenID Connect provider, it then
@@ -201,7 +203,8 @@ Shauth-managed deployments register `/auth/validation` as their authenticated
 validation URL and `/signed-out` as their signed-out URL. `/auth/validation`
 and `/me` expose the verified username, email address, synchronized
 `developer` or `admin` role, and immutable 12-character commit tag (or complete
-image digest). Anonymous access fails closed to the application-owned signed-out page. The repository's
+image digest). Anonymous access fails closed to the application-owned
+signed-out page. The repository's
 `scripts/test-shauth-sso.sh` qualification starts real PostgreSQL, Ory Hydra,
 Shauth, and two isolated SameOldChat relying parties, then runs Shauth's exact
 browser validator for direct and catalog entry, silent SSO, application and

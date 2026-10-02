@@ -85,11 +85,11 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	descriptionBlocks, err := normalizeJSONArray(descriptionBlocks, "[]")
 	if err != nil {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	if strings.TrimSpace(schema) == "" && copyFrom == "" {
 		schema = `[{"key":"title","name":"Title","type":"text","is_primary_column":true}]`
@@ -97,11 +97,11 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 	// A schema that cannot be read is refused at the door rather than stored
 	// and discovered later by every reader of the list.
 	if _, err := domain.ParseListSchema(schema); err != nil {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	schema, err = normalizeJSONArray(schema, "[]")
 	if err != nil {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	id, err := domain.NewListID()
 	if err != nil {
@@ -197,21 +197,21 @@ func (m Messages) SearchLists(ctx context.Context, workspaceID domain.WorkspaceI
 	}
 	request.Query = strings.TrimSpace(request.Query)
 	if request.Query == "" || utf8.RuneCountInString(request.Query) > 500 {
-		return domain.ListPage{}, ErrInvalidSearch
+		return domain.ListPage{}, domain.ErrInvalidSearch
 	}
 	if err := store.CheckAscendingPage(request.Page); err != nil {
 		return domain.ListPage{}, err
 	}
 	sortOrder, direction, err := domain.NormalizeSearchOrder(string(request.Sort), string(request.Direction))
 	if err != nil {
-		return domain.ListPage{}, ErrInvalidSearch
+		return domain.ListPage{}, domain.ErrInvalidSearch
 	}
 	parsed, err := parseSearchQuery(request.Query, m.searchClockFor(ctx, workspaceID, userID))
 	if err != nil {
-		return domain.ListPage{}, ErrInvalidSearch
+		return domain.ListPage{}, domain.ErrInvalidSearch
 	}
 	if parsed.conversation != "" || parsed.excludedConversation != "" {
-		return domain.ListPage{}, ErrInvalidSearch
+		return domain.ListPage{}, domain.ErrInvalidSearch
 	}
 	search := domain.ListSearch{
 		Terms: parsed.terms, ExcludedTerms: parsed.excludedTerms,
@@ -245,7 +245,7 @@ func (m Messages) copyListRecords(ctx context.Context, workspaceID domain.Worksp
 		}
 		for _, source := range page.Items {
 			if len(items) >= maxCopiedListRecords {
-				return nil, nil, ErrInvalidList
+				return nil, nil, domain.ErrInvalidList
 			}
 			itemID, err := domain.NewListItemID()
 			if err != nil {
@@ -279,7 +279,7 @@ func (m Messages) UpdateList(ctx context.Context, workspaceID domain.WorkspaceID
 	if strings.TrimSpace(descriptionBlocks) != "" {
 		value.DescriptionBlocks, err = normalizeJSONArray(descriptionBlocks, "[]")
 		if err != nil {
-			return domain.List{}, ErrInvalidList
+			return domain.List{}, domain.ErrInvalidList
 		}
 	}
 	if todoModeSet {
@@ -313,7 +313,7 @@ func (m Messages) AddListColumn(ctx context.Context, workspaceID domain.Workspac
 	}
 	name = strings.TrimSpace(name)
 	if name == "" || !columnType.Valid() {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	value, err := m.Store.GetList(ctx, workspaceID, id)
 	if err != nil {
@@ -321,10 +321,10 @@ func (m Messages) AddListColumn(ctx context.Context, workspaceID domain.Workspac
 	}
 	columns, err := domain.ParseListSchema(value.Schema)
 	if err != nil {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	if len(columns) >= domain.ListColumnLimit {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	cleaned := make([]string, 0, len(options))
 	for _, option := range options {
@@ -336,7 +336,7 @@ func (m Messages) AddListColumn(ctx context.Context, workspaceID domain.Workspac
 	// is refused here rather than created and discovered by whoever tries to
 	// fill it in.
 	if columnType == domain.ListColumnSelect && len(cleaned) == 0 {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	added := domain.ListColumn{Key: domain.ListColumnKey(name, columns), Name: name, Type: columnType, Options: cleaned}
 	// The first declared column is the primary one, so a list that had only the
@@ -382,11 +382,11 @@ func (m Messages) RemoveListColumn(ctx context.Context, workspaceID domain.Works
 	}
 	columns, err := domain.ParseListSchema(value.Schema)
 	if err != nil {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	remaining, err := domain.RemoveListColumn(columns, key)
 	if err != nil {
-		return domain.List{}, ErrInvalidList
+		return domain.List{}, domain.ErrInvalidList
 	}
 	schema, err := domain.EncodeListSchema(remaining)
 	if err != nil {
@@ -415,13 +415,13 @@ func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.Workspa
 	}
 	fields, err = normalizeJSONArray(fields, "[]")
 	if err != nil {
-		return domain.ListItem{}, ErrInvalidList
+		return domain.ListItem{}, domain.ErrInvalidList
 	}
 	// A cell under a column nobody declared is invisible to every reader of the
 	// list, so accepting it silently would lose the member's work while looking
 	// like it had been saved.
 	if err := domain.ValidateListFields(list.Schema, fields, ""); err != nil {
-		return domain.ListItem{}, ErrInvalidList
+		return domain.ListItem{}, domain.ErrInvalidList
 	}
 	id, err := domain.NewListItemID()
 	if err != nil {
@@ -464,14 +464,14 @@ func (m Messages) UpdateListItem(ctx context.Context, workspaceID domain.Workspa
 	previousFields := value.Fields
 	value.Fields, err = normalizeJSONArray(fields, value.Fields)
 	if err != nil {
-		return domain.ListItem{}, ErrInvalidList
+		return domain.ListItem{}, domain.ErrInvalidList
 	}
 	list, err := m.Store.GetList(ctx, workspaceID, listID)
 	if err != nil {
 		return domain.ListItem{}, err
 	}
 	if err := domain.ValidateListFields(list.Schema, value.Fields, previousFields); err != nil {
-		return domain.ListItem{}, ErrInvalidList
+		return domain.ListItem{}, domain.ErrInvalidList
 	}
 	value.Archived = archived
 	value.UpdatedBy = userID
@@ -513,7 +513,7 @@ func (m Messages) AssignListItem(ctx context.Context, workspaceID domain.Workspa
 	}
 	if assignee != "" {
 		if err := m.requireListAccess(ctx, workspaceID, assignee, listID, domain.AccessRead); err != nil {
-			return domain.ListItem{}, ErrInvalidList
+			return domain.ListItem{}, domain.ErrInvalidList
 		}
 	}
 	value, err := m.Store.GetListItem(ctx, workspaceID, listID, itemID)
@@ -550,7 +550,7 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 	}
 	var input []map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(cells), &input); err != nil || len(input) == 0 {
-		return nil, ErrInvalidList
+		return nil, domain.ErrInvalidList
 	}
 	// Rows are kept in the order the request names them. Iterating the grouping
 	// map directly made the returned order — and the order the writes happened in
@@ -561,7 +561,7 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 	for _, cell := range input {
 		var rowID string
 		if err := json.Unmarshal(cell["row_id"], &rowID); err != nil || strings.TrimSpace(rowID) == "" {
-			return nil, ErrInvalidList
+			return nil, domain.ErrInvalidList
 		}
 		itemID := domain.ListItemID(rowID)
 		if _, seen := grouped[itemID]; !seen {
@@ -584,12 +584,12 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 		}
 		var fields []map[string]any
 		if err := json.Unmarshal([]byte(item.Fields), &fields); err != nil {
-			return nil, ErrInvalidList
+			return nil, domain.ErrInvalidList
 		}
 		for _, cell := range cellsForItem {
 			columnID := ""
 			if err := json.Unmarshal(cell["column_id"], &columnID); err != nil || columnID == "" {
-				return nil, ErrInvalidList
+				return nil, domain.ErrInvalidList
 			}
 			updated := false
 			for index := range fields {
@@ -598,7 +598,7 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 						if key != "row_id" {
 							var decoded any
 							if err := json.Unmarshal(raw, &decoded); err != nil {
-								return nil, ErrInvalidList
+								return nil, domain.ErrInvalidList
 							}
 							fields[index][key] = decoded
 						}
@@ -615,7 +615,7 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 					}
 					var decoded any
 					if err := json.Unmarshal(raw, &decoded); err != nil {
-						return nil, ErrInvalidList
+						return nil, domain.ErrInvalidList
 					}
 					newField[key] = decoded
 				}
@@ -648,7 +648,7 @@ func (m Messages) DeleteListItems(ctx context.Context, workspaceID domain.Worksp
 		return err
 	}
 	if len(itemIDs) == 0 {
-		return ErrInvalidList
+		return domain.ErrInvalidList
 	}
 	event, err := listEvent(workspaceID, userID, "list.items.deleted", events.String("list_id", string(listID)), events.Strings("list_item_ids", listItemIDStrings(itemIDs)))
 	if err != nil {
@@ -707,7 +707,7 @@ func (m Messages) DeleteListAccess(ctx context.Context, workspaceID domain.Works
 		return err
 	}
 	if (len(channelIDs) == 0) == (len(userIDs) == 0) {
-		return ErrInvalidList
+		return domain.ErrInvalidList
 	}
 	for _, target := range channelIDs {
 		event, err := listEvent(workspaceID, userID, "list.access.deleted", events.String("list_id", string(listID)), events.String("entity_type", "channel"), events.String("entity_id", string(target)))
@@ -772,10 +772,10 @@ func (m Messages) GetListDownload(ctx context.Context, workspaceID domain.Worksp
 
 func validateListAccess(access domain.AccessLevel, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
 	if !access.Valid() || (len(channelIDs) == 0) == (len(userIDs) == 0) {
-		return ErrInvalidList
+		return domain.ErrInvalidList
 	}
 	if access == domain.AccessOwner && len(channelIDs) > 0 {
-		return ErrInvalidList
+		return domain.ErrInvalidList
 	}
 	return nil
 }

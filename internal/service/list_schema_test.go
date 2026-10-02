@@ -39,10 +39,10 @@ func TestAnItemMustConformToItsListsColumns(t *testing.T) {
 		"an unoffered option":  `[{"column_id":"status","value":"blocked"}]`,
 		"a date that is not":   `[{"column_id":"due","value":"soon"}]`,
 	} {
-		if _, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", fields); !errors.Is(err, ErrInvalidList) {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", fields); !errors.Is(err, domain.ErrInvalidList) {
 			t.Fatalf("%s was accepted on create: %v", name, err)
 		}
-		if _, err := messages.UpdateListItem(ctx, "T1", "U1", list.ID, item.ID, fields, false); !errors.Is(err, ErrInvalidList) {
+		if _, err := messages.UpdateListItem(ctx, "T1", "U1", list.ID, item.ID, fields, false); !errors.Is(err, domain.ErrInvalidList) {
 			t.Fatalf("%s was accepted on update: %v", name, err)
 		}
 	}
@@ -76,7 +76,7 @@ func TestAListRefusesASchemaItCannotRead(t *testing.T) {
 		"a select with no options": `[{"key":"a","name":"A","type":"select"}]`,
 		"a column with no name":    `[{"key":"a","type":"text"}]`,
 	} {
-		if _, err := messages.CreateList(ctx, "T1", "U1", "Bad", "", schema, "", false, false); !errors.Is(err, ErrInvalidList) {
+		if _, err := messages.CreateList(ctx, "T1", "U1", "Bad", "", schema, "", false, false); !errors.Is(err, domain.ErrInvalidList) {
 			t.Fatalf("%s was accepted: %v", name, err)
 		}
 	}

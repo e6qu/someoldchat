@@ -18,7 +18,7 @@ func (m Messages) AttachFileToListItem(ctx context.Context, workspaceID domain.W
 		return domain.ListItemFile{}, err
 	}
 	if fileID == "" || itemID == "" {
-		return domain.ListItemFile{}, ErrInvalidList
+		return domain.ListItemFile{}, domain.ErrInvalidList
 	}
 	identifier, err := domain.PublicID("temp:LIF:")
 	if err != nil {

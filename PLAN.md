@@ -1,9 +1,10 @@
 # SameOldChat project status and planned work
 
-This document records current implementation status and work that remains
+This document records where the project stands and the work that remains
 before a deployment profile or compatibility claim can be treated as
-qualified. It is not a description of behavior that the repository does not
-implement yet.
+qualified. Completed work is described by the code, its tests, and
+[the architecture documentation](docs/README.md), not here; the git history
+holds how it got there.
 
 ## Objective
 
@@ -12,23 +13,22 @@ Build SameOldChat, a multi-workspace chat application with:
 - a Go backend implementing the Slack platform contracts described by pinned
   published OpenAPI/AsyncAPI specifications and official open-source SDKs;
 - a server-rendered HTMX web application;
-- SQLite for local and small deployments;
-- PostgreSQL as the qualified external durable SQL profile, gated in CI against
-  a pinned PostgreSQL 18.1 service;
-- dqlite as the production replicated SQLite implementation;
-- stateless application processes that scale from zero;
-- application hibernation in which the database is snapshotted and stopped;
-- a minimal always-reachable activator that wakes the stack on demand;
+- SQLite for local and small deployments, PostgreSQL as the qualified external
+  SQL profile, and dqlite as the replicated SQLite profile;
+- stateless application processes that scale from zero, with the database
+  snapshotted and stopped during hibernation and a minimal always-reachable
+  activator that wakes the stack on demand;
+- modules that call one another as Go interfaces, composed at build time into
+  either one monolith binary or separately scalable binaries;
 - dependency admission that selects the newest eligible stable release only
-  after a mandatory 24-hour publication quarantine;
-- self-hosted deployment on ordinary Linux VMs in any cloud; and
-- managed-container deployment on Amazon Elastic Container Service (ECS) on
-  AWS Fargate, Google Cloud Run, and Azure Container Apps, subject to the
-  persistence qualification rules.
+  after a mandatory 24-hour publication quarantine; and
+- self-hosted deployment on Linux VMs and managed-container deployment on
+  Amazon ECS on AWS Fargate, Google Cloud Run, and Azure Container Apps,
+  subject to the persistence qualification rules.
 
 The compatibility target is a pinned, reproducible contract. The archived
-Slack specifications alone do not describe all Slack behavior,
-so every inferred or observed behavior must retain its provenance.
+Slack specifications alone do not describe all Slack behavior, so every
+inferred or observed behavior must retain its provenance.
 
 ## Governing specifications
 
@@ -50,666 +50,240 @@ so every inferred or observed behavior must retain its provenance.
 2. The web, API, worker, activator, and persistence concerns are separate.
 3. No application process owns irreplaceable state.
 4. Domain changes and their emitted events commit atomically.
-5. SQLite and dqlite run the same schema and portable query suite.
+5. Every SQL profile runs the same schema and portable query suite.
 6. Hibernation is a state machine with fencing, verification, and recovery;
    it is never a blind process shutdown.
 7. Security checks are release gates, including for tools and test-only code.
 
-## Phases
+## Status
 
-### Phase 0: Repository and contract foundation
+The figures below come from `make compatibility-report` and
+`make journey-check`; rerun them rather than editing numbers by hand.
 
-- Establish the Go module, build commands, CI, and document checks.
-- Vendor the Slack OpenAPI 2.0 and Events AsyncAPI sources at exact commits.
-- Pin exact releases of official Node, Python, Java, and Deno Slack SDKs.
-- Pin applicable Bolt SDK releases for event, OAuth, interactivity, and Socket
-  Mode behavior.
-- Record source URL, revision, checksum, license, and retrieval timestamp.
-- Build a normalized operation and schema catalog.
-- Create `specs/compatibility.yaml` as the machine-readable compatibility
-  ledger.
-- Add CI checks for source drift and generated-file drift.
+| Measure | Value |
+|---|---|
+| Current Slack Web API methods implemented | 331 of 331 |
+| …with method-level evidence | 331 of 331 |
+| …`behavior-compatible` or better | 269 of 331 |
+| …`verified-against-slack` | 0 of 331 |
+| Recorded known deviations | 92 |
+| Retained legacy methods implemented | 10 of 10 |
+| User journeys in the normative catalog | 108 |
+| …cited by a browser scenario | 100 of 108 |
+| …cited by a current official Slack source assertion | 53 of 108 |
 
-Exit criteria:
+Delivered and gated in CI: the pinned contract catalog and compatibility
+ledger (Phase 0); portable persistence on memory, SQLite, PostgreSQL, and
+dqlite with a transactional outbox and idempotency records (Phase 1); the
+Slack Web API, Events API, RTM, and Socket Mode surfaces exercised by the
+pinned Node, Python, and Java SDKs (Phases 2 and 5); the HTMX application with
+SSE delivery, OIDC sign-in and logout, qualified in Chromium, Firefox, and
+WebKit with automated accessibility checks (Phase 3); and the activator,
+lifecycle state machine, verified snapshots, and Amazon ECS scale-to-zero
+modules (Phase 4).
 
-- A clean checkout reproduces the same catalog without unpinned network input.
-- Every source conflict is visible and no upstream schema is silently patched.
+No compatibility claim is live Slack equivalence: a passing route, local
+test, or SDK parse is evidence for its own layer only. The per-method record
+lives in [specs/compatibility.yaml](specs/compatibility.yaml), product gaps in
+[specs/product-gap-audit.md](specs/product-gap-audit.md), and journey gaps in
+the `make journey-check` report.
 
-### Phase 1: Portable persistence and platform kernel
+## Remaining work
 
-- Define application-facing transaction and query interfaces.
-- Implement shared SQL repositories over `database/sql`.
-- Implement the SQLite lifecycle adapter.
-- Implement the dqlite lifecycle adapter and a three-node integration fixture.
-- Add identical schema, migration, and repository tests for both adapters.
-- Implement workspaces, users, memberships, roles, sessions, tokens, scopes,
-  conversations, and Slack-style public identifiers.
-- Implement a transactional outbox and durable idempotency records.
+### Phase 4: Hosting profiles
 
-Exit criteria:
+- Linux VM, Google Cloud Run, and Azure Container Apps profiles have guidance
+  but no templates or qualification; each needs its lifecycle driver,
+  deployment templates, and the hibernation and wake tests the
+  [hosting specification](specs/hosting.md) requires before it is supported.
 
-- Both backends pass the same functional suite.
-- A dqlite leader failure produces either one committed command or no committed
-  command, never a duplicate or partial command.
-
-PostgreSQL schema migration acquired a database-scoped transaction advisory
-lock before touching the catalog, so concurrent application replicas started
-against a fresh database without racing on schema creation. Its qualification
-used isolated durable identifiers and passed repeatedly against both fresh and
-already-populated databases.
-
-### Phase 2: Core Slack API vertical slice
-
-Implement the first usable slice:
-
-- authentication and scope enforcement;
-- `auth.*`;
-- core `users.*` and `users.profile.*`;
-- core `conversations.*`;
-- `chat.postMessage`, `chat.update`, and `chat.delete`;
-- threads, reactions, pins, and read cursors;
-- Slack-compatible query, form, JSON, and error decoding; and
-- cursor pagination.
-
-Run the slice through all applicable pinned official SDKs using a configurable
-API base URL or an SDK-specific test proxy.
-
-Exit criteria:
-
-- An SDK can authenticate, create/join a conversation, post/update/delete a
-  message, reply in a thread, paginate results, and decode errors.
-
-### Phase 3: HTMX application and real-time delivery
-
-- Build the workspace shell, channel/DM sidebar, timeline, composer, thread
-  pane, member/profile views, reactions, unread state, and dialogs.
-- Use full-page server rendering for entry points and HTMX fragments for
-  mutations and incremental navigation.
-- Use SSE for live delivery with durable event IDs and replay.
-- Add minimal JavaScript only for focus, keyboard, composer, and reconnect
-  behavior that HTMX cannot provide.
-- Add accessibility, browser, and screenshot regression tests.
-
-The web identity flow bound each authorization response to a per-request nonce
-and persisted its verified OIDC issuer, subject, session ID, ID-token metadata,
-and provider-bounded expiry with each durable application session. RP-initiated
-logout revoked the local session before redirecting through the provider's
-discovered end-session endpoint with an ID-token hint, client ID, and an exact
-return to SameOldChat's terminal signed-out page. Provider logout failures left
-the application signed out and were reported on that page. The signed
-back-channel receiver accepted the standard `sid` or `sub` correlation forms,
-rejected non-canonical token delivery and replayed `jti` values, and revoked
-only the correlated provider sessions. Logout-token replay state remained
-durable until expiry through the same SQLite/PostgreSQL store and generated
-gRPC boundary used by distributed composition.
-
-Shauth qualification used the provider's exact pinned browser contract against
-real PostgreSQL, Ory Hydra, and two SameOldChat relying parties with distinct
-databases and origins. It covered direct and catalog entry, silent SSO,
-application-initiated and provider-initiated global logout, witness-session
-revocation, the one-time logout completion bridge, fail-closed anonymous
-access, verified identity and role display, immutable release identity, and
-validator credential isolation.
-
-Remote chat services preserved canonical store and context errors across the
-gRPC boundary, so first-login identity provisioning behaved the same in local
-and distributed composition. Concurrent first login was qualified through a
-real gRPC server and PostgreSQL repository and converged on one durable user and
-external identity.
-
-Exit criteria:
-
-- A user can complete the core chat workflow after a cold wake.
-- Terminating a web replica during live delivery loses no committed event.
-
-### Phase 4: Application hibernation and activation
-
-- Implement the always-on activator as a separately deployable small service.
-- Implement the lifecycle state machine and fencing epochs.
-- Quiesce ingress, drain writes and required outbox work, checkpoint state,
-  create a snapshot, verify it, publish a manifest, and stop all app, worker,
-  and database nodes.
-- On a request, elect one wake attempt, restore and validate the database,
-  start dqlite, run a migration job if needed, start workers/web, and forward
-  the triggering request.
-- Preserve scheduled wake deadlines outside the hibernated database.
-- Add bounded request buffering and explicit overload behavior.
-- Implement the provider-neutral lifecycle driver and hosting drivers for Linux
-  VMs, Amazon ECS on AWS Fargate, Google Cloud Run plus companion database
-  compute, and
-  Azure Container Apps plus any required companion database compute.
-- Publish deployment templates and qualification tests for each supported
-  profile.
-
-SQLite activator request spool leases used parsed timestamps for expiry,
-renewal, and deletion decisions, so fractional RFC 3339 timestamps could not
-be misordered lexicographically. Deterministic clock-driven race tests covered
-exclusive leases, renewal during slow delivery, expired-owner rejection, and
-crash recovery without depending on scheduler timing.
-
-The dqlite qualification gate ran package suites serially because its real
-clusters bind ephemeral loopback ports; this prevented independent package
-processes from racing between port discovery and dqlite listener creation.
-
-Exit criteria:
+Exit criteria for every supported profile:
 
 - Only the activator, durable object storage, and control-plane facilities
   remain active while hibernated.
 - Repeated and concurrent wake requests cause one restoration.
 - A failed or corrupt snapshot never replaces the last known-good snapshot.
+- A user can complete the core chat workflow after a cold wake, and
+  terminating a web replica during live delivery loses no committed event.
 
-### Phase 5: Remaining published Slack surface
+### Phase 5: Compatibility evidence
 
-Implement methods in domain waves:
+The surface is implemented; what remains is evidence and the recorded
+deviations.
 
-1. Files, remote files, search, stars, reminders, and bookmarks.
-2. User groups, DND, presence, team information, and scheduled messages.
-3. OAuth, app installations, webhooks, slash commands, and interactivity.
-4. Views, dialogs, Block Kit models, and event subscriptions.
-5. Calls, admin/enterprise families, legacy aliases, and deprecated methods
-   represented by the pinned contract.
-6. Socket Mode and other SDK-exposed protocols selected in the compatibility
-   ledger.
-
-An operation is complete only after input, authorization, success, warning,
-error, pagination, SDK, SQLite, and dqlite tests pass as applicable.
-
-In progress. The 2026-07-30 post-merge audit reconciled the ledger with Slack's
-current method catalog rather than treating every historical ledger entry as a
-current method:
-
-- Slack's current reference contains 310 methods. SameOldChat registers 236 of
-  them and leaves 74 unimplemented.
-- The 320-entry ledger also retains ten legacy methods for clients that still
-  call them. Those methods are useful compatibility inventory, but they are not
-  part of the current Slack denominator.
-- After correcting overstated method claims and separating deprecated
-  `reminders.*` from first-party Later, the ledger records 199 current methods
-  as `behavior-compatible`, 35 as `sdk-compatible`, two as
-  `schema-compatible`, and none as
-  `verified-against-slack`. A passing route, local test, or SDK parse is not
-  itself live Slack equivalence.
-- Several recorded evidence levels are too high. The ratchet must permit an
-  explicit, reviewed downgrade backed by a concrete deviation; otherwise a
-  false compatibility claim becomes permanent.
-
-The remaining 74 current methods break down as 50 `admin.*`, five `apps.*`,
-five `assistant.*`, nine `conversations.*`, one `functions.*`, three `team.*`,
-and one `users.*`. This sweep added datastore query/count,
-conversation-canvas creation, `auth.teams.list`, `rtm.start`, and
-`team.preferences.list`; each addition records the Slack variants it does not
-yet claim rather than treating a happy response as full compatibility.
-
-Before another breadth wave, complete the following evidence-backed work in
-order:
-
-1. maintain the normative Slack-matching journey catalog under
-   `specs/journeys/`, map every browser/API/SDK/differential test to stable
-   journey IDs, and keep implementation coverage in the separate gap audit;
-2. report current and retained-legacy coverage separately, attach executable
-   method-level evidence to compatibility claims, allow audited corrections,
-   and repair stale SDK/event-platform documentation;
-3. make scheduled messages token-isolated and app-attributed, implement Slack's
-   time-window, quota, pagination, thread, and error contracts, run scheduling
-   in every worker delivery mode across all workspaces, persist terminal
-   failures, and deploy a real worker process;
-4. correct Slack keyboard mappings and slash-command semantics, including
-   `response_url` authorization, `should_escape`, command discovery, built-in
-   commands, and realistic human/bot qualification identities;
-5. continue closing remaining stateful first-party journey gaps after the
-   completed scheduled-send, reminder execution, Drafts & sent, Later, and
-   Activity slices;
-6. audit every claimed Web API method's current arguments, authorization,
-   success and error schemas, pagination, rate limits, and official SDK
-   behavior, beginning with `chat.postMessage` and file uploads;
-7. qualify Chromium, Firefox, and WebKit with automated accessibility and visual
-   comparison, then add opt-in differential runs against a dedicated Slack
-   developer workspace.
-
-Current sweep status (2026-07-30): the normative catalog and stable-ID mapping
-for all 31 first-party browser journeys are in place; Slack web keyboard and
-slash-command discovery/escaping semantics are corrected; and the journeys now
-qualify in Chromium, Firefox, and WebKit with representative automated WCAG
-checks. Visual baselines, manual assistive-technology evidence, complete
-API/SDK-to-journey mapping, and live-Slack differential runs remain explicit
-work rather than inferred compatibility. Scheduled send preserves
-channel/thread context and the browser's local time zone, stays out of history
-until delivery, and has a real pending/failure list with edit, reschedule,
-send-now, and cancellation journeys. Durable composer drafts and authored sent
-history share Slack's current Drafts & sent surface; drafts survive reload and
-process restart, while sent history re-applies private-conversation visibility
-after membership loss. Slack exposes only schedule/list/delete Web API
-operations, so first-party edit and send-now remain on the authenticated
-application/gRPC seam instead of inventing public Slack methods. Current Later
-is now a private first-party
-saved-item model—not an alias over deprecated `stars.*`—with save/unsave,
-focused-message `A`, In progress, Archived, Completed, restore/removal,
-inaccessible-source redaction, live reconciliation, portable persistence, and
-local/distributed composition parity. Slack exposes no current Later Web API,
-so official SDK qualification remains evidence for the deliberately separate
-legacy `stars.*` and `reminders.*` contracts rather than being mislabeled as
-Later evidence. Composer attachments are now private durable children of the
-exact conversation/thread draft: background staging, reload/process-restart
-recovery, Drafts & sent counts, sidebar indicators, memory/portable-SQL
-persistence, generated-gRPC parity, and blob-reconciliation references share
-one contract. Sending promotes the staged blobs through the ordinary atomic
-multi-file share path and clears the draft only after the message commits.
-Scheduled attachment delivery now keeps the exact staged files private and
-blob-referenced after draft/upload-ticket expiry, carries them through the
-generated gRPC seam, exposes their count in Drafts & sent, and atomically
-promotes them through idempotent send-now/worker delivery. Slack's 1 GB
-per-file allowance versus this deployment's explicit 100 MiB request limit,
-Slack's suggested scheduling
-times, reminder dates/delivery, and Later reminder filtering remain part of the
-next stateful client review.
-
-The direct-message lifecycle now has a dedicated searchable DMs surface,
-multi-recipient composition up to Slack's nine-person total, optional and
-later group-DM naming, durable per-member close state, canonical reopen by
-exact participant set, and automatic reopen when a participant posts. Closing
-no longer abuses channel membership: history, files, drafts, read state, and
-other participants remain intact. DM-03 now reviews additions and the history
-choice before one atomic commit creates the canonical expanded group DM,
-copies only the selected history/files, leaves the source membership intact,
-and posts both participant notices. DM-05 converts an MPIM in place to a
-private channel, retaining its identity, members, messages, files, drafts, and
-read state, with name-conflict rollback and the conversion notice in the new
-channel. The Slack HTTP boundary returns the documented `no_op` and
-`already_closed` fields on a repeated `conversations.close`, rejects
-`conversations.leave` and `conversations.rename` for IM/MPIM types, and is
-exercised by the pinned Node, Python, and Java SDK clients, including canonical
-multi-person opening. Slack exposes no public method for add-history or
-conversion, so those remain first-party application/gRPC operations instead
-of invented Slack APIs. Slack's exact live history-option inventory,
-workspace-configurable conversion restrictions, and Slack Connect/external
-variants remain differential gaps.
-
-The reminder contract audit also corrected a false evidence claim. Current
-Slack Help puts personal reminder creation and management in Later and message
-actions; current `/remind` documentation covers channel reminders and a private
-channel-reminder list, with channel edits performed by delete-and-recreate.
-Slack's five deprecated `reminders.*` app methods remain a separate legacy
-surface. They are now recorded as `sdk-compatible`, not
-`behavior-compatible`, until natural-language parsing, recurrence, targeting,
-delivery, retirement behavior, and controlled live outcomes have their own
-evidence.
-
-The search-depth sweep now defines SEARCH-01 through SEARCH-03 as explicit
-Slack-matching journeys and implements a typed cross-layer search contract.
-Quoted and excluded text plus sender, conversation, participant, date, thread,
-saved, file, pin, reaction, and file-type modifiers flow through the local and
-generated gRPC compositions. Message and hosted-file search apply viewer
-visibility before totals and pagination across memory and shared SQL storage;
-file browse, search, metadata, and download share one public/private access
-rule. The first-party UI exposes real Messages, Files, People, and Channels
-types, private durable recent searches, visibility-aware people/channel/file
-typeahead, URL-backed filters/order, authenticated file results, and explicit
-current-conversation `Command/Control+F` scope. Recent-search ordering,
-deduplication, privacy, SQL migration/reopen, local/generated-gRPC parity, and
-keyboard selection are covered by shared persistence, transport, web, and
-three-engine browser qualification. The pinned Node, Python, and Java SDKs now
-invoke the user-token-only `search.messages`, `search.files`, and legacy
-`search.all` methods. Canvases, semantic ranking and highlighting, the complete
-modifier inventory, exact thread entry scope, visual baselines, and live-Slack
-differential results remain named gaps.
-
-UI evidence is now measured against the normative catalog rather than counted
-from test files: every one of the 102 stable journey IDs has exactly one local
-source-map row linking the specific current official Slack contract,
-and 37 Playwright scenarios cite 78 IDs. `make journey-check` rejects
-duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
-and empty behavioral assertions. The remaining IDs are printed as an explicit
-browser gap list; a citation is not promoted
-to full compatibility without the domain, transport, accessibility, visual,
-and differential layers required by the catalog.
-
-SDK evidence is now measured at the HTTP boundary too. The pinned official
-Node, Python, and Java clients record every `/api/{method}` path they actually
-request, and the Deno runtime records its two verified function-completion
-requests at its own receiver. `make sdk-qualification` fails if any operation
-claimed at `sdk-compatible` or above is absent. The workflow pass adds direct
-Node and Python observations for 13 current function/workflow methods; the
-network-enabled qualification result remains a required CI gate rather than a
-locally inferred count. This proves SDK serialization/decoding only, not live
-Slack equivalence.
-
-Current app-execution work replaces installed-bot-only event filtering with
-bot/user authorization perspectives and immutable callback snapshots. Message
-create/change/delete and file create/share callbacks now retain the exact
-committed version through delayed delivery and SQL restart; HTTP and Socket
-Mode apply the same manifest subscription, OAuth-scope, and conversation
-visibility rules. Current callbacks carry one representative authorization
-and an event-backed `event_context`; the full set is returned only to an
-`authorizations:read` app token through `apps.event.authorizations.list`.
-`star_added`/`star_removed` are available to the matching user-token
-subscription on Events API and RTM as Slack documents. File-unshare mutation
-production, retained attempt/authorization history, and controlled live-Slack
-differential outcomes remain the next event-runtime gaps.
-
-The current workflow-execution pass replaces the decorative workflow target
-with one durable cross-layer slice. A developer-app owner can create a draft
-from owned remote functions, configure ordered steps and an input schema,
-publish or unpublish, create and enable or disable a link/shortcut trigger,
-start one idempotent `Wx` run, and reopen its exact running or terminal state.
-Definitions, revisions, triggers, runs, function completion, distribution and
-trigger permissions, featured workflows, and workflow-step listing share the
-local/generated-gRPC seam and memory/portable-SQL stores. The Slack HTTP
-methods newly qualify through the pinned official Node and Python SDKs, while
-the three-engine browser journey uses the real app-management, OAuth, builder,
-trigger, and run surfaces. Invalid permission classes now retain Slack's
-`invalid_permission_type` error instead of being flattened into authorization
-or generic argument errors. App-owned `function_executed` records now translate
-to the current Slack callback shape and bypass manifest subscription filtering,
-as Slack's no-scope automatic-dispatch contract requires, on both HTTP Events
-API and Socket Mode.
-
-The same pass keeps the remaining boundary explicit.
-find/use/copy permissions, plan and admin policy, built-in and connector
-functions, asynchronous CSV exports at scale, multi-org permission
-semantics, typed workflow/function input and output enforcement, exact rate
-limits, and controlled live-Slack outcomes remain.
-
-The bot access token pass then lets a function_executed callback carry the
-receiving app's `bot_access_token`, exactly as Slack sends it so the app can
-call back. Installation credentials stop being hash-only: a freshly issued bot
-token is sealed with the application credential key at OAuth exchange and kept
-as ciphertext in its own table, and the dispatch projection opens it only at
-delivery time — the plaintext is never persisted. An app installed before this
-change issued no retrievable token, so its callbacks omit the field until it
-reinstalls, matching the one-way nature of the hashes it was installed under.
-
-The function-scoped interactivity pass replaces that sealed copy of the app's
-ordinary bot token (schema 190 drops `app_bot_tokens`): `function_executed`
-now carries an execution-scoped `xwfp-` token minted once per execution, which
-authenticates as the app's bot only while its execution runs. Messages and
-views created with it record the execution, and their `block_actions`,
-`view_submission` and `view_closed` carry `function_data`, the token, and
-`interactivity`, so Bolt's `complete()`/`fail()` work inside action and view
-handlers.
-
-The staged-editing pass then lets a published workflow keep executing its
-published revision while its owner edits a draft. A non-publish update keeps
-the head row published and lets Version diverge from PublishedVersion — the
-marker that staged edits exist — and every run keeps pinning PublishedVersion,
-so a step removed from the draft never reaches an in-flight execution. The
-revision table now carries description, callback id, and input schema alongside
-title and steps, so a non-owner reading the directory or a run view sees the
-published revision's metadata rather than the staged draft; only the owner and
-the execution path read the live head. The unpublish-and-discard pass closes
-the remaining lifecycle gaps. Unpublishing a published workflow atomically
-cancels every running run and executing step in the same transaction that
-disables it, stamping both with the `workflow_unpublished` error and a
-completion time so a late function completion is rejected; a cancelled run is
-a terminal state like any other. Discarding staged changes reverts the head to
-the published revision, prunes the staged revision rows, and emits a
-`workflow.staged_discarded` event, so the next update publishes from the
-realigned version instead of colliding with the discarded draft.
-
-The per-step change tracking pass then completes the builder's view of a
-published workflow with staged edits. The owner-only `WorkflowStepChanges`
-operation diffs the live head against the published revision positionally: each
-head step is labeled added, changed, or removed relative to the step at the same
-index, and trailing published steps with no head step are reported removed. The
-builder renders a badge on every changed or added step and lists the removed
-steps beneath the step list, so the owner sees exactly what publishing would
-change. A published head or a workflow with no published revision yields no
-changes, and the wire method is covered by the differential parity suite
-alongside every other chat operation.
-
-The builder-completion pass then closes the remaining Workflow Builder gaps a
-single feature slice at a time. A workflow can be copied into a new draft and
-deleted, with deletion cancelling every running execution in the same
-transaction that removes the workflow, its revisions, triggers, runs, steps,
-and featured entries. Scheduled triggers accept named weekdays (a weekly
-schedule fires on the days it names, anchored on the start's week) and an
-explicit day of the month that clamps to a shorter month's last day instead of
-drifting into the next one. The builder shows a per-workflow run activity
-dashboard — counts by status and the newest runs, newest first — to the owner.
-Steps carry a type and a unique id, so the per-step change diff compares whole
-definitions rather than only the callback, and the diff no longer phantom-flags
-a revision written before step types existed. A step can be gated by a
-condition comparing a variable (`inputs.<name>` or an earlier step's
-`steps.<id>.outputs.<name>`) with equals, not equals, contains, greater than,
-or less than; the run skips a step whose condition fails and completes when no
-remaining step's condition holds, and a run now starts from its pinned
-published revision even while staged edits diverge the head. Each step's inputs
-can be mapped from trigger inputs or earlier step outputs, keeping the value's
-type and dropping a key whose variable does not resolve. Form and button steps
-park a run waiting for a person to submit a form or click a confirmation, and
-any workspace member may respond; the run view renders the pending interaction
-and resumes on submit or click through the same advance path as a function
-completion. Each new operation crosses the gRPC seam with a differential parity
-case, and the workspace content security policy now allowlists the workflow
-pages' own inline scripts (a prior gap that had silently disabled their
-progressive enhancement).
-
-The smaller builder slices pass then rounds out the day-to-day builder surface
-and the defects found on the way. Workflow run views are workspace-shareable,
-so a member can open the run a form or button step is parked on — the
-interactive-steps feature was unreachable for members until this aligned with
-the interaction audience. Steps reorder in place with up/down controls that
-swap every field between adjacent slots (kept outside the step's label, since a
-label wrapping both a select and a button is invalid and broke the option's
-enabled state). A workflow carries an icon through its head, its published
-revisions, the staged-edit projection, the duplicate and discard paths, the
-gRPC seam, and the builder and directory views. A published workflow's trigger
-is locked to enable/disable — reconfiguring it requires unpublishing, matching
-Slack, and a webhook's secret is no longer rotated by a rename that can no
-longer happen. The owner exports the run history and every submitted form
-field as CSV through new seam operations. Each operation has a differential
-parity case and the schema gains the icon columns through an idempotent
-migration.
-
-The workflow managers pass then opens management beyond the owner. A workflow
-carries a manager list, stored in its own column and changed only through a
-dedicated operation (a content update preserves it in both stores, which the
-persistence qualification pins). The owner and workspace administrators assign
-managers; a manager edits, publishes, manages triggers, exports, duplicates,
-and deletes the workflow exactly as the owner does, reading the live head the
-same way, while a non-manager is refused indistinguishably from a missing
-workflow. The pass also corrected two defects it exposed: a content edit used
-to wipe the manager list in the memory store, and workflow create/edit wrongly
-required app ownership — building against an installed app is what Slack
-requires, so the check is now app-installed-in-workspace rather than
-app-owned-by-builder.
-
-The trigger-worker pass then replaced the configuration-only scheduled,
-webhook, message, reaction, join, and list trigger types with durable
-execution. Scheduled triggers carry a next-occurrence column and fire from a
-compare-and-set queue whose earliest occurrence joins the lifecycle
-wake-deadline publication; hourly, daily, weekly, and monthly recurrence is
-evaluated as wall-clock calendar arithmetic in the configured IANA zone so a
-daily 09:00 survives daylight-saving transitions. Webhook triggers execute on
-an unauthenticated POST to `/services/triggers/{workspace}/{trigger}/{secret}`:
-the secret is stored as a hash plus credential-key ciphertext, revealed only to
-the workflow owner, and unknown workspace, trigger, or secret, a disabled
-trigger, and an unpublished workflow all answer the same plain-text 404. A
-workspace event dispatcher tails the durable journal behind a monotonic cursor
-and fires channel-bound message (with optional keyword), reaction (with
-optional emoji), join, and first-party list record triggers; every fire —
-scheduled occurrence, event match — carries a derived idempotency key, so a
-crashed or racing worker starts one run. Automatic fires execute as the
-workflow owner and bypass link/shortcut run permissions while still requiring
-a published workflow and an enabled trigger. Named weekday schedules,
-month-end semantics, trigger inputs wired to step variables, Slack-list
-(rather than first-party list) triggers, webhook secret rotation UX, and
-durable trigger-failure surfacing beyond the run ledger remain.
-
-The journey contract is also checked upstream on every SDK CI run.
-`make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 163 representative exact assertions
-explicitly citing 53 of the 108 journey IDs across every journey domain.
-`make journey-check` prints the other 55 as upstream-text evidence
-gaps. This pass corrected two local targets
-that had drifted from Slack: a conversation canvas is created or attached as a
-tab rather than modeled as a separate invented channel-canvas object, and
-Slack Connect acceptance must account atomically for Slack's current
-250-organization capacity including the host. This gate detects documentation
-drift; controlled live-workspace behavior and visual comparison remain
-distinct evidence layers.
-
-The current composer/reaction pass removes a second source of false UI parity:
-standard emoji are no longer six hard-coded buttons and reactions are no
-longer arbitrary free text. One checksum-pinned iamcal/emoji-data revision—the
-dataset Slack's current formatting guide names—now drives colon completion,
-the searchable picker, Unicode rendering, reaction validation, and
-`emoji.list(include_categories=true)`. Durable workspace custom emoji and
-aliases are merged through the same model, with HTTP(S)-only image rendering.
-Channel completion stores Slack's `<#ID>` form and resolves only authorized
-visible names at presentation time. User-group completion now combines enabled
-groups with people under the same keyboard-operable `@` list, stores Slack's
-`<!subteam^ID>` form, resolves the current handle without mutating history, and
-expands enabled membership to visibility-safe Activity. The user-group Web API
-also reports Slack's required `is_subteam:true` object shape. Node, Python, and
-Java typed SDK calls, current Slack Help/developer assertions, browser keyboard
-journeys, and service/web/API/shared-persistence tests form the qualification
-stack. Recent/category/skin-tone picker depth, exact Slack ranking, pasted
-attachments, clips, and controlled live-Slack outcomes remain named gaps.
-
-The first-party reminder slice now has a durable model separate from deprecated
-`reminders.*`, message `M` presets/custom time, Later CRUD and filtering,
-reserved `/remind` parsing including named weekdays, private channel-reminder
-listing, guest enforcement, worker delivery/recurrence/retry/failure fencing,
-Activity/source projection, durable Later/Activity badge acknowledgement, and
-combined scheduled/reminder lifecycle wake publication. The real browser
-journey runs in all three engines; deterministic memory, SQL, service, web, and
-local-versus-gRPC evidence covers delivery state that cannot safely wait for a
-wall clock in CI. Live-workspace parsing/presentation comparison,
-deterministic deployed-worker browser delivery, and undocumented month-end
-recurrence remain explicit gaps.
-
-The 2026 Activity source refresh now drives a durable cross-layer slice rather
-than a projection assembled by the page. DMs/MPIMs, direct and user-group
-mentions, followed-thread replies, all-new-post channel notifications, exact channel-keyword matches,
-reactions, applicable app messages, and delivered personal reminders create
-idempotent per-recipient items in the source
-transaction. Memory and portable SQL persist overlapping filters, read and
-cleared state, recoverable clear, and detailed/dense preference; the typed
-service and generated gRPC seam preserve pagination and hydration; the web
-implements filters, bulk/per-item read/unread/clear/restore actions,
-source/reply navigation,
-accessibility, and Activity-local Up/Down, Enter, `X`, `C`, and `R`.
-Repository, reopen, converter-property, differential, web, and three-engine
-browser evidence covers the original slice. Durable per-member notification
-defaults now add keyword and Activity inclusion settings; channel exceptions
-add all-post/mention/mute and follow-every-thread behavior; individual thread
-following is available from the thread pane; and preset/custom DND pause and
-resume use the existing Slack-compatible DND model. The generated gRPC seam,
-memory/SQL stores, SQLite reopen tests, and current first-party Slack Help
-assertions cover this dependency knot. Public-channel mentions may now reach an
-active member before they join, as Slack documents, while private and
-access-group-restricted sources remain fenced during both creation and
-hydration. Public/private channel additions now commit a durable, source-linked
-Invitations item atomically with membership and return `already_in_channel`
-without duplicating it. The ordinary invitation API now also follows Slack's
-current bot/user and public/private scope alternatives, 100-user formal
-argument limit, all-or-none default, per-user error array, and `force=true`
-valid-subset behavior; the qualification fetches those current contracts and
-the three official SDKs decode the public/private success path. Workspace
-guest/channel-limit and Slack Connect policy errors remain explicit deviations.
-Slack Connect/canvas-share invitations, VIP/section notifications,
-custom views, inline Activity reactions, focus-preserving live updates,
-browser/push/email/sound delivery and timing, notification schedules, urgent
-overrides, group-DM UI, pre-v107 history backfill, controlled live-Slack
-behavior, and visual comparison remain named gaps rather than empty controls
-or a false full-compatibility claim.
-
-The profile/presence pass now treats current and future status timing as a
-cross-layer lifecycle,
-not a browser-only timer: `status_expiration` is typed through the Slack API,
-domain, generated gRPC seam, memory/SQL stores, first-party UI, and a
-compare-and-set worker whose earliest deadline participates in lifecycle wake
-publication. Future statuses are a separate first-party typed resource (Slack
-does not expose a scheduling Web API method): memory/SQL persistence, generated
-gRPC, the People UI, and an atomic revision-fenced worker cover creation,
-chronological listing, full pre-start editing/cancellation, the five-item
-limit, activation, missed windows, and lifecycle wake. Current Node, Python,
-and Java Slack SDKs exercise the public current-status field, and
-the browser journey covers status suggestions, expiry selection, manual
-active/away choice, and clearing. `users.profile:read` is enforced separately
-from `users:read`, while profile email in get/set/info/list responses remains
-gated by `users:read.email`. Slack's
-Live activity-derived automatic presence remains an explicit STATUS-02 gap,
-and STATUS-03 still requires controlled live-Slack differential evidence.
-The four public profile/presence methods remain SDK-compatible rather than
-falsely behavior-compatible.
-
-Phase 5 exits only when each method counted as complete names its current
-official sources, executable evidence, known deviations, and live-comparison
-state. An aggregate green suite is supporting evidence, not a substitute for
-that per-method record. The compatibility report now makes the missing records
-explicit: only 41 of the 234 current methods claimed at `sdk-compatible` or
-above carry method-level evidence in the ledger; 193 claims still require
-individual review and evidence even though the official SDK aggregate observes
-their request paths.
+- Work down the 92 known deviations in the ledger, and keep each claim at the
+  level its evidence supports; the contract ratchet permits an audited
+  downgrade when a claim is found to be overstated.
+- Refuse bot tokens on every `admin.*` method with `not_allowed_token_type`,
+  as Slack does: admin scopes exist only on user tokens. Only the
+  `admin.apps.permissions.*`, `admin.apps.mcp.servers.*`, the new
+  `admin.usergroups.*` methods and `admin.conversations.bulkSetProperties`
+  enforce it today. The other admin methods
+  accept the deployment's `-api-token`, a bot token, and the handler tests and
+  official SDK qualification call them with bot tokens, so the change needs an
+  admin user-token fixture and an operator path to an admin user token first.
+- Close the journey gaps `make journey-check` prints: eight journeys without a
+  browser scenario and 55 without a current official-source assertion.
+- Add visual baselines and manual assistive-technology evidence to the
+  browser qualification.
+- Sign in with Slack: serve an OpenID discovery document and key set at this
+  deployment's own URLs, sign ID tokens RS256 with a durable key every
+  replica shares, and serve `/openid/connect/authorize`, so a relying party
+  that only changes Slack's endpoints can discover and verify tokens the way
+  it does Slack's.
+- Phase 5 exits only when each method names its current official sources,
+  executable evidence, known deviations, and live-comparison state; an
+  aggregate green suite supports that record but does not replace it.
 
 ### Phase 6: Differential verification and production hardening
 
 - Run controlled differential requests against a disposable Slack developer
-  workspace and normalize volatile fields before comparison.
-- Fuzz request decoding, cursor handling, event envelopes, and restore manifests.
-- Load-test hot channels, reconnect storms, file upload, search, and cold wake.
+  workspace, normalizing volatile fields, so claims can reach
+  `verified-against-slack`. No live-Slack runner exists yet; the existing
+  differential suites compare local and gRPC composition only.
 - Exercise node loss, quorum loss, failed snapshot upload, corrupt snapshot,
-  interrupted restoration, and rollback.
-- Produce an SBOM, signed artifacts, compatibility report, and operational
-  recovery guide for each release.
+  interrupted restoration, and rollback against a deployed profile; the
+  lifecycle and dqlite qualification suites cover them in process today.
+- Authenticate and encrypt dqlite node-to-node traffic with per-node
+  certificates, as the [persistence specification](specs/persistence.md#dqlite-adapter)
+  requires; nodes replicate over plain TCP today, so the cluster network must
+  be private.
+- Wire OSV/advisory and container-image scanning, which the
+  [dependency policy](specs/dependency-policy.md) requires, into CI;
+  `govulncheck` already runs over the module source.
+- Produce a compatibility report and operational recovery guide with each
+  release, alongside the SBOM and signed provenance the container workflow
+  already attaches.
 
-## Cross-cutting release gates
+### Phase 7: Compile-time module composition
 
-Every change must pass:
+The architecture's distinguishing mechanic, which this phase finishes, is that
+modules call one another as ordinary Go interfaces and the build decides how a
+call travels. `modulegen` reads [modules.json](modules.json) and, for each
+target, generates the composition: in the monolith every module dependency is a
+direct function call into the implementation; in a split target a dependency on
+a module that lives in another binary is satisfied by a generated gRPC client,
+and the owning binary registers the generated server. Business code never
+names a transport, and the choice is made when the binary is compiled, not by a
+runtime flag.
 
-- formatting, linting, unit, integration, race, and browser tests;
-- the relevant official Slack SDK suites;
-- SQLite and dqlite persistence suites;
-- hibernation/wake tests when lifecycle code or schema changes;
+Current state, measured rather than intended:
+
+- There is one module. `chat` owns a 518-method `chatapi.Service`, the
+  502-method `store.Store` port, and `internal/service`, an implementation of
+  23,500 lines outside its tests; identity, files, apps, real-time delivery, and collaboration
+  features all sit behind it.
+- Transport selection is a runtime decision. `sameoldchat -chat-mode
+  local|grpc` links the implementation, every storage backend, and the gRPC
+  client into one binary, and `internal/generated/bindings.go` exports both the
+  local and the remote provider from a single package, so every binary that
+  imports it links both. The target profiles in `modules.json` are runtime data;
+  no build output corresponds to a target.
+- Configuration is declared per binary. `sameoldchat` parses 49 flags and
+  `sameoldchat-chatd` 21, of which 17 (`-store`, `-db`, the `-dqlite-*` and
+  `-blob-*` families, `-auth-public-url`, `-app-credential-key-hex`,
+  `-metrics-listen`, the app and session tokens) are declared twice; the workers each declare their own copy of the
+  store settings.
+- Publication covers one shape. The container workflow publishes only
+  `ghcr.io/e6qu/someoldchat`, built from `cmd/server`. `sameoldchat-chatd` and
+  the workers are built by `make build` but never published, so a split
+  deployment cannot be assembled from released artifacts.
+
+Done: the HTTP and HTMX adapters link only module APIs and `internal/domain`,
+which now holds the error sentinels, request limits, and pure parsers they
+used to take from `internal/service`; `internal/modules/boundary_test.go`
+enforces it.
+
+Remaining work, in order:
+
+1. **Classify packages as modules or libraries.** A module owns durable state
+   and its transactions and is reachable through an API that can cross a
+   process boundary. A library is pure code linked into whichever binary
+   imports it and is never called over gRPC. The proposed modules are
+   identity (users, profiles, groups, sessions, tokens, external identity,
+   workspace membership and roles), messaging (conversations, membership,
+   messages, threads, reactions, pins, bookmarks, drafts, scheduled messages,
+   the journal and outbox), files (metadata, blob streaming, thumbnails, remote
+   files, blob deletion), apps platform (installations, manifests, datastores,
+   Events API delivery, interactivity, views, Socket Mode, workflows and
+   functions), real-time delivery (SSE and RTM fan-out, typing, presence; it
+   only reads the journal), and collaboration (canvases, lists, huddles,
+   reminders, saved items). Libraries are `domain`, `blockkit`, `slackobject`,
+   `slackemoji`, `appmanifest`, `bearer`, `secretbox`, `lease`,
+   `clientaddr`, `observability`, `thumbnail`, and `huddlesfu`; `outbox`,
+   `socketmode`, `realtime`, and `scheduler` are shared runtime libraries,
+   and `scheduler` must stop importing `internal/service`.
+2. **Split the chat API in process first.** Divide `chatapi.Service` and
+   `store.Store` into per-module interfaces served by the existing monolith and
+   database, so dependencies become visible before any process boundary moves.
+   Each module's sentinels move to its API package. The store port's
+   sentinels move out of `internal/store` with them; five names
+   (`ErrInvalidAppApproval`, `ErrInvalidInviteRequest`,
+   `ErrScheduledStatusLimit`, `ErrTriggerExchanged`, `ErrTriggerExpired`) are
+   declared in both `store` and the former service set with different
+   meanings and must be renamed apart while keeping their wire keys.
+3. **Make dependency direction a build error.** `modules.json` names each
+   module's dependencies on other module APIs; `modulegen` rejects cycles and
+   generates the boundary rules the adapter test now hard-codes, so a module
+   importing another module's implementation fails `make check`. Feature
+   modules depend on messaging and identity, never the reverse; a module that
+   must react to messages consumes the journal instead of running inside
+   messaging's transaction.
+4. **Generate one composition root per target.** `modulegen` emits a package
+   per target and process that wires every module dependency to either the
+   local constructor or the generated gRPC client, and every `cmd/` main
+   becomes a thin wrapper over one generated root. Generation must cover
+   module-to-module clients, not only the HTTP-to-chat seam that exists
+   today. `-chat-mode` is retired; a binary's composition is fixed when it is
+   compiled. This is generated code, not build tags, so the existing rule
+   that tags must not encode local/remote combinations still holds.
+5. **One configuration schema.** Declare every flag and `SAMEOLDCHAT_*`
+   environment variable once, in a shared package, and have every binary
+   accept the whole schema, so one configuration serves the monolith and
+   every process of a split deployment. Each binary requires the settings of
+   the modules it links and the addresses and mutual-TLS material of the
+   modules it reaches remotely. Decision needed: a setting that belongs only to
+   a module the binary does not link is either accepted and reported as not
+   applicable at startup, or rejected as contradictory, which is today's rule
+   for `-db` in `-chat-mode grpc`.
+6. **Scale each module independently.** A split target gives every module
+   binary its own replica count, which `modules.json` already records, and
+   `terraform/ecs-runtime` must express one service per binary. Each module
+   that owns a dqlite store needs its own three-voter quorum, so splitting a
+   module out multiplies database processes; the read path that hydrates a
+   message from several modules needs batch lookups or a journal-built read
+   model instead of one RPC per field.
+7. **Publish both shapes.** Release the monolith image and one image per split
+   binary under the same immutable commit tag, each with the provenance, SBOM,
+   dual-architecture, and retention gates the current image passes, and
+   publish the static binaries of both shapes as release assets. The
+   retention script must group versions across all of the packages.
+
+Exit criteria:
+
+- `make build` produces the monolith and every split binary from generated
+  roots, and a CI check asserts from `go list -deps` that the monolith links
+  no internal gRPC transport and that each split binary links only its own
+  module implementations.
+- The existing composition parity and differential suites run against the
+  compiled split binaries as well as the monolith.
+- The same configuration file and environment start both shapes.
+- Every published image and binary passes the container publication gate.
+
+## Release gates
+
+Every change must pass, as applicable to what it touches:
+
+- formatting, vet, unit, integration, race, fuzz, mutation, and browser tests
+  (`make check`, `make check-full`, `make browser-qualification`);
+- the official Slack SDK suites (`make sdk-qualification`);
+- the SQLite, PostgreSQL, and dqlite persistence suites;
+- hibernation and wake tests when lifecycle code or schema changes;
 - dependency age, integrity, provenance, and license checks
-  (`make dependency-check`);
-- vulnerability scanning. `govulncheck` runs in the pull-request workflow over
-  the module source; OSV/advisory and container-image scanning required by the
-  [dependency policy](specs/dependency-policy.md) are not yet wired into CI;
+  (`make dependency-check`) and vulnerability scanning (`make vuln-check`);
 - migration forward and restore compatibility checks; and
-- generated compatibility-ledger validation.
-
-Fuzz smoke gates requested a fixed 25,000-execution budget per target under an
-explicit two-minute process timeout, so successful completion did not depend
-on a wall-clock fuzz deadline while hung inputs still failed the gate.
-
-Dqlite qualification clusters retained their kernel-assigned TCP listeners for
-the complete test lifetime and passed those real connections through
-Canonical's external-connection interface. The adapter used the same dialer
-for cluster health probes. Accepted upgrades remained queued until each
-Canonical dqlite application had constructed its local engine, and restarted
-applications received a distinct transport session on the same retained
-listener. Stores deactivated and drained their external accept loop before
-closing the local engine; the drain barrier completed Canonical's real dqlite
-wire handshake after all routed connections. Peer dials therefore could not
-reach an obsolete session during node loss or restart. Cluster creation and
-restart tests had neither a released-port bind window nor an external-accept
-lifecycle race and required neither retries nor sleeps.
-
-The dependency-admission gate verified exact direct npm lockfile versions and
-Subresource Integrity checksums against the same aged evidence inventory used
-for Go modules, GitHub Actions, and container inputs.
-
-The official SDK qualification script cleared `CDPATH` with a portable empty
-assignment, so its repository-root discovery passed ShellCheck on Linux and
-macOS shells without inheriting caller-specific directory search behavior.
-
-The container publication gate emitted immutable 12-character commit tags,
-direct Linux amd64 and Linux arm64 image manifests, and a generic index made
-from exactly those two manifests. It generated an SPDX SBOM from the exact
-architecture image, attached GitHub's native signed SLSA provenance and a
-signed SBOM attestation to the architecture digest without changing the direct
-tag's media type, and read the published references back from GitHub Container
-Registry. It retained at most
-the newest 20 complete three-version release groups and removed incomplete,
-mixed-tag, untagged, and older package versions. Every remaining root was
-verified to have exactly one direct amd64 and one direct arm64 sibling, while
-signed attestation records remained outside the container package versions.
-The release gate used the official GitHub attestation action's native SLSA
-generator instead of submitting BuildKit extension fields to GitHub's stricter
-SLSA decoder, and it rejected malformed BuildKit SPDX documents before
-requesting an SBOM signature.
+- the compatibility-ledger and gRPC wire ratchets (`make contract-ratchet`,
+  `make proto-breaking`).
 
 ## Initial milestone
 

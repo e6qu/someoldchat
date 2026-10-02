@@ -49,7 +49,7 @@ func TestBarrierKeepsSeparatedGroupsOutOfOneChannel(t *testing.T) {
 	ctx, messages := seedBarrieredWorld(t)
 
 	// A member's invite: barriered from U2 who is already in C1, U3 is refused.
-	if _, err := messages.InviteConversationMembers(ctx, "T1", "U2", "C1", []domain.UserID{"U3"}); !errors.Is(err, ErrBarrieredFromMember) {
+	if _, err := messages.InviteConversationMembers(ctx, "T1", "U2", "C1", []domain.UserID{"U3"}); !errors.Is(err, domain.ErrBarrieredFromMember) {
 		t.Fatalf("inviting a barriered member into a shared channel: err=%v, want ErrBarrieredFromMember", err)
 	}
 	// Someone in neither group is admitted.
@@ -58,7 +58,7 @@ func TestBarrierKeepsSeparatedGroupsOutOfOneChannel(t *testing.T) {
 	}
 
 	// An administrator does not get to defeat the barrier either.
-	if _, err := messages.AdminInviteConversationMembers(ctx, "T1", "U1", "C1", []domain.UserID{"U3"}); !errors.Is(err, ErrBarrieredFromMember) {
+	if _, err := messages.AdminInviteConversationMembers(ctx, "T1", "U1", "C1", []domain.UserID{"U3"}); !errors.Is(err, domain.ErrBarrieredFromMember) {
 		t.Fatalf("admin invite across a barrier: err=%v, want ErrBarrieredFromMember", err)
 	}
 }

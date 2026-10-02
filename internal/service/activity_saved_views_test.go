@@ -84,7 +84,7 @@ func TestActivitySavedViewValidationAndLimit(t *testing.T) {
 		case "over-long name":
 			label = strings.Repeat("x", domain.ActivitySavedViewNameLimit+1)
 		}
-		if _, err := messages.CreateActivitySavedView(ctx, "T1", "U1", label, kinds); !errors.Is(err, ErrInvalidActivitySavedView) {
+		if _, err := messages.CreateActivitySavedView(ctx, "T1", "U1", label, kinds); !errors.Is(err, domain.ErrInvalidActivitySavedView) {
 			t.Fatalf("%s = %v, want ErrInvalidActivitySavedView", name, err)
 		}
 	}

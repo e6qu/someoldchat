@@ -25,23 +25,6 @@ import (
 
 const appConfigurationTokenLifetime = 12 * time.Hour
 
-var (
-	ErrAppConfigurationAuthentication = errors.New("app configuration token is invalid")
-	ErrAppCredentialKeyUnavailable    = errors.New("application credential encryption key is unavailable")
-	ErrInvalidAppManifest             = errors.New("app manifest is invalid")
-	// ErrAppNotDistributable refuses public distribution for an app that has no
-	// redirect URL: an install has nowhere to return to, so Slack does not let
-	// distribution activate until one exists, and neither does this.
-	ErrAppNotDistributable = errors.New("app cannot be distributed without a redirect URL")
-	// ErrInvalidExternalAuthProvider is a malformed external OAuth provider
-	// declaration: a name, client id, and https authorization and token URLs are
-	// the minimum an app needs before a member can connect an account.
-	ErrInvalidExternalAuthProvider = errors.New("external authentication provider is invalid")
-	// ErrExternalAuthConnection is a connect flow that could not complete: the
-	// state did not verify, or the provider refused the code exchange.
-	ErrExternalAuthConnection = errors.New("external authentication connection failed")
-)
-
 func appSigningSecretAssociatedData(appID domain.AppID) string {
 	return "app:" + string(appID) + ":signing-secret"
 }
@@ -64,7 +47,7 @@ func appVerificationTokenAssociatedData(appID domain.AppID) string {
 // application's credential into another application's authority.
 func (m Messages) OpenAppSigningSecret(app domain.App) (string, error) {
 	if len(m.AppCredentialKey) != 32 {
-		return "", ErrAppCredentialKeyUnavailable
+		return "", domain.ErrAppCredentialKeyUnavailable
 	}
 	secret, err := secretbox.Open(m.AppCredentialKey, appSigningSecretAssociatedData(app.ID), app.SigningSecretCiphertext)
 	if err != nil {
@@ -75,7 +58,7 @@ func (m Messages) OpenAppSigningSecret(app domain.App) (string, error) {
 
 func (m Messages) openAppVerificationToken(app domain.App) (string, error) {
 	if len(m.AppCredentialKey) != 32 {
-		return "", ErrAppCredentialKeyUnavailable
+		return "", domain.ErrAppCredentialKeyUnavailable
 	}
 	secret, err := secretbox.Open(m.AppCredentialKey, appVerificationTokenAssociatedData(app.ID), app.VerificationTokenCiphertext)
 	if err != nil {
@@ -115,13 +98,13 @@ func (m Messages) IssueAppConfigurationToken(ctx context.Context, workspaceID do
 func (m Messages) RotateAppConfigurationToken(ctx context.Context, refreshToken string) (domain.AppConfigurationCredentials, error) {
 	refreshToken = strings.TrimSpace(refreshToken)
 	if refreshToken == "" {
-		return domain.AppConfigurationCredentials{}, ErrAppConfigurationAuthentication
+		return domain.AppConfigurationCredentials{}, domain.ErrAppConfigurationAuthentication
 	}
 	// The store owns the one-time refresh-token lookup and atomic compare-and-
 	// replace. The identity is intentionally not accepted from the caller.
 	identity, err := m.Store.LookupAppConfigurationRefreshToken(ctx, refreshToken)
 	if errors.Is(err, store.ErrNotFound) {
-		return domain.AppConfigurationCredentials{}, ErrAppConfigurationAuthentication
+		return domain.AppConfigurationCredentials{}, domain.ErrAppConfigurationAuthentication
 	}
 	if err != nil {
 		return domain.AppConfigurationCredentials{}, err
@@ -149,7 +132,7 @@ func (m Messages) RotateAppConfigurationToken(ctx context.Context, refreshToken 
 		ExpiresAt:   value.ExpiresAt,
 	})
 	if errors.Is(err, store.ErrNotFound) {
-		return domain.AppConfigurationCredentials{}, ErrAppConfigurationAuthentication
+		return domain.AppConfigurationCredentials{}, domain.ErrAppConfigurationAuthentication
 	}
 	if err != nil {
 		return domain.AppConfigurationCredentials{}, err
@@ -185,7 +168,7 @@ func (m Messages) CreateAppFromManifest(ctx context.Context, configurationToken,
 	}
 	parsed, problems := appmanifest.Parse(manifest)
 	if len(problems) != 0 {
-		return domain.App{}, domain.AppCredentials{}, ErrInvalidAppManifest
+		return domain.App{}, domain.AppCredentials{}, domain.ErrInvalidAppManifest
 	}
 	appID, err := domain.NewAppID()
 	if err != nil {
@@ -204,7 +187,7 @@ func (m Messages) CreateAppFromManifest(ctx context.Context, configurationToken,
 		return domain.App{}, domain.AppCredentials{}, err
 	}
 	if len(m.AppCredentialKey) != 32 {
-		return domain.App{}, domain.AppCredentials{}, ErrAppCredentialKeyUnavailable
+		return domain.App{}, domain.AppCredentials{}, domain.ErrAppCredentialKeyUnavailable
 	}
 	signingSecretCiphertext, err := secretbox.Seal(m.AppCredentialKey, appSigningSecretAssociatedData(appID), signingSecret)
 	if err != nil {
@@ -220,7 +203,7 @@ func (m Messages) CreateAppFromManifest(ctx context.Context, configurationToken,
 	}
 	if parsed.EventRequestURL != "" && !parsed.SocketModeEnabled {
 		if err := m.verifyEventRequestURL(ctx, parsed.EventRequestURL, signingSecret, verificationToken); err != nil {
-			return domain.App{}, domain.AppCredentials{}, fmt.Errorf("%w: event request URL: %v", ErrInvalidAppManifest, err)
+			return domain.App{}, domain.AppCredentials{}, fmt.Errorf("%w: event request URL: %v", domain.ErrInvalidAppManifest, err)
 		}
 	}
 	now := time.Now().UTC()
@@ -277,7 +260,7 @@ func (m Messages) UpdateAppFromManifest(ctx context.Context, configurationToken 
 	}
 	parsed, problems := appmanifest.Parse(manifest)
 	if len(problems) != 0 {
-		return domain.App{}, ErrInvalidAppManifest
+		return domain.App{}, domain.ErrInvalidAppManifest
 	}
 	app, _, err := m.Store.GetApp(ctx, appID)
 	if err != nil {
@@ -296,7 +279,7 @@ func (m Messages) UpdateAppFromManifest(ctx context.Context, configurationToken 
 			return domain.App{}, openErr
 		}
 		if verifyErr := m.verifyEventRequestURL(ctx, parsed.EventRequestURL, signingSecret, verificationToken); verifyErr != nil {
-			return domain.App{}, fmt.Errorf("%w: event request URL: %v", ErrInvalidAppManifest, verifyErr)
+			return domain.App{}, fmt.Errorf("%w: event request URL: %v", domain.ErrInvalidAppManifest, verifyErr)
 		}
 	}
 	now := time.Now().UTC()
@@ -406,10 +389,10 @@ func (m Messages) SetAppDistribution(ctx context.Context, configurationToken str
 	if public {
 		parsed, problems := appmanifest.Parse(revision.Manifest)
 		if len(problems) != 0 {
-			return domain.App{}, ErrInvalidAppManifest
+			return domain.App{}, domain.ErrInvalidAppManifest
 		}
 		if len(parsed.RedirectURLs) == 0 {
-			return domain.App{}, ErrAppNotDistributable
+			return domain.App{}, domain.ErrAppNotDistributable
 		}
 		distribution = "public"
 	}
@@ -517,7 +500,7 @@ func (m Messages) AppHome(ctx context.Context, workspaceID domain.WorkspaceID, u
 		return domain.InstalledApp{}, domain.View{}, err
 	}
 	if !parsed.HomeTabEnabled {
-		return domain.InstalledApp{}, domain.View{}, ErrAppHomeNotEnabled
+		return domain.InstalledApp{}, domain.View{}, domain.ErrAppHomeNotEnabled
 	}
 	view, err := m.Store.GetPublishedView(ctx, workspaceID, userID, appID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -802,28 +785,28 @@ func (m Messages) InspectOAuthAuthorization(ctx context.Context, request domain.
 	request.CodeChallenge = strings.TrimSpace(request.CodeChallenge)
 	request.CodeChallengeMethod = strings.TrimSpace(request.CodeChallengeMethod)
 	if request.ClientID == "" || request.WorkspaceID == "" || request.UserID == "" {
-		return domain.OAuthAuthorization{}, ErrInvalidOAuth
+		return domain.OAuthAuthorization{}, domain.ErrInvalidOAuth
 	}
 	if err := m.authorizeWorkspace(ctx, request.WorkspaceID, request.UserID); err != nil {
 		return domain.OAuthAuthorization{}, err
 	}
 	app, revision, err := m.Store.GetAppByClientID(ctx, request.ClientID)
 	if errors.Is(err, store.ErrNotFound) {
-		return domain.OAuthAuthorization{}, ErrInvalidOAuthClient
+		return domain.OAuthAuthorization{}, domain.ErrInvalidOAuthClient
 	}
 	if err != nil {
 		return domain.OAuthAuthorization{}, err
 	}
 	if app.Distribution == "private" && app.DevelopmentWorkspaceID != request.WorkspaceID {
-		return domain.OAuthAuthorization{}, ErrInvalidOAuth
+		return domain.OAuthAuthorization{}, domain.ErrInvalidOAuth
 	}
 	manifest, problems := appmanifest.Parse(revision.Manifest)
 	if len(problems) != 0 {
-		return domain.OAuthAuthorization{}, ErrInvalidAppManifest
+		return domain.OAuthAuthorization{}, domain.ErrInvalidAppManifest
 	}
 	redirectURI, ok := selectOAuthRedirect(request.RedirectURI, manifest.RedirectURLs)
 	if !ok {
-		return domain.OAuthAuthorization{}, ErrInvalidOAuth
+		return domain.OAuthAuthorization{}, domain.ErrInvalidOAuth
 	}
 	botScopes := domain.NormalizeScopes(request.BotScopes)
 	userScopes := domain.NormalizeScopes(request.UserScopes)
@@ -832,14 +815,14 @@ func (m Messages) InspectOAuthAuthorization(ctx context.Context, request domain.
 		userScopes = domain.NormalizeScopes(manifest.UserScopes)
 	}
 	if !scopeSubset(botScopes, manifest.BotScopes) || !scopeSubset(userScopes, manifest.UserScopes) || len(botScopes) == 0 && len(userScopes) == 0 {
-		return domain.OAuthAuthorization{}, ErrInvalidOAuth
+		return domain.OAuthAuthorization{}, domain.ErrInvalidOAuth
 	}
 	if request.CodeChallenge == "" {
 		if request.CodeChallengeMethod != "" {
-			return domain.OAuthAuthorization{}, ErrInvalidOAuth
+			return domain.OAuthAuthorization{}, domain.ErrInvalidOAuth
 		}
 	} else if request.CodeChallengeMethod != "S256" || len(request.CodeChallenge) < 43 || len(request.CodeChallenge) > 128 {
-		return domain.OAuthAuthorization{}, ErrInvalidOAuth
+		return domain.OAuthAuthorization{}, domain.ErrInvalidOAuth
 	}
 	return domain.OAuthAuthorization{
 		AppID:                  app.ID,
@@ -871,14 +854,14 @@ func (m Messages) AuthorizeOAuth(ctx context.Context, request domain.OAuthAuthor
 	if authorization.WantsIncomingWebhook() {
 		channel := authorization.IncomingWebhookChannel
 		if channel == "" {
-			return domain.OAuthAuthorization{}, ErrInvalidOAuth
+			return domain.OAuthAuthorization{}, domain.ErrInvalidOAuth
 		}
 		if err := m.requireConversationMembership(ctx, authorization.WorkspaceID, authorization.UserID, channel); err != nil {
-			return domain.OAuthAuthorization{}, ErrInvalidOAuth
+			return domain.OAuthAuthorization{}, domain.ErrInvalidOAuth
 		}
 		conversation, err := m.Store.GetConversation(ctx, channel)
 		if err != nil || conversation.WorkspaceID != authorization.WorkspaceID || conversation.IsDirectOrGroup() || conversation.Archived {
-			return domain.OAuthAuthorization{}, ErrInvalidOAuth
+			return domain.OAuthAuthorization{}, domain.ErrInvalidOAuth
 		}
 	} else {
 		authorization.IncomingWebhookChannel = ""
@@ -936,11 +919,11 @@ func (m Messages) AuthorizeOAuth(ctx context.Context, request domain.OAuthAuthor
 func (m Messages) appConfigurationPrincipal(ctx context.Context, token string) (domain.AppConfigurationToken, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return domain.AppConfigurationToken{}, ErrAppConfigurationAuthentication
+		return domain.AppConfigurationToken{}, domain.ErrAppConfigurationAuthentication
 	}
 	value, err := m.Store.LookupAppConfigurationToken(ctx, token)
 	if errors.Is(err, store.ErrNotFound) {
-		return domain.AppConfigurationToken{}, ErrAppConfigurationAuthentication
+		return domain.AppConfigurationToken{}, domain.ErrAppConfigurationAuthentication
 	}
 	return value, err
 }

@@ -2947,14 +2947,14 @@ func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *tes
 		{expression: "stand-up on July 30", text: "stand-up", hour: 9},
 		{expression: "stand-up on Dec 25 at 6am", text: "stand-up", hour: 6},
 		{expression: "stand-up on January 5", text: "stand-up", hour: 9},
-		{expression: "stand-up on February 30", wantError: service.ErrInvalidLaterReminder},
+		{expression: "stand-up on February 30", wantError: domain.ErrInvalidLaterReminder},
 		{expression: "stand-up every Thursday at 9am", text: "stand-up", recurrence: domain.ReminderWeekly, hour: 9},
 		{expression: "stand-up every week at 10:30", text: "stand-up", recurrence: domain.ReminderWeekly, hour: 10},
-		{expression: "stand-up sometime soon", wantError: service.ErrInvalidLaterReminder},
-		{expression: "stand-up at 7am", wantError: service.ErrReminderTimeInPast},
+		{expression: "stand-up sometime soon", wantError: domain.ErrInvalidLaterReminder},
+		{expression: "stand-up at 7am", wantError: domain.ErrReminderTimeInPast},
 	} {
 		t.Run(testCase.expression, func(t *testing.T) {
-			text, due, recurrence, err := service.ParseReminderExpression(testCase.expression, now, time.UTC)
+			text, due, recurrence, err := domain.ParseReminderExpression(testCase.expression, now, time.UTC)
 			if testCase.wantError != nil {
 				if !errors.Is(err, testCase.wantError) {
 					t.Fatalf("error=%v want=%v", err, testCase.wantError)
@@ -3103,6 +3103,8 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	if _, err := messages.LeaveHuddle(ctx, "T1", "U1", "Cdev"); err != nil {
 		t.Fatal(err)
 	}
+	// An agent session's status, both renames and a stop.
+	emitAgentSessionTopics(t, s, messages, "Cdev", "U1")
 	records, err := s.ListEventsAfter(ctx, "T1", 0, 200)
 	if err != nil {
 		t.Fatal(err)
@@ -3110,7 +3112,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	emitted := map[string]bool{}
 	for _, record := range records {
 		topic := record.Event.Topic
-		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") || strings.HasPrefix(topic, "dialog.") || strings.HasPrefix(topic, "huddle.") {
+		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") || strings.HasPrefix(topic, "dialog.") || strings.HasPrefix(topic, "huddle.") || strings.HasPrefix(topic, "agent_session.") {
 			emitted[topic] = true
 		}
 	}

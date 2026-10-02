@@ -10,7 +10,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -49,7 +49,7 @@ func (h Handler) connectDeny(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) withdrawSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
 	invite, err := h.Messages.DenySharedInvite(ctx, workspaceID, actorID, id)
-	if err == nil || !errors.Is(err, service.ErrSharedInviteSettled) {
+	if err == nil || !errors.Is(err, domain.ErrSharedInviteSettled) {
 		return invite, err
 	}
 	// It was already approved, so withdrawing it is a revocation rather than a
@@ -99,25 +99,25 @@ func (h Handler) redirectConnect(w http.ResponseWriter, r *http.Request, channel
 
 func (h Handler) writeConnectError(w http.ResponseWriter, r *http.Request, err error, action string) {
 	switch {
-	case errors.Is(err, service.ErrSlackConnectFull):
+	case errors.Is(err, domain.ErrSlackConnectFull):
 		h.writeMutationError(w, r, http.StatusConflict, "There is no room in this channel",
 			"A Slack Connect channel holds at most 250 organizations, including this one. Nothing was changed.")
-	case errors.Is(err, service.ErrSharedInviteSettled):
+	case errors.Is(err, domain.ErrSharedInviteSettled):
 		h.writeMutationError(w, r, http.StatusConflict, "That invitation was already decided",
 			"Someone else answered it first. Reload to see where it stands.")
 	// Expiry is not a decision anyone took, so it is not "already decided".
 	// Approving a lapsed invitation would record it as live and send nobody
 	// anything, because acceptance refuses it on the deadline.
-	case errors.Is(err, service.ErrInvitationExpired):
+	case errors.Is(err, domain.ErrInvitationExpired):
 		h.writeMutationError(w, r, http.StatusConflict, "That invitation has expired",
 			"Nobody accepted it within 14 days, so it can no longer be approved. Withdraw it and send a new one.")
 	case errors.Is(err, store.ErrAlreadyExists):
 		h.writeMutationError(w, r, http.StatusConflict, "That organization already has an invitation",
 			"Withdraw the outstanding one before sending another.")
-	case errors.Is(err, service.ErrInvalidSharedInvite):
+	case errors.Is(err, domain.ErrInvalidSharedInvite):
 		h.writeMutationError(w, r, http.StatusBadRequest, "That invitation is not valid",
 			"An invitation names one organization and one channel this workspace hosts.")
-	case errors.Is(err, service.ErrNotWorkspaceAdmin):
+	case errors.Is(err, domain.ErrNotWorkspaceAdmin):
 		h.writeMutationError(w, r, http.StatusForbidden, "You cannot decide that invitation",
 			"Deciding who joins from outside is a workspace administrator's call.")
 	case errors.Is(err, store.ErrNotFound):
@@ -164,13 +164,13 @@ func (h Handler) conversationRetentionRemove(w http.ResponseWriter, r *http.Requ
 
 func (h Handler) writeRetentionError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, service.ErrInvalidRetentionDuration):
+	case errors.Is(err, domain.ErrInvalidRetentionDuration):
 		h.writeMutationError(w, r, http.StatusBadRequest, "That limit is not allowed",
 			"A channel limit is between 1 and 36499 days. To keep messages forever, follow the workspace default instead.")
-	case errors.Is(err, service.ErrRetentionNotSupported):
+	case errors.Is(err, domain.ErrRetentionNotSupported):
 		h.writeMutationError(w, r, http.StatusConflict, "This conversation cannot have its own limit",
 			"Group direct messages and the workspace's default channel follow the workspace policy.")
-	case errors.Is(err, service.ErrNotWorkspaceAdmin):
+	case errors.Is(err, domain.ErrNotWorkspaceAdmin):
 		h.writeMutationError(w, r, http.StatusForbidden, "You cannot change that limit",
 			"How long messages are kept is a workspace administrator's decision.")
 	default:

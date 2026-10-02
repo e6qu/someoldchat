@@ -18,7 +18,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -919,7 +919,7 @@ func (h Handler) uploadModalFiles(r *http.Request, principal auth.Principal, mod
 				mimeType = "application/octet-stream"
 			}
 			upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, header.Size, draftAttachmentTTL)
-			if errors.Is(err, service.ErrInvalidExternalUpload) {
+			if errors.Is(err, domain.ErrInvalidExternalUpload) {
 				failures[input.BlockID] = "Choose files that are not empty."
 				refused = true
 				break
@@ -1245,7 +1245,7 @@ func (h Handler) decodeModalMutation(w http.ResponseWriter, r *http.Request, idF
 // modalInteractionStatus is the status of a refused modal interaction: the
 // member's own input is 422, anything the app or the service failed at 502.
 func modalInteractionStatus(err error) int {
-	if errors.Is(err, service.ErrViewFilesInvalid) {
+	if errors.Is(err, domain.ErrViewFilesInvalid) {
 		return http.StatusUnprocessableEntity
 	}
 	return http.StatusBadGateway
@@ -1255,11 +1255,11 @@ func modalInteractionError(err error) string {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return "This modal or its app is no longer available."
-	case errors.Is(err, service.ErrAppInteractionUnavailable):
+	case errors.Is(err, domain.ErrAppInteractionUnavailable):
 		return "The app did not respond in time. Your entries are still here; try again."
-	case errors.Is(err, service.ErrInvalidAppResponse):
+	case errors.Is(err, domain.ErrInvalidAppResponse):
 		return "The app returned an invalid modal response. Your entries are still here."
-	case errors.Is(err, service.ErrViewFilesInvalid):
+	case errors.Is(err, domain.ErrViewFilesInvalid):
 		return "An attached file is no longer available or is not one this form accepts. Remove it and attach the file again."
 	default:
 		return "The app modal could not be submitted. Your entries are still here; try again."

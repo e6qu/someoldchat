@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -36,14 +37,14 @@ func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret
 		grantType = "authorization_code"
 	}
 	if clientID == "" || clientSecret == "" {
-		return domain.OpenIDToken{}, ErrInvalidOAuthClient
+		return domain.OpenIDToken{}, domain.ErrInvalidOAuthClient
 	}
 	if grantType != "authorization_code" && grantType != "refresh_token" {
-		return domain.OpenIDToken{}, ErrInvalidOAuth
+		return domain.OpenIDToken{}, domain.ErrInvalidOAuth
 	}
 	if grantType == "refresh_token" {
 		if refreshToken == "" || code != "" || codeVerifier != "" {
-			return domain.OpenIDToken{}, ErrInvalidOAuth
+			return domain.OpenIDToken{}, domain.ErrInvalidOAuth
 		}
 		accessToken, err := domain.NewOAuthToken()
 		if err != nil {
@@ -55,11 +56,11 @@ func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret
 		}
 		client, err := m.Store.GetOAuthClient(ctx, clientID)
 		if err != nil || !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
-			return domain.OpenIDToken{}, ErrInvalidOAuthClient
+			return domain.OpenIDToken{}, domain.ErrInvalidOAuthClient
 		}
 		token, err := m.Store.ExchangeOpenIDRefreshToken(ctx, clientID, refreshToken, accessToken, newRefreshToken, domain.OpenIDToken{OAuthToken: domain.OAuthToken{ClientID: clientID, AppID: client.AppID, TokenType: "Bearer"}})
 		if errors.Is(err, store.ErrNotFound) {
-			return domain.OpenIDToken{}, ErrInvalidOAuth
+			return domain.OpenIDToken{}, domain.ErrInvalidOAuth
 		}
 		if err != nil {
 			return domain.OpenIDToken{}, err
@@ -67,14 +68,14 @@ func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret
 		return m.finishOpenIDToken(ctx, clientSecret, token)
 	}
 	if code == "" || refreshToken != "" {
-		return domain.OpenIDToken{}, ErrInvalidOAuth
+		return domain.OpenIDToken{}, domain.ErrInvalidOAuth
 	}
 	oauthToken, err := m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, codeVerifier, "user", false)
 	if err != nil {
 		return domain.OpenIDToken{}, err
 	}
 	if !containsScope(oauthToken.Scopes, "openid") {
-		return domain.OpenIDToken{}, ErrInvalidOAuth
+		return domain.OpenIDToken{}, domain.ErrInvalidOAuth
 	}
 	newRefreshToken, err := domain.NewOAuthToken()
 	if err != nil {
@@ -95,7 +96,7 @@ func (m Messages) finishOpenIDToken(ctx context.Context, clientSecret string, to
 	if err != nil {
 		return domain.OpenIDToken{}, err
 	}
-	idToken, err := signOpenIDToken(clientSecret, token.ClientID, user, workspace)
+	idToken, err := signOpenIDToken(clientSecret, slackobject.Origin(m.PublicURL), token.ClientID, user, workspace)
 	if err != nil {
 		return domain.OpenIDToken{}, err
 	}
@@ -129,12 +130,24 @@ func containsScope(scopes []string, wanted string) bool {
 	return false
 }
 
-func signOpenIDToken(secret, clientID string, user domain.User, workspace domain.Workspace) (string, error) {
+// signOpenIDToken signs the ID token openid.connect.token returns. Its issuer
+// is this deployment's public URL: a relying party that only changed Slack's
+// endpoints to this deployment's validates iss against the issuer it was
+// configured with, never against slack.com. Without a public URL there is no
+// issuer to name, so the claim is left out rather than impersonating Slack.
+// The https://slack.com/... claim names are Slack's literal claim keys, not
+// URLs, and stay as Slack sends them.
+func signOpenIDToken(secret, issuer, clientID string, user domain.User, workspace domain.Workspace) (string, error) {
 	header, err := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})
 	if err != nil {
 		return "", err
 	}
-	claims, err := json.Marshal(map[string]any{"iss": "https://slack.com", "sub": string(user.ID), "aud": clientID, "iat": time.Now().UTC().Unix(), "exp": time.Now().UTC().Add(time.Hour).Unix(), "email": user.Email, "email_verified": user.Email != "", "name": user.Name, "https://slack.com/team_id": string(workspace.ID), "https://slack.com/user_id": string(user.ID)})
+	now := time.Now().UTC()
+	values := map[string]any{"sub": string(user.ID), "aud": clientID, "iat": now.Unix(), "exp": now.Add(time.Hour).Unix(), "email": user.Email, "email_verified": user.Email != "", "name": user.Name, "https://slack.com/team_id": string(workspace.ID), "https://slack.com/user_id": string(user.ID)}
+	if issuer != "" {
+		values["iss"] = issuer
+	}
+	claims, err := json.Marshal(values)
 	if err != nil {
 		return "", err
 	}

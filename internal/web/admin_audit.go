@@ -11,7 +11,8 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/events"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
+	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
 // ADMIN-03 asks for entries that identify actor, action, target, time and
@@ -187,7 +188,7 @@ func auditURL(limit int, after uint64, accessPage int) string {
 }
 
 func auditReadProblem(err error, message string) authAdminProblem {
-	if errors.Is(err, service.ErrNotWorkspaceAdmin) {
+	if errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		return authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Your workspace role does not read the audit record."}
 	}
 	return authAdminProblem{Status: http.StatusServiceUnavailable, Code: "audit_unavailable", Title: "Temporarily unavailable", Message: message}

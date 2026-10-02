@@ -17,13 +17,6 @@ import (
 
 const maxAppDatastoreItemBytes = 400 << 10
 
-var (
-	ErrAppNotHosted          = errors.New("application is not Slack-hosted")
-	ErrAppDatastoreNotFound  = errors.New("application datastore was not found")
-	ErrInvalidDatastoreItem  = errors.New("application datastore item is invalid")
-	ErrInvalidDatastoreQuery = errors.New("application datastore query is invalid")
-)
-
 // PutAppDatastoreItems replaces or merges one to 25 items in a declared
 // Slack-hosted app datastore. Items cross the process boundary as canonical
 // JSON so local and gRPC-backed deployments apply exactly the same validation.
@@ -36,7 +29,7 @@ func (m Messages) PutAppDatastoreItems(ctx context.Context, workspaceID domain.W
 		return nil, err
 	}
 	if len(rawItems) == 0 || len(rawItems) > 25 {
-		return nil, fmt.Errorf("%w: a request must contain 1 to 25 items", ErrInvalidDatastoreItem)
+		return nil, fmt.Errorf("%w: a request must contain 1 to 25 items", domain.ErrInvalidDatastoreItem)
 	}
 
 	items := make([]map[string]any, len(rawItems))
@@ -48,7 +41,7 @@ func (m Messages) PutAppDatastoreItems(ctx context.Context, workspaceID domain.W
 			return nil, fmt.Errorf("item %d: %w", index, err)
 		}
 		if _, duplicate := seen[id]; duplicate {
-			return nil, fmt.Errorf("%w: duplicate primary key %q", ErrInvalidDatastoreItem, id)
+			return nil, fmt.Errorf("%w: duplicate primary key %q", domain.ErrInvalidDatastoreItem, id)
 		}
 		seen[id] = struct{}{}
 		items[index], ids[index] = item, id
@@ -60,10 +53,10 @@ func (m Messages) PutAppDatastoreItems(ctx context.Context, workspaceID domain.W
 	for index, item := range items {
 		encoded, err := json.Marshal(item)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidDatastoreItem, err)
+			return nil, fmt.Errorf("%w: %v", domain.ErrInvalidDatastoreItem, err)
 		}
 		if len(encoded) > maxAppDatastoreItemBytes {
-			return nil, fmt.Errorf("%w: item exceeds 400 KiB", ErrInvalidDatastoreItem)
+			return nil, fmt.Errorf("%w: item exceeds 400 KiB", domain.ErrInvalidDatastoreItem)
 		}
 		canonical[index] = string(encoded)
 		values[index] = domain.AppDatastoreItem{
@@ -129,7 +122,7 @@ func (m Messages) QueryAppDatastoreItems(ctx context.Context, workspaceID domain
 		return domain.AppDatastoreQueryPage{}, err
 	}
 	if query.Page.Limit < 1 || query.Page.Limit > 1000 || query.Page.Descending {
-		return domain.AppDatastoreQueryPage{}, fmt.Errorf("%w: limit must be between 1 and 1000", ErrInvalidDatastoreQuery)
+		return domain.AppDatastoreQueryPage{}, fmt.Errorf("%w: limit must be between 1 and 1000", domain.ErrInvalidDatastoreQuery)
 	}
 	matches, err := compileDatastoreExpression(query, definition)
 	if err != nil {
@@ -207,33 +200,33 @@ func (m Messages) DeleteAppDatastoreItems(ctx context.Context, workspaceID domai
 func (m Messages) appDatastore(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, name string) (domain.AppManifestSnapshot, appmanifest.Datastore, error) {
 	name = strings.TrimSpace(name)
 	if appID == "" || name == "" {
-		return domain.AppManifestSnapshot{}, appmanifest.Datastore{}, ErrAppDatastoreNotFound
+		return domain.AppManifestSnapshot{}, appmanifest.Datastore{}, domain.ErrAppDatastoreNotFound
 	}
 	snapshot, parsed, err := m.installedApp(ctx, workspaceID, appID)
 	if err != nil {
 		return domain.AppManifestSnapshot{}, appmanifest.Datastore{}, err
 	}
 	if !parsed.IsHosted || parsed.FunctionRuntime != "slack" {
-		return domain.AppManifestSnapshot{}, appmanifest.Datastore{}, ErrAppNotHosted
+		return domain.AppManifestSnapshot{}, appmanifest.Datastore{}, domain.ErrAppNotHosted
 	}
 	definition, exists := parsed.Datastores[name]
 	if !exists {
-		return domain.AppManifestSnapshot{}, appmanifest.Datastore{}, ErrAppDatastoreNotFound
+		return domain.AppManifestSnapshot{}, appmanifest.Datastore{}, domain.ErrAppDatastoreNotFound
 	}
 	return snapshot, definition, nil
 }
 
 func validateDatastoreIDs(ids []string) error {
 	if len(ids) == 0 || len(ids) > 25 {
-		return fmt.Errorf("%w: a request must contain 1 to 25 ids", ErrInvalidDatastoreItem)
+		return fmt.Errorf("%w: a request must contain 1 to 25 ids", domain.ErrInvalidDatastoreItem)
 	}
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		if strings.TrimSpace(id) == "" {
-			return fmt.Errorf("%w: id is required", ErrInvalidDatastoreItem)
+			return fmt.Errorf("%w: id is required", domain.ErrInvalidDatastoreItem)
 		}
 		if _, duplicate := seen[id]; duplicate {
-			return fmt.Errorf("%w: duplicate id %q", ErrInvalidDatastoreItem, id)
+			return fmt.Errorf("%w: duplicate id %q", domain.ErrInvalidDatastoreItem, id)
 		}
 		seen[id] = struct{}{}
 	}
@@ -242,19 +235,19 @@ func validateDatastoreIDs(ids []string) error {
 
 func decodeAppDatastoreItem(raw string, definition appmanifest.Datastore) (map[string]any, string, error) {
 	if len(raw) == 0 || len(raw) > maxAppDatastoreItemBytes {
-		return nil, "", fmt.Errorf("%w: item must be a JSON object no larger than 400 KiB", ErrInvalidDatastoreItem)
+		return nil, "", fmt.Errorf("%w: item must be a JSON object no larger than 400 KiB", domain.ErrInvalidDatastoreItem)
 	}
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.UseNumber()
 	var item map[string]any
 	if err := decoder.Decode(&item); err != nil || item == nil {
-		return nil, "", fmt.Errorf("%w: item must be a JSON object", ErrInvalidDatastoreItem)
+		return nil, "", fmt.Errorf("%w: item must be a JSON object", domain.ErrInvalidDatastoreItem)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err == nil {
-		return nil, "", fmt.Errorf("%w: item contains multiple JSON values", ErrInvalidDatastoreItem)
+		return nil, "", fmt.Errorf("%w: item contains multiple JSON values", domain.ErrInvalidDatastoreItem)
 	} else if !errors.Is(err, io.EOF) {
-		return nil, "", fmt.Errorf("%w: item contains invalid trailing JSON", ErrInvalidDatastoreItem)
+		return nil, "", fmt.Errorf("%w: item contains invalid trailing JSON", domain.ErrInvalidDatastoreItem)
 	}
 	if err := validateAppDatastoreObject(item, definition); err != nil {
 		return nil, "", err
@@ -267,15 +260,15 @@ func validateAppDatastoreObject(item map[string]any, definition appmanifest.Data
 	for name, value := range item {
 		attribute, exists := definition.Attributes[name]
 		if !exists {
-			return fmt.Errorf("%w: attribute %q is not declared", ErrInvalidDatastoreItem, name)
+			return fmt.Errorf("%w: attribute %q is not declared", domain.ErrInvalidDatastoreItem, name)
 		}
 		if !validAppDatastoreValue(value, attribute.Type) {
-			return fmt.Errorf("%w: attribute %q does not match %s", ErrInvalidDatastoreItem, name, attribute.Type)
+			return fmt.Errorf("%w: attribute %q does not match %s", domain.ErrInvalidDatastoreItem, name, attribute.Type)
 		}
 	}
 	id, exists := item[definition.PrimaryKey].(string)
 	if !exists || strings.TrimSpace(id) == "" {
-		return fmt.Errorf("%w: primary key %q must be a non-empty string", ErrInvalidDatastoreItem, definition.PrimaryKey)
+		return fmt.Errorf("%w: primary key %q must be a non-empty string", domain.ErrInvalidDatastoreItem, definition.PrimaryKey)
 	}
 	return nil
 }
@@ -349,7 +342,7 @@ func compileDatastoreExpression(query domain.AppDatastoreQuery, definition appma
 	expression := strings.TrimSpace(query.Expression)
 	if expression == "" {
 		if strings.TrimSpace(query.ExpressionAttributes) != "" || strings.TrimSpace(query.ExpressionValues) != "" {
-			return nil, fmt.Errorf("%w: expression is required when expression maps are provided", ErrInvalidDatastoreQuery)
+			return nil, fmt.Errorf("%w: expression is required when expression maps are provided", domain.ErrInvalidDatastoreQuery)
 		}
 		return func(map[string]any) bool { return true }, nil
 	}
@@ -363,15 +356,15 @@ func compileDatastoreExpression(query domain.AppDatastoreQuery, definition appma
 	}
 	for alias, attribute := range attributes {
 		if !strings.HasPrefix(alias, "#") || alias == "#" {
-			return nil, fmt.Errorf("%w: expression attribute aliases must begin with #", ErrInvalidDatastoreQuery)
+			return nil, fmt.Errorf("%w: expression attribute aliases must begin with #", domain.ErrInvalidDatastoreQuery)
 		}
 		if _, exists := definition.Attributes[attribute]; !exists {
-			return nil, fmt.Errorf("%w: attribute %q is not declared", ErrInvalidDatastoreQuery, attribute)
+			return nil, fmt.Errorf("%w: attribute %q is not declared", domain.ErrInvalidDatastoreQuery, attribute)
 		}
 	}
 	for alias := range values {
 		if !strings.HasPrefix(alias, ":") || alias == ":" {
-			return nil, fmt.Errorf("%w: expression value aliases must begin with :", ErrInvalidDatastoreQuery)
+			return nil, fmt.Errorf("%w: expression value aliases must begin with :", domain.ErrInvalidDatastoreQuery)
 		}
 	}
 	tokens, err := tokenizeDatastoreExpression(expression)
@@ -384,7 +377,7 @@ func compileDatastoreExpression(query domain.AppDatastoreQuery, definition appma
 		return nil, err
 	}
 	if parser.index != len(parser.tokens) {
-		return nil, fmt.Errorf("%w: unexpected token %q", ErrInvalidDatastoreQuery, parser.tokens[parser.index].text)
+		return nil, fmt.Errorf("%w: unexpected token %q", domain.ErrInvalidDatastoreQuery, parser.tokens[parser.index].text)
 	}
 	return predicate, nil
 }
@@ -396,11 +389,11 @@ func decodeDatastoreExpressionObject(raw string, target any) error {
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.UseNumber()
 	if err := decoder.Decode(target); err != nil {
-		return fmt.Errorf("%w: expression maps must be JSON objects", ErrInvalidDatastoreQuery)
+		return fmt.Errorf("%w: expression maps must be JSON objects", domain.ErrInvalidDatastoreQuery)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return fmt.Errorf("%w: expression maps contain trailing data", ErrInvalidDatastoreQuery)
+		return fmt.Errorf("%w: expression maps contain trailing data", domain.ErrInvalidDatastoreQuery)
 	}
 	return nil
 }
@@ -434,14 +427,14 @@ func tokenizeDatastoreExpression(expression string) ([]datastoreExpressionToken,
 				index++
 			}
 			if start == index {
-				return nil, fmt.Errorf("%w: invalid expression character", ErrInvalidDatastoreQuery)
+				return nil, fmt.Errorf("%w: invalid expression character", domain.ErrInvalidDatastoreQuery)
 			}
 			text := expression[start:index]
 			result = append(result, datastoreExpressionToken{kind: "word", text: text})
 		}
 	}
 	if len(result) == 0 {
-		return nil, fmt.Errorf("%w: expression is empty", ErrInvalidDatastoreQuery)
+		return nil, fmt.Errorf("%w: expression is empty", domain.ErrInvalidDatastoreQuery)
 	}
 	return result, nil
 }
@@ -472,21 +465,21 @@ func (p *datastoreExpressionParser) parseClause() (datastoreItemPredicate, error
 	if p.peekWord("contains") || p.peekWord("begins_with") {
 		function := strings.ToLower(p.take().text)
 		if !p.consumeKind("(") {
-			return nil, fmt.Errorf("%w: %s requires parentheses", ErrInvalidDatastoreQuery, function)
+			return nil, fmt.Errorf("%w: %s requires parentheses", domain.ErrInvalidDatastoreQuery, function)
 		}
 		attribute, err := p.parseAttribute()
 		if err != nil {
 			return nil, err
 		}
 		if !p.consumeKind(",") {
-			return nil, fmt.Errorf("%w: %s requires two arguments", ErrInvalidDatastoreQuery, function)
+			return nil, fmt.Errorf("%w: %s requires two arguments", domain.ErrInvalidDatastoreQuery, function)
 		}
 		value, err := p.parseValue()
 		if err != nil {
 			return nil, err
 		}
 		if !p.consumeKind(")") {
-			return nil, fmt.Errorf("%w: %s has an unclosed argument list", ErrInvalidDatastoreQuery, function)
+			return nil, fmt.Errorf("%w: %s has an unclosed argument list", domain.ErrInvalidDatastoreQuery, function)
 		}
 		return func(item map[string]any) bool {
 			left, ok := item[attribute].(string)
@@ -510,7 +503,7 @@ func (p *datastoreExpressionParser) parseClause() (datastoreItemPredicate, error
 			return nil, err
 		}
 		if !p.consumeWord("AND") {
-			return nil, fmt.Errorf("%w: BETWEEN requires AND", ErrInvalidDatastoreQuery)
+			return nil, fmt.Errorf("%w: BETWEEN requires AND", domain.ErrInvalidDatastoreQuery)
 		}
 		upper, err := p.parseValue()
 		if err != nil {
@@ -527,7 +520,7 @@ func (p *datastoreExpressionParser) parseClause() (datastoreItemPredicate, error
 		}, nil
 	}
 	if p.index >= len(p.tokens) || p.tokens[p.index].kind != "operator" {
-		return nil, fmt.Errorf("%w: comparison operator is required", ErrInvalidDatastoreQuery)
+		return nil, fmt.Errorf("%w: comparison operator is required", domain.ErrInvalidDatastoreQuery)
 	}
 	operator := p.take().text
 	right, err := p.parseValue()
@@ -563,27 +556,27 @@ func (p *datastoreExpressionParser) parseClause() (datastoreItemPredicate, error
 
 func (p *datastoreExpressionParser) parseAttribute() (string, error) {
 	if p.index >= len(p.tokens) || p.tokens[p.index].kind != "word" {
-		return "", fmt.Errorf("%w: expression attribute is required", ErrInvalidDatastoreQuery)
+		return "", fmt.Errorf("%w: expression attribute is required", domain.ErrInvalidDatastoreQuery)
 	}
 	alias := p.take().text
 	attribute, exists := p.attributes[alias]
 	if !exists {
-		return "", fmt.Errorf("%w: expression attribute %q is not defined", ErrInvalidDatastoreQuery, alias)
+		return "", fmt.Errorf("%w: expression attribute %q is not defined", domain.ErrInvalidDatastoreQuery, alias)
 	}
 	if attribute == p.primaryKey {
-		return "", fmt.Errorf("%w: expressions cannot contain the primary key", ErrInvalidDatastoreQuery)
+		return "", fmt.Errorf("%w: expressions cannot contain the primary key", domain.ErrInvalidDatastoreQuery)
 	}
 	return attribute, nil
 }
 
 func (p *datastoreExpressionParser) parseValue() (any, error) {
 	if p.index >= len(p.tokens) || p.tokens[p.index].kind != "word" {
-		return nil, fmt.Errorf("%w: expression value is required", ErrInvalidDatastoreQuery)
+		return nil, fmt.Errorf("%w: expression value is required", domain.ErrInvalidDatastoreQuery)
 	}
 	alias := p.take().text
 	value, exists := p.values[alias]
 	if !exists {
-		return nil, fmt.Errorf("%w: expression value %q is not defined", ErrInvalidDatastoreQuery, alias)
+		return nil, fmt.Errorf("%w: expression value %q is not defined", domain.ErrInvalidDatastoreQuery, alias)
 	}
 	return value, nil
 }

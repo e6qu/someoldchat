@@ -8,7 +8,6 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
 )
 
 // The assistant.threads.* methods. Argument names are taken from the pinned
@@ -107,9 +106,9 @@ func (h Handler) assistantTarget(w http.ResponseWriter, r *http.Request) (auth.P
 
 func writeAssistantError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, service.ErrInvalidAssistantThread):
+	case errors.Is(err, domain.ErrInvalidAssistantThread):
 		writeError(w, "invalid_arguments")
-	case errors.Is(err, service.ErrInvalidTimestamp):
+	case errors.Is(err, domain.ErrInvalidTimestamp):
 		writeError(w, "invalid_arguments")
 	default:
 		writeError(w, mapServiceError(err, "channel_not_found"))

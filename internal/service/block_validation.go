@@ -2,16 +2,11 @@ package service
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
 
 	"github.com/sameoldchat/sameoldchat/internal/blockkit"
+	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
-
-// ErrInvalidBlocks reports message blocks that are not valid Block Kit —
-// Slack's invalid_blocks. It is distinct from ErrInvalidMessage (no_text),
-// which reports a message with nothing to show.
-var ErrInvalidBlocks = errors.New("blocks are not valid Block Kit")
 
 // maxMessageBlocks is Slack's limit for a message; a view may hold 100.
 const maxMessageBlocks = 50
@@ -26,7 +21,7 @@ func validateMessageBlocks(normalized string) error {
 	}
 	problems, err := blockkit.ValidateBlocks(json.RawMessage(normalized), "", maxMessageBlocks)
 	if err != nil || len(problems) != 0 {
-		return ErrInvalidBlocks
+		return domain.ErrInvalidBlocks
 	}
 	return nil
 }

@@ -106,7 +106,7 @@ func prepareAppLinkSharedEvent(ctx context.Context, state AppEventProjectionStor
 	}
 	parsed, problems := appmanifest.Parse(revision.Manifest)
 	if len(problems) != 0 {
-		return events.Record{}, false, ErrAppInteractionUnavailable
+		return events.Record{}, false, domain.ErrAppInteractionUnavailable
 	}
 	links := domain.SharedLinks(parsed.UnfurlDomains, snapshot.Links)
 	if len(links) == 0 {

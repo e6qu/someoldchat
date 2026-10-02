@@ -276,6 +276,7 @@ func CheckAscendingPage(request domain.PageRequest) error {
 }
 
 type Store interface {
+	AgentSessionStore
 	AppendEvent(context.Context, events.Event) error
 	// InviteToHuddle journals a huddle invitation and lands it in the invitee's
 	// Activity in one write, so the notification and the durable record agree.
@@ -459,6 +460,13 @@ type Store interface {
 	// explicitly in about twenty places, and a fact only the administrative
 	// surface reads does not belong in all of them.
 	SetConversationsExcludedFromAI(context.Context, domain.WorkspaceID, []domain.ConversationID, bool, events.Event) error
+	// SetExistingConversationsExcludedFromAI is SetConversationsExcludedFromAI
+	// for a request that may name channels that are not here
+	// (admin.conversations.bulkSetProperties): every named channel of the
+	// workspace is set and the others are skipped, in one transaction, and the
+	// count set is returned. A request naming no channel of the workspace
+	// writes nothing, appends no event, and answers ErrNotFound.
+	SetExistingConversationsExcludedFromAI(context.Context, domain.WorkspaceID, []domain.ConversationID, bool, events.Event) (int, error)
 	// ConversationsExcludedFromAI reports which of the named channels are out.
 	ConversationsExcludedFromAI(context.Context, domain.WorkspaceID, []domain.ConversationID) ([]domain.ConversationID, error)
 	// MoveConversations reassigns channels to another workspace.
@@ -478,6 +486,19 @@ type Store interface {
 	// ListAppConfigs reports the configuration of the named apps. An app with
 	// none is absent rather than present with empty lists.
 	ListAppConfigs(context.Context, domain.WorkspaceID, []domain.AppID) ([]domain.AppConfig, error)
+	// GetAppPermission reads one app's access control list. An app nobody has
+	// set one on is ErrNotFound: admin.apps.permissions.add and .remove refuse
+	// it, while .list answers the default.
+	GetAppPermission(context.Context, domain.WorkspaceID, domain.AppID) (domain.AppPermission, error)
+	// SetAppPermission writes one app's access control list whole, replacing
+	// what was there. An unknown app is ErrNotFound.
+	SetAppPermission(context.Context, domain.AppPermission, events.Event) error
+	// ListMCPServerPermissions reports the permissions stored for one app's MCP
+	// servers. A server with none is absent rather than present as a default.
+	ListMCPServerPermissions(context.Context, domain.WorkspaceID, domain.AppID) ([]domain.MCPServerPermission, error)
+	// SetMCPServerPermission writes one MCP server's permission whole. An
+	// unknown app is ErrNotFound.
+	SetMCPServerPermission(context.Context, domain.MCPServerPermission, events.Event) error
 	// ClearAppApproval removes an app's approval decision, so the app is
 	// undecided again rather than approved or restricted.
 	ClearAppApproval(context.Context, domain.WorkspaceID, domain.AppID, events.Event) error
@@ -522,9 +543,20 @@ type Store interface {
 	// compare-and-set on the expiration instant lets exactly one act, so the
 	// deactivation event is appended once.
 	ExpireUserAccount(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) (bool, error)
+	// SetUserDeleted, like ExpireUserAccount, also appends
+	// events.GuestStatusChangedEvent in the same transaction when it
+	// deactivates an active guest, because a guest becoming a deactivated
+	// guest is a guest status change.
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error
 	AssignUser(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, events.Event) error
 	SetWorkspaceRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole, events.Event) error
+	// AssignWorkspaceRole is the administrative role assignment
+	// (admin.users.setRegular, setAdmin, setOwner): it sets the role and, for
+	// a guest, ends the guest tier, appending events.GuestStatusChangedEvent
+	// beside the given event in the same transaction. SetWorkspaceRole keeps
+	// refusing to promote a guest, because an identity provider's role claim
+	// must not turn a guest into a member.
+	AssignWorkspaceRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole, events.Event) error
 	GetDoNotDisturb(context.Context, domain.WorkspaceID, domain.UserID) (domain.DoNotDisturb, error)
 	SetDoNotDisturb(context.Context, domain.DoNotDisturb, events.Event) error
 	GetConversation(context.Context, domain.ConversationID) (domain.Conversation, error)
@@ -746,6 +778,17 @@ type Store interface {
 	LookupOAuthRefreshToken(context.Context, string, string) (domain.OAuthRefreshGrant, error)
 	ExchangeOAuthRefreshToken(context.Context, string, string, string, string, string, time.Time) (domain.OAuthToken, error)
 	ExchangeOAuthAccessToken(context.Context, string, string, string, string, string, time.Time) (domain.OAuthToken, error)
+	// BeginShortTokenRotation records a pending short-secret rotation,
+	// replacing any earlier pending rotation of the same token.
+	BeginShortTokenRotation(context.Context, domain.ShortTokenRotation) error
+	// CompleteShortTokenRotation swaps the token's hash for the pending
+	// replacement's, so the original stops authenticating and the replacement
+	// is the same credential. It answers
+	// domain.ErrShortTokenRotationNotFound with no pending rotation or an
+	// expired one, domain.ErrOAuthAppMismatch for another app's rotation,
+	// domain.ErrShortTokenRotationMismatch for a different replacement, and
+	// ErrNotFound when the token itself is gone or revoked.
+	CompleteShortTokenRotation(ctx context.Context, tokenHash, newTokenHash string, appID domain.AppID, now time.Time) error
 	CreateOpenIDRefreshToken(context.Context, domain.OpenIDRefreshToken) error
 	ExchangeOpenIDRefreshToken(context.Context, string, string, string, string, domain.OpenIDToken) (domain.OpenIDToken, error)
 	// LatestEventSequence is the journal position a new reader should start
@@ -1185,6 +1228,14 @@ type Store interface {
 	SetUserGroupEnabled(context.Context, domain.WorkspaceID, domain.UserGroupID, bool, domain.UserID, events.Event) error
 	SetUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserGroupID, []domain.UserID, domain.UserID, events.Event) error
 	SetUserGroupChannels(context.Context, domain.WorkspaceID, domain.UserGroupID, []domain.ConversationID, domain.UserID, events.Event) error
+	// ChangeUserGroupUsers adds the first list's users to a group and removes
+	// the second's in one transaction, leaving every other member alone, so two
+	// administrators changing one group at once cannot undo each other. Adding a
+	// member or removing a non-member is not an error.
+	ChangeUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserGroupID, []domain.UserID, []domain.UserID, domain.UserID, events.Event) error
+	// ChangeUserGroupTeams is ChangeUserGroupUsers for the workspaces a group
+	// is assigned to.
+	ChangeUserGroupTeams(context.Context, domain.WorkspaceID, domain.UserGroupID, []domain.WorkspaceID, []domain.WorkspaceID, domain.UserID, events.Event) error
 	CreateCall(context.Context, domain.Call, events.Event) error
 	GetCall(context.Context, domain.WorkspaceID, domain.CallID) (domain.Call, error)
 	UpdateCall(context.Context, domain.Call, events.Event) error

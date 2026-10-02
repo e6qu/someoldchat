@@ -22,7 +22,7 @@ func (m Messages) SetWorkspaceProfileField(ctx context.Context, workspaceID doma
 	definition.Label = strings.TrimSpace(definition.Label)
 	definition.Hint = strings.TrimSpace(definition.Hint)
 	if !definition.Valid() {
-		return domain.ProfileFieldDefinition{}, ErrInvalidProfileField
+		return domain.ProfileFieldDefinition{}, domain.ErrInvalidProfileField
 	}
 	if strings.TrimSpace(string(definition.ID)) == "" {
 		id, err := domain.NewProfileFieldID()
@@ -78,7 +78,7 @@ func (m Messages) SetUserProfileFields(ctx context.Context, workspaceID domain.W
 		targetID = actorID
 	}
 	if targetID != actorID {
-		return ErrInvalidProfile
+		return domain.ErrInvalidProfile
 	}
 	if len(values) == 0 {
 		return nil
@@ -89,10 +89,10 @@ func (m Messages) SetUserProfileFields(ctx context.Context, workspaceID domain.W
 			// A value for a field nobody defined is invisible to every reader and
 			// would be orphaned the moment a field minted the same id, so it is
 			// refused rather than stored.
-			return ErrInvalidProfile
+			return domain.ErrInvalidProfile
 		}
 		if !definition.Accepts(value.Value) {
-			return ErrInvalidProfile
+			return domain.ErrInvalidProfile
 		}
 	}
 	return m.Store.SetUserProfileFieldValues(ctx, workspaceID, targetID, values)

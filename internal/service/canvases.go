@@ -82,7 +82,7 @@ func (m Messages) CreateConversationCanvas(ctx context.Context, workspaceID doma
 		return domain.Canvas{}, err
 	}
 	if channelID == "" {
-		return domain.Canvas{}, ErrInvalidCanvas
+		return domain.Canvas{}, domain.ErrInvalidCanvas
 	}
 	if err := m.authorizeDocumentChannels(ctx, workspaceID, userID, []domain.ConversationID{channelID}); err != nil {
 		return domain.Canvas{}, err
@@ -166,7 +166,7 @@ func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 	}
 	var input []canvasChange
 	if err := json.Unmarshal([]byte(changes), &input); err != nil || len(input) == 0 || len(input) > 100 {
-		return ErrInvalidCanvas
+		return domain.ErrInvalidCanvas
 	}
 	document, err := decodeCanvasDocument(canvas.DocumentContent)
 	if err != nil {
@@ -218,7 +218,7 @@ func (m Messages) SetCanvasAccess(ctx context.Context, workspaceID domain.Worksp
 		return err
 	}
 	if len(channelIDs) > 0 && access == domain.AccessOwner {
-		return ErrInvalidCanvas
+		return domain.ErrInvalidCanvas
 	}
 	if err := m.authorizeDocumentChannels(ctx, workspaceID, userID, channelIDs); err != nil {
 		return err
@@ -258,16 +258,16 @@ func (m Messages) DeleteCanvasAccess(ctx context.Context, workspaceID domain.Wor
 		return err
 	}
 	if (len(channelIDs) == 0) == (len(userIDs) == 0) {
-		return ErrInvalidCanvas
+		return domain.ErrInvalidCanvas
 	}
 	for _, targetID := range channelIDs {
 		if targetID == "" {
-			return ErrInvalidCanvas
+			return domain.ErrInvalidCanvas
 		}
 	}
 	for _, targetID := range userIDs {
 		if targetID == "" {
-			return ErrInvalidCanvas
+			return domain.ErrInvalidCanvas
 		}
 	}
 	for _, targetID := range channelIDs {
@@ -305,7 +305,7 @@ func (m Messages) LookupCanvasSections(ctx context.Context, workspaceID domain.W
 	}
 	var filter canvasCriteria
 	if err := json.Unmarshal([]byte(criteria), &filter); err != nil {
-		return nil, ErrInvalidCanvas
+		return nil, domain.ErrInvalidCanvas
 	}
 	allowed := make(map[domain.CanvasSectionType]struct{}, len(filter.SectionTypes))
 	for _, value := range filter.SectionTypes {
@@ -342,7 +342,7 @@ func (m Messages) CommentOnCanvas(ctx context.Context, workspaceID domain.Worksp
 	}
 	text = strings.TrimSpace(text)
 	if text == "" || utf8.RuneCountInString(text) > domain.CanvasCommentLimit {
-		return domain.CanvasComment{}, ErrInvalidCanvas
+		return domain.CanvasComment{}, domain.ErrInvalidCanvas
 	}
 	identifier, err := domain.PublicID("temp:CC:")
 	if err != nil {
@@ -416,7 +416,7 @@ func (m Messages) RestoreCanvasRevision(ctx context.Context, workspaceID domain.
 		}
 	}
 	if wanted.CanvasID == "" {
-		return domain.Canvas{}, ErrInvalidCanvas
+		return domain.Canvas{}, domain.ErrInvalidCanvas
 	}
 	canvas, err := m.Store.GetCanvas(ctx, workspaceID, id)
 	if err != nil {
@@ -452,21 +452,21 @@ func (m Messages) SearchCanvases(ctx context.Context, workspaceID domain.Workspa
 	}
 	request.Query = strings.TrimSpace(request.Query)
 	if request.Query == "" || utf8.RuneCountInString(request.Query) > 500 {
-		return domain.CanvasPage{}, ErrInvalidSearch
+		return domain.CanvasPage{}, domain.ErrInvalidSearch
 	}
 	if err := store.CheckAscendingPage(request.Page); err != nil {
 		return domain.CanvasPage{}, err
 	}
 	sortOrder, direction, err := domain.NormalizeSearchOrder(string(request.Sort), string(request.Direction))
 	if err != nil {
-		return domain.CanvasPage{}, ErrInvalidSearch
+		return domain.CanvasPage{}, domain.ErrInvalidSearch
 	}
 	parsed, err := parseSearchQuery(request.Query, m.searchClockFor(ctx, workspaceID, userID))
 	if err != nil {
-		return domain.CanvasPage{}, ErrInvalidSearch
+		return domain.CanvasPage{}, domain.ErrInvalidSearch
 	}
 	if parsed.conversation != "" || parsed.excludedConversation != "" {
-		return domain.CanvasPage{}, ErrInvalidSearch
+		return domain.CanvasPage{}, domain.ErrInvalidSearch
 	}
 	search := domain.CanvasSearch{
 		Terms: parsed.terms, ExcludedTerms: parsed.excludedTerms,
@@ -484,7 +484,7 @@ func (m Messages) SearchCanvases(ctx context.Context, workspaceID domain.Workspa
 
 func validateCanvasAccess(access domain.AccessLevel, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
 	if !access.Valid() || (len(channelIDs) == 0) == (len(userIDs) == 0) {
-		return ErrInvalidCanvas
+		return domain.ErrInvalidCanvas
 	}
 	return nil
 }
@@ -504,7 +504,7 @@ func normalizeCanvasContent(value string) (string, error) {
 	}
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(value), &raw); err != nil || raw == nil {
-		return "", ErrInvalidCanvas
+		return "", domain.ErrInvalidCanvas
 	}
 	sections, err := canvasSectionsFromContent(raw)
 	if err != nil {
@@ -546,21 +546,21 @@ func canvasSectionsFromContent(raw map[string]any) ([]domain.CanvasSection, erro
 func decodeCanvasDocument(value string) (canvasDocument, error) {
 	var document canvasDocument
 	if err := json.Unmarshal([]byte(value), &document); err != nil {
-		return canvasDocument{}, ErrInvalidCanvas
+		return canvasDocument{}, domain.ErrInvalidCanvas
 	}
 	return document, nil
 }
 
 func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change canvasChange) error {
 	if change.Operation == "" {
-		return ErrInvalidCanvas
+		return domain.ErrInvalidCanvas
 	}
 	if len(change.TitleContent) > 0 {
 		var title struct {
 			Title string `json:"title"`
 		}
 		if err := json.Unmarshal(change.TitleContent, &title); err != nil || title.Title == "" {
-			return ErrInvalidCanvas
+			return domain.ErrInvalidCanvas
 		}
 		canvas.Title = strings.TrimSpace(title.Title)
 		return nil
@@ -568,13 +568,13 @@ func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change c
 	newSections := func() ([]domain.CanvasSection, error) {
 		var raw map[string]any
 		if err := json.Unmarshal(change.DocumentContent, &raw); err != nil || raw == nil {
-			return nil, ErrInvalidCanvas
+			return nil, domain.ErrInvalidCanvas
 		}
 		return canvasSectionsFromContent(raw)
 	}
 	if change.Operation == "delete" {
 		if change.SectionID == "" {
-			return ErrInvalidCanvas
+			return domain.ErrInvalidCanvas
 		}
 		for index, section := range document.Sections {
 			if section.ID == change.SectionID {
@@ -591,7 +591,7 @@ func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change c
 	// the Slack API boundary.
 	if change.Operation == "move_before" || change.Operation == "move_after" {
 		if change.SectionID == "" || change.TargetSectionID == "" || change.SectionID == change.TargetSectionID {
-			return ErrInvalidCanvas
+			return domain.ErrInvalidCanvas
 		}
 		moved, ok := domain.CanvasSection{}, false
 		remaining := document.Sections[:0:0]
@@ -660,7 +660,7 @@ func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change c
 		}
 		return store.ErrNotFound
 	default:
-		return ErrInvalidCanvas
+		return domain.ErrInvalidCanvas
 	}
 	return nil
 }

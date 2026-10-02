@@ -110,10 +110,10 @@ func TestSidebarSectionsAreTheMembersOwnOrderedGroups(t *testing.T) {
 
 func TestSidebarSectionValidationAndOwnership(t *testing.T) {
 	ctx, messages, _ := sidebarWorld(t)
-	if _, err := messages.CreateSidebarSection(ctx, "T1", "U1", "   "); !errors.Is(err, ErrInvalidSidebarSection) {
+	if _, err := messages.CreateSidebarSection(ctx, "T1", "U1", "   "); !errors.Is(err, domain.ErrInvalidSidebarSection) {
 		t.Fatalf("empty name = %v, want ErrInvalidSidebarSection", err)
 	}
-	if _, err := messages.CreateSidebarSection(ctx, "T1", "U1", strings.Repeat("x", domain.SidebarSectionNameLimit+1)); !errors.Is(err, ErrInvalidSidebarSection) {
+	if _, err := messages.CreateSidebarSection(ctx, "T1", "U1", strings.Repeat("x", domain.SidebarSectionNameLimit+1)); !errors.Is(err, domain.ErrInvalidSidebarSection) {
 		t.Fatalf("over-long name = %v, want ErrInvalidSidebarSection", err)
 	}
 	section, err := messages.CreateSidebarSection(ctx, "T1", "U1", "Mine")
@@ -136,7 +136,7 @@ func TestSidebarSectionValidationAndOwnership(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := messages.CreateSidebarSection(ctx, "T1", "U1", "one too many"); !errors.Is(err, ErrInvalidSidebarSection) {
+	if _, err := messages.CreateSidebarSection(ctx, "T1", "U1", "one too many"); !errors.Is(err, domain.ErrInvalidSidebarSection) {
 		t.Fatalf("past the limit = %v, want ErrInvalidSidebarSection", err)
 	}
 }

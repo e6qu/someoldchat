@@ -19,12 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	OAuthService_ExchangeOAuth_FullMethodName         = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuth"
-	OAuthService_ExchangeOAuthV2_FullMethodName       = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuthV2"
-	OAuthService_RefreshOAuthV2_FullMethodName        = "/sameoldchat.chat.v1.OAuthService/RefreshOAuthV2"
-	OAuthService_ExchangeOAuthV2Token_FullMethodName  = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuthV2Token"
-	OAuthService_OpenIDConnectToken_FullMethodName    = "/sameoldchat.chat.v1.OAuthService/OpenIDConnectToken"
-	OAuthService_OpenIDConnectUserInfo_FullMethodName = "/sameoldchat.chat.v1.OAuthService/OpenIDConnectUserInfo"
+	OAuthService_ExchangeOAuth_FullMethodName              = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuth"
+	OAuthService_ExchangeOAuthV2_FullMethodName            = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuthV2"
+	OAuthService_RefreshOAuthV2_FullMethodName             = "/sameoldchat.chat.v1.OAuthService/RefreshOAuthV2"
+	OAuthService_ExchangeOAuthV2Token_FullMethodName       = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuthV2Token"
+	OAuthService_BeginShortTokenRotation_FullMethodName    = "/sameoldchat.chat.v1.OAuthService/BeginShortTokenRotation"
+	OAuthService_CompleteShortTokenRotation_FullMethodName = "/sameoldchat.chat.v1.OAuthService/CompleteShortTokenRotation"
+	OAuthService_OpenIDConnectToken_FullMethodName         = "/sameoldchat.chat.v1.OAuthService/OpenIDConnectToken"
+	OAuthService_OpenIDConnectUserInfo_FullMethodName      = "/sameoldchat.chat.v1.OAuthService/OpenIDConnectUserInfo"
 )
 
 // OAuthServiceClient is the client API for OAuthService service.
@@ -35,6 +37,8 @@ type OAuthServiceClient interface {
 	ExchangeOAuthV2(ctx context.Context, in *OAuthExchangeRequest, opts ...grpc.CallOption) (*OAuthToken, error)
 	RefreshOAuthV2(ctx context.Context, in *OAuthExchangeRequest, opts ...grpc.CallOption) (*OAuthToken, error)
 	ExchangeOAuthV2Token(ctx context.Context, in *OAuthExchangeRequest, opts ...grpc.CallOption) (*OAuthToken, error)
+	BeginShortTokenRotation(ctx context.Context, in *ShortTokenRotationRequest, opts ...grpc.CallOption) (*ShortTokenRotationResponse, error)
+	CompleteShortTokenRotation(ctx context.Context, in *ShortTokenRotationRequest, opts ...grpc.CallOption) (*ShortTokenRotationResponse, error)
 	OpenIDConnectToken(ctx context.Context, in *OpenIDConnectTokenRequest, opts ...grpc.CallOption) (*OpenIDConnectTokenResponse, error)
 	OpenIDConnectUserInfo(ctx context.Context, in *OpenIDConnectUserInfoRequest, opts ...grpc.CallOption) (*OpenIDConnectUserInfoResponse, error)
 }
@@ -87,6 +91,26 @@ func (c *oAuthServiceClient) ExchangeOAuthV2Token(ctx context.Context, in *OAuth
 	return out, nil
 }
 
+func (c *oAuthServiceClient) BeginShortTokenRotation(ctx context.Context, in *ShortTokenRotationRequest, opts ...grpc.CallOption) (*ShortTokenRotationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShortTokenRotationResponse)
+	err := c.cc.Invoke(ctx, OAuthService_BeginShortTokenRotation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *oAuthServiceClient) CompleteShortTokenRotation(ctx context.Context, in *ShortTokenRotationRequest, opts ...grpc.CallOption) (*ShortTokenRotationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShortTokenRotationResponse)
+	err := c.cc.Invoke(ctx, OAuthService_CompleteShortTokenRotation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *oAuthServiceClient) OpenIDConnectToken(ctx context.Context, in *OpenIDConnectTokenRequest, opts ...grpc.CallOption) (*OpenIDConnectTokenResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(OpenIDConnectTokenResponse)
@@ -115,6 +139,8 @@ type OAuthServiceServer interface {
 	ExchangeOAuthV2(context.Context, *OAuthExchangeRequest) (*OAuthToken, error)
 	RefreshOAuthV2(context.Context, *OAuthExchangeRequest) (*OAuthToken, error)
 	ExchangeOAuthV2Token(context.Context, *OAuthExchangeRequest) (*OAuthToken, error)
+	BeginShortTokenRotation(context.Context, *ShortTokenRotationRequest) (*ShortTokenRotationResponse, error)
+	CompleteShortTokenRotation(context.Context, *ShortTokenRotationRequest) (*ShortTokenRotationResponse, error)
 	OpenIDConnectToken(context.Context, *OpenIDConnectTokenRequest) (*OpenIDConnectTokenResponse, error)
 	OpenIDConnectUserInfo(context.Context, *OpenIDConnectUserInfoRequest) (*OpenIDConnectUserInfoResponse, error)
 }
@@ -137,6 +163,12 @@ func (UnimplementedOAuthServiceServer) RefreshOAuthV2(context.Context, *OAuthExc
 }
 func (UnimplementedOAuthServiceServer) ExchangeOAuthV2Token(context.Context, *OAuthExchangeRequest) (*OAuthToken, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExchangeOAuthV2Token not implemented")
+}
+func (UnimplementedOAuthServiceServer) BeginShortTokenRotation(context.Context, *ShortTokenRotationRequest) (*ShortTokenRotationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BeginShortTokenRotation not implemented")
+}
+func (UnimplementedOAuthServiceServer) CompleteShortTokenRotation(context.Context, *ShortTokenRotationRequest) (*ShortTokenRotationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompleteShortTokenRotation not implemented")
 }
 func (UnimplementedOAuthServiceServer) OpenIDConnectToken(context.Context, *OpenIDConnectTokenRequest) (*OpenIDConnectTokenResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenIDConnectToken not implemented")
@@ -236,6 +268,42 @@ func _OAuthService_ExchangeOAuthV2Token_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OAuthService_BeginShortTokenRotation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShortTokenRotationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OAuthServiceServer).BeginShortTokenRotation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OAuthService_BeginShortTokenRotation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OAuthServiceServer).BeginShortTokenRotation(ctx, req.(*ShortTokenRotationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OAuthService_CompleteShortTokenRotation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShortTokenRotationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OAuthServiceServer).CompleteShortTokenRotation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OAuthService_CompleteShortTokenRotation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OAuthServiceServer).CompleteShortTokenRotation(ctx, req.(*ShortTokenRotationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _OAuthService_OpenIDConnectToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(OpenIDConnectTokenRequest)
 	if err := dec(in); err != nil {
@@ -294,6 +362,14 @@ var OAuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ExchangeOAuthV2Token",
 			Handler:    _OAuthService_ExchangeOAuthV2Token_Handler,
+		},
+		{
+			MethodName: "BeginShortTokenRotation",
+			Handler:    _OAuthService_BeginShortTokenRotation_Handler,
+		},
+		{
+			MethodName: "CompleteShortTokenRotation",
+			Handler:    _OAuthService_CompleteShortTokenRotation_Handler,
 		},
 		{
 			MethodName: "OpenIDConnectToken",

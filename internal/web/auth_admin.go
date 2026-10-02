@@ -13,7 +13,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/service"
+
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -92,7 +92,7 @@ const authAdminMarkup = `{{define "title"}}Workspace administration · SameOldCh
 <div class="heading"><h1>Workspace administration</h1><p>Manage access without leaving the workspace.</p><p><a href="/app/admin/settings">Workspace settings</a> · <a href="/app/admin/analytics">Analytics</a> · <a href="/app/admin/audit">Audit</a></p></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if .CanReadApps}}<section class="card" aria-labelledby="authorization-heading"><div class="section-head"><h2 id="authorization-heading">Authorization methods</h2><p>Provider secrets are deployment configuration. Enablement is durable workspace state.</p></div>{{range .Methods}}<div class="row"><span><strong>{{.Label}}</strong><br><span class="status{{if .Enabled}} active{{end}}">{{.State}}</span></span>{{if $.CanWriteApps}}<form method="post" action="/app/admin/auth/methods.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="provider" value="{{.Name}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button class="toggle{{if .Enabled}} danger{{end}}" type="submit" aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Label}} authorization">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div>{{end}}</section>{{end}}
-{{if .CanReadUsers}}<section class="card" aria-labelledby="users-heading"><div class="section-head"><h2 id="users-heading">Workspace users</h2><p>Manage active membership and roles. Signing a member out ends every session they hold without touching their account; deactivating them revokes their sessions and access tokens as well.</p></div><div class="table-scroll"><table><thead><tr><th scope="col">User</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Sessions</th><th scope="col">Actions</th></tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Name}}</strong><br><span class="user-email">{{.Email}}</span></td><td><span class="status{{if .Active}} active{{end}}">{{.Status}}</span></td><td>{{.Role}}</td><td><span class="session-count">{{.Sessions}}</span></td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="{{if .Active}}disable{{else}}enable{{end}}"><button class="toggle{{if .Active}} danger{{end}}" type="submit" aria-label="{{if .Active}}Disable{{else}}Enable{{end}} {{.Name}}">{{if .Active}}Disable{{else}}Enable{{end}}</button></form>{{if .Sessions}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="sessions"><button class="toggle secondary" type="submit" aria-label="Sign {{.Name}} out of every session">Sign out everywhere</button></form>{{end}}{{if .RoleOptions}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="role"><label>Role for {{.Name}} <select name="role">{{range .RoleOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label><button class="toggle secondary" type="submit" aria-label="Save role for {{.Name}}">Save role</button></form>{{end}}{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{end}}</tbody></table></div>{{if .NextPageURL}}<p class="pager"><a href="{{.NextPageURL}}">Next page</a></p>{{end}}</section>{{end}}
+{{if .CanReadUsers}}<section class="card" aria-labelledby="users-heading"><div class="section-head"><h2 id="users-heading">Workspace users</h2><p>Manage active membership and roles. Signing a member out ends every session they hold without touching their account; deactivating them revokes their sessions and access tokens as well.</p></div><div class="table-scroll"><table><thead><tr><th scope="col">User</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Sessions</th><th scope="col">Actions</th></tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Name}}</strong><br><span class="user-email">{{.Email}}</span></td><td><span class="status{{if .Active}} active{{end}}">{{.Status}}</span></td><td>{{if .Guest}}{{.Guest}}{{else}}{{.Role}}{{end}}</td><td><span class="session-count">{{.Sessions}}</span></td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="{{if .Active}}disable{{else}}enable{{end}}"><button class="toggle{{if .Active}} danger{{end}}" type="submit" aria-label="{{if .Active}}Disable{{else}}Enable{{end}} {{.Name}}">{{if .Active}}Disable{{else}}Enable{{end}}</button></form>{{if .Sessions}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="sessions"><button class="toggle secondary" type="submit" aria-label="Sign {{.Name}} out of every session">Sign out everywhere</button></form>{{end}}{{if .RoleOptions}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="role"><label>Role for {{.Name}} <select name="role">{{range .RoleOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}{{if .Disabled}} disabled{{end}}>{{.Label}}</option>{{end}}</select></label><button class="toggle secondary" type="submit" aria-label="Save role for {{.Name}}">Save role</button></form>{{end}}{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{end}}</tbody></table></div>{{if .NextPageURL}}<p class="pager"><a href="{{.NextPageURL}}">Next page</a></p>{{end}}</section>{{end}}
 {{if .CanReadUsers}}<section class="card" aria-labelledby="invitations-heading"><div class="section-head"><h2 id="invitations-heading">Invitations</h2><p>An invitation records who may join, at what tier, and into which channels. It becomes an account when the person accepts it.</p></div>
 {{if .CanWriteUsers}}<form class="setup" method="post" action="/app/admin/auth/users.invite">
 <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
@@ -214,6 +214,9 @@ type authAdminUserView struct {
 	Email  string
 	Status string
 	Role   domain.WorkspaceRole
+	// Guest names the row's guest tier, empty for a full member. A guest's
+	// stored role is member, so without it the page called a guest a member.
+	Guest  string
 	Active bool
 	// RoleOptions is the set of roles this actor may write onto this row, with
 	// the row's current role selected. It is empty when the actor may not change
@@ -234,6 +237,9 @@ type authAdminRoleOption struct {
 	Value    domain.WorkspaceRole
 	Label    string
 	Selected bool
+	// Disabled marks the guest tier a guest row starts on: it is the current
+	// state, not a role the form can submit.
+	Disabled bool
 }
 
 // assignableRoles mirrors the authority the service enforces, so the page tells
@@ -416,6 +422,15 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 				Active:      active,
 				RoleOptions: assignableRoles(actorRole, item.Membership.Role),
 			}
+			// Saving a role on a guest makes them a full member of that role
+			// (admin.users.setRegular and its siblings do the same), so a
+			// guest's row names the tier and pre-selects it as the current,
+			// unsubmittable state: leaving the control alone must not read as
+			// "Member" and convert the guest on the next save.
+			if tier := guestTierLabel(item.Membership); tier != "" {
+				row.Guest = tier
+				row.RoleOptions = guestRoleOptions(tier, row.RoleOptions)
+			}
 			// A failed read leaves the count at zero, which hides the control
 			// rather than offering one whose effect nobody can see. The page is
 			// about membership first; sessions not answering must not take it
@@ -439,7 +454,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 		}
 		queue := func(status domain.InviteRequestStatus) ([]authAdminInviteView, domain.Cursor, bool) {
 			page, pageErr := h.Messages.AdminListInviteRequests(r.Context(), principal.WorkspaceID, principal.UserID, status, domain.PageRequest{Limit: 25})
-			if pageErr != nil && !errors.Is(pageErr, service.ErrNotWorkspaceAdmin) {
+			if pageErr != nil && !errors.Is(pageErr, domain.ErrNotWorkspaceAdmin) {
 				h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "invitations_unavailable", Title: "Temporarily unavailable", Message: "Invitations could not be read."})
 				return nil, "", false
 			}
@@ -485,7 +500,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if canReadApps {
 		apps, appsErr := h.Messages.AdminListApps(r.Context(), principal.WorkspaceID, principal.UserID, domain.AppApprovalRequested, domain.PageRequest{Limit: 25})
-		if appsErr != nil && !errors.Is(appsErr, service.ErrNotWorkspaceAdmin) {
+		if appsErr != nil && !errors.Is(appsErr, domain.ErrNotWorkspaceAdmin) {
 			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "app_requests_unavailable", Title: "Temporarily unavailable", Message: "App requests could not be read."})
 			return
 		}
@@ -620,13 +635,13 @@ func authAdminUserMutationProblem(err error) authAdminProblem {
 	// A refusal by the role hierarchy is an authorization answer, not an
 	// outage: it used to be reported as "temporarily unavailable", which told an
 	// administrator to try again at something that can never succeed.
-	if errors.Is(err, service.ErrNotWorkspaceAdmin) {
+	if errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		return authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Your workspace role does not allow that change. Nothing was changed."}
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		return authAdminProblem{Status: http.StatusNotFound, Code: "user_not_found", Title: "User not found", Message: "That workspace user does not exist."}
 	}
-	if errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidWorkspace) {
+	if errors.Is(err, domain.ErrInvalidInviteRequest) || errors.Is(err, domain.ErrInvalidWorkspace) {
 		return authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_user", Title: "Request rejected", Message: "The submitted user details are not valid."}
 	}
 	return authAdminProblem{Status: http.StatusServiceUnavailable, Code: "user_update_unavailable", Title: "Temporarily unavailable", Message: "The user could not be updated. Nothing was changed."}
@@ -770,7 +785,7 @@ func normalizeAdminInviteChannels(raw string) []domain.ConversationID {
 }
 
 func authAdminInvitationProblem(err error) authAdminProblem {
-	if errors.Is(err, service.ErrInvalidInviteRequest) {
+	if errors.Is(err, domain.ErrInvalidInviteRequest) {
 		return authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_invitation", Title: "Request rejected", Message: "The submitted invitation is not valid."}
 	}
 	if errors.Is(err, store.ErrAlreadyExists) {
@@ -779,7 +794,7 @@ func authAdminInvitationProblem(err error) authAdminProblem {
 	// A lapsed request is not a transient failure: nothing the administrator
 	// waits for will make approving it work, and the default below would tell
 	// them to try again in a moment for ever.
-	if errors.Is(err, service.ErrInvitationExpired) {
+	if errors.Is(err, domain.ErrInvitationExpired) {
 		return authAdminProblem{Status: http.StatusConflict, Code: "invitation_expired", Title: "Invitation expired", Message: "This request is older than the invitation it would issue, so approving it would invite nobody. Deny it and ask for a new one."}
 	}
 	return authAdminProblem{Status: http.StatusServiceUnavailable, Code: "user_invitation_unavailable", Title: "Temporarily unavailable", Message: "The invitation could not be recorded. Nothing was changed."}
@@ -942,7 +957,7 @@ func (h Handler) authAppDecision(approve bool) http.HandlerFunc {
 
 func authAdminAppDecisionProblem(err error) authAdminProblem {
 	switch {
-	case errors.Is(err, service.ErrNotWorkspaceAdmin):
+	case errors.Is(err, domain.ErrNotWorkspaceAdmin):
 		return authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Your workspace role does not decide app requests. Nothing was changed."}
 	case errors.Is(err, store.ErrNotFound):
 		return authAdminProblem{Status: http.StatusNotFound, Code: "app_request_not_found", Title: "Request not found", Message: "That app request no longer exists. It may already have been decided."}
@@ -970,11 +985,37 @@ func (h Handler) authUserCreate(w http.ResponseWriter, r *http.Request) {
 		problem := authAdminProblem{Status: http.StatusServiceUnavailable, Code: "user_creation_unavailable", Title: "Temporarily unavailable", Message: "The user could not be created. Nothing was changed."}
 		if errors.Is(err, store.ErrAlreadyExists) {
 			problem = authAdminProblem{Status: http.StatusConflict, Code: "user_already_exists", Title: "Already a member", Message: "A workspace user already has that address."}
-		} else if errors.Is(err, service.ErrInvalidInviteRequest) {
+		} else if errors.Is(err, domain.ErrInvalidInviteRequest) {
 			problem = authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_user", Title: "Request rejected", Message: "The submitted user details are not valid."}
 		}
 		h.writeAuthAdminProblem(w, r, problem)
 		return
 	}
 	h.authAdminSuccess(w, r, http.StatusCreated, map[string]any{"ok": true, "user": user})
+}
+
+// guestTierLabel names a membership's guest tier, or "" for a full member.
+func guestTierLabel(membership domain.WorkspaceMembership) string {
+	switch {
+	case membership.UltraRestricted:
+		return "Guest, one channel"
+	case membership.Restricted:
+		return "Guest, several channels"
+	}
+	return ""
+}
+
+// guestRoleOptions puts a guest's current tier in front of the roles the actor
+// may grant, selected and disabled, and selects none of the roles.
+func guestRoleOptions(tier string, roles []authAdminRoleOption) []authAdminRoleOption {
+	if len(roles) == 0 {
+		return roles
+	}
+	options := make([]authAdminRoleOption, 0, len(roles)+1)
+	options = append(options, authAdminRoleOption{Label: tier, Selected: true, Disabled: true})
+	for _, option := range roles {
+		option.Selected = false
+		options = append(options, option)
+	}
+	return options
 }

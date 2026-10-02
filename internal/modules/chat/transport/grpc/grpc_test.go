@@ -158,7 +158,7 @@ func TestRemotePostsScheduledFilesAtomicallyAndIdempotently(t *testing.T) {
 	remote := servedRemote(t, service.Messages{Store: target}, target)
 	scheduled, err := remote.ScheduleMessageAs(context.Background(), "T1", "U1", domain.ScheduledMessageRequest{
 		Channel: "C1", Text: "scheduled evidence", PostAt: now.Add(time.Hour),
-		CredentialHash:  service.InternalScheduledCredential("T1", "U1"),
+		CredentialHash:  domain.InternalScheduledCredential("T1", "U1"),
 		FileAttachments: []domain.DraftAttachment{{UploadID: "scheduled-upload", Title: "Evidence"}},
 	})
 	if err != nil {

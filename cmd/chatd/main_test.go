@@ -79,13 +79,13 @@ func (a authority) pool() *x509.CertPool {
 	return pool
 }
 
-// TestOneAuthorityForBothRolesIsRefused covers the internal-boundary defect
-// docs/modules.md documented for a release: `-tls-client-ca ca.crt` on chatd and
-// `-chat-ca ca.crt` on the HTTP process named one authority for two independent
-// questions — who may connect to chatd, and which server chatd is. Under one
-// authority every certificate it issues authenticates as a client to the whole
-// internal data plane, including chatd's own server certificate, so anything
-// holding the server key is a privileged client of the service it serves.
+// TestOneAuthorityForBothRolesIsRefused covers an internal-boundary defect:
+// `-tls-client-ca ca.crt` on chatd and `-chat-ca ca.crt` on the HTTP process
+// name one authority for two independent questions — who may connect to chatd,
+// and which server chatd is. Under one authority every certificate it issues
+// authenticates as a client to the whole internal data plane, including chatd's
+// own server certificate, so anything holding the server key is a privileged
+// client of the service it serves.
 //
 // Documentation cannot be the only thing enforcing that, which is why the
 // binary refuses it. Before this check, the shared-CA configuration below

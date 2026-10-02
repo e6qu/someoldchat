@@ -178,7 +178,7 @@ func TestNextWorkflowScheduledRunStepsCalendarsInTheConfiguredZone(t *testing.T)
 		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"monthly","day":32}}`,
 		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"monthly","day":0}}`,
 	} {
-		if _, err := NextWorkflowScheduledRun(raw, time.Now(), true); !errors.Is(err, ErrInvalidTriggerConfig) {
+		if _, err := NextWorkflowScheduledRun(raw, time.Now(), true); !errors.Is(err, domain.ErrInvalidTriggerConfig) {
 			t.Fatalf("schedule %s error=%v, want ErrInvalidTriggerConfig", raw, err)
 		}
 	}
@@ -219,7 +219,7 @@ func TestScheduledWorkflowTriggerComputesAndClearsNextRun(t *testing.T) {
 	}
 	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 		WorkflowID: workflow.ID, Title: "Broken", Type: "scheduled", Config: `{"start_time":"soon"}`, Enabled: true,
-	}, 0); !errors.Is(err, ErrInvalidTriggerConfig) {
+	}, 0); !errors.Is(err, domain.ErrInvalidTriggerConfig) {
 		t.Fatalf("invalid schedule error=%v, want ErrInvalidTriggerConfig", err)
 	}
 }
@@ -301,7 +301,7 @@ func TestWebhookWorkflowTriggerSecretLifecycle(t *testing.T) {
 		t.Fatal("enable/disable rotated the webhook secret")
 	}
 	secret := invokeURL[strings.LastIndex(invokeURL, "/")+1:]
-	if _, err := messages.RunWebhookTrigger(ctx, "T1", trigger.ID, "wrong-secret", `{}`); !errors.Is(err, ErrWebhookTriggerSecret) {
+	if _, err := messages.RunWebhookTrigger(ctx, "T1", trigger.ID, "wrong-secret", `{}`); !errors.Is(err, domain.ErrWebhookTriggerSecret) {
 		t.Fatalf("wrong secret error=%v, want ErrWebhookTriggerSecret", err)
 	}
 	if _, err := messages.RunWebhookTrigger(ctx, "T1", trigger.ID, secret, `{}`); !errors.Is(err, store.ErrConflict) {
@@ -319,7 +319,7 @@ func TestWebhookWorkflowTriggerSecretLifecycle(t *testing.T) {
 	if run.Status != domain.WorkflowRunRunning || run.ActorID != "U1" || run.Inputs != `{"source":"hook"}` {
 		t.Fatalf("webhook run=%+v", run)
 	}
-	if _, err := messages.RunWebhookTrigger(ctx, "T1", "Ft-missing", secret, `{}`); !errors.Is(err, ErrWebhookTriggerSecret) {
+	if _, err := messages.RunWebhookTrigger(ctx, "T1", "Ft-missing", secret, `{}`); !errors.Is(err, domain.ErrWebhookTriggerSecret) {
 		t.Fatalf("unknown trigger error=%v, want ErrWebhookTriggerSecret", err)
 	}
 }
@@ -328,12 +328,12 @@ func TestEventWorkflowTriggerValidation(t *testing.T) {
 	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
 	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 		WorkflowID: workflow.ID, Title: "Missing channel", Type: "message", Config: `{}`, Enabled: true,
-	}, 0); !errors.Is(err, ErrInvalidTriggerConfig) {
+	}, 0); !errors.Is(err, domain.ErrInvalidTriggerConfig) {
 		t.Fatalf("channel-less message trigger error=%v, want ErrInvalidTriggerConfig", err)
 	}
 	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 		WorkflowID: workflow.ID, Title: "Unknown channel", Type: "message", Config: `{"channel_ids":["C-missing"]}`, Enabled: true,
-	}, 0); !errors.Is(err, ErrInvalidTriggerConfig) {
+	}, 0); !errors.Is(err, domain.ErrInvalidTriggerConfig) {
 		t.Fatalf("unknown channel error=%v, want ErrInvalidTriggerConfig", err)
 	}
 	reaction, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
@@ -347,17 +347,17 @@ func TestEventWorkflowTriggerValidation(t *testing.T) {
 	}
 	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 		WorkflowID: workflow.ID, Title: "Unknown list", Type: "list", Config: `{"list_id":"L-missing","event":"created"}`, Enabled: true,
-	}, 0); !errors.Is(err, ErrInvalidTriggerConfig) {
+	}, 0); !errors.Is(err, domain.ErrInvalidTriggerConfig) {
 		t.Fatalf("unknown list error=%v, want ErrInvalidTriggerConfig", err)
 	}
 	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 		WorkflowID: workflow.ID, Title: "Bad event", Type: "list", Config: `{"list_id":"L1","event":"deleted"}`, Enabled: true,
-	}, 0); !errors.Is(err, ErrInvalidTriggerConfig) {
+	}, 0); !errors.Is(err, domain.ErrInvalidTriggerConfig) {
 		t.Fatalf("unknown list event error=%v, want ErrInvalidTriggerConfig", err)
 	}
 	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 		WorkflowID: workflow.ID, Title: "Typed", Type: "carousel", Config: `{}`, Enabled: true,
-	}, 0); !errors.Is(err, ErrInvalidTriggerConfig) {
+	}, 0); !errors.Is(err, domain.ErrInvalidTriggerConfig) {
 		t.Fatalf("unknown type error=%v, want ErrInvalidTriggerConfig", err)
 	}
 }

@@ -143,7 +143,7 @@ Implemented evidence:
 - New DMs and MPIM messages, explicit mentions, replies to a thread root
   authored or followed by the member, replies in channels configured to follow
   every thread, all-new-post channel notifications, exact channel-keyword
-  matches, reactions to the member's messages, applicable app-authored
+  matches (in a thread, only one the member follows), reactions to the member's messages, applicable app-authored
   notifications, and delivered personal reminders create one idempotent item
   per recipient. Overlapping filters share one triage record.
 - Direct and enabled user-group mentions use Slack's stable user/subteam

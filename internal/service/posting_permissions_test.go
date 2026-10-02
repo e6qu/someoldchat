@@ -57,7 +57,7 @@ func mustPost(t *testing.T, ctx context.Context, m Messages, author domain.UserI
 
 func mustNotPost(t *testing.T, ctx context.Context, m Messages, author domain.UserID) {
 	t.Helper()
-	if _, err := m.Post(ctx, "T1", author, "C1", "hi", "", ""); !errors.Is(err, ErrConversationPostingRestricted) {
+	if _, err := m.Post(ctx, "T1", author, "C1", "hi", "", ""); !errors.Is(err, domain.ErrConversationPostingRestricted) {
 		t.Fatalf("%s post error = %v, want ErrConversationPostingRestricted", author, err)
 	}
 }
@@ -146,7 +146,7 @@ func TestCanThreadGovernsRepliesSeparately(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Post(ctx, "T1", "Umember", "C1", "reply2", rootTS, ""); !errors.Is(err, ErrConversationPostingRestricted) {
+	if _, err := m.Post(ctx, "T1", "Umember", "C1", "reply2", rootTS, ""); !errors.Is(err, domain.ErrConversationPostingRestricted) {
 		t.Fatalf("restricted reply error = %v, want ErrConversationPostingRestricted", err)
 	}
 }
@@ -157,13 +157,13 @@ func TestWhoCanPostRejectsUnknownVocabulary(t *testing.T) {
 	ctx, m, _ := postingWorld(t)
 	if _, err := m.AdminSetConversationPrefs(ctx, "T1", "Uadmin", "C1", domain.ConversationPrefs{
 		WhoCanPost: domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{"root_only"}},
-	}); !errors.Is(err, ErrInvalidConversationPrefs) {
+	}); !errors.Is(err, domain.ErrInvalidConversationPrefs) {
 		t.Fatalf("unknown poster class error = %v, want ErrInvalidConversationPrefs", err)
 	}
 	// The same guard rejects an unknown class in the threading list.
 	if _, err := m.AdminSetConversationPrefs(ctx, "T1", "Uadmin", "C1", domain.ConversationPrefs{
 		CanThread: domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{"nobody"}},
-	}); !errors.Is(err, ErrInvalidConversationPrefs) {
+	}); !errors.Is(err, domain.ErrInvalidConversationPrefs) {
 		t.Fatalf("unknown thread class error = %v, want ErrInvalidConversationPrefs", err)
 	}
 }

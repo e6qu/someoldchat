@@ -31,7 +31,7 @@ import (
 // service reaches this handler either as a direct Go call (monolith) or through
 // the generated gRPC adapter (split deployment). It used to classify partly by
 // gRPC status code, which is coarser than a sentinel: codes.AlreadyExists is both
-// store.ErrAlreadyExists and service.ErrEmojiAlreadyExists, so reactions.add on a
+// store.ErrAlreadyExists and domain.ErrEmojiAlreadyExists, so reactions.add on a
 // duplicate answered `emoji_already_exists` — a code /reactions.add does not
 // declare — in the split deployment and `already_reacted` in the monolith. No
 // test could see it, because every test in this package runs the monolith.
@@ -139,7 +139,7 @@ func TestBothCompositionsNameTheSameFailure(t *testing.T) {
 	}{
 		{
 			// The headline defect: store.ErrAlreadyExists and
-			// service.ErrEmojiAlreadyExists share codes.AlreadyExists, and the code
+			// domain.ErrEmojiAlreadyExists share codes.AlreadyExists, and the code
 			// test came first, so a duplicate reaction was reported with the emoji
 			// error. /reactions.add declares `already_reacted` and does not declare
 			// `emoji_already_exists`.
@@ -326,26 +326,26 @@ func TestEveryRestoredSentinelIsNamedFromTheSentinelNotTheStatusCode(t *testing.
 	}{
 		{codes.NotFound, store.ErrNotFound, "channel_not_found"},
 		{codes.InvalidArgument, store.ErrInvalidArgument, "invalid_name"},
-		{codes.InvalidArgument, service.ErrInvalidReaction, "invalid_name"},
+		{codes.InvalidArgument, domain.ErrInvalidReaction, "invalid_name"},
 		// Two sentinels, one code. The emoji error is not in /reactions.add's enum
 		// and `already_reacted` is, so the duplicate-reaction case must not borrow it.
 		// A generic collision is now named by the calling operation, so the shared
 		// mapper answers the caller's collision code and never another operation's.
 		{codes.AlreadyExists, store.ErrAlreadyExists, "already_reacted"},
-		{codes.AlreadyExists, service.ErrEmojiAlreadyExists, "emoji_already_exists"},
+		{codes.AlreadyExists, domain.ErrEmojiAlreadyExists, "emoji_already_exists"},
 		// Three sentinels, one code. The code test answered `hash_conflict` for all
 		// of them, which shadowed the idempotency contract.
 		{codes.Aborted, store.ErrConflict, "hash_conflict"},
 		// An Idempotency-Key replayed with a different body can never succeed, so
 		// it must not be reported with the one code every SDK retries on.
 		{codes.Aborted, store.ErrIdempotencyConflict, "invalid_arg_name"},
-		{codes.FailedPrecondition, service.ErrNotInConversation, "not_in_channel"},
-		{codes.PermissionDenied, service.ErrMessageNotOwned, "no_permission"},
-		{codes.PermissionDenied, service.ErrNotWorkspaceAdmin, "no_permission"},
-		{codes.FailedPrecondition, service.ErrMessageAlreadyDeleted, "message_not_found"},
+		{codes.FailedPrecondition, domain.ErrNotInConversation, "not_in_channel"},
+		{codes.PermissionDenied, domain.ErrMessageNotOwned, "no_permission"},
+		{codes.PermissionDenied, domain.ErrNotWorkspaceAdmin, "no_permission"},
+		{codes.FailedPrecondition, domain.ErrMessageAlreadyDeleted, "message_not_found"},
 		{codes.ResourceExhausted, store.ErrBookmarkLimit, "too_many_bookmarks"},
 		{codes.ResourceExhausted, store.ErrSocketModeConnectionLimit, "socket_mode_unavailable"},
-		{codes.Unavailable, service.ErrBlobUnavailable, "file_storage_unavailable"},
+		{codes.Unavailable, domain.ErrBlobUnavailable, "file_storage_unavailable"},
 	}
 	for _, testCase := range cases {
 		restored := restoredRemoteError{code: testCase.code, sentinel: testCase.sentinel}

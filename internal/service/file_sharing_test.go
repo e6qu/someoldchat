@@ -71,17 +71,17 @@ func TestShareUploadedFileSharesIntoChannels(t *testing.T) {
 	if _, err := messages.ShareUploadedFile(ctx, "T1", "U1", "F1", []domain.ConversationID{"C4"}, "", ""); err == nil {
 		t.Fatal("sharing into a channel the sharer is not in was allowed")
 	}
-	if _, err := messages.ShareUploadedFile(ctx, "T1", "U1", "F1", []domain.ConversationID{"C3"}, "", ""); !errors.Is(err, ErrConversationAlreadyArchived) {
+	if _, err := messages.ShareUploadedFile(ctx, "T1", "U1", "F1", []domain.ConversationID{"C3"}, "", ""); !errors.Is(err, domain.ErrConversationAlreadyArchived) {
 		t.Fatalf("archived share = %v, want ErrConversationAlreadyArchived", err)
 	}
-	if _, err := messages.ShareUploadedFile(ctx, "T1", "U1", "F1", []domain.ConversationID{"C1", "C2"}, "", "123.456"); !errors.Is(err, ErrInvalidFile) {
+	if _, err := messages.ShareUploadedFile(ctx, "T1", "U1", "F1", []domain.ConversationID{"C1", "C2"}, "", "123.456"); !errors.Is(err, domain.ErrInvalidFile) {
 		t.Fatalf("threaded multi-channel share = %v, want ErrInvalidFile", err)
 	}
 
 	// Validate-all-first: a request naming a good channel and an archived one
 	// shares into neither, so nothing is left half-shared.
 	before, _ := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 50}})
-	if _, err := messages.ShareUploadedFile(ctx, "T1", "U1", "F1", []domain.ConversationID{"C1", "C3"}, "", ""); !errors.Is(err, ErrConversationAlreadyArchived) {
+	if _, err := messages.ShareUploadedFile(ctx, "T1", "U1", "F1", []domain.ConversationID{"C1", "C3"}, "", ""); !errors.Is(err, domain.ErrConversationAlreadyArchived) {
 		t.Fatalf("mixed archived share = %v, want ErrConversationAlreadyArchived", err)
 	}
 	after, _ := s.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 50}})

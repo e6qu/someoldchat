@@ -101,6 +101,7 @@ type Store struct {
 	conversationNotificationPrefs map[string]domain.ConversationNotificationPreferences
 	threadFollows                 map[string]bool
 	assistantThreads              map[string]domain.AssistantThread
+	agentSessions                 map[string]domain.AgentSession
 	typing                        map[string]domain.TypingSignal
 	activityItems                 map[domain.ActivityID]domain.ActivityItem
 	activityPreferences           map[string]domain.ActivityPreferences
@@ -143,7 +144,10 @@ type Store struct {
 	sessionSettings               map[string]domain.SessionSettings
 	barriers                      map[domain.BarrierID]domain.InformationBarrier
 	appConfigs                    map[string]domain.AppConfig
+	appPermissions                map[string]domain.AppPermission
+	mcpServerPermissions          map[string]domain.MCPServerPermission
 	aiExcludedConversations       map[domain.ConversationID]struct{}
+	shortTokenRotations           map[string]domain.ShortTokenRotation
 	conversationObjects           map[string]domain.LinkedObject
 	appActivities                 []domain.AppActivity
 	anomalyAllowLists             map[domain.WorkspaceID]domain.AnomalyAllowList
@@ -372,6 +376,7 @@ func New() *Store {
 		conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences),
 		threadFollows:                 make(map[string]bool),
 		assistantThreads:              make(map[string]domain.AssistantThread),
+		agentSessions:                 make(map[string]domain.AgentSession),
 		typing:                        make(map[string]domain.TypingSignal),
 		activityItems:                 make(map[domain.ActivityID]domain.ActivityItem),
 		activityPreferences:           make(map[string]domain.ActivityPreferences),
@@ -414,7 +419,10 @@ func New() *Store {
 		sessionSettings:               make(map[string]domain.SessionSettings),
 		barriers:                      make(map[domain.BarrierID]domain.InformationBarrier),
 		appConfigs:                    make(map[string]domain.AppConfig),
+		appPermissions:                make(map[string]domain.AppPermission),
+		mcpServerPermissions:          make(map[string]domain.MCPServerPermission),
 		aiExcludedConversations:       make(map[domain.ConversationID]struct{}),
+		shortTokenRotations:           make(map[string]domain.ShortTokenRotation),
 		conversationObjects:           make(map[string]domain.LinkedObject),
 		anomalyAllowLists:             make(map[domain.WorkspaceID]domain.AnomalyAllowList),
 		externalAuthTokens:            make(map[string]domain.ExternalAuthToken),
@@ -3254,6 +3262,10 @@ func (s *Store) ExpireUserAccount(_ context.Context, workspaceID domain.Workspac
 	if user.Deleted || !s.userExpirations[userID].Equal(expected.UTC()) {
 		return false, nil
 	}
+	guestEvent, err := s.guestDeactivationEventLocked(user, event)
+	if err != nil {
+		return false, err
+	}
 	user.Deleted = true
 	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
@@ -3277,6 +3289,7 @@ func (s *Store) ExpireUserAccount(_ context.Context, workspaceID domain.Workspac
 		}
 	}
 	s.outbox = append(s.outbox, event)
+	s.outbox = append(s.outbox, guestEvent...)
 	return true, nil
 }
 
@@ -3286,6 +3299,13 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 	user, ok := s.users[userID]
 	if !ok || user.WorkspaceID != workspaceID {
 		return store.ErrNotFound
+	}
+	var guestEvent []events.Event
+	if deleted && !user.Deleted {
+		var err error
+		if guestEvent, err = s.guestDeactivationEventLocked(user, event); err != nil {
+			return err
+		}
 	}
 	user.Deleted = deleted
 	user.Updated = secondsInstant(event.CreatedAt)
@@ -3310,6 +3330,7 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 		}
 	}
 	s.outbox = append(s.outbox, event)
+	s.outbox = append(s.outbox, guestEvent...)
 	return nil
 }
 
@@ -4051,6 +4072,7 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 			delete(s.assistantThreads, key)
 		}
 	}
+	s.deleteConversationAgentSessionsLocked(conversation)
 	for key, signal := range s.typing {
 		if signal.Conversation == conversation {
 			delete(s.typing, key)
@@ -8640,6 +8662,11 @@ func (s *Store) createMessageActivityLocked(message domain.Message) {
 		if message.ThreadTimestamp != "" &&
 			(conversationPreferences.FollowEveryThread || s.threadFollows[threadFollowKey(message.WorkspaceID, user, message.Conversation, root)]) {
 			add(user, domain.ActivityThread)
+			// Slack matches keywords in replies to threads the member
+			// follows, and only those.
+			if !conversation.IsDirectOrGroup() && effective != domain.NotificationMute && domain.MatchesNotificationKeyword(message.Text, workspacePreferences.Keywords) {
+				add(user, domain.ActivityKeyword)
+			}
 		}
 	}
 	if message.ThreadTimestamp != "" {
@@ -10475,6 +10502,7 @@ func (s *Store) ReleaseScheduledMessage(_ context.Context, owner string, id doma
 func cloneUserGroup(value domain.UserGroup) domain.UserGroup {
 	value.Users = append([]domain.UserID(nil), value.Users...)
 	value.Channels = append([]domain.ConversationID(nil), value.Channels...)
+	value.Teams = append([]domain.WorkspaceID(nil), value.Teams...)
 	return value
 }
 
@@ -10571,7 +10599,11 @@ func (s *Store) UpdateUserGroup(_ context.Context, value domain.UserGroup, event
 	if err := s.userGroupChannelsBelongLocked(value.WorkspaceID, value.Channels); err != nil {
 		return err
 	}
+	// Membership and workspace assignment have their own writers, and whether
+	// a group belongs to the organization is fixed when it is created.
 	value.Users = append([]domain.UserID(nil), current.Users...)
+	value.Teams = current.Teams
+	value.OrgLevel = current.OrgLevel
 	s.userGroups[value.ID] = cloneUserGroup(value)
 	s.outbox = append(s.outbox, event)
 	return nil
