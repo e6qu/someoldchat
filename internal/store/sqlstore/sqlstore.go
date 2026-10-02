@@ -606,7 +606,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 203
+const schemaVersion = 204
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -4756,6 +4756,25 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	// --- schema 204: Slackbot ---
+	if version < 204 {
+		// Slackbot posts reminders into each member's Slackbot DM. Its ID is
+		// USLACKBOT in every workspace, as on Slack, so it has one identity
+		// row, owned by a reserved workspace nobody can sign in to; its DMs
+		// and messages belong to the member's workspace. See
+		// domain.SlackbotUserID. It runs after the ladder because it writes
+		// columns older steps add.
+		if _, err := db.ExecContext(ctx, `INSERT INTO workspaces(id, name, discoverability) VALUES (?, 'Slackbot', 'closed') ON CONFLICT(id) DO NOTHING`, domain.SlackbotHomeWorkspaceID); err != nil {
+			return fmt.Errorf("migrate Slackbot workspace: %w", err)
+		}
+		slackbot := domain.SlackbotUser(domain.SlackbotHomeWorkspaceID)
+		if _, err := db.ExecContext(ctx, `INSERT INTO users(id, workspace_id, name, real_name, display_name, name_folded, real_name_folded, display_name_folded, first_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+			slackbot.ID, slackbot.WorkspaceID, slackbot.Name, slackbot.RealName, slackbot.Profile.DisplayName,
+			domain.FoldSearchText(slackbot.Name), domain.FoldSearchText(slackbot.RealName), domain.FoldSearchText(slackbot.Profile.DisplayName), slackbot.Profile.FirstName); err != nil {
+			return fmt.Errorf("migrate Slackbot user: %w", err)
+		}
+	}
+	// --- end schema 204 ---
 	// Every ladder step has run, so each column a base-schema index covers now
 	// exists on databases of every age; see the phase split at the top.
 	for _, statement := range baseIndexes {
@@ -7879,13 +7898,14 @@ func (s *Store) CreateDirectConversation(ctx context.Context, conversation domai
 	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_teams(conversation_id, team_id, org_channel) VALUES (?, ?, 0)`, conversation.ID, conversation.WorkspaceID); err != nil {
 		return err
 	}
+	// Slackbot is in every workspace; see domain.SlackbotUserID.
 	seen := make(map[domain.UserID]struct{}, len(members))
 	for _, member := range members {
 		if _, exists := seen[member]; exists {
 			return store.InvalidArgument("direct conversation contains duplicate members")
 		}
 		seen[member] = struct{}{}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0`, conversation.ID, member, conversation.WorkspaceID); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) SELECT ?, id FROM users WHERE id = ? AND (workspace_id = ? OR id = ?) AND deleted = 0`, conversation.ID, member, conversation.WorkspaceID, domain.SlackbotUserID); err != nil {
 			return err
 		}
 		var count int
@@ -18315,28 +18335,8 @@ func (s *Store) MarkReminderDelivered(ctx context.Context, workspace domain.Work
 	if changed == 0 {
 		return false, nil
 	}
-	// The notice and the Activity row are written with the claim, so a member
-	// cannot be marked reminded without being shown the reminder.
-	var owner domain.UserID
-	if err := tx.QueryRowContext(ctx, `SELECT user_id FROM reminders WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&owner); err != nil {
-		return false, err
-	}
-	activityReminders := 1
-	if err := tx.QueryRowContext(ctx, `SELECT activity_reminders FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, owner).
-		Scan(&activityReminders); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-	if owner != "" && activityReminders != 0 {
-		activityID := domain.ActivityIDFor(owner, "app-reminder:"+string(id)+":"+string(domain.NewStoredTime(deliveredAt)))
-		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, app_reminder_id, occurred_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-			activityID, workspace, owner, id, deliveredAt.UTC().UnixNano()); err != nil {
-			return false, err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`,
-			activityID, domain.ActivityReminder); err != nil {
-			return false, err
-		}
-	}
+	// The member is shown the reminder by the Slackbot DM the delivery worker
+	// posts before it claims the occurrence; see scheduler.ReminderDeliveryWorker.
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return false, err
 	}

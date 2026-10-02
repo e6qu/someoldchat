@@ -777,7 +777,8 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 		t.Fatalf("reused=%+v direct=%+v err=%v", reused, direct, err)
 	}
 	users, err := remote.Users(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
-	if err != nil || len(users.Users) != 3 || !containsUser(users.Users, "U1") || !containsUser(users.Users, "U2") || !containsUser(users.Users, createdUser.ID) {
+	// Slackbot ends the directory, as on Slack.
+	if err != nil || len(users.Users) != 4 || !containsUser(users.Users, "U1") || !containsUser(users.Users, "U2") || !containsUser(users.Users, createdUser.ID) || users.Users[3].ID != domain.SlackbotUserID {
 		t.Fatalf("users=%+v err=%v", users, err)
 	}
 	workspace, err := remote.WorkspaceInfo(ctx, "T1", "U1")

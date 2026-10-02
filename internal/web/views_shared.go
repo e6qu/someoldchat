@@ -406,7 +406,7 @@ func (h Handler) buildProfileView(r *http.Request, principal auth.Principal, id 
 	switch {
 	case user.IsBot():
 		view.Presence, view.PresenceLabel = "active", "App"
-	case user.Presence.CurrentAt(user.LastActiveAt, now) == "away" && !view.IsSelf:
+	case user.PresenceAt(now) == "away" && !view.IsSelf:
 		view.Presence, view.PresenceLabel = "away", "Away"
 	case view.IsSelf && user.Presence == domain.PresenceAway:
 		view.Presence, view.PresenceLabel = "away", "Away"

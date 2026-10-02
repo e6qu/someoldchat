@@ -299,7 +299,7 @@ func New() *Store {
 	// One field per line, and TestNewInitialisesEveryMap holds it: this used to
 	// be a single 103-field literal, and a map field added to Store but not
 	// here compiles and panics on the first write to it.
-	return &Store{
+	s := &Store{
 		lists:                         make(map[domain.ListID]domain.List),
 		listTemplates:                 make(map[domain.ListTemplateID]domain.ListTemplate),
 		listItems:                     make(map[domain.ListID]map[domain.ListItemID]domain.ListItem),
@@ -437,6 +437,11 @@ func New() *Store {
 		scheduledStatuses:             make(map[domain.ScheduledStatusID]domain.ScheduledStatus),
 		searchHistory:                 make(map[string]domain.SearchHistoryEntry),
 	}
+	// Slackbot's identity row, as the SQL profiles' schema 204 writes it; see
+	// domain.SlackbotUserID.
+	s.workspaces[domain.SlackbotHomeWorkspaceID] = domain.Workspace{ID: domain.SlackbotHomeWorkspaceID, Name: "Slackbot", Discoverability: domain.WorkspaceDiscoverabilityClosed}
+	s.users[domain.SlackbotUserID] = domain.SlackbotUser(domain.SlackbotHomeWorkspaceID)
+	return s
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -3699,7 +3704,8 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 			return store.InvalidArgument("direct conversation contains duplicate members")
 		}
 		user, exists := s.users[member]
-		if !exists || user.WorkspaceID != conversation.WorkspaceID || user.Deleted {
+		// Slackbot is in every workspace; see domain.SlackbotUserID.
+		if !exists || (user.WorkspaceID != conversation.WorkspaceID && !user.IsSlackbot()) || user.Deleted {
 			return store.ErrNotFound
 		}
 		memberSet[member] = struct{}{}
@@ -9763,20 +9769,8 @@ func (s *Store) MarkReminderDelivered(_ context.Context, workspace domain.Worksp
 		reminder.Time = next.UTC().Truncate(time.Second)
 		s.reminders[id] = reminder
 	}
-	// The notice and the Activity row are written with the claim, so a member
-	// cannot be marked reminded without being shown the reminder.
-	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, reminder.User)
-	if stored, ok := s.workspaceNotificationPrefs[workspaceNotificationKey(workspace, reminder.User)]; ok {
-		preferences = stored
-	}
-	if reminder.User != "" && preferences.ActivityReminders {
-		activityID := domain.ActivityIDFor(reminder.User, "app-reminder:"+string(id)+":"+string(domain.NewStoredTime(deliveredAt)))
-		s.activityItems[activityID] = domain.ActivityItem{
-			ID: activityID, WorkspaceID: workspace, UserID: reminder.User,
-			Kinds: []domain.ActivityKind{domain.ActivityReminder}, AppReminderID: id,
-			OccurredAt: deliveredAt.UTC(),
-		}
-	}
+	// The member is shown the reminder by the Slackbot DM the delivery worker
+	// posts before it claims the occurrence; see scheduler.ReminderDeliveryWorker.
 	s.outbox = append(s.outbox, event)
 	return true, nil
 }

@@ -404,6 +404,7 @@ func authorityMatrix() map[string]authority {
 		"Permalink":                               authorityAnyMember,
 		"Pins":                                    authorityAnyMember,
 		"Post":                                    authorityAnyMember,
+		"PostAsSlackbot":                          authorityAnyMember,
 		"PostEphemeral":                           authorityAnyMember,
 		"PostEphemeralWithBlocks":                 authorityAnyMember,
 		"PostEphemeralWithBlocksAndAttachments":   authorityAnyMember,

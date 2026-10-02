@@ -333,6 +333,7 @@ operations:
       - go-test:internal/api/slack:TestConversationAndUserInfo
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
       - go-test:internal/api/slack:TestAdminUsersRemoveDeactivatesUser
+      - go-test:internal/api/slack:TestSlackbotIsInEveryWorkspaceAsUSLACKBOT
     deviations:
       - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's long name in force at the time (for example Eastern Daylight Time), from ICU's names; a zone or offset newer than the generated table keeps its abbreviation.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
@@ -590,7 +591,9 @@ operations:
       - go-test:internal/api/slack:TestUsersAndConversationsList
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
+      - go-test:internal/api/slack:TestSlackbotIsInEveryWorkspaceAsUSLACKBOT
     deviations:
+      - Slackbot (USLACKBOT) ends the list, as in every Slack workspace. It does not answer messages sent to its direct message, where Slack's Slackbot replies with help and the workspace's custom responses.
       - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's long name in force at the time (for example Eastern Daylight Time), from ICU's names; a zone or offset newer than the generated table keeps its abbreviation.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: users.lookupByEmail
@@ -1295,9 +1298,10 @@ operations:
       - go-test:internal/scheduler:TestRecurringReminderMovesToItsNextOccurrence
       - go-test:internal/api/slack:TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse
       - go-test:internal/api/slack:TestReminderRecurrenceObjectSetsHowItRepeats
+      - go-test:internal/scheduler:TestReminderDeliveryFiresEachReminderOnce
     deviations:
       - Natural-language times cover the phrases the first-party /remind command reads (in N minutes/hours/days/weeks/months/years, tomorrow, on a date, weekday or month and day, at a time, every day/week/month/year or weekday) in the zone of the member's notification schedule (UTC otherwise); other phrasings answer cannot_parse. The recurrence argument (frequency, and weekdays for weekly) sets how the reminder repeats, with time giving its first occurrence; a recurrence it cannot read is cannot_parse, the method's pinned code for an unreadable time.
-      - Delivery shows the reminder in the member's Activity at the due instant; Slack posts it as a Slackbot direct message.
+      - At the due instant Slackbot (USLACKBOT, as in every Slack workspace) posts Reminder followed by the reminder's text into the member's Slackbot direct message, and into the channel for a channel reminder; Slack's reminder message also carries buttons to mark it complete or snooze it, which are not reproduced.
       - The current token-type-dependent rules for setting another user's reminder have not been differentially qualified.
     audit:
       downgraded_from: behavior-compatible

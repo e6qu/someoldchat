@@ -7,6 +7,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
@@ -35,7 +36,7 @@ func TestReminderDeliveryFiresEachReminderOnce(t *testing.T) {
 	create("Rm-now", "U1", now)
 	create("Rm-future", "U1", now.Add(time.Hour))
 
-	worker, err := NewReminderDeliveryWorker(store, 10)
+	worker, err := NewReminderDeliveryWorker(store, service.Messages{Store: store}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +72,33 @@ func TestReminderDeliveryFiresEachReminderOnce(t *testing.T) {
 	if notices != 3 {
 		t.Fatalf("delivery notices=%d, want one for each reminder", notices)
 	}
+	// Slackbot posts each reminder into the reminded member's Slackbot DM, as
+	// Slack does: bob was reminded once, by Slackbot, and alice twice.
+	for member, want := range map[domain.UserID][]string{"U2": {"Reminder: Rm-past."}, "U1": {"Reminder: Rm-now.", "Reminder: Rm-future."}} {
+		direct, err := store.FindDirectConversation(ctx, "T1", []domain.UserID{member, domain.SlackbotUserID})
+		if err != nil {
+			t.Fatalf("%s has no Slackbot DM: %v", member, err)
+		}
+		page, err := store.ListMessages(ctx, direct.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]bool{}
+		for _, message := range page.Messages {
+			if message.AuthorID != domain.SlackbotUserID {
+				t.Fatalf("a reminder was posted by %s, not Slackbot", message.AuthorID)
+			}
+			got[message.Text] = true
+		}
+		if len(page.Messages) != len(want) {
+			t.Fatalf("%s's Slackbot DM holds %d messages, want %v", member, len(page.Messages), want)
+		}
+		for _, text := range want {
+			if !got[text] {
+				t.Fatalf("%s's Slackbot DM lacks %q: %+v", member, text, page.Messages)
+			}
+		}
+	}
 }
 
 // TestReminderDeliveryIsClaimedOnceUnderConcurrency holds the compare-and-set.
@@ -90,11 +118,11 @@ func TestReminderDeliveryIsClaimedOnceUnderConcurrency(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	first, err := NewReminderDeliveryWorker(store, 10)
+	first, err := NewReminderDeliveryWorker(store, service.Messages{Store: store}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := NewReminderDeliveryWorker(store, 10)
+	second, err := NewReminderDeliveryWorker(store, service.Messages{Store: store}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +154,7 @@ func TestRecurringReminderMovesToItsNextOccurrence(t *testing.T) {
 	if err := store.CreateReminder(ctx, reminder, events.Event{ID: "evt-weekly", WorkspaceID: "T1", ActorID: "U1", Topic: "reminder.created", Payload: "Rm-weekly", CreatedAt: first}); err != nil {
 		t.Fatal(err)
 	}
-	worker, err := NewReminderDeliveryWorker(store, 10)
+	worker, err := NewReminderDeliveryWorker(store, service.Messages{Store: store}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

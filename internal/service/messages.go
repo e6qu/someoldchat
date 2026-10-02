@@ -1587,6 +1587,11 @@ func (m Messages) UserInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.User{}, err
 	}
+	// Slackbot is in every workspace, under the same ID; see
+	// domain.SlackbotUserID.
+	if requestedID == domain.SlackbotUserID {
+		return domain.SlackbotUser(workspaceID), nil
+	}
 	user, err := m.Store.GetUser(ctx, requestedID)
 	if err != nil || user.WorkspaceID != workspaceID {
 		return domain.User{}, store.ErrNotFound
@@ -3789,6 +3794,10 @@ func (m Messages) DoNotDisturbInfo(ctx context.Context, workspaceID domain.Works
 	if requestedID == "" {
 		requestedID = userID
 	}
+	// Slackbot never sets Do Not Disturb.
+	if requestedID == domain.SlackbotUserID {
+		return domain.DoNotDisturb{WorkspaceID: workspaceID, UserID: requestedID}, nil
+	}
 	requested, err := m.Store.GetUser(ctx, requestedID)
 	if err != nil || requested.WorkspaceID != workspaceID || requested.Deleted {
 		return domain.DoNotDisturb{}, store.ErrNotFound
@@ -3901,7 +3910,13 @@ func (m Messages) Users(ctx context.Context, workspaceID domain.WorkspaceID, use
 		return domain.UserPage{}, err
 	}
 	page, err := m.Store.ListUsers(ctx, workspaceID, request)
-	return m.describeUsers(ctx, page, err)
+	page, err = m.describeUsers(ctx, page, err)
+	// users.list includes Slackbot, as Slack's does. It ends the directory, so
+	// the store's cursor walks the members as before.
+	if err == nil && !page.HasMore {
+		page.Users = append(page.Users, domain.SlackbotUser(workspaceID))
+	}
+	return page, err
 }
 
 // SearchPeople answers the People search tab. The client used to load every
@@ -5298,6 +5313,11 @@ func (m Messages) OpenConversation(ctx context.Context, workspaceID domain.Works
 	}
 	members := make([]domain.UserID, 0, len(seen))
 	for candidate := range seen {
+		// Any member may DM Slackbot, which is in every workspace.
+		if candidate == domain.SlackbotUserID {
+			members = append(members, candidate)
+			continue
+		}
 		member, err := m.Store.GetUser(ctx, candidate)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return domain.DirectOpening{}, err
@@ -10578,6 +10598,12 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		ReplyBroadcast: request.ReplyBroadcast,
 		CreatedAt:      domain.MessageInstant(time.Now()), Subtype: request.Subtype,
 	}
+	return m.createMessage(ctx, message, request.IdempotencyKey, scheduledID)
+}
+
+// createMessage stores a new message the caller has validated and authorized,
+// with its message.created event.
+func (m Messages) createMessage(ctx context.Context, message domain.Message, idempotencyKey string, scheduledID domain.ScheduledMessageID) (domain.Message, error) {
 	// A message's ts is its public identifier and it carries microseconds, so two
 	// messages in one conversation may not be created on the same microsecond.
 	// The repository refuses the collision; the remedy is the next microsecond,
@@ -10586,16 +10612,16 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	// This is the same construction the real Slack timestamp uses, and it is why
 	// the identifier cannot be merged no matter how coarse the host clock is.
 	for {
-		event, err := messageEventAt(workspaceID, "message.created", message, nil, message.CreatedAt)
+		event, err := messageEventAt(message.WorkspaceID, "message.created", message, nil, message.CreatedAt)
 		if err != nil {
 			return domain.Message{}, err
 		}
-		shared, err := linkSharedEvents(workspaceID, message, nil, message.CreatedAt)
+		shared, err := linkSharedEvents(message.WorkspaceID, message, nil, message.CreatedAt)
 		if err != nil {
 			return domain.Message{}, err
 		}
 		if scheduledID == "" {
-			err = m.Store.CreateMessage(ctx, message, event, request.IdempotencyKey, shared...)
+			err = m.Store.CreateMessage(ctx, message, event, idempotencyKey, shared...)
 		} else {
 			err = m.Store.CreateScheduledMessagePost(ctx, scheduledID, message, event, shared...)
 		}
@@ -10605,7 +10631,7 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		}
 		if err != nil {
 			if errors.Is(err, store.ErrIdempotencyConflict) {
-				return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, request.IdempotencyKey)
+				return m.Store.GetIdempotentMessage(ctx, message.WorkspaceID, message.AuthorID, idempotencyKey)
 			}
 			return domain.Message{}, err
 		}

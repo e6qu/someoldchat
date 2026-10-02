@@ -79,7 +79,9 @@ worker races. Recurrence schedules the next occurrence without duplicating the
 current one.
 
 Personal reminders appear in Later and produce the documented Later and
-Activity badges when due. Channel reminders post to the target conversation.
+Activity badges when due. Slackbot posts channel reminders to the target
+conversation, and posts a `reminders.add` reminder into the member's Slackbot
+direct message. Slackbot is `USLACKBOT` in every workspace, as on Slack.
 Cancellation racing delivery has one outcome. Past, completed, and deleted
 reminders do not fire.
 

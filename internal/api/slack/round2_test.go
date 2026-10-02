@@ -822,9 +822,10 @@ func TestDndTeamInfoNamesEveryMemberOfALargeWorkspace(t *testing.T) {
 	if err := json.Unmarshal(result.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	// The shared fixture seeds U1 and U2 as well.
-	if !body.OK || len(body.Users) != extra+2 {
-		t.Fatalf("dnd.teamInfo described %d of %d members", len(body.Users), extra+2)
+	// The shared fixture seeds U1 and U2 as well, and Slackbot is in every
+	// workspace.
+	if !body.OK || len(body.Users) != extra+3 || body.Users[string(domain.SlackbotUserID)] == nil {
+		t.Fatalf("dnd.teamInfo described %d of %d members", len(body.Users), extra+3)
 	}
 }
 

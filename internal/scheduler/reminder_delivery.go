@@ -3,10 +3,13 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 )
 
 // ReminderDeliverySource is the compare-and-set queue behind reminders.add.
@@ -21,16 +24,19 @@ type ReminderDeliverySource interface {
 	MarkReminderDelivered(context.Context, domain.WorkspaceID, domain.ReminderID, time.Time, time.Time, events.Event) (bool, error)
 }
 
+// ReminderDeliveryWorker delivers reminders.add reminders as Slack does: Slackbot
+// posts the reminder into the member's Slackbot DM.
 type ReminderDeliveryWorker struct {
 	Source ReminderDeliverySource
+	Poster chatapi.Service
 	Limit  int
 }
 
-func NewReminderDeliveryWorker(source ReminderDeliverySource, limit int) (ReminderDeliveryWorker, error) {
-	if source == nil || limit <= 0 {
-		return ReminderDeliveryWorker{}, errors.New("reminder delivery worker requires a source and positive limit")
+func NewReminderDeliveryWorker(source ReminderDeliverySource, poster chatapi.Service, limit int) (ReminderDeliveryWorker, error) {
+	if source == nil || poster == nil || limit <= 0 {
+		return ReminderDeliveryWorker{}, errors.New("reminder delivery worker requires a source, poster and positive limit")
 	}
-	return ReminderDeliveryWorker{Source: source, Limit: limit}, nil
+	return ReminderDeliveryWorker{Source: source, Poster: poster, Limit: limit}, nil
 }
 
 func (w ReminderDeliveryWorker) RunOnce(ctx context.Context, workspaceID domain.WorkspaceID) (int, error) {
@@ -61,6 +67,18 @@ func (w ReminderDeliveryWorker) RunOnceAt(ctx context.Context, workspaceID domai
 			failures = errors.Join(failures, err)
 			continue
 		}
+		// The message is posted before the claim, under a key naming this
+		// occurrence, so a worker that dies between the two posts it once
+		// when the reminder is delivered again. A member who can no longer
+		// receive it - deactivated since - is past reminding: the occurrence
+		// is still claimed rather than retried forever.
+		if _, err := w.Poster.PostAsSlackbot(ctx, reminder.WorkspaceID, reminder.User, domain.SlackbotPost{
+			Text:           ReminderText(reminder.Text),
+			IdempotencyKey: fmt.Sprintf("reminder:%s:%d", reminder.ID, reminder.Time.UTC().Unix()),
+		}); err != nil && permanentFailureCode(err) == "" {
+			failures = errors.Join(failures, err)
+			continue
+		}
 		claimed, err := w.Source.MarkReminderDelivered(ctx, reminder.WorkspaceID, reminder.ID, now, next, event)
 		if err != nil {
 			failures = errors.Join(failures, err)
@@ -87,4 +105,14 @@ func reminderDeliveredEvent(reminder domain.Reminder, now time.Time) (events.Eve
 		events.String("text", reminder.Text),
 		events.String("due_at", reminder.Time.UTC().Format(time.RFC3339)),
 	), now)
+}
+
+// ReminderText is the message Slackbot posts for a reminder: "Reminder: " and
+// the reminder's text, ending as a sentence.
+func ReminderText(text string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasSuffix(text, ".") && !strings.HasSuffix(text, "!") && !strings.HasSuffix(text, "?") {
+		text += "."
+	}
+	return "Reminder: " + text
 }

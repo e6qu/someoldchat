@@ -169,6 +169,9 @@ func Profile(origin string, user domain.User) map[string]any {
 	if user.IsBot() {
 		profile["bot_id"], profile["api_app_id"], profile["always_active"] = user.BotID, user.AppID, false
 	}
+	if user.IsSlackbot() {
+		profile["always_active"] = true
+	}
 	return profile
 }
 

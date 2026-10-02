@@ -47,8 +47,8 @@ func NewReminderWorker(source ReminderSource, poster chatapi.Service, owner stri
 }
 
 // RunOnce delivers one bounded batch. A personal reminder is delivered as a
-// private Activity/Later event; a channel reminder also posts one idempotent
-// message to the target conversation.
+// private Activity/Later event; a channel reminder also has Slackbot post one
+// idempotent message to the target conversation.
 func (w ReminderWorker) RunOnce(ctx context.Context, workspace domain.WorkspaceID) (int, error) {
 	now := w.now()
 	items, err := w.Source.ClaimDueLaterReminders(ctx, workspace, w.Owner, w.Limit, w.Lease, now)
@@ -125,10 +125,12 @@ func (w ReminderWorker) postChannelReminder(ctx context.Context, reminder domain
 		},
 		func(postContext context.Context) error {
 			idempotencyKey := fmt.Sprintf("later-reminder:%s:%d", reminder.ID, reminder.DueAt.UTC().Unix())
-			_, err := w.Poster.PostWithBlocksAndAttachments(
-				postContext, reminder.WorkspaceID, reminder.Creator, reminder.Channel,
-				"Reminder: "+reminder.Text, "", "", "", idempotencyKey, "",
-			)
+			// Slackbot posts a channel reminder, as on Slack, for the member who
+			// set it; the member must still be able to post there.
+			_, err := w.Poster.PostAsSlackbot(postContext, reminder.WorkspaceID, reminder.Creator, domain.SlackbotPost{
+				Conversation: reminder.Channel,
+				Text:         ReminderText(reminder.Text), IdempotencyKey: idempotencyKey,
+			})
 			return err
 		},
 	)

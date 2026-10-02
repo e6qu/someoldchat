@@ -13438,6 +13438,16 @@ func (s *Server) PostIncomingWebhook(ctx context.Context, input *chatv1.Incoming
 	return encodeProtoMessage(value), nil
 }
 
+func (s *Server) PostAsSlackbot(ctx context.Context, input *chatv1.SlackbotPostRequest) (*chatv1.Message, error) {
+	value, err := s.implementation.PostAsSlackbot(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetMemberId()), domain.SlackbotPost{
+		Conversation: domain.ConversationID(input.GetConversationId()), Text: input.GetText(), IdempotencyKey: input.GetIdempotencyKey(),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(value), nil
+}
+
 func encodeProtoIncomingWebhook(value domain.IncomingWebhook, secret string) *chatv1.IncomingWebhook {
 	return &chatv1.IncomingWebhook{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), AppId: string(value.AppID), ConversationId: string(value.ConversationID), UserId: string(value.UserID), Enabled: value.Enabled, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Secret: secret}
 }
@@ -13629,6 +13639,14 @@ func encodeStreamMutation(workspaceID domain.WorkspaceID, userID domain.UserID, 
 
 func (r Remote) PostIncomingWebhookWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
 	out, err := r.messages.PostIncomingWebhook(ctx, &chatv1.IncomingWebhookPostRequest{WorkspaceId: string(workspaceID), AppId: string(appID), Secret: secret, Text: text, Blocks: blocks, Attachments: attachments, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
+func (r Remote) PostAsSlackbot(ctx context.Context, workspaceID domain.WorkspaceID, memberID domain.UserID, post domain.SlackbotPost) (domain.Message, error) {
+	out, err := r.messages.PostAsSlackbot(ctx, &chatv1.SlackbotPostRequest{WorkspaceId: string(workspaceID), MemberId: string(memberID), ConversationId: string(post.Conversation), Text: post.Text, IdempotencyKey: post.IdempotencyKey})
 	if err != nil {
 		return domain.Message{}, err
 	}

@@ -6687,7 +6687,7 @@ func (h Handler) getPresence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	presence := user.Presence.CurrentAt(user.LastActiveAt, now)
+	presence := user.PresenceAt(now)
 	response := map[string]any{"ok": true, "presence": presence}
 	// Slack reports the detail only for the caller's own presence: why they
 	// are away, and when they were last active. Client connections are not

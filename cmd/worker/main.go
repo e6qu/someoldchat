@@ -189,7 +189,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("configure user expiration worker", "error", err)
 		return exitConfiguration
 	}
-	reminderDeliveryWorker, err = scheduler.NewReminderDeliveryWorker(runtime.Store, *limit)
+	reminderDeliveryWorker, err = scheduler.NewReminderDeliveryWorker(runtime.Store, runtime.Service, *limit)
 	if err != nil {
 		logger.Error("configure reminder delivery worker", "error", err)
 		return exitConfiguration

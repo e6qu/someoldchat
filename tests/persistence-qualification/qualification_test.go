@@ -171,6 +171,7 @@ func runQualification(t *testing.T, open opener) {
 		{"canvas and list retention deletes what went unedited", documentRetentionDeletesWhatWentUnedited},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
+		{"Slackbot can DM a member of any workspace", slackbotDirectMessagesAMemberOfAnyWorkspace},
 		{"visible files are newest first", visibleFilesAreNewestFirst},
 		{"OAuth installs reuse their bot and redeem every grant shape", oauthInstallsReuseTheirBotAndRedeemEveryGrantShape},
 		{"file shares name their carrying messages", fileSharesNameTheirCarryingMessages},
@@ -3099,6 +3100,56 @@ func oneAppApprovalReadsBackByItself(t *testing.T, open opener) {
 	}
 }
 
+// slackbotDirectMessagesAMemberOfAnyWorkspace holds the storage behind
+// Slackbot. It is USLACKBOT in every workspace, so its one identity row has to
+// exist on every profile, and a DM between it and a member of any workspace -
+// two of them here - has to be storable and found again, with Slackbot's
+// messages in it. The member is shown a reminder through this DM.
+func slackbotDirectMessagesAMemberOfAnyWorkspace(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	now := time.Unix(1700000000, 0).UTC()
+	for index, name := range []string{"first", "second"} {
+		workspaceID := domain.WorkspaceID("T-slackbot-" + name + "-" + suffix)
+		userID := domain.UserID("U-slackbot-" + name + "-" + suffix)
+		if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Slackbot " + name}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: string(userID)}); err != nil {
+			t.Fatal(err)
+		}
+		members := []domain.UserID{domain.SlackbotUserID, userID}
+		conversation := domain.Conversation{ID: domain.ConversationID("D-slackbot-" + name + "-" + suffix), WorkspaceID: workspaceID, Name: "direct", Kind: domain.ConversationTypeIM, Created: now, CreatorID: domain.SlackbotUserID}
+		if err := repository.CreateDirectConversation(ctx, conversation, members, events.Event{
+			ID: domain.EventID("evt-slackbot-dm-" + name + "-" + suffix), WorkspaceID: workspaceID, ActorID: domain.SlackbotUserID,
+			Topic: "conversation.direct_created", Payload: "{}", CreatedAt: now,
+		}); err != nil {
+			t.Fatalf("Slackbot's DM in workspace %d: %v", index+1, err)
+		}
+		found, err := repository.FindDirectConversation(ctx, workspaceID, members)
+		if err != nil || found.ID != conversation.ID {
+			t.Fatalf("Slackbot's DM was not found again: %+v err=%v", found, err)
+		}
+		message := domain.Message{
+			ID: domain.MessageID("msg-slackbot-" + name + "-" + suffix), WorkspaceID: workspaceID, Conversation: conversation.ID,
+			AuthorID: domain.SlackbotUserID, Text: "Reminder: stretch.", CreatedAt: now,
+		}
+		if err := repository.CreateMessage(ctx, message, events.Event{
+			ID: domain.EventID("evt-slackbot-message-" + name + "-" + suffix), WorkspaceID: workspaceID, ActorID: domain.SlackbotUserID,
+			Topic: "message.created", Payload: "{}", CreatedAt: now,
+		}, ""); err != nil {
+			t.Fatal(err)
+		}
+		page, err := repository.ListMessages(ctx, conversation.ID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
+		if err != nil || len(page.Messages) != 1 || page.Messages[0].AuthorID != domain.SlackbotUserID {
+			t.Fatalf("Slackbot's DM holds %+v err=%v", page.Messages, err)
+		}
+	}
+}
+
 // aReminderIsDeliveredOnce holds the storage contract behind reminders.add.
 // The claim is the mark, so two workers reading the same batch deliver a
 // reminder once between them; without that, a member is reminded twice for one
@@ -3146,39 +3197,10 @@ func aReminderIsDeliveredOnce(t *testing.T, open opener) {
 	if err != nil || !claimed {
 		t.Fatalf("the first claim did not win: claimed=%t err=%v", claimed, err)
 	}
-	// Delivery the member never sees is the bug this worker exists to fix, so
-	// the Activity row is written with the claim rather than after it.
-	shown, err := repository.ListActivity(ctx, workspaceID, userID, domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reminded := 0
-	for _, item := range shown.Items {
-		if item.AppReminderID == due {
-			reminded++
-		}
-	}
-	if reminded != 1 {
-		t.Fatalf("the member was marked reminded and shown %d reminders", reminded)
-	}
 	// The second claim loses rather than delivering again, and writes no notice.
 	second, err := repository.MarkReminderDelivered(ctx, workspaceID, due, now, time.Time{}, notice("second"))
 	if err != nil || second {
 		t.Fatalf("a delivered reminder was claimed twice: claimed=%t err=%v", second, err)
-	}
-	// The losing claim shows nothing, so a member is not reminded twice.
-	again, err := repository.ListActivity(ctx, workspaceID, userID, domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	repeated := 0
-	for _, item := range again.Items {
-		if item.AppReminderID == due {
-			repeated++
-		}
-	}
-	if repeated != 1 {
-		t.Fatalf("a lost claim showed the reminder again: %d rows", repeated)
 	}
 	after, err := repository.DueReminders(ctx, workspaceID, now, 10)
 	if err != nil || len(after) != 0 {

@@ -6029,7 +6029,7 @@ func TestADeliveredReminderIsVisibleWithItsText(t *testing.T) {
 	before := get(t, mux, "/app/activity?channel=Cdev").Body.String()
 	requireMissing(t, "activity before delivery", before, "call the dentist")
 
-	worker, err := scheduler.NewReminderDeliveryWorker(store, 10)
+	worker, err := scheduler.NewReminderDeliveryWorker(store, messages, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6050,6 +6050,15 @@ func TestADeliveredReminderIsVisibleWithItsText(t *testing.T) {
 		t.Fatalf("the reminder appears %d times in Activity", count)
 	}
 	_ = reminder
+
+	// Slackbot posts it into the member's Slackbot DM, as Slack does, and the
+	// DM is listed with the member's conversations.
+	direct, err := store.FindDirectConversation(ctx, "T1", []domain.UserID{"U1", domain.SlackbotUserID})
+	if err != nil {
+		t.Fatalf("no Slackbot DM: %v", err)
+	}
+	dm := get(t, mux, "/app?channel="+string(direct.ID)).Body.String()
+	requireContains(t, "Slackbot DM", dm, "Slackbot", "Reminder: call the dentist.")
 }
 
 // The signalling route is called by a script, never by a form, so every answer
