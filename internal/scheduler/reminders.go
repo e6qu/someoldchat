@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -147,12 +148,13 @@ func (w ReminderWorker) postChannelReminder(ctx context.Context, reminder domain
 // calendar recurrence behaves. Daily and weekly have no month-length to clamp,
 // so they still advance by a fixed span.
 func NextReminderDue(reminder domain.LaterReminder, after time.Time) (time.Time, error) {
-	return nextRecurrence(reminder.Recurrence, reminder.TimeZone, reminder.RecurrenceAnchor, reminder.DueAt, after)
+	return nextRecurrence(reminder.Recurrence, nil, reminder.TimeZone, reminder.RecurrenceAnchor, reminder.DueAt, after)
 }
 
 // nextRecurrence is NextReminderDue for any reminder: Later reminders and the
-// Web API's recurring reminders.add reminders recur the same way.
-func nextRecurrence(recurrence domain.ReminderRecurrence, timeZone string, anchor, due, after time.Time) (time.Time, error) {
+// Web API's recurring reminders.add reminders recur the same way. weekdays are
+// the days a weekly recurrence falls on; none means the anchor's day.
+func nextRecurrence(recurrence domain.ReminderRecurrence, weekdays []time.Weekday, timeZone string, anchor, due, after time.Time) (time.Time, error) {
 	if recurrence == domain.ReminderOnce {
 		return time.Time{}, nil
 	}
@@ -172,7 +174,7 @@ func nextRecurrence(recurrence domain.ReminderRecurrence, timeZone string, ancho
 	afterLocal := after.In(location)
 	next := due.In(location)
 	for !next.After(afterLocal) {
-		next = advanceReminder(recurrence, anchorLocal, next, location)
+		next = advanceReminder(recurrence, weekdays, anchorLocal, next, location)
 		if next.IsZero() {
 			return time.Time{}, store.InvalidArgument("reminder recurrence is invalid")
 		}
@@ -183,13 +185,23 @@ func nextRecurrence(recurrence domain.ReminderRecurrence, timeZone string, ancho
 // advanceReminder returns the next occurrence strictly after value, positioned
 // by the anchor's calendar fields and clamped so an impossible day-of-month
 // becomes that month's last day rather than overflowing into the next month.
-func advanceReminder(recurrence domain.ReminderRecurrence, anchor, value time.Time, location *time.Location) time.Time {
+func advanceReminder(recurrence domain.ReminderRecurrence, weekdays []time.Weekday, anchor, value time.Time, location *time.Location) time.Time {
 	hour, minute := anchor.Hour(), anchor.Minute()
 	switch recurrence {
 	case domain.ReminderDaily:
 		return value.AddDate(0, 0, 1)
 	case domain.ReminderWeekly:
-		return value.AddDate(0, 0, 7)
+		if len(weekdays) == 0 {
+			return value.AddDate(0, 0, 7)
+		}
+		// The next of the named days, at the anchor's time of day.
+		for days := 1; days <= 7; days++ {
+			candidate := value.AddDate(0, 0, days)
+			if slices.Contains(weekdays, candidate.Weekday()) {
+				return time.Date(candidate.Year(), candidate.Month(), candidate.Day(), hour, minute, 0, 0, location)
+			}
+		}
+		return time.Time{}
 	case domain.ReminderMonthly:
 		year, month := value.Year(), value.Month()
 		if month == time.December {

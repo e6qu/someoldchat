@@ -1290,8 +1290,9 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/scheduler:TestRecurringReminderMovesToItsNextOccurrence
       - go-test:internal/api/slack:TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse
+      - go-test:internal/api/slack:TestReminderRecurrenceObjectSetsHowItRepeats
     deviations:
-      - Natural-language times cover the phrases the first-party /remind command reads (in N minutes/hours/days/weeks/months/years, tomorrow, on a date, weekday or month and day, at a time, every day/week/month/year or weekday) in the zone of the member's notification schedule (UTC otherwise); other phrasings answer cannot_parse, and the recurrence object in responses is only the recurring flag.
+      - Natural-language times cover the phrases the first-party /remind command reads (in N minutes/hours/days/weeks/months/years, tomorrow, on a date, weekday or month and day, at a time, every day/week/month/year or weekday) in the zone of the member's notification schedule (UTC otherwise); other phrasings answer cannot_parse. The recurrence argument (frequency, and weekdays for weekly) sets how the reminder repeats, with time giving its first occurrence; a recurrence it cannot read is cannot_parse, the method's pinned code for an unreadable time.
       - Delivery shows the reminder in the member's Activity at the due instant; Slack posts it as a Slackbot direct message.
       - The current token-type-dependent rules for setting another user's reminder have not been differentially qualified.
     audit:

@@ -461,7 +461,8 @@ CREATE INDEX IF NOT EXISTS bookmarks_conversation_rank ON bookmarks(workspace_id
 CREATE TABLE IF NOT EXISTS reminders (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), creator_id TEXT NOT NULL REFERENCES users(id),
  user_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, due_at INTEGER NOT NULL, complete_at INTEGER NOT NULL DEFAULT 0,
- recurring INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT '', time_zone TEXT NOT NULL DEFAULT 'UTC', recurrence_anchor INTEGER NOT NULL DEFAULT 0
+ recurring INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT '', time_zone TEXT NOT NULL DEFAULT 'UTC', recurrence_anchor INTEGER NOT NULL DEFAULT 0,
+ weekdays TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS reminders_user_due ON reminders(workspace_id, user_id, due_at, id);
 CREATE TABLE IF NOT EXISTS later_reminders (
@@ -604,7 +605,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 201
+const schemaVersion = 202
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3581,6 +3582,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 202: the weekdays of a weekly reminder ---
+	if version < 202 {
+		// reminders.add's recurrence names the days a weekly reminder
+		// recurs on. Existing reminders name none and recur on their
+		// anchor's day, as they did.
+		columns, err := s.tableColumns(ctx, db, "reminders")
+		if err != nil {
+			return err
+		}
+		if !columns["weekdays"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE reminders ADD COLUMN weekdays TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate reminder weekdays: %w", err)
+			}
+		}
+	}
+	// --- end schema 202 ---
 	// --- schema 201: profile name parts and phone ---
 	if version < 201 {
 		// Slack's profile carries first_name, last_name and phone, and a
@@ -17916,7 +17933,7 @@ func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, ev
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO reminders(id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring, recurrence, time_zone, recurrence_anchor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, reminder.ID, reminder.WorkspaceID, reminder.Creator, reminder.User, reminder.Text, reminder.Time.Unix(), unixSeconds(reminder.CompleteAt), boolInt(reminder.Recurring), string(reminder.Recurrence), reminderTimeZone(reminder.TimeZone), unixSeconds(reminder.RecurrenceAnchor)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO reminders(id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring, recurrence, time_zone, recurrence_anchor, weekdays) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, reminder.ID, reminder.WorkspaceID, reminder.Creator, reminder.User, reminder.Text, reminder.Time.Unix(), unixSeconds(reminder.CompleteAt), boolInt(reminder.Recurring), string(reminder.Recurrence), reminderTimeZone(reminder.TimeZone), unixSeconds(reminder.RecurrenceAnchor), domain.EncodeReminderWeekdays(reminder.Weekdays)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -17926,15 +17943,16 @@ func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, ev
 }
 
 // reminderColumns is the one column list every reminder read uses.
-const reminderColumns = `id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring, recurrence, time_zone, recurrence_anchor`
+const reminderColumns = `id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring, recurrence, time_zone, recurrence_anchor, weekdays`
 
 func scanReminder(row rowScanner) (domain.Reminder, error) {
 	var reminder domain.Reminder
 	var due, complete, recurring, anchor int64
-	var recurrence string
-	if err := row.Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring, &recurrence, &reminder.TimeZone, &anchor); err != nil {
+	var recurrence, weekdays string
+	if err := row.Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring, &recurrence, &reminder.TimeZone, &anchor, &weekdays); err != nil {
 		return domain.Reminder{}, err
 	}
+	reminder.Weekdays = domain.DecodeReminderWeekdays(weekdays)
 	reminder.Time = time.Unix(due, 0).UTC()
 	if complete != 0 {
 		reminder.CompleteAt = time.Unix(complete, 0).UTC()

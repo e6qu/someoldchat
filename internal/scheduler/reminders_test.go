@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -320,4 +321,34 @@ func (s *failFirstReminderAcknowledgement) MarkLaterReminderDelivered(ctx contex
 		return errReminderAcknowledgement
 	}
 	return s.Store.MarkLaterReminderDelivered(ctx, owner, id, deliveredAt, nextDue, event)
+}
+
+// A weekly reminder that names its weekdays steps from one named day to the
+// next at the anchor's local time, wrapping into the following week, rather
+// than a whole week from its last occurrence.
+func TestNextRecurrenceStepsThroughTheNamedWeekdays(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("tz database unavailable")
+	}
+	// Wednesday 2026-10-07 09:30 local.
+	anchor := time.Date(2026, 10, 7, 9, 30, 0, 0, location)
+	days := []time.Weekday{time.Monday, time.Wednesday, time.Friday}
+	due := anchor.UTC()
+	var got []string
+	for range 4 {
+		next, err := nextRecurrence(domain.ReminderWeekly, days, "America/New_York", anchor.UTC(), due, due)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, next.In(location).Format("Mon 01-02 15:04"))
+		due = next
+	}
+	if want := "[Fri 10-09 09:30 Mon 10-12 09:30 Wed 10-14 09:30 Fri 10-16 09:30]"; fmt.Sprint(got) != want {
+		t.Fatalf("occurrences = %v, want %s", got, want)
+	}
+	// Without weekdays a weekly reminder still advances a week at a time.
+	if next, err := nextRecurrence(domain.ReminderWeekly, nil, "America/New_York", anchor.UTC(), anchor.UTC(), anchor.UTC()); err != nil || !next.Equal(anchor.AddDate(0, 0, 7).UTC()) {
+		t.Fatalf("weekly without weekdays = %v err=%v", next, err)
+	}
 }

@@ -34,8 +34,10 @@ type Reminder struct {
 	Recurrence       string                 `protobuf:"bytes,9,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
 	TimeZone         string                 `protobuf:"bytes,10,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
 	RecurrenceAnchor int64                  `protobuf:"varint,11,opt,name=recurrence_anchor,json=recurrenceAnchor,proto3" json:"recurrence_anchor,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// The days a weekly reminder recurs on, as lower-case day names.
+	Weekdays      []string `protobuf:"bytes,12,rep,name=weekdays,proto3" json:"weekdays,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Reminder) Reset() {
@@ -145,6 +147,13 @@ func (x *Reminder) GetRecurrenceAnchor() int64 {
 	return 0
 }
 
+func (x *Reminder) GetWeekdays() []string {
+	if x != nil {
+		return x.Weekdays
+	}
+	return nil
+}
+
 type AddReminderRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -154,6 +163,7 @@ type AddReminderRequest struct {
 	Time          int64                  `protobuf:"varint,5,opt,name=time,proto3" json:"time,omitempty"`
 	Recurrence    string                 `protobuf:"bytes,6,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
 	TimeZone      string                 `protobuf:"bytes,7,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
+	Weekdays      []string               `protobuf:"bytes,8,rep,name=weekdays,proto3" json:"weekdays,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -235,6 +245,13 @@ func (x *AddReminderRequest) GetTimeZone() string {
 		return x.TimeZone
 	}
 	return ""
+}
+
+func (x *AddReminderRequest) GetWeekdays() []string {
+	if x != nil {
+		return x.Weekdays
+	}
+	return nil
 }
 
 type ReminderRequest struct {
@@ -1113,7 +1130,7 @@ var File_sameoldchat_chat_v1_reminders_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\n" +
-	"#sameoldchat/chat/v1/reminders.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xc6\x02\n" +
+	"#sameoldchat/chat/v1/reminders.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xe2\x02\n" +
 	"\bReminder\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1d\n" +
@@ -1130,7 +1147,8 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"recurrence\x12\x1b\n" +
 	"\ttime_zone\x18\n" +
 	" \x01(\tR\btimeZone\x12+\n" +
-	"\x11recurrence_anchor\x18\v \x01(\x03R\x10recurrenceAnchor\"\xdb\x01\n" +
+	"\x11recurrence_anchor\x18\v \x01(\x03R\x10recurrenceAnchor\x12\x1a\n" +
+	"\bweekdays\x18\f \x03(\tR\bweekdays\"\xf7\x01\n" +
 	"\x12AddReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12$\n" +
@@ -1140,7 +1158,8 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\n" +
 	"recurrence\x18\x06 \x01(\tR\n" +
 	"recurrence\x12\x1b\n" +
-	"\ttime_zone\x18\a \x01(\tR\btimeZone\"n\n" +
+	"\ttime_zone\x18\a \x01(\tR\btimeZone\x12\x1a\n" +
+	"\bweekdays\x18\b \x03(\tR\bweekdays\"n\n" +
 	"\x0fReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +

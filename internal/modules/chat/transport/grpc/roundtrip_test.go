@@ -501,7 +501,13 @@ func conversionCases() map[string]conversionCase {
 			through: through(encodeProtoSavedItemPage, decodeProtoSavedItemPage),
 		},
 		"Bookmark": {sample: &domain.Bookmark{}, through: through(encodeProtoBookmark, decodeProtoBookmark)},
-		"Reminder": {sample: &domain.Reminder{}, through: through(encodeProtoReminder, decodeProtoReminder)},
+		"Reminder": {
+			sample: &domain.Reminder{},
+			prepare: func(filled any) {
+				filled.(*domain.Reminder).Weekdays = []time.Weekday{time.Monday, time.Thursday}
+			},
+			through: through(encodeProtoReminder, decodeProtoReminder),
+		},
 		"LaterReminder": {
 			sample: &domain.LaterReminder{},
 			prepare: func(filled any) {
@@ -522,6 +528,9 @@ func conversionCases() map[string]conversionCase {
 				item.Reminder.Target = domain.LaterReminderPersonal
 				item.Reminder.Channel = ""
 				item.Reminder.Recurrence = domain.ReminderMonthly
+				// A weekday set is a sorted set of real days; arbitrary
+				// integers are not a set anyone could have named.
+				item.AppReminder.Weekdays = []time.Weekday{time.Monday, time.Thursday}
 			},
 			through: through(encodeProtoActivityItem, decodeProtoActivityItem),
 		},

@@ -1277,3 +1277,58 @@ func TestAdminUsersListReturnsTheAdminProjection(t *testing.T) {
 		t.Fatal("admin.users.list omitted the guest")
 	}
 }
+
+// TestReminderRecurrenceObjectSetsHowItRepeats covers reminders.add's
+// recurrence argument as the SDKs send it, form-encoded and in a JSON body:
+// a weekly reminder recurs on the days it names, its first occurrence moves
+// to the first of them, and a recurrence the method cannot read is
+// cannot_parse.
+func TestReminderRecurrenceObjectSetsHowItRepeats(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	// A Monday at 09:00 UTC, two weeks out, so it is in the future.
+	monday := time.Now().UTC().AddDate(0, 0, 14)
+	for monday.Weekday() != time.Monday {
+		monday = monday.AddDate(0, 0, 1)
+	}
+	monday = time.Date(monday.Year(), monday.Month(), monday.Day(), 9, 0, 0, 0, time.UTC)
+	add := func(body, contentType string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/reminders.add", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer token")
+		request.Header.Set("Content-Type", contentType)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var decoded map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+			t.Fatalf("reminders.add %s: %s", body, response.Body)
+		}
+		return decoded
+	}
+	form := add(url.Values{"text": {"standup"}, "time": {strconv.FormatInt(monday.Unix(), 10)},
+		"recurrence": {`{"frequency":"weekly","weekdays":["wednesday","friday"]}`}}.Encode(), "application/x-www-form-urlencoded")
+	reminder, _ := form["reminder"].(map[string]any)
+	if form["ok"] != true || reminder["recurring"] != true {
+		t.Fatalf("weekly recurrence = %v", form)
+	}
+	// Monday is neither day, so the first occurrence is that Wednesday.
+	if wednesday := monday.AddDate(0, 0, 2); int64(reminder["time"].(float64)) != wednesday.Unix() {
+		t.Fatalf("first occurrence = %v, want %d", reminder["time"], wednesday.Unix())
+	}
+	stored, err := repository.GetReminder(context.Background(), "T1", "U1", domain.ReminderID(reminder["id"].(string)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Recurrence != domain.ReminderWeekly || fmt.Sprint(stored.Weekdays) != "[Wednesday Friday]" {
+		t.Fatalf("stored recurrence = %q %v", stored.Recurrence, stored.Weekdays)
+	}
+
+	daily := add(`{"text":"water plants","time":`+strconv.FormatInt(monday.Unix(), 10)+`,"recurrence":{"frequency":"daily"}}`, "application/json")
+	if daily["ok"] != true || daily["reminder"].(map[string]any)["recurring"] != true {
+		t.Fatalf("daily recurrence in a JSON body = %v", daily)
+	}
+	for _, bad := range []string{`{"frequency":"weekly"}`, `{"frequency":"hourly"}`, `{"frequency":"daily","weekdays":["monday"]}`, `{"frequency":"weekly","weekdays":["someday"]}`, `weekly`} {
+		if refused := add(url.Values{"text": {"x"}, "time": {"300"}, "recurrence": {bad}}.Encode(), "application/x-www-form-urlencoded"); refused["error"] != "cannot_parse" {
+			t.Errorf("recurrence %s = %v, want cannot_parse", bad, refused)
+		}
+	}
+}

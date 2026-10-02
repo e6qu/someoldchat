@@ -8704,6 +8704,15 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	// recurrence says how the reminder repeats, in place of a phrase in time
+	// such as "every Thursday"; time then gives the first occurrence.
+	if raw := strings.TrimSpace(fields["recurrence"]); raw != "" {
+		schedule.Recurrence, schedule.Weekdays, err = reminderRecurrence(raw)
+		if err != nil {
+			writeDecodeError(w, err)
+			return
+		}
+	}
 	targetID := domain.UserID(strings.TrimSpace(fields["user"]))
 	// Slack marks the user argument no longer supported for user tokens. Its
 	// current page separately notes a bot-token exception, so preserve that
@@ -12859,7 +12868,7 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // methods answered invalid_array_arg to the SDK's own request.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages", "property":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages", "property", "recurrence":
 		return true
 	default:
 		return false
@@ -13689,6 +13698,42 @@ func reminderSchedule(raw string, now time.Time, location *time.Location) (domai
 		return domain.ReminderSchedule{}, err
 	}
 	return domain.ReminderSchedule{Due: due, TimeZone: location.String()}, nil
+}
+
+// reminderRecurrence reads reminders.add's recurrence object: a frequency of
+// daily, weekly, monthly or yearly, and for weekly the weekdays it falls on,
+// which Slack requires with it. Anything else is a recurrence the method
+// cannot read, which its pinned errors call cannot_parse.
+func reminderRecurrence(raw string) (domain.ReminderRecurrence, []time.Weekday, error) {
+	var value struct {
+		Frequency string   `json:"frequency"`
+		Weekdays  []string `json:"weekdays"`
+	}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return "", nil, decodeFailure("cannot_parse", "recurrence must be an object with a frequency")
+	}
+	recurrence := domain.ReminderRecurrence(strings.ToLower(strings.TrimSpace(value.Frequency)))
+	if recurrence == domain.ReminderOnce || !recurrence.Valid() {
+		return "", nil, decodeFailure("cannot_parse", "recurrence.frequency must be daily, weekly, monthly or yearly")
+	}
+	if recurrence != domain.ReminderWeekly {
+		if len(value.Weekdays) > 0 {
+			return "", nil, decodeFailure("cannot_parse", "recurrence.weekdays belongs to a weekly frequency")
+		}
+		return recurrence, nil, nil
+	}
+	if len(value.Weekdays) == 0 {
+		return "", nil, decodeFailure("cannot_parse", "a weekly recurrence names its weekdays")
+	}
+	weekdays := make([]time.Weekday, 0, len(value.Weekdays))
+	for _, name := range value.Weekdays {
+		day, ok := domain.ParseReminderWeekday(name)
+		if !ok {
+			return "", nil, decodeFailure("cannot_parse", "recurrence.weekdays names a day that is not one")
+		}
+		weekdays = append(weekdays, day)
+	}
+	return recurrence, domain.NormalizeReminderWeekdays(weekdays), nil
 }
 
 func reminderTime(raw string, now time.Time) (time.Time, error) {

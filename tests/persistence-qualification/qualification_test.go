@@ -167,6 +167,7 @@ func runQualification(t *testing.T, open opener) {
 		{"never being asked again by an app outlives the prompt", unfurlAuthDeclineIsDurable},
 		{"an assistant's loading messages travel with its status", assistantLoadingMessagesTravelWithTheStatus},
 		{"a profile's name parts and phone are durable", profileNamePartsAndPhoneAreDurable},
+		{"a weekly reminder's weekdays are durable", reminderWeekdaysAreDurable},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
 		{"visible files are newest first", visibleFilesAreNewestFirst},
@@ -1175,6 +1176,42 @@ func profileNamePartsAndPhoneAreDurable(t *testing.T, open opener) {
 	}
 	if user := write("other", domain.UserProfile{DisplayName: "ada"}); user.RealName != "Augusta Ada King" || user.Profile.Phone != "" {
 		t.Fatalf("user after a profile naming neither part = %q %+v", user.RealName, user.Profile)
+	}
+}
+
+// reminderWeekdaysAreDurable holds reminders.add's recurrence.weekdays on
+// every profile: a weekly reminder reads back the days it recurs on, and a
+// reminder that named none reads back none.
+func reminderWeekdaysAreDurable(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID, userID := domain.WorkspaceID("T-weekdays-"+suffix), domain.UserID("U-weekdays-"+suffix)
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Weekdays"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: "weekdays-" + suffix}); err != nil {
+		t.Fatal(err)
+	}
+	due := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	for _, value := range []domain.Reminder{
+		{ID: domain.ReminderID("Rm-weekly-" + suffix), Recurring: true, Recurrence: domain.ReminderWeekly, Weekdays: []time.Weekday{time.Monday, time.Thursday}},
+		{ID: domain.ReminderID("Rm-once-" + suffix)},
+	} {
+		value.WorkspaceID, value.Creator, value.User, value.Text, value.Time, value.TimeZone, value.RecurrenceAnchor = workspaceID, userID, userID, "standup", due, "UTC", due
+		event := events.Event{ID: domain.EventID("E-" + string(value.ID)), WorkspaceID: workspaceID, Topic: "reminder.created", Payload: "{}", CreatedAt: due}
+		if err := repository.CreateReminder(ctx, value, event); err != nil {
+			t.Fatal(err)
+		}
+		stored, err := repository.GetReminder(ctx, workspaceID, userID, value.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fmt.Sprint(stored.Weekdays) != fmt.Sprint(value.Weekdays) {
+			t.Fatalf("reminder %s weekdays = %v, want %v", value.ID, stored.Weekdays, value.Weekdays)
+		}
 	}
 }
 
