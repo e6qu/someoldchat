@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, secret_hash TEXT 
 -- authorization code is a bearer credential, and a database copy, backup or
 -- replica of it is enough to redeem the grant. expires_at is UnixNano and bounds
 -- redemption to store.OAuthCodeLifetime.
-CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, bot_id TEXT NOT NULL DEFAULT '', bot_user_id TEXT NOT NULL DEFAULT '', bot_scopes TEXT NOT NULL DEFAULT '[]', user_scopes TEXT NOT NULL DEFAULT '[]', redirect_uri TEXT NOT NULL DEFAULT '', incoming_webhook_channel TEXT NOT NULL DEFAULT '', code_challenge TEXT NOT NULL DEFAULT '', code_challenge_method TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, bot_id TEXT NOT NULL DEFAULT '', bot_user_id TEXT NOT NULL DEFAULT '', bot_scopes TEXT NOT NULL DEFAULT '[]', user_scopes TEXT NOT NULL DEFAULT '[]', redirect_uri TEXT NOT NULL DEFAULT '', incoming_webhook_channel TEXT NOT NULL DEFAULT '', code_challenge TEXT NOT NULL DEFAULT '', code_challenge_method TEXT NOT NULL DEFAULT '', nonce TEXT NOT NULL DEFAULT '', authorized_at INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
  refresh_hash TEXT PRIMARY KEY, access_hash TEXT NOT NULL, client_id TEXT NOT NULL REFERENCES oauth_clients(id),
  app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TE
 CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, installer_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (app_id, workspace_id));
 CREATE TABLE IF NOT EXISTS file_access_grants (file_id TEXT NOT NULL, user_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), granted_at INTEGER NOT NULL, PRIMARY KEY (file_id, user_id));
 CREATE TABLE IF NOT EXISTS short_token_rotations (token_hash TEXT PRIMARY KEY, new_token_hash TEXT NOT NULL, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS openid_signing_keys (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), key_id TEXT NOT NULL, private_key_ciphertext TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS function_execution_tokens (token_hash TEXT PRIMARY KEY, execution_id TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, callback_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL, bot_id TEXT NOT NULL DEFAULT '', scopes TEXT NOT NULL DEFAULT '', token_ciphertext TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS incoming_webhooks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id), user_id TEXT NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspace_id, app_id, secret_hash, enabled);
@@ -599,7 +600,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 196
+const schemaVersion = 197
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3550,6 +3551,27 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 197: Sign in with Slack ---
+	if version < 197 {
+		// An authorization code remembers the relying party's nonce and when
+		// the member authorized it, which the ID token repeats; and the
+		// deployment keeps the one RSA key every replica signs ID tokens with.
+		columns, err := s.tableColumns(ctx, db, "oauth_codes")
+		if err != nil {
+			return fmt.Errorf("inspect OAuth authorization codes: %w", err)
+		}
+		for column, definition := range map[string]string{"nonce": "TEXT NOT NULL DEFAULT ''", "authorized_at": "INTEGER NOT NULL DEFAULT 0"} {
+			if !columns[column] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE oauth_codes ADD COLUMN `+column+` `+definition); err != nil {
+					return fmt.Errorf("migrate OAuth authorization code %s: %w", column, err)
+				}
+			}
+		}
+		if _, err := db.ExecContext(ctx, openIDSigningKeysTable); err != nil {
+			return fmt.Errorf("migrate OpenID signing keys: %w", err)
+		}
+	}
+	// --- end schema 197 ---
 	// --- schema 196: short-secret token rotation ---
 	if version < 196 {
 		// oauth.v2.beginShortTokenRotation issues a replacement that only
@@ -11389,7 +11411,7 @@ func (s *Store) CreateOAuthCode(ctx context.Context, value domain.OAuthCode) err
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, incoming_webhook_channel, code_challenge, code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, domain.HashToken(value.Code), value.ClientID, value.WorkspaceID, value.UserID, string(scopes), value.BotID, value.BotUserID, string(botScopes), string(userScopes), value.RedirectURI, value.IncomingWebhookChannel, value.CodeChallenge, value.CodeChallengeMethod, time.Now().UTC().Add(store.OAuthCodeLifetime).UnixNano())
+	_, err = s.db.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, incoming_webhook_channel, code_challenge, code_challenge_method, nonce, authorized_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, domain.HashToken(value.Code), value.ClientID, value.WorkspaceID, value.UserID, string(scopes), value.BotID, value.BotUserID, string(botScopes), string(userScopes), value.RedirectURI, value.IncomingWebhookChannel, value.CodeChallenge, value.CodeChallengeMethod, value.Nonce, unixNanoOrZeroTime(value.AuthorizedAt), time.Now().UTC().Add(store.OAuthCodeLifetime).UnixNano())
 	return classify(err)
 }
 
@@ -11433,7 +11455,8 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	}
 	var grant domain.OAuthCode
 	var scopes, botScopes, userScopes string
-	if err := tx.QueryRowContext(ctx, `SELECT code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, incoming_webhook_channel, code_challenge, code_challenge_method FROM oauth_codes WHERE code = ? AND client_id = ? AND expires_at > ?`, codeHash, clientID, now.UnixNano()).Scan(&grant.Code, &grant.ClientID, &grant.WorkspaceID, &grant.UserID, &scopes, &grant.BotID, &grant.BotUserID, &botScopes, &userScopes, &grant.RedirectURI, &grant.IncomingWebhookChannel, &grant.CodeChallenge, &grant.CodeChallengeMethod); err != nil {
+	var authorizedAt int64
+	if err := tx.QueryRowContext(ctx, `SELECT code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, incoming_webhook_channel, code_challenge, code_challenge_method, nonce, authorized_at FROM oauth_codes WHERE code = ? AND client_id = ? AND expires_at > ?`, codeHash, clientID, now.UnixNano()).Scan(&grant.Code, &grant.ClientID, &grant.WorkspaceID, &grant.UserID, &scopes, &grant.BotID, &grant.BotUserID, &botScopes, &userScopes, &grant.RedirectURI, &grant.IncomingWebhookChannel, &grant.CodeChallenge, &grant.CodeChallengeMethod, &grant.Nonce, &authorizedAt); err != nil {
 		return domain.OAuthToken{}, translateNotFound(err)
 	}
 	if err := json.Unmarshal([]byte(scopes), &grant.Scopes); err != nil {
@@ -11445,6 +11468,7 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	if err := json.Unmarshal([]byte(userScopes), &grant.UserScopes); err != nil {
 		return domain.OAuthToken{}, err
 	}
+	grant.AuthorizedAt = timeFromUnixNanoOrZero(authorizedAt)
 	if !store.OAuthRedirectMatches(grant.RedirectURI, redirect) {
 		return domain.OAuthToken{}, store.ErrOAuthRedirectMismatch
 	}
@@ -11460,6 +11484,7 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
+	token.Nonce, token.AuthorizedAt = grant.Nonce, grant.AuthorizedAt
 	subjectID := grant.UserID
 	var tokenBotID domain.BotID
 	tokenScopes := grant.UserScopes

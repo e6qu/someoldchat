@@ -88,7 +88,7 @@ func (s *Store) CreateOAuthAuthorization(ctx context.Context, botUser domain.Use
 		// incoming_webhook_channel was missing here, so on the SQL profiles an
 		// install that chose a webhook channel lost it before redemption while
 		// the memory profile kept it.
-		if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, incoming_webhook_channel, code_challenge, code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, domain.HashToken(code.Code), code.ClientID, code.WorkspaceID, code.UserID, string(scopes), code.BotID, code.BotUserID, string(botScopes), string(userScopes), code.RedirectURI, code.IncomingWebhookChannel, code.CodeChallenge, code.CodeChallengeMethod, time.Now().UTC().Add(store.OAuthCodeLifetime).UnixNano()); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, incoming_webhook_channel, code_challenge, code_challenge_method, nonce, authorized_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, domain.HashToken(code.Code), code.ClientID, code.WorkspaceID, code.UserID, string(scopes), code.BotID, code.BotUserID, string(botScopes), string(userScopes), code.RedirectURI, code.IncomingWebhookChannel, code.CodeChallenge, code.CodeChallengeMethod, code.Nonce, unixNanoOrZeroTime(code.AuthorizedAt), time.Now().UTC().Add(store.OAuthCodeLifetime).UnixNano()); err != nil {
 			return classify(err)
 		}
 		return tx.Commit()

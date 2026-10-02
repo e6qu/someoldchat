@@ -64,7 +64,7 @@ The figures below come from `make compatibility-report` and
 |---|---|
 | Current Slack Web API methods implemented | 331 of 331 |
 | …with method-level evidence | 331 of 331 |
-| …`behavior-compatible` or better | 269 of 331 |
+| …`behavior-compatible` or better | 270 of 331 |
 | …`verified-against-slack` | 0 of 331 |
 | Recorded known deviations | 92 |
 | Retained legacy methods implemented | 10 of 10 |
@@ -118,11 +118,6 @@ deviations.
   browser scenario and 55 without a current official-source assertion.
 - Add visual baselines and manual assistive-technology evidence to the
   browser qualification.
-- Sign in with Slack: serve an OpenID discovery document and key set at this
-  deployment's own URLs, sign ID tokens RS256 with a durable key every
-  replica shares, and serve `/openid/connect/authorize`, so a relying party
-  that only changes Slack's endpoints can discover and verify tokens the way
-  it does Slack's.
 - Phase 5 exits only when each method names its current official sources,
   executable evidence, known deviations, and live-comparison state; an
   aggregate green suite supports that record but does not replace it.

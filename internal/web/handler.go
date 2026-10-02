@@ -1587,6 +1587,10 @@ type oauthConsentData struct {
 	State               string
 	CodeChallenge       string
 	CodeChallengeMethod string
+	// Nonce and ResponseMode carry a Sign in with Slack request through
+	// consent; the app authorization flow leaves both empty.
+	Nonce        string
+	ResponseMode string
 }
 
 type oauthWebhookChannel struct {
@@ -2590,6 +2594,8 @@ const oauthConsentMarkup = `{{define "title"}}Authorize {{.AppName}} · SameOldC
 <input type="hidden" name="state" value="{{.State}}">
 <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
 <input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
+{{if .Nonce}}<input type="hidden" name="nonce" value="{{.Nonce}}">{{end}}
+{{if .ResponseMode}}<input type="hidden" name="response_mode" value="{{.ResponseMode}}">{{end}}
 {{if .WebhookChannels}}<h2>Where its webhook posts</h2><p>This app will post to the channel you choose here.</p>
 <label class="webhook-channel">Channel<select name="incoming_webhook_channel" required>{{range .WebhookChannels}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>{{end}}
 <div class="oauth-actions"><button class="deny" type="submit" name="decision" value="deny" formnovalidate>Cancel</button><button class="approve" type="submit" name="decision" value="approve">Allow</button></div>
@@ -3872,6 +3878,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /oauth/authorize", h.oauthAuthorize)
 	mux.HandleFunc("GET /oauth/v2/authorize", h.oauthAuthorize)
 	mux.HandleFunc("POST /oauth/v2/authorize", h.oauthAuthorize)
+	mux.HandleFunc("GET /openid/connect/authorize", h.openIDAuthorize)
+	mux.HandleFunc("POST /openid/connect/authorize", h.openIDAuthorize)
+	mux.HandleFunc("GET /.well-known/openid-configuration", h.openIDConfiguration)
+	mux.HandleFunc("GET /openid/connect/keys", h.openIDKeys)
 	mux.HandleFunc("GET /app/timeline", h.timeline)
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("POST /app/read/all", h.markAllRead)
@@ -4403,6 +4413,18 @@ func (h Handler) index(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
+	h.authorize(w, r, false)
+}
+
+// openIDAuthorize is Sign in with Slack's authorization endpoint. It is the
+// app authorization flow with OpenID Connect's request shape: scope names the
+// member's own scopes and must include openid, and the relying party's nonce
+// travels through the code into the ID token.
+func (h Handler) openIDAuthorize(w http.ResponseWriter, r *http.Request) {
+	h.authorize(w, r, true)
+}
+
+func (h Handler) authorize(w http.ResponseWriter, r *http.Request, openID bool) {
 	principal, err := h.Authenticator.Authenticate(r)
 	if err != nil {
 		if r.Method == http.MethodGet && errors.Is(err, auth.ErrNotAuthenticated) && h.Login != nil {
@@ -4414,7 +4436,7 @@ func (h Handler) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost {
-		h.completeOAuthAuthorization(w, r, principal)
+		h.completeOAuthAuthorization(w, r, principal, openID)
 		return
 	}
 	fields, ok := singleValues(r.URL.Query())
@@ -4422,15 +4444,29 @@ func (h Handler) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 		h.writePageError(w, http.StatusBadRequest, "That authorization request is invalid", "One of its fields was supplied more than once.")
 		return
 	}
-	if responseType := strings.TrimSpace(fields["response_type"]); responseType != "" && responseType != "code" {
+	responseType := strings.TrimSpace(fields["response_type"])
+	if responseType != "code" && (openID || responseType != "") {
 		h.writePageError(w, http.StatusBadRequest, "That authorization request is invalid", "This server supports the authorization code flow.")
 		return
+	}
+	if openID {
+		if !slices.Contains(splitOAuthScopes(fields["scope"]), "openid") {
+			h.writePageError(w, http.StatusBadRequest, "That sign-in request is invalid", "A Sign in with Slack request must ask for the openid scope.")
+			return
+		}
+		if !validOpenIDResponseMode(fields["response_mode"]) {
+			h.writePageError(w, http.StatusBadRequest, "That sign-in request is invalid", "The response mode must be query or form_post.")
+			return
+		}
+		// Sign in with Slack's scopes are the member's own, which the app
+		// authorization flow calls user scopes.
+		fields["user_scope"], fields["scope"] = fields["scope"], ""
 	}
 	if team := strings.TrimSpace(fields["team"]); team != "" && team != string(principal.WorkspaceID) {
 		h.writePageError(w, http.StatusBadRequest, "That workspace is not available", "The requested app installation belongs to a different workspace.")
 		return
 	}
-	request := oauthAuthorizationRequest(principal, fields)
+	request := oauthAuthorizationRequest(principal, fields, openID)
 	value, err := h.Messages.InspectOAuthAuthorization(r.Context(), request)
 	if err != nil {
 		h.writeOAuthAuthorizationError(w, err)
@@ -4457,22 +4493,32 @@ func (h Handler) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 		State:               value.State,
 		CodeChallenge:       value.CodeChallenge,
 		CodeChallengeMethod: value.CodeChallengeMethod,
+		Nonce:               value.Nonce,
+		ResponseMode:        openIDResponseMode(fields, openID),
 	}, http.StatusOK, "authorization consent is temporarily unavailable")
 }
 
-func (h Handler) completeOAuthAuthorization(w http.ResponseWriter, r *http.Request, principal auth.Principal) {
+func (h Handler) completeOAuthAuthorization(w http.ResponseWriter, r *http.Request, principal auth.Principal, openID bool) {
 	fields, ok := h.decodeMutation(w, r, "The authorization request could not be read. Return to the app and try again.")
 	if !ok {
 		return
 	}
-	request := oauthAuthorizationRequest(principal, fields)
+	if openID && !validOpenIDResponseMode(fields["response_mode"]) {
+		h.writePageError(w, http.StatusBadRequest, "That sign-in request is invalid", "The response mode must be query or form_post.")
+		return
+	}
+	request := oauthAuthorizationRequest(principal, fields, openID)
+	respond := redirectOAuthAuthorization
+	if openIDResponseMode(fields, openID) == "form_post" {
+		respond = postOAuthAuthorization
+	}
 	if strings.TrimSpace(fields["decision"]) == "deny" {
 		value, err := h.Messages.InspectOAuthAuthorization(r.Context(), request)
 		if err != nil {
 			h.writeOAuthAuthorizationError(w, err)
 			return
 		}
-		redirectOAuthAuthorization(w, r, value.RedirectURI, value.State, "", "access_denied")
+		respond(w, r, value.RedirectURI, value.State, "", "access_denied")
 		return
 	}
 	if strings.TrimSpace(fields["decision"]) != "approve" {
@@ -4484,11 +4530,18 @@ func (h Handler) completeOAuthAuthorization(w http.ResponseWriter, r *http.Reque
 		h.writeOAuthAuthorizationError(w, err)
 		return
 	}
-	redirectOAuthAuthorization(w, r, value.RedirectURI, value.State, value.Code, "")
+	respond(w, r, value.RedirectURI, value.State, value.Code, "")
 }
 
-func oauthAuthorizationRequest(principal auth.Principal, fields map[string]string) domain.OAuthAuthorizationRequest {
+// oauthAuthorizationRequest reads an authorization request. nonce belongs to
+// Sign in with Slack alone, so the app authorization flow ignores one.
+func oauthAuthorizationRequest(principal auth.Principal, fields map[string]string, openID bool) domain.OAuthAuthorizationRequest {
+	nonce := ""
+	if openID {
+		nonce = strings.TrimSpace(fields["nonce"])
+	}
 	return domain.OAuthAuthorizationRequest{
+		Nonce:                  nonce,
 		ClientID:               strings.TrimSpace(fields["client_id"]),
 		WorkspaceID:            principal.WorkspaceID,
 		UserID:                 principal.UserID,

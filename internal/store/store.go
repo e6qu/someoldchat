@@ -790,6 +790,13 @@ type Store interface {
 	// ErrNotFound when the token itself is gone or revoked.
 	CompleteShortTokenRotation(ctx context.Context, tokenHash, newTokenHash string, appID domain.AppID, now time.Time) error
 	CreateOpenIDRefreshToken(context.Context, domain.OpenIDRefreshToken) error
+	// EnsureOpenIDSigningKey stores candidate as the deployment's signing key
+	// unless one is already stored, and returns the stored one. Replicas that
+	// race to create the first key therefore all sign with the same key.
+	EnsureOpenIDSigningKey(context.Context, domain.OpenIDSigningKey) (domain.OpenIDSigningKey, error)
+	// OpenIDSigningKey returns the stored signing key, or ErrNotFound before
+	// the first is created.
+	OpenIDSigningKey(context.Context) (domain.OpenIDSigningKey, error)
 	ExchangeOpenIDRefreshToken(context.Context, string, string, string, string, domain.OpenIDToken) (domain.OpenIDToken, error)
 	// LatestEventSequence is the journal position a new reader should start
 	// after: the sequence of the most recent event in the workspace, or zero

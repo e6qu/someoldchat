@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createPublicKey, verify } from "node:crypto";
 import http from "node:http";
 import { InstallProvider } from "@slack/oauth";
 import { LogLevel, WebClient } from "@slack/web-api";
@@ -433,6 +434,27 @@ assert.equal(openidToken.ok, true);
 assert.equal(openidToken.token_type, "Bearer");
 assert.equal(typeof openidToken.id_token, "string");
 assert.equal(typeof openidToken.refresh_token, "string");
+// A relying party that only changed Slack's URLs discovers this deployment's
+// issuer and key set and verifies the ID token with Node's own JWK and RS256
+// support, the way it verifies Slack's.
+const discovery = await (await fetch(`${apiOrigin}/.well-known/openid-configuration`)).json();
+assert.equal(discovery.issuer, apiOrigin);
+assert.equal(discovery.jwks_uri, `${apiOrigin}/openid/connect/keys`);
+assert.deepEqual(discovery.id_token_signing_alg_values_supported, ["RS256"]);
+const keySet = await (await fetch(discovery.jwks_uri)).json();
+const [idHeader, idPayload, idSignature] = openidToken.id_token.split(".");
+const idTokenHeader = JSON.parse(Buffer.from(idHeader, "base64url").toString());
+const idTokenClaims = JSON.parse(Buffer.from(idPayload, "base64url").toString());
+assert.equal(idTokenHeader.alg, "RS256");
+const signingJWK = keySet.keys.find((key) => key.kid === idTokenHeader.kid);
+assert.ok(signingJWK, `no published key named ${idTokenHeader.kid}`);
+assert.equal(
+	verify("RSA-SHA256", Buffer.from(`${idHeader}.${idPayload}`), createPublicKey({ key: signingJWK, format: "jwk" }), Buffer.from(idSignature, "base64url")),
+	true,
+);
+assert.equal(idTokenClaims.iss, discovery.issuer);
+assert.equal(idTokenClaims.aud, "qualification-client");
+assert.equal(idTokenClaims.sub, "U1");
 const openidInfo = await client.apiCall("openid.connect.userInfo", { token: openidToken.access_token });
 assert.equal(openidInfo.ok, true);
 assert.equal(openidInfo.sub, "U1");

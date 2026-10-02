@@ -677,6 +677,11 @@ type OAuthCode struct {
 	IncomingWebhookChannel ConversationID
 	CodeChallenge          string
 	CodeChallengeMethod    string
+	// Nonce and AuthorizedAt belong to a Sign in with Slack request: the ID
+	// token the code is redeemed for repeats the relying party's nonce and says
+	// when the member authorized it.
+	Nonce        string
+	AuthorizedAt time.Time
 }
 
 type OAuthToken struct {
@@ -699,6 +704,10 @@ type OAuthToken struct {
 	AuthedUserRefreshToken string
 	AuthedUserExpiresAt    time.Time
 	CodeVerifier           string
+	// Nonce and AuthorizedAt travel from the redeemed code to the ID token
+	// openid.connect.token signs. No response carries them otherwise.
+	Nonce        string
+	AuthorizedAt time.Time
 	// The incoming-webhook fields are populated only when the install requested
 	// the incoming-webhook scope and chose a channel: the exchange mints the
 	// webhook and the oauth.v2.access response hands its coordinates back, the
@@ -749,6 +758,9 @@ type OAuthAuthorizationRequest struct {
 	IncomingWebhookChannel ConversationID
 	CodeChallenge          string
 	CodeChallengeMethod    string
+	// Nonce is the Sign in with Slack relying party's replay guard, returned
+	// unchanged in the ID token.
+	Nonce string
 }
 
 type OAuthAuthorization struct {
@@ -767,6 +779,7 @@ type OAuthAuthorization struct {
 	IncomingWebhookChannel ConversationID
 	CodeChallenge          string
 	CodeChallengeMethod    string
+	Nonce                  string
 }
 
 // WantsIncomingWebhook reports whether this authorization requests the
@@ -779,6 +792,24 @@ func (a OAuthAuthorization) WantsIncomingWebhook() bool {
 		}
 	}
 	return false
+}
+
+// OpenIDSigningKey is the RSA key Sign in with Slack ID tokens are signed
+// with. One key serves the deployment, so every replica signs with it and a
+// relying party verifies against the one key set. The private key is stored
+// sealed under the app credential key; KeyID names it in each token's header.
+type OpenIDSigningKey struct {
+	KeyID                string
+	PrivateKeyCiphertext string
+	CreatedAt            time.Time
+}
+
+// OpenIDKey is the public half of a signing key as a JSON Web Key carries it:
+// the modulus and exponent base64url encoded.
+type OpenIDKey struct {
+	KeyID    string
+	Modulus  string
+	Exponent string
 }
 
 type OpenIDToken struct {
@@ -813,6 +844,23 @@ type OpenIDUserInfo struct {
 	UserImages        map[string]string
 	TeamImages        map[string]string
 	TeamImageDefault  bool
+}
+
+// Claims are the member's claims as Slack names them, which
+// openid.connect.userInfo returns and every ID token carries. The
+// https://slack.com/... names are Slack's literal claim keys, not URLs.
+func (v OpenIDUserInfo) Claims() map[string]any {
+	claims := map[string]any{"sub": v.Subject, "https://slack.com/user_id": v.UserID, "https://slack.com/team_id": v.WorkspaceID, "email": v.Email, "email_verified": v.EmailVerified, "name": v.Name, "given_name": v.GivenName, "family_name": v.FamilyName, "locale": v.Locale, "picture": v.Picture, "https://slack.com/team_name": v.TeamName, "https://slack.com/team_domain": v.TeamDomain, "https://slack.com/team_image_default": v.TeamImageDefault}
+	if v.DateEmailVerified != 0 {
+		claims["date_email_verified"] = v.DateEmailVerified
+	}
+	for size, image := range v.UserImages {
+		claims["https://slack.com/user_image_"+size] = image
+	}
+	for size, image := range v.TeamImages {
+		claims["https://slack.com/team_image_"+size] = image
+	}
+	return claims
 }
 
 func (d DoNotDisturb) SnoozeEnabled(now time.Time) bool {

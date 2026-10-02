@@ -148,6 +148,7 @@ type Store struct {
 	mcpServerPermissions          map[string]domain.MCPServerPermission
 	aiExcludedConversations       map[domain.ConversationID]struct{}
 	shortTokenRotations           map[string]domain.ShortTokenRotation
+	openIDSigningKey              *domain.OpenIDSigningKey
 	conversationObjects           map[string]domain.LinkedObject
 	appActivities                 []domain.AppActivity
 	anomalyAllowLists             map[domain.WorkspaceID]domain.AnomalyAllowList
@@ -6179,6 +6180,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
+	token.Nonce, token.AuthorizedAt = grant.Nonce, grant.AuthorizedAt
 	subjectID := grant.UserID
 	var tokenBotID domain.BotID
 	tokenScopes := grant.UserScopes

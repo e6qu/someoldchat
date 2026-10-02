@@ -13812,16 +13812,8 @@ func (h Handler) openIDConnectUserInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_auth")
 		return
 	}
-	response := map[string]any{"ok": true, "sub": value.Subject, "https://slack.com/user_id": value.UserID, "https://slack.com/team_id": value.WorkspaceID, "email": value.Email, "email_verified": value.EmailVerified, "name": value.Name, "given_name": value.GivenName, "family_name": value.FamilyName, "locale": value.Locale, "picture": value.Picture, "https://slack.com/team_name": value.TeamName, "https://slack.com/team_domain": value.TeamDomain, "https://slack.com/team_image_default": value.TeamImageDefault}
-	if value.DateEmailVerified != 0 {
-		response["date_email_verified"] = value.DateEmailVerified
-	}
-	for size, image := range value.UserImages {
-		response["https://slack.com/user_image_"+size] = image
-	}
-	for size, image := range value.TeamImages {
-		response["https://slack.com/team_image_"+size] = image
-	}
+	response := value.Claims()
+	response["ok"] = true
 	writeJSON(w, http.StatusOK, response)
 }
 

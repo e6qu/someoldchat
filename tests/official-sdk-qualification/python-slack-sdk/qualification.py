@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import http.client
 import io
 import json
@@ -10,7 +11,7 @@ import urllib.request
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-from slack_sdk.oauth import AuthorizeUrlGenerator
+from slack_sdk.oauth import AuthorizeUrlGenerator, OpenIDConnectAuthorizeUrlGenerator
 from slack_sdk.oauth.installation_store import FileInstallationStore, Installation
 from slack_sdk.oauth.state_store import FileOAuthStateStore
 
@@ -1110,5 +1111,64 @@ try:
     raise AssertionError("a wrong client secret was accepted")
 except SlackApiError as error:
     assert error.response["error"] == "bad_client_secret"
+
+# Sign in with Slack, as a relying party that only changed Slack's URLs walks
+# it: discover the endpoints, send the member to authorize with a nonce, redeem
+# the code, and verify the ID token against the published keys. The RS256 check
+# is RSASSA-PKCS1-v1_5 written out with the standard library, so no JWT
+# library's leniency stands between the token and the verdict.
+def base64url(value):
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def verify_rs256(token, key):
+    signed, _, signature = token.rpartition(".")
+    modulus = int.from_bytes(base64url(key["n"]), "big")
+    exponent = int.from_bytes(base64url(key["e"]), "big")
+    length = (modulus.bit_length() + 7) // 8
+    recovered = pow(int.from_bytes(base64url(signature), "big"), exponent, modulus).to_bytes(length, "big")
+    digest_info = bytes.fromhex("3031300d060960864801650304020105000420") + hashlib.sha256(signed.encode()).digest()
+    assert recovered == b"\x00\x01" + b"\xff" * (length - len(digest_info) - 3) + b"\x00" + digest_info, "the ID token signature does not verify"
+
+
+discovery = json.load(urllib.request.urlopen(api_origin + "/.well-known/openid-configuration"))
+assert discovery["issuer"] == api_origin, discovery
+assert discovery["authorization_endpoint"] == api_origin + "/openid/connect/authorize", discovery
+assert discovery["token_endpoint"] == api_origin + "/api/openid.connect.token", discovery
+assert discovery["id_token_signing_alg_values_supported"] == ["RS256"], discovery
+key_set = json.load(urllib.request.urlopen(discovery["jwks_uri"]))
+sign_in = OpenIDConnectAuthorizeUrlGenerator(
+    client_id="install-client",
+    scopes=["openid", "email", "profile"],
+    redirect_uri="https://example.com/install",
+    authorization_url=api_origin + "/qualification/openid/authorize",
+)
+sign_in_state = state_store.issue()
+sign_in_url = urllib.parse.urlparse(sign_in.generate(sign_in_state, nonce="python-nonce"))
+connection = http.client.HTTPConnection(sign_in_url.hostname, sign_in_url.port)
+connection.request("GET", sign_in_url.path + "?" + sign_in_url.query)
+signed_in = connection.getresponse()
+signed_in.read()
+assert signed_in.status == 302, signed_in.status
+sign_in_callback = urllib.parse.parse_qs(urllib.parse.urlparse(signed_in.getheader("Location")).query)
+assert state_store.consume(sign_in_callback["state"][0]) is True
+identity = oauth_client.openid_connect_token(
+    client_id="install-client",
+    client_secret="install-secret",
+    code=sign_in_callback["code"][0],
+    redirect_uri="https://example.com/install",
+)
+assert identity["ok"] is True
+id_token = identity["id_token"]
+id_header = json.loads(base64url(id_token.split(".")[0]))
+id_claims = json.loads(base64url(id_token.split(".")[1]))
+assert id_header["alg"] == "RS256", id_header
+signing_key = next(key for key in key_set["keys"] if key["kid"] == id_header["kid"])
+verify_rs256(id_token, signing_key)
+assert id_claims["iss"] == discovery["issuer"], id_claims
+assert id_claims["aud"] == "install-client", id_claims
+assert id_claims["nonce"] == "python-nonce", id_claims
+assert id_claims["sub"] == "U1" and id_claims["https://slack.com/team_id"] == "T1", id_claims
+assert id_claims["exp"] > time.time() >= id_claims["iat"] - 60, id_claims
 
 print("python-slack-sdk qualification passed")

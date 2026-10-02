@@ -243,6 +243,8 @@ type Service interface {
 	CompleteShortTokenRotation(context.Context, string, string, string, string) (string, error)
 	OpenIDConnectToken(context.Context, string, string, string, string, string, string, string) (domain.OpenIDToken, error)
 	OpenIDConnectUserInfo(context.Context, string) (domain.OpenIDUserInfo, error)
+	// OpenIDKeys is the public key set Sign in with Slack ID tokens verify against.
+	OpenIDKeys(context.Context) ([]domain.OpenIDKey, error)
 	CreateRTMConnection(context.Context, domain.WorkspaceID, domain.UserID) (domain.RTMConnection, error)
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
 	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error

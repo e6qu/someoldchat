@@ -211,15 +211,29 @@ browser validator for direct and catalog entry, silent SSO, application and
 provider global logout, witness-session revocation, exact bridge routing,
 identity, release, and credential-boundary behavior.
 
-The Slack-compatible Sign in with Slack API is separate from the browser login
-provider configuration. `POST /api/openid.connect.token` exchanges a durable,
-single-use authorization code or rotates a durable refresh token. The exchange
-requires the `openid` scope and verifies Proof Key for Code Exchange when the
-authorization code carries a challenge. `POST /api/openid.connect.userInfo`
-accepts the resulting bearer token and returns the Slack-shaped user identity.
-These methods use the same selected storage backend in local and distributed
-composition; distributed composition reaches the implementation through the
-generated gRPC client.
+The Slack-compatible Sign in with Slack provider is separate from the browser
+login provider configuration: here SameOldChat is the identity provider, and an
+app's relying party points at this deployment where it would point at Slack.
+
+- `GET /.well-known/openid-configuration` is the discovery document. Its
+  issuer is `-auth-public-url`; without one the document answers 404, because a
+  relying party compares every ID token's `iss` against it.
+- `GET /openid/connect/authorize` takes `response_type=code`, a `scope` that
+  includes `openid`, and an optional `nonce`, and asks the signed-in member to
+  consent. The response arrives in the redirect's query, or by `form_post` when
+  `response_mode=form_post` is requested.
+- `POST /api/openid.connect.token` exchanges the single-use code, or rotates a
+  durable refresh token, and verifies Proof Key for Code Exchange when the code
+  carries a challenge. Its ID token is signed RS256, names its key by `kid`, and
+  repeats the request's `nonce`.
+- `GET /openid/connect/keys` publishes the signing key as a JSON Web Key Set.
+- `POST /api/openid.connect.userInfo` returns the Slack-shaped identity for the
+  resulting bearer token.
+
+The deployment has one signing key. The chat service creates it on first use
+and stores it sealed under `-app-credential-key-hex`, so every replica, in
+local and distributed composition alike, signs with the same key and no
+separate key needs provisioning.
 
 ## Administration
 

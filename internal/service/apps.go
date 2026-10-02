@@ -784,6 +784,7 @@ func (m Messages) InspectOAuthAuthorization(ctx context.Context, request domain.
 	request.State = strings.TrimSpace(request.State)
 	request.CodeChallenge = strings.TrimSpace(request.CodeChallenge)
 	request.CodeChallengeMethod = strings.TrimSpace(request.CodeChallengeMethod)
+	request.Nonce = strings.TrimSpace(request.Nonce)
 	if request.ClientID == "" || request.WorkspaceID == "" || request.UserID == "" {
 		return domain.OAuthAuthorization{}, domain.ErrInvalidOAuth
 	}
@@ -837,6 +838,7 @@ func (m Messages) InspectOAuthAuthorization(ctx context.Context, request domain.
 		IncomingWebhookChannel: request.IncomingWebhookChannel,
 		CodeChallenge:          request.CodeChallenge,
 		CodeChallengeMethod:    request.CodeChallengeMethod,
+		Nonce:                  request.Nonce,
 	}, nil
 }
 
@@ -904,6 +906,8 @@ func (m Messages) AuthorizeOAuth(ctx context.Context, request domain.OAuthAuthor
 		IncomingWebhookChannel: authorization.IncomingWebhookChannel,
 		CodeChallenge:          authorization.CodeChallenge,
 		CodeChallengeMethod:    authorization.CodeChallengeMethod,
+		Nonce:                  authorization.Nonce,
+		AuthorizedAt:           time.Now().UTC(),
 	}
 	granted, err := m.Store.CreateOAuthAuthorization(ctx, botUser, bot, grant)
 	if err != nil {

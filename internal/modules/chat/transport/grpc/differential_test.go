@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -7205,6 +7206,7 @@ func parityCases() []parityCase {
 				oidcRequest := oauthRequest
 				oidcRequest.State = "state-oidc"
 				oidcRequest.UserScopes = []string{"openid", "email", "profile"}
+				oidcRequest.Nonce = "nonce-oidc"
 				oidcAuthorized, err := chat.AuthorizeOAuth(ctx, oidcRequest)
 				if err != nil {
 					return nil, err
@@ -7217,6 +7219,18 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The key set is the deployment's, so both compositions publish
+				// one key, and the ID token names it and repeats the nonce.
+				openIDKeys, err := chat.OpenIDKeys(ctx)
+				if err != nil {
+					return nil, err
+				}
+				idTokenParts := strings.Split(openID.IDToken, ".")
+				if len(idTokenParts) != 3 || len(openIDKeys) != 1 {
+					return nil, fmt.Errorf("id token %q against %d keys", openID.IDToken, len(openIDKeys))
+				}
+				idTokenHeader, _ := base64.RawURLEncoding.DecodeString(idTokenParts[0])
+				idTokenClaims, _ := base64.RawURLEncoding.DecodeString(idTokenParts[1])
 				refreshed, err := chat.OAuthV2Refresh(ctx, credentials.ClientID, credentials.ClientSecret, oauthToken.RefreshToken)
 				if err != nil {
 					return nil, err
@@ -7252,6 +7266,7 @@ func parityCases() []parityCase {
 				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), len(listed), revokeOneErr == nil, revokedCount, strangerRevoke != nil, updated.Name, updated.ManifestVersion, distributed.Distribution, reprivatized.Distribution, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != "",
 					v1Token.AccessToken != "", string(v1Token.TokenType), len(v1Token.Scopes) > 0,
 					openID.IDToken != "", openID.AccessToken != "",
+					strings.Contains(string(idTokenHeader), `"kid":"`+openIDKeys[0].KeyID+`"`), strings.Contains(string(idTokenClaims), `"nonce":"nonce-oidc"`),
 					len(externalProviders), externalProviders[0].Name, externalProviders[0].ClientID, externalProviders[0].ClientSecretCiphertext == "",
 					strings.Contains(authorizeURL, "acme.test/authorize"), strings.Contains(authorizeURL, "client_id=ext-cid"), strayConnect != nil, missingProvider != nil,
 					string(userInfo.UserID), string(userInfo.WorkspaceID), userInfo.Email, userInfo.TeamName, revoked.Revoked}, nil

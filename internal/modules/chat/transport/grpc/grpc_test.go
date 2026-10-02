@@ -290,7 +290,7 @@ func TestRemoteOpenIDConnectUsesTheProcessIndependentContract(t *testing.T) {
 	if err := store.CreateOAuthCode(ctx, domain.OAuthCode{Code: "code", ClientID: "client", WorkspaceID: "T1", UserID: "U1", Scopes: append(auth.AllScopes(), "openid"), RedirectURI: "https://callback"}); err != nil {
 		t.Fatal(err)
 	}
-	remote := servedRemote(t, service.Messages{Store: store}, store)
+	remote := servedRemote(t, service.Messages{Store: store, AppCredentialKey: []byte(strings.Repeat("k", 32))}, store)
 	token, err := remote.OpenIDConnectToken(ctx, "client", "secret", "code", "https://callback", "authorization_code", "", "")
 	if err != nil || token.AccessToken == "" || token.IDToken == "" || token.RefreshToken == "" {
 		t.Fatalf("token=%+v err=%v", token, err)
