@@ -4,7 +4,6 @@ package dqlite
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"net"
 	"strings"
@@ -28,7 +27,6 @@ type Config struct {
 type Store struct {
 	*sqlstore.Store
 	application   *app.App
-	database      *sql.DB
 	dial          client.DialFunc
 	externalClose func() error
 }
@@ -76,11 +74,16 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 	if err != nil {
 		return nil, errors.Join(err, database.Close(), closeExternal(config.ExternalClose), application.Close())
 	}
-	return &Store{Store: repositories, application: application, database: database, dial: dial, externalClose: config.ExternalClose}, nil
+	return &Store{Store: repositories, application: application, dial: dial, externalClose: config.ExternalClose}, nil
 }
 
+// Close stops the store's own writers before the node they write through.
+// The embedded repository's Close stops and awaits its data-migration drain
+// and then closes the database handle; closing the handle directly skipped the
+// drain, so the node could be stopped with a drain write still being
+// replicated, which aborts the process inside libdqlite.
 func (s *Store) Close() error {
-	dbErr := s.database.Close()
+	dbErr := s.Store.Close()
 	externalErr := closeExternal(s.externalClose)
 	appErr := s.application.Close()
 	return errors.Join(dbErr, externalErr, appErr)
