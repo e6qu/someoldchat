@@ -63,4 +63,9 @@ package mutation
 // own dialog and drives AddStar in its channel form; service tests refuse a
 // non-member the options load, an outsider the Messages tab before the app is
 // examined, and a non-member a private channel's star.
-const survivingGuardCeiling = 75
+//
+// 75 to 73: the adopted admin.usergroups.* methods share saveUserGroup with
+// usergroups.create and update, and the agent session and app permission
+// suites drive their guards, so two operations whose guard used to run on
+// unnoticed are now caught.
+const survivingGuardCeiling = 73
