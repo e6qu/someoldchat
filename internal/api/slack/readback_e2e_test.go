@@ -130,7 +130,7 @@ func readBackJourneys() []readBack {
 		},
 		{
 			name:   "a custom emoji is in the emoji list",
-			mutate: "/api/admin.emoji.add", form: url.Values{"name": {"readback-emoji"}, "url": {"https://example.test/e.png"}},
+			mutate: "/api/admin.emoji.add", form: url.Values{"name": {"readback-emoji"}, "url": {"https://example.test/e.png"}}, asUser: true,
 			read: "/api/emoji.list", readForm: url.Values{},
 			expect: "readback-emoji",
 		},

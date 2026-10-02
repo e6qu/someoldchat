@@ -120,12 +120,14 @@ type Shortcut struct {
 // A manifest that asked for one under scopes.bot was accepted, and the
 // installed bot then held a scope no Slack bot can: dnd:write let it snooze
 // its installer, stars:* read their saved items, identity.* sign them in.
+// Admin scopes are user-token-only too: Slack grants them to an
+// administrator's user token and refuses a bot on every admin method.
 func userTokenOnlyScope(scope string) bool {
 	switch scope {
-	case "dnd:write", "stars:read", "stars:write", "search:read", "users.profile:write":
+	case "dnd:write", "stars:read", "stars:write", "search:read", "users.profile:write", "app_configurations:write", "admin":
 		return true
 	}
-	return strings.HasPrefix(scope, "identity.")
+	return strings.HasPrefix(scope, "identity.") || strings.HasPrefix(scope, "admin.")
 }
 
 func Parse(raw string) (Parsed, []Error) {

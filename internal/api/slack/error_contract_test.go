@@ -127,7 +127,7 @@ func TestHandledFailuresAreHTTP200WithAPinnedErrorCode(t *testing.T) {
 // client could not distinguish success from failure. Every one must now name the
 // cause with a code from the pinned enums.
 func TestDecodeFailuresNameTheirCauseInsteadOfReturningAnEmptyBody(t *testing.T) {
-	handler, _ := testHandlerWithStore()
+	handler, _ := testUserHandlerWithStore()
 	cases := []struct {
 		name string
 		path string
@@ -204,7 +204,7 @@ func TestPostPayloadWithoutAUsableContentTypeIsNamed(t *testing.T) {
 // returned an empty map with no error, so `limit` and `cursor` were dropped and
 // the response looked successful.
 func TestJSONPaginationArgumentsSurviveTheSecondDecode(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	for index := 0; index < 5; index++ {
 		store.SeedUser(domain.User{ID: domain.UserID("UP" + strconv.Itoa(index)), WorkspaceID: "T1", Name: "user" + strconv.Itoa(index)})
 	}
@@ -974,7 +974,7 @@ func TestOpenIDConnectTokenRefusesCredentialsInTheURL(t *testing.T) {
 // must all be indistinguishable rejections; anything else is an unauthenticated
 // post-to-any-channel hole.
 func TestIncomingWebhookRejectsEverySecretItDidNotIssue(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
@@ -1067,7 +1067,7 @@ func TestIncomingWebhookRejectsEverySecretItDidNotIssue(t *testing.T) {
 // workspace-A token could attach A's channel to workspace B. The pinned parameter
 // description requires every workspace to belong to the token's organization.
 func TestAdminTeamMutationsRejectAForeignWorkspace(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "other"})
 	response := callAPI(t, handler, http.MethodPost, "/api/admin.conversations.setTeams", "channel_id=C1&target_team_ids=T2")
 	if envelope := decodeEnvelope(t, response); envelope.OK || envelope.Error != "invalid_team" {
@@ -1237,7 +1237,7 @@ func TestParseIDListUnderstandsBothDocumentedListForms(t *testing.T) {
 // which the pinned 200 example carries — even though the admin projection already
 // existed and was already used by the web UI.
 func TestAdminUsersListReturnsTheAdminProjection(t *testing.T) {
-	handler, repository := testHandlerWithStore()
+	handler, repository := testUserHandlerWithStore()
 	guest := domain.User{ID: "UG", WorkspaceID: "T1", Email: "guest@example.com", Name: "guest"}
 	if err := repository.CreateUser(context.Background(), guest, domain.WorkspaceMembership{
 		WorkspaceID: "T1", UserID: guest.ID, Role: domain.WorkspaceRoleMember,

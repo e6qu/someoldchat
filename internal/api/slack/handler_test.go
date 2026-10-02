@@ -206,7 +206,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeGroupsHistory, auth.ScopeIMHistory, auth.ScopeMPIMHistory, auth.ScopeGroupsRead, auth.ScopeIMRead, auth.ScopeMPIMRead, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeAdminBarriersRead, auth.ScopeAdminBarriersWrite, auth.ScopeAdminAnalyticsRead, auth.ScopeAuditLogsRead, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeGroupsHistory, auth.ScopeIMHistory, auth.ScopeMPIMHistory, auth.ScopeGroupsRead, auth.ScopeIMRead, auth.ScopeMPIMRead, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTriggersRead, auth.ScopeTriggersWrite, auth.ScopeTokensBasic, auth.ScopeAppConfigurationsWrite, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminWorkflowsRead, auth.ScopeAdminWorkflowsWrite, auth.ScopeAdminRolesRead, auth.ScopeAdminRolesWrite, auth.ScopeAdminBarriersRead, auth.ScopeAdminBarriersWrite, auth.ScopeAdminAnalyticsRead, auth.ScopeAuditLogsRead, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -227,6 +227,18 @@ func testHandlerWithScopes(scopes ...auth.Scope) (http.Handler, *memory.Store) {
 // /files.upload and /users.setPhoto declare.
 func testHandlerWithStoredTokenAuth(scopes ...auth.Scope) (http.Handler, *memory.Store) {
 	return testFixture(true, scopes...)
+}
+
+// testUserHandler and testUserHandlerWithScopes are the user-token
+// counterparts of testHandler and testHandlerWithScopes, for admin methods:
+// Slack grants admin scopes to user tokens only and refuses a bot.
+func testUserHandler() http.Handler {
+	handler, _ := testUserHandlerWithStore()
+	return handler
+}
+
+func testUserHandlerWithScopes(scopes ...auth.Scope) (http.Handler, *memory.Store) {
+	return testFixtureAs(false, domain.TokenUser, scopes...)
 }
 
 func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store) {
@@ -302,7 +314,6 @@ func testHandlerValueAs(stored bool, tokenType domain.TokenType, scopes ...auth.
 	s.SeedConversationMember("C1", "U1")
 	s.SeedConversationMember("C1", "U2")
 	s.SeedConversationMember("C2", "U1")
-	s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: auth.AllScopes()})
 	if err := s.CreateOAuthClient(context.Background(), domain.OAuthClient{ID: "oauth-client", SecretHash: domain.HashToken("oauth-secret"), AppID: "A1"}); err != nil {
 		panic(err)
 	}
@@ -324,10 +335,14 @@ func testHandlerValueAs(stored bool, tokenType domain.TokenType, scopes ...auth.
 	if tokenType == domain.TokenUser {
 		botID = ""
 	}
+	// The store holds `token` as the same principal the authenticator presents,
+	// so a handler that reads the token record back sees what the caller holds.
+	// It used to be seeded a second time as an all-scope bot first, which made
+	// the stored fixture's requested type and scopes silently ineffective.
+	if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: botID, TokenType: tokenType, Scopes: names}); err != nil {
+		panic(err)
+	}
 	if stored {
-		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: botID, TokenType: tokenType, Scopes: names}); err != nil {
-			panic(err)
-		}
 		value, err := auth.NewStored(s)
 		if err != nil {
 			panic(err)
@@ -418,7 +433,7 @@ func TestEntityMethodsAcceptStructuredWorkObjectPayloads(t *testing.T) {
 }
 
 func TestAdminInviteRequestLifecycle(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	for _, request := range []domain.InviteRequest{
 		{ID: "IR-approve", WorkspaceID: "T1", Email: "approve@example.com", RequestedBy: "U1", Status: domain.InviteRequestPending, CreatedAt: now},
@@ -461,7 +476,7 @@ func TestAdminInviteRequestLifecycle(t *testing.T) {
 }
 
 func TestAdminAppRequestsList(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	if err := store.SetAppApproval(context.Background(), "T1", "A2", "R2", domain.AppApprovalRequested, now, events.Event{ID: "event-app-request", WorkspaceID: "T1", ActorID: "U1", Topic: "app.requested", Payload: "A2", CreatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -476,7 +491,7 @@ func TestAdminAppRequestsList(t *testing.T) {
 }
 
 func TestAdminUsersSessionInvalidateRevokesSession(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	if err := store.SeedSession(context.Background(), "session-1", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
@@ -903,7 +918,7 @@ func TestTeamPreferencesListReturnsEnforcedWorkspacePolicies(t *testing.T) {
 func TestIntegrationLogsHTTPExposeActorAttribution(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/team.integrationLogs?token=token&app_id=A1&team_id=Tother&count=25", nil)
 	response := httptest.NewRecorder()
-	testHandler().ServeHTTP(response, request)
+	testUserHandler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
@@ -1534,7 +1549,7 @@ func TestCallsLifecycle(t *testing.T) {
 }
 
 func TestAdminAppsApprovalHTTPWorkflow(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	approve := httptest.NewRequest(http.MethodPost, "/api/admin.apps.approve", strings.NewReader("team_id=T1&app_id=A1&request_id=R1"))
 	approve.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	approve.Header.Set("Authorization", "Bearer token")
@@ -1568,7 +1583,7 @@ func TestAdminAppsApprovalHTTPWorkflow(t *testing.T) {
 }
 
 func TestTeamBillableInfoUsesDurableMembershipState(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	request := httptest.NewRequest(http.MethodGet, "/api/team.billableInfo?user=U1", nil)
 	request.Header.Set("Authorization", "Bearer token")
 	result := httptest.NewRecorder()
@@ -1579,7 +1594,7 @@ func TestTeamBillableInfoUsesDurableMembershipState(t *testing.T) {
 }
 
 func TestAccessLogsRequireAdminAndExposeRecordedAccess(t *testing.T) {
-	handler, s := testHandlerWithStore()
+	handler, s := testUserHandlerWithStore()
 	port := 40000
 	get := func(path string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
@@ -1642,7 +1657,7 @@ func TestAccessLogsRequireAdminAndExposeRecordedAccess(t *testing.T) {
 }
 
 func TestAdminUsersListIsBoundedAndWorkspaceScoped(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	request := httptest.NewRequest(http.MethodGet, "/api/admin.users.list?team_id=T1&limit=1", nil)
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
@@ -1662,7 +1677,7 @@ func TestAdminUsersListIsBoundedAndWorkspaceScoped(t *testing.T) {
 }
 
 func TestAdminUsersInvitePersistsRequiredInviteParameters(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.invite", strings.NewReader("team_id=T1&email=Alice%40Example.com&channel_ids=C1%2CC1&custom_message=Welcome&real_name=Alice+Example&resend=true&is_restricted=true&guest_expiration_ts=4102444800"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer token")
@@ -1803,7 +1818,7 @@ func TestAppsUninstallRevokesTheWholeMatchingInstallation(t *testing.T) {
 }
 
 func TestAdminConversationTeamsAreExplicitlySingleWorkspace(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	get := httptest.NewRequest(http.MethodGet, "/api/admin.conversations.getTeams?channel_id=C1&limit=1", nil)
 	get.Header.Set("Authorization", "Bearer token")
 	result := httptest.NewRecorder()
@@ -1830,7 +1845,7 @@ func TestAdminConversationTeamsAreExplicitlySingleWorkspace(t *testing.T) {
 }
 
 func TestAdminConversationSharedDisconnectAndEKMInfo(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	set := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.setTeams", strings.NewReader("channel_id=C1&target_team_ids=T1&org_channel=false"))
 	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	set.Header.Set("Authorization", "Bearer token")
@@ -1861,7 +1876,7 @@ func TestAdminConversationSharedDisconnectAndEKMInfo(t *testing.T) {
 // requires the owning app to still be installed, so exactly the workflows most
 // worth stopping were the ones that could not be.
 func TestAdminWorkflowSearchAndUnpublishReachWhatMembersCannot(t *testing.T) {
-	handler, repository := testHandlerWithStore()
+	handler, repository := testUserHandlerWithStore()
 	post := func(path, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -1921,7 +1936,7 @@ func TestAdminWorkflowSearchAndUnpublishReachWhatMembersCannot(t *testing.T) {
 // administrator had to decide whether to sign somebody out without being able
 // to see what they would be ending.
 func TestAdminSessionListShowsSessionsWithoutTheirTokens(t *testing.T) {
-	handler, s := testHandlerWithStore()
+	handler, s := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	if err := s.SeedSession(context.Background(), "member-token", domain.SessionRecord{
 		WorkspaceID: "T1", UserID: "U2", Scopes: []string{string(auth.ScopeChatWrite)},
@@ -1973,7 +1988,9 @@ func TestAdminSessionListShowsSessionsWithoutTheirTokens(t *testing.T) {
 // per-channel form already existed; the question "who are we connected to, and
 // end it everywhere" had no answer at all.
 func TestExternalTeamsListAndDisconnectSpanEveryChannel(t *testing.T) {
-	handler, s := testHandlerWithStore()
+	// Slack grants team.externalTeams.* to the bot of a Slack Connect app,
+	// holding conversations.connect:manage and, to list, team:read.
+	handler, s := testFixture(false, auth.ScopeConversationsConnectManage, auth.ScopeTeamRead)
 	s.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Partner"})
 	post := func(path, body string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -2019,7 +2036,7 @@ func TestExternalTeamsListAndDisconnectSpanEveryChannel(t *testing.T) {
 }
 
 func TestAdminUserGroupAddTeamsValidatesWorkspaceTopology(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	create := httptest.NewRequest(http.MethodPost, "/api/usergroups.create", strings.NewReader("name=Engineering&handle=engineering"))
 	create.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	create.Header.Set("Authorization", "Bearer token")
@@ -2055,7 +2072,7 @@ func TestAdminUserGroupAddTeamsValidatesWorkspaceTopology(t *testing.T) {
 }
 
 func TestUserGroupLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	form := func(path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -2146,7 +2163,7 @@ func TestUserGroupLifecycle(t *testing.T) {
 }
 
 func TestAdminTeamsCreatePersistsNewWorkspace(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.teams.create", strings.NewReader("team_domain=second-workspace&team_name=Second%20Workspace&team_description=created"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer token")
@@ -2158,7 +2175,7 @@ func TestAdminTeamsCreatePersistsNewWorkspace(t *testing.T) {
 }
 
 func TestAdminUsersRemoveDeactivatesUser(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	if err := store.SeedToken(context.Background(), "user-two-token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes()}); err != nil {
 		t.Fatal(err)
 	}
@@ -2209,7 +2226,7 @@ func TestAdminUsersRemoveDeactivatesUser(t *testing.T) {
 }
 
 func TestAdminUsersAssignReactivatesAndJoinsChannels(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	remove := httptest.NewRequest(http.MethodPost, "/api/admin.users.remove", strings.NewReader("team_id=T1&user_id=U2"))
 	remove.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	remove.Header.Set("Authorization", "Bearer token")
@@ -2250,7 +2267,7 @@ func TestAdminUsersRoleMutationsUseTypedRoles(t *testing.T) {
 }
 
 func TestAdminUsersSetExpirationAcceptsEpochAndClear(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	for _, expiration := range []string{"1", "0"} {
 		request := httptest.NewRequest(http.MethodPost, "/api/admin.users.setExpiration", strings.NewReader("team_id=T1&user_id=U2&expiration_ts="+expiration))
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -2268,7 +2285,7 @@ func TestAdminUsersSetExpirationAcceptsEpochAndClear(t *testing.T) {
 // outside the workspace is refused before any row lands, so a request that
 // names one leaves nothing behind.
 func TestAdminRoleAssignments(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	call := func(t *testing.T, method, endpoint, body string) map[string]any {
 		t.Helper()
 		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
@@ -2331,7 +2348,7 @@ func TestAdminRoleAssignments(t *testing.T) {
 // names one policy and one entity type; anything else is refused rather than
 // stored as a policy nothing enforces.
 func TestAdminAuthPolicyEntities(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	call := func(t *testing.T, method, endpoint, body string) map[string]any {
 		t.Helper()
 		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
@@ -2391,7 +2408,7 @@ func TestAdminAuthPolicyEntities(t *testing.T) {
 // contract. A member on the workspace default is named in no_settings_applied
 // and not reported with zeros, and a duration under eight hours is refused.
 func TestAdminUsersSessionSettings(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	call := func(t *testing.T, method, endpoint, body string) map[string]any {
 		t.Helper()
 		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
@@ -2449,7 +2466,7 @@ func TestAdminUsersSessionSettings(t *testing.T) {
 // every subject Slack declares or it is refused: one that stopped direct
 // messages but not calls would read as a barrier and leave a way through.
 func TestAdminBarriers(t *testing.T) {
-	handler, target := testHandlerWithStore()
+	handler, target := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	for _, group := range []domain.UserGroup{
 		{ID: "S1", WorkspaceID: "T1", Name: "Traders", Handle: "traders", Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now},
@@ -2525,7 +2542,7 @@ func TestAdminBarriers(t *testing.T) {
 // left out of the reply, and named_entities naming nobody is refused: it would
 // read as a narrowing and open the resource to no one.
 func TestAdminAutomationPermissions(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	call := func(t *testing.T, method, endpoint, body string) map[string]any {
 		t.Helper()
 		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
@@ -2592,7 +2609,7 @@ func TestAdminAutomationPermissions(t *testing.T) {
 // defaults, and clearing a resolution leaves the app undecided rather than
 // restricted.
 func TestAdminAppConfigAndResolution(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	call := func(t *testing.T, method, endpoint, body string) map[string]any {
 		t.Helper()
 		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
@@ -2665,7 +2682,7 @@ func TestAdminAppConfigAndResolution(t *testing.T) {
 // admin.conversations.* contract: the lookup, the two bulk settings and the
 // object links. A batch naming a channel that is not here changes nothing.
 func TestAdminConversationAdministration(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	call := func(t *testing.T, method, endpoint, body string) map[string]any {
 		t.Helper()
 		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
@@ -2731,7 +2748,7 @@ func TestAdminConversationAdministration(t *testing.T) {
 // emit is refused rather than ignored: ignoring it would answer every entry to
 // a caller that asked for a narrow set.
 func TestAppActivityLog(t *testing.T) {
-	handler, target := testHandlerWithStore()
+	handler, target := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	for index, level := range []domain.ActivityLevel{domain.ActivityInfo, domain.ActivityError} {
 		if err := target.RecordAppActivity(context.Background(), domain.AppActivity{
@@ -2799,7 +2816,7 @@ func TestAppActivityLog(t *testing.T) {
 // gzipped stream of JSON lines, which is what Slack answers: the file is meant
 // to be piped to a store rather than parsed out of a JSON envelope.
 func TestAdminAnalytics(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	get := func(t *testing.T, endpoint, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodPost, "/api/"+endpoint, strings.NewReader(body))
@@ -2868,7 +2885,7 @@ func TestAdminAnalytics(t *testing.T) {
 // starts in, not a missing one, and an address without a reason is refused: an
 // exclusion nobody explained is one nobody can review later.
 func TestAdminAuditBillingAndExports(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	call := func(t *testing.T, method, endpoint, body string) map[string]any {
 		t.Helper()
 		request := httptest.NewRequest(method, "/api/"+endpoint, strings.NewReader(body))
@@ -2936,7 +2953,7 @@ func TestAdminAuditBillingAndExports(t *testing.T) {
 // external credential's secret never reaches the caller, and the assistant's
 // context is the member's own search rather than a wider one.
 func TestAppCredentialsAndAssistantSearch(t *testing.T) {
-	handler, target := testHandlerWithStore()
+	handler, target := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	if err := target.SetExternalAuthToken(context.Background(), domain.ExternalAuthToken{
 		ID: "Et1", AppID: "A1", WorkspaceID: "T1", UserID: "U1", Provider: "example",
@@ -3017,7 +3034,7 @@ func TestAppCredentialsAndAssistantSearch(t *testing.T) {
 // whether or not they were signed in, and a member who is genuinely absent is
 // still refused.
 func TestAdminUsersSessionResetIsIdempotentButStillFindsTheMember(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	reset := func(t *testing.T, user string) map[string]any {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.reset", strings.NewReader("team_id=T1&user_id="+user))
@@ -3047,7 +3064,7 @@ func TestAdminUsersSessionResetIsIdempotentButStillFindsTheMember(t *testing.T) 
 // that each answered ok, which a handler that acknowledged and changed nothing
 // would also have satisfied; the state is read back now.
 func TestAdminConversationRenameArchiveAndUnarchiveTakeEffect(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	read := func(t *testing.T, channel string) map[string]any {
 		t.Helper()
 		return adminCall(t, handler, http.MethodPost, "conversations.info", "channel="+channel)["channel"].(map[string]any)
@@ -3078,7 +3095,7 @@ func TestAdminConversationRenameArchiveAndUnarchiveTakeEffect(t *testing.T) {
 }
 
 func TestAdminConversationDeleteRemovesPublicChannel(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.delete", strings.NewReader("channel_id=C1"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer token")
@@ -3101,7 +3118,7 @@ func TestAdminConversationCreateUsesDurableConversationBoundary(t *testing.T) {
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
-	testHandler().ServeHTTP(response, request)
+	testUserHandler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"admin-created"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
@@ -3110,7 +3127,7 @@ func TestAdminConversationCreateUsesDurableConversationBoundary(t *testing.T) {
 // TestAdminConversationInviteAddsTheMember holds admin.conversations.invite.
 // Asserting ok alone said nothing about whether anybody joined.
 func TestAdminConversationInviteAddsTheMember(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	store.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol"})
 	if invited := adminCall(t, handler, http.MethodPost, "admin.conversations.invite", "channel_id=C1&users=U3"); invited["ok"] != true {
 		t.Fatalf("invite=%v", invited)
@@ -3128,7 +3145,7 @@ func TestAdminConversationInviteAddsTheMember(t *testing.T) {
 // admin.conversations.convertToPrivate. The reply saying is_private is not the
 // same as the channel being private afterwards, so the state is read back.
 func TestAdminConversationConvertToPrivateTakesEffect(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	converted := adminCall(t, handler, http.MethodPost, "admin.conversations.convertToPrivate", "channel_id=C1")
 	if converted["channel"].(map[string]any)["is_private"] != true {
 		t.Fatalf("convertToPrivate=%v", converted)
@@ -3143,7 +3160,7 @@ func TestAdminConversationConvertToPrivateTakesEffect(t *testing.T) {
 }
 
 func TestAdminConversationPrefsLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	set := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.setConversationPrefs", strings.NewReader(`channel_id=C1&prefs={"can_thread":{"type":["regular_members"],"user":["U1"]},"who_can_post":{"type":["admins"],"user":[]}}`))
 	set.Header.Set("Authorization", "Bearer token")
 	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -3166,7 +3183,7 @@ func TestAdminConversationPrefsLifecycle(t *testing.T) {
 // the unrestricted posting setting, and rejecting it broke SDK compatibility;
 // this keeps that catchable in make check rather than only in the CI SDK job.
 func TestAdminConversationPrefsAcceptsTheEveryoneToken(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	set := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.setConversationPrefs", strings.NewReader(`channel_id=C1&prefs={"can_thread":{"type":["everyone"]},"who_can_post":{"type":["everyone"]}}`))
 	set.Header.Set("Authorization", "Bearer token")
 	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -4298,7 +4315,7 @@ func TestEmojiList(t *testing.T) {
 }
 
 func TestAdminEmojiLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	call := func(endpoint, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/"+endpoint, strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer token")
@@ -4373,14 +4390,14 @@ func TestAdminConversationSearchIsRegistered(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/admin.conversations.search?query=general&limit=10", nil)
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
-	testHandler().ServeHTTP(response, request)
+	testUserHandler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"general"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
 }
 
 func TestAdminUserGroupChannelMembershipIsRegistered(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	create := httptest.NewRequest(http.MethodPost, "/api/usergroups.create", strings.NewReader("name=Engineering&handle=engineering"))
 	create.Header.Set("Authorization", "Bearer token")
 	create.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -4412,7 +4429,7 @@ func TestAdminUserGroupChannelMembershipIsRegistered(t *testing.T) {
 }
 
 func TestAdminTeamSettingsNameLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	set := httptest.NewRequest(http.MethodPost, "/api/admin.teams.settings.setName", strings.NewReader("name=Renamed%20Team"))
 	set.Header.Set("Authorization", "Bearer token")
 	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -4431,7 +4448,7 @@ func TestAdminTeamSettingsNameLifecycle(t *testing.T) {
 }
 
 func TestAdminTeamSettingsDescriptionLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	set := httptest.NewRequest(http.MethodPost, "/api/admin.teams.settings.setDescription", strings.NewReader("description=Workspace%20description"))
 	set.Header.Set("Authorization", "Bearer token")
 	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -4450,7 +4467,7 @@ func TestAdminTeamSettingsDescriptionLifecycle(t *testing.T) {
 }
 
 func TestAdminTeamSettingsDiscoverabilityLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	set := httptest.NewRequest(http.MethodPost, "/api/admin.teams.settings.setDiscoverability", strings.NewReader("discoverability=invite_only"))
 	set.Header.Set("Authorization", "Bearer token")
 	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -4469,7 +4486,7 @@ func TestAdminTeamSettingsDiscoverabilityLifecycle(t *testing.T) {
 }
 
 func TestAdminTeamSettingsIconLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	set := httptest.NewRequest(http.MethodPost, "/api/admin.teams.settings.setIcon", strings.NewReader("image_url=https%3A%2F%2Fcdn.example%2Ficon.png"))
 	set.Header.Set("Authorization", "Bearer token")
 	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -4488,7 +4505,7 @@ func TestAdminTeamSettingsIconLifecycle(t *testing.T) {
 }
 
 func TestAdminTeamSettingsDefaultChannelsLifecycle(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	set := httptest.NewRequest(http.MethodPost, "/api/admin.teams.settings.setDefaultChannels", strings.NewReader("channel_ids=C1%2CC1"))
 	set.Header.Set("Authorization", "Bearer token")
 	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -4510,7 +4527,7 @@ func TestAdminTeamListIsRegistered(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/admin.teams.list", nil)
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
-	testHandler().ServeHTTP(response, request)
+	testUserHandler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"T1"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
@@ -4605,7 +4622,7 @@ func TestUsersSetPhotoAcceptsOfficialMultipartField(t *testing.T) {
 }
 
 func TestUsersSetActiveAndAdminTeamRoleLists(t *testing.T) {
-	handler := testHandler()
+	handler := testUserHandler()
 	active := httptest.NewRequest(http.MethodPost, "/api/users.setActive", strings.NewReader(""))
 	active.Header.Set("Authorization", "Bearer token")
 	activeResult := httptest.NewRecorder()

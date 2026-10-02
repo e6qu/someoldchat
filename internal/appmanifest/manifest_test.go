@@ -195,7 +195,7 @@ func TestParseRejectsMalformedCurrentManifestFields(t *testing.T) {
 }
 
 func TestParseRejectsUserOnlyScopesRequestedForTheBot(t *testing.T) {
-	for _, scope := range []string{"dnd:write", "identity.basic", "identity.email", "stars:read", "stars:write", "search:read", "users.profile:write"} {
+	for _, scope := range []string{"dnd:write", "identity.basic", "identity.email", "stars:read", "stars:write", "search:read", "users.profile:write", "app_configurations:write", "admin", "admin.users:read", "admin.conversations:write"} {
 		_, problems := Parse(`{"display_information": {"name": "Scoped"}, "oauth_config": {"scopes": {"bot": ["chat:write", "` + scope + `"]}}}`)
 		if len(problems) != 1 || problems[0].Pointer != "/oauth_config/scopes/bot" || !strings.Contains(problems[0].Message, scope) {
 			t.Fatalf("bot %s: problems=%+v", scope, problems)

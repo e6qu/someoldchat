@@ -82,30 +82,33 @@ const (
 	// links:read receives link_shared, the event an app's unfurl domains
 	// raise (pinned AsyncAPI x-scopes-required); links:write answers it with
 	// chat.unfurl.
-	ScopeLinksRead               Scope = "links:read"
-	ScopeLinksWrite              Scope = "links:write"
-	ScopeIdentityBasic           Scope = "identity.basic"
-	ScopeIdentityEmail           Scope = "identity.email"
-	ScopeIdentityAvatar          Scope = "identity.avatar"
-	ScopeIdentityTeam            Scope = "identity.team"
-	ScopeRTMStream               Scope = "rtm:stream"
-	ScopeConnectionsWrite        Scope = "connections:write"
-	ScopeDatastoreRead           Scope = "datastore:read"
-	ScopeDatastoreWrite          Scope = "datastore:write"
-	ScopeDNDRead                 Scope = "dnd:read"
-	ScopeDNDWrite                Scope = "dnd:write"
-	ScopeStarsRead               Scope = "stars:read"
-	ScopeStarsWrite              Scope = "stars:write"
-	ScopeRemindersRead           Scope = "reminders:read"
-	ScopeRemindersWrite          Scope = "reminders:write"
-	ScopeUserGroupsRead          Scope = "usergroups:read"
-	ScopeUserGroupsWrite         Scope = "usergroups:write"
-	ScopeCallsRead               Scope = "calls:read"
-	ScopeCallsWrite              Scope = "calls:write"
-	ScopeWorkflowStepsExecute    Scope = "workflow.steps:execute"
-	ScopeTriggersRead            Scope = "triggers:read"
-	ScopeTriggersWrite           Scope = "triggers:write"
-	ScopeTokensBasic             Scope = "tokens.basic"
+	ScopeLinksRead            Scope = "links:read"
+	ScopeLinksWrite           Scope = "links:write"
+	ScopeIdentityBasic        Scope = "identity.basic"
+	ScopeIdentityEmail        Scope = "identity.email"
+	ScopeIdentityAvatar       Scope = "identity.avatar"
+	ScopeIdentityTeam         Scope = "identity.team"
+	ScopeRTMStream            Scope = "rtm:stream"
+	ScopeConnectionsWrite     Scope = "connections:write"
+	ScopeDatastoreRead        Scope = "datastore:read"
+	ScopeDatastoreWrite       Scope = "datastore:write"
+	ScopeDNDRead              Scope = "dnd:read"
+	ScopeDNDWrite             Scope = "dnd:write"
+	ScopeStarsRead            Scope = "stars:read"
+	ScopeStarsWrite           Scope = "stars:write"
+	ScopeRemindersRead        Scope = "reminders:read"
+	ScopeRemindersWrite       Scope = "reminders:write"
+	ScopeUserGroupsRead       Scope = "usergroups:read"
+	ScopeUserGroupsWrite      Scope = "usergroups:write"
+	ScopeCallsRead            Scope = "calls:read"
+	ScopeCallsWrite           Scope = "calls:write"
+	ScopeWorkflowStepsExecute Scope = "workflow.steps:execute"
+	ScopeTriggersRead         Scope = "triggers:read"
+	ScopeTriggersWrite        Scope = "triggers:write"
+	ScopeTokensBasic          Scope = "tokens.basic"
+	// app_configurations:write lets an app's collaborator change how the app
+	// presents itself, which apps.icon.set needs. Slack grants it to user tokens.
+	ScopeAppConfigurationsWrite  Scope = "app_configurations:write"
 	ScopeAdmin                   Scope = "admin"
 	ScopeAdminUsersRead          Scope = "admin.users:read"
 	ScopeAdminUsersWrite         Scope = "admin.users:write"
@@ -602,6 +605,7 @@ var allScopes = []Scope{
 	ScopeTriggersRead,
 	ScopeTriggersWrite,
 	ScopeTokensBasic,
+	ScopeAppConfigurationsWrite,
 	ScopeAdmin,
 	ScopeAdminUsersRead,
 	ScopeAdminUsersWrite,
