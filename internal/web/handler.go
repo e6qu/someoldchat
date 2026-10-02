@@ -818,6 +818,10 @@ type assistantThreadView struct {
 	Status       string
 	PromptsTitle string
 	Prompts      []assistantPromptView
+	// LoadingMessages rotate beneath the status while it shows: the first is
+	// rendered, and LoadingMessagesJSON carries them all to the page script.
+	LoadingMessages     []string
+	LoadingMessagesJSON string
 }
 
 type assistantPromptView struct {
@@ -1842,6 +1846,7 @@ const workspaceRefinements = `<style>
 .assistant-state{display:grid;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
 .assistant-title{margin:0;font-weight:800}
 .assistant-status{margin:0;color:var(--muted);font-size:13px;font-style:italic}
+.assistant-loading{margin:2px 0 0;color:var(--muted);font-size:12px}
 .assistant-prompts{display:grid;gap:6px}.assistant-prompts-title{margin:0;color:var(--muted);font-size:12px;font-weight:700}
 .assistant-prompts form{margin:0}
 .assistant-prompt{display:block;width:100%;min-height:32px;padding:7px 10px;border:1px solid var(--field-line);border-radius:7px;background:var(--panel-strong);color:var(--text);text-align:left;font-weight:600}
@@ -2150,6 +2155,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
         {{if .Assistant.Present}}<div class="assistant-state">
           {{if .Assistant.Title}}<p class="assistant-title">{{.Assistant.Title}}</p>{{end}}
           {{if .Assistant.Status}}<p class="assistant-status" role="status">{{.Assistant.Status}}</p>{{end}}
+          {{if .Assistant.LoadingMessages}}<p class="assistant-loading" aria-hidden="true" data-assistant-loading="{{.Assistant.LoadingMessagesJSON}}">{{index .Assistant.LoadingMessages 0}}</p>{{end}}
           {{if .Assistant.Prompts}}<div class="assistant-prompts">
             {{if .Assistant.PromptsTitle}}<p class="assistant-prompts-title">{{.Assistant.PromptsTitle}}</p>{{end}}
             {{range .Assistant.Prompts}}<form method="post" action="{{$.ThreadComposer.ComposeURL}}" hx-post="{{$.ThreadComposer.ComposeURL}}">
@@ -5442,6 +5448,11 @@ func (h Handler) assistantThreadView(ctx context.Context, principal auth.Princip
 		return assistantThreadView{}
 	}
 	view := assistantThreadView{Present: true, Title: value.Title, Status: value.Status, PromptsTitle: value.PromptsTitle}
+	if value.Status != "" && len(value.LoadingMessages) > 0 {
+		if encoded, encodeErr := json.Marshal(value.LoadingMessages); encodeErr == nil {
+			view.LoadingMessages, view.LoadingMessagesJSON = value.LoadingMessages, string(encoded)
+		}
+	}
 	for _, prompt := range value.Prompts {
 		view.Prompts = append(view.Prompts, assistantPromptView{Title: prompt.Title, Message: prompt.Message})
 	}

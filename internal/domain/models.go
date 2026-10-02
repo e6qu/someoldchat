@@ -507,10 +507,17 @@ type AssistantThread struct {
 	ThreadTimestamp MessageTimestamp
 	Title           string
 	Status          string
+	// LoadingMessages are the lines a client rotates through while the
+	// status is shown; they are set and cleared with it.
+	LoadingMessages []string
 	PromptsTitle    string
 	Prompts         []AssistantPrompt
 	UpdatedAt       time.Time
 }
+
+// AssistantLoadingMessageLimit is Slack's documented maximum for
+// assistant.threads.setStatus loading_messages.
+const AssistantLoadingMessageLimit = 10
 
 type AssistantPrompt struct {
 	Title   string

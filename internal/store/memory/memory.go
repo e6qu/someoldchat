@@ -7554,6 +7554,7 @@ func (s *Store) SetAssistantThread(_ context.Context, value domain.AssistantThre
 		current.Title = value.Title
 	case domain.AssistantThreadStatus:
 		current.Status = value.Status
+		current.LoadingMessages = append([]string(nil), value.LoadingMessages...)
 	case domain.AssistantThreadPrompts:
 		current.PromptsTitle = value.PromptsTitle
 		current.Prompts = append([]domain.AssistantPrompt(nil), value.Prompts...)
@@ -7572,6 +7573,7 @@ func (s *Store) GetAssistantThread(_ context.Context, workspace domain.Workspace
 		return domain.AssistantThread{}, store.ErrNotFound
 	}
 	value.Prompts = append([]domain.AssistantPrompt(nil), value.Prompts...)
+	value.LoadingMessages = append([]string(nil), value.LoadingMessages...)
 	return value, nil
 }
 

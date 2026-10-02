@@ -55,6 +55,7 @@ message AssistantThread {
   string prompts_title = 6;
   repeated AssistantPrompt prompts = 7;
   int64 updated_at_unix_nano = 8;
+  repeated string loading_messages = 9;
 }
 
 message SetAssistantThreadRequest {
@@ -67,6 +68,7 @@ message SetAssistantThreadRequest {
   string status = 7;
   string prompts_title = 8;
   repeated AssistantPrompt prompts = 9;
+  repeated string loading_messages = 10;
 }
 
 message SetAssistantThreadResponse {

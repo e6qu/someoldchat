@@ -4682,10 +4682,10 @@ func (r Remote) SetAssistantThreadTitle(ctx context.Context, workspaceID domain.
 	})
 }
 
-func (r Remote) SetAssistantThreadStatus(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, status string) error {
+func (r Remote) SetAssistantThreadStatus(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, status string, loadingMessages []string) error {
 	return r.setAssistantThread(ctx, &chatv1.SetAssistantThreadRequest{
 		WorkspaceId: string(workspaceID), UserId: string(actor), Conversation: string(conversation),
-		ThreadTs: string(thread), Field: string(domain.AssistantThreadStatus), Status: status,
+		ThreadTs: string(thread), Field: string(domain.AssistantThreadStatus), Status: status, LoadingMessages: loadingMessages,
 	})
 }
 
@@ -9314,7 +9314,7 @@ func (s *Server) SetAssistantThread(ctx context.Context, input *chatv1.SetAssist
 	case domain.AssistantThreadTitle:
 		err = s.implementation.SetAssistantThreadTitle(ctx, workspace, actor, conversation, thread, input.GetTitle())
 	case domain.AssistantThreadStatus:
-		err = s.implementation.SetAssistantThreadStatus(ctx, workspace, actor, conversation, thread, input.GetStatus())
+		err = s.implementation.SetAssistantThreadStatus(ctx, workspace, actor, conversation, thread, input.GetStatus(), input.GetLoadingMessages())
 	case domain.AssistantThreadPrompts:
 		err = s.implementation.SetAssistantThreadSuggestedPrompts(ctx, workspace, actor, conversation, thread, input.GetPromptsTitle(), decodeProtoAssistantPrompts(input.GetPrompts()))
 	default:
@@ -9396,7 +9396,7 @@ func encodeProtoAssistantThread(value domain.AssistantThread) *chatv1.AssistantT
 		WorkspaceId: string(value.WorkspaceID), Conversation: string(value.Conversation),
 		ThreadTs: string(value.ThreadTimestamp), Title: value.Title, Status: value.Status,
 		PromptsTitle: value.PromptsTitle, Prompts: encodeProtoAssistantPrompts(value.Prompts),
-		UpdatedAtUnixNano: unixNanoOrZero(value.UpdatedAt),
+		UpdatedAtUnixNano: unixNanoOrZero(value.UpdatedAt), LoadingMessages: value.LoadingMessages,
 	}
 }
 
@@ -9405,7 +9405,7 @@ func decodeProtoAssistantThread(value *chatv1.AssistantThread) (domain.Assistant
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversation()),
 		ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()), Title: value.GetTitle(), Status: value.GetStatus(),
 		PromptsTitle: value.GetPromptsTitle(), Prompts: decodeProtoAssistantPrompts(value.GetPrompts()),
-		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
+		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()), LoadingMessages: value.GetLoadingMessages(),
 	}, nil
 }
 

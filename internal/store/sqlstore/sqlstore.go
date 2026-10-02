@@ -213,6 +213,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
  thread_ts TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '',
  prompts_title TEXT NOT NULL DEFAULT '', prompts TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL,
+ loading_messages TEXT NOT NULL DEFAULT '[]',
  PRIMARY KEY (workspace_id, conversation_id, thread_ts)
 );
 ` + agentSessionSchema + `
@@ -603,7 +604,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 199
+const schemaVersion = 200
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3580,6 +3581,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 200: assistant loading messages ---
+	if version < 200 {
+		// assistant.threads.setStatus loading_messages travel with the
+		// status they accompany.
+		columns, err := s.tableColumns(ctx, db, "assistant_threads")
+		if err != nil {
+			return fmt.Errorf("inspect assistant threads: %w", err)
+		}
+		if !columns["loading_messages"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE assistant_threads ADD COLUMN loading_messages TEXT NOT NULL DEFAULT '[]'`); err != nil {
+				return fmt.Errorf("migrate assistant loading messages: %w", err)
+			}
+		}
+	}
+	// --- end schema 200 ---
 	// --- schema 199: unfurl authentication declines ---
 	if version < 199 {
 		// A member's "Never ask me again" on an app's chat.unfurl
@@ -5134,6 +5150,7 @@ var migratableTables = []string{
 	"workspace_members",
 	"workspaces",
 	"reminders",
+	"assistant_threads",
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
@@ -9414,9 +9431,17 @@ func (s *Store) SetAssistantThread(ctx context.Context, value domain.AssistantTh
 	if err != nil {
 		return err
 	}
+	loadingMessages := value.LoadingMessages
+	if loadingMessages == nil {
+		loadingMessages = []string{}
+	}
+	encodedLoading, err := json.Marshal(loadingMessages)
+	if err != nil {
+		return err
+	}
 	column := map[domain.AssistantThreadField]string{
 		domain.AssistantThreadTitle:   "title = excluded.title",
-		domain.AssistantThreadStatus:  "status = excluded.status",
+		domain.AssistantThreadStatus:  "status = excluded.status, loading_messages = excluded.loading_messages",
 		domain.AssistantThreadPrompts: "prompts_title = excluded.prompts_title, prompts = excluded.prompts",
 	}[field]
 	tx, err := s.beginWrite(ctx)
@@ -9424,10 +9449,10 @@ func (s *Store) SetAssistantThread(ctx context.Context, value domain.AssistantTh
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO assistant_threads(workspace_id, conversation_id, thread_ts, title, status, prompts_title, prompts, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO assistant_threads(workspace_id, conversation_id, thread_ts, title, status, prompts_title, prompts, updated_at, loading_messages)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id, conversation_id, thread_ts) DO UPDATE SET `+column+`, updated_at = excluded.updated_at`,
-		value.WorkspaceID, value.Conversation, string(value.ThreadTimestamp), value.Title, value.Status, value.PromptsTitle, string(prompts), value.UpdatedAt.UTC().UnixNano()); err != nil {
+		value.WorkspaceID, value.Conversation, string(value.ThreadTimestamp), value.Title, value.Status, value.PromptsTitle, string(prompts), value.UpdatedAt.UTC().UnixNano(), string(encodedLoading)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -9438,10 +9463,10 @@ func (s *Store) SetAssistantThread(ctx context.Context, value domain.AssistantTh
 
 func (s *Store) GetAssistantThread(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, thread domain.MessageTimestamp) (domain.AssistantThread, error) {
 	value := domain.AssistantThread{WorkspaceID: workspace, Conversation: conversation, ThreadTimestamp: thread}
-	var prompts string
+	var prompts, loadingMessages string
 	var updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT title, status, prompts_title, prompts, updated_at FROM assistant_threads WHERE workspace_id = ? AND conversation_id = ? AND thread_ts = ?`,
-		workspace, conversation, string(thread)).Scan(&value.Title, &value.Status, &value.PromptsTitle, &prompts, &updated)
+	err := s.db.QueryRowContext(ctx, `SELECT title, status, prompts_title, prompts, updated_at, loading_messages FROM assistant_threads WHERE workspace_id = ? AND conversation_id = ? AND thread_ts = ?`,
+		workspace, conversation, string(thread)).Scan(&value.Title, &value.Status, &value.PromptsTitle, &prompts, &updated, &loadingMessages)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.AssistantThread{}, store.ErrNotFound
 	}
@@ -9449,6 +9474,9 @@ func (s *Store) GetAssistantThread(ctx context.Context, workspace domain.Workspa
 		return domain.AssistantThread{}, err
 	}
 	if err := json.Unmarshal([]byte(prompts), &value.Prompts); err != nil {
+		return domain.AssistantThread{}, err
+	}
+	if err := json.Unmarshal([]byte(loadingMessages), &value.LoadingMessages); err != nil {
 		return domain.AssistantThread{}, err
 	}
 	value.UpdatedAt = time.Unix(0, updated).UTC()

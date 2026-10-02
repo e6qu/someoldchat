@@ -165,6 +165,7 @@ func runQualification(t *testing.T, open opener) {
 		{"the OpenID signing key is one key for every replica", openIDSigningKeyIsSingular},
 		{"a workspace's primary owner is one owner who cannot be removed", primaryOwnerIsOneProtectedOwner},
 		{"never being asked again by an app outlives the prompt", unfurlAuthDeclineIsDurable},
+		{"an assistant's loading messages travel with its status", assistantLoadingMessagesTravelWithTheStatus},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
 		{"visible files are newest first", visibleFilesAreNewestFirst},
@@ -1100,6 +1101,42 @@ func unfurlAuthDeclineIsDurable(t *testing.T, open opener) {
 	}
 	if !declined(userID, appID) || declined(userID, appID+"-other") || declined(userID+"-other", appID) {
 		t.Fatal("the decline does not belong to exactly that member and app")
+	}
+}
+
+// assistantLoadingMessagesTravelWithTheStatus holds assistant.threads.setStatus
+// loading_messages on every profile: written with the status, read back in
+// order, and cleared when the status is.
+func assistantLoadingMessagesTravelWithTheStatus(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID, conversationID := domain.WorkspaceID("T-assistant-"+suffix), domain.ConversationID("C-assistant-"+suffix)
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Assistant"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedConversation(ctx, domain.Conversation{ID: conversationID, WorkspaceID: workspaceID, Name: "assistant-" + suffix}); err != nil {
+		t.Fatal(err)
+	}
+	thread := domain.MessageTimestamp("1700000000.000100")
+	write := func(status string, loading []string) {
+		t.Helper()
+		value := domain.AssistantThread{WorkspaceID: workspaceID, Conversation: conversationID, ThreadTimestamp: thread, Status: status, LoadingMessages: loading, UpdatedAt: time.Now().UTC()}
+		event := events.Event{ID: domain.EventID("E-assistant-" + suffix + status), WorkspaceID: workspaceID, Topic: "assistant.thread_updated", Payload: "{}", CreatedAt: time.Now().UTC()}
+		if err := repository.SetAssistantThread(ctx, value, domain.AssistantThreadStatus, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("is thinking", []string{"Reading", "Writing"})
+	value, err := repository.GetAssistantThread(ctx, workspaceID, conversationID, thread)
+	if err != nil || value.Status != "is thinking" || fmt.Sprint(value.LoadingMessages) != "[Reading Writing]" {
+		t.Fatalf("assistant thread = %+v err=%v", value, err)
+	}
+	write("", nil)
+	if value, err = repository.GetAssistantThread(ctx, workspaceID, conversationID, thread); err != nil || value.Status != "" || len(value.LoadingMessages) != 0 {
+		t.Fatalf("cleared assistant thread = %+v err=%v", value, err)
 	}
 }
 

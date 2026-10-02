@@ -5439,7 +5439,7 @@ func parityCases() []parityCase {
 				if err := chat.SetAssistantThreadTitle(ctx, "T1", "U1", "C1", thread, "Deploy help"); err != nil {
 					return nil, err
 				}
-				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking..."); err != nil {
+				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", nil); err != nil {
 					return nil, err
 				}
 				if err := chat.SetAssistantThreadSuggestedPrompts(ctx, "T1", "U1", "C1", thread, "Try", []domain.AssistantPrompt{{Title: "Roll back", Message: "How do I roll back?"}}); err != nil {
@@ -5450,7 +5450,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				// Clearing the status must leave the title and prompts alone.
-				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, ""); err != nil {
+				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "", nil); err != nil {
 					return nil, err
 				}
 				after, err := chat.AssistantThread(ctx, "T1", "U1", "C1", thread)
