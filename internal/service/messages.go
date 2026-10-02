@@ -7543,16 +7543,31 @@ func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceI
 	if timeZone == "" {
 		timeZone = "UTC"
 	}
-	if _, err := time.LoadLocation(timeZone); err != nil {
+	location, err := time.LoadLocation(timeZone)
+	if err != nil {
 		return domain.Reminder{}, domain.ErrInvalidReminder
+	}
+	// Weekdays belong to a weekly recurrence alone. The first occurrence is
+	// the requested time when it falls on one of them, else the next of them
+	// at that time of day.
+	weekdays := domain.NormalizeReminderWeekdays(schedule.Weekdays)
+	if len(weekdays) > 0 && schedule.Recurrence != domain.ReminderWeekly {
+		return domain.Reminder{}, domain.ErrInvalidReminder
+	}
+	due := schedule.Due.UTC()
+	if len(weekdays) > 0 {
+		local := due.In(location)
+		for !slices.Contains(weekdays, local.Weekday()) {
+			local = time.Date(local.Year(), local.Month(), local.Day()+1, local.Hour(), local.Minute(), local.Second(), 0, location)
+		}
+		due = local.UTC()
 	}
 	id, err := domain.NewReminderID()
 	if err != nil {
 		return domain.Reminder{}, err
 	}
-	due := schedule.Due.UTC()
 	reminder := domain.Reminder{WorkspaceID: workspaceID, ID: id, Creator: userID, User: targetID, Text: text, Time: due,
-		Recurring: schedule.Recurrence != domain.ReminderOnce, Recurrence: schedule.Recurrence, TimeZone: timeZone, RecurrenceAnchor: due}
+		Recurring: schedule.Recurrence != domain.ReminderOnce, Recurrence: schedule.Recurrence, TimeZone: timeZone, RecurrenceAnchor: due, Weekdays: weekdays}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("reminder.created", events.String("reminder_id", string(id)), events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
 		return domain.Reminder{}, err

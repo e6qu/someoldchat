@@ -18,6 +18,8 @@ message Reminder {
   string recurrence = 9;
   string time_zone = 10;
   int64 recurrence_anchor = 11;
+  // The days a weekly reminder recurs on, as lower-case day names.
+  repeated string weekdays = 12;
 }
 
 message AddReminderRequest {
@@ -28,6 +30,7 @@ message AddReminderRequest {
   int64 time = 5;
   string recurrence = 6;
   string time_zone = 7;
+  repeated string weekdays = 8;
 }
 
 message ReminderRequest {

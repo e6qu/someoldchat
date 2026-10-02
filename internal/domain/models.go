@@ -2725,6 +2725,9 @@ type Reminder struct {
 	Recurrence       ReminderRecurrence
 	TimeZone         string
 	RecurrenceAnchor time.Time
+	// Weekdays are the days a weekly reminder recurs on, as reminders.add's
+	// recurrence.weekdays names them. Empty means the weekday of its anchor.
+	Weekdays []time.Weekday
 }
 
 // ReminderSchedule is when a reminders.add reminder comes due and whether,
@@ -2733,6 +2736,8 @@ type ReminderSchedule struct {
 	Due        time.Time
 	Recurrence ReminderRecurrence
 	TimeZone   string
+	// Weekdays are a weekly recurrence's days; see Reminder.Weekdays.
+	Weekdays []time.Weekday
 }
 
 type ReminderPage struct {

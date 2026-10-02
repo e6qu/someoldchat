@@ -56,7 +56,7 @@ func (w ReminderDeliveryWorker) RunOnceAt(ctx context.Context, workspaceID domai
 		}
 		// A recurring reminder moves to its next occurrence rather than being
 		// retired; it used to be delivered once and never again.
-		next, err := nextRecurrence(reminder.Recurrence, reminder.TimeZone, reminder.RecurrenceAnchor, reminder.Time, now)
+		next, err := nextRecurrence(reminder.Recurrence, reminder.Weekdays, reminder.TimeZone, reminder.RecurrenceAnchor, reminder.Time, now)
 		if err != nil {
 			failures = errors.Join(failures, err)
 			continue

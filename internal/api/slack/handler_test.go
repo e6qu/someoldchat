@@ -5683,6 +5683,13 @@ func TestScheduledMessageAPIIsScopedToTheSchedulingIdentity(t *testing.T) {
 	if unknown := call("token", "/api/chat.scheduledMessages.list", "channel=CNOPE"); unknown["error"] != "invalid_channel" {
 		t.Fatalf("unknown channel filter=%v", unknown)
 	}
+	// team_id may name the token's own workspace and no other.
+	if own := call("token", "/api/chat.scheduledMessages.list", "team_id=T1"); own["ok"] != true {
+		t.Fatalf("own team_id=%v", own)
+	}
+	if other := call("token", "/api/chat.scheduledMessages.list", "team_id=T2"); other["error"] != "invalid_arg_name" {
+		t.Fatalf("another team_id=%v, want invalid_arg_name", other)
+	}
 	for _, bad := range []string{"soon", "1700000000.5", "-5"} {
 		if rejected := call("token", "/api/chat.scheduleMessage", url.Values{"channel": {"C1"}, "text": {"x"}, "post_at": {bad}}.Encode()); rejected["error"] != "invalid_time" {
 			t.Fatalf("post_at=%q answered %v", bad, rejected)
