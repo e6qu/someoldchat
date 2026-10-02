@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -242,5 +243,63 @@ func TestIncomingWebhookIsServedAndLimitedPerWebhookBehindTheLimiter(t *testing.
 	now = now.Add(time.Second)
 	if response := deliver(path); response.Code != http.StatusOK {
 		t.Fatalf("after one second status=%d body=%q", response.Code, response.Body)
+	}
+}
+
+// A method whose Slack reference names a stricter tier is held to it: its
+// burst passes, the next call answers 429 with ratelimited, and the refill is
+// that tier's per-minute floor. A method the table does not name keeps Tier 4,
+// so one strict method does not slow the rest. Covers chat.scheduleMessage and
+// chat.scheduledMessages.list (Tier 3), admin.apps.permissions.add (Tier 2)
+// and admin.usergroups.create (Tier 1).
+func TestRateLimiterHoldsEachMethodToItsDocumentedTier(t *testing.T) {
+	for _, test := range []struct {
+		method    string
+		burst     int
+		perMinute float64
+	}{
+		{"chat.scheduleMessage", 50, 50},
+		{"chat.scheduledMessages.list", 50, 50},
+		{"admin.apps.permissions.add", 20, 20},
+		{"admin.usergroups.create", tier1Burst, 1},
+		{"users.list", methodBudgetPerMinute, methodBudgetPerMinute},
+	} {
+		t.Run(test.method, func(t *testing.T) {
+			now := time.Unix(1_700_000_000, 0).UTC()
+			limiter := limiterAt(&now)
+			wrapped := limiter.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			for i := 0; i < test.burst; i++ {
+				if response := limitedRequest(t, wrapped, http.MethodPost, "/api/"+test.method, "xoxb-tier", "", ""); response.Code != http.StatusOK {
+					t.Fatalf("call %d of the burst status=%d", i+1, response.Code)
+				}
+			}
+			limited := limitedRequest(t, wrapped, http.MethodPost, "/api/"+test.method, "xoxb-tier", "", "")
+			if limited.Code != http.StatusTooManyRequests || !strings.Contains(limited.Body.String(), `"error":"ratelimited"`) {
+				t.Fatalf("call past the burst status=%d body=%s", limited.Code, limited.Body)
+			}
+			retryAfter, err := strconv.Atoi(limited.Header().Get("Retry-After"))
+			want := int((60 / test.perMinute) + 0.999999) // one call's refill, rounded up to whole seconds
+			if err != nil || retryAfter != want {
+				t.Fatalf("Retry-After=%q, want %d: the refill is the tier's per-minute floor", limited.Header().Get("Retry-After"), want)
+			}
+			now = now.Add(time.Duration(retryAfter) * time.Second)
+			if response := limitedRequest(t, wrapped, http.MethodPost, "/api/"+test.method, "xoxb-tier", "", ""); response.Code != http.StatusOK {
+				t.Fatalf("after Retry-After status=%d", response.Code)
+			}
+		})
+	}
+}
+
+// Every method the tier table names is one the ledger tracks, so a typo cannot
+// leave a strict method at Tier 4 while the table claims otherwise.
+func TestEveryTieredMethodIsALedgerMethod(t *testing.T) {
+	ledger, err := os.ReadFile("../../../specs/compatibility.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for method := range methodTiers {
+		if !strings.Contains(string(ledger), "\n  - method: "+method+"\n") {
+			t.Errorf("methodTiers names %s, which the compatibility ledger does not", method)
+		}
 	}
 }
