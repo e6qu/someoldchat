@@ -334,7 +334,7 @@ operations:
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
       - go-test:internal/api/slack:TestAdminUsersRemoveDeactivatesUser
     deviations:
-      - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's abbreviation (for example EDT) rather than Slack's long name.
+      - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's long name in force at the time (for example Eastern Daylight Time), from ICU's names; a zone or offset newer than the generated table keeps its abbreviation.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: conversations.info
     status: behavior-compatible
@@ -591,7 +591,7 @@ operations:
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
     deviations:
-      - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's abbreviation (for example EDT) rather than Slack's long name.
+      - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's long name in force at the time (for example Eastern Daylight Time), from ICU's names; a zone or offset newer than the generated table keeps its abbreviation.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: users.lookupByEmail
     status: behavior-compatible
