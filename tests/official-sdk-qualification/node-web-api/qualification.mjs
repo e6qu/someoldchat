@@ -10,6 +10,10 @@ const clientOptions = {
 	...(process.env.SAMEOLDCHAT_SDK_DEBUG === "1" ? { logLevel: LogLevel.DEBUG } : {}),
 };
 const client = new WebClient(token, clientOptions);
+// Slack grants admin scopes to user tokens only and refuses a bot on every
+// admin method, so those calls, and the user-only app configuration ones,
+// carry the workspace owner's user token.
+const adminClient = new WebClient(process.env.SAMEOLDCHAT_ADMIN_TOKEN ?? "xoxp-admin-qualification", clientOptions);
 const apiOrigin = new URL(apiUrl).origin;
 const reminderClient = new WebClient("xoxp-reminder-qualification", clientOptions);
 const workflowClient = new WebClient("xoxb-workflow-qualification", clientOptions);
@@ -255,29 +259,29 @@ assert.equal((await client.apiCall("slackLists.items.delete", {
 const bot = await client.bots.info({ bot: "B1" });
 assert.equal(bot.ok, true);
 assert.equal(bot.bot.id, "B1");
-const accessLogs = await client.team.accessLogs({ count: 1 });
+const accessLogs = await adminClient.team.accessLogs({ count: 1 });
 assert.equal(accessLogs.ok, true);
 assert.equal(Array.isArray(accessLogs.logins), true);
-const billableInfo = await client.team.billableInfo({ user: "U1" });
+const billableInfo = await adminClient.team.billableInfo({ user: "U1" });
 assert.equal(billableInfo.ok, true);
 assert.equal(billableInfo.billable_info.U1.billing_active, true);
-const integrationLogs = await client.team.integrationLogs({ count: 1 });
+const integrationLogs = await adminClient.team.integrationLogs({ count: 1 });
 assert.equal(integrationLogs.ok, true);
 // admin.workflows.*: an administrator finds workflows across the workspace and
 // takes one out of service. The walk asserts the shape of the search and the
 // refusal for a workflow that is not there, which is the case the fixture can
 // reach without authoring one.
-const workflowSearch = await client.admin.workflows.search({ query: "", limit: 10 });
+const workflowSearch = await adminClient.admin.workflows.search({ query: "", limit: 10 });
 assert.equal(workflowSearch.ok, true);
 assert.equal(Array.isArray(workflowSearch.workflows), true);
 await assert.rejects(
-  () => client.admin.workflows.unpublish({ workflow_ids: ["Wf-not-here"] }),
+  () => adminClient.admin.workflows.unpublish({ workflow_ids: ["Wf-not-here"] }),
   (error) => String(error).includes("workflow_not_found"),
 );
 
 // The pinned client exposes no typed method for this one, so the walk issues
 // it through apiCall. A genuine client still sends the request.
-const expiration = await client.apiCall("admin.users.getExpiration", { user_id: "U1" });
+const expiration = await adminClient.apiCall("admin.users.getExpiration", { user_id: "U1" });
 assert.equal(expiration.ok, true);
 assert.equal(typeof expiration.expiration_ts, "number");
 
@@ -285,22 +289,22 @@ const contacts = await client.apiCall("users.discoverableContacts.lookup", { ema
 assert.equal(contacts.ok, true);
 assert.equal(Array.isArray(contacts.contacts), true);
 
-const adminFunctions = await client.apiCall("admin.functions.list", {});
+const adminFunctions = await adminClient.apiCall("admin.functions.list", {});
 assert.equal(adminFunctions.ok, true);
 assert.equal(Array.isArray(adminFunctions.functions), true);
 
-const cancelled = await client.apiCall("admin.apps.requests.cancel", { request_id: "Rq-sdk" });
+const cancelled = await adminClient.apiCall("admin.apps.requests.cancel", { request_id: "Rq-sdk" });
 assert.equal(cancelled.ok, true);
 
 // Bulk channel administration. The walk pins the refusal for a channel that is
 // not here; archiving the fixture's channels would take the rest of the walk
 // with them.
 await assert.rejects(
-  () => client.admin.conversations.bulkArchive({ channel_ids: ["C-not-here"] }),
+  () => adminClient.admin.conversations.bulkArchive({ channel_ids: ["C-not-here"] }),
   (error) => String(error).includes("channel_not_found"),
 );
 await assert.rejects(
-  () => client.admin.conversations.bulkDelete({ channel_ids: ["C-not-here"] }),
+  () => adminClient.admin.conversations.bulkDelete({ channel_ids: ["C-not-here"] }),
   (error) => String(error).includes("channel_not_found"),
 );
 
@@ -308,27 +312,27 @@ await assert.rejects(
 // pins the refusal for an app nobody has heard of; uninstalling the fixture's
 // own app would take the rest of the walk's app calls with it.
 await assert.rejects(
-  () => client.admin.apps.uninstall({ app_ids: ["A-not-here"] }),
+  () => adminClient.admin.apps.uninstall({ app_ids: ["A-not-here"] }),
   (error) => String(error).includes("app_not_found"),
 );
 
 await assert.rejects(
-  () => client.admin.workflows.collaborators.add({ workflow_ids: ["Wf-not-here"], collaborator_ids: ["U1"] }),
+  () => adminClient.admin.workflows.collaborators.add({ workflow_ids: ["Wf-not-here"], collaborator_ids: ["U1"] }),
   (error) => String(error).includes("workflow_not_found"),
 );
 await assert.rejects(
-  () => client.admin.workflows.collaborators.remove({ workflow_ids: ["Wf-not-here"], collaborator_ids: ["U1"] }),
+  () => adminClient.admin.workflows.collaborators.remove({ workflow_ids: ["Wf-not-here"], collaborator_ids: ["U1"] }),
   (error) => String(error).includes("workflow_not_found"),
 );
 
 // Session administration: the list must describe sessions without carrying the
 // credential it describes, so the walk asserts the token is absent rather than
 // merely that the call succeeded.
-const sessions = await client.admin.users.session.list({ user_id: "U1" });
+const sessions = await adminClient.admin.users.session.list({ user_id: "U1" });
 assert.equal(sessions.ok, true);
 assert.equal(Array.isArray(sessions.active_sessions), true);
 assert.equal(JSON.stringify(sessions).includes("token-"), false);
-const bulkReset = await client.admin.users.session.resetBulk({ user_ids: "U1" });
+const bulkReset = await adminClient.admin.users.session.resetBulk({ user_ids: "U1" });
 assert.equal(bulkReset.ok, true);
 
 // team.externalTeams.* is the whole-organization half of Slack Connect. The
@@ -448,29 +452,29 @@ const authorizations = await appClient.apps.event.authorizations.list({ event_co
 assert.equal(authorizations.ok, true);
 assert.equal(authorizations.authorizations[0].team_id, "T1");
 assert.equal(authorizations.authorizations[0].is_bot, true);
-const adminUsers = await client.admin.users.list({ team_id: "T1", limit: 10 });
+const adminUsers = await adminClient.admin.users.list({ team_id: "T1", limit: 10 });
 assert.equal(adminUsers.ok, true);
 assert.equal(adminUsers.users.some((user) => user.id === "U1"), true);
-const adminEmoji = await client.admin.emoji.list();
+const adminEmoji = await adminClient.admin.emoji.list();
 assert.equal(adminEmoji.ok, true);
-const adminTeams = await client.admin.teams.list({ limit: 10 });
+const adminTeams = await adminClient.admin.teams.list({ limit: 10 });
 assert.equal(adminTeams.ok, true);
 assert.equal(adminTeams.teams.some((team) => team.id === "T1"), true);
-assert.equal((await client.admin.emoji.add({ name: "qualified", url: "https://example.com/qualified.png" })).ok, true);
-assert.equal((await client.admin.emoji.addAlias({ name: "qualified-alias", alias_for: "qualified" })).ok, true);
-assert.equal((await client.admin.emoji.rename({ name: "qualified", new_name: "qualified-renamed" })).ok, true);
-assert.equal((await client.admin.emoji.remove({ name: "qualified-alias" })).ok, true);
-assert.equal((await client.admin.emoji.remove({ name: "qualified-renamed" })).ok, true);
-assert.equal((await client.admin.conversations.rename({ channel_id: "C2", name: "renamed-lifecycle" })).ok, true);
-assert.equal((await client.admin.conversations.archive({ channel_id: "C2" })).ok, true);
-assert.equal((await client.admin.conversations.unarchive({ channel_id: "C2" })).ok, true);
-const adminTeamAdmins = await client.admin.teams.admins.list({ team_id: "T1", limit: 10 });
+assert.equal((await adminClient.admin.emoji.add({ name: "qualified", url: "https://example.com/qualified.png" })).ok, true);
+assert.equal((await adminClient.admin.emoji.addAlias({ name: "qualified-alias", alias_for: "qualified" })).ok, true);
+assert.equal((await adminClient.admin.emoji.rename({ name: "qualified", new_name: "qualified-renamed" })).ok, true);
+assert.equal((await adminClient.admin.emoji.remove({ name: "qualified-alias" })).ok, true);
+assert.equal((await adminClient.admin.emoji.remove({ name: "qualified-renamed" })).ok, true);
+assert.equal((await adminClient.admin.conversations.rename({ channel_id: "C2", name: "renamed-lifecycle" })).ok, true);
+assert.equal((await adminClient.admin.conversations.archive({ channel_id: "C2" })).ok, true);
+assert.equal((await adminClient.admin.conversations.unarchive({ channel_id: "C2" })).ok, true);
+const adminTeamAdmins = await adminClient.admin.teams.admins.list({ team_id: "T1", limit: 10 });
 assert.equal(adminTeamAdmins.ok, true);
 assert.equal(adminTeamAdmins.admin_ids.includes("U2"), true);
-const adminTeamOwners = await client.admin.teams.owners.list({ team_id: "T1", limit: 10 });
+const adminTeamOwners = await adminClient.admin.teams.owners.list({ team_id: "T1", limit: 10 });
 assert.equal(adminTeamOwners.ok, true);
 assert.equal(adminTeamOwners.owner_ids.includes("U1"), true);
-const createdAdminTeam = await client.admin.teams.create({
+const createdAdminTeam = await adminClient.admin.teams.create({
 	team_domain: "sdk-created-workspace",
 	team_name: "SDK Created Workspace",
 	team_description: "created by SDK qualification",
@@ -478,55 +482,55 @@ const createdAdminTeam = await client.admin.teams.create({
 });
 assert.equal(createdAdminTeam.ok, true);
 assert.equal(typeof createdAdminTeam.team, "string");
-const adminTeamSettings = await client.admin.teams.settings.info({ team_id: "T1" });
+const adminTeamSettings = await adminClient.admin.teams.settings.info({ team_id: "T1" });
 assert.equal(adminTeamSettings.ok, true);
 assert.equal(adminTeamSettings.team.id, "T1");
 assert.equal(adminTeamSettings.team.name, "test");
-assert.equal((await client.admin.users.setAdmin({ team_id: "T1", user_id: "U2" })).ok, true);
-assert.equal((await client.admin.users.setOwner({ team_id: "T1", user_id: "U2" })).ok, true);
-assert.equal((await client.admin.users.setRegular({ team_id: "T1", user_id: "U2" })).ok, true);
-assert.equal((await client.admin.teams.settings.setName({ team_id: "T1", name: "qualified-test" })).ok, true);
-assert.equal((await client.admin.teams.settings.setDescription({ team_id: "T1", description: "qualified description" })).ok, true);
-assert.equal((await client.admin.teams.settings.setDiscoverability({ team_id: "T1", discoverability: "closed" })).ok, true);
-assert.equal((await client.admin.teams.settings.setIcon({ team_id: "T1", image_url: "https://example.com/qualified.png" })).ok, true);
-assert.equal((await client.admin.teams.settings.setDefaultChannels({ team_id: "T1", channel_ids: ["C1"] })).ok, true);
-const inviteRequests = await client.admin.inviteRequests.list({ team_id: "T1", limit: 10 });
+assert.equal((await adminClient.admin.users.setAdmin({ team_id: "T1", user_id: "U2" })).ok, true);
+assert.equal((await adminClient.admin.users.setOwner({ team_id: "T1", user_id: "U2" })).ok, true);
+assert.equal((await adminClient.admin.users.setRegular({ team_id: "T1", user_id: "U2" })).ok, true);
+assert.equal((await adminClient.admin.teams.settings.setName({ team_id: "T1", name: "qualified-test" })).ok, true);
+assert.equal((await adminClient.admin.teams.settings.setDescription({ team_id: "T1", description: "qualified description" })).ok, true);
+assert.equal((await adminClient.admin.teams.settings.setDiscoverability({ team_id: "T1", discoverability: "closed" })).ok, true);
+assert.equal((await adminClient.admin.teams.settings.setIcon({ team_id: "T1", image_url: "https://example.com/qualified.png" })).ok, true);
+assert.equal((await adminClient.admin.teams.settings.setDefaultChannels({ team_id: "T1", channel_ids: ["C1"] })).ok, true);
+const inviteRequests = await adminClient.admin.inviteRequests.list({ team_id: "T1", limit: 10 });
 assert.equal(inviteRequests.ok, true);
 assert.equal(Array.isArray(inviteRequests.invite_requests), true);
-const approvedInviteRequests = await client.admin.inviteRequests.approved.list({ team_id: "T1", limit: 10 });
+const approvedInviteRequests = await adminClient.admin.inviteRequests.approved.list({ team_id: "T1", limit: 10 });
 assert.equal(approvedInviteRequests.ok, true);
 assert.equal(Array.isArray(approvedInviteRequests.approved_requests), true);
-const deniedInviteRequests = await client.admin.inviteRequests.denied.list({ team_id: "T1", limit: 10 });
+const deniedInviteRequests = await adminClient.admin.inviteRequests.denied.list({ team_id: "T1", limit: 10 });
 assert.equal(deniedInviteRequests.ok, true);
 assert.equal(Array.isArray(deniedInviteRequests.denied_requests), true);
-assert.equal((await client.admin.users.invite({
+assert.equal((await adminClient.admin.users.invite({
 	team_id: "T1",
 	email: "sdk-approve@example.com",
 	channel_ids: ["C1"],
 	is_restricted: false,
 	is_ultra_restricted: false,
 })).ok, true);
-assert.equal((await client.admin.users.invite({
+assert.equal((await adminClient.admin.users.invite({
 	team_id: "T1",
 	email: "sdk-deny@example.com",
 	channel_ids: ["C1"],
 	is_restricted: false,
 	is_ultra_restricted: false,
 })).ok, true);
-const pendingInviteRequests = await client.admin.inviteRequests.list({ team_id: "T1", limit: 10 });
+const pendingInviteRequests = await adminClient.admin.inviteRequests.list({ team_id: "T1", limit: 10 });
 const approvalRequest = pendingInviteRequests.invite_requests.find((request) => request.email === "sdk-approve@example.com");
 const denialRequest = pendingInviteRequests.invite_requests.find((request) => request.email === "sdk-deny@example.com");
 assert.equal(typeof approvalRequest?.id, "string");
 assert.equal(typeof denialRequest?.id, "string");
-assert.equal((await client.admin.inviteRequests.approve({ team_id: "T1", invite_request_id: approvalRequest.id })).ok, true);
-assert.equal((await client.admin.inviteRequests.deny({ team_id: "T1", invite_request_id: denialRequest.id })).ok, true);
-const approvedApps = await client.admin.apps.approved.list({ team_id: "T1", limit: 10 });
+assert.equal((await adminClient.admin.inviteRequests.approve({ team_id: "T1", invite_request_id: approvalRequest.id })).ok, true);
+assert.equal((await adminClient.admin.inviteRequests.deny({ team_id: "T1", invite_request_id: denialRequest.id })).ok, true);
+const approvedApps = await adminClient.admin.apps.approved.list({ team_id: "T1", limit: 10 });
 assert.equal(approvedApps.ok, true);
 assert.equal(Array.isArray(approvedApps.approved_apps), true);
-const appRequests = await client.admin.apps.requests.list({ team_id: "T1", limit: 10 });
+const appRequests = await adminClient.admin.apps.requests.list({ team_id: "T1", limit: 10 });
 assert.equal(appRequests.ok, true);
 assert.equal(Array.isArray(appRequests.app_requests), true);
-const restrictedApps = await client.admin.apps.restricted.list({ team_id: "T1", limit: 10 });
+const restrictedApps = await adminClient.admin.apps.restricted.list({ team_id: "T1", limit: 10 });
 assert.equal(restrictedApps.ok, true);
 assert.equal(Array.isArray(restrictedApps.restricted_apps), true);
 assert.equal((await client.apiCall("apps.permissions.info")).ok, true);
@@ -542,33 +546,33 @@ assert.equal((await client.apiCall("apps.permissions.users.request", {
 	trigger_id: "permission-user-trigger",
 	user: "U1",
 })).ok, true);
-assert.equal((await client.admin.apps.approve({ app_id: "A1", team_id: "T1" })).ok, true);
+assert.equal((await adminClient.admin.apps.approve({ app_id: "A1", team_id: "T1" })).ok, true);
 // Restriction is restricted to another app on purpose: it uninstalls the app
 // and revokes its credentials, so restricting A1 would revoke this walk's own
 // token. The app is checked to have actually stopped rather than merely to
 // appear in a list, which is what the restricted.list assertion above covers.
 const restrictedClient = new WebClient("xoxb-restricted-app", clientOptions);
 assert.equal((await restrictedClient.auth.test()).ok, true);
-assert.equal((await client.admin.apps.restrict({ app_id: "ARESTRICT", team_id: "T1" })).ok, true);
+assert.equal((await adminClient.admin.apps.restrict({ app_id: "ARESTRICT", team_id: "T1" })).ok, true);
 await assert.rejects(
 	() => restrictedClient.auth.test(),
 	(error) => error.data?.error === "token_revoked",
 	"a restricted app kept a usable token",
 );
-const adminInvite = await client.admin.conversations.invite({ channel_id: "C2", users: "U2" });
+const adminInvite = await adminClient.admin.conversations.invite({ channel_id: "C2", users: "U2" });
 assert.equal(adminInvite.ok, true);
-const searchedConversations = await client.admin.conversations.search({ query: "general", limit: 10 });
+const searchedConversations = await adminClient.admin.conversations.search({ query: "general", limit: 10 });
 assert.equal(searchedConversations.ok, true);
 assert.equal(searchedConversations.conversations.some((conversation) => conversation.id === "C1"), true);
-const setConversationPrefs = await client.admin.conversations.setConversationPrefs({
+const setConversationPrefs = await adminClient.admin.conversations.setConversationPrefs({
   channel_id: "C1",
   prefs: { can_thread: { type: ["everyone"] }, who_can_post: { type: ["everyone"] } },
 });
 assert.equal(setConversationPrefs.ok, true);
-const conversationPrefs = await client.admin.conversations.getConversationPrefs({ channel_id: "C1" });
+const conversationPrefs = await adminClient.admin.conversations.getConversationPrefs({ channel_id: "C1" });
 assert.equal(conversationPrefs.ok, true);
 assert.equal(typeof conversationPrefs.prefs, "object");
-const conversationTeams = await client.admin.conversations.getTeams({ channel_id: "C1", limit: 10 });
+const conversationTeams = await adminClient.admin.conversations.getTeams({ channel_id: "C1", limit: 10 });
 assert.equal(conversationTeams.ok, true);
 assert.equal(conversationTeams.team_ids.includes("T1"), true);
 // Web API 8 removed the typed Workflow Steps from Apps helpers after Slack
@@ -814,55 +818,55 @@ const kicked = await client.conversations.kick({ channel: privateInvitationChann
 assert.equal(kicked.ok, true);
 const left = await client.conversations.leave({ channel: "C2" });
 assert.equal(left.ok, true);
-assert.equal((await client.admin.conversations.convertToPrivate({ channel_id: "C2" })).ok, true);
+assert.equal((await adminClient.admin.conversations.convertToPrivate({ channel_id: "C2" })).ok, true);
 // The reverse converts it back, and converting a channel that is already public
 // is refused rather than reported as a change nobody made.
-assert.equal((await client.admin.conversations.convertToPublic({ channel_id: "C2" })).ok, true);
+assert.equal((await adminClient.admin.conversations.convertToPublic({ channel_id: "C2" })).ok, true);
 await assert.rejects(
-  () => client.admin.conversations.convertToPublic({ channel_id: "C2" }),
+  () => adminClient.admin.conversations.convertToPublic({ channel_id: "C2" }),
   // invalid_arg_name rather than channel_not_found: the channel is plainly
   // there, it is the conversion that does not apply to it.
   (error) => String(error).includes("invalid_arg_name"),
 );
-assert.equal((await client.admin.conversations.delete({ channel_id: "C2" })).ok, true);
-const createdAdminConversation = await client.admin.conversations.create({
+assert.equal((await adminClient.admin.conversations.delete({ channel_id: "C2" })).ok, true);
+const createdAdminConversation = await adminClient.admin.conversations.create({
 	name: "sdk-admin-created",
 	is_private: true,
 	team_id: "T1",
 });
 assert.equal(createdAdminConversation.ok, true);
 assert.equal(typeof createdAdminConversation.channel_id, "string");
-assert.equal((await client.admin.conversations.delete({ channel_id: createdAdminConversation.channel_id })).ok, true);
-const connectedChannelInfo = await client.admin.conversations.ekm.listOriginalConnectedChannelInfo({
+assert.equal((await adminClient.admin.conversations.delete({ channel_id: createdAdminConversation.channel_id })).ok, true);
+const connectedChannelInfo = await adminClient.admin.conversations.ekm.listOriginalConnectedChannelInfo({
 	channel_ids: ["C1"],
 	limit: 10,
 });
 assert.equal(connectedChannelInfo.ok, true);
 assert.equal(Array.isArray(connectedChannelInfo.channels), true);
-assert.equal((await client.admin.conversations.disconnectShared({ channel_id: "C1", leaving_team_ids: ["T1"] })).ok, true);
+assert.equal((await adminClient.admin.conversations.disconnectShared({ channel_id: "C1", leaving_team_ids: ["T1"] })).ok, true);
 
 // Retention. The workspace default governs a channel with no override; the
 // per-channel API sets and removes one; getCustomRetention reports the duration
 // that actually applies either way.
-const noRetention = await client.admin.conversations.getCustomRetention({ channel_id: "C-retention" });
+const noRetention = await adminClient.admin.conversations.getCustomRetention({ channel_id: "C-retention" });
 assert.equal(noRetention.ok, true);
 assert.equal(noRetention.is_policy_enabled, false);
 
-assert.equal((await client.admin.conversations.setCustomRetention({ channel_id: "C-retention", duration_days: 30 })).ok, true);
-const withRetention = await client.admin.conversations.getCustomRetention({ channel_id: "C-retention" });
+assert.equal((await adminClient.admin.conversations.setCustomRetention({ channel_id: "C-retention", duration_days: 30 })).ok, true);
+const withRetention = await adminClient.admin.conversations.getCustomRetention({ channel_id: "C-retention" });
 assert.equal(withRetention.is_policy_enabled, true);
 assert.equal(withRetention.duration_days, 30);
 
 // Slack's bound is greater than zero and below 36500; both ends are refused.
 for (const duration of [0, 36500]) {
 	await assert.rejects(
-		client.admin.conversations.setCustomRetention({ channel_id: "C-retention", duration_days: duration }),
+		adminClient.admin.conversations.setCustomRetention({ channel_id: "C-retention", duration_days: duration }),
 		(error) => error.data.error === "invalid_duration",
 	);
 }
 
-assert.equal((await client.admin.conversations.removeCustomRetention({ channel_id: "C-retention" })).ok, true);
-assert.equal((await client.admin.conversations.getCustomRetention({ channel_id: "C-retention" })).is_policy_enabled, false);
+assert.equal((await adminClient.admin.conversations.removeCustomRetention({ channel_id: "C-retention" })).ok, true);
+assert.equal((await adminClient.admin.conversations.getCustomRetention({ channel_id: "C-retention" })).is_policy_enabled, false);
 
 // Slack Connect, walked across the boundary it exists for. The host sends and
 // approves; the invited organization accepts, through its own credential —
@@ -908,12 +912,12 @@ assert.equal((await client.conversations.requestSharedInvite.approve({ invite_id
 // Declined by the organization it was actually sent to: an invitation names
 // one organization, and only that one may answer it.
 assert.equal((await thirdOrgClient.conversations.declineSharedInvite({ invite_id: toDecline.invite.id })).ok, true);
-assert.equal((await client.admin.conversations.setTeams({
+assert.equal((await adminClient.admin.conversations.setTeams({
 	channel_id: "C1",
 	org_channel: false,
 	target_team_ids: ["T1"],
 })).ok, true);
-const restrictedConversation = await client.admin.conversations.create({
+const restrictedConversation = await adminClient.admin.conversations.create({
 	name: "sdk-restricted-private",
 	is_private: true,
 	team_id: "T1",
@@ -927,23 +931,23 @@ const accessGroup = await client.usergroups.create({
 assert.equal(accessGroup.ok, true);
 assert.equal(typeof accessGroup.usergroup.id, "string");
 const accessGroupID = accessGroup.usergroup.id;
-assert.equal((await client.admin.conversations.restrictAccess.addGroup({
+assert.equal((await adminClient.admin.conversations.restrictAccess.addGroup({
 	channel_id: restrictedConversation.channel_id,
 	group_id: accessGroupID,
 	team_id: "T1",
 })).ok, true);
-const accessGroups = await client.admin.conversations.restrictAccess.listGroups({
+const accessGroups = await adminClient.admin.conversations.restrictAccess.listGroups({
 	channel_id: restrictedConversation.channel_id,
 	team_id: "T1",
 });
 assert.equal(accessGroups.ok, true);
 assert.deepEqual(accessGroups.group_ids, [accessGroupID]);
-assert.equal((await client.admin.conversations.restrictAccess.removeGroup({
+assert.equal((await adminClient.admin.conversations.restrictAccess.removeGroup({
 	channel_id: restrictedConversation.channel_id,
 	group_id: accessGroupID,
 	team_id: "T1",
 })).ok, true);
-assert.equal((await client.admin.conversations.delete({ channel_id: restrictedConversation.channel_id })).ok, true);
+assert.equal((await adminClient.admin.conversations.delete({ channel_id: restrictedConversation.channel_id })).ok, true);
 assert.equal((await client.usergroups.disable({ usergroup: accessGroupID, team_id: "T1" })).ok, true);
 // Web API 8 removed the retired files.upload helper. filesUploadV2 exercises
 // the current three-step upload protocol through the SDK's public convenience
@@ -1141,13 +1145,13 @@ const createdUsergroup = await client.usergroups.create({
 assert.equal(createdUsergroup.ok, true);
 assert.equal(createdUsergroup.usergroup.is_subteam, true);
 const usergroupId = createdUsergroup.usergroup.id;
-assert.equal((await client.admin.usergroups.addChannels({ usergroup_id: usergroupId, channel_ids: ["C1"] })).ok, true);
-assert.equal((await client.admin.usergroups.addTeams({ usergroup_id: usergroupId, team_ids: ["T1"] })).ok, true);
-const adminUsergroupChannels = await client.admin.usergroups.listChannels({ usergroup_id: usergroupId, team_id: "T1" });
+assert.equal((await adminClient.admin.usergroups.addChannels({ usergroup_id: usergroupId, channel_ids: ["C1"] })).ok, true);
+assert.equal((await adminClient.admin.usergroups.addTeams({ usergroup_id: usergroupId, team_ids: ["T1"] })).ok, true);
+const adminUsergroupChannels = await adminClient.admin.usergroups.listChannels({ usergroup_id: usergroupId, team_id: "T1" });
 assert.equal(adminUsergroupChannels.ok, true);
 assert.equal(adminUsergroupChannels.channels.length, 1);
 assert.equal(adminUsergroupChannels.channels[0].id, "C1");
-assert.equal((await client.admin.usergroups.removeChannels({ usergroup_id: usergroupId, channel_ids: ["C1"] })).ok, true);
+assert.equal((await adminClient.admin.usergroups.removeChannels({ usergroup_id: usergroupId, channel_ids: ["C1"] })).ok, true);
 const updatedUsergroup = await client.usergroups.update({
 	usergroup: usergroupId,
 	name: "Updated qualification group",
@@ -1390,23 +1394,23 @@ assert.equal(users.ok, true);
 assert.equal(users.members.length, 3);
 assert.equal(users.response_metadata?.next_cursor ?? "", "");
 assert.equal((await client.apiCall("users.setActive")).ok, true);
-assert.equal((await client.admin.users.assign({
+assert.equal((await adminClient.admin.users.assign({
 	team_id: "T1",
 	user_id: "U2",
 	channel_ids: ["C1"],
 	is_restricted: false,
 	is_ultra_restricted: false,
 })).ok, true);
-assert.equal((await client.admin.users.setExpiration({
+assert.equal((await adminClient.admin.users.setExpiration({
 	team_id: "T1",
 	user_id: "U2",
 	expiration_ts: Math.floor(Date.now() / 1000) + 3600,
 })).ok, true);
-assert.equal((await client.apiCall("admin.users.session.invalidate", {
+assert.equal((await adminClient.apiCall("admin.users.session.invalidate", {
 	team_id: "T1",
 	session_id: "qualification-session",
 })).ok, true);
-assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+assert.equal((await adminClient.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
 const externalCredential = await client.apiCall("apps.auth.external.get", {
 	external_token_id: "Et-qualification",
 });
@@ -1417,7 +1421,8 @@ assert.equal((await client.apiCall("apps.auth.external.delete", {
 	external_token_id: "Et-qualification",
 })).ok, true);
 
-assert.equal((await client.apiCall("apps.icon.set", {
+// apps.icon.set wants app_configurations:write, a user scope.
+assert.equal((await adminClient.apiCall("apps.icon.set", {
 	app_id: "A1",
 	image_url: "https://example.invalid/icon.png",
 })).ok, true);
@@ -1429,125 +1434,125 @@ const assistantContext = await client.apiCall("assistant.search.context", { quer
 assert.equal(assistantContext.ok, true);
 assert.ok(Array.isArray(assistantContext.results.messages));
 
-const anomalyAllowList = await client.apiCall("admin.audit.anomaly.allow.getItem");
+const anomalyAllowList = await adminClient.apiCall("admin.audit.anomaly.allow.getItem");
 assert.equal(anomalyAllowList.ok, true);
 assert.equal(anomalyAllowList.anomaly_allow_updated_item.ips.length, 0);
-assert.equal((await client.apiCall("admin.audit.anomaly.allow.updateItem", {
+assert.equal((await adminClient.apiCall("admin.audit.anomaly.allow.updateItem", {
 	ip_addresses: "198.51.100.7",
 	reasons: "office",
 })).anomaly_allow_updated_item.ips.length, 1);
 assert.equal((await client.apiCall("team.billing.info")).ok, true);
-assert.equal((await client.apiCall("admin.users.unsupportedVersions.export", {
+assert.equal((await adminClient.apiCall("admin.users.unsupportedVersions.export", {
 	date_end_of_support: 1700000000,
 })).ok, true);
 
-const analyticsMetadata = await client.apiCall("admin.analytics.getFile", {
+const analyticsMetadata = await adminClient.apiCall("admin.analytics.getFile", {
 	type: "public_channel",
 	metadata_only: true,
 });
 assert.equal(analyticsMetadata.ok, true);
 assert.ok(analyticsMetadata.fields.length > 0);
-assert.equal((await client.apiCall("admin.analytics.messages.activity", { date: "2023-11-14" })).ok, true);
-assert.equal((await client.apiCall("admin.analytics.messages.metadata")).ok, true);
+assert.equal((await adminClient.apiCall("admin.analytics.messages.activity", { date: "2023-11-14" })).ok, true);
+assert.equal((await adminClient.apiCall("admin.analytics.messages.metadata")).ok, true);
 
-const adminActivities = await client.apiCall("admin.apps.activities.list", { app_id: "A1", limit: 10 });
+const adminActivities = await adminClient.apiCall("admin.apps.activities.list", { app_id: "A1", limit: 10 });
 assert.equal(adminActivities.ok, true);
 assert.ok(Array.isArray(adminActivities.activities));
 assert.equal((await client.apiCall("apps.activities.list", { limit: 10 })).ok, true);
 
-const channelLookup = await client.apiCall("admin.conversations.lookup", { limit: 100 });
+const channelLookup = await adminClient.apiCall("admin.conversations.lookup", { limit: 100 });
 assert.equal(channelLookup.ok, true);
 assert.ok(channelLookup.channels.length > 0);
-assert.equal((await client.apiCall("admin.conversations.bulkSetExcludeFromSlackAi", {
+assert.equal((await adminClient.apiCall("admin.conversations.bulkSetExcludeFromSlackAi", {
 	channel_ids: "C1",
 	exclude_from_slack_ai_value: true,
 })).ok, true);
-assert.equal((await client.apiCall("admin.conversations.linkObjects", {
+assert.equal((await adminClient.apiCall("admin.conversations.linkObjects", {
 	channel: "C1",
 	salesforce_org_id: "00D000",
 	record_id: "a01",
 })).ok, true);
-assert.equal((await client.apiCall("admin.conversations.unlinkObjects", { channels: "C1" })).ok, true);
-const recordChannel = await client.apiCall("admin.conversations.createForObjects", {
+assert.equal((await adminClient.apiCall("admin.conversations.unlinkObjects", { channels: "C1" })).ok, true);
+const recordChannel = await adminClient.apiCall("admin.conversations.createForObjects", {
 	channel_name: "sdk-record-channel",
 	salesforce_org_id: "00D000",
 	object_id: "a02",
 });
 assert.equal(recordChannel.ok, true);
 assert.equal(typeof recordChannel.channel_id, "string");
-assert.equal((await client.apiCall("admin.conversations.bulkMove", {
+assert.equal((await adminClient.apiCall("admin.conversations.bulkMove", {
 	channel_ids: recordChannel.channel_id,
 	target_team_id: "T1",
 })).ok, true);
 
-const appConfigs = await client.apiCall("admin.apps.config.lookup", { app_ids: "A1" });
+const appConfigs = await adminClient.apiCall("admin.apps.config.lookup", { app_ids: "A1" });
 assert.equal(appConfigs.ok, true);
 assert.equal(appConfigs.configs[0].workflow_auth_strategy, "builder_choice");
-assert.equal((await client.apiCall("admin.apps.config.set", {
+assert.equal((await adminClient.apiCall("admin.apps.config.set", {
 	app_id: "A1",
 	workflow_auth_strategy: "end_user_only",
 	domain_restrictions: JSON.stringify({ urls: ["https://example.invalid"], emails: [] }),
 })).config.workflow_auth_strategy, "end_user_only");
-assert.equal((await client.apiCall("admin.apps.clearResolution", { app_id: "A1" })).ok, true);
+assert.equal((await adminClient.apiCall("admin.apps.clearResolution", { app_id: "A1" })).ok, true);
 
-const functionPermissions = await client.apiCall("admin.functions.permissions.lookup", { function_ids: "Fn1" });
+const functionPermissions = await adminClient.apiCall("admin.functions.permissions.lookup", { function_ids: "Fn1" });
 assert.equal(functionPermissions.ok, true);
 assert.equal(functionPermissions.permissions.Fn1.permission_type, "everyone");
-assert.equal((await client.apiCall("admin.functions.permissions.set", {
+assert.equal((await adminClient.apiCall("admin.functions.permissions.set", {
 	function_id: "Fn1",
 	visibility: "named_entities",
 	user_ids: "U1",
 })).permission_type, "named_entities");
-assert.equal((await client.apiCall("admin.workflows.permissions.lookup", { workflow_ids: "Wf1" })).ok, true);
-assert.equal((await client.apiCall("admin.workflows.triggers.types.permissions.set", {
+assert.equal((await adminClient.apiCall("admin.workflows.permissions.lookup", { workflow_ids: "Wf1" })).ok, true);
+assert.equal((await adminClient.apiCall("admin.workflows.triggers.types.permissions.set", {
 	trigger_type_id: "scheduled",
 	visibility: "app_collaborators",
 })).permission_type, "app_collaborators");
-assert.equal((await client.apiCall("admin.workflows.triggers.types.permissions.lookup", {
+assert.equal((await adminClient.apiCall("admin.workflows.triggers.types.permissions.lookup", {
 	trigger_type_id: "scheduled",
 })).permission_type, "app_collaborators");
 
-const barrier = await client.apiCall("admin.barriers.create", {
+const barrier = await adminClient.apiCall("admin.barriers.create", {
 	primary_usergroup_id: usergroupId,
 	barriered_from_usergroup_ids: accessGroup.usergroup.id,
 	restricted_subjects: "im,mpim,call",
 });
 assert.equal(barrier.ok, true);
 assert.equal(barrier.barrier.restricted_subjects.length, 3);
-assert.equal((await client.apiCall("admin.barriers.update", {
+assert.equal((await adminClient.apiCall("admin.barriers.update", {
 	barrier_id: barrier.barrier.id,
 	primary_usergroup_id: accessGroup.usergroup.id,
 	barriered_from_usergroup_ids: usergroupId,
 	restricted_subjects: "im,mpim,call",
 })).ok, true);
-assert.equal((await client.apiCall("admin.barriers.list")).barriers.length, 1);
-assert.equal((await client.apiCall("admin.barriers.delete", { barrier_id: barrier.barrier.id })).ok, true);
+assert.equal((await adminClient.apiCall("admin.barriers.list")).barriers.length, 1);
+assert.equal((await adminClient.apiCall("admin.barriers.delete", { barrier_id: barrier.barrier.id })).ok, true);
 
-assert.equal((await client.apiCall("admin.users.session.setSettings", {
+assert.equal((await adminClient.apiCall("admin.users.session.setSettings", {
 	user_ids: "U2",
 	duration: 43200,
 	mobile_device_check: true,
 })).ok, true);
-const sessionSettings = await client.apiCall("admin.users.session.getSettings", { user_ids: "U2" });
+const sessionSettings = await adminClient.apiCall("admin.users.session.getSettings", { user_ids: "U2" });
 assert.equal(sessionSettings.ok, true);
 assert.equal(sessionSettings.session_settings.length, 1);
 assert.equal(sessionSettings.session_settings[0].duration, 43200);
 assert.equal(sessionSettings.no_settings_applied.length, 0);
-assert.equal((await client.apiCall("admin.users.session.clearSettings", { user_ids: "U2" })).ok, true);
+assert.equal((await adminClient.apiCall("admin.users.session.clearSettings", { user_ids: "U2" })).ok, true);
 
-assert.equal((await client.apiCall("admin.auth.policy.assignEntities", {
+assert.equal((await adminClient.apiCall("admin.auth.policy.assignEntities", {
 	policy_name: "email_password",
 	entity_type: "USER",
 	entity_ids: "U2",
 })).ok, true);
-const policyEntities = await client.apiCall("admin.auth.policy.getEntities", {
+const policyEntities = await adminClient.apiCall("admin.auth.policy.getEntities", {
 	policy_name: "email_password",
 	entity_type: "USER",
 });
 assert.equal(policyEntities.ok, true);
 assert.equal(policyEntities.entity_total_count, 1);
 assert.equal(policyEntities.entities[0].entity_id, "U2");
-assert.equal((await client.apiCall("admin.auth.policy.removeEntities", {
+assert.equal((await adminClient.apiCall("admin.auth.policy.removeEntities", {
 	policy_name: "email_password",
 	entity_type: "USER",
 	entity_ids: "U2",
@@ -1555,23 +1560,23 @@ assert.equal((await client.apiCall("admin.auth.policy.removeEntities", {
 
 // admin.roles.* runs before the member leaves: a role assignment names a
 // member, so removing U2 first would make the walk unreachable.
-assert.equal((await client.apiCall("admin.roles.addAssignments", {
+assert.equal((await adminClient.apiCall("admin.roles.addAssignments", {
 	role_id: "Rl0A",
 	entity_ids: "C1,C2",
 	user_ids: "U2",
 })).ok, true);
-const roleAssignments = await client.apiCall("admin.roles.listAssignments", { role_id: "Rl0A" });
+const roleAssignments = await adminClient.apiCall("admin.roles.listAssignments", { role_id: "Rl0A" });
 assert.equal(roleAssignments.ok, true);
 assert.equal(roleAssignments.role_assignments.length, 2);
 assert.equal(roleAssignments.role_assignments[0].user_id, "U2");
-assert.equal((await client.apiCall("admin.roles.removeAssignments", {
+assert.equal((await adminClient.apiCall("admin.roles.removeAssignments", {
 	role_id: "Rl0A",
 	entity_ids: "C1,C2",
 	user_ids: "U2",
 })).ok, true);
-assert.equal((await client.apiCall("admin.roles.listAssignments", { role_id: "Rl0A" })).role_assignments.length, 0);
+assert.equal((await adminClient.apiCall("admin.roles.listAssignments", { role_id: "Rl0A" })).role_assignments.length, 0);
 
-assert.equal((await client.admin.users.remove({ team_id: "T1", user_id: "U2" })).ok, true);
+assert.equal((await adminClient.admin.users.remove({ team_id: "T1", user_id: "U2" })).ok, true);
 
 // files.getUploadURLExternal hands back a file_id before any bytes exist, and
 // the documented flow references the file by that same identifier once

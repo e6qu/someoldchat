@@ -31,6 +31,12 @@ client = WebClient(
     token=os.environ.get("SAMEOLDCHAT_API_TOKEN", "xoxb-test"),
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
 )
+# Slack grants admin scopes to user tokens only and refuses a bot on every
+# admin method, so those calls carry the workspace owner's user token.
+admin_client = WebClient(
+    token=os.environ.get("SAMEOLDCHAT_ADMIN_TOKEN", "xoxp-admin-qualification"),
+    base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
+)
 # The user token: reminders, snooze, identity, photo and stars are methods
 # Slack serves to user tokens only.
 reminder_client = WebClient(
@@ -122,13 +128,13 @@ assert client.api_call(
 bot = client.bots_info(bot="B1")
 assert bot["ok"] is True
 assert bot["bot"]["id"] == "B1"
-access_logs = client.team_accessLogs(count=1)
+access_logs = admin_client.team_accessLogs(count=1)
 assert access_logs["ok"] is True
 assert isinstance(access_logs["logins"], list)
-billable_info = client.team_billableInfo(user="U1")
+billable_info = admin_client.team_billableInfo(user="U1")
 assert billable_info["ok"] is True
 assert billable_info["billable_info"]["U1"]["billing_active"] is True
-integration_logs = client.team_integrationLogs(count=1)
+integration_logs = admin_client.team_integrationLogs(count=1)
 assert integration_logs["ok"] is True
 migration = client.migration_exchange(users=["U1"])
 assert migration["ok"] is True
@@ -236,29 +242,29 @@ authorizations = app_client.apps_event_authorizations_list(event_context=event_c
 assert authorizations["ok"] is True
 assert authorizations["authorizations"][0]["team_id"] == "T1"
 assert authorizations["authorizations"][0]["is_bot"] is True
-admin_users = client.admin_users_list(team_id="T1", limit=10)
+admin_users = admin_client.admin_users_list(team_id="T1", limit=10)
 assert admin_users["ok"] is True
 assert any(user["id"] == "U1" for user in admin_users["users"])
-admin_emoji = client.admin_emoji_list()
+admin_emoji = admin_client.admin_emoji_list()
 assert admin_emoji["ok"] is True
-admin_teams = client.admin_teams_list(limit=10)
+admin_teams = admin_client.admin_teams_list(limit=10)
 assert admin_teams["ok"] is True
 assert any(team["id"] == "T1" for team in admin_teams["teams"])
-assert client.admin_emoji_add(name="qualified", url="https://example.com/qualified.png")["ok"] is True
-assert client.admin_emoji_addAlias(name="qualified-alias", alias_for="qualified")["ok"] is True
-assert client.admin_emoji_rename(name="qualified", new_name="qualified-renamed")["ok"] is True
-assert client.admin_emoji_remove(name="qualified-alias")["ok"] is True
-assert client.admin_emoji_remove(name="qualified-renamed")["ok"] is True
-assert client.admin_conversations_rename(channel_id="C2", name="renamed-lifecycle")["ok"] is True
-assert client.admin_conversations_archive(channel_id="C2")["ok"] is True
-assert client.admin_conversations_unarchive(channel_id="C2")["ok"] is True
-admin_team_admins = client.admin_teams_admins_list(team_id="T1", limit=10)
+assert admin_client.admin_emoji_add(name="qualified", url="https://example.com/qualified.png")["ok"] is True
+assert admin_client.admin_emoji_addAlias(name="qualified-alias", alias_for="qualified")["ok"] is True
+assert admin_client.admin_emoji_rename(name="qualified", new_name="qualified-renamed")["ok"] is True
+assert admin_client.admin_emoji_remove(name="qualified-alias")["ok"] is True
+assert admin_client.admin_emoji_remove(name="qualified-renamed")["ok"] is True
+assert admin_client.admin_conversations_rename(channel_id="C2", name="renamed-lifecycle")["ok"] is True
+assert admin_client.admin_conversations_archive(channel_id="C2")["ok"] is True
+assert admin_client.admin_conversations_unarchive(channel_id="C2")["ok"] is True
+admin_team_admins = admin_client.admin_teams_admins_list(team_id="T1", limit=10)
 assert admin_team_admins["ok"] is True
 assert "U2" in admin_team_admins["admin_ids"]
-admin_team_owners = client.admin_teams_owners_list(team_id="T1", limit=10)
+admin_team_owners = admin_client.admin_teams_owners_list(team_id="T1", limit=10)
 assert admin_team_owners["ok"] is True
 assert "U1" in admin_team_owners["owner_ids"]
-created_admin_team = client.admin_teams_create(
+created_admin_team = admin_client.admin_teams_create(
     team_domain="sdk-created-workspace",
     team_name="SDK Created Workspace",
     team_description="created by SDK qualification",
@@ -266,45 +272,45 @@ created_admin_team = client.admin_teams_create(
 )
 assert created_admin_team["ok"] is True
 assert isinstance(created_admin_team["team"], str)
-admin_team_settings = client.admin_teams_settings_info(team_id="T1")
+admin_team_settings = admin_client.admin_teams_settings_info(team_id="T1")
 assert admin_team_settings["ok"] is True
 assert admin_team_settings["team"]["id"] == "T1"
 assert admin_team_settings["team"]["name"] == "test"
-assert client.admin_users_setAdmin(team_id="T1", user_id="U2")["ok"] is True
-assert client.admin_users_setOwner(team_id="T1", user_id="U2")["ok"] is True
-assert client.admin_users_setRegular(team_id="T1", user_id="U2")["ok"] is True
-assert client.admin_teams_settings_setName(team_id="T1", name="qualified-test")["ok"] is True
-assert client.admin_teams_settings_setDescription(team_id="T1", description="qualified description")["ok"] is True
-assert client.admin_teams_settings_setDiscoverability(team_id="T1", discoverability="closed")["ok"] is True
-assert client.admin_teams_settings_setIcon(team_id="T1", image_url="https://example.com/qualified.png")["ok"] is True
-assert client.admin_teams_settings_setDefaultChannels(team_id="T1", channel_ids=["C1"])["ok"] is True
-invite_requests = client.admin_inviteRequests_list(team_id="T1", limit=10)
+assert admin_client.admin_users_setAdmin(team_id="T1", user_id="U2")["ok"] is True
+assert admin_client.admin_users_setOwner(team_id="T1", user_id="U2")["ok"] is True
+assert admin_client.admin_users_setRegular(team_id="T1", user_id="U2")["ok"] is True
+assert admin_client.admin_teams_settings_setName(team_id="T1", name="qualified-test")["ok"] is True
+assert admin_client.admin_teams_settings_setDescription(team_id="T1", description="qualified description")["ok"] is True
+assert admin_client.admin_teams_settings_setDiscoverability(team_id="T1", discoverability="closed")["ok"] is True
+assert admin_client.admin_teams_settings_setIcon(team_id="T1", image_url="https://example.com/qualified.png")["ok"] is True
+assert admin_client.admin_teams_settings_setDefaultChannels(team_id="T1", channel_ids=["C1"])["ok"] is True
+invite_requests = admin_client.admin_inviteRequests_list(team_id="T1", limit=10)
 assert invite_requests["ok"] is True
 assert isinstance(invite_requests["invite_requests"], list)
-approved_invite_requests = client.admin_inviteRequests_approved_list(team_id="T1", limit=10)
+approved_invite_requests = admin_client.admin_inviteRequests_approved_list(team_id="T1", limit=10)
 assert approved_invite_requests["ok"] is True
 assert isinstance(approved_invite_requests["approved_requests"], list)
-denied_invite_requests = client.admin_inviteRequests_denied_list(team_id="T1", limit=10)
+denied_invite_requests = admin_client.admin_inviteRequests_denied_list(team_id="T1", limit=10)
 assert denied_invite_requests["ok"] is True
 assert isinstance(denied_invite_requests["denied_requests"], list)
-assert client.admin_users_invite(
+assert admin_client.admin_users_invite(
     team_id="T1", email="sdk-approve@example.com", channel_ids=["C1"], is_restricted=False, is_ultra_restricted=False
 )["ok"] is True
-assert client.admin_users_invite(
+assert admin_client.admin_users_invite(
     team_id="T1", email="sdk-deny@example.com", channel_ids=["C1"], is_restricted=False, is_ultra_restricted=False
 )["ok"] is True
-pending_invite_requests = client.admin_inviteRequests_list(team_id="T1", limit=10)
+pending_invite_requests = admin_client.admin_inviteRequests_list(team_id="T1", limit=10)
 approval_request = next(request for request in pending_invite_requests["invite_requests"] if request["email"] == "sdk-approve@example.com")
 denial_request = next(request for request in pending_invite_requests["invite_requests"] if request["email"] == "sdk-deny@example.com")
-assert client.admin_inviteRequests_approve(team_id="T1", invite_request_id=approval_request["id"])["ok"] is True
-assert client.admin_inviteRequests_deny(team_id="T1", invite_request_id=denial_request["id"])["ok"] is True
-approved_apps = client.admin_apps_approved_list(team_id="T1", limit=10)
+assert admin_client.admin_inviteRequests_approve(team_id="T1", invite_request_id=approval_request["id"])["ok"] is True
+assert admin_client.admin_inviteRequests_deny(team_id="T1", invite_request_id=denial_request["id"])["ok"] is True
+approved_apps = admin_client.admin_apps_approved_list(team_id="T1", limit=10)
 assert approved_apps["ok"] is True
 assert isinstance(approved_apps["approved_apps"], list)
-app_requests = client.admin_apps_requests_list(team_id="T1", limit=10)
+app_requests = admin_client.admin_apps_requests_list(team_id="T1", limit=10)
 assert app_requests["ok"] is True
 assert isinstance(app_requests["app_requests"], list)
-restricted_apps = client.admin_apps_restricted_list(team_id="T1", limit=10)
+restricted_apps = admin_client.admin_apps_restricted_list(team_id="T1", limit=10)
 assert restricted_apps["ok"] is True
 assert isinstance(restricted_apps["restricted_apps"], list)
 assert client.api_call("apps.permissions.info")["ok"] is True
@@ -318,21 +324,21 @@ assert client.api_call(
     "apps.permissions.users.request",
     params={"scopes": "channels:read", "trigger_id": "permission-user-trigger", "user": "U1"},
 )["ok"] is True
-assert client.admin_apps_approve(app_id="A1", team_id="T1")["ok"] is True
+assert admin_client.admin_apps_approve(app_id="A1", team_id="T1")["ok"] is True
 # Restriction targets another app on purpose: it uninstalls the app and revokes
 # its credentials, so restricting A1 would revoke this walk's own token.
-assert client.admin_apps_restrict(app_id="ARESTRICT", team_id="T1")["ok"] is True
-assert client.admin_conversations_invite(channel_id="C2", user_ids="U2")["ok"] is True
-searched_conversations = client.admin_conversations_search(query="general", limit=10)
+assert admin_client.admin_apps_restrict(app_id="ARESTRICT", team_id="T1")["ok"] is True
+assert admin_client.admin_conversations_invite(channel_id="C2", user_ids="U2")["ok"] is True
+searched_conversations = admin_client.admin_conversations_search(query="general", limit=10)
 assert searched_conversations["ok"] is True
 assert any(conversation["id"] == "C1" for conversation in searched_conversations["conversations"])
-assert client.admin_conversations_setConversationPrefs(
+assert admin_client.admin_conversations_setConversationPrefs(
     channel_id="C1", prefs={"can_thread": {"type": ["everyone"]}, "who_can_post": {"type": ["everyone"]}}
 )["ok"] is True
-conversation_prefs = client.admin_conversations_getConversationPrefs(channel_id="C1")
+conversation_prefs = admin_client.admin_conversations_getConversationPrefs(channel_id="C1")
 assert conversation_prefs["ok"] is True
 assert isinstance(conversation_prefs["prefs"], dict)
-conversation_teams = client.admin_conversations_getTeams(channel_id="C1", limit=10)
+conversation_teams = admin_client.admin_conversations_getTeams(channel_id="C1", limit=10)
 assert conversation_teams["ok"] is True
 assert "T1" in conversation_teams["team_ids"]
 completed_step = client.workflows_stepCompleted(
@@ -560,35 +566,35 @@ kicked = client.conversations_kick(channel=private_invitation_channel["channel"]
 assert kicked["ok"] is True
 left = client.conversations_leave(channel="C2")
 assert left["ok"] is True
-assert client.admin_conversations_convertToPrivate(channel_id="C2")["ok"] is True
-assert client.admin_conversations_delete(channel_id="C2")["ok"] is True
-created_admin_conversation = client.admin_conversations_create(name="sdk-admin-created", is_private=True, team_id="T1")
+assert admin_client.admin_conversations_convertToPrivate(channel_id="C2")["ok"] is True
+assert admin_client.admin_conversations_delete(channel_id="C2")["ok"] is True
+created_admin_conversation = admin_client.admin_conversations_create(name="sdk-admin-created", is_private=True, team_id="T1")
 assert created_admin_conversation["ok"] is True
 assert isinstance(created_admin_conversation["channel_id"], str)
-assert client.admin_conversations_delete(channel_id=created_admin_conversation["channel_id"])["ok"] is True
-connected_channel_info = client.admin_conversations_ekm_listOriginalConnectedChannelInfo(channel_ids=["C1"], limit=10)
+assert admin_client.admin_conversations_delete(channel_id=created_admin_conversation["channel_id"])["ok"] is True
+connected_channel_info = admin_client.admin_conversations_ekm_listOriginalConnectedChannelInfo(channel_ids=["C1"], limit=10)
 assert connected_channel_info["ok"] is True
 assert isinstance(connected_channel_info["channels"], list)
-assert client.admin_conversations_disconnectShared(channel_id="C1", leaving_team_ids=["T1"])["ok"] is True
-assert client.admin_conversations_setTeams(channel_id="C1", org_channel=False, target_team_ids=["T1"])["ok"] is True
-restricted_conversation = client.admin_conversations_create(name="sdk-restricted-private", is_private=True, team_id="T1")
+assert admin_client.admin_conversations_disconnectShared(channel_id="C1", leaving_team_ids=["T1"])["ok"] is True
+assert admin_client.admin_conversations_setTeams(channel_id="C1", org_channel=False, target_team_ids=["T1"])["ok"] is True
+restricted_conversation = admin_client.admin_conversations_create(name="sdk-restricted-private", is_private=True, team_id="T1")
 assert restricted_conversation["ok"] is True
 access_group = client.usergroups_create(name="SDK Access Group", handle="sdk-access-group", team_id="T1")
 assert access_group["ok"] is True
 access_group_id = access_group["usergroup"]["id"]
 assert isinstance(access_group_id, str)
-assert client.admin_conversations_restrictAccess_addGroup(
+assert admin_client.admin_conversations_restrictAccess_addGroup(
     channel_id=restricted_conversation["channel_id"], group_id=access_group_id, team_id="T1"
 )["ok"] is True
-access_groups = client.admin_conversations_restrictAccess_listGroups(
+access_groups = admin_client.admin_conversations_restrictAccess_listGroups(
     channel_id=restricted_conversation["channel_id"], team_id="T1"
 )
 assert access_groups["ok"] is True
 assert access_groups["group_ids"] == [access_group_id]
-assert client.admin_conversations_restrictAccess_removeGroup(
+assert admin_client.admin_conversations_restrictAccess_removeGroup(
     channel_id=restricted_conversation["channel_id"], group_id=access_group_id, team_id="T1"
 )["ok"] is True
-assert client.admin_conversations_delete(channel_id=restricted_conversation["channel_id"])["ok"] is True
+assert admin_client.admin_conversations_delete(channel_id=restricted_conversation["channel_id"])["ok"] is True
 assert client.usergroups_disable(usergroup=access_group_id, team_id="T1")["ok"] is True
 uploaded_file = client.files_upload(content="sdk upload", filename="sdk-upload.txt", title="SDK upload")
 assert uploaded_file["ok"] is True
@@ -759,13 +765,13 @@ created_usergroup = client.usergroups_create(
 assert created_usergroup["ok"] is True
 assert created_usergroup["usergroup"]["is_subteam"] is True
 usergroup_id = created_usergroup["usergroup"]["id"]
-assert client.admin_usergroups_addChannels(usergroup_id=usergroup_id, channel_ids=["C1"])["ok"] is True
-assert client.admin_usergroups_addTeams(usergroup_id=usergroup_id, team_ids=["T1"])["ok"] is True
-admin_usergroup_channels = client.admin_usergroups_listChannels(usergroup_id=usergroup_id, team_id="T1")
+assert admin_client.admin_usergroups_addChannels(usergroup_id=usergroup_id, channel_ids=["C1"])["ok"] is True
+assert admin_client.admin_usergroups_addTeams(usergroup_id=usergroup_id, team_ids=["T1"])["ok"] is True
+admin_usergroup_channels = admin_client.admin_usergroups_listChannels(usergroup_id=usergroup_id, team_id="T1")
 assert admin_usergroup_channels["ok"] is True
 assert len(admin_usergroup_channels["channels"]) == 1
 assert admin_usergroup_channels["channels"][0]["id"] == "C1"
-assert client.admin_usergroups_removeChannels(usergroup_id=usergroup_id, channel_ids=["C1"])["ok"] is True
+assert admin_client.admin_usergroups_removeChannels(usergroup_id=usergroup_id, channel_ids=["C1"])["ok"] is True
 updated_usergroup = client.usergroups_update(usergroup=usergroup_id, name="Updated qualification group", channels="C1")
 assert updated_usergroup["ok"] is True
 assert updated_usergroup["usergroup"]["prefs"]["channels"] == ["C1"]
@@ -949,17 +955,17 @@ users = client.users_list(limit=10)
 assert users["ok"] is True
 assert len(users["members"]) == 3
 assert client.api_call("users.setActive")["ok"] is True
-assert client.admin_users_assign(
+assert admin_client.admin_users_assign(
     team_id="T1", user_id="U2", channel_ids=["C1"], is_restricted=False, is_ultra_restricted=False
 )["ok"] is True
-assert client.admin_users_setExpiration(
+assert admin_client.admin_users_setExpiration(
     team_id="T1", user_id="U2", expiration_ts=int(time.time()) + 3600
 )["ok"] is True
-assert client.api_call(
+assert admin_client.api_call(
     "admin.users.session.invalidate", params={"team_id": "T1", "session_id": "qualification-session"}
 )["ok"] is True
-assert client.api_call("admin.users.session.reset", params={"user_id": "U2"})["ok"] is True
-assert client.admin_users_remove(team_id="T1", user_id="U2")["ok"] is True
+assert admin_client.api_call("admin.users.session.reset", params={"user_id": "U2"})["ok"] is True
+assert admin_client.admin_users_remove(team_id="T1", user_id="U2")["ok"] is True
 
 # The message object as history, replies, pins and reactions return it,
 # read through the official client exactly as an app written against Slack

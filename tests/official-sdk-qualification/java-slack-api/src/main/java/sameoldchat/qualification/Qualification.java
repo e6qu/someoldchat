@@ -59,6 +59,9 @@ public final class Qualification {
         config.setTokenExistenceVerificationEnabled(false);
         try (Slack slack = Slack.getInstance(config)) {
             MethodsClient methods = slack.methods(token);
+            // Slack grants admin scopes to user tokens only and refuses a bot on
+            // every admin method, so those calls carry the owner's user token.
+            MethodsClient adminMethods = slack.methods(env("SAMEOLDCHAT_ADMIN_TOKEN", "xoxp-admin-qualification"));
             MethodsClient appMethods = slack.methods(appToken);
             MethodsClient reminderMethods = slack.methods("xoxp-reminder-qualification");
 
@@ -73,15 +76,15 @@ public final class Qualification {
                     com.slack.api.methods.request.bots.BotsInfoRequest.builder().bot("B1").build());
             require(bot.isOk() && bot.getBot() != null && "B1".equals(bot.getBot().getId()),
                     "bots.info failed: " + bot.getError());
-            com.slack.api.methods.response.team.TeamAccessLogsResponse accessLogs = methods.teamAccessLogs(
+            com.slack.api.methods.response.team.TeamAccessLogsResponse accessLogs = adminMethods.teamAccessLogs(
                     com.slack.api.methods.request.team.TeamAccessLogsRequest.builder().count(1).build());
             require(accessLogs.isOk() && accessLogs.getLogins() != null, "team.accessLogs failed: " + accessLogs.getError());
-            com.slack.api.methods.response.team.TeamBillableInfoResponse billableInfo = methods.teamBillableInfo(
+            com.slack.api.methods.response.team.TeamBillableInfoResponse billableInfo = adminMethods.teamBillableInfo(
                     com.slack.api.methods.request.team.TeamBillableInfoRequest.builder().user("U1").build());
             require(billableInfo.isOk() && billableInfo.getBillableInfo() != null
                             && billableInfo.getBillableInfo().containsKey("U1"),
                     "team.billableInfo failed: " + billableInfo.getError());
-            com.slack.api.methods.response.team.TeamIntegrationLogsResponse integrationLogs = methods.teamIntegrationLogs(
+            com.slack.api.methods.response.team.TeamIntegrationLogsResponse integrationLogs = adminMethods.teamIntegrationLogs(
                     com.slack.api.methods.request.team.TeamIntegrationLogsRequest.builder().count(1).build());
             require(integrationLogs.isOk(), "team.integrationLogs failed: " + integrationLogs.getError());
             com.slack.api.methods.response.migration.MigrationExchangeResponse migration = methods.migrationExchange(
@@ -159,30 +162,30 @@ public final class Qualification {
             require(authorizations.isOk() && authorizations.getAuthorizations() != null
                             && !authorizations.getAuthorizations().isEmpty(),
                     "apps.event.authorizations.list failed: " + authorizations.getError());
-            com.slack.api.methods.response.admin.users.AdminUsersListResponse adminUsers = methods.adminUsersList(
+            com.slack.api.methods.response.admin.users.AdminUsersListResponse adminUsers = adminMethods.adminUsersList(
                     com.slack.api.methods.request.admin.users.AdminUsersListRequest.builder()
                             .teamId("T1").limit(10).build());
             require(adminUsers.isOk() && adminUsers.getUsers() != null
                             && adminUsers.getUsers().stream().anyMatch(user -> "U1".equals(user.getId())),
                     "admin.users.list failed: " + adminUsers.getError());
-            com.slack.api.methods.response.admin.emoji.AdminEmojiListResponse adminEmoji = methods.adminEmojiList(
+            com.slack.api.methods.response.admin.emoji.AdminEmojiListResponse adminEmoji = adminMethods.adminEmojiList(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiListRequest.builder().build());
             require(adminEmoji.isOk() && adminEmoji.getEmoji() != null,
                     "admin.emoji.list failed: " + adminEmoji.getError());
-            com.slack.api.methods.response.admin.teams.AdminTeamsListResponse adminTeams = methods.adminTeamsList(
+            com.slack.api.methods.response.admin.teams.AdminTeamsListResponse adminTeams = adminMethods.adminTeamsList(
                     com.slack.api.methods.request.admin.teams.AdminTeamsListRequest.builder().limit(10).build());
             require(adminTeams.isOk() && adminTeams.getTeams() != null
                             && adminTeams.getTeams().stream().anyMatch(team -> "T1".equals(team.getId())),
                     "admin.teams.list failed: " + adminTeams.getError());
-            require(methods.adminEmojiAdd(
+            require(adminMethods.adminEmojiAdd(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiAddRequest.builder()
                             .name("qualified").url("https://example.com/qualified.png").build()).isOk(), "admin.emoji.add failed");
-            require(methods.adminEmojiAddAlias(
+            require(adminMethods.adminEmojiAddAlias(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiAddAliasRequest.builder()
                             .name("qualified-alias").aliasFor("qualified").build()).isOk(), "admin.emoji.addAlias failed");
             // admin.emoji.list answers an object per emoji; the client's
             // strict admin Emoji model cannot decode emoji.list's bare URLs.
-            com.slack.api.methods.response.admin.emoji.AdminEmojiListResponse addedEmoji = methods.adminEmojiList(
+            com.slack.api.methods.response.admin.emoji.AdminEmojiListResponse addedEmoji = adminMethods.adminEmojiList(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiListRequest.builder().limit(1000).build());
             require(addedEmoji.isOk() && addedEmoji.getEmoji() != null
                             && addedEmoji.getEmoji().get("qualified") != null
@@ -191,90 +194,90 @@ public final class Qualification {
                             && addedEmoji.getEmoji().get("qualified-alias") != null
                             && "alias:qualified".equals(addedEmoji.getEmoji().get("qualified-alias").getUrl()),
                     "admin.emoji.list after add failed: " + addedEmoji);
-            require(methods.adminEmojiRename(
+            require(adminMethods.adminEmojiRename(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiRenameRequest.builder()
                             .name("qualified").newName("qualified-renamed").build()).isOk(), "admin.emoji.rename failed");
-            require(methods.adminEmojiRemove(
+            require(adminMethods.adminEmojiRemove(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiRemoveRequest.builder()
                             .name("qualified-alias").build()).isOk(), "admin.emoji.remove alias failed");
-            require(methods.adminEmojiRemove(
+            require(adminMethods.adminEmojiRemove(
                     com.slack.api.methods.request.admin.emoji.AdminEmojiRemoveRequest.builder()
                             .name("qualified-renamed").build()).isOk(), "admin.emoji.remove failed");
-            require(methods.adminConversationsRename(
+            require(adminMethods.adminConversationsRename(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsRenameRequest.builder()
                             .channelId("C2").name("renamed-lifecycle").build()).isOk(), "admin.conversations.rename failed");
-            require(methods.adminConversationsArchive(
+            require(adminMethods.adminConversationsArchive(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsArchiveRequest.builder()
                             .channelId("C2").build()).isOk(), "admin.conversations.archive failed");
-            require(methods.adminConversationsUnarchive(
+            require(adminMethods.adminConversationsUnarchive(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsUnarchiveRequest.builder()
                             .channelId("C2").build()).isOk(), "admin.conversations.unarchive failed");
-            com.slack.api.methods.response.admin.teams.AdminTeamsAdminsListResponse adminTeamAdmins = methods.adminTeamsAdminsList(
+            com.slack.api.methods.response.admin.teams.AdminTeamsAdminsListResponse adminTeamAdmins = adminMethods.adminTeamsAdminsList(
                     com.slack.api.methods.request.admin.teams.AdminTeamsAdminsListRequest.builder()
                             .teamId("T1").limit(10).build());
             require(adminTeamAdmins.isOk() && adminTeamAdmins.getAdminIds() != null
                             && adminTeamAdmins.getAdminIds().contains("U2"),
                     "admin.teams.admins.list failed: " + adminTeamAdmins.getError());
-            com.slack.api.methods.response.admin.teams.owners.AdminTeamsOwnersListResponse adminTeamOwners = methods.adminTeamsOwnersList(
+            com.slack.api.methods.response.admin.teams.owners.AdminTeamsOwnersListResponse adminTeamOwners = adminMethods.adminTeamsOwnersList(
                     com.slack.api.methods.request.admin.teams.owners.AdminTeamsOwnersListRequest.builder()
                             .teamId("T1").limit(10).build());
             require(adminTeamOwners.isOk() && adminTeamOwners.getOwnerIds() != null
                             && adminTeamOwners.getOwnerIds().contains("U1"),
                     "admin.teams.owners.list failed: " + adminTeamOwners.getError());
-            com.slack.api.methods.response.admin.teams.AdminTeamsCreateResponse createdAdminTeam = methods.adminTeamsCreate(
+            com.slack.api.methods.response.admin.teams.AdminTeamsCreateResponse createdAdminTeam = adminMethods.adminTeamsCreate(
                     com.slack.api.methods.request.admin.teams.AdminTeamsCreateRequest.builder()
                             .teamDomain("sdk-created-workspace").teamName("SDK Created Workspace")
                             .teamDescription("created by SDK qualification").teamDiscoverability("closed").build());
             require(createdAdminTeam.isOk() && createdAdminTeam.getTeam() != null,
                     "admin.teams.create failed: " + createdAdminTeam.getError());
-            com.slack.api.methods.response.admin.teams.settings.AdminTeamsSettingsInfoResponse adminTeamSettings = methods.adminTeamsSettingsInfo(
+            com.slack.api.methods.response.admin.teams.settings.AdminTeamsSettingsInfoResponse adminTeamSettings = adminMethods.adminTeamsSettingsInfo(
                     com.slack.api.methods.request.admin.teams.settings.AdminTeamsSettingsInfoRequest.builder()
                             .teamId("T1").build());
             require(adminTeamSettings.isOk() && adminTeamSettings.getTeam() != null
                             && "T1".equals(adminTeamSettings.getTeam().getId())
                             && "test".equals(adminTeamSettings.getTeam().getName()),
                     "admin.teams.settings.info failed: " + adminTeamSettings.getError());
-            require(methods.adminUsersSetAdmin(
+            require(adminMethods.adminUsersSetAdmin(
                     com.slack.api.methods.request.admin.users.AdminUsersSetAdminRequest.builder()
                             .teamId("T1").userId("U2").build()).isOk(), "admin.users.setAdmin failed");
-            require(methods.adminUsersSetOwner(
+            require(adminMethods.adminUsersSetOwner(
                     com.slack.api.methods.request.admin.users.AdminUsersSetOwnerRequest.builder()
                             .teamId("T1").userId("U2").build()).isOk(), "admin.users.setOwner failed");
-            require(methods.adminUsersSetRegular(
+            require(adminMethods.adminUsersSetRegular(
                     com.slack.api.methods.request.admin.users.AdminUsersSetRegularRequest.builder()
                             .teamId("T1").userId("U2").build()).isOk(), "admin.users.setRegular failed");
-            require(methods.adminTeamsSettingsSetName(
+            require(adminMethods.adminTeamsSettingsSetName(
                     com.slack.api.methods.request.admin.teams.settings.AdminTeamsSettingsSetNameRequest.builder()
                             .teamId("T1").name("qualified-test").build()).isOk(), "admin.teams.settings.setName failed");
-            require(methods.adminTeamsSettingsSetDescription(
+            require(adminMethods.adminTeamsSettingsSetDescription(
                     com.slack.api.methods.request.admin.teams.settings.AdminTeamsSettingsSetDescriptionRequest.builder()
                             .teamId("T1").description("qualified description").build()).isOk(), "admin.teams.settings.setDescription failed");
-            require(methods.adminTeamsSettingsSetDiscoverability(
+            require(adminMethods.adminTeamsSettingsSetDiscoverability(
                     com.slack.api.methods.request.admin.teams.settings.AdminTeamsSettingsSetDiscoverabilityRequest.builder()
                             .teamId("T1").discoverability("closed").build()).isOk(), "admin.teams.settings.setDiscoverability failed");
-            require(methods.adminTeamsSettingsSetIcon(
+            require(adminMethods.adminTeamsSettingsSetIcon(
                     com.slack.api.methods.request.admin.teams.settings.AdminTeamsSettingsSetIconRequest.builder()
                             .teamId("T1").imageUrl("https://example.com/qualified.png").build()).isOk(), "admin.teams.settings.setIcon failed");
-            require(methods.adminTeamsSettingsSetDefaultChannels(
+            require(adminMethods.adminTeamsSettingsSetDefaultChannels(
                     com.slack.api.methods.request.admin.teams.settings.AdminTeamsSettingsSetDefaultChannelsRequest.builder()
                             .teamId("T1").channelIds(java.util.List.of("C1")).build()).isOk(), "admin.teams.settings.setDefaultChannels failed");
-            com.slack.api.methods.response.admin.invite_requests.AdminInviteRequestsListResponse inviteRequests = methods.adminInviteRequestsList(
+            com.slack.api.methods.response.admin.invite_requests.AdminInviteRequestsListResponse inviteRequests = adminMethods.adminInviteRequestsList(
                     com.slack.api.methods.request.admin.invite_requests.AdminInviteRequestsListRequest.builder()
                             .teamId("T1").limit(10).build());
             require(inviteRequests.isOk() && inviteRequests.getInviteRequests() != null,
                     "admin.inviteRequests.list failed: " + inviteRequests.getError());
-            require(methods.adminUsersInvite(
+            require(adminMethods.adminUsersInvite(
                     com.slack.api.methods.request.admin.users.AdminUsersInviteRequest.builder()
                             .teamId("T1").email("sdk-approve@example.com").channelIds(java.util.List.of("C1"))
                             .isRestricted(false).isUltraRestricted(false).build()).isOk(),
                     "admin.users.invite for approval failed");
-            require(methods.adminUsersInvite(
+            require(adminMethods.adminUsersInvite(
                     com.slack.api.methods.request.admin.users.AdminUsersInviteRequest.builder()
                             .teamId("T1").email("sdk-deny@example.com").channelIds(java.util.List.of("C1"))
                             .isRestricted(false).isUltraRestricted(false).build()).isOk(),
                     "admin.users.invite for denial failed");
             com.slack.api.methods.response.admin.invite_requests.AdminInviteRequestsListResponse pendingInviteRequests =
-                    methods.adminInviteRequestsList(
+                    adminMethods.adminInviteRequestsList(
                             com.slack.api.methods.request.admin.invite_requests.AdminInviteRequestsListRequest.builder()
                                     .teamId("T1").limit(10).build());
             String approvalRequestId = pendingInviteRequests.getInviteRequests().stream()
@@ -285,35 +288,35 @@ public final class Qualification {
                     .map(com.slack.api.model.admin.InviteRequest::getId).findFirst().orElse("");
             require(!approvalRequestId.isEmpty() && !denialRequestId.isEmpty(),
                     "admin.inviteRequests.list did not return created requests");
-            require(methods.adminInviteRequestsApprove(
+            require(adminMethods.adminInviteRequestsApprove(
                     com.slack.api.methods.request.admin.invite_requests.AdminInviteRequestsApproveRequest.builder()
                             .teamId("T1").inviteRequestId(approvalRequestId).build()).isOk(),
                     "admin.inviteRequests.approve failed");
-            require(methods.adminInviteRequestsDeny(
+            require(adminMethods.adminInviteRequestsDeny(
                     com.slack.api.methods.request.admin.invite_requests.AdminInviteRequestsDenyRequest.builder()
                             .teamId("T1").inviteRequestId(denialRequestId).build()).isOk(),
                     "admin.inviteRequests.deny failed");
-            com.slack.api.methods.response.admin.invite_requests.AdminInviteRequestsApprovedListResponse approvedInviteRequests = methods.adminInviteRequestsApprovedList(
+            com.slack.api.methods.response.admin.invite_requests.AdminInviteRequestsApprovedListResponse approvedInviteRequests = adminMethods.adminInviteRequestsApprovedList(
                     com.slack.api.methods.request.admin.invite_requests.AdminInviteRequestsApprovedListRequest.builder()
                             .teamId("T1").limit(10).build());
             require(approvedInviteRequests.isOk() && approvedInviteRequests.getApprovedRequests() != null,
                     "admin.inviteRequests.approved.list failed: " + approvedInviteRequests.getError());
-            com.slack.api.methods.response.admin.invite_requests.AdminInviteRequestsDeniedListResponse deniedInviteRequests = methods.adminInviteRequestsDeniedList(
+            com.slack.api.methods.response.admin.invite_requests.AdminInviteRequestsDeniedListResponse deniedInviteRequests = adminMethods.adminInviteRequestsDeniedList(
                     com.slack.api.methods.request.admin.invite_requests.AdminInviteRequestsDeniedListRequest.builder()
                             .teamId("T1").limit(10).build());
             require(deniedInviteRequests.isOk() && deniedInviteRequests.getDeniedRequests() != null,
                     "admin.inviteRequests.denied.list failed: " + deniedInviteRequests.getError());
-            com.slack.api.methods.response.admin.apps.AdminAppsApprovedListResponse approvedApps = methods.adminAppsApprovedList(
+            com.slack.api.methods.response.admin.apps.AdminAppsApprovedListResponse approvedApps = adminMethods.adminAppsApprovedList(
                     com.slack.api.methods.request.admin.apps.AdminAppsApprovedListRequest.builder()
                             .teamId("T1").limit(10).build());
             require(approvedApps.isOk() && approvedApps.getApprovedApps() != null,
                     "admin.apps.approved.list failed: " + approvedApps.getError());
-            com.slack.api.methods.response.admin.apps.AdminAppsRequestsListResponse appRequests = methods.adminAppsRequestsList(
+            com.slack.api.methods.response.admin.apps.AdminAppsRequestsListResponse appRequests = adminMethods.adminAppsRequestsList(
                     com.slack.api.methods.request.admin.apps.AdminAppsRequestsListRequest.builder()
                             .teamId("T1").limit(10).build());
             require(appRequests.isOk() && appRequests.getAppRequests() != null,
                     "admin.apps.requests.list failed: " + appRequests.getError());
-            com.slack.api.methods.response.admin.apps.AdminAppsRestrictedListResponse restrictedApps = methods.adminAppsRestrictedList(
+            com.slack.api.methods.response.admin.apps.AdminAppsRestrictedListResponse restrictedApps = adminMethods.adminAppsRestrictedList(
                     com.slack.api.methods.request.admin.apps.AdminAppsRestrictedListRequest.builder()
                             .teamId("T1").limit(10).build());
             require(restrictedApps.isOk() && restrictedApps.getRestrictedApps() != null,
@@ -344,31 +347,31 @@ public final class Qualification {
                             .scopes(java.util.List.of("channels:read")).triggerId("permission-user-trigger")
                             .user("U1").build()).isOk(),
                     "apps.permissions.users.request failed");
-            require(methods.adminAppsApprove(
+            require(adminMethods.adminAppsApprove(
                     com.slack.api.methods.request.admin.apps.AdminAppsApproveRequest.builder()
                             .appId("A1").teamId("T1").build()).isOk(), "admin.apps.approve failed");
-            require(methods.adminAppsRestrict(
+            require(adminMethods.adminAppsRestrict(
                     com.slack.api.methods.request.admin.apps.AdminAppsRestrictRequest.builder()
                             .appId("ARESTRICT").teamId("T1").build()).isOk(), "admin.apps.restrict failed");
-            require(methods.adminConversationsInvite(
+            require(adminMethods.adminConversationsInvite(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsInviteRequest.builder()
                             .channelId("C2").userIds(java.util.List.of("U2")).build()).isOk(), "admin.conversations.invite failed");
-            com.slack.api.methods.response.admin.conversations.AdminConversationsSearchResponse searchedConversations = methods.adminConversationsSearch(
+            com.slack.api.methods.response.admin.conversations.AdminConversationsSearchResponse searchedConversations = adminMethods.adminConversationsSearch(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsSearchRequest.builder()
                             .query("general").limit(10).build());
             require(searchedConversations.isOk() && searchedConversations.getConversations() != null
                             && searchedConversations.getConversations().stream().anyMatch(conversation -> "C1".equals(conversation.getId())),
                     "admin.conversations.search failed: " + searchedConversations.getError());
-            require(methods.adminConversationsSetConversationPrefs(
+            require(adminMethods.adminConversationsSetConversationPrefs(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsSetConversationPrefsRequest.builder()
                             .channelId("C1").prefsAsString("{\"can_thread\":{\"type\":[\"everyone\"]},\"who_can_post\":{\"type\":[\"everyone\"]}}")
                             .build()).isOk(), "admin.conversations.setConversationPrefs failed");
-            com.slack.api.methods.response.admin.conversations.AdminConversationsGetConversationPrefsResponse conversationPrefs = methods.adminConversationsGetConversationPrefs(
+            com.slack.api.methods.response.admin.conversations.AdminConversationsGetConversationPrefsResponse conversationPrefs = adminMethods.adminConversationsGetConversationPrefs(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsGetConversationPrefsRequest.builder()
                             .channelId("C1").build());
             require(conversationPrefs.isOk() && conversationPrefs.getPrefs() != null,
                     "admin.conversations.getConversationPrefs failed: " + conversationPrefs.getError());
-            com.slack.api.methods.response.admin.conversations.AdminConversationsGetTeamsResponse conversationTeams = methods.adminConversationsGetTeams(
+            com.slack.api.methods.response.admin.conversations.AdminConversationsGetTeamsResponse conversationTeams = adminMethods.adminConversationsGetTeams(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsGetTeamsRequest.builder()
                             .channelId("C1").limit(10).build());
             require(conversationTeams.isOk() && conversationTeams.getTeamIds() != null
@@ -559,38 +562,38 @@ public final class Qualification {
             com.slack.api.methods.response.conversations.ConversationsLeaveResponse left = methods.conversationsLeave(
                     com.slack.api.methods.request.conversations.ConversationsLeaveRequest.builder().channel("C2").build());
             require(left.isOk(), "conversations.leave failed: " + left.getError());
-            require(methods.adminConversationsConvertToPrivate(
+            require(adminMethods.adminConversationsConvertToPrivate(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsConvertToPrivateRequest.builder()
                             .channelId("C2").build()).isOk(), "admin.conversations.convertToPrivate failed");
-            require(methods.adminConversationsDelete(
+            require(adminMethods.adminConversationsDelete(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsDeleteRequest.builder()
                             .channelId("C2").build()).isOk(), "admin.conversations.delete failed");
             com.slack.api.methods.response.admin.conversations.AdminConversationsCreateResponse createdAdminConversation =
-                    methods.adminConversationsCreate(
+                    adminMethods.adminConversationsCreate(
                             com.slack.api.methods.request.admin.conversations.AdminConversationsCreateRequest.builder()
                                     .name("sdk-admin-created").isPrivate(true).teamId("T1").build());
             require(createdAdminConversation.isOk() && createdAdminConversation.getChannelId() != null,
                     "admin.conversations.create failed");
-            require(methods.adminConversationsDelete(
+            require(adminMethods.adminConversationsDelete(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsDeleteRequest.builder()
                             .channelId(createdAdminConversation.getChannelId()).build()).isOk(),
                     "admin.conversations.delete for created conversation failed");
             com.slack.api.methods.response.admin.conversations.ekm.AdminConversationsEkmListOriginalConnectedChannelInfoResponse connectedChannelInfo =
-                    methods.adminConversationsEkmListOriginalConnectedChannelInfo(
+                    adminMethods.adminConversationsEkmListOriginalConnectedChannelInfo(
                             com.slack.api.methods.request.admin.conversations.ekm.AdminConversationsEkmListOriginalConnectedChannelInfoRequest.builder()
                                     .channelIds(java.util.List.of("C1")).limit(10).build());
             require(connectedChannelInfo.isOk(),
                     "admin.conversations.ekm.listOriginalConnectedChannelInfo failed");
-            require(methods.adminConversationsDisconnectShared(
+            require(adminMethods.adminConversationsDisconnectShared(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsDisconnectSharedRequest.builder()
                             .channelId("C1").leavingTeamIds(java.util.List.of("T1")).build()).isOk(),
                     "admin.conversations.disconnectShared failed");
-            require(methods.adminConversationsSetTeams(
+            require(adminMethods.adminConversationsSetTeams(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsSetTeamsRequest.builder()
                             .channelId("C1").orgChannel(false).targetTeamIds(java.util.List.of("T1")).build()).isOk(),
                     "admin.conversations.setTeams failed");
             com.slack.api.methods.response.admin.conversations.AdminConversationsCreateResponse restrictedConversation =
-                    methods.adminConversationsCreate(
+                    adminMethods.adminConversationsCreate(
                             com.slack.api.methods.request.admin.conversations.AdminConversationsCreateRequest.builder()
                                     .name("sdk-restricted-private").isPrivate(true).teamId("T1").build());
             require(restrictedConversation.isOk() && restrictedConversation.getChannelId() != null,
@@ -601,22 +604,22 @@ public final class Qualification {
             require(accessGroup.isOk() && accessGroup.getUsergroup() != null && accessGroup.getUsergroup().getId() != null,
                     "usergroups.create for access group failed");
             String accessGroupId = accessGroup.getUsergroup().getId();
-            require(methods.adminConversationsRestrictAccessAddGroup(
+            require(adminMethods.adminConversationsRestrictAccessAddGroup(
                     com.slack.api.methods.request.admin.conversations.restrict_access.AdminConversationsRestrictAccessAddGroupRequest.builder()
                             .channelId(restrictedConversation.getChannelId()).groupId(accessGroupId).teamId("T1").build()).isOk(),
                     "admin.conversations.restrictAccess.addGroup failed");
             com.slack.api.methods.response.admin.conversations.restrict_access.AdminConversationsRestrictAccessListGroupsResponse accessGroups =
-                    methods.adminConversationsRestrictAccessListGroups(
+                    adminMethods.adminConversationsRestrictAccessListGroups(
                             com.slack.api.methods.request.admin.conversations.restrict_access.AdminConversationsRestrictAccessListGroupsRequest.builder()
                                     .channelId(restrictedConversation.getChannelId()).teamId("T1").build());
             require(accessGroups.isOk() && accessGroups.getGroupIds() != null && accessGroups.getGroupIds().size() == 1
                             && accessGroupId.equals(accessGroups.getGroupIds().get(0)),
                     "admin.conversations.restrictAccess.listGroups failed");
-            require(methods.adminConversationsRestrictAccessRemoveGroup(
+            require(adminMethods.adminConversationsRestrictAccessRemoveGroup(
                     com.slack.api.methods.request.admin.conversations.restrict_access.AdminConversationsRestrictAccessRemoveGroupRequest.builder()
                             .channelId(restrictedConversation.getChannelId()).groupId(accessGroupId).teamId("T1").build()).isOk(),
                     "admin.conversations.restrictAccess.removeGroup failed");
-            require(methods.adminConversationsDelete(
+            require(adminMethods.adminConversationsDelete(
                     com.slack.api.methods.request.admin.conversations.AdminConversationsDeleteRequest.builder()
                             .channelId(restrictedConversation.getChannelId()).build()).isOk(),
                     "admin.conversations.delete for access group failed");
@@ -805,23 +808,23 @@ public final class Qualification {
                             && createdUsergroup.getUsergroup().isSubteam(),
                     "usergroups.create failed: " + createdUsergroup.getError());
             String usergroupId = createdUsergroup.getUsergroup().getId();
-            require(methods.adminUsergroupsAddChannels(
+            require(adminMethods.adminUsergroupsAddChannels(
                     com.slack.api.methods.request.admin.usergroups.AdminUsergroupsAddChannelsRequest.builder()
                             .usergroupId(usergroupId).channelIds(java.util.List.of("C1")).build()).isOk(),
                     "admin.usergroups.addChannels failed");
-            require(methods.adminUsergroupsAddTeams(
+            require(adminMethods.adminUsergroupsAddTeams(
                     com.slack.api.methods.request.admin.usergroups.AdminUsergroupsAddTeamsRequest.builder()
                             .usergroupId(usergroupId).teamIds(java.util.List.of("T1")).build()).isOk(),
                     "admin.usergroups.addTeams failed");
             com.slack.api.methods.response.admin.usergroups.AdminUsergroupsListChannelsResponse adminUsergroupChannels =
-                    methods.adminUsergroupsListChannels(
+                    adminMethods.adminUsergroupsListChannels(
                             com.slack.api.methods.request.admin.usergroups.AdminUsergroupsListChannelsRequest.builder()
                                     .usergroupId(usergroupId).teamId("T1").build());
             require(adminUsergroupChannels.isOk() && adminUsergroupChannels.getChannels() != null
                             && adminUsergroupChannels.getChannels().size() == 1
                             && "C1".equals(adminUsergroupChannels.getChannels().get(0).getId()),
                     "admin.usergroups.listChannels failed");
-            require(methods.adminUsergroupsRemoveChannels(
+            require(adminMethods.adminUsergroupsRemoveChannels(
                     com.slack.api.methods.request.admin.usergroups.AdminUsergroupsRemoveChannelsRequest.builder()
                             .usergroupId(usergroupId).channelIds(java.util.List.of("C1")).build()).isOk(),
                     "admin.usergroups.removeChannels failed");
@@ -1163,25 +1166,25 @@ public final class Qualification {
             require(methods.usersSetActive(
                     com.slack.api.methods.request.users.UsersSetActiveRequest.builder().build()).isOk(),
                     "users.setActive failed");
-            require(methods.adminUsersAssign(
+            require(adminMethods.adminUsersAssign(
                     com.slack.api.methods.request.admin.users.AdminUsersAssignRequest.builder()
                             .teamId("T1").userId("U2").channelIds(java.util.List.of("C1"))
                             .isRestricted(false).isUltraRestricted(false).build()).isOk(),
                     "admin.users.assign failed");
-            require(methods.adminUsersSetExpiration(
+            require(adminMethods.adminUsersSetExpiration(
                     com.slack.api.methods.request.admin.users.AdminUsersSetExpirationRequest.builder()
                             .teamId("T1").userId("U2")
                             .expirationTs(java.time.Instant.now().getEpochSecond() + 3600).build()).isOk(),
                     "admin.users.setExpiration failed");
-            require(methods.adminUsersSessionInvalidate(
+            require(adminMethods.adminUsersSessionInvalidate(
                     com.slack.api.methods.request.admin.users.AdminUsersSessionInvalidateRequest.builder()
                             .teamId("T1").sessionId("qualification-session").build()).isOk(),
                     "admin.users.session.invalidate failed");
-            require(methods.adminUsersSessionReset(
+            require(adminMethods.adminUsersSessionReset(
                     com.slack.api.methods.request.admin.users.AdminUsersSessionResetRequest.builder()
                             .userId("U2").build()).isOk(),
                     "admin.users.session.reset failed");
-            require(methods.adminUsersRemove(
+            require(adminMethods.adminUsersRemove(
                     com.slack.api.methods.request.admin.users.AdminUsersRemoveRequest.builder()
                             .teamId("T1").userId("U2").build()).isOk(),
                     "admin.users.remove failed");

@@ -204,7 +204,7 @@ func TestRegisterKeepsEveryRouteReachableBehindTheLimiter(t *testing.T) {
 // plain-text body the webhook surface uses, and another webhook — a different
 // URL — is a different budget.
 func TestIncomingWebhookIsServedAndLimitedPerWebhookBehindTheLimiter(t *testing.T) {
-	handler, store := testHandlerValue(false, defaultTestScopes()...)
+	handler, store := testHandlerValueAs(false, domain.TokenUser, defaultTestScopes()...)
 	now := time.Unix(1_700_000_000, 0).UTC()
 	handler.Limiter = limiterAt(&now)
 	mux := http.NewServeMux()

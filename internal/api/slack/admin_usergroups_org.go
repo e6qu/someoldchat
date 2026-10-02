@@ -16,17 +16,13 @@ import (
 // method, and each answers a caller who may not act on the group with
 // restricted_action, the code every one of their references declares for it.
 
-// adminUserGroupFields refuses a bot token and decodes the request of a caller
+// adminUserGroupFields decodes the request of a caller
 // the handler has authenticated. A JSON body may carry `users` as an array,
 // which each method's reference allows alongside a comma-separated string;
 // every other argument decodes as it does everywhere.
 func adminUserGroupFields(w http.ResponseWriter, r *http.Request, principal auth.Principal, err error) (map[string]string, bool) {
 	if err != nil {
 		writeAuthError(w, err)
-		return nil, false
-	}
-	if isBotPrincipal(principal) {
-		writeError(w, "not_allowed_token_type")
 		return nil, false
 	}
 	fields, err := decodeArguments(w, r, func(name string, value json.RawMessage) (string, error) {

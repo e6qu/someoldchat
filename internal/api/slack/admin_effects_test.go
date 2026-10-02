@@ -41,7 +41,7 @@ func adminCall(t *testing.T, handler http.Handler, method, endpoint, body string
 // workspace does not hold must change nothing at all, because a half-applied
 // batch leaves an administrator unable to say which half landed.
 func TestAdminBulkConversationChangesTakeEffect(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	store.SeedConversation(domain.Conversation{ID: "C3", WorkspaceID: "T1", Name: "private-room", Kind: domain.ConversationTypePrivate})
 
 	// convertToPublic answers the converted channel, and the channel really is
@@ -96,7 +96,7 @@ func TestAdminBulkConversationChangesTakeEffect(t *testing.T) {
 // decided; cancelling a decided one is refused, because reopening a decision by
 // withdrawing it would let an administrator undo an approval silently.
 func TestAdminAppUninstallAndRequestCancelTakeEffect(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	if err := store.SetAppApproval(context.Background(), "T1", "A2", "R2", domain.AppApprovalRequested, now, events.Event{
 		ID: "event-request-A2", WorkspaceID: "T1", ActorID: "U1", Topic: "app.requested", Payload: "A2", CreatedAt: now,
@@ -148,7 +148,7 @@ func TestAdminAppUninstallAndRequestCancelTakeEffect(t *testing.T) {
 // exists in an app's manifest and nowhere else, so a route that answered an
 // empty list would look the same as a workspace with no functions.
 func TestAdminFunctionsListReadsTheManifest(t *testing.T) {
-	handler, _ := testHandlerWithStore()
+	handler, _ := testUserHandlerWithStore()
 	listed := adminCall(t, handler, http.MethodGet, "admin.functions.list", "")
 	functions, ok := listed["functions"].([]any)
 	if !ok || len(functions) == 0 {
@@ -165,7 +165,7 @@ func TestAdminFunctionsListReadsTheManifest(t *testing.T) {
 // what Slack reports for one; reporting the current instant instead would read
 // as an account that has just expired.
 func TestAdminUsersGetExpirationReportsTheGuestHorizon(t *testing.T) {
-	handler, _ := testHandlerWithStore()
+	handler, _ := testUserHandlerWithStore()
 	none := adminCall(t, handler, http.MethodGet, "admin.users.getExpiration?user_id=U2", "")
 	if none["ok"] != true || none["expiration_ts"].(float64) != 0 {
 		t.Fatalf("an account that does not lapse reported %v", none)
@@ -191,7 +191,7 @@ func TestAdminUsersGetExpirationReportsTheGuestHorizon(t *testing.T) {
 // stored cannot manage the workflow, so the walk reads the manager list back
 // rather than trusting the acknowledgement.
 func TestAdminWorkflowCollaboratorsTakeEffect(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	workflow := domain.WorkflowDefinition{
 		ID: "WfAdmin", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", CallbackID: "admin-workflow",
@@ -275,7 +275,7 @@ var _ = memory.New
 // and reported and consulted by nothing, so an administrator could build one,
 // see it listed, and watch the two groups carry on talking.
 func TestInformationBarrierStopsContact(t *testing.T) {
-	handler, store := testHandlerWithStore()
+	handler, store := testUserHandlerWithStore()
 	now := time.Now().UTC()
 	store.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol"})
 	for _, group := range []domain.UserGroup{

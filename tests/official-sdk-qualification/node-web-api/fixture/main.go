@@ -191,6 +191,9 @@ func main() {
 	// "qualifying" reminders with an identity Slack does not advertise for the
 	// method.
 	store.SeedToken(context.Background(), "xoxp-reminder-qualification", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user", Scopes: auth.AllScopes()})
+	// Admin methods are a user-token surface: Slack grants admin scopes to an
+	// administrator's user token only. U1 is the workspace owner.
+	store.SeedToken(context.Background(), "xoxp-admin-qualification", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user", Scopes: auth.AllScopes()})
 	store.SeedToken(context.Background(), "xoxb-qualification-legacy", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: []string{"chat:write"}})
 	// The invited organization's own credential. Slack Connect acceptance is
 	// its decision, so exercising it through the host's token would prove the
