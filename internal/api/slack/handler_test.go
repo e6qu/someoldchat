@@ -162,7 +162,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: store}, authenticator)
+	handler, err := NewHandler(service.Messages{Store: store, AppCredentialKey: []byte(strings.Repeat("k", 32))}, authenticator)
 	if err != nil {
 		t.Fatal(err)
 	}

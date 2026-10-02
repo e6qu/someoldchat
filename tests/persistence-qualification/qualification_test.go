@@ -162,6 +162,7 @@ func runQualification(t *testing.T, open opener) {
 		{"analytics count one day and not another", analyticsCountOneDayAndNotAnother},
 		{"an unset anomaly allow list is empty and not missing", anomalyAllowListIsEmptyNotMissing},
 		{"an external credential keeps its secret in the store", externalCredentialKeepsItsSecret},
+		{"the OpenID signing key is one key for every replica", openIDSigningKeyIsSingular},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
 		{"visible files are newest first", visibleFilesAreNewestFirst},
@@ -972,6 +973,36 @@ func openIDRefreshTokenRotationIsDurable(t *testing.T, open opener) {
 	}
 }
 
+// openIDSigningKeyIsSingular holds the contract replicas rely on to sign Sign
+// in with Slack ID tokens with one key: whichever candidate is stored first is
+// the key, every later candidate gets that key back, and a read returns it.
+func openIDSigningKeyIsSingular(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	now := time.Unix(1700000000, 0).UTC()
+	first, err := repository.EnsureOpenIDSigningKey(ctx, domain.OpenIDSigningKey{KeyID: "kid-a-" + suffix, PrivateKeyCiphertext: "sealed-a", CreatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.EnsureOpenIDSigningKey(ctx, domain.OpenIDSigningKey{KeyID: "kid-b-" + suffix, PrivateKeyCiphertext: "sealed-b", CreatedAt: now.Add(time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.KeyID == "" || second.KeyID != first.KeyID || second.PrivateKeyCiphertext != first.PrivateKeyCiphertext || !second.CreatedAt.Equal(first.CreatedAt) {
+		t.Fatalf("first=%+v second=%+v, want the stored key both times", first, second)
+	}
+	read, err := repository.OpenIDSigningKey(ctx)
+	if err != nil || read.KeyID != first.KeyID {
+		t.Fatalf("read=%+v err=%v, want %s", read, err, first.KeyID)
+	}
+	if _, err := repository.EnsureOpenIDSigningKey(ctx, domain.OpenIDSigningKey{KeyID: "kid-c-" + suffix}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("incomplete key error=%v, want %v", err, store.ErrInvalidArgument)
+	}
+}
+
 func listsRepositoryContract(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -1483,12 +1514,18 @@ func publishedIntegrationRepositoryContract(t *testing.T, open opener) {
 		}
 		code := "code-" + suffix
 		redirect := "https://example.test/oauth/callback"
-		if err := repository.CreateOAuthCode(ctx, domain.OAuthCode{Code: code, ClientID: clientID, WorkspaceID: workspaceID, UserID: userID, Scopes: []string{"chat:write", " users:read ", "chat:write"}, RedirectURI: redirect}); err != nil {
+		authorizedAt := time.Unix(1700000000, 123).UTC()
+		if err := repository.CreateOAuthCode(ctx, domain.OAuthCode{Code: code, ClientID: clientID, WorkspaceID: workspaceID, UserID: userID, Scopes: []string{"chat:write", " users:read ", "chat:write"}, RedirectURI: redirect, Nonce: "nonce-" + suffix, AuthorizedAt: authorizedAt}); err != nil {
 			t.Fatal(err)
 		}
 		token, err := repository.ExchangeOAuthCode(ctx, clientID, "secret", code, redirect, "access-"+suffix, domain.OAuthToken{TokenType: "user"})
 		if err != nil {
 			t.Fatal(err)
+		}
+		// The ID token repeats the relying party's nonce and the moment of
+		// authorization, so both survive the code's round trip.
+		if token.Nonce != "nonce-"+suffix || !token.AuthorizedAt.Equal(authorizedAt) {
+			t.Fatalf("nonce=%q authorized_at=%v, want the code's", token.Nonce, token.AuthorizedAt)
 		}
 		if token.AppID != client.AppID || token.WorkspaceID != workspaceID || token.UserID != userID || fmt.Sprint(token.Scopes) != "[chat:write users:read]" {
 			t.Fatalf("token=%+v", token)

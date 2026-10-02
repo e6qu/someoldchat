@@ -27,6 +27,7 @@ const (
 	OAuthService_CompleteShortTokenRotation_FullMethodName = "/sameoldchat.chat.v1.OAuthService/CompleteShortTokenRotation"
 	OAuthService_OpenIDConnectToken_FullMethodName         = "/sameoldchat.chat.v1.OAuthService/OpenIDConnectToken"
 	OAuthService_OpenIDConnectUserInfo_FullMethodName      = "/sameoldchat.chat.v1.OAuthService/OpenIDConnectUserInfo"
+	OAuthService_OpenIDKeys_FullMethodName                 = "/sameoldchat.chat.v1.OAuthService/OpenIDKeys"
 )
 
 // OAuthServiceClient is the client API for OAuthService service.
@@ -41,6 +42,7 @@ type OAuthServiceClient interface {
 	CompleteShortTokenRotation(ctx context.Context, in *ShortTokenRotationRequest, opts ...grpc.CallOption) (*ShortTokenRotationResponse, error)
 	OpenIDConnectToken(ctx context.Context, in *OpenIDConnectTokenRequest, opts ...grpc.CallOption) (*OpenIDConnectTokenResponse, error)
 	OpenIDConnectUserInfo(ctx context.Context, in *OpenIDConnectUserInfoRequest, opts ...grpc.CallOption) (*OpenIDConnectUserInfoResponse, error)
+	OpenIDKeys(ctx context.Context, in *OpenIDKeysRequest, opts ...grpc.CallOption) (*OpenIDKeysResponse, error)
 }
 
 type oAuthServiceClient struct {
@@ -131,6 +133,16 @@ func (c *oAuthServiceClient) OpenIDConnectUserInfo(ctx context.Context, in *Open
 	return out, nil
 }
 
+func (c *oAuthServiceClient) OpenIDKeys(ctx context.Context, in *OpenIDKeysRequest, opts ...grpc.CallOption) (*OpenIDKeysResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(OpenIDKeysResponse)
+	err := c.cc.Invoke(ctx, OAuthService_OpenIDKeys_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OAuthServiceServer is the server API for OAuthService service.
 // All implementations should embed UnimplementedOAuthServiceServer
 // for forward compatibility.
@@ -143,6 +155,7 @@ type OAuthServiceServer interface {
 	CompleteShortTokenRotation(context.Context, *ShortTokenRotationRequest) (*ShortTokenRotationResponse, error)
 	OpenIDConnectToken(context.Context, *OpenIDConnectTokenRequest) (*OpenIDConnectTokenResponse, error)
 	OpenIDConnectUserInfo(context.Context, *OpenIDConnectUserInfoRequest) (*OpenIDConnectUserInfoResponse, error)
+	OpenIDKeys(context.Context, *OpenIDKeysRequest) (*OpenIDKeysResponse, error)
 }
 
 // UnimplementedOAuthServiceServer should be embedded to have
@@ -175,6 +188,9 @@ func (UnimplementedOAuthServiceServer) OpenIDConnectToken(context.Context, *Open
 }
 func (UnimplementedOAuthServiceServer) OpenIDConnectUserInfo(context.Context, *OpenIDConnectUserInfoRequest) (*OpenIDConnectUserInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenIDConnectUserInfo not implemented")
+}
+func (UnimplementedOAuthServiceServer) OpenIDKeys(context.Context, *OpenIDKeysRequest) (*OpenIDKeysResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method OpenIDKeys not implemented")
 }
 func (UnimplementedOAuthServiceServer) testEmbeddedByValue() {}
 
@@ -340,6 +356,24 @@ func _OAuthService_OpenIDConnectUserInfo_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OAuthService_OpenIDKeys_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(OpenIDKeysRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OAuthServiceServer).OpenIDKeys(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OAuthService_OpenIDKeys_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OAuthServiceServer).OpenIDKeys(ctx, req.(*OpenIDKeysRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OAuthService_ServiceDesc is the grpc.ServiceDesc for OAuthService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -378,6 +412,10 @@ var OAuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OpenIDConnectUserInfo",
 			Handler:    _OAuthService_OpenIDConnectUserInfo_Handler,
+		},
+		{
+			MethodName: "OpenIDKeys",
+			Handler:    _OAuthService_OpenIDKeys_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

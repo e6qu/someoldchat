@@ -234,6 +234,7 @@ message OAuthAuthorizationRequest {
   string code_challenge = 8;
   string code_challenge_method = 9;
   string incoming_webhook_channel = 10;
+  string nonce = 11;
 }
 
 message OAuthAuthorization {
@@ -252,6 +253,7 @@ message OAuthAuthorization {
   string code_challenge = 13;
   string code_challenge_method = 14;
   string incoming_webhook_channel = 15;
+  string nonce = 16;
 }
 
 message ExternalAuthTokenValue {

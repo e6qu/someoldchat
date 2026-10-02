@@ -66,12 +66,13 @@ references, against which they are qualified before their provenance is
 promoted; tracking them does not claim the vendored snapshot contains them.
 
 `openid.connect.token` keeps authorization codes single-use and rotates refresh
-tokens in the selected durable store. Its ID token names the deployment's
-`-auth-public-url` as its issuer. It is signed HS256 with the OAuth client
-secret, where Slack signs RS256 against a published key set; the missing
-discovery document, key set, and `/openid/connect/authorize` route are a
-recorded deviation in the ledger and open work in the
-[project plan](../PLAN.md#phase-5-compatibility-evidence).
+tokens in the selected durable store. Sign in with Slack is served at this
+deployment's own URLs: `/.well-known/openid-configuration` names the
+deployment's `-auth-public-url` as the issuer, `/openid/connect/authorize`
+takes the relying party's `nonce`, and ID tokens are signed RS256 with a key
+published at `/openid/connect/keys`. The deployment holds one signing key,
+created on first use and stored sealed under the app credential key, so every
+replica signs with it.
 
 ### Reporting
 

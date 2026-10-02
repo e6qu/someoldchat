@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -65,7 +68,7 @@ func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret
 		if err != nil {
 			return domain.OpenIDToken{}, err
 		}
-		return m.finishOpenIDToken(ctx, clientSecret, token)
+		return m.finishOpenIDToken(ctx, token)
 	}
 	if code == "" || refreshToken != "" {
 		return domain.OpenIDToken{}, domain.ErrInvalidOAuth
@@ -84,10 +87,10 @@ func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret
 	if err := m.Store.CreateOpenIDRefreshToken(ctx, domain.OpenIDRefreshToken{TokenHash: domain.HashToken(newRefreshToken), ClientID: clientID, WorkspaceID: oauthToken.WorkspaceID, UserID: oauthToken.UserID, Scopes: oauthToken.Scopes, ExpiresAt: time.Now().UTC().Add(openIDRefreshLifetime)}); err != nil {
 		return domain.OpenIDToken{}, err
 	}
-	return m.finishOpenIDToken(ctx, clientSecret, domain.OpenIDToken{OAuthToken: oauthToken, RefreshToken: newRefreshToken, IDToken: ""})
+	return m.finishOpenIDToken(ctx, domain.OpenIDToken{OAuthToken: oauthToken, RefreshToken: newRefreshToken, IDToken: ""})
 }
 
-func (m Messages) finishOpenIDToken(ctx context.Context, clientSecret string, token domain.OpenIDToken) (domain.OpenIDToken, error) {
+func (m Messages) finishOpenIDToken(ctx context.Context, token domain.OpenIDToken) (domain.OpenIDToken, error) {
 	user, err := m.Store.GetUser(ctx, token.UserID)
 	if err != nil || user.WorkspaceID != token.WorkspaceID || user.Deleted {
 		return domain.OpenIDToken{}, store.ErrNotFound
@@ -96,7 +99,11 @@ func (m Messages) finishOpenIDToken(ctx context.Context, clientSecret string, to
 	if err != nil {
 		return domain.OpenIDToken{}, err
 	}
-	idToken, err := signOpenIDToken(clientSecret, slackobject.Origin(m.PublicURL), token.ClientID, user, workspace)
+	key, keyID, err := m.openIDSigner(ctx)
+	if err != nil {
+		return domain.OpenIDToken{}, err
+	}
+	idToken, err := signOpenIDToken(key, keyID, slackobject.Origin(m.PublicURL), token.OAuthToken, openIDUserInfo(user, workspace), time.Now().UTC())
 	if err != nil {
 		return domain.OpenIDToken{}, err
 	}
@@ -118,7 +125,13 @@ func (m Messages) OpenIDConnectUserInfo(ctx context.Context, token string) (doma
 	if err != nil {
 		return domain.OpenIDUserInfo{}, err
 	}
-	return domain.OpenIDUserInfo{Subject: user.ID, UserID: user.ID, WorkspaceID: workspace.ID, Email: user.Email, EmailVerified: user.Email != "", Name: user.Name, TeamName: workspace.Name, TeamDomain: workspace.SlackDomain(), UserImages: map[string]string{"24": user.Profile.Image24, "32": user.Profile.Image32, "48": user.Profile.Image48, "72": user.Profile.Image72, "192": user.Profile.Image192, "512": user.Profile.Image512}, TeamImages: map[string]string{}, TeamImageDefault: workspace.IconURL == ""}, nil
+	return openIDUserInfo(user, workspace), nil
+}
+
+// openIDUserInfo is what Sign in with Slack says about a member, in
+// openid.connect.userInfo and in every ID token alike.
+func openIDUserInfo(user domain.User, workspace domain.Workspace) domain.OpenIDUserInfo {
+	return domain.OpenIDUserInfo{Subject: user.ID, UserID: user.ID, WorkspaceID: workspace.ID, Email: user.Email, EmailVerified: user.Email != "", Name: user.Name, TeamName: workspace.Name, TeamDomain: workspace.SlackDomain(), UserImages: map[string]string{"24": user.Profile.Image24, "32": user.Profile.Image32, "48": user.Profile.Image48, "72": user.Profile.Image72, "192": user.Profile.Image192, "512": user.Profile.Image512}, TeamImages: map[string]string{}, TeamImageDefault: workspace.IconURL == ""}
 }
 
 func containsScope(scopes []string, wanted string) bool {
@@ -130,30 +143,49 @@ func containsScope(scopes []string, wanted string) bool {
 	return false
 }
 
-// signOpenIDToken signs the ID token openid.connect.token returns. Its issuer
-// is this deployment's public URL: a relying party that only changed Slack's
-// endpoints to this deployment's validates iss against the issuer it was
-// configured with, never against slack.com. Without a public URL there is no
-// issuer to name, so the claim is left out rather than impersonating Slack.
-// The https://slack.com/... claim names are Slack's literal claim keys, not
-// URLs, and stay as Slack sends them.
-func signOpenIDToken(secret, issuer, clientID string, user domain.User, workspace domain.Workspace) (string, error) {
-	header, err := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})
+// signOpenIDToken signs the ID token openid.connect.token returns, RS256 with
+// the deployment's key, named by kid so a relying party finds it in the key
+// set at /openid/connect/keys. Its issuer is this deployment's public URL: a
+// relying party that only changed Slack's endpoints to this deployment's
+// validates iss against the issuer it discovered, never against slack.com.
+// Without a public URL there is no issuer to name, so the claim is left out
+// rather than impersonating Slack.
+//
+// nonce and auth_time come from the authorization the code was issued for,
+// so a refreshed token carries neither; at_hash binds the token to the access
+// token issued beside it, as OpenID Connect Core section 3.1.3.6 defines.
+func signOpenIDToken(key *rsa.PrivateKey, keyID, issuer string, token domain.OAuthToken, info domain.OpenIDUserInfo, now time.Time) (string, error) {
+	header, err := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": keyID})
 	if err != nil {
 		return "", err
 	}
-	now := time.Now().UTC()
-	values := map[string]any{"sub": string(user.ID), "aud": clientID, "iat": now.Unix(), "exp": now.Add(time.Hour).Unix(), "email": user.Email, "email_verified": user.Email != "", "name": user.Name, "https://slack.com/team_id": string(workspace.ID), "https://slack.com/user_id": string(user.ID)}
+	values := info.Claims()
+	values["aud"] = token.ClientID
+	values["iat"] = now.Unix()
+	values["exp"] = now.Add(time.Hour).Unix()
 	if issuer != "" {
 		values["iss"] = issuer
+	}
+	if token.Nonce != "" {
+		values["nonce"] = token.Nonce
+	}
+	if !token.AuthorizedAt.IsZero() {
+		values["auth_time"] = token.AuthorizedAt.Unix()
+	}
+	if token.AccessToken != "" {
+		digest := sha256.Sum256([]byte(token.AccessToken))
+		values["at_hash"] = base64.RawURLEncoding.EncodeToString(digest[:len(digest)/2])
 	}
 	claims, err := json.Marshal(values)
 	if err != nil {
 		return "", err
 	}
-	encode := func(value []byte) string { return base64.RawURLEncoding.EncodeToString(value) }
+	encode := base64.RawURLEncoding.EncodeToString
 	unsigned := encode(header) + "." + encode(claims)
-	hash := hmac.New(sha256.New, []byte(secret))
-	_, _ = hash.Write([]byte(unsigned))
-	return unsigned + "." + encode(hash.Sum(nil)), nil
+	digest := sha256.Sum256([]byte(unsigned))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+	if err != nil {
+		return "", err
+	}
+	return unsigned + "." + encode(signature), nil
 }

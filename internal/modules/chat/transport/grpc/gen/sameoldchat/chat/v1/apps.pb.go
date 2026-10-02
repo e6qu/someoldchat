@@ -2121,6 +2121,7 @@ type OAuthAuthorizationRequest struct {
 	CodeChallenge          string                 `protobuf:"bytes,8,opt,name=code_challenge,json=codeChallenge,proto3" json:"code_challenge,omitempty"`
 	CodeChallengeMethod    string                 `protobuf:"bytes,9,opt,name=code_challenge_method,json=codeChallengeMethod,proto3" json:"code_challenge_method,omitempty"`
 	IncomingWebhookChannel string                 `protobuf:"bytes,10,opt,name=incoming_webhook_channel,json=incomingWebhookChannel,proto3" json:"incoming_webhook_channel,omitempty"`
+	Nonce                  string                 `protobuf:"bytes,11,opt,name=nonce,proto3" json:"nonce,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -2225,6 +2226,13 @@ func (x *OAuthAuthorizationRequest) GetIncomingWebhookChannel() string {
 	return ""
 }
 
+func (x *OAuthAuthorizationRequest) GetNonce() string {
+	if x != nil {
+		return x.Nonce
+	}
+	return ""
+}
+
 type OAuthAuthorization struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	AppId                  string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
@@ -2242,6 +2250,7 @@ type OAuthAuthorization struct {
 	CodeChallenge          string                 `protobuf:"bytes,13,opt,name=code_challenge,json=codeChallenge,proto3" json:"code_challenge,omitempty"`
 	CodeChallengeMethod    string                 `protobuf:"bytes,14,opt,name=code_challenge_method,json=codeChallengeMethod,proto3" json:"code_challenge_method,omitempty"`
 	IncomingWebhookChannel string                 `protobuf:"bytes,15,opt,name=incoming_webhook_channel,json=incomingWebhookChannel,proto3" json:"incoming_webhook_channel,omitempty"`
+	Nonce                  string                 `protobuf:"bytes,16,opt,name=nonce,proto3" json:"nonce,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -2377,6 +2386,13 @@ func (x *OAuthAuthorization) GetCodeChallengeMethod() string {
 func (x *OAuthAuthorization) GetIncomingWebhookChannel() string {
 	if x != nil {
 		return x.IncomingWebhookChannel
+	}
+	return ""
+}
+
+func (x *OAuthAuthorization) GetNonce() string {
+	if x != nil {
+		return x.Nonce
 	}
 	return ""
 }
@@ -4102,7 +4118,7 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\x05count\x18\x04 \x01(\x03R\x05count\"Z\n" +
 	"\x13AppMutationResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x123\n" +
-	"\x03app\x18\x02 \x01(\v2!.sameoldchat.chat.v1.DeveloperAppR\x03app\"\x82\x03\n" +
+	"\x03app\x18\x02 \x01(\v2!.sameoldchat.chat.v1.DeveloperAppR\x03app\"\x98\x03\n" +
 	"\x19OAuthAuthorizationRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -4116,7 +4132,8 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\x0ecode_challenge\x18\b \x01(\tR\rcodeChallenge\x122\n" +
 	"\x15code_challenge_method\x18\t \x01(\tR\x13codeChallengeMethod\x128\n" +
 	"\x18incoming_webhook_channel\x18\n" +
-	" \x01(\tR\x16incomingWebhookChannel\"\xf8\x03\n" +
+	" \x01(\tR\x16incomingWebhookChannel\x12\x14\n" +
+	"\x05nonce\x18\v \x01(\tR\x05nonce\"\x8e\x04\n" +
 	"\x12OAuthAuthorization\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x19\n" +
 	"\bapp_name\x18\x02 \x01(\tR\aappName\x12\x1b\n" +
@@ -4135,7 +4152,8 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\vbot_user_id\x18\f \x01(\tR\tbotUserId\x12%\n" +
 	"\x0ecode_challenge\x18\r \x01(\tR\rcodeChallenge\x122\n" +
 	"\x15code_challenge_method\x18\x0e \x01(\tR\x13codeChallengeMethod\x128\n" +
-	"\x18incoming_webhook_channel\x18\x0f \x01(\tR\x16incomingWebhookChannel\"\xd5\x01\n" +
+	"\x18incoming_webhook_channel\x18\x0f \x01(\tR\x16incomingWebhookChannel\x12\x14\n" +
+	"\x05nonce\x18\x10 \x01(\tR\x05nonce\"\xd5\x01\n" +
 	"\x16ExternalAuthTokenValue\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06app_id\x18\x02 \x01(\tR\x05appId\x12!\n" +

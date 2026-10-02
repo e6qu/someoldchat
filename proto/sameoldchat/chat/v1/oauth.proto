@@ -57,6 +57,21 @@ message OpenIDConnectTokenResponse {
   string refresh_token = 3;
 }
 
+// OpenIDKey is one public key of the set Sign in with Slack ID tokens are
+// signed with: an RSA key by its id, modulus and exponent, each base64url
+// encoded as a JSON Web Key carries them.
+message OpenIDKey {
+  string key_id = 1;
+  string modulus = 2;
+  string exponent = 3;
+}
+
+message OpenIDKeysRequest {}
+
+message OpenIDKeysResponse {
+  repeated OpenIDKey keys = 1;
+}
+
 message OpenIDConnectUserInfoRequest {
   string token = 1;
 }
@@ -104,4 +119,5 @@ service OAuthService {
   rpc CompleteShortTokenRotation(ShortTokenRotationRequest) returns (ShortTokenRotationResponse);
   rpc OpenIDConnectToken(OpenIDConnectTokenRequest) returns (OpenIDConnectTokenResponse);
   rpc OpenIDConnectUserInfo(OpenIDConnectUserInfoRequest) returns (OpenIDConnectUserInfoResponse);
+  rpc OpenIDKeys(OpenIDKeysRequest) returns (OpenIDKeysResponse);
 }

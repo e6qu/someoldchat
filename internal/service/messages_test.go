@@ -272,7 +272,7 @@ func TestOpenIDConnectTokenRotatesRefreshTokenAndUserInfoUsesIssuedScope(t *test
 	if err := s.CreateOAuthCode(ctx, domain.OAuthCode{Code: "code", ClientID: "client", WorkspaceID: "T1", UserID: "U1", Scopes: append(auth.AllScopes(), "openid"), RedirectURI: "https://callback", CodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", CodeChallengeMethod: "S256"}); err != nil {
 		t.Fatal(err)
 	}
-	service := Messages{Store: s}
+	service := Messages{Store: s, AppCredentialKey: []byte(strings.Repeat("k", 32))}
 	token, err := service.OpenIDConnectToken(ctx, "client", "secret", "code", "https://callback", "authorization_code", "", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
 	if err != nil {
 		t.Fatal(err)
@@ -311,7 +311,7 @@ func TestOpenIDTokenNamesTheDeploymentAsItsIssuer(t *testing.T) {
 		if err := s.CreateOAuthCode(ctx, domain.OAuthCode{Code: "code", ClientID: "client", WorkspaceID: "T1", UserID: "U1", Scopes: []string{"openid"}, RedirectURI: "https://callback", CodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", CodeChallengeMethod: "S256"}); err != nil {
 			t.Fatal(err)
 		}
-		token, err := Messages{Store: s, PublicURL: publicURL}.OpenIDConnectToken(ctx, "client", "secret", "code", "https://callback", "authorization_code", "", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+		token, err := Messages{Store: s, PublicURL: publicURL, AppCredentialKey: []byte(strings.Repeat("k", 32))}.OpenIDConnectToken(ctx, "client", "secret", "code", "https://callback", "authorization_code", "", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
 		if err != nil {
 			t.Fatal(err)
 		}

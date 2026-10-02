@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -28,6 +29,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/slackapp"
 	storepkg "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
+	"github.com/sameoldchat/sameoldchat/internal/web"
 )
 
 func main() {
@@ -161,7 +163,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	installManifest := `{"display_information":{"name":"Install Qualification"},"oauth_config":{"redirect_urls":["https://example.com/install"],"scopes":{"bot":["chat:write"],"user":["search:read"]}}}`
+	installManifest := `{"display_information":{"name":"Install Qualification"},"oauth_config":{"redirect_urls":["https://example.com/install"],"scopes":{"bot":["chat:write"],"user":["search:read","openid","email","profile"]}}}`
 	if err := store.CreateApp(context.Background(),
 		domain.App{ID: "A4", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Install Qualification", ClientID: "install-client", SigningSecretHash: domain.HashToken("install-signing"), SigningSecretCiphertext: installSigningCiphertext, VerificationTokenHash: domain.HashToken("install-verification"), VerificationTokenCiphertext: installVerificationCiphertext, ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now},
 		domain.AppManifestRevision{AppID: "A4", Version: 1, Manifest: installManifest, CreatedBy: "U1", CreatedAt: now},
@@ -438,6 +440,25 @@ func main() {
 	}); err != nil {
 		panic(err)
 	}
+	// Sign in with Slack's discovery document and key set are the web
+	// handler's, mounted as cmd/server mounts them, so a relying party in a
+	// suite discovers this fixture and verifies its ID tokens the way it
+	// would a deployment's.
+	browserAuthenticator, err := auth.NewBrowser(store)
+	if err != nil {
+		panic(err)
+	}
+	webHandler, err := web.NewHandler(messages, browserAuthenticator, store, "C1", "")
+	if err != nil {
+		panic(err)
+	}
+	if err := webHandler.SetPublicURL(fixturePublicURL); err != nil {
+		panic(err)
+	}
+	webMux := http.NewServeMux()
+	webHandler.Register(webMux)
+	mux.Handle("GET /.well-known/openid-configuration", webMux)
+	mux.Handle("GET /openid/connect/keys", webMux)
 	mux.HandleFunc("GET /qualification/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -467,6 +488,35 @@ func main() {
 		target, err := url.Parse(authorization.RedirectURI)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		values := target.Query()
+		values.Set("code", authorization.Code)
+		values.Set("state", authorization.State)
+		target.RawQuery = values.Encode()
+		http.Redirect(w, r, target.String(), http.StatusFound)
+	})
+	// The consent stand-in for Sign in with Slack: the request shape
+	// /openid/connect/authorize takes, approved as U1. The browser suite
+	// qualifies the page itself.
+	mux.HandleFunc("GET /qualification/openid/authorize", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		scopes := strings.FieldsFunc(query.Get("scope"), func(r rune) bool { return r == ',' || r == ' ' })
+		if query.Get("response_type") != "code" || !slices.Contains(scopes, "openid") {
+			http.Error(w, "a Sign in with Slack request asks for the openid scope and a code", http.StatusBadRequest)
+			return
+		}
+		authorization, err := messages.AuthorizeOAuth(r.Context(), domain.OAuthAuthorizationRequest{
+			ClientID: query.Get("client_id"), WorkspaceID: "T1", UserID: "U1", RedirectURI: query.Get("redirect_uri"),
+			UserScopes: scopes, State: query.Get("state"), Nonce: query.Get("nonce"),
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		target, err := url.Parse(authorization.RedirectURI)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		values := target.Query()
