@@ -220,7 +220,7 @@ func recordedNonPinnedCodes() map[string]string {
 	return map[string]string{
 		// Surfaces the pinned snapshot does not describe, or that declare no enum.
 		"ratelimited":                    "Slack's 429 code for a method's rate-limit tier, which the pinned snapshot does not enumerate per method; python-slack-sdk retries apps.connections.open and rtm.connect only on it (see rate-limit-codes in specs/compatibility.yaml)",
-		"cant_delete_primary_owner":      "the pinned snapshot declares no owner-protection code for admin.users.*; this names the real cause rather than reporting a permission failure the actor does not have",
+		"cannot_modify_primary_owner":    "current admin.users.remove, setAdmin and setRegular code for a change to the primary owner; absent from the pinned snapshot",
 		"canvas_not_found":               "canvases.* is absent from the pinned snapshot",
 		"channel_canvas_already_exists":  "current conversations.canvases.create singular-resource conflict; absent from the legacy OpenAPI snapshot",
 		"channel_canvas_creation_failed": "current conversations.canvases.create storage failure; absent from the legacy OpenAPI snapshot",

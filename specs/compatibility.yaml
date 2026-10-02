@@ -329,12 +329,12 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
+      - go-test:internal/api/slack:TestAdminUsersRoleMutationsKeepOnePrimaryOwner
       - go-test:internal/api/slack:TestConversationAndUserInfo
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
       - go-test:internal/api/slack:TestAdminUsersRemoveDeactivatesUser
     deviations:
       - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's abbreviation (for example EDT) rather than Slack's long name.
-      - A workspace has owners but no distinguished primary owner, so every owner reports is_primary_owner.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: conversations.info
     status: behavior-compatible
@@ -581,12 +581,12 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
+      - go-test:internal/api/slack:TestAdminUsersRoleMutationsKeepOnePrimaryOwner
       - go-test:internal/api/slack:TestUsersAndConversationsList
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
     deviations:
       - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's abbreviation (for example EDT) rather than Slack's long name.
-      - A workspace has owners but no distinguished primary owner, so every owner reports is_primary_owner.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: users.lookupByEmail
     status: behavior-compatible
@@ -950,7 +950,7 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
-      - go-test:internal/api/slack:TestAdminUsersRoleMutationsUseTypedRoles
+      - go-test:internal/api/slack:TestAdminUsersRoleMutationsKeepOnePrimaryOwner
   - method: admin.users.setExpiration
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -960,12 +960,12 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
-      - go-test:internal/api/slack:TestAdminUsersRoleMutationsUseTypedRoles
+      - go-test:internal/api/slack:TestAdminUsersRoleMutationsKeepOnePrimaryOwner
   - method: admin.users.setRegular
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
-      - go-test:internal/api/slack:TestAdminUsersRoleMutationsUseTypedRoles
+      - go-test:internal/api/slack:TestAdminUsersRoleMutationsKeepOnePrimaryOwner
   - method: apps.event.authorizations.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1078,6 +1078,7 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/chat.scheduleMessage/
     evidence:
+      - go-test:internal/api/slack:TestScheduleMessagePreservesCurrentSlackMessageOptionsUntilDelivery
       - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheSchedulingIdentity
       - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
       - go-test:internal/web:TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly
@@ -1091,7 +1092,6 @@ operations:
       - go-test:internal/api/slack:TestPostMessageResolvesNamesAndUsers
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
     deviations:
-      - markdown_text, metadata, reply_broadcast, parse, link_names, and unfurl controls are not implemented (as_user is read and ignored, as chat.postMessage does; a user token posts as its user, a bot token as its bot)
       - Web API rate limiting now answers 429 with Retry-After and ratelimited at a uniform per-method budget (Tier 4's documented floor, replica-local); this method's own tier below that floor is not separately enforced
       - schedules created before schema 102 lack reconstructable app attribution
   - method: chat.scheduledMessages.list
@@ -1119,12 +1119,12 @@ operations:
       - go-test:internal/service:TestUnfurlPersistsNormalizedMetadata
       - go-test:internal/service:TestAnAppUnfurlsItsOwnDomainsInAPublicChannelItHasNotJoined
       - go-test:internal/service:TestPostedLinksReachEachAppWhoseUnfurlDomainsClaimThem
+      - go-test:internal/service:TestMessageEventSnapshotsPreserveEveryMutationVersion
       - go-test:internal/slackapp:TestEventProcessorDeliversLinkSharedForTheAppsUnfurlDomains
       - official-sdk:tests/official-sdk-qualification/node-bolt/qualification.mjs
     deviations:
       - link_shared always carries source=conversations_history; source=composer is answered cannot_unfurl_url because the first-party client previews no unsent draft, so no composer unfurl_id exists.
       - The user_auth_* parameters (unfurling behind an ephemeral authentication prompt) are accepted but not acted on.
-      - The message_changed event Slack sends when an unfurl attaches is not emitted (the message.unfurled topic is mapped but not built); conversations.history and the first-party client show the unfurl.
   - method: dialog.open
     status: behavior-compatible
     provenance: slack-api-specs-openapi

@@ -44,6 +44,11 @@ func (s *Store) AssignWorkspaceRole(_ context.Context, workspaceID domain.Worksp
 	if !ok || user.WorkspaceID != workspaceID {
 		return store.ErrNotFound
 	}
+	if role != domain.WorkspaceRoleOwner {
+		if err := s.refusePrimaryOwnerChangeLocked(workspaceID, userID); err != nil {
+			return err
+		}
+	}
 	wasGuest := membership.Guest()
 	membership.Role, membership.Active = role, true
 	membership.Restricted, membership.UltraRestricted = false, false
@@ -60,6 +65,7 @@ func (s *Store) AssignWorkspaceRole(_ context.Context, workspaceID domain.Worksp
 		s.users[userID] = user
 	}
 	s.members[key] = membership
+	s.claimPrimaryOwnershipLocked(workspaceID, userID)
 	s.outbox = append(s.outbox, event)
 	s.outbox = append(s.outbox, guestEvent...)
 	return nil

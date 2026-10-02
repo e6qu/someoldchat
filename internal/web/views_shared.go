@@ -419,6 +419,8 @@ func (h Handler) buildProfileView(r *http.Request, principal auth.Principal, id 
 		view.RoleLabel = "Single-channel guest"
 	case user.Restricted:
 		view.RoleLabel = "Guest"
+	case user.PrimaryOwner:
+		view.RoleLabel = "Workspace primary owner"
 	case user.Role == domain.WorkspaceRoleOwner:
 		view.RoleLabel = "Workspace owner"
 	case user.Role == domain.WorkspaceRoleAdmin:

@@ -136,6 +136,7 @@ service.not_in_conversation
 service.not_starred
 service.not_workspace_admin
 service.oauth_app_mismatch
+service.primary_owner
 service.recipient_not_in_conversation
 service.reminder_owned_by_other
 service.reminder_recurring

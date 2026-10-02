@@ -1578,7 +1578,7 @@ func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID
 	}
 	// Removal carries the same authority as demotion: it ends the target's
 	// participation entirely, so an administrator must not be able to apply it
-	// to an owner, and the last owner must not be removable.
+	// to an owner. The store refuses removing the primary owner.
 	membership, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, targetID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
@@ -1587,10 +1587,8 @@ func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID
 		if membership.Role.Outranks(actor.Role) {
 			return domain.ErrNotWorkspaceAdmin
 		}
-		if membership.Role == domain.WorkspaceRoleOwner {
-			if err := m.refuseLastOwnerChange(ctx, workspaceID, targetID); err != nil {
-				return err
-			}
+		if membership.PrimaryOwner {
+			return domain.ErrPrimaryOwner
 		}
 	}
 	target, getErr := m.Store.GetUser(ctx, targetID)
@@ -1638,8 +1636,9 @@ func (m Messages) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceI
 //     mint an owner and cannot promote themselves;
 //   - nobody may change the role of someone who outranks them, so an
 //     administrator cannot demote an owner;
-//   - the last remaining owner cannot be demoted, because a workspace with no
-//     owner cannot appoint one and is permanently unadministrable.
+//   - the primary owner cannot be demoted, because a workspace with no owner
+//     cannot appoint one and is permanently unadministrable; the primary owner
+//     hands the role on with TransferPrimaryOwnership first.
 func (m Messages) authorizeRoleChange(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.WorkspaceMembership, targetID domain.UserID, role domain.WorkspaceRole) error {
 	// An actor may grant any role up to and including their own, so an
 	// administrator can appoint administrators but not owners. Requiring the
@@ -1658,25 +1657,33 @@ func (m Messages) authorizeRoleChange(ctx context.Context, workspaceID domain.Wo
 	if target.Role.Outranks(actor.Role) {
 		return domain.ErrNotWorkspaceAdmin
 	}
-	if target.Role == domain.WorkspaceRoleOwner && role != domain.WorkspaceRoleOwner {
-		return m.refuseLastOwnerChange(ctx, workspaceID, targetID)
+	if target.PrimaryOwner && role != domain.WorkspaceRoleOwner {
+		return domain.ErrPrimaryOwner
 	}
 	return nil
 }
 
-// refuseLastOwnerChange reports ErrLastWorkspaceOwner when targetID is the only
-// active owner the workspace has.
-func (m Messages) refuseLastOwnerChange(ctx context.Context, workspaceID domain.WorkspaceID, targetID domain.UserID) error {
-	page, err := m.Store.ListUsersByRole(ctx, workspaceID, domain.WorkspaceRoleOwner, domain.PageRequest{Limit: 2})
+// TransferPrimaryOwnership hands the primary owner's role to another active
+// full member, who becomes an owner if not one already; the previous primary
+// owner stays an owner. Only the primary owner may do it, as in Slack, where
+// it is the one way the primary owner can later be demoted or deactivated.
+func (m Messages) TransferPrimaryOwnership(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID) error {
+	actor, err := m.requireWorkspaceRole(ctx, workspaceID, actorID)
 	if err != nil {
 		return err
 	}
-	for _, owner := range page.Users {
-		if owner.ID != targetID && !owner.Deleted {
-			return nil
-		}
+	if !actor.PrimaryOwner {
+		return domain.ErrNotWorkspaceAdmin
 	}
-	return domain.ErrLastWorkspaceOwner
+	target, err := m.Store.GetUser(ctx, targetID)
+	if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
+		return store.ErrNotFound
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("workspace.role_changed", events.String("user_id", string(targetID)), events.String("role", string(domain.WorkspaceRoleOwner))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.TransferPrimaryOwnership(ctx, workspaceID, actorID, targetID, event)
 }
 
 // requireWorkspaceRole is requireWorkspaceAdmin, returning the membership so a
@@ -9448,8 +9455,11 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 	if messageUnfurlsTooLong(merged) {
 		return domain.Message{}, domain.ErrInvalidMessage
 	}
+	previous := message
 	message.Unfurls = merged
-	event, err := messageEvent(workspaceID, "message.unfurled", message)
+	// Slack announces an attached unfurl as message_changed, with the message
+	// before and after, so the record keeps both bodies as an edit's does.
+	event, err := messageMutationEvent(workspaceID, "message.unfurled", message, previous)
 	if err != nil {
 		return domain.Message{}, err
 	}

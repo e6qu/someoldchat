@@ -82,9 +82,7 @@ func User(origin string, user domain.User, includeEmail bool) map[string]any {
 		"color": UserColor(user.ID),
 		"tz":    tz, "tz_label": tzLabel, "tz_offset": tzOffset,
 		"is_admin": user.Role == domain.WorkspaceRoleAdmin || user.Role == domain.WorkspaceRoleOwner,
-		// A workspace here has owners but no distinguished primary owner, so
-		// each owner reports both, as admin.users.list always has.
-		"is_owner": user.Role == domain.WorkspaceRoleOwner, "is_primary_owner": user.Role == domain.WorkspaceRoleOwner,
+		"is_owner": user.Role == domain.WorkspaceRoleOwner, "is_primary_owner": user.PrimaryOwner,
 		"is_restricted": user.Restricted, "is_ultra_restricted": user.UltraRestricted,
 		"is_bot": user.IsBot(), "is_app_user": false, "is_email_confirmed": user.Email != "", "has_2fa": false,
 		"updated": unixSeconds(user.Updated),

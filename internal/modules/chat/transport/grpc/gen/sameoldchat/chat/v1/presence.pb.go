@@ -198,6 +198,7 @@ type User struct {
 	Role            string `protobuf:"bytes,13,opt,name=role,proto3" json:"role,omitempty"`
 	Restricted      bool   `protobuf:"varint,14,opt,name=restricted,proto3" json:"restricted,omitempty"`
 	UltraRestricted bool   `protobuf:"varint,15,opt,name=ultra_restricted,json=ultraRestricted,proto3" json:"ultra_restricted,omitempty"`
+	PrimaryOwner    bool   `protobuf:"varint,16,opt,name=primary_owner,json=primaryOwner,proto3" json:"primary_owner,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -333,6 +334,13 @@ func (x *User) GetRestricted() bool {
 func (x *User) GetUltraRestricted() bool {
 	if x != nil {
 		return x.UltraRestricted
+	}
+	return false
+}
+
+func (x *User) GetPrimaryOwner() bool {
+	if x != nil {
+		return x.PrimaryOwner
 	}
 	return false
 }
@@ -1863,7 +1871,7 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\x1aactive_scheduled_status_id\x18\f \x01(\tR\x17activeScheduledStatusId\x12\x14\n" +
 	"\x05title\x18\r \x01(\tR\x05title\x12\x1a\n" +
 	"\bpronouns\x18\x0e \x01(\tR\bpronouns\x12\x1a\n" +
-	"\btimezone\x18\x0f \x01(\tR\btimezone\"\xe3\x03\n" +
+	"\btimezone\x18\x0f \x01(\tR\btimezone\"\x88\x04\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x14\n" +
@@ -1882,7 +1890,8 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\n" +
 	"restricted\x18\x0e \x01(\bR\n" +
 	"restricted\x12)\n" +
-	"\x10ultra_restricted\x18\x0f \x01(\bR\x0fultraRestricted\"p\n" +
+	"\x10ultra_restricted\x18\x0f \x01(\bR\x0fultraRestricted\x12#\n" +
+	"\rprimary_owner\x18\x10 \x01(\bR\fprimaryOwner\"p\n" +
 	"\x16SetUserPresenceRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1a\n" +

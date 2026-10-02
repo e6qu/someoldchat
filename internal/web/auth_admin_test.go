@@ -328,11 +328,26 @@ func TestAuthAdminRoleEditorTellsTheTruthAboutOwnership(t *testing.T) {
 			`<option value="member" selected>Member</option>`,
 			`<option value="admin">Administrator</option>`,
 			`<option value="owner">Owner</option>`,
-			`<option value="owner" selected>Owner</option>`,
+			`aria-label="Make member the primary owner"`,
 		} {
 			if !strings.Contains(body, expected) {
 				t.Fatalf("the role editor is missing %q: %s", expected, body)
 			}
+		}
+		// The actor is the primary owner, whose row offers neither a role
+		// editor nor deactivation: the role is handed on first.
+		primaryRows := 0
+		for _, row := range strings.Split(body, "<tr>") {
+			if !strings.Contains(row, "<td>Primary owner</td>") {
+				continue
+			}
+			primaryRows++
+			if strings.Contains(row, `value="role"`) || strings.Contains(row, `value="disable"`) {
+				t.Fatalf("the primary owner's row offers a change the service refuses: %s", row)
+			}
+		}
+		if primaryRows != 1 {
+			t.Fatalf("%d rows name the primary owner, want 1: %s", primaryRows, body)
 		}
 		// An owner can appoint another owner, so ownership is recoverable from
 		// the page that can lose it.

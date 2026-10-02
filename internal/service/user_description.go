@@ -17,7 +17,7 @@ func (m Messages) describeUser(ctx context.Context, user domain.User) (domain.Us
 	membership, err := m.Store.GetWorkspaceMembership(ctx, user.WorkspaceID, user.ID)
 	switch {
 	case err == nil:
-		user.Role, user.Restricted, user.UltraRestricted = membership.Role, membership.Restricted, membership.UltraRestricted
+		user.Role, user.Restricted, user.UltraRestricted, user.PrimaryOwner = membership.Role, membership.Restricted, membership.UltraRestricted, membership.PrimaryOwner
 	case !errors.Is(err, store.ErrNotFound):
 		return domain.User{}, err
 	}

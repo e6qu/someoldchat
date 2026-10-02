@@ -134,6 +134,8 @@ type Service interface {
 	UserInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.User, error)
 	RemoveUser(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) error
 	SetUserRole(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, domain.WorkspaceRole) error
+	// TransferPrimaryOwnership hands the actor's primary ownership to the target.
+	TransferPrimaryOwnership(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID) error
 
 	// WorkspaceMembership reads one membership row. The actor may read their own;
 	// reading another user's requires a workspace administrator.

@@ -92,7 +92,7 @@ const authAdminMarkup = `{{define "title"}}Workspace administration · SameOldCh
 <div class="heading"><h1>Workspace administration</h1><p>Manage access without leaving the workspace.</p><p><a href="/app/admin/settings">Workspace settings</a> · <a href="/app/admin/analytics">Analytics</a> · <a href="/app/admin/audit">Audit</a></p></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if .CanReadApps}}<section class="card" aria-labelledby="authorization-heading"><div class="section-head"><h2 id="authorization-heading">Authorization methods</h2><p>Provider secrets are deployment configuration. Enablement is durable workspace state.</p></div>{{range .Methods}}<div class="row"><span><strong>{{.Label}}</strong><br><span class="status{{if .Enabled}} active{{end}}">{{.State}}</span></span>{{if $.CanWriteApps}}<form method="post" action="/app/admin/auth/methods.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="provider" value="{{.Name}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button class="toggle{{if .Enabled}} danger{{end}}" type="submit" aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Label}} authorization">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div>{{end}}</section>{{end}}
-{{if .CanReadUsers}}<section class="card" aria-labelledby="users-heading"><div class="section-head"><h2 id="users-heading">Workspace users</h2><p>Manage active membership and roles. Signing a member out ends every session they hold without touching their account; deactivating them revokes their sessions and access tokens as well.</p></div><div class="table-scroll"><table><thead><tr><th scope="col">User</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Sessions</th><th scope="col">Actions</th></tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Name}}</strong><br><span class="user-email">{{.Email}}</span></td><td><span class="status{{if .Active}} active{{end}}">{{.Status}}</span></td><td>{{if .Guest}}{{.Guest}}{{else}}{{.Role}}{{end}}</td><td><span class="session-count">{{.Sessions}}</span></td><td><div class="actions">{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="{{if .Active}}disable{{else}}enable{{end}}"><button class="toggle{{if .Active}} danger{{end}}" type="submit" aria-label="{{if .Active}}Disable{{else}}Enable{{end}} {{.Name}}">{{if .Active}}Disable{{else}}Enable{{end}}</button></form>{{if .Sessions}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="sessions"><button class="toggle secondary" type="submit" aria-label="Sign {{.Name}} out of every session">Sign out everywhere</button></form>{{end}}{{if .RoleOptions}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="role"><label>Role for {{.Name}} <select name="role">{{range .RoleOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}{{if .Disabled}} disabled{{end}}>{{.Label}}</option>{{end}}</select></label><button class="toggle secondary" type="submit" aria-label="Save role for {{.Name}}">Save role</button></form>{{end}}{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{end}}</tbody></table></div>{{if .NextPageURL}}<p class="pager"><a href="{{.NextPageURL}}">Next page</a></p>{{end}}</section>{{end}}
+{{if .CanReadUsers}}<section class="card" aria-labelledby="users-heading"><div class="section-head"><h2 id="users-heading">Workspace users</h2><p>Manage active membership and roles. Signing a member out ends every session they hold without touching their account; deactivating them revokes their sessions and access tokens as well.</p></div><div class="table-scroll"><table><thead><tr><th scope="col">User</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Sessions</th><th scope="col">Actions</th></tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Name}}</strong><br><span class="user-email">{{.Email}}</span></td><td><span class="status{{if .Active}} active{{end}}">{{.Status}}</span></td><td>{{if .Guest}}{{.Guest}}{{else if .PrimaryOwner}}Primary owner{{else}}{{.Role}}{{end}}</td><td><span class="session-count">{{.Sessions}}</span></td><td><div class="actions">{{if $.CanWriteUsers}}{{if not .PrimaryOwner}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="{{if .Active}}disable{{else}}enable{{end}}"><button class="toggle{{if .Active}} danger{{end}}" type="submit" aria-label="{{if .Active}}Disable{{else}}Enable{{end}} {{.Name}}">{{if .Active}}Disable{{else}}Enable{{end}}</button></form>{{end}}{{if .CanReceivePrimaryOwnership}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="primary_owner"><button class="toggle secondary" type="submit" aria-label="Make {{.Name}} the primary owner">Make primary owner</button></form>{{end}}{{if .Sessions}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="sessions"><button class="toggle secondary" type="submit" aria-label="Sign {{.Name}} out of every session">Sign out everywhere</button></form>{{end}}{{if .RoleOptions}}<form class="inline-form" method="post" action="/app/admin/auth/users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="role"><label>Role for {{.Name}} <select name="role">{{range .RoleOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}{{if .Disabled}} disabled{{end}}>{{.Label}}</option>{{end}}</select></label><button class="toggle secondary" type="submit" aria-label="Save role for {{.Name}}">Save role</button></form>{{end}}{{else}}<span class="read-only">Read only</span>{{end}}</div></td></tr>{{end}}</tbody></table></div>{{if .NextPageURL}}<p class="pager"><a href="{{.NextPageURL}}">Next page</a></p>{{end}}</section>{{end}}
 {{if .CanReadUsers}}<section class="card" aria-labelledby="invitations-heading"><div class="section-head"><h2 id="invitations-heading">Invitations</h2><p>An invitation records who may join, at what tier, and into which channels. It becomes an account when the person accepts it.</p></div>
 {{if .CanWriteUsers}}<form class="setup" method="post" action="/app/admin/auth/users.invite">
 <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
@@ -218,6 +218,12 @@ type authAdminUserView struct {
 	// stored role is member, so without it the page called a guest a member.
 	Guest  string
 	Active bool
+	// PrimaryOwner marks the workspace's primary owner, whose role and
+	// membership cannot be changed until primary ownership is handed on.
+	PrimaryOwner bool
+	// CanReceivePrimaryOwnership offers the primary owner the hand-over to
+	// this row's member.
+	CanReceivePrimaryOwnership bool
 	// RoleOptions is the set of roles this actor may write onto this row, with
 	// the row's current role selected. It is empty when the actor may not change
 	// the row at all, and the form is then not rendered.
@@ -355,7 +361,8 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthAdminProblem(w, r, problemNotAuthorized)
 		return
 	}
-	actorRole, roleAllowed := h.authAdminRoleAllowed(w, r, principal)
+	actor, roleAllowed := h.authAdminRoleAllowed(w, r, principal)
+	actorRole := actor.Role
 	if !roleAllowed {
 		return
 	}
@@ -414,13 +421,23 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 				status = "active"
 			}
 			row := authAdminUserView{
-				ID:          item.User.ID,
-				Name:        name,
-				Email:       item.User.Email,
-				Status:      status,
-				Role:        item.Membership.Role,
-				Active:      active,
-				RoleOptions: assignableRoles(actorRole, item.Membership.Role),
+				ID:           item.User.ID,
+				Name:         name,
+				Email:        item.User.Email,
+				Status:       status,
+				Role:         item.Membership.Role,
+				Active:       active,
+				PrimaryOwner: item.Membership.PrimaryOwner,
+				RoleOptions:  assignableRoles(actorRole, item.Membership.Role),
+				// The primary owner alone hands the role on, to an active
+				// full member who is a person.
+				CanReceivePrimaryOwnership: actor.PrimaryOwner && active && item.User.ID != principal.UserID &&
+					!item.Membership.Restricted && !item.Membership.UltraRestricted && item.User.BotID == "",
+			}
+			// The primary owner can be neither demoted nor deactivated until
+			// the role has been handed on, so the page offers neither.
+			if item.Membership.PrimaryOwner {
+				row.RoleOptions = nil
 			}
 			// Saving a role on a guest makes them a full member of that role
 			// (admin.users.setRegular and its siblings do the same), so a
@@ -610,6 +627,8 @@ func (h Handler) authUserSet(w http.ResponseWriter, r *http.Request) {
 		// because "sign them out" is the safe first move when a device is lost
 		// and disabling the account is not.
 		operationErr = h.Login.service.ResetUserSessionsBulk(r.Context(), h.Login.workspace, principal.UserID, []domain.UserID{target})
+	case "primary_owner":
+		operationErr = h.Login.service.TransferPrimaryOwnership(r.Context(), h.Login.workspace, principal.UserID, target)
 	case "role":
 		role := domain.WorkspaceRole(strings.ToLower(strings.TrimSpace(fields["role"])))
 		// owner is a real, reachable workspace role. Refusing it here left the
@@ -637,6 +656,12 @@ func authAdminUserMutationProblem(err error) authAdminProblem {
 	// administrator to try again at something that can never succeed.
 	if errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		return authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Your workspace role does not allow that change. Nothing was changed."}
+	}
+	if errors.Is(err, domain.ErrPrimaryOwner) {
+		return authAdminProblem{Status: http.StatusConflict, Code: "cannot_modify_primary_owner", Title: "Primary owner", Message: "The primary owner keeps their role and account until they make another member the primary owner. Nothing was changed."}
+	}
+	if errors.Is(err, store.ErrInvalidArgument) {
+		return authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_user", Title: "Request rejected", Message: "Only an active full member can become the primary owner. Nothing was changed."}
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		return authAdminProblem{Status: http.StatusNotFound, Code: "user_not_found", Title: "User not found", Message: "That workspace user does not exist."}
@@ -744,26 +769,25 @@ func (h Handler) authAdminAllowed(w http.ResponseWriter, r *http.Request, scopes
 // Identity-provider administration still requires a provider, because there is
 // nothing to administer without one; that check stays where it belongs, on the
 // Authorization page.
-func (h Handler) authAdminRoleAllowed(w http.ResponseWriter, r *http.Request, principal auth.Principal) (domain.WorkspaceRole, bool) {
+func (h Handler) authAdminRoleAllowed(w http.ResponseWriter, r *http.Request, principal auth.Principal) (domain.WorkspaceMembership, bool) {
 	membership, err := h.Messages.WorkspaceMembership(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
-	role := membership.Role
 	if err == nil && !membership.Active {
 		h.writeAuthAdminProblem(w, r, problemNotAuthorized)
-		return "", false
+		return domain.WorkspaceMembership{}, false
 	}
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			h.writeAuthAdminProblem(w, r, problemNotAuthorized)
-			return "", false
+			return domain.WorkspaceMembership{}, false
 		}
 		h.writeAuthAdminProblem(w, r, problemRoleUnavailable)
-		return "", false
+		return domain.WorkspaceMembership{}, false
 	}
-	if !auth.WorkspaceRoleHoldsControlPlane(role) {
+	if !auth.WorkspaceRoleHoldsControlPlane(membership.Role) {
 		h.writeAuthAdminProblem(w, r, problemNotAuthorized)
-		return "", false
+		return domain.WorkspaceMembership{}, false
 	}
-	return role, true
+	return membership, true
 }
 
 func normalizeAdminInviteChannels(raw string) []domain.ConversationID {

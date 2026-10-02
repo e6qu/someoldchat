@@ -311,11 +311,18 @@ var (
 	// the actor, so the refusal may say what it is.
 	ErrNotInConversation = errors.New("actor is not a member of the conversation")
 
-	// ErrLastWorkspaceOwner refuses a change that would leave a workspace with no
-	// owner. Ownership is the authority that appoints administrators, so a
-	// workspace that loses its last owner cannot appoint another and is
-	// permanently unadministrable.
+	// ErrLastWorkspaceOwner refused a change that would leave a workspace with
+	// no owner. The primary owner made it unreachable: every workspace that
+	// has an owner has a primary owner, who can be neither demoted nor removed.
+	// It stays because its key is wire contract a rolling deployment still
+	// answers with.
 	ErrLastWorkspaceOwner = errors.New("workspace must retain an owner")
+
+	// ErrPrimaryOwner refuses demoting or removing a workspace's primary
+	// owner, Slack's cannot_modify_primary_owner. The primary owner hands the
+	// role to another member first, which keeps every workspace that has an
+	// owner able to appoint administrators.
+	ErrPrimaryOwner = errors.New("the primary owner cannot be modified")
 )
 
 var (

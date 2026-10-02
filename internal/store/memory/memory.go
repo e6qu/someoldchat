@@ -1380,8 +1380,14 @@ func (s *Store) SeedWorkspaceRole(workspaceID domain.WorkspaceID, userID domain.
 	if !ok {
 		return store.ErrNotFound
 	}
+	if role != domain.WorkspaceRoleOwner {
+		if err := s.refusePrimaryOwnerChangeLocked(workspaceID, userID); err != nil {
+			return err
+		}
+	}
 	membership.Role, membership.Active = role, true
 	s.members[key] = membership
+	s.claimPrimaryOwnershipLocked(workspaceID, userID)
 	return nil
 }
 
@@ -3263,6 +3269,9 @@ func (s *Store) ExpireUserAccount(_ context.Context, workspaceID domain.Workspac
 	if user.Deleted || !s.userExpirations[userID].Equal(expected.UTC()) {
 		return false, nil
 	}
+	if err := s.refusePrimaryOwnerChangeLocked(workspaceID, userID); err != nil {
+		return false, err
+	}
 	guestEvent, err := s.guestDeactivationEventLocked(user, event)
 	if err != nil {
 		return false, err
@@ -3302,6 +3311,11 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 		return store.ErrNotFound
 	}
 	var guestEvent []events.Event
+	if deleted {
+		if err := s.refusePrimaryOwnerChangeLocked(workspaceID, userID); err != nil {
+			return err
+		}
+	}
 	if deleted && !user.Deleted {
 		var err error
 		if guestEvent, err = s.guestDeactivationEventLocked(user, event); err != nil {
@@ -3384,8 +3398,14 @@ func (s *Store) SetWorkspaceRole(_ context.Context, workspaceID domain.Workspace
 	if membership.Guest() && role != domain.WorkspaceRoleMember {
 		return store.InvalidArgument("guest membership cannot be promoted")
 	}
+	if role != domain.WorkspaceRoleOwner {
+		if err := s.refusePrimaryOwnerChangeLocked(workspaceID, userID); err != nil {
+			return err
+		}
+	}
 	membership.Role, membership.Active = role, true
 	s.members[key] = membership
+	s.claimPrimaryOwnershipLocked(workspaceID, userID)
 	s.outbox = append(s.outbox, event)
 	return nil
 }

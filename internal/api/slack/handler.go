@@ -7126,7 +7126,7 @@ func (h Handler) usersSetActive(w http.ResponseWriter, r *http.Request) {
 // read, and whether the membership is active.
 func adminUserResponse(origin string, value domain.AdminUser) map[string]any {
 	user := value.User
-	user.Role, user.Restricted, user.UltraRestricted = value.Membership.Role, value.Membership.Restricted, value.Membership.UltraRestricted
+	user.Role, user.Restricted, user.UltraRestricted, user.PrimaryOwner = value.Membership.Role, value.Membership.Restricted, value.Membership.UltraRestricted, value.Membership.PrimaryOwner
 	result := slackobject.User(origin, user, true)
 	result["is_active"] = value.Membership.Active
 	return result
@@ -12216,11 +12216,12 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, domain.ErrMessageNotOwned) || errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		return "no_permission"
 	}
-	// A refusal to leave the workspace ownerless is not a permission failure —
-	// the actor holds the authority — so it must not be reported as one, or an
-	// administrator is told they lack a right they actually have.
-	if errors.Is(err, domain.ErrLastWorkspaceOwner) {
-		return "cant_delete_primary_owner"
+	// A refusal to change the primary owner is not a permission failure — the
+	// actor holds the authority — so it must not be reported as one, or an
+	// administrator is told they lack a right they actually have. Slack names
+	// it cannot_modify_primary_owner on every method that can reach it.
+	if errors.Is(err, domain.ErrPrimaryOwner) || errors.Is(err, domain.ErrLastWorkspaceOwner) {
+		return "cannot_modify_primary_owner"
 	}
 	if errors.Is(err, domain.ErrMessageAlreadyDeleted) {
 		return "message_not_found"

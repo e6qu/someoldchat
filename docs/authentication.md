@@ -116,7 +116,8 @@ set to a parent shared with unrelated relying applications; cross-application
 single sign-on comes from the issuer session instead (see
 [Single sign-on and logout](#single-sign-on-and-logout)).
 `-bootstrap-admin-email` provides the email address of the initial workspace
-user. `-release-revision` provides the immutable deployed commit or image
+user, who becomes the workspace's primary owner, as a Slack workspace's creator
+does. `-release-revision` provides the immutable deployed commit or image
 digest exposed by the authenticated validation page; it defaults to the commit
 embedded at build time.
 
@@ -248,6 +249,17 @@ member manually. Manual creation uses
 the supplied verified email, creates durable workspace membership, and accepts
 only the `member` or `admin` role. It does not create a password or bypass the
 configured authorization source.
+
+Each workspace that has an owner has exactly one primary owner, Slack's
+`is_primary_owner`. Only owners appoint owners, and the primary owner can be
+neither demoted nor deactivated; `admin.users.setAdmin`, `setRegular` and
+`remove` answer `cannot_modify_primary_owner`. The primary owner hands the role
+to another active full member with **Make primary owner** on the users table;
+that member becomes an owner, and the previous primary owner stays one. A
+deployment upgraded from a release without primary owners names one from its
+existing owners, the first active one by member ID; one that had no owner makes
+the bootstrap identity the primary owner on its next start, unless an operator
+has demoted that identity to member.
 
 The internal administration endpoints are first-party routes of the web client,
 not Slack Web API methods, so they live under the page they serve rather than
