@@ -1248,8 +1248,15 @@ func modalInteractionStatus(err error) int {
 	if errors.Is(err, domain.ErrViewFilesInvalid) {
 		return http.StatusUnprocessableEntity
 	}
+	if errors.Is(err, domain.ErrAppUseRestricted) {
+		return http.StatusForbidden
+	}
 	return http.StatusBadGateway
 }
+
+// appUseRestrictedReason explains a refusal by an app's access control list,
+// which an administrator sets and the member cannot change.
+const appUseRestrictedReason = "An administrator has restricted who may use this app, or where."
 
 func modalInteractionError(err error) string {
 	switch {
@@ -1261,6 +1268,8 @@ func modalInteractionError(err error) string {
 		return "The app returned an invalid modal response. Your entries are still here."
 	case errors.Is(err, domain.ErrViewFilesInvalid):
 		return "An attached file is no longer available or is not one this form accepts. Remove it and attach the file again."
+	case errors.Is(err, domain.ErrAppUseRestricted):
+		return appUseRestrictedReason
 	default:
 		return "The app modal could not be submitted. Your entries are still here; try again."
 	}

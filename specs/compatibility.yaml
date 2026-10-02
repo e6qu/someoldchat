@@ -522,9 +522,10 @@ operations:
       - >-
         The file object carries no thumb_* URLs: no token-authenticated
         thumbnail route exists on the Web API surface. A shares entry carries
-        ts, thread_ts, channel_name, team_id and share_user_id but not the
-        reply_count/reply_users thread summary, and shares appear on
-        files.info only, not on list or message file objects.
+        ts, channel_name, team_id and share_user_id, and thread_ts with
+        reply_count, reply_users, reply_users_count and latest_reply when the
+        sharing message starts a thread; shares appear on files.info only, not
+        on list or message file objects.
   - method: files.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -650,7 +651,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
-      - Core identity, image, status, expiration, and workspace-defined custom fields are returned; a hidden field is filtered from a reader who is neither its owner nor an administrator. Labels for the custom fields are read separately through team.profile.get.
+      - Core identity, name parts, phone, image, status, expiration, and workspace-defined custom fields are returned, with each field's label under include_labels; a hidden field is filtered from a reader who is neither its owner nor an administrator.
       - Current rate limits and every user-token/bot-token visibility variation have not been differentially qualified.
     audit:
       downgraded_from: behavior-compatible
@@ -670,7 +671,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
-      - Display name, status, expiration, image URL, and workspace-defined custom fields are settable, both through the profile object's fields map and through the single-field name/value form (a standard field or a custom field id), each validated against its field's declared type. Title and pronouns are stored and settable through both forms. Standard Slack profile fields this deployment does not store (first/last/real name, phone, skype, start date, email) are refused rather than silently dropped.
+      - Display name, full name (real_name, first_name, last_name), phone, title, pronouns, status, expiration, image URL, and workspace-defined custom fields are settable through both the profile object and the single-field name/value form. real_name sets both parts, split at its first space, and a full name cannot be cleared. Standard Slack profile fields this deployment does not store (skype, start date) and email, which only an administrator may change in Slack, are refused rather than silently dropped.
       - Admin editing of another user, paid-plan restrictions, method-specific rate limits, and all token-type rules remain unqualified.
     audit:
       downgraded_from: behavior-compatible
@@ -2593,7 +2594,7 @@ operations:
     deviations:
       - The reference documents no response body; the method answers the same permission_type, user_ids/usergroup_ids and channel_restriction_mode/channel_ids shape that admin.apps.permissions.remove and .set document.
       - The reference states a 50-user maximum per call but no ceiling for the accumulated list; the accumulated list is held to admin.apps.permissions.set's 200-user maximum and answers too_many_named_entities beyond it.
-      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - The access control list and channel restriction are enforced wherever a member uses an app — a slash command or shortcut (and the composer offers no command of an app the member may not use), an interactive element of its message or view, its Home and Messages tabs, and a mention, which reaches the app as app_mention only from a member the list admits in a channel it allows. Other event delivery follows the app's own access to the conversation, not the acting member's.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
       - failed_to_update_channels is never emitted because the list and its channels are written in one transaction, so a storage failure is reported with the shared engine codes instead.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
@@ -2611,7 +2612,7 @@ operations:
     deviations:
       - The reference says a named_entities response includes the users and user groups but does not name the fields; they are reported as user_ids and usergroup_ids, the argument names .add, .remove and .set take, and the channel restriction in the shape .set documents.
       - invalid_permission_type (an ACL holding an invalid type) cannot occur because the stored type is validated on every write.
-      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - The access control list and channel restriction are enforced wherever a member uses an app — a slash command or shortcut (and the composer offers no command of an app the member may not use), an interactive element of its message or view, its Home and Messages tabs, and a mention, which reaches the app as app_mention only from a member the list admits in a channel it allows. Other event delivery follows the app's own access to the conversation, not the acting member's.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 3 budget is not separately enforced.
   - method: admin.apps.permissions.remove
@@ -2629,7 +2630,7 @@ operations:
       - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
     deviations:
       - Removing the last user or user group from a named_entities list is refused with named_entities_cannot_be_empty, which is this local reading of that documented code; a usergroup_ids entry naming a group not on the list is a no-op because the reference declares no user-group error for remove.
-      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - The access control list and channel restriction are enforced wherever a member uses an app — a slash command or shortcut (and the composer offers no command of an app the member may not use), an interactive element of its message or view, its Home and Messages tabs, and a mention, which reaches the app as app_mention only from a member the list admits in a channel it allows. Other event delivery follows the app's own access to the conversation, not the acting member's.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
       - failed_to_update_channels is never emitted because the list and its channels are written in one transaction, so a storage failure is reported with the shared engine codes instead.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
@@ -2639,6 +2640,7 @@ operations:
     reference: https://docs.slack.dev/reference/methods/admin.apps.permissions.set/
     evidence:
       - go-test:internal/service:TestAppAccessControlDecidesWhoMayInvokeAnApp
+      - go-test:internal/service:TestAppAccessControlGatesEveryUseOfAnApp
       - go-test:internal/api/slack:TestAdminAppsPermissionsFollowTheSlackReference
       - go-test:internal/api/slack:TestAdminAppAccessMethodsRefuseABotToken
       - go-test:internal/service:TestAdminSetAppPermissionKeepsOrClearsTheChannelRestriction
@@ -2650,7 +2652,7 @@ operations:
       - Omitting channel_restriction_mode keeps the app's current channel restriction, and channel_ids without a listing mode (omitted or all_channels) is refused with invalid_channel_restriction_mode; the reference does not state either case.
       - channel_restrictions_not_available is never emitted because every workspace here can configure channel restrictions.
       - More than 200 channel_ids is refused with invalid_arguments; the reference states the maximum but no code for it.
-      - The access control list and channel restriction are enforced where a member invokes an app by slash command or shortcut (and the composer offers no command of an app the member may not use); block actions on an app message, App Home, mentions and event delivery are not yet gated by them.
+      - The access control list and channel restriction are enforced wherever a member uses an app — a slash command or shortcut (and the composer offers no command of an app the member may not use), an interactive element of its message or view, its Home and Messages tabs, and a mention, which reaches the app as app_mention only from a member the list admits in a channel it allows. Other event delivery follows the app's own access to the conversation, not the acting member's.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
       - Rate limiting is enforced at the uniform Tier 4 floor with 429, Retry-After, and ratelimited; this method's stricter Tier 2 budget is not separately enforced.
   - method: admin.conversations.bulkSetProperties

@@ -67,4 +67,9 @@ package mutation
 // 75 to 73: measured after adopting the 21 methods Slack added to its
 // reference; the suites that arrived with them catch two more operations
 // whose guard used to run on unnoticed.
-const survivingGuardCeiling = 73
+//
+// 73 to 72: measured after an app's access control list began deciding its
+// block actions, views, Home and Messages tabs, and app_mention; the tests
+// that refuse each of those catch one more operation whose guard ran on
+// unnoticed.
+const survivingGuardCeiling = 72

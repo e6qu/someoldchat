@@ -2103,6 +2103,9 @@ func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.Workspac
 		profile.ActiveScheduledStatusID = ""
 	}
 	user.Profile = profile
+	if realName := domain.JoinRealName(profile.FirstName, profile.LastName); realName != "" {
+		user.RealName = realName
+	}
 	user.Updated = secondsInstant(changes[0].CreatedAt)
 	s.users[userID] = user
 	s.outbox = append(s.outbox, changes...)

@@ -279,6 +279,7 @@ type profileView struct {
 	Timezone      string
 	LocalTime     string
 	Email         string
+	Phone         string
 	RoleLabel     string
 	IsBot         bool
 	IsSelf        bool
@@ -323,7 +324,7 @@ const profilePanelPartial = `{{define "profile-panel"}}<div class="pp-head"><h2 
 </div></details>
 </div>
 <p class="v-sr" role="status" data-profile-status></p>
-<section class="pp-section" aria-labelledby="profile-contact-heading"><h3 id="profile-contact-heading">Contact information</h3>{{if .Email}}<dl><div><dt>Email address</dt><dd><a href="mailto:{{.Email}}">{{.Email}}</a></dd></div></dl>{{else}}<p class="pp-muted">No contact details are shared with you.</p>{{end}}</section>
+<section class="pp-section" aria-labelledby="profile-contact-heading"><h3 id="profile-contact-heading">Contact information</h3>{{if or .Email .Phone}}<dl>{{if .Email}}<div><dt>Email address</dt><dd><a href="mailto:{{.Email}}">{{.Email}}</a></dd></div>{{end}}{{if .Phone}}<div><dt>Phone</dt><dd><a href="tel:{{.Phone}}">{{.Phone}}</a></dd></div>{{end}}</dl>{{else}}<p class="pp-muted">No contact details are shared with you.</p>{{end}}</section>
 {{if .Fields}}<section class="pp-section" aria-labelledby="profile-about-heading"><h3 id="profile-about-heading">About</h3><dl>{{range .Fields}}<div><dt>{{.Label}}</dt><dd>{{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer" target="_blank">{{.Value}}</a>{{else}}{{.Value}}{{end}}</dd></div>{{end}}</dl></section>{{end}}
 </div>{{end}}`
 
@@ -385,7 +386,7 @@ func (h Handler) buildProfileView(r *http.Request, principal auth.Principal, id 
 	name := displayName(user)
 	view := profileView{
 		ID: string(user.ID), Name: name, RealName: strings.TrimSpace(user.RealName),
-		Title: user.Profile.Title, Pronouns: user.Profile.Pronouns,
+		Title: user.Profile.Title, Pronouns: user.Profile.Pronouns, Phone: user.Profile.Phone,
 		Initial: initial(name), AvatarURL: profileImageURL(user.Profile),
 		StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), StatusText: user.Profile.StatusText,
 		IsBot: user.IsBot(), IsSelf: user.ID == principal.UserID,

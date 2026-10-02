@@ -177,8 +177,12 @@ type FileShare struct {
 	Ts               string                 `protobuf:"bytes,4,opt,name=ts,proto3" json:"ts,omitempty"`
 	ThreadTs         string                 `protobuf:"bytes,5,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
 	SharedBy         string                 `protobuf:"bytes,6,opt,name=shared_by,json=sharedBy,proto3" json:"shared_by,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// The thread the sharing message starts, when it has replies.
+	ReplyCount          int32    `protobuf:"varint,7,opt,name=reply_count,json=replyCount,proto3" json:"reply_count,omitempty"`
+	ReplyUsers          []string `protobuf:"bytes,8,rep,name=reply_users,json=replyUsers,proto3" json:"reply_users,omitempty"`
+	LatestReplyUnixNano int64    `protobuf:"varint,9,opt,name=latest_reply_unix_nano,json=latestReplyUnixNano,proto3" json:"latest_reply_unix_nano,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *FileShare) Reset() {
@@ -251,6 +255,27 @@ func (x *FileShare) GetSharedBy() string {
 		return x.SharedBy
 	}
 	return ""
+}
+
+func (x *FileShare) GetReplyCount() int32 {
+	if x != nil {
+		return x.ReplyCount
+	}
+	return 0
+}
+
+func (x *FileShare) GetReplyUsers() []string {
+	if x != nil {
+		return x.ReplyUsers
+	}
+	return nil
+}
+
+func (x *FileShare) GetLatestReplyUnixNano() int64 {
+	if x != nil {
+		return x.LatestReplyUnixNano
+	}
+	return 0
 }
 
 type FilePage struct {
@@ -2758,14 +2783,19 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\x0fshared_channels\x18\v \x03(\tR\x0esharedChannels\x12 \n" +
 	"\vdescription\x18\f \x01(\tR\vdescription\x12\x1b\n" +
 	"\tfile_type\x18\r \x01(\tR\bfileType\x126\n" +
-	"\x06shares\x18\x0e \x03(\v2\x1e.sameoldchat.chat.v1.FileShareR\x06shares\"\xc5\x01\n" +
+	"\x06shares\x18\x0e \x03(\v2\x1e.sameoldchat.chat.v1.FileShareR\x06shares\"\xbc\x02\n" +
 	"\tFileShare\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12+\n" +
 	"\x11conversation_name\x18\x02 \x01(\tR\x10conversationName\x12\x18\n" +
 	"\aprivate\x18\x03 \x01(\bR\aprivate\x12\x0e\n" +
 	"\x02ts\x18\x04 \x01(\tR\x02ts\x12\x1b\n" +
 	"\tthread_ts\x18\x05 \x01(\tR\bthreadTs\x12\x1b\n" +
-	"\tshared_by\x18\x06 \x01(\tR\bsharedBy\"\x8d\x01\n" +
+	"\tshared_by\x18\x06 \x01(\tR\bsharedBy\x12\x1f\n" +
+	"\vreply_count\x18\a \x01(\x05R\n" +
+	"replyCount\x12\x1f\n" +
+	"\vreply_users\x18\b \x03(\tR\n" +
+	"replyUsers\x123\n" +
+	"\x16latest_reply_unix_nano\x18\t \x01(\x03R\x13latestReplyUnixNano\"\x8d\x01\n" +
 	"\bFilePage\x12/\n" +
 	"\x05files\x18\x01 \x03(\v2\x19.sameoldchat.chat.v1.FileR\x05files\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +

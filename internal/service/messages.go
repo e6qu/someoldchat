@@ -549,7 +549,39 @@ func (m Messages) FileInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 		}
 		file.Shares = append(file.Shares, share)
 	}
+	if err := m.summarizeShareThreads(ctx, file.Shares); err != nil {
+		return domain.File{}, err
+	}
 	return file, nil
+}
+
+// summarizeShareThreads fills each share's thread summary, as Slack's shares
+// entry carries reply_count, reply_users and latest_reply for a sharing
+// message that has replies. A reply cannot start a thread, so only
+// top-level shares are asked about.
+func (m Messages) summarizeShareThreads(ctx context.Context, shares []domain.FileShare) error {
+	parents := map[domain.ConversationID][]domain.MessageTimestamp{}
+	for _, share := range shares {
+		if share.ThreadTimestamp == "" {
+			parents[share.Conversation] = append(parents[share.Conversation], share.Timestamp)
+		}
+	}
+	summaries := make(map[domain.ConversationID]map[domain.MessageTimestamp]domain.ThreadSummary, len(parents))
+	for conversation, timestamps := range parents {
+		found, err := m.Store.ThreadSummaries(ctx, conversation, timestamps)
+		if err != nil {
+			return err
+		}
+		summaries[conversation] = found
+	}
+	for i := range shares {
+		if shares[i].ThreadTimestamp != "" {
+			continue
+		}
+		summary := summaries[shares[i].Conversation][shares[i].Timestamp]
+		shares[i].ReplyCount, shares[i].ReplyUsers, shares[i].LatestReply = summary.ReplyCount, summary.Participants, summary.LastReplyAt
+	}
+	return nil
 }
 
 func (m Messages) OpenFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID) (domain.File, io.ReadCloser, error) {
@@ -3339,6 +3371,9 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 	profile.DisplayName = strings.TrimSpace(profile.DisplayName)
 	profile.Title = strings.TrimSpace(profile.Title)
 	profile.Pronouns = strings.TrimSpace(profile.Pronouns)
+	profile.FirstName = strings.TrimSpace(profile.FirstName)
+	profile.LastName = strings.TrimSpace(profile.LastName)
+	profile.Phone = strings.TrimSpace(profile.Phone)
 	profile.Timezone = strings.TrimSpace(profile.Timezone)
 	if profile.Timezone != "" {
 		// Only a zone this host can resolve is stored: a profile's local time
@@ -3368,7 +3403,8 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 			return domain.User{}, domain.ErrInvalidProfile
 		}
 	}
-	if len(profile.DisplayName) > 80 || len(profile.Title) > 150 || len(profile.Pronouns) > 40 || len(profile.StatusText) > 100 || len(profile.StatusEmoji) > 64 || len(profile.Image24) > 2048 || len(profile.Image32) > 2048 || len(profile.Image48) > 2048 || len(profile.Image72) > 2048 || len(profile.Image192) > 2048 || len(profile.Image512) > 2048 || len(profile.Image1024) > 2048 {
+	if len(profile.FirstName) > 80 || len(profile.LastName) > 80 || len(profile.Phone) > 64 ||
+		len(profile.DisplayName) > 80 || len(profile.Title) > 150 || len(profile.Pronouns) > 40 || len(profile.StatusText) > 100 || len(profile.StatusEmoji) > 64 || len(profile.Image24) > 2048 || len(profile.Image32) > 2048 || len(profile.Image48) > 2048 || len(profile.Image72) > 2048 || len(profile.Image192) > 2048 || len(profile.Image512) > 2048 || len(profile.Image1024) > 2048 {
 		return domain.User{}, domain.ErrInvalidProfile
 	}
 	if err := m.validateStatusEmoji(ctx, workspaceID, profile.StatusEmoji, domain.ErrInvalidProfile); err != nil {
@@ -3378,11 +3414,20 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 	if err != nil || current.WorkspaceID != workspaceID {
 		return domain.User{}, store.ErrNotFound
 	}
+	if profile.FirstName == "" && profile.LastName == "" {
+		// A member's full name is never cleared: a profile that names neither
+		// part, as every writer that changes something else sends for a
+		// member whose name was never written through the profile, keeps it.
+		profile.FirstName, profile.LastName = current.NameParts()
+	}
 	statusChanged := current.Profile.StatusText != profile.StatusText ||
 		current.Profile.StatusEmoji != profile.StatusEmoji ||
 		!current.Profile.StatusExpiration.Equal(profile.StatusExpiration)
 	updated := current
 	updated.Profile = profile
+	if realName := domain.JoinRealName(profile.FirstName, profile.LastName); realName != "" {
+		updated.RealName = realName
+	}
 	now := time.Now().UTC()
 	payload, err := events.UserChangePayload("user.profile_changed", updated, false, statusChanged, now)
 	if err != nil {

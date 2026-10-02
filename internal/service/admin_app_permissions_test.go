@@ -10,6 +10,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
@@ -286,5 +287,80 @@ func TestAdminRemoveAppPermissionEntitiesRemovesADeactivatedMember(t *testing.T)
 	}
 	if !reflect.DeepEqual(removed.UserIDs, []domain.UserID{"UA"}) {
 		t.Fatalf("removed=%+v", removed)
+	}
+}
+
+// Every way a member uses an app answers to its access control, not only a
+// slash command: an interactive element of its message, its Home tab, and its
+// Messages tab. A member the list admits keeps all three.
+func TestAppAccessControlGatesEveryUseOfAnApp(t *testing.T) {
+	ctx, repository, messages := seedAppAccessWorld(t)
+	now := time.Now().UTC()
+	manifest := `{"display_information":{"name":"Helper"},"oauth_config":{"scopes":{"bot":["commands","chat:write"]}},` +
+		`"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true}},` +
+		`"settings":{"socket_mode_enabled":true,"interactivity":{"is_enabled":true}}}`
+	verificationCiphertext, err := secretbox.Seal(messages.AppCredentialKey, appVerificationTokenAssociatedData("AH"), "verification-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateApp(ctx, domain.App{
+		ID: "AH", DevelopmentWorkspaceID: "T1", OwnerID: "UA", Name: "Helper", ClientID: "client-AH",
+		SigningSecretHash: "hash", SigningSecretCiphertext: "cipher", VerificationTokenHash: domain.HashToken("verification-token"), VerificationTokenCiphertext: verificationCiphertext,
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{AppID: "AH", Version: 1, Manifest: manifest, CreatedBy: "UA", CreatedAt: now},
+		domain.OAuthClient{ID: "client-AH", SecretHash: "secret", AppID: "AH"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, seed := range []error{
+		repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "AH", WorkspaceID: "T1", Enabled: true, CreatedAt: now}),
+		repository.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "helper"}),
+		repository.CreateBot(ctx, domain.Bot{ID: "BH", AppID: "AH", WorkspaceID: "T1", UserID: "UBOT", Name: "helper", UpdatedAt: now}),
+		repository.SeedConversationMember("C1", "U1"),
+		repository.SeedConversationMember("C1", "UBOT"),
+	} {
+		if seed != nil {
+			t.Fatal(seed)
+		}
+	}
+	blocks := `[{"type":"actions","block_id":"choice","elements":[{"type":"button","action_id":"go","text":{"type":"plain_text","text":"Go"},"value":"go"}]}]`
+	message, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "UBOT", "C1", "Pick one", blocks, "", "", "", "AH")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uses := func(user domain.UserID) map[string]error {
+		t.Helper()
+		_, _, home := messages.AppHome(ctx, "T1", user, "AH")
+		_, tab := messages.OpenAppMessages(ctx, "T1", user, "AH")
+		action := messages.DispatchBlockAction(ctx, "T1", user, domain.AppBlockAction{
+			MessageID: message.ID, BlockID: "choice", ActionID: "go", Type: "button", Value: "go",
+		}, "https://chat.example.test")
+		return map[string]error{"home": home, "messages tab": tab, "block action": action}
+	}
+	for use, err := range uses("U1") {
+		if err != nil {
+			t.Fatalf("unrestricted %s: %v", use, err)
+		}
+	}
+	if _, err := messages.AdminSetAppPermission(ctx, "T1", "UA", domain.AppPermission{
+		AppID: "AH", PermissionType: domain.AppPermissionNamedEntities, UserIDs: []domain.UserID{"UA"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for use, err := range uses("U1") {
+		if !errors.Is(err, domain.ErrAppUseRestricted) {
+			t.Errorf("%s by a member the list does not admit: %v, want ErrAppUseRestricted", use, err)
+		}
+	}
+	// A channel restriction refuses the block action in the channel it
+	// excludes; the Home and Messages tabs are in no channel.
+	if _, err := messages.AdminSetAppPermission(ctx, "T1", "UA", domain.AppPermission{
+		AppID: "AH", PermissionType: domain.AppPermissionEveryone,
+		ChannelRestrictionMode: domain.ChannelRestrictionAllChannelsExcept, ChannelIDs: []domain.ConversationID{"C1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	restricted := uses("U1")
+	if restricted["home"] != nil || restricted["messages tab"] != nil || !errors.Is(restricted["block action"], domain.ErrAppUseRestricted) {
+		t.Fatalf("channel-restricted uses = %v, want only the block action refused", restricted)
 	}
 }

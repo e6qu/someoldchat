@@ -466,19 +466,31 @@ func (m Messages) SetManagedAppPermissions(ctx context.Context, configurationTok
 }
 
 // requireAppUse is where an app's access control list decides something: a
-// member invoking the app — a slash command or a shortcut — must be admitted by
-// its permission type, and, when the use happens in a channel, by its channel
+// member using the app — a slash command, a shortcut, an interactive element
+// of its message or view, its Home or Messages tab — must be admitted by its
+// permission type, and, when the use happens in a channel, by its channel
 // restriction. An app nobody has restricted admits everyone everywhere.
 // conversationID is empty for a use that happens in no channel.
 func (m Messages) requireAppUse(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, conversationID domain.ConversationID) error {
-	permission, err := m.Store.GetAppPermission(ctx, workspaceID, appID)
+	return requireAppUse(ctx, m.Store, workspaceID, userID, appID, conversationID)
+}
+
+// appPermissionReader is what deciding an app's access control reads; event
+// delivery decides it from its own narrower store.
+type appPermissionReader interface {
+	GetAppPermission(context.Context, domain.WorkspaceID, domain.AppID) (domain.AppPermission, error)
+	GetUserGroup(context.Context, domain.WorkspaceID, domain.UserGroupID) (domain.UserGroup, error)
+}
+
+func requireAppUse(ctx context.Context, state appPermissionReader, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, conversationID domain.ConversationID) error {
+	permission, err := state.GetAppPermission(ctx, workspaceID, appID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	admitted, err := m.appPermissionAdmits(ctx, workspaceID, permission, userID)
+	admitted, err := appPermissionAdmits(ctx, state, workspaceID, permission, userID)
 	if err != nil {
 		return err
 	}
@@ -504,7 +516,7 @@ func (m Messages) requireAppUse(ctx context.Context, workspaceID domain.Workspac
 
 // appPermissionAdmits reports whether a permission type lets a member use the
 // app at all. A named list admits its users and the members of its groups.
-func (m Messages) appPermissionAdmits(ctx context.Context, workspaceID domain.WorkspaceID, permission domain.AppPermission, userID domain.UserID) (bool, error) {
+func appPermissionAdmits(ctx context.Context, state appPermissionReader, workspaceID domain.WorkspaceID, permission domain.AppPermission, userID domain.UserID) (bool, error) {
 	switch permission.PermissionType {
 	case domain.AppPermissionEveryone:
 		return true, nil
@@ -513,7 +525,7 @@ func (m Messages) appPermissionAdmits(ctx context.Context, workspaceID domain.Wo
 			return true, nil
 		}
 		for _, groupID := range permission.UserGroupIDs {
-			group, err := m.Store.GetUserGroup(ctx, workspaceID, groupID)
+			group, err := state.GetUserGroup(ctx, workspaceID, groupID)
 			if errors.Is(err, store.ErrNotFound) {
 				continue
 			}

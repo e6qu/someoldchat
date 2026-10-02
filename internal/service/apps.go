@@ -502,6 +502,9 @@ func (m Messages) AppHome(ctx context.Context, workspaceID domain.WorkspaceID, u
 	if !parsed.HomeTabEnabled {
 		return domain.InstalledApp{}, domain.View{}, domain.ErrAppHomeNotEnabled
 	}
+	if err := m.requireAppUse(ctx, workspaceID, userID, snapshot.App.ID, ""); err != nil {
+		return domain.InstalledApp{}, domain.View{}, err
+	}
 	view, err := m.Store.GetPublishedView(ctx, workspaceID, userID, appID)
 	if errors.Is(err, store.ErrNotFound) {
 		err = nil
@@ -546,6 +549,9 @@ func (m Messages) OpenAppMessages(ctx context.Context, workspaceID domain.Worksp
 	}
 	if !parsed.MessagesTabEnabled {
 		return domain.Conversation{}, store.ErrNotFound
+	}
+	if err := m.requireAppUse(ctx, workspaceID, userID, snapshot.App.ID, ""); err != nil {
+		return domain.Conversation{}, err
 	}
 	bot, err := m.Store.GetBotByApp(ctx, workspaceID, snapshot.App.ID)
 	if err != nil {

@@ -166,6 +166,7 @@ func runQualification(t *testing.T, open opener) {
 		{"a workspace's primary owner is one owner who cannot be removed", primaryOwnerIsOneProtectedOwner},
 		{"never being asked again by an app outlives the prompt", unfurlAuthDeclineIsDurable},
 		{"an assistant's loading messages travel with its status", assistantLoadingMessagesTravelWithTheStatus},
+		{"a profile's name parts and phone are durable", profileNamePartsAndPhoneAreDurable},
 		{"one app approval reads back by itself", oneAppApprovalReadsBackByItself},
 		{"a reminder is delivered once on every profile", aReminderIsDeliveredOnce},
 		{"visible files are newest first", visibleFilesAreNewestFirst},
@@ -1137,6 +1138,43 @@ func assistantLoadingMessagesTravelWithTheStatus(t *testing.T, open opener) {
 	write("", nil)
 	if value, err = repository.GetAssistantThread(ctx, workspaceID, conversationID, thread); err != nil || value.Status != "" || len(value.LoadingMessages) != 0 {
 		t.Fatalf("cleared assistant thread = %+v err=%v", value, err)
+	}
+}
+
+// profileNamePartsAndPhoneAreDurable holds users.profile.set's first_name,
+// last_name and phone on every profile: stored as written, with real_name the
+// two parts joined, and a profile that names neither part keeping the name.
+func profileNamePartsAndPhoneAreDurable(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID, userID := domain.WorkspaceID("T-names-"+suffix), domain.UserID("U-names-"+suffix)
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Names"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: "names-" + suffix, RealName: "Ada Lovelace"}); err != nil {
+		t.Fatal(err)
+	}
+	write := func(step string, profile domain.UserProfile) domain.User {
+		t.Helper()
+		event := events.Event{ID: domain.EventID("E-names-" + suffix + step), WorkspaceID: workspaceID, Topic: "user.profile_changed", Payload: "{}", CreatedAt: time.Now().UTC()}
+		if _, err := repository.UpdateUserProfile(ctx, workspaceID, userID, profile, event); err != nil {
+			t.Fatal(err)
+		}
+		user, err := repository.GetUser(ctx, userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return user
+	}
+	if user := write("parts", domain.UserProfile{FirstName: "Augusta Ada", LastName: "King", Phone: "+1 555 0100"}); user.RealName != "Augusta Ada King" ||
+		user.Profile.FirstName != "Augusta Ada" || user.Profile.LastName != "King" || user.Profile.Phone != "+1 555 0100" {
+		t.Fatalf("user after naming parts = %q %+v", user.RealName, user.Profile)
+	}
+	if user := write("other", domain.UserProfile{DisplayName: "ada"}); user.RealName != "Augusta Ada King" || user.Profile.Phone != "" {
+		t.Fatalf("user after a profile naming neither part = %q %+v", user.RealName, user.Profile)
 	}
 }
 

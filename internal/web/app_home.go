@@ -206,6 +206,10 @@ func (h Handler) renderWorkspaceApps(w http.ResponseWriter, r *http.Request, pri
 			read = h.Messages.AppHome
 		}
 		_, view, err := read(r.Context(), principal.WorkspaceID, principal.UserID, data.Selected.ID)
+		if errors.Is(err, domain.ErrAppUseRestricted) {
+			h.writePageError(w, http.StatusForbidden, "You can’t use this app", appUseRestrictedReason)
+			return
+		}
 		if err != nil {
 			status := http.StatusServiceUnavailable
 			if errors.Is(err, store.ErrNotFound) {
@@ -290,6 +294,9 @@ func (h Handler) appMessages(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, store.ErrNotFound) {
 			status, heading, reason = http.StatusNotFound, "This app has no Messages tab", "It may have been removed from this workspace or turned the tab off."
 		}
+		if errors.Is(err, domain.ErrAppUseRestricted) {
+			status, heading, reason = http.StatusForbidden, "You can’t use this app", appUseRestrictedReason
+		}
 		h.writeMutationError(w, r, status, heading, reason)
 		return
 	}
@@ -322,6 +329,10 @@ func (h Handler) appHomeAction(w http.ResponseWriter, r *http.Request) {
 	appID := domain.AppID(strings.TrimSpace(r.PathValue("appID")))
 	_, current, err := h.Messages.AppHome(r.Context(), principal.WorkspaceID, principal.UserID, appID)
 	viewID := domain.ViewID(strings.TrimSpace(values["view_id"][0]))
+	if errors.Is(err, domain.ErrAppUseRestricted) {
+		h.writeMutationError(w, r, http.StatusForbidden, "The app action did not run", appUseRestrictedReason)
+		return
+	}
 	if err != nil || current.ID == "" || current.ID != viewID {
 		h.writeMutationError(w, r, http.StatusNotFound, "That app Home has changed", "Reload the app and try the action again.")
 		return
@@ -352,7 +363,7 @@ func (h Handler) appHomeAction(w http.ResponseWriter, r *http.Request) {
 		Type: action.Type, Value: value, State: stateJSON,
 	}, h.responseBaseURL(r))
 	if err != nil {
-		h.writeMutationError(w, r, http.StatusBadGateway, "The app action did not run", modalInteractionError(err))
+		h.writeMutationError(w, r, modalInteractionStatus(err), "The app action did not run", modalInteractionError(err))
 		return
 	}
 	target := "/app/apps/" + string(appID) + "?channel=" + string(h.requestChannel(r)) + "&notice=action_sent"

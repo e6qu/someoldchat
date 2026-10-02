@@ -6610,11 +6610,16 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
+	includeLabels, err := parseBoolField(fields["include_labels"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	profile := slackobject.Profile(h.origin(r), user)
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(profile, "email")
 	}
-	customFields, err := h.profileFieldValues(r.Context(), principal.WorkspaceID, principal.UserID, requested)
+	customFields, err := h.profileFieldValues(r.Context(), principal.WorkspaceID, principal.UserID, requested, includeLabels)
 	if err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
@@ -6627,8 +6632,9 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 // profile response, keyed by field id the way users.profile.get reports them. A
 // member with none set is reported as null, which is what Slack returns rather
 // than an empty object, and hidden fields the reader may not see are already
-// filtered by the service.
-func (h Handler) profileFieldValues(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID) (any, error) {
+// filtered by the service. withLabels adds each field's label beside its
+// value, as users.profile.get's include_labels asks.
+func (h Handler) profileFieldValues(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID, withLabels bool) (any, error) {
 	values, err := h.Messages.UserProfileFields(ctx, workspaceID, actorID, targetID)
 	if err != nil {
 		return nil, err
@@ -6636,9 +6642,24 @@ func (h Handler) profileFieldValues(ctx context.Context, workspaceID domain.Work
 	if len(values) == 0 {
 		return nil, nil
 	}
+	var labels map[domain.ProfileFieldID]string
+	if withLabels {
+		definitions, err := h.Messages.WorkspaceProfileFields(ctx, workspaceID, actorID)
+		if err != nil {
+			return nil, err
+		}
+		labels = make(map[domain.ProfileFieldID]string, len(definitions))
+		for _, definition := range definitions {
+			labels[definition.ID] = definition.Label
+		}
+	}
 	fields := make(map[string]any, len(values))
 	for _, value := range values {
-		fields[string(value.FieldID)] = map[string]any{"value": value.Value, "alt": value.Alt}
+		entry := map[string]any{"value": value.Value, "alt": value.Alt}
+		if withLabels {
+			entry["label"] = labels[value.FieldID]
+		}
+		fields[string(value.FieldID)] = entry
 	}
 	return fields, nil
 }
@@ -6937,8 +6958,22 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	profile := current.Profile
+	profile.FirstName, profile.LastName = current.NameParts()
+	// real_name is the two parts joined, so setting it sets both, split at
+	// its first space; a first_name or last_name given beside it wins for its
+	// part.
+	if realName, ok := profileFields.Strings["real_name"]; ok {
+		first, last, _ := strings.Cut(strings.TrimSpace(realName), " ")
+		profile.FirstName, profile.LastName = first, strings.TrimSpace(last)
+	}
 	for name, value := range profileFields.Strings {
 		switch name {
+		case "first_name":
+			profile.FirstName = value
+		case "last_name":
+			profile.LastName = value
+		case "phone":
+			profile.Phone = value
 		case "display_name":
 			profile.DisplayName = value
 		case "title":
@@ -6995,7 +7030,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(responseProfile, "email")
 	}
-	customFields, err := h.profileFieldValues(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	customFields, err := h.profileFieldValues(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, false)
 	if err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
@@ -12439,7 +12474,7 @@ func decodeProfileJSON(raw string) (decodedProfile, error) {
 	acknowledged := 0
 	for name, value := range fields {
 		switch name {
-		case "display_name", "title", "pronouns", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
+		case "display_name", "title", "pronouns", "real_name", "first_name", "last_name", "phone", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
 			var text string
 			if err := json.Unmarshal(value, &text); err != nil {
 				return decodedProfile{}, fmt.Errorf("profile field %s must be a string", name)
@@ -12495,7 +12530,7 @@ func decodeProfileJSON(raw string) (decodedProfile, error) {
 func singleFieldProfile(name, value string) (decodedProfile, error) {
 	result := decodedProfile{Strings: map[string]string{}}
 	switch name {
-	case "display_name", "title", "pronouns", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
+	case "display_name", "title", "pronouns", "real_name", "first_name", "last_name", "phone", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
 		result.Strings[name] = value
 	case "status_expiration":
 		seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
@@ -12503,7 +12538,7 @@ func singleFieldProfile(name, value string) (decodedProfile, error) {
 			return decodedProfile{}, errors.New("status_expiration must be a non-negative integer")
 		}
 		result.StatusExpiration = &seconds
-	case "first_name", "last_name", "real_name", "phone", "skype", "start_date", "email":
+	case "skype", "start_date", "email":
 		// Standard Slack profile fields this deployment does not store. Refusing is
 		// honest — accepting and dropping would report a change that did not happen.
 		return decodedProfile{}, fmt.Errorf("profile field %s is not settable here", name)

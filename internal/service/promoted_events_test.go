@@ -316,6 +316,37 @@ func TestAppMentionIsDerivedForTheMentionedAppOnly(t *testing.T) {
 	if len(bystander) != 1 || bystander[0] != "message" {
 		t.Fatalf("bystander app bodies=%v, want the message alone", bystander)
 	}
+
+	// A mention is a use of the app: an author its access control does not
+	// admit, or a channel it restricts, reaches it by the message alone.
+	now := time.Now().UTC()
+	if err := state.CreateApp(ctx,
+		domain.App{ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "A1", ClientID: "client-A1", SigningSecretHash: "hash", SigningSecretCiphertext: "sealed", VerificationTokenCiphertext: "sealed", ManifestVersion: 1, CreatedAt: now, UpdatedAt: now},
+		domain.AppManifestRevision{AppID: "A1", Version: 1, Manifest: `{"display_information":{"name":"A1"}}`, CreatedBy: "U1", CreatedAt: now},
+		domain.OAuthClient{ID: "client-A1", SecretHash: "secret", AppID: "A1"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	restrict := func(value domain.AppPermission) {
+		t.Helper()
+		value.WorkspaceID, value.AppID, value.UpdatedAt = "T1", "A1", time.Now().UTC()
+		if err := state.SetAppPermission(ctx, value, events.Event{ID: domain.EventID("Ev-" + string(value.PermissionType) + string(value.ChannelRestrictionMode)), WorkspaceID: "T1", Topic: "app.permission_set", Payload: "{}", CreatedAt: value.UpdatedAt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, value := range []domain.AppPermission{
+		{PermissionType: domain.AppPermissionNamedEntities, UserIDs: []domain.UserID{"UC"}},
+		{PermissionType: domain.AppPermissionEveryone, ChannelRestrictionMode: domain.ChannelRestrictionAllChannelsExcept, ChannelIDs: []domain.ConversationID{"C1"}},
+	} {
+		restrict(value)
+		if restricted := bodiesFor("A1"); len(restricted) != 1 || restricted[0] != "message" {
+			t.Fatalf("app restricted by %+v received %v, want the message alone", value, restricted)
+		}
+	}
+	restrict(domain.AppPermission{PermissionType: domain.AppPermissionNamedEntities, UserIDs: []domain.UserID{"U1"}})
+	if admitted := bodiesFor("A1"); len(admitted) != 2 || admitted[1] != "app_mention" {
+		t.Fatalf("app admitting the author received %v, want message then app_mention", admitted)
+	}
 }
 
 // TestAppInstallCommitsTheInstalledEvent: issuing a bot token announces

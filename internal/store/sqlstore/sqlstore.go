@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS users (
  image_24 TEXT NOT NULL DEFAULT '', image_32 TEXT NOT NULL DEFAULT '', image_48 TEXT NOT NULL DEFAULT '',
  image_72 TEXT NOT NULL DEFAULT '', image_192 TEXT NOT NULL DEFAULT '', image_512 TEXT NOT NULL DEFAULT '', image_1024 TEXT NOT NULL DEFAULT '',
  deleted INTEGER NOT NULL DEFAULT 0, presence TEXT NOT NULL DEFAULT 'auto', last_active_at INTEGER NOT NULL DEFAULT 0,
- updated_at INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '', pronouns TEXT NOT NULL DEFAULT '', tz TEXT NOT NULL DEFAULT ''
+ updated_at INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '', pronouns TEXT NOT NULL DEFAULT '', tz TEXT NOT NULL DEFAULT '', first_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS user_expirations (user_id TEXT PRIMARY KEY REFERENCES users(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), expiration_ts INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS scheduled_statuses (
@@ -604,7 +604,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 200
+const schemaVersion = 201
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -1709,7 +1709,7 @@ func (s *Store) seedUser(ctx context.Context, value domain.User, initialRole dom
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, email, name, real_name, display_name, name_folded, real_name_folded, display_name_folded, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, updated_at, title, pronouns, tz) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET email = CASE WHEN users.email = '' THEN excluded.email ELSE users.email END`, value.ID, value.WorkspaceID, domain.NormalizeEmail(value.Email), value.Name, value.RealName, value.Profile.DisplayName, domain.FoldSearchText(value.Name), domain.FoldSearchText(value.RealName), domain.FoldSearchText(value.Profile.DisplayName), value.Profile.StatusText, value.Profile.StatusEmoji, unixSeconds(value.Profile.StatusExpiration), value.Profile.Image24, value.Profile.Image32, value.Profile.Image48, value.Profile.Image72, value.Profile.Image192, value.Profile.Image512, value.Profile.Image1024, deleted, presence, unixSeconds(value.Updated), value.Profile.Title, value.Profile.Pronouns, value.Profile.Timezone); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, email, name, real_name, display_name, name_folded, real_name_folded, display_name_folded, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, updated_at, title, pronouns, tz, first_name, last_name, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET email = CASE WHEN users.email = '' THEN excluded.email ELSE users.email END`, value.ID, value.WorkspaceID, domain.NormalizeEmail(value.Email), value.Name, value.RealName, value.Profile.DisplayName, domain.FoldSearchText(value.Name), domain.FoldSearchText(value.RealName), domain.FoldSearchText(value.Profile.DisplayName), value.Profile.StatusText, value.Profile.StatusEmoji, unixSeconds(value.Profile.StatusExpiration), value.Profile.Image24, value.Profile.Image32, value.Profile.Image48, value.Profile.Image72, value.Profile.Image192, value.Profile.Image512, value.Profile.Image1024, deleted, presence, unixSeconds(value.Updated), value.Profile.Title, value.Profile.Pronouns, value.Profile.Timezone, value.Profile.FirstName, value.Profile.LastName, value.Profile.Phone); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id, user_id, role, active) VALUES (?, ?, ?, 1) ON CONFLICT(workspace_id, user_id) DO NOTHING`, value.WorkspaceID, value.ID, initialRole); err != nil {
@@ -3581,6 +3581,24 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 201: profile name parts and phone ---
+	if version < 201 {
+		// Slack's profile carries first_name, last_name and phone, and a
+		// member may set each. Existing rows start empty, so a member's name
+		// parts are read from real_name until the member writes them.
+		columns, err := s.tableColumns(ctx, db, "users")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{"first_name", "last_name", "phone"} {
+			if !columns[column] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN `+column+` TEXT NOT NULL DEFAULT ''`); err != nil {
+					return fmt.Errorf("migrate user %s: %w", column, err)
+				}
+			}
+		}
+	}
+	// --- end schema 201 ---
 	// --- schema 200: assistant loading messages ---
 	if version < 200 {
 		// assistant.threads.setStatus loading_messages travel with the
@@ -5501,12 +5519,16 @@ func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.Worksp
 	if len(changes) == 0 {
 		return domain.User{}, store.InvalidArgument("a profile change requires at least one event")
 	}
+	// The full name is the profile's two parts joined. A profile that names
+	// neither keeps the stored name: the service fills the parts in, so only
+	// a member whose name is empty arrives without them.
+	realName := domain.JoinRealName(profile.FirstName, profile.LastName)
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return domain.User{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE users SET display_name = ?, display_name_folded = ?, active_scheduled_status_id = CASE WHEN status_text = ? AND status_emoji = ? AND status_expiration = ? THEN active_scheduled_status_id ELSE '' END, status_text = ?, status_emoji = ?, status_expiration = ?, image_24 = ?, image_32 = ?, image_48 = ?, image_72 = ?, image_192 = ?, image_512 = ?, image_1024 = ?, title = ?, pronouns = ?, tz = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1)`, profile.DisplayName, domain.FoldSearchText(profile.DisplayName), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.Image24, profile.Image32, profile.Image48, profile.Image72, profile.Image192, profile.Image512, profile.Image1024, profile.Title, profile.Pronouns, profile.Timezone, unixSeconds(changes[0].CreatedAt), userID, workspaceID, workspaceID, userID)
+	result, err := tx.ExecContext(ctx, `UPDATE users SET display_name = ?, display_name_folded = ?, active_scheduled_status_id = CASE WHEN status_text = ? AND status_emoji = ? AND status_expiration = ? THEN active_scheduled_status_id ELSE '' END, status_text = ?, status_emoji = ?, status_expiration = ?, image_24 = ?, image_32 = ?, image_48 = ?, image_72 = ?, image_192 = ?, image_512 = ?, image_1024 = ?, title = ?, pronouns = ?, tz = ?, first_name = ?, last_name = ?, phone = ?, real_name = CASE WHEN ? = '' THEN real_name ELSE ? END, real_name_folded = CASE WHEN ? = '' THEN real_name_folded ELSE ? END, updated_at = ? WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1)`, profile.DisplayName, domain.FoldSearchText(profile.DisplayName), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.Image24, profile.Image32, profile.Image48, profile.Image72, profile.Image192, profile.Image512, profile.Image1024, profile.Title, profile.Pronouns, profile.Timezone, profile.FirstName, profile.LastName, profile.Phone, realName, realName, realName, domain.FoldSearchText(realName), unixSeconds(changes[0].CreatedAt), userID, workspaceID, workspaceID, userID)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -11074,10 +11096,10 @@ const qualifiedConversationColumns = `c.id, c.workspace_id, c.name, c.topic, c.p
 // them left active_scheduled_status_id out, so the same member read back with
 // and without the scheduled status that fences their current one depending on
 // which method loaded them.
-const userColumns = `id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at, updated_at, title, pronouns, tz`
+const userColumns = `id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at, updated_at, title, pronouns, tz, first_name, last_name, phone`
 
 // qualifiedUserColumns is userColumns for a query that aliases the table as u.
-const qualifiedUserColumns = `u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.active_scheduled_status_id, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at, u.updated_at, u.title, u.pronouns, u.tz`
+const qualifiedUserColumns = `u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.active_scheduled_status_id, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at, u.updated_at, u.title, u.pronouns, u.tz, u.first_name, u.last_name, u.phone`
 
 // scanUserRow reads one user selected with userColumns, optionally followed by
 // extra columns into the given destinations.
@@ -11088,7 +11110,7 @@ func scanUserRow(row rowScanner, extra ...any) (domain.User, error) {
 	destinations := append([]any{&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName,
 		&user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.ActiveScheduledStatusID,
 		&user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024,
-		&deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}, &updated, &user.Profile.Title, &user.Profile.Pronouns, &user.Profile.Timezone}, extra...)
+		&deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}, &updated, &user.Profile.Title, &user.Profile.Pronouns, &user.Profile.Timezone, &user.Profile.FirstName, &user.Profile.LastName, &user.Profile.Phone}, extra...)
 	if err := row.Scan(destinations...); err != nil {
 		return domain.User{}, err
 	}

@@ -4861,10 +4861,93 @@ func TestCustomProfileFieldsThroughTeamAndUserProfile(t *testing.T) {
 	if !strings.Contains(profile, `"Xf01"`) || !strings.Contains(profile, `"she/her"`) {
 		t.Fatalf("users.profile.get = %s", profile)
 	}
+	if strings.Contains(profile, `"label"`) {
+		t.Fatalf("users.profile.get without include_labels carried a label: %s", profile)
+	}
+
+	// include_labels puts each field's label beside its value.
+	labelled := get("/api/users.profile.get?include_labels=true").Body.String()
+	if !strings.Contains(labelled, `"label":"Pronouns"`) || !strings.Contains(labelled, `"value":"she/her"`) {
+		t.Fatalf("users.profile.get include_labels = %s", labelled)
+	}
+	if envelope := decodeEnvelope(t, get("/api/users.profile.get?include_labels=maybe")); envelope.OK || envelope.Error != "invalid_arg_name" {
+		t.Fatalf("a malformed include_labels body=%+v, want invalid_arg_name", envelope)
+	}
 
 	// A value for a field nobody defined is refused as invalid_profile.
 	if envelope := decodeEnvelope(t, post("/api/users.profile.set", url.Values{"profile": {`{"fields":{"Xf-nope":{"value":"x"}}}`}}.Encode())); envelope.OK || envelope.Error != "invalid_profile" {
 		t.Fatalf("undefined field body=%+v, want invalid_profile", envelope)
+	}
+}
+
+// TestUserProfileSetsTheFullNameAndPhone covers the profile's name parts and
+// phone, which Slack lets a member set: real_name sets both parts, a part sets
+// real_name, and a change to anything else keeps the name the member has.
+func TestUserProfileSetsTheFullNameAndPhone(t *testing.T) {
+	handler, s := testHandlerWithStore()
+	set := func(form url.Values) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/users.profile.set", strings.NewReader(form.Encode()))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		var body struct {
+			OK      bool           `json:"ok"`
+			Error   string         `json:"error"`
+			Profile map[string]any `json:"profile"`
+		}
+		if err := json.Unmarshal(result.Body.Bytes(), &body); err != nil || !body.OK {
+			t.Fatalf("users.profile.set %v = %d %s", form, result.Code, result.Body)
+		}
+		return body.Profile
+	}
+	expect := func(profile map[string]any, want map[string]string) {
+		t.Helper()
+		for field, value := range want {
+			if profile[field] != value {
+				t.Fatalf("profile %s = %v, want %q (profile %v)", field, profile[field], value, profile)
+			}
+		}
+	}
+	userID := domain.UserID("U1")
+	before, err := s.GetUser(context.Background(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, last := before.NameParts()
+
+	// A change to something else keeps the name the member has.
+	expect(set(url.Values{"name": {"phone"}, "value": {"+1 555 0100"}}),
+		map[string]string{"phone": "+1 555 0100", "real_name": before.RealName, "first_name": first, "last_name": last})
+
+	// real_name sets both parts, split at its first space.
+	expect(set(url.Values{"profile": {`{"real_name":"Ada King Lovelace"}`}}),
+		map[string]string{"real_name": "Ada King Lovelace", "first_name": "Ada", "last_name": "King Lovelace", "phone": "+1 555 0100"})
+
+	// A part sets real_name; a first name of two words stays one part.
+	expect(set(url.Values{"profile": {`{"first_name":"Augusta Ada","last_name":"King"}`}}),
+		map[string]string{"real_name": "Augusta Ada King", "first_name": "Augusta Ada", "last_name": "King"})
+	expect(set(url.Values{"name": {"last_name"}, "value": {"Lovelace"}}),
+		map[string]string{"real_name": "Augusta Ada Lovelace", "first_name": "Augusta Ada", "last_name": "Lovelace"})
+
+	// The user object and the stored record agree.
+	stored, err := s.GetUser(context.Background(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RealName != "Augusta Ada Lovelace" || stored.Profile.Phone != "+1 555 0100" {
+		t.Fatalf("stored user = %q %q", stored.RealName, stored.Profile.Phone)
+	}
+
+	// A part beyond the limit is invalid_profile and changes nothing.
+	req := httptest.NewRequest(http.MethodPost, "/api/users.profile.set", strings.NewReader(url.Values{"name": {"first_name"}, "value": {strings.Repeat("a", 81)}}.Encode()))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, req)
+	if envelope := decodeEnvelope(t, result); envelope.OK || envelope.Error != "invalid_profile" {
+		t.Fatalf("an overlong first_name body=%+v, want invalid_profile", envelope)
 	}
 }
 
@@ -4914,7 +4997,7 @@ func TestUserProfileSetSingleFieldNameValueForm(t *testing.T) {
 	}
 
 	// A standard Slack field this deployment does not store is refused, not dropped.
-	if envelope := decodeEnvelope(t, post(url.Values{"name": {"first_name"}, "value": {"Ada"}}.Encode())); envelope.OK || envelope.Error != "invalid_arg_name" {
+	if envelope := decodeEnvelope(t, post(url.Values{"name": {"skype"}, "value": {"ada"}}.Encode())); envelope.OK || envelope.Error != "invalid_arg_name" {
 		t.Fatalf("unsupported standard field body=%+v, want invalid_arg_name", envelope)
 	}
 	// An undefined custom field id is refused by the service.

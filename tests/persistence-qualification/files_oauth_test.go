@@ -3,6 +3,7 @@ package qualification
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -201,7 +202,7 @@ func fileSharesNameTheirCarryingMessages(t *testing.T, open opener) {
 		{Conversation: f.channelID, ConversationName: "divergence", Timestamp: domain.NewMessageTimestamp(reply.CreatedAt), ThreadTimestamp: reply.ThreadTimestamp, SharedBy: f.userID},
 	}
 	for index := range want {
-		if shares[index] != want[index] {
+		if !reflect.DeepEqual(shares[index], want[index]) {
 			t.Fatalf("shares[%d]=%+v, want %+v", index, shares[index], want[index])
 		}
 	}

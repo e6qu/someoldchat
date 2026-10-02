@@ -32,6 +32,11 @@ type AppEventProjectionStore interface {
 	// IssueFunctionExecutionToken mints (once) the execution-scoped token a
 	// function_executed dispatch hands the receiving app.
 	IssueFunctionExecutionToken(context.Context, domain.FunctionExecutionToken, string) (domain.FunctionExecutionToken, error)
+	// GetAppPermission and GetUserGroup decide the app's access control: a
+	// member it does not admit, or a channel it restricts, does not reach the
+	// app by mentioning it.
+	GetAppPermission(context.Context, domain.WorkspaceID, domain.AppID) (domain.AppPermission, error)
+	GetUserGroup(context.Context, domain.WorkspaceID, domain.UserGroupID) (domain.UserGroup, error)
 }
 
 type UserEventProjectionStore interface {
@@ -514,7 +519,11 @@ func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, 
 			return record, false, err
 		}
 		record, _, _ = withEventAuthorizations(record, authorizations)
-		return projectMessageSnapshot(ctx, state, origin, record, snapshot, appBotUserID(authorizations))
+		botUserID, err := mentionableBotUserID(ctx, state, authorizations, snapshot.Current)
+		if err != nil {
+			return events.Record{}, false, err
+		}
+		return projectMessageSnapshot(ctx, state, origin, record, snapshot, botUserID)
 	}
 	delivered, err := events.Deliverable(record.Event)
 	if err != nil {
@@ -539,7 +548,31 @@ func prepareAppMessageEvent(ctx context.Context, state AppEventProjectionStore, 
 		return record, false, err
 	}
 	record, _, _ = withEventAuthorizations(record, authorizations)
-	return projectMessageEvent(ctx, state, origin, record, message, appBotUserID(authorizations))
+	botUserID, err := mentionableBotUserID(ctx, state, authorizations, message)
+	if err != nil {
+		return events.Record{}, false, err
+	}
+	return projectMessageEvent(ctx, state, origin, record, message, botUserID)
+}
+
+// mentionableBotUserID is the bot a message must mention for the app to be
+// told of it by app_mention, or empty when the app's access control does not
+// let the message's author use it in that conversation: a mention is a use of
+// the app, as a slash command is. The message event itself is not a use and
+// is delivered as before.
+func mentionableBotUserID(ctx context.Context, state AppEventProjectionStore, authorizations []domain.AppAuthorization, message domain.Message) (domain.UserID, error) {
+	botUserID := appBotUserID(authorizations)
+	if botUserID == "" || message.AuthorID == "" {
+		return botUserID, nil
+	}
+	appID := authorizations[0].AppID
+	switch err := requireAppUse(ctx, state, message.WorkspaceID, message.AuthorID, appID, message.Conversation); {
+	case errors.Is(err, domain.ErrAppUseRestricted):
+		return "", nil
+	case err != nil:
+		return "", err
+	}
+	return botUserID, nil
 }
 
 // messageEventTopic names the records that carry a message snapshot and are
