@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS users (
  image_24 TEXT NOT NULL DEFAULT '', image_32 TEXT NOT NULL DEFAULT '', image_48 TEXT NOT NULL DEFAULT '',
  image_72 TEXT NOT NULL DEFAULT '', image_192 TEXT NOT NULL DEFAULT '', image_512 TEXT NOT NULL DEFAULT '', image_1024 TEXT NOT NULL DEFAULT '',
  deleted INTEGER NOT NULL DEFAULT 0, presence TEXT NOT NULL DEFAULT 'auto', last_active_at INTEGER NOT NULL DEFAULT 0,
- updated_at INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '', pronouns TEXT NOT NULL DEFAULT '', tz TEXT NOT NULL DEFAULT '', first_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT ''
+ updated_at INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '', pronouns TEXT NOT NULL DEFAULT '', tz TEXT NOT NULL DEFAULT '', first_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
+ connected_until INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS user_expirations (user_id TEXT PRIMARY KEY REFERENCES users(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), expiration_ts INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS scheduled_statuses (
@@ -221,6 +222,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
 ` + codeChannelSchema + `
 ` + codeChannelViewSchema + `
 ` + slackbotResponseSchema + `
+` + clientConnectionSchema + `
 CREATE TABLE IF NOT EXISTS conversation_typing (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
  user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL,
@@ -609,7 +611,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 208
+const schemaVersion = 209
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3586,6 +3588,25 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 209: client connections ---
+	if version < 209 {
+		// Presence follows open client connections, as on Slack. No connection
+		// is open across the upgrade, so every member starts disconnected and
+		// is connected again by their client's next stream.
+		columns, err := s.tableColumns(ctx, db, "users")
+		if err != nil {
+			return err
+		}
+		if !columns["connected_until"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN connected_until INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate user connections: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, clientConnectionSchema); err != nil {
+			return fmt.Errorf("migrate client connections: %w", err)
+		}
+	}
+	// --- end schema 209 ---
 	// --- schema 208: Slackbot custom responses ---
 	if version < 208 {
 		// Slackbot answers a workspace's custom responses and its direct
@@ -5272,6 +5293,7 @@ var migratableTables = []string{
 	"reminders",
 	"assistant_threads",
 	"workspace_retention",
+	"client_connections",
 	"code_channels",
 }
 
@@ -11203,27 +11225,30 @@ const qualifiedConversationColumns = `c.id, c.workspace_id, c.name, c.topic, c.p
 // them left active_scheduled_status_id out, so the same member read back with
 // and without the scheduled status that fences their current one depending on
 // which method loaded them.
-const userColumns = `id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at, updated_at, title, pronouns, tz, first_name, last_name, phone`
+const userColumns = `id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at, updated_at, title, pronouns, tz, first_name, last_name, phone, connected_until`
 
 // qualifiedUserColumns is userColumns for a query that aliases the table as u.
-const qualifiedUserColumns = `u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.active_scheduled_status_id, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at, u.updated_at, u.title, u.pronouns, u.tz, u.first_name, u.last_name, u.phone`
+const qualifiedUserColumns = `u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.active_scheduled_status_id, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at, u.updated_at, u.title, u.pronouns, u.tz, u.first_name, u.last_name, u.phone, u.connected_until`
 
 // scanUserRow reads one user selected with userColumns, optionally followed by
 // extra columns into the given destinations.
 func scanUserRow(row rowScanner, extra ...any) (domain.User, error) {
 	var user domain.User
 	var deleted int
-	var statusExpiration, updated int64
+	var statusExpiration, updated, connectedUntil int64
 	destinations := append([]any{&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName,
 		&user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.ActiveScheduledStatusID,
 		&user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024,
-		&deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}, &updated, &user.Profile.Title, &user.Profile.Pronouns, &user.Profile.Timezone, &user.Profile.FirstName, &user.Profile.LastName, &user.Profile.Phone}, extra...)
+		&deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}, &updated, &user.Profile.Title, &user.Profile.Pronouns, &user.Profile.Timezone, &user.Profile.FirstName, &user.Profile.LastName, &user.Profile.Phone, &connectedUntil}, extra...)
 	if err := row.Scan(destinations...); err != nil {
 		return domain.User{}, err
 	}
 	user.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
 	user.Deleted = deleted != 0
 	user.Updated = fromUnixSeconds(updated)
+	if connectedUntil != 0 {
+		user.ConnectedUntil = time.Unix(0, connectedUntil).UTC()
+	}
 	return user, nil
 }
 

@@ -2373,7 +2373,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 .field input,.field select{width:100%;min-width:0;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 10px;font:inherit;font-weight:400}
 .field small{color:var(--muted);font-weight:400}
 .save{border:1px solid var(--ok);border-radius:6px;background:var(--ok);color:var(--on-strong);padding:7px 14px;font-weight:800;white-space:nowrap}
-.presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;margin-right:5px;vertical-align:middle}.presence.active{border-color:var(--ok);background:var(--ok)}.presence.auto{border-style:dashed}
+.presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;margin-right:5px;vertical-align:middle}.presence.active{border-color:var(--ok);background:var(--ok)}
 .status-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.status-suggestions button,.secondary{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:6px 9px}
 .profile-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .name-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:0 12px}
@@ -2402,7 +2402,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
     {{if ne .Type "apps"}}<section class="people-section" aria-labelledby="people-heading">
       <h2 id="people-heading">Workspace members</h2>
       {{if .Members}}<ul class="people-grid">{{range .Members}}
-        <li class="person-card"><a class="person-open" href="/app/members?user={{.ID}}" data-profile-user="{{.ID}}" aria-label="{{.Name}}{{if .Profile.Title}}, {{.Profile.Title}}{{end}}{{if eq .Presence "away"}}, away{{else if eq .Presence "active"}}, active{{else}}, presence unavailable{{end}}. Open profile">
+        <li class="person-card"><a class="person-open" href="/app/members?user={{.ID}}" data-profile-user="{{.ID}}" aria-label="{{.Name}}{{if .Profile.Title}}, {{.Profile.Title}}{{end}}{{if eq .Presence "away"}}, away{{else}}, active{{end}}. Open profile">
           <span class="person-photo" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="" loading="lazy">{{else}}{{.AuthorInitial}}{{end}}</span>
           <span class="person-name"><span>{{.Name}}</span>{{if .IsSelf}}<span class="v-badge">you</span>{{end}}<span class="presence {{.Presence}}" aria-hidden="true"></span></span>
           {{if .Profile.Title}}<span class="person-line">{{.Profile.Title}}</span>{{else if and .RealName (ne .RealName .Name)}}<span class="person-line">{{.RealName}}</span>{{end}}
@@ -2426,7 +2426,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
       <h2 id="profile-heading" tabindex="-1">Your profile</h2>
       <div class="profile-summary">
         <span class="profile-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.UserInitial}}{{end}}</span>
-        <div><strong>{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}Add a display name{{end}}</strong><p class="muted"><span class="presence {{.Presence}}" aria-hidden="true"></span>{{if eq .Presence "active"}}Active{{else if eq .Presence "away"}}Away{{else}}Automatic{{end}}</p>{{if .Profile.StatusText}}<p class="muted">{{if .StatusDisplay}}{{.StatusDisplay}}{{else}}💬{{end}} {{.Profile.StatusText}}{{if .StatusExpires}} · clears <time data-status-expires="{{.StatusExpires}}"></time>{{end}}</p>{{else}}<p class="muted">No status set</p>{{end}}</div>
+        <div><strong>{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}Add a display name{{end}}</strong><p class="muted"><span class="presence {{.Presence}}" aria-hidden="true"></span>{{if eq .Presence "active"}}Active{{else}}Away{{end}}</p>{{if .Profile.StatusText}}<p class="muted">{{if .StatusDisplay}}{{.StatusDisplay}}{{else}}💬{{end}} {{.Profile.StatusText}}{{if .StatusExpires}} · clears <time data-status-expires="{{.StatusExpires}}"></time>{{end}}</p>{{else}}<p class="muted">No status set</p>{{end}}</div>
       </div>
       {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}
       {{if .CanEditProfile}}<form class="availability-form" method="post" action="/app/presence">
@@ -6178,7 +6178,7 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 			name := displayName(user)
 			isSelf := user.ID == principal.UserID
 			membersByID[user.ID] = struct{}{}
-			members = append(members, memberView{ID: string(user.ID), Name: name, Profile: user.Profile, StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), Presence: webPresence(user.Presence, isSelf), AuthorInitial: initial(name), IsSelf: isSelf})
+			members = append(members, memberView{ID: string(user.ID), Name: name, Profile: user.Profile, StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), Presence: viewPresence(user, isSelf, time.Now().UTC()), AuthorInitial: initial(name), IsSelf: isSelf})
 		}
 		if !page.HasMore || page.NextCursor == "" {
 			break
@@ -10568,14 +10568,7 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		name := displayName(user)
 		isSelf := user.ID == principal.UserID
 		_, isVIP := vips[user.ID]
-		// A member never seen active has no presence to report; "auto" says
-		// so rather than claiming they are active.
-		presence := user.PresenceAt(now)
-		if isSelf {
-			presence = webPresence(user.Presence, true)
-		} else if user.LastActiveAt.IsZero() && user.Presence != domain.PresenceAway {
-			presence = "auto"
-		}
+		presence := viewPresence(user, isSelf, now)
 		view := memberView{ID: string(user.ID), Name: name, RealName: user.RealName, Profile: user.Profile, StatusDisplay: statusEmojiDisplay(user.Profile.StatusEmoji, emojiImages), Presence: presence, AvatarURL: profileImageURL(user.Profile), AuthorInitial: initial(name), IsSelf: isSelf, IsVIP: isVIP}
 		if user.IsBot() {
 			apps = append(apps, view)
@@ -10598,7 +10591,7 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		Truncated:      truncated,
 		Profile:        profile,
 		StatusDisplay:  statusEmojiDisplay(profile.StatusEmoji, emojiImages),
-		Presence:       current.PresenceAt(time.Now().UTC()),
+		Presence:       viewPresence(current, true, now),
 		StatusExpires:  webUnixSeconds(profile.StatusExpiration),
 		AvatarURL:      profileImageURL(profile),
 		UserInitial:    initial(displayName(current)),
@@ -13794,14 +13787,18 @@ func webUnixSeconds(value time.Time) int64 {
 // that they are online. The current request is activity evidence for the signed
 // in member; everyone else remains neutral until session activity tracking can
 // derive Slack's effective active/away state.
-func webPresence(value domain.Presence, isSelf bool) string {
-	if value == domain.PresenceAway {
-		return "away"
-	}
+// viewPresence is the presence a reader sees for a member: Slack's, active
+// only while one of the member's clients is connected and they are not away.
+// The reader's own is active unless they chose away, because the page they
+// are reading is their client, whether or not its stream has connected yet.
+func viewPresence(user domain.User, isSelf bool, now time.Time) string {
 	if isSelf {
+		if user.Presence == domain.PresenceAway {
+			return "away"
+		}
 		return "active"
 	}
-	return "auto"
+	return user.PresenceAt(now)
 }
 
 func conversationName(conversation domain.Conversation) string {

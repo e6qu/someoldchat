@@ -225,7 +225,12 @@ type User struct {
 	// interacting. It drives automatic presence and nothing else; it is not a
 	// login record and carries no session identity.
 	LastActiveAt time.Time
-	Deleted      bool
+	// ConnectedUntil is when the member's last open client connection lapses
+	// unless it is renewed: while it is ahead, at least one client — a web
+	// client's event stream or an RTM socket — is connected. Zero is never
+	// connected.
+	ConnectedUntil time.Time
+	Deleted        bool
 	// Updated is when the member's record — identity, profile, status, or
 	// activation — last changed. It is zero for a record last written before
 	// schema 181, which kept no such instant.

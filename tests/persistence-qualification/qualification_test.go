@@ -177,6 +177,7 @@ func runQualification(t *testing.T, open opener) {
 		{"visible files are newest first", visibleFilesAreNewestFirst},
 		{"remote files are searchable where they are shared", remoteFilesAreSearchable},
 		{"Slackbot's custom responses are kept with their cursor", slackbotResponsesAreKept},
+		{"client connections decide presence", clientConnectionsDecidePresence},
 		{"OAuth installs reuse their bot and redeem every grant shape", oauthInstallsReuseTheirBotAndRedeemEveryGrantShape},
 		{"file shares name their carrying messages", fileSharesNameTheirCarryingMessages},
 	} {

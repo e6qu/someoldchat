@@ -31,6 +31,9 @@ type Handler struct {
 	// Typing reports who is composing. It is read on its own timer rather than
 	// from the journal, because a typing signal is never journalled.
 	Typing TypingSource
+	// Connections records each open stream as a client connection of its
+	// member, which is what makes them online.
+	Connections ConnectionTracker
 	// Logger records why a stream ended and which records were skipped.
 	// Without it a store outage is indistinguishable from a client disconnect.
 	Logger *slog.Logger
@@ -131,7 +134,7 @@ var errUnsupportedRTMCommand = errors.New("unsupported RTM command")
 // reader may switch into. A construction-time workspace both decided nothing
 // once the streams followed their credentials and, while it did decide, made a
 // switch unserviceable from the same process.
-func NewHandler(source UserEventSource, authenticator auth.Authenticator, typing TypingSource) (Handler, error) {
+func NewHandler(source UserEventSource, authenticator auth.Authenticator, typing TypingSource, connections ConnectionTracker) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("SSE requires an event source")
 	}
@@ -144,10 +147,15 @@ func NewHandler(source UserEventSource, authenticator auth.Authenticator, typing
 	if typing == nil {
 		return Handler{}, errors.New("SSE requires a typing source")
 	}
-	return Handler{Source: source, Authenticator: authenticator, Typing: typing}, nil
+	// Required for the same reason: a stream that does not register its
+	// connection leaves its member offline while they read.
+	if connections == nil {
+		return Handler{}, errors.New("SSE requires a connection tracker")
+	}
+	return Handler{Source: source, Authenticator: authenticator, Typing: typing, Connections: connections}, nil
 }
 
-func NewRTMHandler(source UserEventSource, connections RTMConnectionSource, messages RTMMessageService, typing TypingSource) (Handler, error) {
+func NewRTMHandler(source UserEventSource, connections RTMConnectionSource, messages RTMMessageService, typing TypingSource, tracker ConnectionTracker) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("RTM requires an event source")
 	}
@@ -160,7 +168,10 @@ func NewRTMHandler(source UserEventSource, connections RTMConnectionSource, mess
 	if typing == nil {
 		return Handler{}, errors.New("RTM requires a typing source")
 	}
-	return Handler{Source: source, RTMConnections: connections, Messages: messages, Typing: typing}, nil
+	if tracker == nil {
+		return Handler{}, errors.New("RTM requires a connection tracker")
+	}
+	return Handler{Source: source, RTMConnections: connections, Messages: messages, Typing: typing, Connections: tracker}, nil
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
@@ -242,6 +253,20 @@ func (h Handler) rtmWebSocket(w http.ResponseWriter, request *http.Request) {
 	// workspace it was issued for, and a construction-time workspace bound
 	// every connection in the process to one of them.
 	workspace := connection.WorkspaceID
+	if h.Connections == nil {
+		_ = conn.Send(`{"type":"goodbye"}`)
+		return
+	}
+	lease, err := openConnectionLease(request.Context(), h.Connections, h.logger(), workspace, connection.UserID)
+	if err != nil {
+		// The client reconnects on goodbye, as it does when the server ends a
+		// stream on purpose; a socket that cannot put its member online is
+		// not one to keep open.
+		h.logger().Error("RTM stream could not open its client connection", "workspace", workspace, "user", connection.UserID, "error", err)
+		_ = conn.Send(`{"type":"goodbye"}`)
+		return
+	}
+	defer lease.close(request.Context())
 	if err := conn.Send(`{"type":"hello"}`); err != nil {
 		return
 	}
@@ -298,6 +323,7 @@ func (h Handler) rtmWebSocket(w http.ResponseWriter, request *http.Request) {
 	// that is already gone cannot be told goodbye.
 	sayGoodbye := func() { _ = conn.Send(`{"type":"goodbye"}`) }
 	for {
+		lease.renewIfDue(request.Context())
 		page, listErr := h.Source.ListUserEventsAfter(request.Context(), workspace, connection.UserID, after, 100)
 		if listErr != nil {
 			if request.Context().Err() == nil {
@@ -575,10 +601,17 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 		}
 	}
 	flusher, ok := w.(http.Flusher)
-	if !ok {
+	if !ok || h.Connections == nil {
 		http.Error(w, "streaming is unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	lease, err := openConnectionLease(r.Context(), h.Connections, h.logger(), workspace, principal.UserID)
+	if err != nil {
+		h.logger().Error("event stream could not open its client connection", "workspace", workspace, "user", principal.UserID, "error", err)
+		http.Error(w, "streaming is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer lease.close(r.Context())
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	// nginx buffers proxied responses by default, which withholds a stream's
@@ -606,6 +639,7 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	announcer := newTypingAnnouncer()
 	unresolved := 0
 	for {
+		lease.renewIfDue(r.Context())
 		page, err := h.Source.ListUserEventsAfter(r.Context(), workspace, principal.UserID, after, 100)
 		if err != nil {
 			if r.Context().Err() == nil {

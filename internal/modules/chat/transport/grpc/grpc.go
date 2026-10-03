@@ -3341,6 +3341,41 @@ func (r Remote) EndDND(ctx context.Context, workspaceID domain.WorkspaceID, user
 	return nil
 }
 
+func (r Remote) OpenClientConnection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.ClientConnection, error) {
+	out, err := r.presence.OpenClientConnection(ctx, &chatv1.ClientConnectionRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.ClientConnection{}, err
+	}
+	return decodeProtoClientConnection(out)
+}
+
+func (r Remote) RenewClientConnection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ClientConnectionID) (domain.ClientConnection, error) {
+	out, err := r.presence.RenewClientConnection(ctx, &chatv1.ClientConnectionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Id: string(id)})
+	if err != nil {
+		return domain.ClientConnection{}, err
+	}
+	return decodeProtoClientConnection(out)
+}
+
+func (r Remote) CloseClientConnection(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ClientConnectionID) error {
+	out, err := r.presence.CloseClientConnection(ctx, &chatv1.ClientConnectionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Id: string(id)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed client connection response is not ok")
+	}
+	return nil
+}
+
+func (r Remote) ClientConnectionCount(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (int, error) {
+	out, err := r.presence.ClientConnectionCount(ctx, &chatv1.ClientConnectionRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetCount()), nil
+}
+
 func (r Remote) Users(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.UserPage, error) {
 	in := &chatv1.UsersRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor)}
 	out, err := r.directory.Users(ctx, in)
@@ -10340,6 +10375,51 @@ func (s *Server) EndDND(ctx context.Context, input *chatv1.DoNotDisturbRequest) 
 	return s.endDNDProto(ctx, input)
 }
 
+func (s *Server) OpenClientConnection(ctx context.Context, input *chatv1.ClientConnectionRequest) (*chatv1.ClientConnection, error) {
+	value, err := s.implementation.OpenClientConnection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoClientConnection(value), nil
+}
+
+func (s *Server) RenewClientConnection(ctx context.Context, input *chatv1.ClientConnectionRequest) (*chatv1.ClientConnection, error) {
+	value, err := s.implementation.RenewClientConnection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ClientConnectionID(input.GetId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoClientConnection(value), nil
+}
+
+func (s *Server) CloseClientConnection(ctx context.Context, input *chatv1.ClientConnectionRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.CloseClientConnection(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ClientConnectionID(input.GetId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) ClientConnectionCount(ctx context.Context, input *chatv1.ClientConnectionRequest) (*chatv1.ClientConnectionCountResponse, error) {
+	count, err := s.implementation.ClientConnectionCount(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ClientConnectionCountResponse{Count: int64(count)}, nil
+}
+
+func encodeProtoClientConnection(value domain.ClientConnection) *chatv1.ClientConnection {
+	return &chatv1.ClientConnection{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ExpiresAtUnixNano: unixNanoOrZero(value.ExpiresAt)}
+}
+
+func decodeProtoClientConnection(value *chatv1.ClientConnection) (domain.ClientConnection, error) {
+	if value == nil || value.GetId() == "" || value.GetExpiresAtUnixNano() == 0 {
+		return domain.ClientConnection{}, errors.New("typed client connection is incomplete")
+	}
+	return domain.ClientConnection{
+		ID: domain.ClientConnectionID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()),
+		ExpiresAt: time.Unix(0, value.GetExpiresAtUnixNano()).UTC(),
+	}, nil
+}
+
 func (s *Server) updateProto(ctx context.Context, input *chatv1.UpdateRequest) (*chatv1.Message, error) {
 	message, err := s.implementation.Update(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), input.GetText())
 	if err != nil {
@@ -11279,14 +11359,15 @@ func encodeProtoUser(value domain.User) *chatv1.User {
 		// negative number, which the decoder would read back as an instant in
 		// 1754 — so a member who had never been seen would come back from the
 		// remote composition as having been seen, three centuries ago.
-		LastActiveAtUnixNano: unixNanoOrZero(value.LastActiveAt),
-		UpdatedUnixNano:      unixNanoOrZero(value.Updated),
-		BotId:                string(value.BotID),
-		AppId:                string(value.AppID),
-		Role:                 string(value.Role),
-		Restricted:           value.Restricted,
-		UltraRestricted:      value.UltraRestricted,
-		PrimaryOwner:         value.PrimaryOwner,
+		LastActiveAtUnixNano:   unixNanoOrZero(value.LastActiveAt),
+		UpdatedUnixNano:        unixNanoOrZero(value.Updated),
+		BotId:                  string(value.BotID),
+		AppId:                  string(value.AppID),
+		Role:                   string(value.Role),
+		Restricted:             value.Restricted,
+		UltraRestricted:        value.UltraRestricted,
+		PrimaryOwner:           value.PrimaryOwner,
+		ConnectedUntilUnixNano: unixNanoOrZero(value.ConnectedUntil),
 	}
 }
 
@@ -13144,6 +13225,9 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 	}
 	if value.GetLastActiveAtUnixNano() != 0 {
 		result.LastActiveAt = time.Unix(0, value.GetLastActiveAtUnixNano()).UTC()
+	}
+	if value.GetConnectedUntilUnixNano() != 0 {
+		result.ConnectedUntil = time.Unix(0, value.GetConnectedUntilUnixNano()).UTC()
 	}
 	return result, nil
 }

@@ -6711,19 +6711,20 @@ func (h Handler) getPresence(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	presence := user.PresenceAt(now)
 	response := map[string]any{"ok": true, "presence": presence}
-	// Slack reports the detail only for the caller's own presence: why they
-	// are away, and when they were last active. Client connections are not
-	// tracked here, so online and connection_count follow observed activity,
-	// the same signal automatic presence resolves against.
+	// Slack reports the detail only for the caller's own presence: how many
+	// of their clients are connected, why they are away, and when they were
+	// last active. Auto-away is the automatic kind: connected, not away by
+	// choice, and idle.
 	if user.ID == principal.UserID {
-		online := presence == "active"
-		connections := 0
-		if online {
-			connections = 1
+		connections, err := h.Messages.ClientConnectionCount(r.Context(), principal.WorkspaceID, principal.UserID)
+		if err != nil {
+			writeError(w, mapServiceError(err, "user_not_found"))
+			return
 		}
+		online := connections > 0
 		response["online"] = online
 		response["manual_away"] = user.Presence == domain.PresenceAway
-		response["auto_away"] = user.Presence != domain.PresenceAway && presence == "away"
+		response["auto_away"] = user.Presence != domain.PresenceAway && online && presence == "away"
 		response["connection_count"] = connections
 		response["last_activity"] = unixSeconds(user.LastActiveAt)
 	}

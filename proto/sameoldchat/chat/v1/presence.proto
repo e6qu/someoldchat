@@ -49,6 +49,27 @@ message User {
   bool restricted = 14;
   bool ultra_restricted = 15;
   bool primary_owner = 16;
+  // When the member's last open client lapses; zero when never connected.
+  int64 connected_until_unix_nano = 17;
+}
+
+// ClientConnection is one open client of a member, held as a lease.
+message ClientConnection {
+  string id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  int64 expires_at_unix_nano = 4;
+}
+
+message ClientConnectionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  // Empty when opening a connection.
+  string id = 3;
+}
+
+message ClientConnectionCountResponse {
+  int64 count = 1;
 }
 
 message SetUserPresenceRequest {
@@ -226,4 +247,8 @@ service PresenceService {
   rpc PauseNotificationsUntil(PauseNotificationsUntilRequest) returns (DoNotDisturb);
   rpc EndSnooze(DoNotDisturbRequest) returns (DoNotDisturb);
   rpc EndDND(DoNotDisturbRequest) returns (MutationResponse);
+  rpc OpenClientConnection(ClientConnectionRequest) returns (ClientConnection);
+  rpc RenewClientConnection(ClientConnectionRequest) returns (ClientConnection);
+  rpc CloseClientConnection(ClientConnectionRequest) returns (MutationResponse);
+  rpc ClientConnectionCount(ClientConnectionRequest) returns (ClientConnectionCountResponse);
 }

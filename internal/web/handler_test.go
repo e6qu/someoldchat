@@ -5097,7 +5097,12 @@ func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	}
 	// The form mirrors the limits the service enforces without exposing the
 	// seven size-specific image fields in Slack's API model.
-	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`, `name="status_expiration" value="4102444800"`, `action="/app/presence"`, "Active (automatic)", "presence unavailable", "💬 Heads down", "Schedule a status", "No scheduled statuses.")
+	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`, `name="status_expiration" value="4102444800"`, `action="/app/presence"`, "Active (automatic)", "bob, away. Open profile", "💬 Heads down", "Schedule a status", "No scheduled statuses.")
+	// A member is active only while one of their clients is connected.
+	if _, err := (service.Messages{Store: s}).OpenClientConnection(context.Background(), "T1", "U2"); err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, "a connected member", get(t, mux, "/app/members").Body.String(), "bob, active. Open profile")
 	requireMissing(t, "profile form", res.Body.String(), `name="image_24"`, `name="image_1024"`)
 	updateResult := postForm(t, mux, "/app/profile", "display_name=updated&status_text=Ready&status_emoji=%3Aok%3A&status_expiration=4102444800&avatar_url=https%3A%2F%2Fexample.test%2Favatar.png", false)
 	if updateResult.Code != http.StatusSeeOther {

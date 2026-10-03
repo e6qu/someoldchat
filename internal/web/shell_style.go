@@ -112,7 +112,7 @@ details[open]>.menu-list{display:grid}
 .side-avatar{position:relative;display:grid;place-items:center;flex:0 0 auto;width:20px;height:20px;border-radius:5px;background:#ffffff3b;color:var(--on-accent);font-size:11px;font-weight:800;text-transform:uppercase}
 .side-avatar img{width:100%;height:100%;border-radius:inherit;object-fit:cover}
 .side-avatar .presence-dot{width:9px;height:9px;right:-3px;bottom:-3px;border-color:var(--chrome)}
-.side-avatar .presence-dot.auto{display:none}
+
 .shell .badge{margin-left:auto;display:inline-grid;place-items:center;min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:#c81e4f;color:#fff;font-size:12px;font-weight:800}
 .shell .draft-badge{margin-left:auto;display:inline-grid;place-items:center;color:inherit}
 .shell .draft-badge .icon{width:15px;height:15px}

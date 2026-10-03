@@ -4220,15 +4220,45 @@ func TestConversationAndUserInfo(t *testing.T) {
 	}
 }
 
-func TestPresenceEndpointsPersistAndNormalize(t *testing.T) {
-	handler := testHandler()
-	get := httptest.NewRequest(http.MethodGet, "/api/users.getPresence", nil)
-	get.Header.Set("Authorization", "Bearer token")
-	getResult := httptest.NewRecorder()
-	handler.ServeHTTP(getResult, get)
-	if getResult.Code != http.StatusOK || !strings.Contains(getResult.Body.String(), `"presence":"active"`) {
-		t.Fatalf("initial presence status=%d body=%s", getResult.Code, getResult.Body)
+// Presence is Slack's: active only while one of the member's clients is
+// connected and they are not away. The caller's own presence counts those
+// clients, and closing the last one takes them offline.
+func TestPresenceFollowsOpenClientsAndTheManualSetting(t *testing.T) {
+	handler, s := testHandlerWithStore()
+	messages := service.Messages{Store: s}
+	ctx := context.Background()
+	presence := func(query string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/api/users.getPresence"+query, nil)
+		request.Header.Set("Authorization", "Bearer token")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, request)
+		var body map[string]any
+		if result.Code != http.StatusOK || json.Unmarshal(result.Body.Bytes(), &body) != nil {
+			t.Fatalf("presence status=%d body=%s", result.Code, result.Body)
+		}
+		return body
 	}
+	want := func(name string, body map[string]any, fields map[string]any) {
+		t.Helper()
+		for key, value := range fields {
+			if body[key] != value {
+				t.Fatalf("%s: %s=%v, want %v in %v", name, key, body[key], value, body)
+			}
+		}
+	}
+	want("no client", presence(""), map[string]any{"presence": "away", "online": false, "connection_count": float64(0), "auto_away": false, "manual_away": false})
+
+	web, err := messages.OpenClientConnection(ctx, "T1", "U1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtm, err := messages.OpenClientConnection(ctx, "T1", "U1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want("two clients", presence(""), map[string]any{"presence": "active", "online": true, "connection_count": float64(2)})
+
 	set := httptest.NewRequest(http.MethodPost, "/api/users.setPresence", strings.NewReader("presence=away"))
 	set.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	set.Header.Set("Authorization", "Bearer token")
@@ -4237,13 +4267,19 @@ func TestPresenceEndpointsPersistAndNormalize(t *testing.T) {
 	if setResult.Code != http.StatusOK || setResult.Body.String() != "{\"ok\":true}\n" {
 		t.Fatalf("set presence status=%d body=%s", setResult.Code, setResult.Body)
 	}
-	get = httptest.NewRequest(http.MethodGet, "/api/users.getPresence?user=U1", nil)
-	get.Header.Set("Authorization", "Bearer token")
-	getResult = httptest.NewRecorder()
-	handler.ServeHTTP(getResult, get)
-	if getResult.Code != http.StatusOK || !strings.Contains(getResult.Body.String(), `"presence":"away"`) {
-		t.Fatalf("updated presence status=%d body=%s", getResult.Code, getResult.Body)
+	want("away by choice", presence("?user=U1"), map[string]any{"presence": "away", "online": true, "manual_away": true, "auto_away": false})
+	if _, err := messages.SetUserPresence(ctx, "T1", "U1", domain.PresenceAuto); err != nil {
+		t.Fatal(err)
 	}
+
+	if err := messages.CloseClientConnection(ctx, "T1", "U1", web.ID); err != nil {
+		t.Fatal(err)
+	}
+	want("one client left", presence(""), map[string]any{"presence": "active", "connection_count": float64(1)})
+	if err := messages.CloseClientConnection(ctx, "T1", "U1", rtm.ID); err != nil {
+		t.Fatal(err)
+	}
+	want("every client closed", presence(""), map[string]any{"presence": "away", "online": false, "connection_count": float64(0)})
 }
 
 func TestUserProfileSet(t *testing.T) {

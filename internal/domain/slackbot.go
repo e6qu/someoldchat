@@ -52,11 +52,25 @@ type SlackbotPost struct {
 	IdempotencyKey string
 }
 
-// PresenceAt is the member's presence at now. Slackbot is always active, as on
-// Slack, where its profile is always_active.
+// PresenceAt is the member's presence at now, by Slack's rule: active only
+// while at least one of their clients is connected and they are not away,
+// either by choice or after ten minutes without activity. A bot user is active
+// while it is connected. Slackbot is always active, as on Slack, where its
+// profile is always_active.
 func (u User) PresenceAt(now time.Time) string {
 	if u.IsSlackbot() {
 		return "active"
 	}
+	if u.Presence == PresenceAway || !u.ConnectedAt(now) {
+		return "away"
+	}
+	if u.IsBot() {
+		return "active"
+	}
 	return u.Presence.CurrentAt(u.LastActiveAt, now)
+}
+
+// ConnectedAt reports whether one of the member's clients is connected at now.
+func (u User) ConnectedAt(now time.Time) bool {
+	return u.ConnectedUntil.After(now)
 }

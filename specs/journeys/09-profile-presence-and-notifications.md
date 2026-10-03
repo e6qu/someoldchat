@@ -72,16 +72,18 @@ Deleting a field removes it and every member's value for it.
    `away`.
 3. `users.getPresence` returns the effective `active` or `away` value, and for
    the caller's own presence also `manual_away`, `auto_away`, `online`,
-   `connection_count` and `last_activity`; with no connection tracking, `online`
-   and `connection_count` follow observed activity. `users.setPresence` changes
-   only the calling user and returns `{ok:true}`.
+   `connection_count` and `last_activity`; `online` and `connection_count`
+   count the member's open clients (web event streams and RTM sockets).
+   `users.setPresence` changes only the calling user and returns `{ok:true}`.
    Invalid values return `invalid_presence`. The durable manual value and its
    change event remain workspace/member isolated across memory, SQL, and gRPC.
-4. Automatic presence may report active only when the service has truthful
-   client-activity evidence. Until automatic ten-minute inactivity detection is
-   implemented, the UI labels the control as automatic and MUST NOT claim that a
-   green dot proves a live connection. Deactivated members and bots do not
-   receive fabricated human activity.
+4. Presence is Slack's: active only while at least one of the member's clients
+   is connected and they are not away, by choice or after ten minutes without
+   activity. Each open web event stream or RTM socket is a connection, held as a
+   lease that lapses within a minute of a server vanishing. The reader's own
+   presence shows active unless they chose away. A member's first connection
+   and their last disconnection send `presence_change` with `active` or `away`.
+   Deactivated members and bots do not receive fabricated human activity.
 
 ## STATUS-03 — Schedule statuses in advance
 

@@ -420,6 +420,10 @@ type Service interface {
 	TypingSignals(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.TypingSignal, error)
 	TypingIn(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.TypingSignal, error)
 	RecordActivity(context.Context, domain.WorkspaceID, domain.UserID) error
+	OpenClientConnection(context.Context, domain.WorkspaceID, domain.UserID) (domain.ClientConnection, error)
+	RenewClientConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.ClientConnectionID) (domain.ClientConnection, error)
+	CloseClientConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.ClientConnectionID) error
+	ClientConnectionCount(context.Context, domain.WorkspaceID, domain.UserID) (int, error)
 	ReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	MessageAt(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
 	ThreadSummaries(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)

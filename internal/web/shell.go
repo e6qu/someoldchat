@@ -417,7 +417,7 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 				}
 				if user, err := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, conversation.DirectUserID); err == nil {
 					item.AvatarURL = profileImageURL(user.Profile)
-					item.Presence = webPresence(user.Presence, item.IsSelfDirect)
+					item.Presence = viewPresence(user, item.IsSelfDirect, time.Now().UTC())
 					item.Topic = strings.TrimSpace(user.Profile.StatusText)
 				}
 			case resolved < directNameWindow && (conversation.Kind != domain.ConversationTypeMPIM || conversation.Name == "" || conversation.Name == "direct"):

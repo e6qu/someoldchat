@@ -5645,6 +5645,45 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A member's open clients cross the seam: opening one brings them
+			// online, the count and the renewed lease come back, and closing
+			// the last takes them offline; a closed connection is gone.
+			name: "client connections decide presence",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				before, err := chat.UserInfo(ctx, "T1", "U1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				opened, err := chat.OpenClientConnection(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				renewed, err := chat.RenewClientConnection(ctx, "T1", "U1", opened.ID)
+				if err != nil {
+					return nil, err
+				}
+				count, err := chat.ClientConnectionCount(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				during, err := chat.UserInfo(ctx, "T1", "U1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.CloseClientConnection(ctx, "T1", "U1", opened.ID); err != nil {
+					return nil, err
+				}
+				gone := chat.CloseClientConnection(ctx, "T1", "U1", opened.ID)
+				after, err := chat.UserInfo(ctx, "T1", "U1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				now := time.Now()
+				return []any{before.PresenceAt(now), opened.UserID, renewed.ID == opened.ID, !renewed.ExpiresAt.Before(opened.ExpiresAt), count,
+					during.PresenceAt(now), during.ConnectedUntil.Equal(renewed.ExpiresAt), errors.Is(gone, storepkg.ErrNotFound), after.PresenceAt(now), after.ConnectedUntil.IsZero()}, nil
+			},
+		},
+		{
 			// An agent session crosses the seam whole: the session and every
 			// agent's status and identity, the setStatus warning, the stop
 			// control, and each refusal's sentinel.
