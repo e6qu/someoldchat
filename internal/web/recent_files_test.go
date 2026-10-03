@@ -65,4 +65,3 @@ func TestRecentFilesAreSharedFromTheComposer(t *testing.T) {
 		t.Fatalf("sharing someone else's file=%d", refused.Code)
 	}
 }
-
