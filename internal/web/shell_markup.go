@@ -290,6 +290,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
 {{define "preferences-panels"}}<div class="preferences-layout">
   <div class="preferences-tabs" role="tablist" data-shell-tabs aria-label="Preference sections" aria-orientation="vertical">
     <button type="button" role="tab" id="pref-tab-notifications" aria-controls="pref-notifications" aria-selected="true">{{icon "activity"}}<span>Notifications</span></button>
+    <button type="button" role="tab" id="pref-tab-vip" aria-controls="pref-vip" aria-selected="false" tabindex="-1">{{icon "star"}}<span>VIP</span></button>
     <button type="button" role="tab" id="pref-tab-home" aria-controls="pref-home" aria-selected="false" tabindex="-1">{{icon "home"}}<span>Home</span></button>
     <button type="button" role="tab" id="pref-tab-appearance" aria-controls="pref-appearance" aria-selected="false" tabindex="-1">{{icon "status"}}<span>Appearance</span></button>
     <button type="button" role="tab" id="pref-tab-accessibility" aria-controls="pref-accessibility" aria-selected="false" tabindex="-1">{{icon "info"}}<span>Accessibility</span></button>
@@ -307,8 +308,13 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       <ul class="preferences-links">
         <li><a href="{{.With "/app/notifications"}}#workspace-notifications-heading">Notify me about…</a></li>
         <li><a href="{{.With "/app/notifications"}}#schedule-heading">Notification schedule</a></li>
-        <li><a href="{{.With "/app/notifications"}}#notification-exceptions-heading">VIPs and exceptions</a></li>
+        <li><a href="{{.With "/app/notifications"}}#notification-exceptions-heading">Exceptions</a></li>
       </ul>
+    </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-vip" aria-labelledby="pref-tab-vip" tabindex="0" hidden>
+      <h3>VIP</h3>
+      <p>Every message a VIP posts in your channels notifies you, even in a channel you have muted or set to mentions only. Mark someone from their profile or from People; your list, with a way to remove each one, is on your notification preferences.</p>
+      <p><a class="button" href="{{.With "/app/notifications"}}#notification-vips-heading">Manage VIPs</a></p>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-home" aria-labelledby="pref-tab-home" tabindex="0" hidden>
       <h3>Home</h3>

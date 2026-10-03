@@ -186,7 +186,9 @@ that does nothing:
   `dnd.*` with user tokens and permission/error variants.
 - Controlled live-Slack comparison for advance status scheduling remains
   required. Notification schedules and VIP routing into Activity (a marked
-  person's messages reach you even in a muted channel) are implemented.
+  person's messages reach you even in a muted channel) are implemented; the
+  member's VIPs are listed on the notification preferences page, each with its
+  own Remove, and Preferences has a VIP section that leads there.
   Browser/push/email/sound delivery, per-platform timing and appearance,
   group-DM notification overrides, and notification deep-link reconciliation are
   explicit gaps that need a mobile client, a mail server, or an audio channel to
