@@ -73,6 +73,7 @@ const (
 	DirectoryService_SetWorkspaceDefaultChannels_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDefaultChannels"
 	DirectoryService_GetConversationPrefs_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/GetConversationPrefs"
 	DirectoryService_SetConversationPrefs_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/SetConversationPrefs"
+	DirectoryService_GetPostingPermissions_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/GetPostingPermissions"
 	DirectoryService_AdminTeamUsers_FullMethodName                     = "/sameoldchat.chat.v1.DirectoryService/AdminTeamUsers"
 	DirectoryService_AdminInviteUser_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/AdminInviteUser"
 	DirectoryService_AdminCreateUser_FullMethodName                    = "/sameoldchat.chat.v1.DirectoryService/AdminCreateUser"
@@ -158,6 +159,7 @@ type DirectoryServiceClient interface {
 	SetWorkspaceDefaultChannels(ctx context.Context, in *SetWorkspaceDefaultChannelsRequest, opts ...grpc.CallOption) (*Workspace, error)
 	GetConversationPrefs(ctx context.Context, in *ConversationPrefsRequest, opts ...grpc.CallOption) (*ConversationPrefs, error)
 	SetConversationPrefs(ctx context.Context, in *SetConversationPrefsRequest, opts ...grpc.CallOption) (*ConversationPrefs, error)
+	GetPostingPermissions(ctx context.Context, in *ConversationPrefsRequest, opts ...grpc.CallOption) (*PostingPermissions, error)
 	AdminTeamUsers(ctx context.Context, in *AdminTeamUsersRequest, opts ...grpc.CallOption) (*UserPage, error)
 	AdminInviteUser(ctx context.Context, in *AdminInviteUserRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminCreateUser(ctx context.Context, in *AdminCreateUserRequest, opts ...grpc.CallOption) (*User, error)
@@ -727,6 +729,16 @@ func (c *directoryServiceClient) SetConversationPrefs(ctx context.Context, in *S
 	return out, nil
 }
 
+func (c *directoryServiceClient) GetPostingPermissions(ctx context.Context, in *ConversationPrefsRequest, opts ...grpc.CallOption) (*PostingPermissions, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PostingPermissions)
+	err := c.cc.Invoke(ctx, DirectoryService_GetPostingPermissions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *directoryServiceClient) AdminTeamUsers(ctx context.Context, in *AdminTeamUsersRequest, opts ...grpc.CallOption) (*UserPage, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UserPage)
@@ -981,6 +993,7 @@ type DirectoryServiceServer interface {
 	SetWorkspaceDefaultChannels(context.Context, *SetWorkspaceDefaultChannelsRequest) (*Workspace, error)
 	GetConversationPrefs(context.Context, *ConversationPrefsRequest) (*ConversationPrefs, error)
 	SetConversationPrefs(context.Context, *SetConversationPrefsRequest) (*ConversationPrefs, error)
+	GetPostingPermissions(context.Context, *ConversationPrefsRequest) (*PostingPermissions, error)
 	AdminTeamUsers(context.Context, *AdminTeamUsersRequest) (*UserPage, error)
 	AdminInviteUser(context.Context, *AdminInviteUserRequest) (*MutationResponse, error)
 	AdminCreateUser(context.Context, *AdminCreateUserRequest) (*User, error)
@@ -1170,6 +1183,9 @@ func (UnimplementedDirectoryServiceServer) GetConversationPrefs(context.Context,
 }
 func (UnimplementedDirectoryServiceServer) SetConversationPrefs(context.Context, *SetConversationPrefsRequest) (*ConversationPrefs, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetConversationPrefs not implemented")
+}
+func (UnimplementedDirectoryServiceServer) GetPostingPermissions(context.Context, *ConversationPrefsRequest) (*PostingPermissions, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPostingPermissions not implemented")
 }
 func (UnimplementedDirectoryServiceServer) AdminTeamUsers(context.Context, *AdminTeamUsersRequest) (*UserPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminTeamUsers not implemented")
@@ -2220,6 +2236,24 @@ func _DirectoryService_SetConversationPrefs_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DirectoryService_GetPostingPermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConversationPrefsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).GetPostingPermissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_GetPostingPermissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).GetPostingPermissions(ctx, req.(*ConversationPrefsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DirectoryService_AdminTeamUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminTeamUsersRequest)
 	if err := dec(in); err != nil {
@@ -2784,6 +2818,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetConversationPrefs",
 			Handler:    _DirectoryService_SetConversationPrefs_Handler,
+		},
+		{
+			MethodName: "GetPostingPermissions",
+			Handler:    _DirectoryService_GetPostingPermissions_Handler,
 		},
 		{
 			MethodName: "AdminTeamUsers",

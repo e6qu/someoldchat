@@ -1452,6 +1452,14 @@ type ConversationPrefs struct {
 	WhoCanPost     ConversationPreferenceList
 }
 
+// PostingPermissions is what a member may post in one conversation: a new
+// message (who_can_post) and a thread reply (can_thread). A client reads it to
+// offer only the composers the send would accept.
+type PostingPermissions struct {
+	Messages bool
+	Replies  bool
+}
+
 // OrPublic reads the zero kind as a public channel. A caller that builds a
 // Conversation and says nothing describes the least restricted kind, which is
 // what the three booleans said when a caller set none of them.

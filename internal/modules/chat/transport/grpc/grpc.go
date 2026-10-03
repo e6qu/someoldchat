@@ -2586,6 +2586,14 @@ func (r Remote) AdminGetConversationPrefs(ctx context.Context, workspaceID domai
 	return decodeProtoConversationPrefs(out)
 }
 
+func (r Remote) PostingPermissions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.PostingPermissions, error) {
+	out, err := r.directory.GetPostingPermissions(ctx, &chatv1.ConversationPrefsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID)})
+	if err != nil {
+		return domain.PostingPermissions{}, err
+	}
+	return domain.PostingPermissions{Messages: out.GetMessages(), Replies: out.GetReplies()}, nil
+}
+
 func (r Remote) AdminSetConversationPrefs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, value domain.ConversationPrefs) (domain.ConversationPrefs, error) {
 	out, err := r.directory.SetConversationPrefs(ctx, &chatv1.SetConversationPrefsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Prefs: encodeProtoConversationPrefs(value)})
 	if err != nil {
@@ -7247,6 +7255,14 @@ func (s *Server) GetConversationPrefs(ctx context.Context, input *chatv1.Convers
 		return nil, mapError(err)
 	}
 	return encodeProtoConversationPrefs(value), nil
+}
+
+func (s *Server) GetPostingPermissions(ctx context.Context, input *chatv1.ConversationPrefsRequest) (*chatv1.PostingPermissions, error) {
+	value, err := s.implementation.PostingPermissions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.PostingPermissions{Messages: value.Messages, Replies: value.Replies}, nil
 }
 
 func (s *Server) SetConversationPrefs(ctx context.Context, input *chatv1.SetConversationPrefsRequest) (*chatv1.ConversationPrefs, error) {

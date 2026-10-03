@@ -55,7 +55,9 @@ written and told so specifically — a non-500 result they can act on, not an
 outage or a silent drop — which is the "permission-changed" and disabled-posting
 case above made real. A top-level message is judged against who-may-post and a
 threaded reply against who-may-reply, so a channel can close new conversation
-while its threads stay open. Workspace admins and owners are never restricted,
+while its threads stay open. The client applies the same rule before the member
+types: a member who-may-post excludes sees why in place of the channel
+composer, and one who-may-reply excludes gets no thread composer. Workspace admins and owners are never restricted,
 Slack's channel-management invariant, and direct or group messages carry no such
 policy. The permission is set through `admin.conversations.setConversationPrefs`
 over a closed member-class vocabulary, and an unknown class is refused rather

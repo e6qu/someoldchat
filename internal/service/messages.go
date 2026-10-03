@@ -10003,6 +10003,41 @@ func (m Messages) authorizeConversation(ctx context.Context, workspaceID domain.
 // members: posting into it, renaming it, changing its topic or purpose,
 // inviting, kicking, leaving, marking it read. Those are exactly the operations
 // whose pinned enums declare `not_in_channel`; see ErrNotInConversation.
+// PostingPermissions reports what the member may post in a conversation they
+// belong to, by the rule a send is judged against, so a client can withhold a
+// composer the send would refuse rather than refuse what was typed.
+func (m Messages) PostingPermissions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.PostingPermissions, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return domain.PostingPermissions{}, err
+	}
+	target, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil {
+		return domain.PostingPermissions{}, err
+	}
+	return m.memberPostingPermissions(ctx, workspaceID, userID, target)
+}
+
+// memberPostingPermissions applies a channel's posting preferences to a
+// member. They restrict only a member posting to a channel: direct and group
+// messages carry no such preference, and an app posting with its own identity
+// is governed by its installation, not by a member class. who-may-post judges
+// a new message and who-may-reply a thread reply, so a channel can restrict
+// new conversation while leaving its threads open.
+func (m Messages) memberPostingPermissions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, target domain.Conversation) (domain.PostingPermissions, error) {
+	if target.IsDirectOrGroup() {
+		return domain.PostingPermissions{Messages: true, Replies: true}, nil
+	}
+	membership, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
+	if err != nil {
+		return domain.PostingPermissions{}, err
+	}
+	prefs, err := m.Store.GetConversationPrefs(ctx, target.ID)
+	if err != nil {
+		return domain.PostingPermissions{}, err
+	}
+	return domain.PostingPermissions{Messages: prefs.WhoCanPost.Permits(membership), Replies: prefs.CanThread.Permits(membership)}, nil
+}
+
 func (m Messages) requireConversationMembership(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return err
@@ -10639,26 +10674,17 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	if target.Archived {
 		return domain.Message{}, domain.ErrConversationAlreadyArchived
 	}
-	// Channel posting permissions restrict which members may post. They apply
-	// only to a member posting to a channel: direct and group messages carry no
-	// such preference, and an app posting with its own identity is governed by
-	// its installation, not by a member class. A top-level message is judged
-	// against who-may-post; a threaded reply against who-may-reply, so a channel
-	// can restrict new conversation while leaving its threads open.
-	if authorID != "" && request.AppID == "" && !target.IsDirectOrGroup() {
-		membership, err := m.activeWorkspaceMembership(ctx, workspaceID, authorID)
+	// Channel posting permissions; see memberPostingPermissions.
+	if authorID != "" && request.AppID == "" {
+		permissions, err := m.memberPostingPermissions(ctx, workspaceID, authorID, target)
 		if err != nil {
 			return domain.Message{}, err
 		}
-		prefs, err := m.Store.GetConversationPrefs(ctx, request.Conversation)
-		if err != nil {
-			return domain.Message{}, err
-		}
-		list := prefs.WhoCanPost
+		permitted := permissions.Messages
 		if request.ThreadTimestamp != "" {
-			list = prefs.CanThread
+			permitted = permissions.Replies
 		}
-		if !list.Permits(membership) {
+		if !permitted {
 			return domain.Message{}, domain.ErrConversationPostingRestricted
 		}
 	}
