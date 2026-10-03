@@ -27,7 +27,7 @@ type composerDialogsView struct {
 // usable and says which suggestions are missing.
 func (h Handler) composerDirectoryFor(ctx context.Context, principal auth.Principal, conversation domain.Conversation) (composerDirectory, []string) {
 	var notices []string
-	people, nonMembers, peopleNotices := h.composerPeople(ctx, principal, conversation)
+	people, nonMembers, truncated, peopleNotices := h.composerPeople(ctx, principal, conversation)
 	notices = append(notices, peopleNotices...)
 	groups, groupNotice := h.composerUserGroups(ctx, principal)
 	if groupNotice != "" {
@@ -44,6 +44,7 @@ func (h Handler) composerDirectoryFor(ctx context.Context, principal auth.Princi
 		People: people, Groups: groups, Channels: channels,
 		Specials: composerSpecialMentions(conversation),
 		Commands: commands, Shortcuts: shortcuts, NonMembers: nonMembers,
+		SearchPeopleURL: searchPeopleURL(truncated, conversation),
 	}, notices
 }
 
