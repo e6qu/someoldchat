@@ -36,7 +36,7 @@ func (h Handler) composerDirectoryFor(ctx context.Context, principal auth.Princi
 		notices = append(notices, "Channel suggestions are temporarily unavailable.")
 		channels = nil
 	}
-	commands, shortcuts, commandNotices := h.composerCommands(ctx, principal)
+	commands, shortcuts, commandNotices := h.composerCommands(ctx, principal, conversation)
 	notices = append(notices, commandNotices...)
 	return composerDirectory{
 		People: people, Groups: groups, Channels: channels,

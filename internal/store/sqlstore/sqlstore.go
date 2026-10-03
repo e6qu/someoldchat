@@ -608,7 +608,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 206
+const schemaVersion = 207
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3585,6 +3585,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 207: code channel commands ---
+	if version < 207 {
+		// agents.conversations.setCommands keeps each agent's commands on the
+		// code channel's record. A record that predates them has none.
+		columns, err := s.tableColumns(ctx, db, "code_channels")
+		if err != nil {
+			return err
+		}
+		if !columns["commands"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE code_channels ADD COLUMN commands TEXT NOT NULL DEFAULT '[]'`); err != nil {
+				return fmt.Errorf("migrate code channel commands: %w", err)
+			}
+		}
+	}
+	// --- end schema 207 ---
 	// --- schema 206: code channel views ---
 	if version < 206 {
 		// agents.conversations.setView keeps each code channel view tab. The
@@ -5246,6 +5261,7 @@ var migratableTables = []string{
 	"reminders",
 	"assistant_threads",
 	"workspace_retention",
+	"code_channels",
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {

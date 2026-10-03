@@ -444,6 +444,8 @@ var topicRules = []topicRule{
 		note: "not a Slack event: agents.conversations.setView answers the app itself, and the record exists so an open client re-renders the channel's tabs"},
 	{topic: CodeChannelViewRemovedTopic,
 		note: "not a Slack event: agents.conversations.removeView answers the app itself, and the record exists so an open client re-renders the channel's tabs"},
+	{topic: CodeChannelCommandsSetTopic,
+		note: "not a Slack event: agents.conversations.setCommands answers the app itself, and the record exists so an open client refreshes the channel's command menu"},
 }
 
 // rulesByTopic indexes the table. A duplicate row would make one of the two

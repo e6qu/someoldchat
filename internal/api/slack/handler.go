@@ -639,6 +639,12 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents.conversations.listViews", h.listCodeChannelViews)
 	mux.HandleFunc("GET /api/agents.conversations.removeView", h.removeCodeChannelView)
 	mux.HandleFunc("POST /api/agents.conversations.removeView", h.removeCodeChannelView)
+	mux.HandleFunc("GET /api/agents.conversations.setCommands", h.setCodeChannelCommands)
+	mux.HandleFunc("POST /api/agents.conversations.setCommands", h.setCodeChannelCommands)
+	mux.HandleFunc("GET /api/agents.conversations.getCanvas", h.getCodeChannelCanvas)
+	mux.HandleFunc("POST /api/agents.conversations.getCanvas", h.getCodeChannelCanvas)
+	mux.HandleFunc("GET /api/agents.conversations.setCanvasContent", h.setCodeChannelCanvasContent)
+	mux.HandleFunc("POST /api/agents.conversations.setCanvasContent", h.setCodeChannelCanvasContent)
 	mux.HandleFunc("GET /api/pins.add", h.addPin)
 	mux.HandleFunc("POST /api/pins.add", h.addPin)
 	mux.HandleFunc("GET /api/pins.remove", h.removePin)
@@ -12935,7 +12941,7 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // methods answered invalid_array_arg to the SDK's own request.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages", "property", "recurrence", "code_channel", "agent_resource", "csp":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages", "property", "recurrence", "code_channel", "agent_resource", "csp", "commands":
 		return true
 	default:
 		return false

@@ -1234,6 +1234,21 @@ assert [view["label"] for view in code_views["views"]] == ["coverage", "Diff"], 
 code_view_removed = client.agents_conversations_removeView(channel_id=code_channel["channel_id"], view_id=code_view["view_id"])
 assert code_view_removed["ok"] is True
 assert len(client.agents_conversations_listViews(channel_id=code_channel["channel_id"])["views"]) == 1
+# The agent registers its commands, shows a canvas in the channel, reads it
+# and rewrites it, and only the section it changed is counted.
+code_commands = client.agents_conversations_setCommands(
+    channel_id=code_channel["channel_id"],
+    commands=[{"name": "review", "description": "Review the diff", "argument_hint": "[path]", "should_escape": True}],
+)
+assert code_commands["ok"] is True and code_commands["command_count"] == 1, code_commands
+code_canvas = client.canvases_create(title="Python plan", document_content={"type": "markdown", "markdown": "# Plan\n\nPort the cron."})
+client.agents_conversations_setView(channel_id=code_channel["channel_id"], type="canvas", view_key="plan", canvas_id=code_canvas["canvas_id"])
+code_canvas_read = client.agents_conversations_getCanvas(channel=code_channel["channel_id"], canvas_id=code_canvas["canvas_id"])
+assert code_canvas_read["title"] == "Python plan" and code_canvas_read["content"] == "# Plan\n\nPort the cron.\n", code_canvas_read
+code_canvas_set = client.agents_conversations_setCanvasContent(
+    channel=code_channel["channel_id"], canvas_id=code_canvas["canvas_id"], content="# Plan\n\nShip it."
+)
+assert code_canvas_set["sections_changed_count"] == 1, code_canvas_set
 code_summary = client.chat_postMessage(channel=code_channel["channel_id"], text="Python summary")
 code_archived = client.agents_conversations_archive(channel_id=code_channel["channel_id"], summary_message_ts=code_summary["ts"])
 assert code_archived["ok"] is True

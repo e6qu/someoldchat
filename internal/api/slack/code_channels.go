@@ -331,3 +331,112 @@ func (h Handler) removeCodeChannelView(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": channel, "view_id": removed})
 }
+
+// agents.conversations.setCommands, getCanvas and setCanvasContent.
+
+// codeChannelCommandArgument is one of setCommands' commands.
+type codeChannelCommandArgument struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	ArgumentHint string `json:"argument_hint"`
+	ShouldEscape bool   `json:"should_escape"`
+}
+
+func (h Handler) setCodeChannelCommands(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.codeChannelRequest(w, r)
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	raw := strings.TrimSpace(fields["commands"])
+	var arguments []codeChannelCommandArgument
+	if channel == "" || raw == "" || json.Unmarshal([]byte(raw), &arguments) != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	commands := make([]domain.CodeChannelCommand, 0, len(arguments))
+	for _, argument := range arguments {
+		commands = append(commands, domain.CodeChannelCommand{
+			Name: argument.Name, Description: argument.Description, ArgumentHint: argument.ArgumentHint, ShouldEscape: argument.ShouldEscape,
+		})
+	}
+	count, err := h.Messages.SetCodeChannelCommands(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, channel, commands)
+	if err != nil {
+		writeCodeChannelError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": channel, "command_count": count})
+}
+
+func (h Handler) getCodeChannelCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.codeChannelRequest(w, r)
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	canvasID := domain.CanvasID(strings.TrimSpace(fields["canvas_id"]))
+	format, known := domain.ParseCanvasContentFormat(fields["content_format"])
+	if _, err := parseBoolField(fields["include_resolved"]); err != nil || channel == "" || canvasID == "" || !known {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	canvas, page, err := h.Messages.CodeChannelCanvas(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, channel, canvasID)
+	if err != nil {
+		writeCodeChannelError(w, err)
+		return
+	}
+	var content string
+	if format == domain.CanvasContentHTML {
+		content, err = domain.CanvasDocumentHTML(canvas.DocumentContent, domain.CanvasHTMLStyle{})
+	} else {
+		content, err = domain.CanvasDocumentMarkdown(canvas.DocumentContent)
+	}
+	if err != nil {
+		writeError(w, "internal_error")
+		return
+	}
+	sections, err := domain.CanvasDocumentSections(canvas.DocumentContent)
+	if err != nil {
+		writeError(w, "internal_error")
+		return
+	}
+	quoted := make(map[string]string, len(sections))
+	for _, section := range sections {
+		quoted[section.ID] = section.Text
+	}
+	// A comment here has no replies and is never resolved, so
+	// include_resolved changes nothing and every comment is open.
+	comments := make([]map[string]any, 0, len(page.Comments))
+	for _, comment := range page.Comments {
+		if comment.Deleted {
+			continue
+		}
+		comments = append(comments, map[string]any{
+			"id": comment.ID, "ts": domain.NewMessageTimestamp(comment.CreatedAt), "user_id": comment.UserID, "text": comment.Text,
+			"quoted_text": quoted[comment.SectionID], "is_resolved": false, "replies": []any{}, "has_more_replies": false,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "canvas_id": canvas.ID, "title": canvas.Title, "content": content, "comments": comments, "has_more_comments": page.HasMore,
+	})
+}
+
+func (h Handler) setCodeChannelCanvasContent(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.codeChannelRequest(w, r)
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	canvasID := domain.CanvasID(strings.TrimSpace(fields["canvas_id"]))
+	content, present := fields["content"]
+	if channel == "" || canvasID == "" || !present {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	changed, err := h.Messages.SetCodeChannelCanvasContent(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, channel, canvasID, content)
+	if err != nil {
+		writeCodeChannelError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "canvas_id": canvasID, "sections_changed_count": changed})
+}

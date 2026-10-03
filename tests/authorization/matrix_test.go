@@ -333,7 +333,8 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		// The code channel operations act on a code channel, which the
 		// seeded channel is not.
 		switch method {
-		case "ArchiveCodeChannel", "CodeChannel", "SetCodeChannelProperties", "SetCodeChannelView", "CodeChannelViews", "RemoveCodeChannelView":
+		case "ArchiveCodeChannel", "CodeChannel", "SetCodeChannelProperties", "SetCodeChannelView", "CodeChannelViews", "RemoveCodeChannelView",
+			"SetCodeChannelCommands", "CodeChannelCanvas", "SetCodeChannelCanvasContent":
 			return reflect.ValueOf(fixtureCodeChannelID)
 		}
 		return reflect.ValueOf(domain.ConversationID("C1"))
@@ -802,6 +803,14 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		Type: domain.CodeChannelViewHTML, Label: "fixture-view", AppID: fixtureAppID, BotUserID: "U-fixture-bot", Content: "<p>fixture</p>", CreatedAt: at, UpdatedAt: at,
 	}, event("E-code-channel-view", "code_channel.view_set"))
 	seed("code channel view", viewErr)
+	// The fixture canvas, shown in the code channel by a canvas view, is the
+	// one getCanvas and setCanvasContent find there.
+	_, canvasViewErr := repository.SetCodeChannelView(ctx, domain.CodeChannelView{
+		WorkspaceID: "T1", Conversation: fixtureCodeChannelID, ID: "Ct-fixture-canvas", FileID: "F-fixture-canvas-view", Key: "fixture-canvas",
+		Type: domain.CodeChannelViewCanvas, Label: "fixture canvas", AppID: fixtureAppID, BotUserID: "U-fixture-bot", CanvasID: fixtureCanvasID,
+		AccessLevel: domain.CodeChannelCanvasWrite, CreatedAt: at.Add(time.Second), UpdatedAt: at.Add(time.Second),
+	}, event("E-code-channel-canvas-view", "code_channel.view_set"))
+	seed("code channel canvas view", canvasViewErr)
 	seed("dialog", repository.CreateDialog(ctx, domain.Dialog{
 		ID: fixtureDialogID, WorkspaceID: "T1", UserID: "U-owner", AppID: fixtureAppID, CreatedAt: at,
 		Payload: `{"callback_id":"fixture","title":"Fixture","elements":[{"type":"text","name":"answer","label":"Answer"}]}`,

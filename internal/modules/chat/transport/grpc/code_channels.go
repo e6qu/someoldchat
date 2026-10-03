@@ -146,6 +146,7 @@ func encodeProtoCodeChannel(value domain.CodeChannel) *chatv1.CodeChannel {
 		AgentResource: &chatv1.AgentResource{
 			Url: value.AgentResource.URL, ResourceType: value.AgentResource.ResourceType, Title: value.AgentResource.Title, Provider: value.AgentResource.Provider,
 		},
+		Commands:          encodeProtoCodeChannelCommands(value.Commands),
 		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt), UpdatedAtUnixNano: unixNanoOrZero(value.UpdatedAt),
 	}
 }
@@ -161,6 +162,7 @@ func decodeProtoCodeChannel(value *chatv1.CodeChannel) domain.CodeChannel {
 			MessageTimestamp: domain.MessageTimestamp(value.GetSummaryMessageTs()), ThreadTimestamp: domain.MessageTimestamp(value.GetSummaryThreadTs()),
 		},
 		AgentResource: domain.AgentResource{URL: resource.GetUrl(), ResourceType: resource.GetResourceType(), Title: resource.GetTitle(), Provider: resource.GetProvider()},
+		Commands:      decodeProtoCodeChannelCommands(value.GetCommands()),
 		CreatedAt:     optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
 	}
 }
@@ -275,4 +277,91 @@ func nonEmptyStrings(values []string) []string {
 		return nil
 	}
 	return append([]string(nil), values...)
+}
+
+func encodeProtoCodeChannelCommands(commands []domain.CodeChannelCommand) []*chatv1.CodeChannelCommand {
+	encoded := make([]*chatv1.CodeChannelCommand, 0, len(commands))
+	for _, command := range commands {
+		encoded = append(encoded, &chatv1.CodeChannelCommand{
+			Name: command.Name, Description: command.Description, ArgumentHint: command.ArgumentHint, ShouldEscape: command.ShouldEscape,
+			AppId: string(command.AppID), BotUserId: string(command.BotUserID),
+		})
+	}
+	return encoded
+}
+
+func decodeProtoCodeChannelCommands(commands []*chatv1.CodeChannelCommand) []domain.CodeChannelCommand {
+	decoded := make([]domain.CodeChannelCommand, 0, len(commands))
+	for _, command := range commands {
+		decoded = append(decoded, domain.CodeChannelCommand{
+			Name: command.GetName(), Description: command.GetDescription(), ArgumentHint: command.GetArgumentHint(), ShouldEscape: command.GetShouldEscape(),
+			AppID: domain.AppID(command.GetAppId()), BotUserID: domain.UserID(command.GetBotUserId()),
+		})
+	}
+	return decoded
+}
+
+func (r Remote) SetCodeChannelCommands(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, app domain.AppID, conversation domain.ConversationID, commands []domain.CodeChannelCommand) (int, error) {
+	out, err := r.codeChannels.SetCodeChannelCommands(ctx, &chatv1.SetCodeChannelCommandsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(actor), AppId: string(app), Conversation: string(conversation), Commands: encodeProtoCodeChannelCommands(commands),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetCommandCount()), nil
+}
+
+func (r Remote) CodeChannelCanvas(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, app domain.AppID, conversation domain.ConversationID, id domain.CanvasID) (domain.Canvas, domain.CanvasCommentPage, error) {
+	out, err := r.codeChannels.GetCodeChannelCanvas(ctx, &chatv1.CodeChannelCanvasRequest{
+		WorkspaceId: string(workspaceID), UserId: string(actor), AppId: string(app), Conversation: string(conversation), CanvasId: string(id),
+	})
+	if err != nil {
+		return domain.Canvas{}, domain.CanvasCommentPage{}, err
+	}
+	canvas, err := decodeProtoCanvas(out.GetCanvas())
+	if err != nil {
+		return domain.Canvas{}, domain.CanvasCommentPage{}, err
+	}
+	comments, err := decodeProtoCanvasCommentPage(out.GetComments())
+	if err != nil {
+		return domain.Canvas{}, domain.CanvasCommentPage{}, err
+	}
+	return canvas, comments, nil
+}
+
+func (r Remote) SetCodeChannelCanvasContent(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, app domain.AppID, conversation domain.ConversationID, id domain.CanvasID, content string) (int, error) {
+	out, err := r.codeChannels.SetCodeChannelCanvasContent(ctx, &chatv1.SetCodeChannelCanvasContentRequest{
+		WorkspaceId: string(workspaceID), UserId: string(actor), AppId: string(app), Conversation: string(conversation), CanvasId: string(id), Content: content,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetSectionsChangedCount()), nil
+}
+
+func (s *Server) SetCodeChannelCommands(ctx context.Context, input *chatv1.SetCodeChannelCommandsRequest) (*chatv1.SetCodeChannelCommandsResponse, error) {
+	count, err := s.implementation.SetCodeChannelCommands(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
+		domain.ConversationID(input.GetConversation()), decodeProtoCodeChannelCommands(input.GetCommands()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SetCodeChannelCommandsResponse{CommandCount: int32(count)}, nil
+}
+
+func (s *Server) GetCodeChannelCanvas(ctx context.Context, input *chatv1.CodeChannelCanvasRequest) (*chatv1.CodeChannelCanvasResponse, error) {
+	canvas, comments, err := s.implementation.CodeChannelCanvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
+		domain.ConversationID(input.GetConversation()), domain.CanvasID(input.GetCanvasId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.CodeChannelCanvasResponse{Canvas: encodeProtoCanvas(canvas), Comments: encodeProtoCanvasCommentPage(comments)}, nil
+}
+
+func (s *Server) SetCodeChannelCanvasContent(ctx context.Context, input *chatv1.SetCodeChannelCanvasContentRequest) (*chatv1.SetCodeChannelCanvasContentResponse, error) {
+	count, err := s.implementation.SetCodeChannelCanvasContent(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
+		domain.ConversationID(input.GetConversation()), domain.CanvasID(input.GetCanvasId()), input.GetContent())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SetCodeChannelCanvasContentResponse{SectionsChangedCount: int32(count)}, nil
 }

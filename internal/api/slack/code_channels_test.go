@@ -3,6 +3,8 @@ package slack
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -285,4 +287,114 @@ func TestCodeChannelViewsAreTabsAnAgentKeepsCurrent(t *testing.T) {
 	}
 	requireCodeError(t, "listViews on a channel that is not a code channel",
 		callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.listViews", `{"channel_id":"C1"}`, false), "channel_not_found")
+}
+
+// TestCodeChannelCommandsAndCanvasesBelongToTheirAgents drives setCommands,
+// getCanvas and setCanvasContent over HTTP: each agent replaces only its own
+// commands under the channel's limit of ten, and an agent reads and rewrites
+// a canvas its channel shows, keeping the sections it did not change.
+func TestCodeChannelCommandsAndCanvasesBelongToTheirAgents(t *testing.T) {
+	ctx := context.Background()
+	mux, repository, _ := codeChannelAPI(t)
+	created := callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.create", `{"name":"Command work"}`, false)
+	channel := created["channel_id"].(string)
+	for _, member := range []domain.UserID{"UB2", "U1"} {
+		if err := repository.SeedConversationMember(domain.ConversationID(channel), member); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commands := func(token, body string) map[string]any {
+		return callAgentSessionMethod(t, mux, token, "agents.conversations.setCommands", `{"channel_id":"`+channel+`","commands":`+body+`}`, false)
+	}
+	first := commands("xoxb-agent", `[{"name":"review","description":"Review the diff","argument_hint":"[path]","should_escape":true},{"name":"ship"}]`)
+	if first["ok"] != true || first["channel_id"] != channel || first["command_count"] != float64(2) {
+		t.Fatalf("setCommands=%v", first)
+	}
+	if other := commands("xoxb-other", `[{"name":"test"}]`); other["command_count"] != float64(3) {
+		t.Fatalf("a second agent's set=%v, want three in the channel", other)
+	}
+	if replaced := commands("xoxb-agent", `[{"name":"review"}]`); replaced["command_count"] != float64(2) {
+		t.Fatalf("a replaced set=%v, want the other agent's command kept", replaced)
+	}
+	requireCodeError(t, "another agent's name", commands("xoxb-other", `[{"name":"review"}]`), "invalid_arguments")
+	requireCodeError(t, "a Slack command", commands("xoxb-agent", `[{"name":"remind"}]`), "invalid_arguments")
+	requireCodeError(t, "more than ten in the channel", commands("xoxb-agent", `[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"},{"name":"e"},{"name":"f"},{"name":"g"},{"name":"h"},{"name":"i"},{"name":"j"}]`), "invalid_arguments")
+	requireCodeError(t, "no commands argument", callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.setCommands", `{"channel_id":"`+channel+`"}`, false), "invalid_arguments")
+	requireCodeError(t, "a channel that is not a code channel", callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.setCommands", `{"channel_id":"C1","commands":[]}`, false), "channel_not_found")
+	form := url.Values{"channel_id": {channel}, "commands": {`[{"name":"deploy"}]`}}.Encode()
+	if formed := callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.setCommands", form, true); formed["command_count"] != float64(2) {
+		t.Fatalf("a form-encoded set=%v", formed)
+	}
+
+	messages := service.Messages{Store: repository}
+	canvas, err := messages.CreateCanvas(ctx, "T1", "UB1", "Plan", `{"type":"markdown","markdown":"# Plan\n\nPort the cron.\n\nShip it."}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	getCanvas := func(token, body string) map[string]any {
+		return callAgentSessionMethod(t, mux, token, "agents.conversations.getCanvas", `{"channel":"`+channel+`","canvas_id":"`+string(canvas.ID)+`"`+body+`}`, false)
+	}
+	requireCodeError(t, "a canvas the channel does not show", getCanvas("xoxb-agent", ``), "canvas_not_found")
+	requireCodeOK(t, "a canvas view", callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.setView",
+		`{"channel_id":"`+channel+`","type":"canvas","view_key":"plan","canvas_id":"`+string(canvas.ID)+`"}`, false))
+	sections, err := domain.CanvasDocumentSections(canvas.DocumentContent)
+	if err != nil || len(sections) != 3 {
+		t.Fatalf("sections=%+v err=%v", sections, err)
+	}
+	if _, err := messages.CommentOnCanvas(ctx, "T1", "U1", canvas.ID, sections[1].ID, "Which cron?"); err != nil {
+		t.Fatal(err)
+	}
+	read := getCanvas("xoxb-agent", ``)
+	comments, _ := read["comments"].([]any)
+	if read["ok"] != true || read["canvas_id"] != string(canvas.ID) || read["title"] != "Plan" || read["content"] != "# Plan\n\nPort the cron.\n\nShip it.\n" ||
+		len(comments) != 1 || read["has_more_comments"] != false {
+		t.Fatalf("getCanvas=%v", read)
+	}
+	comment := comments[0].(map[string]any)
+	if comment["text"] != "Which cron?" || comment["user_id"] != "U1" || comment["quoted_text"] != "Port the cron." || comment["is_resolved"] != false || comment["ts"] == "" {
+		t.Fatalf("comment=%v", comment)
+	}
+	if html := getCanvas("xoxb-agent", `,"content_format":"html"`); !strings.Contains(html["content"].(string), "<h1") {
+		t.Fatalf("html content=%v", html)
+	}
+	requireCodeError(t, "an unknown format", getCanvas("xoxb-agent", `,"content_format":"pdf"`), "invalid_arguments")
+	// The canvas view shared the canvas with the channel, so every agent in
+	// it reads the canvas as its members do.
+	requireCodeOK(t, "another agent of the channel", getCanvas("xoxb-other", ``))
+	// Access is still the canvas's own: once its owner stops sharing it with
+	// the channel, the view no longer lets another agent read it.
+	if err := messages.DeleteCanvasAccess(ctx, "T1", "UB1", canvas.ID, []domain.ConversationID{domain.ConversationID(channel)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	requireCodeError(t, "a canvas no longer shared with the channel", getCanvas("xoxb-other", ``), "canvas_not_found")
+	if err := messages.SetCanvasAccess(ctx, "T1", "UB1", canvas.ID, domain.AccessWrite, []domain.ConversationID{domain.ConversationID(channel)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	requireCodeError(t, "the canvas through a channel that does not show it", callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.getCanvas",
+		`{"channel":"C1","canvas_id":"`+string(canvas.ID)+`"}`, false), "channel_not_found")
+
+	setContent := func(content string) map[string]any {
+		return callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.setCanvasContent",
+			`{"channel":"`+channel+`","canvas_id":"`+string(canvas.ID)+`","content":`+strconv.Quote(content)+`}`, false)
+	}
+	set := setContent("# Plan\n\nPort the cron.\n\nShip it on Friday.\n\nTell billing.")
+	if set["ok"] != true || set["canvas_id"] != string(canvas.ID) || set["sections_changed_count"] != float64(2) {
+		t.Fatalf("setCanvasContent=%v", set)
+	}
+	if again := setContent("# Plan\n\nPort the cron.\n\nShip it on Friday.\n\nTell billing."); again["sections_changed_count"] != float64(0) {
+		t.Fatalf("the same content again=%v", again)
+	}
+	stored, err := repository.GetCanvas(ctx, "T1", canvas.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := domain.CanvasDocumentSections(stored.DocumentContent)
+	if err != nil || len(after) != 4 || after[0].ID != sections[0].ID || after[1].ID != sections[1].ID || after[2].Text != "Ship it on Friday." {
+		t.Fatalf("sections after=%+v err=%v; the unchanged sections must keep their identifiers", after, err)
+	}
+	if kept := getCanvas("xoxb-agent", ``); kept["comments"].([]any)[0].(map[string]any)["quoted_text"] != "Port the cron." {
+		t.Fatalf("the comment lost its section: %v", kept)
+	}
+	requireCodeError(t, "no content", callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.setCanvasContent",
+		`{"channel":"`+channel+`","canvas_id":"`+string(canvas.ID)+`"}`, false), "invalid_arguments")
 }

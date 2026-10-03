@@ -12,3 +12,8 @@ const (
 	CodeChannelViewSetTopic     = "code_channel.view_set"
 	CodeChannelViewRemovedTopic = "code_channel.view_removed"
 )
+
+// CodeChannelCommandsSetTopic records an agent's
+// agents.conversations.setCommands, so an open client refreshes the channel's
+// command menu. The topic table records that it is not a Slack event.
+const CodeChannelCommandsSetTopic = "code_channel.commands_set"

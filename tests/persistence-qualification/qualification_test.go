@@ -3104,10 +3104,11 @@ func oneAppApprovalReadsBackByItself(t *testing.T, open opener) {
 
 // codeChannelsKeepTheirRecord holds the storage behind Slack Code's
 // agents.conversations.*: a code channel's conversation, members and record
-// are created together; an agent's session key names one channel, so a second
-// channel for it is refused; a properties write applies only over the state
-// it read; a view is upserted by its key, keeping its IDs while its version
-// advances; and deleting the conversation takes the record and views with it.
+// are created together, with its agents' commands; an agent's session key
+// names one channel, so a second channel for it is refused; a write applies
+// only over the state it read and replaces the commands with it; a view is
+// upserted by its key, keeping its IDs while its version advances; and
+// deleting the conversation takes the record and views with it.
 func codeChannelsKeepTheirRecord(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -3134,6 +3135,7 @@ func codeChannelsKeepTheirRecord(t *testing.T, open opener) {
 		WorkspaceID: workspaceID, Conversation: conversation.ID, AppID: "A-code", BotUserID: bot, SessionID: "ses",
 		Origin:        domain.CodeChannelOrigin{Channel: "C-origin", Timestamp: "1700000000.000100"},
 		ContextBar:    []domain.CodeChannelContextItem{{Key: "repo", Label: "repo", Icon: "folder", URL: "https://example.com", ItemType: "info", BotUserID: bot}},
+		Commands:      []domain.CodeChannelCommand{{Name: "review", Description: "Review", ArgumentHint: "[path]", ShouldEscape: true, AppID: "A-code", BotUserID: bot}},
 		Summary:       domain.CodeChannelSummary{MessageTimestamp: "1700000000.000200"},
 		AgentResource: domain.AgentResource{URL: "https://example.com/pr/1", ResourceType: "pull_request", Title: "Fix", Provider: "github"},
 		CreatedAt:     now, UpdatedAt: now,
@@ -3163,6 +3165,7 @@ func codeChannelsKeepTheirRecord(t *testing.T, open opener) {
 	}
 	updated := read
 	updated.ContextBar = nil
+	updated.Commands = []domain.CodeChannelCommand{{Name: "ship", AppID: "A-code", BotUserID: bot}}
 	updated.UpdatedAt = now.Add(time.Second)
 	if err := repository.UpdateCodeChannel(ctx, updated, now.Add(time.Hour), event("stale")); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("a write over state it did not read: %v", err)
@@ -3170,7 +3173,7 @@ func codeChannelsKeepTheirRecord(t *testing.T, open opener) {
 	if err := repository.UpdateCodeChannel(ctx, updated, now, event("updated")); err != nil {
 		t.Fatal(err)
 	}
-	if after, err := repository.GetCodeChannel(ctx, workspaceID, conversation.ID); err != nil || len(after.ContextBar) != 0 || !after.UpdatedAt.Equal(updated.UpdatedAt) {
+	if after, err := repository.GetCodeChannel(ctx, workspaceID, conversation.ID); err != nil || len(after.ContextBar) != 0 || !reflect.DeepEqual(after.Commands, updated.Commands) || !after.UpdatedAt.Equal(updated.UpdatedAt) {
 		t.Fatalf("after update=%+v err=%v", after, err)
 	}
 	html := domain.CodeChannelView{

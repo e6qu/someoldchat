@@ -4,6 +4,8 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+import "sameoldchat/chat/v1/canvases.proto";
+
 // CodeChannelContextItem is one item of a code channel's context bar.
 message CodeChannelContextItem {
   string key = 1;
@@ -22,6 +24,16 @@ message AgentResource {
   string provider = 4;
 }
 
+// CodeChannelCommand is one agent command of a code channel.
+message CodeChannelCommand {
+  string name = 1;
+  string description = 2;
+  string argument_hint = 3;
+  bool should_escape = 4;
+  string app_id = 5;
+  string bot_user_id = 6;
+}
+
 // CodeChannel is a code channel's record beside its conversation.
 message CodeChannel {
   string workspace_id = 1;
@@ -37,6 +49,7 @@ message CodeChannel {
   AgentResource agent_resource = 11;
   int64 created_at_unix_nano = 12;
   int64 updated_at_unix_nano = 13;
+  repeated CodeChannelCommand commands = 14;
 }
 
 message CreateCodeChannelRequest {
@@ -149,6 +162,44 @@ message RemoveCodeChannelViewResponse {
   string view_id = 1;
 }
 
+message SetCodeChannelCommandsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string conversation = 4;
+  repeated CodeChannelCommand commands = 5;
+}
+
+message SetCodeChannelCommandsResponse {
+  int32 command_count = 1;
+}
+
+message CodeChannelCanvasRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string conversation = 4;
+  string canvas_id = 5;
+}
+
+message CodeChannelCanvasResponse {
+  Canvas canvas = 1;
+  CanvasCommentPage comments = 2;
+}
+
+message SetCodeChannelCanvasContentRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string conversation = 4;
+  string canvas_id = 5;
+  string content = 6;
+}
+
+message SetCodeChannelCanvasContentResponse {
+  int32 sections_changed_count = 1;
+}
+
 service CodeChannelsService {
   rpc CreateCodeChannel(CreateCodeChannelRequest) returns (CodeChannel);
   rpc ArchiveCodeChannel(ArchiveCodeChannelRequest) returns (CodeChannelMutationResponse);
@@ -157,4 +208,7 @@ service CodeChannelsService {
   rpc SetCodeChannelView(SetCodeChannelViewRequest) returns (CodeChannelView);
   rpc ListCodeChannelViews(CodeChannelRequest) returns (CodeChannelViewsResponse);
   rpc RemoveCodeChannelView(RemoveCodeChannelViewRequest) returns (RemoveCodeChannelViewResponse);
+  rpc SetCodeChannelCommands(SetCodeChannelCommandsRequest) returns (SetCodeChannelCommandsResponse);
+  rpc GetCodeChannelCanvas(CodeChannelCanvasRequest) returns (CodeChannelCanvasResponse);
+  rpc SetCodeChannelCanvasContent(SetCodeChannelCanvasContentRequest) returns (SetCodeChannelCanvasContentResponse);
 }

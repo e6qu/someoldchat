@@ -28,4 +28,13 @@ type CodeChannels interface {
 	// RemoveCodeChannelView is agents.conversations.removeView, naming the
 	// view by exactly one of its tab ID or key; it answers the removed tab.
 	RemoveCodeChannelView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, domain.CodeChannelViewID, string) (domain.CodeChannelViewID, error)
+	// SetCodeChannelCommands is agents.conversations.setCommands; it answers
+	// how many commands the channel holds.
+	SetCodeChannelCommands(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, []domain.CodeChannelCommand) (int, error)
+	// CodeChannelCanvas is agents.conversations.getCanvas: the canvas and its
+	// comments.
+	CodeChannelCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, domain.CanvasID) (domain.Canvas, domain.CanvasCommentPage, error)
+	// SetCodeChannelCanvasContent is agents.conversations.setCanvasContent;
+	// it answers how many sections changed.
+	SetCodeChannelCanvasContent(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, domain.CanvasID, string) (int, error)
 }

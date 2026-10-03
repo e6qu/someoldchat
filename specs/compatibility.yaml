@@ -2864,6 +2864,20 @@ operations:
       - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.create/
+  - method: agents.conversations.getCanvas
+    status: sdk-compatible
+    evidence:
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/api/slack:TestCodeChannelCommandsAndCanvasesBelongToTheirAgents
+    deviations:
+      - The canvas must be one a canvas view of the channel shows, or the channel's own canvas (canvas_not_found otherwise), and the agent must hold access to it as any member would; a canvas view shares it with the channel, so every agent in the channel can use it.
+      - content_format is markdown (the default) or html, rendered as canvases.getContent renders them. Comments are this deployment's canvas comments, oldest first, at most 100 with has_more_comments for the rest; each quotes the text of the section it is anchored to. Canvas comments here have no replies and are never resolved, so replies is always empty, is_resolved always false, and include_resolved changes nothing.
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
+      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/agents.conversations.getCanvas/
   - method: agents.conversations.listViews
     status: sdk-compatible
     evidence:
@@ -2891,6 +2905,36 @@ operations:
       - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.removeView/
+  - method: agents.conversations.setCanvasContent
+    status: sdk-compatible
+    evidence:
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/api/slack:TestCodeChannelCommandsAndCanvasesBelongToTheirAgents
+      - go-test:internal/domain:TestMergeCanvasSectionsKeepsUnchangedSectionsAndCountsEdits
+    deviations:
+      - The canvas must be one a canvas view of the channel shows, or the channel's own canvas (canvas_not_found otherwise), and the agent must hold access to it as any member would; a canvas view shares it with the channel, so every agent in the channel can use it.
+      - content is split into sections as canvases.create splits markdown, and laid over the current sections in order. A section whose kind and text are unchanged keeps its identity and its comments; sections_changed_count counts, within each run of edits between unchanged sections, the larger of the sections removed and added. Content that changes nothing writes nothing and answers 0.
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
+      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/agents.conversations.setCanvasContent/
+  - method: agents.conversations.setCommands
+    status: sdk-compatible
+    evidence:
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/api/slack:TestCodeChannelCommandsAndCanvasesBelongToTheirAgents
+      - go-test:internal/service:TestCodeChannelCommandsReachTheirAgentInTheirChannel
+    deviations:
+      - Names are folded to lowercase; one with a slash or whitespace, one longer than 31 characters, a duplicate within the set, one another agent of the channel holds, one of Slack's own commands (whether or not this deployment implements it), or more than 10 in the channel is invalid_arguments. description and argument_hint are at most 255 characters each.
+      - A member typing an agent's command in its channel reaches that agent as a slash command, ahead of a workspace app command of the same name; the web client's command menu lists the channel's commands under each agent's name. It is delivered over Socket Mode, or otherwise to the agent's interactivity request URL, since no manifest names a URL for it; an agent with neither cannot be reached. Outside its channel the name is not a command.
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
+      - Its Tier 1 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/agents.conversations.setCommands/
   - method: agents.conversations.setProperties
     status: sdk-compatible
     evidence:
