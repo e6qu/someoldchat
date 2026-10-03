@@ -569,10 +569,17 @@ func authorityMatrix() map[string]authority {
 		// Agent sessions act in a conversation as one of its members — the
 		// app's bot for the two Web API methods, the member for the stop and
 		// retitle controls — so membership, not tier, is the gate.
-		"AgentSession":            authorityAnyMember,
-		"ChangeAgentSessionTitle": authorityAnyMember,
-		"RenameAgentSession":      authorityAnyMember,
-		"SetAgentSessionStatus":   authorityAnyMember,
-		"StopAgentSession":        authorityAnyMember,
+		"AgentSession":             authorityAnyMember,
+		"ArchiveCodeChannel":       authorityAnyMember,
+		"CodeChannel":              authorityAnyMember,
+		"CreateCodeChannel":        authorityAnyMember,
+		"SetCodeChannelProperties": authorityAnyMember,
+		"SetCodeChannelView":       authorityAnyMember,
+		"CodeChannelViews":         authorityAnyMember,
+		"RemoveCodeChannelView":    authorityAnyMember,
+		"ChangeAgentSessionTitle":  authorityAnyMember,
+		"RenameAgentSession":       authorityAnyMember,
+		"SetAgentSessionStatus":    authorityAnyMember,
+		"StopAgentSession":         authorityAnyMember,
 	}
 }

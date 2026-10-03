@@ -1194,4 +1194,50 @@ assert id_claims["nonce"] == "python-nonce", id_claims
 assert id_claims["sub"] == "U1" and id_claims["https://slack.com/team_id"] == "T1", id_claims
 assert id_claims["exp"] > time.time() >= id_claims["iat"] - 60, id_claims
 
+# agents.conversations.* (Slack Code): a code channel created from a message
+# is described with a context bar and an agent resource, and archived with its
+# summary shared back on the message the work began from. slack_sdk makes
+# name a required keyword, so this channel is named rather than named after
+# its origin.
+code_origin = client.chat_postMessage(channel="C1", text="Python code channel task")
+code_channel = client.agents_conversations_create(
+    name="Python code channel", origin_channel_id="C1", origin_message_ts=code_origin["ts"], session_id="python-session"
+)
+assert code_channel["ok"] is True
+code_channel_again = client.agents_conversations_create(name="Ignored", session_id="python-session")
+assert code_channel_again["channel_id"] == code_channel["channel_id"]
+code_properties = client.agents_conversations_setProperties(
+    channel_id=code_channel["channel_id"],
+    code_channel={"context_bar_items": [{"key": "branch", "label": "agent/fix", "icon": "branch"}]},
+    agent_resource={"title": "Fix", "provider": "github"},
+)
+assert code_properties["ok"] is True
+code_info = client.conversations_info(channel=code_channel["channel_id"])
+assert code_info["channel"]["name"] == "python-code-channel", code_info
+assert code_info["channel"]["properties"]["code_channel"]["context_bar_items"][0]["key"] == "branch"
+# A code channel's views are tabs keyed by the agent: setting a key again
+# updates the same view one version on, and removing it by key drops the tab.
+code_view = client.agents_conversations_setView(
+    channel_id=code_channel["channel_id"], view_key="reports/coverage.html", content="<!doctype html><p>81%</p>",
+    csp={"resource_domains": ["https://cdn.jsdelivr.net"]},
+)
+assert code_view["ok"] is True and code_view["content_version"] == 1, code_view
+code_view_again = client.agents_conversations_setView(
+    channel_id=code_channel["channel_id"], view_key="reports/coverage.html", content="<!doctype html><p>84%</p>"
+)
+assert code_view_again["view_id"] == code_view["view_id"] and code_view_again["content_version"] == 2, code_view_again
+client.agents_conversations_setView(
+    channel_id=code_channel["channel_id"], type="diff", content="--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n", base_branch="main", head_branch="fix"
+)
+code_views = client.agents_conversations_listViews(channel_id=code_channel["channel_id"])
+assert [view["label"] for view in code_views["views"]] == ["coverage", "Diff"], code_views
+code_view_removed = client.agents_conversations_removeView(channel_id=code_channel["channel_id"], view_id=code_view["view_id"])
+assert code_view_removed["ok"] is True
+assert len(client.agents_conversations_listViews(channel_id=code_channel["channel_id"])["views"]) == 1
+code_summary = client.chat_postMessage(channel=code_channel["channel_id"], text="Python summary")
+code_archived = client.agents_conversations_archive(channel_id=code_channel["channel_id"], summary_message_ts=code_summary["ts"])
+assert code_archived["ok"] is True
+code_shared = client.conversations_replies(channel="C1", ts=code_origin["ts"])
+assert any(message["text"] == "Python summary" for message in code_shared["messages"])
+
 print("python-slack-sdk qualification passed")

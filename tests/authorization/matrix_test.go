@@ -330,6 +330,12 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		if method == "ConvertGroupDirectToPrivate" {
 			return reflect.ValueOf(fixtureGroupDMID)
 		}
+		// The code channel operations act on a code channel, which the
+		// seeded channel is not.
+		switch method {
+		case "ArchiveCodeChannel", "CodeChannel", "SetCodeChannelProperties", "SetCodeChannelView", "CodeChannelViews", "RemoveCodeChannelView":
+			return reflect.ValueOf(fixtureCodeChannelID)
+		}
 		return reflect.ValueOf(domain.ConversationID("C1"))
 	case reflect.TypeOf(domain.CanvasID("")):
 		return reflect.ValueOf(fixtureCanvasID)
@@ -444,6 +450,12 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 	case reflect.TypeOf(domain.AgentSessionStatusRequest{}):
 		// A valid status, so the holder's write on the seeded session succeeds.
 		return reflect.ValueOf(domain.AgentSessionStatusRequest{Status: domain.AgentSessionActive})
+	case reflect.TypeOf(domain.CodeChannelViewRequest{}):
+		// A valid html view, so the holder's setView on the seeded code
+		// channel succeeds.
+		return reflect.ValueOf(domain.CodeChannelViewRequest{Key: "fixture.html", Content: "<p>fixture</p>"})
+	case reflect.TypeOf(domain.CodeChannelViewID("")):
+		return reflect.ValueOf(fixtureCodeChannelViewID)
 	case reflect.TypeOf(domain.LaterReminderRequest{}):
 		// A valid personal reminder edit, so UpdateLaterReminder — acting on the
 		// holder's own seeded reminder after authorizeWorkspace — reaches success
@@ -778,6 +790,18 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		Status: domain.AgentSessionProcessing, Title: "Fixture session", At: at,
 	}, event("E-agent-session", "agent_session.status_set"))
 	seed("agent session", sessionErr)
+	// A code channel the app created, which every tier that holds standing
+	// is a member of, so the code channel operations find what they act on.
+	seed("code channel", repository.CreateCodeChannel(ctx,
+		domain.Conversation{ID: fixtureCodeChannelID, WorkspaceID: "T1", Name: "fixture-code", Kind: domain.ConversationTypePublic, Created: at, CreatorID: "U-fixture-bot"},
+		[]domain.UserID{"U-fixture-bot", "U-owner", "U-admin", "U-member", "U-guest-multi", "U-guest-single"},
+		domain.CodeChannel{WorkspaceID: "T1", Conversation: fixtureCodeChannelID, AppID: fixtureAppID, BotUserID: "U-fixture-bot", ContextBar: []domain.CodeChannelContextItem{}, CreatedAt: at, UpdatedAt: at},
+		[]events.Event{event("E-code-channel", "conversation.created")}))
+	_, viewErr := repository.SetCodeChannelView(ctx, domain.CodeChannelView{
+		WorkspaceID: "T1", Conversation: fixtureCodeChannelID, ID: fixtureCodeChannelViewID, FileID: "F-fixture-view", Key: "fixture-view.html",
+		Type: domain.CodeChannelViewHTML, Label: "fixture-view", AppID: fixtureAppID, BotUserID: "U-fixture-bot", Content: "<p>fixture</p>", CreatedAt: at, UpdatedAt: at,
+	}, event("E-code-channel-view", "code_channel.view_set"))
+	seed("code channel view", viewErr)
 	seed("dialog", repository.CreateDialog(ctx, domain.Dialog{
 		ID: fixtureDialogID, WorkspaceID: "T1", UserID: "U-owner", AppID: fixtureAppID, CreatedAt: at,
 		Payload: `{"callback_id":"fixture","title":"Fixture","elements":[{"type":"text","name":"answer","label":"Answer"}]}`,
@@ -1017,6 +1041,8 @@ const (
 	fixtureSidebarSectionID  domain.SidebarSectionID    = "F-sidebar-section"
 	fixtureListDownloadID    domain.ListDownloadID      = "F-list-download"
 	fixtureGroupDMID         domain.ConversationID      = "Cmpim"
+	fixtureCodeChannelID     domain.ConversationID      = "Ccode"
+	fixtureCodeChannelViewID domain.CodeChannelViewID   = "Ct-fixture"
 	fixtureProfileFieldID    domain.ProfileFieldID      = "F-profile-field"
 )
 

@@ -13,9 +13,10 @@ import (
 // and a member may stop a processing session or retitle it from the client.
 //
 // The reference pages scope a session to a thread root in a regular channel or
-// a DM, or to a "session channel". This product has no session channels, so
-// every session here is a thread session and is keyed by its conversation and
-// thread root.
+// a DM, or to a "session channel": a code channel (see CodeChannel), whose
+// session is the channel's own. A session is keyed by its conversation and
+// thread root, and a session channel's by its conversation and an empty
+// thread.
 
 // AgentSessionStatus is one agent's lifecycle status, as
 // agents.sessions.setStatus writes it.
@@ -205,9 +206,10 @@ type AgentSessionStatusWrite struct {
 	At              time.Time
 }
 
-// Valid reports whether the write names everything a store needs.
+// Valid reports whether the write names everything a store needs. An empty
+// thread is a session channel's session.
 func (w AgentSessionStatusWrite) Valid() bool {
-	return w.WorkspaceID != "" && w.Conversation != "" && w.ThreadTimestamp != "" && w.AppID != "" && w.Status.Valid() && !w.At.IsZero()
+	return w.WorkspaceID != "" && w.Conversation != "" && w.AppID != "" && w.Status.Valid() && !w.At.IsZero()
 }
 
 // AgentSessionRename retitles a session, but only while its title is still
@@ -225,7 +227,7 @@ type AgentSessionRename struct {
 
 // Valid reports whether the rename names everything a store needs.
 func (r AgentSessionRename) Valid() bool {
-	return r.WorkspaceID != "" && r.Conversation != "" && r.ThreadTimestamp != "" && strings.TrimSpace(r.Title) != "" && !r.At.IsZero()
+	return r.WorkspaceID != "" && r.Conversation != "" && strings.TrimSpace(r.Title) != "" && !r.At.IsZero()
 }
 
 // AgentSessionStoppedStream is one in-progress streaming message a stop ends:
@@ -251,7 +253,7 @@ type AgentSessionStop struct {
 
 // Valid reports whether the stop names everything a store needs.
 func (s AgentSessionStop) Valid() bool {
-	return s.WorkspaceID != "" && s.Conversation != "" && s.ThreadTimestamp != "" && len(s.Agents) > 0
+	return s.WorkspaceID != "" && s.Conversation != "" && len(s.Agents) > 0
 }
 
 // AgentSessionView is a session as a member's client shows it.

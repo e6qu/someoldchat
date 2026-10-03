@@ -9,18 +9,19 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 // agents.sessions.setStatus and agents.sessions.rename, as Slack's current
 // reference pages define them: a granular bot token with chat:write, a session
 // named by channel_id and thread_ts, and the error codes each page lists.
 //
-// Every session here is a thread session. The pages also describe session
-// channels, for which thread_ts must be omitted; this product has none, so a
-// missing thread_ts is always thread_ts_required and thread_ts_not_allowed,
-// invalid_name and name_taken are never produced. channel_id is required for
-// the same reason — the pages make it optional outside public channels
-// without saying how the session is then found.
+// A session is a thread's, named with thread_ts, or a session channel's — a
+// code channel's (agents.conversations.create) — named without it. The
+// service decides which: thread_ts_required for a thread session named
+// without one, thread_ts_not_allowed for a session channel named with one.
+// channel_id is required — the pages make it optional outside public
+// channels without saying how the session is then found.
 
 func (h Handler) setAgentSessionStatus(w http.ResponseWriter, r *http.Request) {
 	principal, fields, channel, thread, ok := h.agentSessionRequest(w, r)
@@ -107,10 +108,6 @@ func (h Handler) agentSessionRequest(w http.ResponseWriter, r *http.Request) (au
 		writeError(w, "invalid_arguments")
 		return auth.Principal{}, nil, "", "", false
 	}
-	if thread == "" {
-		writeError(w, "thread_ts_required")
-		return auth.Principal{}, nil, "", "", false
-	}
 	return principal, fields, channel, thread, true
 }
 
@@ -154,6 +151,14 @@ func writeRenameAgentSessionError(w http.ResponseWriter, err error) {
 		writeError(w, "not_authorized")
 	case errors.Is(err, domain.ErrAgentSessionNotFound):
 		writeError(w, "session_not_found")
+	// Renaming a session channel's session renames the channel, and these
+	// are the channel's refusals the rename page lists.
+	case errors.Is(err, domain.ErrInvalidCodeChannelName), errors.Is(err, domain.ErrInvalidConversation):
+		writeError(w, "invalid_name")
+	case errors.Is(err, store.ErrAlreadyExists):
+		writeError(w, "name_taken")
+	case errors.Is(err, domain.ErrConversationAlreadyArchived):
+		writeError(w, "is_archived")
 	default:
 		writeAgentSessionError(w, err)
 	}
@@ -163,6 +168,8 @@ func writeAgentSessionError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, domain.ErrAgentSessionThreadRequired):
 		writeError(w, "thread_ts_required")
+	case errors.Is(err, domain.ErrAgentSessionThreadNotAllowed):
+		writeError(w, "thread_ts_not_allowed")
 	case errors.Is(err, domain.ErrInvalidAgentSession):
 		writeError(w, "invalid_arguments")
 	default:

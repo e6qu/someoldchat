@@ -277,6 +277,8 @@ func CheckAscendingPage(request domain.PageRequest) error {
 
 type Store interface {
 	AgentSessionStore
+	CodeChannelStore
+	CodeChannelViewStore
 	AppendEvent(context.Context, events.Event) error
 	// InviteToHuddle journals a huddle invitation and lands it in the invitee's
 	// Activity in one write, so the notification and the durable record agree.

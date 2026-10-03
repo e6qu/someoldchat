@@ -37,8 +37,8 @@ func (m Messages) SetAgentSessionStatus(ctx context.Context, workspaceID domain.
 	if app == "" {
 		return domain.AgentSessionStatusResult{}, domain.ErrInvalidAgentSession
 	}
-	if thread == "" {
-		return domain.AgentSessionStatusResult{}, domain.ErrAgentSessionThreadRequired
+	if _, err := m.agentSessionScope(ctx, workspaceID, conversation, thread); err != nil {
+		return domain.AgentSessionStatusResult{}, err
 	}
 	if !request.Status.Valid() {
 		return domain.AgentSessionStatusResult{}, domain.ErrInvalidAgentSessionStatus
@@ -95,12 +95,58 @@ func (m Messages) SetAgentSessionStatus(ctx context.Context, workspaceID domain.
 	return result, nil
 }
 
+// agentSessionScope decides how a session is named in a conversation. A code
+// channel is a session channel, whose session is the channel's own and is
+// named without a thread (thread_ts_not_allowed otherwise); in any other
+// conversation a session is a thread's (thread_ts_required without one). It
+// answers whether the conversation is a session channel.
+func (m Messages) agentSessionScope(ctx context.Context, workspaceID domain.WorkspaceID, conversation domain.ConversationID, thread domain.MessageTimestamp) (bool, error) {
+	_, err := m.Store.GetCodeChannel(ctx, workspaceID, conversation)
+	switch {
+	case err == nil && thread != "":
+		return true, domain.ErrAgentSessionThreadNotAllowed
+	case err == nil:
+		return true, nil
+	case !errors.Is(err, store.ErrNotFound):
+		return false, err
+	case thread == "":
+		return false, domain.ErrAgentSessionThreadRequired
+	}
+	return false, nil
+}
+
+// renameSessionChannel gives a session channel the name its session's new
+// title folds to, renamed by the actor retitling the session.
+func (m Messages) renameSessionChannel(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversation domain.ConversationID, title string) error {
+	channel, err := m.Store.GetConversation(ctx, conversation)
+	if err != nil {
+		return err
+	}
+	if channel.Archived {
+		return domain.ErrConversationAlreadyArchived
+	}
+	name := domain.CodeChannelName(title, "")
+	if name == "" {
+		return domain.ErrInvalidCodeChannelName
+	}
+	if name == channel.Name {
+		return nil
+	}
+	_, err = m.RenameConversation(ctx, workspaceID, actor, conversation, name)
+	return err
+}
+
 // validateAgentSessionCreation checks the arguments that only matter when a
 // call creates a session: the thread root it is scoped to, its title, and the
 // member named as its initiator.
 func (m Messages) validateAgentSessionCreation(ctx context.Context, workspaceID domain.WorkspaceID, conversation domain.ConversationID, thread domain.MessageTimestamp, title string, initiator domain.UserID) error {
 	if utf8.RuneCountInString(title) > domain.AgentSessionTitleLimit {
 		return domain.ErrInvalidAgentSession
+	}
+	if thread == "" {
+		// A session channel's session is the channel's own; there is no
+		// thread root to check.
+		return m.validateAgentSessionInitiator(ctx, workspaceID, conversation, initiator)
 	}
 	at, err := domain.ParseMessageTimestamp(thread)
 	if err != nil {
@@ -118,6 +164,12 @@ func (m Messages) validateAgentSessionCreation(ctx context.Context, workspaceID 
 	if root.WorkspaceID != workspaceID || root.Deleted || (root.ThreadTimestamp != "" && root.ThreadTimestamp != thread) {
 		return domain.ErrInvalidAgentSession
 	}
+	return m.validateAgentSessionInitiator(ctx, workspaceID, conversation, initiator)
+}
+
+// validateAgentSessionInitiator checks the member a creating setStatus names
+// as the session's initiator.
+func (m Messages) validateAgentSessionInitiator(ctx context.Context, workspaceID domain.WorkspaceID, conversation domain.ConversationID, initiator domain.UserID) error {
 	if initiator == "" {
 		return nil
 	}
@@ -150,12 +202,28 @@ func (m Messages) RenameAgentSession(ctx context.Context, workspaceID domain.Wor
 	if app == "" {
 		return domain.AgentSession{}, domain.ErrAgentSessionNotAgent
 	}
-	if thread == "" {
-		return domain.AgentSession{}, domain.ErrAgentSessionThreadRequired
+	sessionChannel, err := m.agentSessionScope(ctx, workspaceID, conversation, thread)
+	if err != nil {
+		return domain.AgentSession{}, err
 	}
 	title = strings.TrimSpace(title)
 	if !domain.ValidAgentSessionTitle(title) {
 		return domain.AgentSession{}, domain.ErrInvalidAgentSession
+	}
+	if sessionChannel {
+		// Renaming a session channel's session renames the channel, as the
+		// reference says: invalid_name, name_taken and is_archived are the
+		// channel's refusals. Only an agent of the session may.
+		session, err := m.agentSession(ctx, workspaceID, conversation, thread)
+		if err != nil {
+			return domain.AgentSession{}, err
+		}
+		if _, agent := session.Agent(app); !agent {
+			return domain.AgentSession{}, domain.ErrAgentSessionNotAgent
+		}
+		if err := m.renameSessionChannel(ctx, workspaceID, actor, conversation, title); err != nil {
+			return domain.AgentSession{}, err
+		}
 	}
 	return m.retitleAgentSession(ctx, workspaceID, conversation, thread, title, func(session domain.AgentSession, at time.Time) ([]events.Event, error) {
 		if _, agent := session.Agent(app); !agent {
@@ -177,10 +245,21 @@ func (m Messages) ChangeAgentSessionTitle(ctx context.Context, workspaceID domai
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversation); err != nil {
 		return domain.AgentSession{}, err
 	}
-	if thread == "" {
-		return domain.AgentSession{}, domain.ErrAgentSessionThreadRequired
+	sessionChannel, err := m.agentSessionScope(ctx, workspaceID, conversation, thread)
+	if err != nil {
+		return domain.AgentSession{}, err
 	}
 	title = strings.TrimSpace(title)
+	if sessionChannel && domain.ValidAgentSessionTitle(title) {
+		// A member retitling a session channel's session renames the
+		// channel, as an agent's rename does.
+		if _, err := m.agentSession(ctx, workspaceID, conversation, thread); err != nil {
+			return domain.AgentSession{}, err
+		}
+		if err := m.renameSessionChannel(ctx, workspaceID, userID, conversation, title); err != nil {
+			return domain.AgentSession{}, err
+		}
+	}
 	if !domain.ValidAgentSessionTitle(title) {
 		return domain.AgentSession{}, domain.ErrInvalidAgentSession
 	}
@@ -255,8 +334,8 @@ func (m Messages) StopAgentSession(ctx context.Context, workspaceID domain.Works
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversation); err != nil {
 		return domain.AgentSession{}, err
 	}
-	if thread == "" {
-		return domain.AgentSession{}, domain.ErrAgentSessionThreadRequired
+	if _, err := m.agentSessionScope(ctx, workspaceID, conversation, thread); err != nil {
+		return domain.AgentSession{}, err
 	}
 	var err error
 	for attempt := 0; attempt < agentSessionWriteAttempts; attempt++ {
@@ -349,8 +428,8 @@ func (m Messages) AgentSession(ctx context.Context, workspaceID domain.Workspace
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversation); err != nil {
 		return domain.AgentSessionView{}, err
 	}
-	if thread == "" {
-		return domain.AgentSessionView{}, domain.ErrAgentSessionThreadRequired
+	if _, err := m.agentSessionScope(ctx, workspaceID, conversation, thread); err != nil {
+		return domain.AgentSessionView{}, err
 	}
 	session, err := m.agentSession(ctx, workspaceID, conversation, thread)
 	if err != nil {

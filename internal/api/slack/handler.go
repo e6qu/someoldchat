@@ -627,6 +627,18 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents.sessions.setStatus", h.setAgentSessionStatus)
 	mux.HandleFunc("GET /api/agents.sessions.rename", h.renameAgentSession)
 	mux.HandleFunc("POST /api/agents.sessions.rename", h.renameAgentSession)
+	mux.HandleFunc("GET /api/agents.conversations.create", h.createCodeChannel)
+	mux.HandleFunc("POST /api/agents.conversations.create", h.createCodeChannel)
+	mux.HandleFunc("GET /api/agents.conversations.archive", h.archiveCodeChannel)
+	mux.HandleFunc("POST /api/agents.conversations.archive", h.archiveCodeChannel)
+	mux.HandleFunc("GET /api/agents.conversations.setProperties", h.setCodeChannelProperties)
+	mux.HandleFunc("POST /api/agents.conversations.setProperties", h.setCodeChannelProperties)
+	mux.HandleFunc("GET /api/agents.conversations.setView", h.setCodeChannelView)
+	mux.HandleFunc("POST /api/agents.conversations.setView", h.setCodeChannelView)
+	mux.HandleFunc("GET /api/agents.conversations.listViews", h.listCodeChannelViews)
+	mux.HandleFunc("POST /api/agents.conversations.listViews", h.listCodeChannelViews)
+	mux.HandleFunc("GET /api/agents.conversations.removeView", h.removeCodeChannelView)
+	mux.HandleFunc("POST /api/agents.conversations.removeView", h.removeCodeChannelView)
 	mux.HandleFunc("GET /api/pins.add", h.addPin)
 	mux.HandleFunc("POST /api/pins.add", h.addPin)
 	mux.HandleFunc("GET /api/pins.remove", h.removePin)
@@ -6431,6 +6443,10 @@ func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
 		response["properties"] = map[string]any{"canvas": map[string]any{"file_id": canvas.ID, "is_empty": len(document.Sections) == 0}}
 	} else if !errors.Is(canvasErr, store.ErrNotFound) {
 		writeError(w, mapServiceError(canvasErr, "channel_not_found"))
+		return
+	}
+	if err := h.describeCodeChannel(r, principal, conversation.ID, response); err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": response})
@@ -12919,7 +12935,7 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // methods answered invalid_array_arg to the SDK's own request.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages", "property", "recurrence":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages", "property", "recurrence", "code_channel", "agent_resource", "csp":
 		return true
 	default:
 		return false

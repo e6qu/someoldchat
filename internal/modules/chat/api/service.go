@@ -14,6 +14,7 @@ import (
 // local or generated remote clients; callers do not select transport per call.
 type Service interface {
 	AgentSessions
+	CodeChannels
 	RevokeToken(context.Context, string) error
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppInstallation(context.Context, domain.AppInstallation) error

@@ -78,6 +78,20 @@ const conversationShellStyle = `<style>
 .bookmarks-bar li:hover button,.bookmarks-bar li:focus-within button{opacity:1}
 .bookmarks-bar button .icon{width:12px;height:12px}
 .channel-notices{display:grid;gap:6px;padding:0 20px}
+.code-context-bar{display:flex;align-items:center;gap:6px;margin:0;padding:2px 16px 6px;list-style:none;overflow-x:auto;scrollbar-width:thin}
+.code-context-bar li{flex:0 0 auto;padding:2px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;color:var(--muted)}
+.code-context-bar a{display:inline-flex;align-items:center;gap:4px;color:var(--text);text-decoration:none}
+.code-context-bar .icon{width:12px;height:12px}
+.code-view{flex:1 1 auto;min-height:0;overflow:auto;padding:12px 20px}
+.code-view-html{display:flex;padding:0}
+.code-view-frame{flex:1 1 auto;width:100%;min-height:480px;border:0;background:#fff}
+.code-view-diff{margin:0;padding:8px 0;border:1px solid var(--line);border-radius:6px;background:var(--code-bg);font-size:12px;line-height:1.5;overflow-x:auto}
+.code-view-diff span{display:block;padding:0 10px;white-space:pre}
+.code-view-diff .diff-add{background:color-mix(in srgb,var(--ok) 16%,transparent)}
+.code-view-diff .diff-remove{background:color-mix(in srgb,var(--danger) 16%,transparent)}
+.code-view-diff .diff-hunk,.code-view-diff .diff-file{color:var(--muted)}
+.code-view-branches{margin:0 0 8px;color:var(--muted);font-size:13px}
+.code-view-link a{display:inline-flex;align-items:center;gap:6px}
 .channel-notices:has(.notice,.action-feedback:not([hidden])){padding:0 20px 8px}
 .shell .content{grid-template-rows:auto minmax(0,1fr) auto}
 .pins-view .empty strong{display:block;margin-bottom:6px;color:var(--text)}

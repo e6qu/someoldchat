@@ -68,6 +68,36 @@ type appHomeRoundTrip struct {
 	View domain.View
 }
 
+// codeChannelRequestRoundTrip, codeChannelPropertiesRoundTrip,
+// codeChannelViewRequestRoundTrip and contextBarRoundTrip carry what the code channel converters encode beside
+// the domain value: the caller and the channel.
+type codeChannelRequestRoundTrip struct {
+	WorkspaceID domain.WorkspaceID
+	Actor       domain.UserID
+	App         domain.AppID
+	Request     domain.CodeChannelRequest
+}
+
+type codeChannelPropertiesRoundTrip struct {
+	WorkspaceID  domain.WorkspaceID
+	Actor        domain.UserID
+	App          domain.AppID
+	Conversation domain.ConversationID
+	Properties   domain.CodeChannelProperties
+}
+
+type codeChannelViewRequestRoundTrip struct {
+	WorkspaceID  domain.WorkspaceID
+	Actor        domain.UserID
+	App          domain.AppID
+	Conversation domain.ConversationID
+	Request      domain.CodeChannelViewRequest
+}
+
+type contextBarRoundTrip struct {
+	Items []domain.CodeChannelContextItem
+}
+
 // omittedMarker is the value an omitted field is filled with before the wire
 // check. It is distinctive enough that finding it in the marshalled message can
 // only mean the encoder wrote that field.
@@ -638,15 +668,52 @@ func conversionCases() map[string]conversionCase {
 		"InformationBarrier":    {sample: &domain.InformationBarrier{}, through: throughInfallible(encodeProtoBarrier, decodeProtoBarrier)},
 		"AppConfig":             {sample: &domain.AppConfig{}, through: throughInfallible(encodeProtoAppConfig, decodeProtoAppConfig)},
 		"AgentSession":          {sample: &domain.AgentSession{}, through: throughInfallible(encodeProtoAgentSession, decodeProtoAgentSession)},
-		"AppPermission":         {sample: &domain.AppPermission{}, through: throughInfallible(encodeProtoAppPermission, decodeProtoAppPermission)},
-		"MCPServer":             {sample: &domain.MCPServer{}, through: throughInfallible(encodeProtoMCPServer, decodeProtoMCPServer)},
-		"MCPServerPermission":   {sample: &domain.MCPServerPermission{}, through: throughInfallible(encodeProtoMCPServerPermission, decodeProtoMCPServerPermission)},
-		"LinkedObject":          {sample: &domain.LinkedObject{}, through: throughInfallible(encodeProtoLinkedObject, decodeProtoLinkedObject)},
-		"AppActivity":           {sample: &domain.AppActivity{}, through: throughInfallible(encodeProtoAppActivity, decodeProtoAppActivity)},
-		"AppActivityPage":       {sample: &domain.AppActivityPage{}, through: throughInfallible(encodeProtoAppActivityPage, decodeProtoAppActivityPage)},
-		"AnalyticsRow":          {sample: &domain.AnalyticsRow{}, through: throughInfallible(encodeProtoAnalyticsRow, decodeProtoAnalyticsRow)},
-		"AnomalyAllowList":      {sample: &domain.AnomalyAllowList{}, through: throughInfallible(encodeProtoAnomalyAllowList, decodeProtoAnomalyAllowList)},
-		"WorkflowStepResponse":  {sample: &domain.WorkflowStepResponse{}, through: throughInfallible(encodeProtoWorkflowStepResponse, decodeProtoWorkflowStepResponse)},
+		"CodeChannel":           {sample: &domain.CodeChannel{}, through: throughInfallible(encodeProtoCodeChannel, decodeProtoCodeChannel)},
+		"CodeChannelContextBar": {sample: &contextBarRoundTrip{}, through: throughInfallible(
+			func(value contextBarRoundTrip) *chatv1.CodeChannel {
+				return &chatv1.CodeChannel{ContextBar: encodeProtoCodeChannelContextBar(value.Items)}
+			},
+			func(value *chatv1.CodeChannel) contextBarRoundTrip {
+				return contextBarRoundTrip{Items: decodeProtoCodeChannelContextBar(value.GetContextBar())}
+			},
+		)},
+		"CodeChannelRequest": {sample: &codeChannelRequestRoundTrip{}, through: throughInfallible(
+			func(value codeChannelRequestRoundTrip) *chatv1.CreateCodeChannelRequest {
+				return encodeProtoCodeChannelRequest(value.WorkspaceID, value.Actor, value.App, value.Request)
+			},
+			func(value *chatv1.CreateCodeChannelRequest) codeChannelRequestRoundTrip {
+				workspaceID, actor, app, request := decodeProtoCodeChannelRequest(value)
+				return codeChannelRequestRoundTrip{WorkspaceID: workspaceID, Actor: actor, App: app, Request: request}
+			},
+		)},
+		"CodeChannelProperties": {sample: &codeChannelPropertiesRoundTrip{}, through: throughInfallible(
+			func(value codeChannelPropertiesRoundTrip) *chatv1.SetCodeChannelPropertiesRequest {
+				return encodeProtoCodeChannelProperties(value.WorkspaceID, value.Actor, value.App, value.Conversation, value.Properties)
+			},
+			func(value *chatv1.SetCodeChannelPropertiesRequest) codeChannelPropertiesRoundTrip {
+				workspaceID, actor, app, conversation, properties := decodeProtoCodeChannelProperties(value)
+				return codeChannelPropertiesRoundTrip{WorkspaceID: workspaceID, Actor: actor, App: app, Conversation: conversation, Properties: properties}
+			},
+		)},
+		"CodeChannelViewRequest": {sample: &codeChannelViewRequestRoundTrip{}, through: throughInfallible(
+			func(value codeChannelViewRequestRoundTrip) *chatv1.SetCodeChannelViewRequest {
+				return encodeProtoCodeChannelViewRequest(value.WorkspaceID, value.Actor, value.App, value.Conversation, value.Request)
+			},
+			func(value *chatv1.SetCodeChannelViewRequest) codeChannelViewRequestRoundTrip {
+				workspaceID, actor, app, conversation, request := decodeProtoCodeChannelViewRequest(value)
+				return codeChannelViewRequestRoundTrip{WorkspaceID: workspaceID, Actor: actor, App: app, Conversation: conversation, Request: request}
+			},
+		)},
+		"CodeChannelView":      {sample: &domain.CodeChannelView{}, through: throughInfallible(encodeProtoCodeChannelView, decodeProtoCodeChannelView)},
+		"AppPermission":        {sample: &domain.AppPermission{}, through: throughInfallible(encodeProtoAppPermission, decodeProtoAppPermission)},
+		"MCPServer":            {sample: &domain.MCPServer{}, through: throughInfallible(encodeProtoMCPServer, decodeProtoMCPServer)},
+		"MCPServerPermission":  {sample: &domain.MCPServerPermission{}, through: throughInfallible(encodeProtoMCPServerPermission, decodeProtoMCPServerPermission)},
+		"LinkedObject":         {sample: &domain.LinkedObject{}, through: throughInfallible(encodeProtoLinkedObject, decodeProtoLinkedObject)},
+		"AppActivity":          {sample: &domain.AppActivity{}, through: throughInfallible(encodeProtoAppActivity, decodeProtoAppActivity)},
+		"AppActivityPage":      {sample: &domain.AppActivityPage{}, through: throughInfallible(encodeProtoAppActivityPage, decodeProtoAppActivityPage)},
+		"AnalyticsRow":         {sample: &domain.AnalyticsRow{}, through: throughInfallible(encodeProtoAnalyticsRow, decodeProtoAnalyticsRow)},
+		"AnomalyAllowList":     {sample: &domain.AnomalyAllowList{}, through: throughInfallible(encodeProtoAnomalyAllowList, decodeProtoAnomalyAllowList)},
+		"WorkflowStepResponse": {sample: &domain.WorkflowStepResponse{}, through: throughInfallible(encodeProtoWorkflowStepResponse, decodeProtoWorkflowStepResponse)},
 		"AppPermissionChange": {
 			sample: &domain.AppPermissionChange{},
 			through: func(t *testing.T, filled any) (any, proto.Message, error) {
