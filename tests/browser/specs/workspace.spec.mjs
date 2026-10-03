@@ -1778,7 +1778,9 @@ test('[COMP-01 COMP-02 COMP-03 A11Y-01] the composer draws Slack\'s controls, an
   const attach = form.getByRole('button', { name: 'Attach' });
   await attach.click();
   await expect(page.getByRole('menuitem', { name: 'Upload from your computer' })).toBeFocused();
-  await expect(page.getByRole('menu', { name: 'Attach' }).getByRole('menuitem')).toHaveText(['Upload from your computer', 'Canvas', 'List', 'Workflow', 'Text snippet', 'Shortcuts']);
+  // The menu's own items; Recent files, a group below them, depends on what
+  // this member has uploaded so far.
+  await expect(page.getByRole('menu', { name: 'Attach' }).locator(':scope > [role="menuitem"]')).toHaveText(['Upload from your computer', 'Canvas', 'List', 'Workflow', 'Text snippet', 'Shortcuts']);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu', { name: 'Attach' })).toBeHidden();
   await expect(attach).toBeFocused();
@@ -4216,6 +4218,35 @@ test('[SEARCH-02 A11Y-01] the Only my channels and Exclude automations chips ref
   await expect(page.getByRole('checkbox', { name: 'Only my channels' })).toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Exclude automations' })).toBeChecked();
   await expect(page.locator('.result')).toHaveCount(1);
+});
+
+// The composer's + menu offers the member's own recent files; choosing one
+// shares it into the conversation as its own message.
+test('[COMP-01 FILE-02 A11Y-01] a recent file is shared from the composer menu', async ({ page, context, request }) => {
+  await signIn(context);
+  const name = `recent-${Date.now()}.txt`;
+  const bytes = 'recent file';
+  const ticket = await (await request.post('/api/files.getUploadURLExternal', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/x-www-form-urlencoded' },
+    form: { filename: name, length: String(bytes.length) },
+  })).json();
+  expect(ticket.ok, JSON.stringify(ticket)).toBe(true);
+  const transfer = await request.post(ticket.upload_url, { headers: { 'content-type': 'application/octet-stream' }, data: bytes });
+  expect(transfer.status()).toBeLessThan(300);
+  const complete = await (await request.post('/api/files.completeUploadExternal', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { files: [{ id: ticket.file_id, title: name }] },
+  })).json();
+  expect(complete.ok, JSON.stringify(complete)).toBe(true);
+
+  await page.goto(`/app?channel=${CHANNEL}`);
+  await expect(page.locator('#timeline').getByText(name)).toHaveCount(0);
+  await page.locator('#composer').getByRole('button', { name: 'Attach' }).click();
+  const menu = page.getByRole('menu', { name: 'Attach' });
+  await expect(menu.getByRole('group', { name: 'Recent files' })).toBeVisible();
+  await menu.getByRole('menuitem', { name: `Share ${name}` }).click();
+  await expect(page).toHaveURL(new RegExp(`channel=${CHANNEL}`));
+  await expect(page.locator('#timeline').getByText(name).first()).toBeVisible();
 });
 
 // A canvas keeps what it said before, and a member can put it back. Restoring
