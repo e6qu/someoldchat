@@ -58,7 +58,7 @@ const iconSprite = `<svg class="icon-sprite" aria-hidden="true" focusable="false
 // shellPartials is parsed into every page template (mustPage), so any page can
 // draw the frame by rendering these with its shellView.
 const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#content">Skip to the content</a>
-<div class="shell" data-channel="{{.Channel}}">
+<div class="shell" data-channel="{{.Channel}}"{{if .Preferences}} data-preferences="{{.Preferences}}" data-preferences-csrf="{{.CSRFToken}}"{{end}}>
 {{template "shell-top" .}}
 <div class="workspace without-pane">
 {{template "shell-rail" .}}

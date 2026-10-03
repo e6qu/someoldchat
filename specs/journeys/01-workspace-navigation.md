@@ -137,9 +137,12 @@ syntax, emoji, files, and app-rendered content. Changing appearance MUST not
 reload or discard in-progress work.
 
 Appearance is chosen in Preferences (`Command/Control+,`, or the avatar menu):
-Light, Dark, or the operating system's setting. Here the choice, like the
-other Preferences, is kept per browser rather than per account; that
-difference is recorded in the product gap audit.
+Light, Dark, or the operating system's setting. The choice, like the other
+Preferences (sidebar, sort and show, mark as read, what Enter does, markup,
+skin tone), is kept for the member's account, as Slack keeps it: a browser the
+member has never used starts with it, and a preference a browser kept before
+its account did is kept for the account on that browser's next visit. Recent
+conversations stay with each browser.
 
 ## NAV-07 — Review the threads you follow
 

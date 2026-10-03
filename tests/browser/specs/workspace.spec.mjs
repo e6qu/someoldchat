@@ -1971,6 +1971,36 @@ test('[COMP-01 COMP-02] Preferences choose what Enter does and whether to write 
   await expect(markup).toHaveValue('*plain*');
   await markup.press(`${primary}+b`);
   await expect(markup).toHaveValue('plain');
+
+  // Preferences follow the member, so the next test's browser would inherit
+  // markup mode: put the default back.
+  await page.goto('/app/preferences');
+  await page.getByRole('tab', { name: 'Advanced' }).click();
+  await page.getByRole('checkbox', { name: 'Format messages with markup' }).uncheck();
+  await expect.poll(async () => (await (await page.request.get('/app')).text()).includes('composer-markup&#34;:&#34;false')).toBe(true);
+});
+
+// Preferences follow the member, as Slack's follow the account: one chosen in
+// one browser is the one a browser the member has never used starts with.
+test('[COMP-01 NAV-06] a preference chosen in one browser follows the member to another', async ({ browser, page, context }) => {
+  await signIn(context);
+  await page.goto('/app/preferences');
+  await page.getByRole('tab', { name: 'Advanced' }).click();
+  await page.getByRole('radio', { name: /Start a new line/ }).check();
+  await expect.poll(async () => (await (await page.request.get('/app')).text()).includes('composer-enter&#34;:&#34;newline')).toBe(true);
+
+  const elsewhere = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+  try {
+    await signIn(elsewhere);
+    const other = await elsewhere.newPage();
+    await other.goto('/app/preferences');
+    await other.getByRole('tab', { name: 'Advanced' }).click();
+    await expect(other.getByRole('radio', { name: /Start a new line/ })).toBeChecked();
+    await other.getByRole('radio', { name: 'Send the message' }).check();
+    await expect.poll(async () => (await (await other.request.get('/app')).text()).includes('composer-enter&#34;:&#34;send')).toBe(true);
+  } finally {
+    await elsewhere.close();
+  }
 });
 
 test('[SCHED-01] the schedule menu offers Slack\'s suggested times in the member\'s zone', async ({ page, context }) => {

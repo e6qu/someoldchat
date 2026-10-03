@@ -424,6 +424,8 @@ type Service interface {
 	RenewClientConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.ClientConnectionID) (domain.ClientConnection, error)
 	CloseClientConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.ClientConnectionID) error
 	ClientConnectionCount(context.Context, domain.WorkspaceID, domain.UserID) (int, error)
+	MemberPreferences(context.Context, domain.WorkspaceID, domain.UserID) (map[string]string, error)
+	SetMemberPreference(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	ReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	MessageAt(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
 	ThreadSummaries(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.MessageTimestamp) (map[domain.MessageTimestamp]domain.ThreadSummary, error)

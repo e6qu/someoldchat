@@ -60,6 +60,7 @@ type Store struct {
 	slackbotResponses             map[domain.SlackbotResponseID]domain.SlackbotResponse
 	slackbotResponseCursor        map[domain.WorkspaceID]uint64
 	clientConnections             map[domain.ClientConnectionID]domain.ClientConnection
+	memberPreferences             map[string]map[string]string
 	workflowRuns                  map[domain.WorkflowRunID]domain.WorkflowRun
 	automationPermissions         map[string]domain.AutomationPermission
 	featuredWorkflows             map[domain.ConversationID][]domain.FeaturedWorkflow
@@ -347,6 +348,7 @@ func New() *Store {
 		slackbotResponses:             make(map[domain.SlackbotResponseID]domain.SlackbotResponse),
 		slackbotResponseCursor:        make(map[domain.WorkspaceID]uint64),
 		clientConnections:             make(map[domain.ClientConnectionID]domain.ClientConnection),
+		memberPreferences:             make(map[string]map[string]string),
 		workflowRuns:                  make(map[domain.WorkflowRunID]domain.WorkflowRun),
 		automationPermissions:         make(map[string]domain.AutomationPermission),
 		featuredWorkflows:             make(map[domain.ConversationID][]domain.FeaturedWorkflow),

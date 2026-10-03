@@ -223,6 +223,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
 ` + codeChannelViewSchema + `
 ` + slackbotResponseSchema + `
 ` + clientConnectionSchema + `
+` + memberPreferenceSchema + `
 CREATE TABLE IF NOT EXISTS conversation_typing (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
  user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL,
@@ -611,7 +612,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 209
+const schemaVersion = 210
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3588,6 +3589,15 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 210: member preferences ---
+	if version < 210 {
+		// Preferences were kept by each browser; a new table starts empty and
+		// each client's next change keeps its value for the member.
+		if _, err := db.ExecContext(ctx, memberPreferenceSchema); err != nil {
+			return fmt.Errorf("migrate member preferences: %w", err)
+		}
+	}
+	// --- end schema 210 ---
 	// --- schema 209: client connections ---
 	if version < 209 {
 		// Presence follows open client connections, as on Slack. No connection
@@ -5294,6 +5304,7 @@ var migratableTables = []string{
 	"assistant_threads",
 	"workspace_retention",
 	"client_connections",
+	"member_preferences",
 	"code_channels",
 }
 
