@@ -623,17 +623,23 @@ type pageData struct {
 	// one canvas of its own, which is not the same thing as a canvas shared
 	// into it; it is empty until somebody writes in it, and it is offered only
 	// to members, because only a member may read or create one.
-	CanvasURL   string
-	IsMember    bool
-	CanPost     bool
-	CanSchedule bool
-	CanUpload   bool
-	CanJoin     bool
-	CanCreate   bool
-	JoinURL     string
-	Username    string
-	UserInitial string
-	OlderURL    string
+	CanvasURL string
+	IsMember  bool
+	CanPost   bool
+	// PostingRestricted and CanReply apply a channel's posting preferences
+	// before the member types: a member who_can_post excludes sees why in
+	// place of the channel composer, and one can_thread excludes gets no
+	// thread composer. The send still enforces both.
+	PostingRestricted bool
+	CanReply          bool
+	CanSchedule       bool
+	CanUpload         bool
+	CanJoin           bool
+	CanCreate         bool
+	JoinURL           string
+	Username          string
+	UserInitial       string
+	OlderURL          string
 	// LatestURL is set when the rendered window is not the newest one. It is
 	// both the "jump to the latest messages" pager and the composer's
 	// data-newest, so a post made while reading older history takes the
@@ -2056,6 +2062,7 @@ const workspaceRefinements = `<style>
 .section-menu input[type=text],.channel-menu input[type=text]{min-width:0;border:1px solid #ffffff8a;border-radius:4px;background:#ffffff1f;color:#fff;padding:5px 6px}
 .section-menu button,.channel-menu button{border:0;border-radius:4px;background:#ffffff26;color:#fff;font-weight:700;padding:5px 8px;text-align:left;cursor:pointer;width:100%}
 .conversation-gate{border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.posting-restricted{margin:8px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:10px 12px;color:var(--muted)}
 .conversation-gate-copy{min-width:0}
 .conversation-gate strong{display:block;margin-bottom:2px}
 .conversation-gate p{margin:0;color:var(--muted);font-size:13px}
@@ -2185,12 +2192,19 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
         </div>{{end}}
         <div id="agent-session" data-fragment="{{.AgentSession.FragmentURL}}" data-live="true">{{template "agent-session" .AgentSession}}</div>
         <div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div>
-        {{if .CanPost}}<div class="composer-wrap thread-composer-wrap">{{template "composer" .ThreadComposer}}</div>{{end}}
+        {{if .CanReply}}<div class="composer-wrap thread-composer-wrap">{{template "composer" .ThreadComposer}}</div>{{else if .CanPost}}<p class="posting-restricted" role="note">Only some members can reply to threads in {{.ChannelPrefix}}{{.ChannelName}}.</p>{{end}}
       </aside>
       {{end}}
       <div class="composer-wrap channel-composer-wrap">
         <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
-        {{if or (eq .Tab "pins") (eq .Tab "view")}}{{else if .CanPost}}{{template "composer" .Composer}}
+        {{if or (eq .Tab "pins") (eq .Tab "view")}}{{else if .PostingRestricted}}
+        <section class="conversation-gate" aria-label="Conversation access">
+          <div class="conversation-gate-copy">
+            <strong>Only some members can post in {{.ChannelPrefix}}{{.ChannelName}}.</strong>
+            <p>{{if .CanReply}}You can still reply in its threads.{{else}}You can read its messages and react to them.{{end}}</p>
+          </div>
+        </section>
+        {{else if .CanPost}}{{template "composer" .Composer}}
         {{else}}
         <section class="conversation-gate" aria-label="Conversation access">
           <div class="conversation-gate-copy">
@@ -2222,7 +2236,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
 {{if .IsMember}}{{template "channel-notifications" .}}{{end}}
 {{if .Modal}}
 <div class="modal-backdrop">
-  <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
+  <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title"{{if .Modal.Revision}} data-view-id="{{.Modal.ID}}" data-view-revision="{{.Modal.Revision}}"{{end}}>
     <form id="modal-close-form" method="post" action="{{if .Modal.Dialog}}/app/dialog/close{{else}}/app/view/close{{end}}?channel={{.Channel}}">
       <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="{{if .Modal.Dialog}}dialog_id{{else}}view_id{{end}}" value="{{.Modal.ID}}"><input type="hidden" name="clear" value="{{.Modal.ClearOnClose}}">
     </form>
@@ -3738,7 +3752,7 @@ var deliver=function(event){
 try{document.dispatchEvent(new CustomEvent('sameoldchat:event',{detail:{type:event.type,data:event.data}}))}catch(error){}
 if(event.type==='huddle.signal'||event.type==='huddle.reaction')return;
 if((event.type==='view.closed'||event.type==='view.submitted'||event.type==='dialog.closed')&&!document.querySelector('.app-modal'))return;
-if(event.type.indexOf('view.')===0||event.type.indexOf('dialog.')===0){var viewFrame=null;try{viewFrame=JSON.parse(event.data)}catch(error){}if(viewFrame&&viewFrame.state_only)return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload();return}
+if(event.type.indexOf('view.')===0||event.type.indexOf('dialog.')===0){var viewFrame=null;try{viewFrame=JSON.parse(event.data)}catch(error){}if(viewFrame&&viewFrame.state_only)return;if(viewFrame&&viewFrame.revision&&event.type!=='view.closed'&&document.querySelector('.app-modal[data-view-id="'+CSS.escape(viewFrame.view_id)+'"][data-view-revision="'+CSS.escape(viewFrame.revision)+'"]'))return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload();return}
 var live=regions(false);
 if(!live.length){announce('New activity is available in this conversation.');return}
 scheduleRefresh();
@@ -4977,6 +4991,15 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	canJoin := !isMember && !conversation.Archived && conversation.Kind.OrPublic() == domain.ConversationTypePublic && principal.HasScope(auth.ScopeChannelsManage)
 	canPost := isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite)
 	canUpload := canPost && principal.HasScope(auth.ScopeFilesWrite)
+	postingRestricted, canReply := false, canPost
+	if canPost {
+		permissions, permissionsErr := h.Messages.PostingPermissions(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID)
+		if permissionsErr != nil {
+			notices = append(notices, "Who may post here could not be checked; a message this channel does not accept is refused when sent.")
+		} else {
+			postingRestricted, canReply = !permissions.Messages, permissions.Replies
+		}
+	}
 	var composerDialogs composerDialogsView
 	if canPost {
 		directory, directoryNotices := h.composerDirectoryFor(r.Context(), principal, conversation)
@@ -5115,6 +5138,8 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		CanvasURL:            channelCanvasURL(principal, conversation, isMember),
 		IsMember:             isMember,
 		CanPost:              canPost,
+		PostingRestricted:    postingRestricted,
+		CanReply:             canReply,
 		CanSchedule:          principal.HasScope(auth.ScopeChatWrite),
 		CanUpload:            canUpload,
 		CanJoin:              canJoin,

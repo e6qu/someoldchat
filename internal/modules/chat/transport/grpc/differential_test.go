@@ -5254,6 +5254,23 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The two permissions are separate booleans, so a transport that
+			// swapped or dropped one would offer a composer the send refuses.
+			name: "posting permissions report each preference separately",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				prefs := domain.ConversationPrefs{WhoCanPost: domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{domain.ConversationPosterAdmins}}}
+				if _, err := chat.AdminSetConversationPrefs(ctx, "T1", "UA", "C1", prefs); err != nil {
+					return nil, err
+				}
+				member, err := chat.PostingPermissions(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				_, missing := chat.PostingPermissions(ctx, "T1", "U1", "Cmissing")
+				return []any{member, errors.Is(missing, storepkg.ErrNotFound)}, nil
+			},
+		},
+		{
 			// The server discarded the user the module resolved and the client
 			// fabricated an identifier-only record, so every other field of the
 			// returned user was empty across the seam.

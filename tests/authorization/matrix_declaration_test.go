@@ -398,6 +398,7 @@ func authorityMatrix() map[string]authority {
 		"OpenAppHome":                             authorityAnyMember,
 		"OpenAppMessages":                         authorityAnyMember,
 		"CurrentDialog":                           authorityAnyMember,
+		"PostingPermissions":                      authorityAnyMember,
 		"SubmitDialog":                            authorityAnyMember,
 		"CancelDialog":                            authorityAnyMember,
 		"OpenConversation":                        authorityAnyMember,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
@@ -165,5 +166,48 @@ func TestWhoCanPostRejectsUnknownVocabulary(t *testing.T) {
 		CanThread: domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{"nobody"}},
 	}); !errors.Is(err, domain.ErrInvalidConversationPrefs) {
 		t.Fatalf("unknown thread class error = %v, want ErrInvalidConversationPrefs", err)
+	}
+}
+
+// PostingPermissions answers what a send would: each member class against
+// who_can_post and can_thread separately, every permission in a direct
+// message, and a refusal for someone outside the conversation.
+func TestPostingPermissionsAgreeWithTheSend(t *testing.T) {
+	ctx, m, s := postingWorld(t)
+	if _, err := m.AdminSetConversationPrefs(ctx, "T1", "Uadmin", "C1", domain.ConversationPrefs{
+		WhoCanPost: domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{domain.ConversationPosterAdmins}},
+		CanThread:  domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{domain.ConversationPosterRegularMembers}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		user domain.UserID
+		domain.PostingPermissions
+	}{
+		{"Uadmin", domain.PostingPermissions{Messages: true, Replies: true}},
+		{"Umember", domain.PostingPermissions{Messages: false, Replies: true}},
+		{"Uguest", domain.PostingPermissions{Messages: false, Replies: false}},
+	} {
+		got, err := m.PostingPermissions(ctx, "T1", want.user, "C1")
+		if err != nil || got != want.PostingPermissions {
+			t.Errorf("%s: %+v %v, want %+v", want.user, got, err, want.PostingPermissions)
+		}
+	}
+	mustNotPost(t, ctx, m, "Umember")
+
+	if err := s.SeedConversation(domain.Conversation{ID: "D1", WorkspaceID: "T1", Kind: domain.ConversationTypeIM}); err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range []domain.UserID{"Umember", "Uguest"} {
+		if err := s.SeedConversationMember("D1", user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := m.PostingPermissions(ctx, "T1", "Uguest", "D1"); err != nil || !got.Messages || !got.Replies {
+		t.Fatalf("a direct message: %+v %v", got, err)
+	}
+	// Someone outside a direct message cannot learn it exists.
+	if _, err := m.PostingPermissions(ctx, "T1", "Uallow", "D1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a non-member: %v", err)
 	}
 }

@@ -282,6 +282,11 @@ message ConversationPrefsRequest {
   string conversation_id = 3;
 }
 
+message PostingPermissions {
+  bool messages = 1;
+  bool replies = 2;
+}
+
 // SetConversationPrefsRequest names its target conversation explicitly.
 //
 // `conversation_id` is the target; `prefs.conversation_id` is ignored by the
@@ -685,6 +690,7 @@ service DirectoryService {
   rpc SetWorkspaceDefaultChannels(SetWorkspaceDefaultChannelsRequest) returns (Workspace);
   rpc GetConversationPrefs(ConversationPrefsRequest) returns (ConversationPrefs);
   rpc SetConversationPrefs(SetConversationPrefsRequest) returns (ConversationPrefs);
+  rpc GetPostingPermissions(ConversationPrefsRequest) returns (PostingPermissions);
   rpc AdminTeamUsers(AdminTeamUsersRequest) returns (UserPage);
   rpc AdminInviteUser(AdminInviteUserRequest) returns (MutationResponse);
   rpc AdminCreateUser(AdminCreateUserRequest) returns (User);
