@@ -210,8 +210,28 @@ func TestReactionPillsNameReactorsAndToolbarLeadsWithRecentEmoji(t *testing.T) {
 	body := getWithCookies(t, mux, "/app?channel=Cdev", &http.Cookie{Name: recentEmojiCookie, Value: "rocket.%2B1.not-an-emoji-name-at-all"})
 	article := articleFor(t, body, domain.NewMessageTimestamp(created))
 	requireOrdered(t, "pills in first-use order", article, `title="Grace Hopper reacted with :zap:"`, `title="Grace Hopper and you reacted with :eyes:"`)
-	requireOrdered(t, "toolbar", article[strings.Index(article, `class="message-actions"`):], `data-quick-reaction aria-label="React with :rocket:"`, `aria-label="React with :thumbsup:"`, `aria-label="React with :white_check_mark:"`, `aria-label="Add reaction"`, `aria-label="Reply in thread"`, `aria-label="Forward message"`, `aria-label="Save for later"`, `aria-label="More actions"`)
+	// The member's own reactions lead, as Slack's follow the account; this
+	// browser's recent emoji come after them.
+	requireOrdered(t, "toolbar", article[strings.Index(article, `class="message-actions"`):], `data-quick-reaction aria-label="React with :eyes:"`, `aria-label="React with :rocket:"`, `aria-label="React with :thumbsup:"`, `aria-label="Add reaction"`, `aria-label="Reply in thread"`, `aria-label="Forward message"`, `aria-label="Save for later"`, `aria-label="More actions"`)
 	requireContains(t, "add reaction pill", article, `class="chip add-reaction-chip"`)
+}
+
+// A browser the member has never used still offers their own recent
+// reactions first, then Slack's defaults without repeating one.
+func TestToolbarReactionsFollowTheMemberToANewBrowser(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	created := time.Unix(1700000000, 0).UTC()
+	seedMessage(t, s, "M1", "react to me", created)
+	if err := s.AddReaction(context.Background(), domain.Reaction{Message: "M1", Name: "eyes", UserID: "U1", CreatedAt: created.Add(time.Second)},
+		events.Event{ID: "ER1", WorkspaceID: "T1", Topic: "reaction.added", Payload: "M1", CreatedAt: created.Add(time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	article := articleFor(t, get(t, mux, "/app?channel=Cdev").Body.String(), domain.NewMessageTimestamp(created))
+	toolbar := article[strings.Index(article, `class="message-actions"`):]
+	requireOrdered(t, "toolbar", toolbar, `data-quick-reaction aria-label="React with :eyes:"`, `aria-label="React with :white_check_mark:"`, `aria-label="React with :raised_hands:"`, `aria-label="Add reaction"`)
+	if strings.Count(toolbar, `data-quick-reaction aria-label="React with :eyes:"`) != 1 {
+		t.Fatal("the toolbar offered :eyes: twice")
+	}
 }
 
 // THREAD-01: the Threads view lists threads — messages with replies — with

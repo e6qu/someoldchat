@@ -114,8 +114,10 @@ The corresponding documented one-key shortcuts (`E`, `Delete`/`Backspace`,
 `T`, `F`, `P`, `A`, `U`, `M`, `R`) apply only when a message has keyboard
 focus. They MUST not fire while editing text.
 
-The hover toolbar leads with one-click reactions from the member's recent
-emoji, then Add reaction, Reply in thread, Forward message, Save for later and
+The hover toolbar leads with three one-click reactions: the emoji the member
+most recently reacted with, from their account so they follow the member to
+any client, then the emoji this browser used, then Slack's defaults (white
+check mark, eyes, raised hands), none twice. Then Add reaction, Reply in thread, Forward message, Save for later and
 More actions. More actions lists, with separators and key hints: the thread
 notification toggle; Mark unread (`U`); Remind me about this, a submenu of In
 20 minutes, In 1 hour, In 3 hours, Tomorrow, Next week and Custom…; Copy link;

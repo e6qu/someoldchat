@@ -426,6 +426,7 @@ func authorityMatrix() map[string]authority {
 		"RecentSearches":                          authorityAnyMember,
 		"RecordAccess":                            authorityAnyMember,
 		"RecordActivity":                          authorityAnyMember,
+		"RecentReactions":                         authorityAnyMember,
 		"OpenClientConnection":                    authorityAnyMember,
 		"RenewClientConnection":                   authorityAnyMember,
 		"CloseClientConnection":                   authorityAnyMember,

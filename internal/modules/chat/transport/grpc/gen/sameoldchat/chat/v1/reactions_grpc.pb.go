@@ -19,16 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ReactionsService_AddReaction_FullMethodName    = "/sameoldchat.chat.v1.ReactionsService/AddReaction"
-	ReactionsService_RemoveReaction_FullMethodName = "/sameoldchat.chat.v1.ReactionsService/RemoveReaction"
-	ReactionsService_Reactions_FullMethodName      = "/sameoldchat.chat.v1.ReactionsService/Reactions"
-	ReactionsService_UserReactions_FullMethodName  = "/sameoldchat.chat.v1.ReactionsService/UserReactions"
-	ReactionsService_AddPin_FullMethodName         = "/sameoldchat.chat.v1.ReactionsService/AddPin"
-	ReactionsService_RemovePin_FullMethodName      = "/sameoldchat.chat.v1.ReactionsService/RemovePin"
-	ReactionsService_Pins_FullMethodName           = "/sameoldchat.chat.v1.ReactionsService/Pins"
-	ReactionsService_AddStar_FullMethodName        = "/sameoldchat.chat.v1.ReactionsService/AddStar"
-	ReactionsService_RemoveStar_FullMethodName     = "/sameoldchat.chat.v1.ReactionsService/RemoveStar"
-	ReactionsService_Stars_FullMethodName          = "/sameoldchat.chat.v1.ReactionsService/Stars"
+	ReactionsService_AddReaction_FullMethodName     = "/sameoldchat.chat.v1.ReactionsService/AddReaction"
+	ReactionsService_RemoveReaction_FullMethodName  = "/sameoldchat.chat.v1.ReactionsService/RemoveReaction"
+	ReactionsService_Reactions_FullMethodName       = "/sameoldchat.chat.v1.ReactionsService/Reactions"
+	ReactionsService_UserReactions_FullMethodName   = "/sameoldchat.chat.v1.ReactionsService/UserReactions"
+	ReactionsService_RecentReactions_FullMethodName = "/sameoldchat.chat.v1.ReactionsService/RecentReactions"
+	ReactionsService_AddPin_FullMethodName          = "/sameoldchat.chat.v1.ReactionsService/AddPin"
+	ReactionsService_RemovePin_FullMethodName       = "/sameoldchat.chat.v1.ReactionsService/RemovePin"
+	ReactionsService_Pins_FullMethodName            = "/sameoldchat.chat.v1.ReactionsService/Pins"
+	ReactionsService_AddStar_FullMethodName         = "/sameoldchat.chat.v1.ReactionsService/AddStar"
+	ReactionsService_RemoveStar_FullMethodName      = "/sameoldchat.chat.v1.ReactionsService/RemoveStar"
+	ReactionsService_Stars_FullMethodName           = "/sameoldchat.chat.v1.ReactionsService/Stars"
 )
 
 // ReactionsServiceClient is the client API for ReactionsService service.
@@ -39,6 +40,7 @@ type ReactionsServiceClient interface {
 	RemoveReaction(ctx context.Context, in *ReactionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	Reactions(ctx context.Context, in *ReactionPageRequest, opts ...grpc.CallOption) (*ReactionPage, error)
 	UserReactions(ctx context.Context, in *UserReactionsRequest, opts ...grpc.CallOption) (*UserReactionPage, error)
+	RecentReactions(ctx context.Context, in *RecentReactionsRequest, opts ...grpc.CallOption) (*RecentReactionsResponse, error)
 	AddPin(ctx context.Context, in *PinRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	RemovePin(ctx context.Context, in *PinRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	Pins(ctx context.Context, in *PinsRequest, opts ...grpc.CallOption) (*PinPage, error)
@@ -89,6 +91,16 @@ func (c *reactionsServiceClient) UserReactions(ctx context.Context, in *UserReac
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UserReactionPage)
 	err := c.cc.Invoke(ctx, ReactionsService_UserReactions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *reactionsServiceClient) RecentReactions(ctx context.Context, in *RecentReactionsRequest, opts ...grpc.CallOption) (*RecentReactionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecentReactionsResponse)
+	err := c.cc.Invoke(ctx, ReactionsService_RecentReactions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +175,7 @@ type ReactionsServiceServer interface {
 	RemoveReaction(context.Context, *ReactionRequest) (*MutationResponse, error)
 	Reactions(context.Context, *ReactionPageRequest) (*ReactionPage, error)
 	UserReactions(context.Context, *UserReactionsRequest) (*UserReactionPage, error)
+	RecentReactions(context.Context, *RecentReactionsRequest) (*RecentReactionsResponse, error)
 	AddPin(context.Context, *PinRequest) (*MutationResponse, error)
 	RemovePin(context.Context, *PinRequest) (*MutationResponse, error)
 	Pins(context.Context, *PinsRequest) (*PinPage, error)
@@ -189,6 +202,9 @@ func (UnimplementedReactionsServiceServer) Reactions(context.Context, *ReactionP
 }
 func (UnimplementedReactionsServiceServer) UserReactions(context.Context, *UserReactionsRequest) (*UserReactionPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method UserReactions not implemented")
+}
+func (UnimplementedReactionsServiceServer) RecentReactions(context.Context, *RecentReactionsRequest) (*RecentReactionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RecentReactions not implemented")
 }
 func (UnimplementedReactionsServiceServer) AddPin(context.Context, *PinRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddPin not implemented")
@@ -296,6 +312,24 @@ func _ReactionsService_UserReactions_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ReactionsServiceServer).UserReactions(ctx, req.(*UserReactionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ReactionsService_RecentReactions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecentReactionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReactionsServiceServer).RecentReactions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ReactionsService_RecentReactions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReactionsServiceServer).RecentReactions(ctx, req.(*RecentReactionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -430,6 +464,10 @@ var ReactionsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UserReactions",
 			Handler:    _ReactionsService_UserReactions_Handler,
+		},
+		{
+			MethodName: "RecentReactions",
+			Handler:    _ReactionsService_RecentReactions_Handler,
 		},
 		{
 			MethodName: "AddPin",

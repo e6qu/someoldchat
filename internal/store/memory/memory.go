@@ -13315,3 +13315,44 @@ func (s *Store) AdvanceSlackbotResponseCursor(_ context.Context, workspace domai
 	}
 	return nil
 }
+
+// RecentReactionNames mirrors the SQL profile: each emoji's latest use by the
+// member, compared as the fixed-width stored instant SQL compares, most recent
+// first and by name on a tie.
+func (s *Store) RecentReactionNames(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, limit int) ([]string, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("recent reaction limit must be positive")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	latest := map[string]domain.StoredTime{}
+	for messageID, reactions := range s.reactions {
+		message, err := s.messageLocked(messageID)
+		if err != nil || message.WorkspaceID != workspace {
+			continue
+		}
+		for _, reaction := range reactions {
+			if reaction.UserID != user {
+				continue
+			}
+			at := domain.NewStoredTime(reaction.CreatedAt)
+			if current, seen := latest[reaction.Name]; !seen || at > current {
+				latest[reaction.Name] = at
+			}
+		}
+	}
+	names := make([]string, 0, len(latest))
+	for name := range latest {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(left, right int) bool {
+		if latest[names[left]] != latest[names[right]] {
+			return latest[names[left]] > latest[names[right]]
+		}
+		return names[left] < names[right]
+	})
+	if len(names) > limit {
+		names = names[:limit]
+	}
+	return names, nil
+}

@@ -23360,3 +23360,26 @@ func (s *Store) SearchRemoteFiles(ctx context.Context, workspace domain.Workspac
 	store.SortRemoteFiles(values, search.Direction)
 	return values[:min(limit, len(values))], len(values), nil
 }
+
+func (s *Store) RecentReactionNames(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, limit int) ([]string, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("recent reaction limit must be positive")
+	}
+	// reactions.created_at is a fixed-width stored instant, so its maximum is
+	// the latest use on every profile.
+	rows, err := s.db.QueryContext(ctx, `SELECT r.name, MAX(r.created_at) AS last_used FROM reactions r JOIN messages m ON m.id = r.message_id
+		WHERE m.workspace_id = ? AND r.user_id = ? GROUP BY r.name ORDER BY last_used DESC, r.name LIMIT ?`, workspace, user, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := []string{}
+	for rows.Next() {
+		var name, lastUsed string
+		if err := rows.Scan(&name, &lastUsed); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}

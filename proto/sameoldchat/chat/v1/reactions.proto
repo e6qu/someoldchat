@@ -109,11 +109,22 @@ message StarPage {
   int64 total = 4;
 }
 
+message RecentReactionsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+}
+
+message RecentReactionsResponse {
+  repeated string names = 1;
+}
+
 service ReactionsService {
   rpc AddReaction(ReactionRequest) returns (MutationResponse);
   rpc RemoveReaction(ReactionRequest) returns (MutationResponse);
   rpc Reactions(ReactionPageRequest) returns (ReactionPage);
   rpc UserReactions(UserReactionsRequest) returns (UserReactionPage);
+  rpc RecentReactions(RecentReactionsRequest) returns (RecentReactionsResponse);
   rpc AddPin(PinRequest) returns (MutationResponse);
   rpc RemovePin(PinRequest) returns (MutationResponse);
   rpc Pins(PinsRequest) returns (PinPage);

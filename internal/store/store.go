@@ -1186,6 +1186,10 @@ type Store interface {
 	RemoveReaction(context.Context, domain.Reaction, events.Event) error
 	ListReactions(context.Context, domain.MessageID, domain.PageRequest) ([]domain.Reaction, domain.Cursor, bool, error)
 	ListUserReactions(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.UserReactionPage, error)
+	// RecentReactionNames is the distinct emoji a member has reacted with in
+	// the workspace, the most recently used first (by name on a tie), at most
+	// limit of them.
+	RecentReactionNames(context.Context, domain.WorkspaceID, domain.UserID, int) ([]string, error)
 	AddPin(context.Context, domain.Pin, events.Event) error
 	RemovePin(context.Context, domain.Pin, events.Event) error
 	ListPins(context.Context, domain.ConversationID, domain.PageRequest) ([]domain.Pin, domain.Cursor, bool, error)

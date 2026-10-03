@@ -983,6 +983,110 @@ func (x *StarPage) GetTotal() int64 {
 	return 0
 }
 
+type RecentReactionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecentReactionsRequest) Reset() {
+	*x = RecentReactionsRequest{}
+	mi := &file_sameoldchat_chat_v1_reactions_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecentReactionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecentReactionsRequest) ProtoMessage() {}
+
+func (x *RecentReactionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_reactions_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecentReactionsRequest.ProtoReflect.Descriptor instead.
+func (*RecentReactionsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_reactions_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RecentReactionsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *RecentReactionsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *RecentReactionsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type RecentReactionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Names         []string               `protobuf:"bytes,1,rep,name=names,proto3" json:"names,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecentReactionsResponse) Reset() {
+	*x = RecentReactionsResponse{}
+	mi := &file_sameoldchat_chat_v1_reactions_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecentReactionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecentReactionsResponse) ProtoMessage() {}
+
+func (x *RecentReactionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_reactions_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecentReactionsResponse.ProtoReflect.Descriptor instead.
+func (*RecentReactionsResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_reactions_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RecentReactionsResponse) GetNames() []string {
+	if x != nil {
+		return x.Names
+	}
+	return nil
+}
+
 var File_sameoldchat_chat_v1_reactions_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_reactions_proto_rawDesc = "" +
@@ -1069,12 +1173,19 @@ const file_sameoldchat_chat_v1_reactions_proto_rawDesc = "" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
 	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12\x14\n" +
-	"\x05total\x18\x04 \x01(\x03R\x05total2\xed\x06\n" +
+	"\x05total\x18\x04 \x01(\x03R\x05total\"j\n" +
+	"\x16RecentReactionsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\"/\n" +
+	"\x17RecentReactionsResponse\x12\x14\n" +
+	"\x05names\x18\x01 \x03(\tR\x05names2\xdb\a\n" +
 	"\x10ReactionsService\x12Z\n" +
 	"\vAddReaction\x12$.sameoldchat.chat.v1.ReactionRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12]\n" +
 	"\x0eRemoveReaction\x12$.sameoldchat.chat.v1.ReactionRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12X\n" +
 	"\tReactions\x12(.sameoldchat.chat.v1.ReactionPageRequest\x1a!.sameoldchat.chat.v1.ReactionPage\x12a\n" +
-	"\rUserReactions\x12).sameoldchat.chat.v1.UserReactionsRequest\x1a%.sameoldchat.chat.v1.UserReactionPage\x12P\n" +
+	"\rUserReactions\x12).sameoldchat.chat.v1.UserReactionsRequest\x1a%.sameoldchat.chat.v1.UserReactionPage\x12l\n" +
+	"\x0fRecentReactions\x12+.sameoldchat.chat.v1.RecentReactionsRequest\x1a,.sameoldchat.chat.v1.RecentReactionsResponse\x12P\n" +
 	"\x06AddPin\x12\x1f.sameoldchat.chat.v1.PinRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12S\n" +
 	"\tRemovePin\x12\x1f.sameoldchat.chat.v1.PinRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12F\n" +
 	"\x04Pins\x12 .sameoldchat.chat.v1.PinsRequest\x1a\x1c.sameoldchat.chat.v1.PinPage\x12Q\n" +
@@ -1095,56 +1206,60 @@ func file_sameoldchat_chat_v1_reactions_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_reactions_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_reactions_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_sameoldchat_chat_v1_reactions_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_sameoldchat_chat_v1_reactions_proto_goTypes = []any{
-	(*Reaction)(nil),             // 0: sameoldchat.chat.v1.Reaction
-	(*ReactionPage)(nil),         // 1: sameoldchat.chat.v1.ReactionPage
-	(*UserReaction)(nil),         // 2: sameoldchat.chat.v1.UserReaction
-	(*UserReactionPage)(nil),     // 3: sameoldchat.chat.v1.UserReactionPage
-	(*Pin)(nil),                  // 4: sameoldchat.chat.v1.Pin
-	(*PinPage)(nil),              // 5: sameoldchat.chat.v1.PinPage
-	(*ReactionRequest)(nil),      // 6: sameoldchat.chat.v1.ReactionRequest
-	(*ReactionPageRequest)(nil),  // 7: sameoldchat.chat.v1.ReactionPageRequest
-	(*UserReactionsRequest)(nil), // 8: sameoldchat.chat.v1.UserReactionsRequest
-	(*PinRequest)(nil),           // 9: sameoldchat.chat.v1.PinRequest
-	(*PinsRequest)(nil),          // 10: sameoldchat.chat.v1.PinsRequest
-	(*Star)(nil),                 // 11: sameoldchat.chat.v1.Star
-	(*StarsRequest)(nil),         // 12: sameoldchat.chat.v1.StarsRequest
-	(*StarPage)(nil),             // 13: sameoldchat.chat.v1.StarPage
-	(*Message)(nil),              // 14: sameoldchat.chat.v1.Message
-	(*MutationResponse)(nil),     // 15: sameoldchat.chat.v1.MutationResponse
+	(*Reaction)(nil),                // 0: sameoldchat.chat.v1.Reaction
+	(*ReactionPage)(nil),            // 1: sameoldchat.chat.v1.ReactionPage
+	(*UserReaction)(nil),            // 2: sameoldchat.chat.v1.UserReaction
+	(*UserReactionPage)(nil),        // 3: sameoldchat.chat.v1.UserReactionPage
+	(*Pin)(nil),                     // 4: sameoldchat.chat.v1.Pin
+	(*PinPage)(nil),                 // 5: sameoldchat.chat.v1.PinPage
+	(*ReactionRequest)(nil),         // 6: sameoldchat.chat.v1.ReactionRequest
+	(*ReactionPageRequest)(nil),     // 7: sameoldchat.chat.v1.ReactionPageRequest
+	(*UserReactionsRequest)(nil),    // 8: sameoldchat.chat.v1.UserReactionsRequest
+	(*PinRequest)(nil),              // 9: sameoldchat.chat.v1.PinRequest
+	(*PinsRequest)(nil),             // 10: sameoldchat.chat.v1.PinsRequest
+	(*Star)(nil),                    // 11: sameoldchat.chat.v1.Star
+	(*StarsRequest)(nil),            // 12: sameoldchat.chat.v1.StarsRequest
+	(*StarPage)(nil),                // 13: sameoldchat.chat.v1.StarPage
+	(*RecentReactionsRequest)(nil),  // 14: sameoldchat.chat.v1.RecentReactionsRequest
+	(*RecentReactionsResponse)(nil), // 15: sameoldchat.chat.v1.RecentReactionsResponse
+	(*Message)(nil),                 // 16: sameoldchat.chat.v1.Message
+	(*MutationResponse)(nil),        // 17: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_reactions_proto_depIdxs = []int32{
 	0,  // 0: sameoldchat.chat.v1.ReactionPage.reactions:type_name -> sameoldchat.chat.v1.Reaction
-	14, // 1: sameoldchat.chat.v1.UserReaction.message:type_name -> sameoldchat.chat.v1.Message
+	16, // 1: sameoldchat.chat.v1.UserReaction.message:type_name -> sameoldchat.chat.v1.Message
 	0,  // 2: sameoldchat.chat.v1.UserReaction.reaction:type_name -> sameoldchat.chat.v1.Reaction
 	2,  // 3: sameoldchat.chat.v1.UserReactionPage.items:type_name -> sameoldchat.chat.v1.UserReaction
-	14, // 4: sameoldchat.chat.v1.Pin.item:type_name -> sameoldchat.chat.v1.Message
+	16, // 4: sameoldchat.chat.v1.Pin.item:type_name -> sameoldchat.chat.v1.Message
 	4,  // 5: sameoldchat.chat.v1.PinPage.pins:type_name -> sameoldchat.chat.v1.Pin
-	14, // 6: sameoldchat.chat.v1.Star.message:type_name -> sameoldchat.chat.v1.Message
+	16, // 6: sameoldchat.chat.v1.Star.message:type_name -> sameoldchat.chat.v1.Message
 	11, // 7: sameoldchat.chat.v1.StarPage.stars:type_name -> sameoldchat.chat.v1.Star
 	6,  // 8: sameoldchat.chat.v1.ReactionsService.AddReaction:input_type -> sameoldchat.chat.v1.ReactionRequest
 	6,  // 9: sameoldchat.chat.v1.ReactionsService.RemoveReaction:input_type -> sameoldchat.chat.v1.ReactionRequest
 	7,  // 10: sameoldchat.chat.v1.ReactionsService.Reactions:input_type -> sameoldchat.chat.v1.ReactionPageRequest
 	8,  // 11: sameoldchat.chat.v1.ReactionsService.UserReactions:input_type -> sameoldchat.chat.v1.UserReactionsRequest
-	9,  // 12: sameoldchat.chat.v1.ReactionsService.AddPin:input_type -> sameoldchat.chat.v1.PinRequest
-	9,  // 13: sameoldchat.chat.v1.ReactionsService.RemovePin:input_type -> sameoldchat.chat.v1.PinRequest
-	10, // 14: sameoldchat.chat.v1.ReactionsService.Pins:input_type -> sameoldchat.chat.v1.PinsRequest
-	9,  // 15: sameoldchat.chat.v1.ReactionsService.AddStar:input_type -> sameoldchat.chat.v1.PinRequest
-	9,  // 16: sameoldchat.chat.v1.ReactionsService.RemoveStar:input_type -> sameoldchat.chat.v1.PinRequest
-	12, // 17: sameoldchat.chat.v1.ReactionsService.Stars:input_type -> sameoldchat.chat.v1.StarsRequest
-	15, // 18: sameoldchat.chat.v1.ReactionsService.AddReaction:output_type -> sameoldchat.chat.v1.MutationResponse
-	15, // 19: sameoldchat.chat.v1.ReactionsService.RemoveReaction:output_type -> sameoldchat.chat.v1.MutationResponse
-	1,  // 20: sameoldchat.chat.v1.ReactionsService.Reactions:output_type -> sameoldchat.chat.v1.ReactionPage
-	3,  // 21: sameoldchat.chat.v1.ReactionsService.UserReactions:output_type -> sameoldchat.chat.v1.UserReactionPage
-	15, // 22: sameoldchat.chat.v1.ReactionsService.AddPin:output_type -> sameoldchat.chat.v1.MutationResponse
-	15, // 23: sameoldchat.chat.v1.ReactionsService.RemovePin:output_type -> sameoldchat.chat.v1.MutationResponse
-	5,  // 24: sameoldchat.chat.v1.ReactionsService.Pins:output_type -> sameoldchat.chat.v1.PinPage
-	15, // 25: sameoldchat.chat.v1.ReactionsService.AddStar:output_type -> sameoldchat.chat.v1.MutationResponse
-	15, // 26: sameoldchat.chat.v1.ReactionsService.RemoveStar:output_type -> sameoldchat.chat.v1.MutationResponse
-	13, // 27: sameoldchat.chat.v1.ReactionsService.Stars:output_type -> sameoldchat.chat.v1.StarPage
-	18, // [18:28] is the sub-list for method output_type
-	8,  // [8:18] is the sub-list for method input_type
+	14, // 12: sameoldchat.chat.v1.ReactionsService.RecentReactions:input_type -> sameoldchat.chat.v1.RecentReactionsRequest
+	9,  // 13: sameoldchat.chat.v1.ReactionsService.AddPin:input_type -> sameoldchat.chat.v1.PinRequest
+	9,  // 14: sameoldchat.chat.v1.ReactionsService.RemovePin:input_type -> sameoldchat.chat.v1.PinRequest
+	10, // 15: sameoldchat.chat.v1.ReactionsService.Pins:input_type -> sameoldchat.chat.v1.PinsRequest
+	9,  // 16: sameoldchat.chat.v1.ReactionsService.AddStar:input_type -> sameoldchat.chat.v1.PinRequest
+	9,  // 17: sameoldchat.chat.v1.ReactionsService.RemoveStar:input_type -> sameoldchat.chat.v1.PinRequest
+	12, // 18: sameoldchat.chat.v1.ReactionsService.Stars:input_type -> sameoldchat.chat.v1.StarsRequest
+	17, // 19: sameoldchat.chat.v1.ReactionsService.AddReaction:output_type -> sameoldchat.chat.v1.MutationResponse
+	17, // 20: sameoldchat.chat.v1.ReactionsService.RemoveReaction:output_type -> sameoldchat.chat.v1.MutationResponse
+	1,  // 21: sameoldchat.chat.v1.ReactionsService.Reactions:output_type -> sameoldchat.chat.v1.ReactionPage
+	3,  // 22: sameoldchat.chat.v1.ReactionsService.UserReactions:output_type -> sameoldchat.chat.v1.UserReactionPage
+	15, // 23: sameoldchat.chat.v1.ReactionsService.RecentReactions:output_type -> sameoldchat.chat.v1.RecentReactionsResponse
+	17, // 24: sameoldchat.chat.v1.ReactionsService.AddPin:output_type -> sameoldchat.chat.v1.MutationResponse
+	17, // 25: sameoldchat.chat.v1.ReactionsService.RemovePin:output_type -> sameoldchat.chat.v1.MutationResponse
+	5,  // 26: sameoldchat.chat.v1.ReactionsService.Pins:output_type -> sameoldchat.chat.v1.PinPage
+	17, // 27: sameoldchat.chat.v1.ReactionsService.AddStar:output_type -> sameoldchat.chat.v1.MutationResponse
+	17, // 28: sameoldchat.chat.v1.ReactionsService.RemoveStar:output_type -> sameoldchat.chat.v1.MutationResponse
+	13, // 29: sameoldchat.chat.v1.ReactionsService.Stars:output_type -> sameoldchat.chat.v1.StarPage
+	19, // [19:30] is the sub-list for method output_type
+	8,  // [8:19] is the sub-list for method input_type
 	8,  // [8:8] is the sub-list for extension type_name
 	8,  // [8:8] is the sub-list for extension extendee
 	0,  // [0:8] is the sub-list for field type_name
@@ -1163,7 +1278,7 @@ func file_sameoldchat_chat_v1_reactions_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_reactions_proto_rawDesc), len(file_sameoldchat_chat_v1_reactions_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
