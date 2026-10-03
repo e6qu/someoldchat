@@ -731,6 +731,7 @@ func (r Remote) SearchMessages(ctx context.Context, workspaceID domain.Workspace
 		WorkspaceId: string(workspaceID), UserId: string(userID), Query: request.Query,
 		Limit: int32(request.Page.Limit), Cursor: string(request.Page.Cursor),
 		ConversationId: string(request.Conversation), Sort: string(request.Sort), Direction: string(request.Direction),
+		OnlyMyChannels: request.OnlyMyChannels, ExcludeAutomations: request.ExcludeAutomations,
 	}
 	out, err := r.messages.Search(ctx, in)
 	if err != nil {
@@ -10468,7 +10469,8 @@ func (s *Server) searchProto(ctx context.Context, input *chatv1.SearchRequest) (
 	request := domain.MessageSearchRequest{
 		Query: input.GetQuery(), Conversation: domain.ConversationID(input.GetConversationId()),
 		Sort: domain.SearchSort(input.GetSort()), Direction: domain.SearchDirection(input.GetDirection()),
-		Page: protoPageRequest(input.GetLimit(), input.GetCursor()),
+		Page:           protoPageRequest(input.GetLimit(), input.GetCursor()),
+		OnlyMyChannels: input.GetOnlyMyChannels(), ExcludeAutomations: input.GetExcludeAutomations(),
 	}
 	page, err := s.implementation.SearchMessages(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {

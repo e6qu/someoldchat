@@ -1158,12 +1158,16 @@ type searchData struct {
 	Before               string
 	Has                  string
 	CurrentOnly          bool
-	ResultCount          int
-	Error                string
-	MoreURL              string
-	Warning              string
-	Recent               []searchHistoryView
-	Searched             bool
+	// OnlyMine and ExcludeAutomations are Slack's "Only my channels" and
+	// "Exclude automations" message filters.
+	OnlyMine           bool
+	ExcludeAutomations bool
+	ResultCount        int
+	Error              string
+	MoreURL            string
+	Warning            string
+	Recent             []searchHistoryView
+	Searched           bool
 	// Summary is the sentence under the tabs ("1 result for “x”").
 	Summary string
 	// ScopeName names the conversation a Ctrl/Cmd+F search is confined to,
@@ -2642,6 +2646,7 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 .search-summary{margin:0 0 12px;color:var(--muted)}
 .scope-note{margin:0 0 12px;color:var(--muted);font-size:13px}
 .search-filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 14px}
+.v-chip-check{cursor:pointer}.v-chip-check input{margin:0;accent-color:var(--action)}.v-chip-check:has(input:checked){border-color:var(--action);background:var(--hover);box-shadow:inset 0 0 0 1px var(--action)}.v-chip-check:focus-within{outline:2px solid var(--action);outline-offset:2px}
 .search-filters .v-menu-list{min-width:260px;padding:10px;gap:8px}
 .search-filters .v-menu-list label{display:grid;gap:4px;padding:0;font-size:12px;font-weight:700;color:var(--muted)}
 .search-filters .v-menu-list label:hover{background:transparent;color:var(--muted)}
@@ -2676,6 +2681,7 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 {{if not .CurrentOnly}}<label class="v-chip{{if .SelectedConversation}} on{{end}}"><span aria-hidden="true">In</span><select name="in" aria-label="In"><option value="">Anywhere</option>{{range .ConversationOptions}}<option value="{{.ID}}"{{if eq .ID $.SelectedConversation}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>{{end}}
 <label class="v-chip{{if .DatePreset}} on{{end}}"><span aria-hidden="true">Date</span><select name="date" aria-label="Date">{{range .DateOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label>
 <label class="v-chip{{if .Has}} on{{end}}"><span aria-hidden="true">{{if eq .Type "files"}}Type{{else}}Has{{end}}</span><select name="has" aria-label="{{if eq .Type "files"}}File type{{else}}Contains{{end}}"><option value="">Anything</option>{{if eq .Type "messages"}}<option value="file"{{if eq .Has "file"}} selected{{end}}>A file</option><option value="link"{{if eq .Has "link"}} selected{{end}}>A link</option><option value="pin"{{if eq .Has "pin"}} selected{{end}}>A pin</option><option value="reaction"{{if eq .Has "reaction"}} selected{{end}}>A reaction</option>{{else}}<option value="images"{{if eq .Has "images"}} selected{{end}}>Images</option><option value="pdf"{{if eq .Has "pdf"}} selected{{end}}>PDF files</option><option value="text"{{if eq .Has "text"}} selected{{end}}>Text files</option>{{end}}</select></label>
+{{if eq .Type "messages"}}{{if not .CurrentOnly}}<label class="v-chip v-chip-check{{if .OnlyMine}} on{{end}}"><input type="checkbox" name="mine" value="1"{{if .OnlyMine}} checked{{end}}>Only my channels</label>{{end}}<label class="v-chip v-chip-check{{if .ExcludeAutomations}} on{{end}}"><input type="checkbox" name="automations" value="exclude"{{if .ExcludeAutomations}} checked{{end}}>Exclude automations</label>{{end}}
 <details class="v-menu"><summary class="v-chip{{if or .After .Before}} on{{end}}" role="button" aria-label="More filters">More filters<span aria-hidden="true"> ▾</span></summary><div class="v-menu-list"><label>After<input type="date" name="after" value="{{.After}}"></label><label>Before<input type="date" name="before" value="{{.Before}}"></label></div></details>
 <label class="v-chip"><span aria-hidden="true">Sort</span><select name="order" aria-label="Sort"><option value="relevant"{{if eq .Sort "score"}} selected{{end}}>Most relevant</option><option value="newest"{{if and (eq .Sort "timestamp") (eq .Direction "desc")}} selected{{end}}>Newest</option><option value="oldest"{{if eq .Direction "asc"}} selected{{end}}>Oldest</option></select></label>
 <noscript><button class="v-btn" type="submit">Apply filters</button></noscript>
@@ -8067,6 +8073,8 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		Has:                  strings.TrimSpace(r.URL.Query().Get("has")),
 		CurrentOnly:          r.URL.Query().Get("scope") == "channel",
 		DatePreset:           strings.TrimSpace(r.URL.Query().Get("date")),
+		OnlyMine:             r.URL.Query().Get("mine") == "1",
+		ExcludeAutomations:   r.URL.Query().Get("automations") == "exclude",
 	}
 	if sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName); cookieErr == nil && strings.TrimSpace(sessionCookie.Value) != "" {
 		data.CSRFToken = auth.CSRFToken(sessionCookie.Value)
@@ -8136,7 +8144,8 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	case "messages":
 		request := domain.MessageSearchRequest{
 			Query: effectiveQuery, Sort: sortOrder, Direction: direction,
-			Page: domain.PageRequest{Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))},
+			Page:           domain.PageRequest{Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))},
+			OnlyMyChannels: data.OnlyMine, ExcludeAutomations: data.ExcludeAutomations,
 		}
 		if data.CurrentOnly {
 			request.Conversation = domain.ConversationID(channel)

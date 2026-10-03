@@ -100,11 +100,18 @@ type MessageSearch struct {
 	// failure than returning nothing, because it looks like an answer.
 	ReactionName string
 	// HasLink matches messages carrying a URL, which is Slack's `has:link`.
-	HasLink   bool
-	SavedBy   UserID
-	Sort      SearchSort
-	Direction SearchDirection
-	Page      PageRequest
+	HasLink bool
+	SavedBy UserID
+	// MemberOf keeps results to the conversations this member belongs to,
+	// Slack's "Only my channels" filter; public channels they have not joined
+	// are otherwise searchable.
+	MemberOf UserID
+	// ExcludeAutomations drops what apps, bots, workflows and Slackbot posted,
+	// Slack's "Exclude automations" filter.
+	ExcludeAutomations bool
+	Sort               SearchSort
+	Direction          SearchDirection
+	Page               PageRequest
 }
 
 type MessageSearchRequest struct {
@@ -113,6 +120,17 @@ type MessageSearchRequest struct {
 	Sort         SearchSort
 	Direction    SearchDirection
 	Page         PageRequest
+	// OnlyMyChannels and ExcludeAutomations are the web client's search
+	// filters. Slack's query grammar has no modifier for either, so they are
+	// options of the request rather than words of the query.
+	OnlyMyChannels     bool
+	ExcludeAutomations bool
+}
+
+// MessageIsAutomated reports a message an app, a bot, a workflow or Slackbot
+// posted rather than a person; isBotUser says whether an author is a bot user.
+func MessageIsAutomated(message Message, isBotUser bool) bool {
+	return message.AppID != "" || message.Subtype == "bot_message" || message.AuthorID == SlackbotUserID || isBotUser
 }
 
 type FileSearch struct {

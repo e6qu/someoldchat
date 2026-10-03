@@ -4179,6 +4179,45 @@ test('[SEARCH-02] a named emoji search matches that reaction and not any reactio
   await expect(page.locator('.result')).toHaveCount(1);
 });
 
+// Search's "Only my channels" keeps message results to conversations the
+// member belongs to; a public channel they left is otherwise searchable. The
+// chips filter in place, and their state is what the page reports.
+test('[SEARCH-02 A11Y-01] the Only my channels and Exclude automations chips refine message results', async ({ page, context, request }) => {
+  await signIn(context);
+  const needle = `chips-${Date.now()}`;
+  await postThroughTheAPI(request, `${needle} in general`);
+  const api = async (method, data) => {
+    const response = await request.post(`/api/${method}`, {
+      headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+      data,
+    });
+    const body = await response.json();
+    expect(body.ok, `${method}: ${JSON.stringify(body)}`).toBe(true);
+    return body;
+  };
+  const created = await api('conversations.create', { name: `left-${Date.now()}` });
+  await api('chat.postMessage', { channel: created.channel.id, text: `${needle} in a channel I left` });
+  await api('conversations.leave', { channel: created.channel.id });
+
+  await page.goto(`/app/search?q=${encodeURIComponent(needle)}&channel=Cdev`);
+  await expect(page.locator('.result')).toHaveCount(2);
+  const mine = page.getByRole('checkbox', { name: 'Only my channels' });
+  await expect(mine).not.toBeChecked();
+  await mine.check();
+  await expect(page.locator('.result')).toHaveCount(1);
+  await expect(page.locator('.result').first()).toContainText('in general');
+  await expect(page).toHaveURL(/[?&]mine=1/);
+
+  // A person's message is not an automation, so excluding automations keeps
+  // it; the chip reads as checked after a reload.
+  await page.getByRole('checkbox', { name: 'Exclude automations' }).check();
+  await expect(page).toHaveURL(/[?&]automations=exclude/);
+  await page.reload();
+  await expect(page.getByRole('checkbox', { name: 'Only my channels' })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Exclude automations' })).toBeChecked();
+  await expect(page.locator('.result')).toHaveCount(1);
+});
+
 // A canvas keeps what it said before, and a member can put it back. Restoring
 // is an ordinary edit rather than a rewind, so the content it replaced becomes
 // a revision of its own — which is what makes restoring the wrong one
