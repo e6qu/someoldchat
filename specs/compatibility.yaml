@@ -1296,12 +1296,14 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/scheduler:TestRecurringReminderMovesToItsNextOccurrence
+      - go-test:internal/scheduler:TestDeliveredReminderControlsCompleteAndSnoozeIt
+      - go-test:internal/web:TestSlackbotReminderControlsWorkFromTheSlackbotDM
       - go-test:internal/api/slack:TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse
       - go-test:internal/api/slack:TestReminderRecurrenceObjectSetsHowItRepeats
       - go-test:internal/scheduler:TestReminderDeliveryFiresEachReminderOnce
     deviations:
       - Natural-language times cover the phrases the first-party /remind command reads (in N minutes/hours/days/weeks/months/years, tomorrow, on a date, weekday or month and day, at a time, every day/week/month/year or weekday) in the zone of the member's notification schedule (UTC otherwise); other phrasings answer cannot_parse. The recurrence argument (frequency, and weekdays for weekly) sets how the reminder repeats, with time giving its first occurrence; a recurrence it cannot read is cannot_parse, the method's pinned code for an unreadable time.
-      - At the due instant Slackbot (USLACKBOT, as in every Slack workspace) posts Reminder followed by the reminder's text into the member's Slackbot direct message, and into the channel for a channel reminder; Slack's reminder message also carries buttons to mark it complete or snooze it, which are not reproduced.
+      - At the due instant Slackbot (USLACKBOT, as in every Slack workspace) posts Reminder followed by the reminder's text into the member's Slackbot direct message, and into the channel for a channel reminder. The direct message carries Slack's controls - Mark as complete (for a one-time reminder) and Remind me about this (in 20 minutes, 1 hour or 3 hours, or at 9:00 in the member's zone tomorrow or next Monday) - which Slackbot answers itself, completing the reminder or setting a new one-time reminder of the same text, and replacing the controls with what was done. A channel reminder carries no controls.
       - The current token-type-dependent rules for setting another user's reminder have not been differentially qualified.
     audit:
       downgraded_from: behavior-compatible
