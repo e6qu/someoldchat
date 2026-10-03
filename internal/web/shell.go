@@ -74,14 +74,17 @@ type shellView struct {
 	// Slack's Add coworkers sends to the workspace administrators. A guest
 	// may do neither.
 	CanRequestInvite bool
-	ShowIdentity     bool
-	CanCreate        bool
-	CanSchedule      bool
-	CanSetStatus     bool
-	CanMessage       bool
-	ReminderUnread   bool
-	Keyboard         []keyboardSectionView
-	Switcher         []switcherEntry
+	// Timezone is the member's profile zone, which Language & region shows
+	// and lets them set by hand.
+	Timezone       string
+	ShowIdentity   bool
+	CanCreate      bool
+	CanSchedule    bool
+	CanSetStatus   bool
+	CanMessage     bool
+	ReminderUnread bool
+	Keyboard       []keyboardSectionView
+	Switcher       []switcherEntry
 	// Directs is the member's DMs, newest activity first, for the DMs pane.
 	Directs []conversationView
 	// SearchQuery pre-fills the top bar's search field on the search page.
@@ -212,6 +215,7 @@ func (h Handler) newShell(r *http.Request, principal auth.Principal, request she
 	view.WorkspaceInitial = initial(view.WorkspaceName)
 	if user, err := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, principal.UserID); err == nil {
 		view.Username = displayName(user)
+		view.Timezone = user.Profile.Timezone
 		view.CanRequestInvite = !view.ShowAuthAdmin && view.CanCreate && !user.Restricted && !user.UltraRestricted
 		view.AvatarURL = profileImageURL(user.Profile)
 		view.Away = user.Presence == domain.PresenceAway

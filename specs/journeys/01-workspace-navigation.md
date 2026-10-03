@@ -151,6 +151,11 @@ previews, shows emoji as their `:codes:`, and turns off large emoji. Each
 applies at once to every message on the page and is kept with the account like
 the rest.
 
+Language & region sets the member's time zone automatically from the browser,
+as Slack does by default, or by hand: choosing a zone turns the automatic zone
+off, so a browser in another zone no longer moves it, and turning it back on
+lets the browser's zone in again.
+
 ## NAV-07 — Review the threads you follow
 
 Slack's Threads view lists the threads a member follows, most recently replied

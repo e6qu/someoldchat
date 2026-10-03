@@ -291,6 +291,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     <button type="button" role="tab" id="pref-tab-accessibility" aria-controls="pref-accessibility" aria-selected="false" tabindex="-1">{{icon "info"}}<span>Accessibility</span></button>
     <button type="button" role="tab" id="pref-tab-read" aria-controls="pref-read" aria-selected="false" tabindex="-1">{{icon "check"}}<span>Mark as read</span></button>
     <button type="button" role="tab" id="pref-tab-media" aria-controls="pref-media" aria-selected="false" tabindex="-1">{{icon "files"}}<span>Messages &amp; media</span></button>
+    <button type="button" role="tab" id="pref-tab-region" aria-controls="pref-region" aria-selected="false" tabindex="-1">{{icon "later"}}<span>Language &amp; region</span></button>
     <button type="button" role="tab" id="pref-tab-advanced" aria-controls="pref-advanced" aria-selected="false" tabindex="-1">{{icon "gear"}}<span>Advanced</span></button>
   </div>
   <div class="preferences-panels">
@@ -360,6 +361,21 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       <fieldset><legend>Emoji</legend>
         <label><input type="checkbox" data-preference="emoji-as-text"> Display emoji as plain text</label>
         <label><input type="checkbox" data-preference="jumbomoji" data-default="true"> Show large emoji in messages that contain only emoji</label>
+      </fieldset>
+    </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-region" aria-labelledby="pref-tab-region" tabindex="0" hidden>
+      <h3>Language &amp; region</h3>
+      <p>Language: English. This workspace is not offered in another language.</p>
+      <fieldset><legend>Time zone</legend>
+        <label><input type="checkbox" data-preference="timezone-auto" data-default="true"> Set time zone automatically</label>
+        <form class="timezone-form" method="post" action="/app/preferences/timezone?channel={{.Channel}}">
+          <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+          <label for="pref-timezone">Time zone</label>
+          <input id="pref-timezone" type="text" name="timezone" value="{{.Timezone}}" list="pref-timezone-options" autocomplete="off" required>
+          <datalist id="pref-timezone-options" data-timezone-options></datalist>
+          <button class="button" type="submit">Set time zone</button>
+        </form>
+        <p class="dialog-note">Setting a time zone by hand turns the automatic one off. Times, reminders and scheduled messages follow it.</p>
       </fieldset>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-advanced" aria-labelledby="pref-tab-advanced" tabindex="0" hidden>

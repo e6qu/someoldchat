@@ -2400,6 +2400,37 @@ test('[NAV-06 A11Y-01] accessibility and message display preferences change how 
   await expect(page.locator('html')).not.toHaveAttribute('data-pref-underline-links', /.*/);
 });
 
+// Language & region sets the time zone by hand, which turns the automatic zone
+// off, as Slack's does.
+test('[NAV-06 A11Y-01] Language & region sets the time zone by hand', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto(`/app?channel=${CHANNEL}`);
+  const { primary } = await slackModifiers(page);
+  await page.keyboard.press(`${primary}+Comma`);
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.getByRole('tab', { name: 'Language & region' }).click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-region');
+  const zone = preferences.getByLabel('Time zone', { exact: true });
+  const original = await zone.inputValue();
+  expect(await page.locator('#pref-timezone-options option[value="Europe/Berlin"]').count()).toBe(1);
+  await zone.fill('Europe/Berlin');
+  await preferences.getByRole('button', { name: 'Set time zone' }).click();
+  await expect(page.locator('.channel-notices .notice')).toContainText('Your time zone is now Europe/Berlin.');
+
+  await page.keyboard.press(`${primary}+Comma`);
+  await preferences.getByRole('tab', { name: 'Language & region' }).click();
+  await expect(preferences.getByRole('checkbox', { name: 'Set time zone automatically' })).not.toBeChecked();
+  await expect(zone).toHaveValue('Europe/Berlin');
+
+  // Every test shares one member: put the zone and the automatic setting back.
+  await zone.fill(original || 'UTC');
+  await preferences.getByRole('button', { name: 'Set time zone' }).click();
+  await expect(page.locator('.channel-notices .notice')).toContainText(`Your time zone is now ${original || 'UTC'}.`);
+  await page.keyboard.press(`${primary}+Comma`);
+  await preferences.getByRole('tab', { name: 'Language & region' }).click();
+  await preferences.getByRole('checkbox', { name: 'Set time zone automatically' }).check();
+});
+
 // Slack's switcher is a combobox over a listbox: the typed text filters, the
 // highlighted option is the active descendant, an empty result says so, and
 // with nothing typed the conversations just visited lead.
