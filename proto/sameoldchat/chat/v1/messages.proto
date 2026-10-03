@@ -279,6 +279,10 @@ message SearchRequest {
   string conversation_id = 6;
   string sort = 7;
   string direction = 8;
+  // The web client's search filters, which the query grammar has no
+  // modifier for.
+  bool only_my_channels = 9;
+  bool exclude_automations = 10;
 }
 
 message RecordSearchRequest {

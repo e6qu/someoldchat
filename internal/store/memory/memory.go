@@ -12171,6 +12171,11 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 				continue
 			}
 		}
+		if search.MemberOf != "" {
+			if _, member := s.memberships[conversationID][search.MemberOf]; !member {
+				continue
+			}
+		}
 		for _, message := range messages {
 			if message.Deleted {
 				continue
@@ -12186,7 +12191,8 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 				(search.HasPins && len(s.pins[message.ID]) == 0) ||
 				(search.HasReactions && !s.messageCarriesReaction(message.ID, search.ReactionName)) ||
 				(search.HasLink && !domain.TextCarriesLink(message.Text)) ||
-				(search.SavedBy != "" && !s.messageSavedBy(message.ID, search.SavedBy)) {
+				(search.SavedBy != "" && !s.messageSavedBy(message.ID, search.SavedBy)) ||
+				(search.ExcludeAutomations && domain.MessageIsAutomated(message, s.isBotUserLocked(message.AuthorID))) {
 				continue
 			}
 			total++
@@ -12215,6 +12221,17 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 		}
 	}
 	return page, nil
+}
+
+// isBotUserLocked reports an account that is some app's bot user, live or
+// deleted, as the SQL profile's bots join does. Callers hold s.mu.
+func (s *Store) isBotUserLocked(user domain.UserID) bool {
+	for _, value := range s.bots {
+		if value.UserID == user {
+			return true
+		}
+	}
+	return false
 }
 
 func searchTextMatches(text string, terms, excluded []string) bool {

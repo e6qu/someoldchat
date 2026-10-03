@@ -2318,8 +2318,12 @@ type SearchRequest struct {
 	ConversationId string                 `protobuf:"bytes,6,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	Sort           string                 `protobuf:"bytes,7,opt,name=sort,proto3" json:"sort,omitempty"`
 	Direction      string                 `protobuf:"bytes,8,opt,name=direction,proto3" json:"direction,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The web client's search filters, which the query grammar has no
+	// modifier for.
+	OnlyMyChannels     bool `protobuf:"varint,9,opt,name=only_my_channels,json=onlyMyChannels,proto3" json:"only_my_channels,omitempty"`
+	ExcludeAutomations bool `protobuf:"varint,10,opt,name=exclude_automations,json=excludeAutomations,proto3" json:"exclude_automations,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *SearchRequest) Reset() {
@@ -2406,6 +2410,20 @@ func (x *SearchRequest) GetDirection() string {
 		return x.Direction
 	}
 	return ""
+}
+
+func (x *SearchRequest) GetOnlyMyChannels() bool {
+	if x != nil {
+		return x.OnlyMyChannels
+	}
+	return false
+}
+
+func (x *SearchRequest) GetExcludeAutomations() bool {
+	if x != nil {
+		return x.ExcludeAutomations
+	}
+	return false
 }
 
 type RecordSearchRequest struct {
@@ -3400,7 +3418,7 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\x12\x14\n" +
 	"\x05limit\x18\x05 \x01(\x05R\x05limit\x12\x16\n" +
 	"\x06cursor\x18\x06 \x01(\tR\x06cursor\x12:\n" +
-	"\x06window\x18\a \x01(\v2\".sameoldchat.chat.v1.MessageWindowR\x06window\"\xea\x01\n" +
+	"\x06window\x18\a \x01(\v2\".sameoldchat.chat.v1.MessageWindowR\x06window\"\xc5\x02\n" +
 	"\rSearchRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
@@ -3409,7 +3427,10 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12'\n" +
 	"\x0fconversation_id\x18\x06 \x01(\tR\x0econversationId\x12\x12\n" +
 	"\x04sort\x18\a \x01(\tR\x04sort\x12\x1c\n" +
-	"\tdirection\x18\b \x01(\tR\tdirection\"g\n" +
+	"\tdirection\x18\b \x01(\tR\tdirection\x12(\n" +
+	"\x10only_my_channels\x18\t \x01(\bR\x0eonlyMyChannels\x12/\n" +
+	"\x13exclude_automations\x18\n" +
+	" \x01(\bR\x12excludeAutomations\"g\n" +
 	"\x13RecordSearchRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +

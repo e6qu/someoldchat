@@ -48,7 +48,9 @@ prefix matching.
 **Filters and ordering:** Result-type controls and Slack's visible filter UI
 round-trip to the same query semantics as typed modifiers. The member can
 filter sender, conversation, date, content, reaction, thread, and file type
-where applicable, clear an individual refinement, and choose the ordering
+where applicable, keep message results to their own channels (*Only my
+channels*) or to what people posted (*Exclude automations*: no app, bot,
+workflow, or Slackbot messages), clear an individual refinement, and choose the ordering
 Slack offers for that result type (including relevance and recency). The
 selected type, scope, refinements, and order survive reload and pagination.
 Screen-reader names and selected/current states expose the same filter state as
@@ -213,6 +215,7 @@ Implemented evidence:
   People, and Channels results, durable per-member recent searches, and
   visibility-aware typeahead links to real people, channels, and hosted files.
   It also provides URL-backed sender/conversation/date/content/order filters,
+  the *Only my channels* and *Exclude automations* message filters,
   authenticated file links, explicit current-conversation scope, and
   `Command/Control+F`.
 - A member can save a custom Activity view: a named combination of kinds that

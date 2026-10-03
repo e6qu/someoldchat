@@ -178,6 +178,7 @@ func runQualification(t *testing.T, open opener) {
 		{"remote files are searchable where they are shared", remoteFilesAreSearchable},
 		{"Slackbot's custom responses are kept with their cursor", slackbotResponsesAreKept},
 		{"client connections decide presence", clientConnectionsDecidePresence},
+		{"search filters keep to the searcher's channels and to people", searchFiltersKeepToMembersAndPeople},
 		{"OAuth installs reuse their bot and redeem every grant shape", oauthInstallsReuseTheirBotAndRedeemEveryGrantShape},
 		{"file shares name their carrying messages", fileSharesNameTheirCarryingMessages},
 	} {

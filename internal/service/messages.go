@@ -1029,6 +1029,10 @@ func (m Messages) SearchMessages(ctx context.Context, workspaceID domain.Workspa
 	if parsed.saved {
 		search.SavedBy = userID
 	}
+	if request.OnlyMyChannels {
+		search.MemberOf = userID
+	}
+	search.ExcludeAutomations = request.ExcludeAutomations
 	return m.Store.SearchMessages(ctx, workspaceID, userID, search)
 }
 

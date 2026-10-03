@@ -22190,6 +22190,15 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 		querySQL += ` AND EXISTS (SELECT 1 FROM saved_items si_search WHERE si_search.message_id = m.id AND si_search.user_id = ?)`
 		args = append(args, search.SavedBy)
 	}
+	if search.MemberOf != "" {
+		querySQL += ` AND EXISTS (SELECT 1 FROM conversation_members cm_mine WHERE cm_mine.conversation_id = m.conversation AND cm_mine.user_id = ?)`
+		args = append(args, search.MemberOf)
+	}
+	if search.ExcludeAutomations {
+		// domain.MessageIsAutomated, which the memory profile applies.
+		querySQL += ` AND m.app_id = '' AND m.subtype <> 'bot_message' AND m.author_id <> ? AND NOT EXISTS (SELECT 1 FROM bots b_search WHERE b_search.user_id = m.author_id)`
+		args = append(args, domain.SlackbotUserID)
+	}
 	countSQL := strings.Replace(querySQL, `SELECT `+qualifiedMessageSelectColumns+``, `SELECT COUNT(*)`, 1)
 	var total int
 	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {

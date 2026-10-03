@@ -5645,6 +5645,49 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The web client's search filters cross the seam: "Only my
+			// channels" drops a public channel the searcher has not joined,
+			// and "Exclude automations" drops Slackbot's post.
+			name: "search filters keep to the searcher's channels and to people",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if _, err := chat.Post(ctx, "T1", "U1", "C1", "deploy in general", "", ""); err != nil {
+					return nil, err
+				}
+				if _, err := chat.Post(ctx, "T1", "U1", "C2", "deploy in second", "", ""); err != nil {
+					return nil, err
+				}
+				if _, err := chat.PostAsSlackbot(ctx, "T1", "U1", domain.SlackbotPost{Conversation: "C1", Text: "deploy from Slackbot", IdempotencyKey: "parity-search-filters"}); err != nil {
+					return nil, err
+				}
+				texts := func(request domain.MessageSearchRequest) ([]string, error) {
+					request.Query, request.Page = "deploy", domain.PageRequest{Limit: 20}
+					page, err := chat.SearchMessages(ctx, "T1", "U2", request)
+					if err != nil {
+						return nil, err
+					}
+					values := make([]string, 0, len(page.Messages))
+					for _, message := range page.Messages {
+						values = append(values, message.Text)
+					}
+					sort.Strings(values)
+					return values, nil
+				}
+				everything, err := texts(domain.MessageSearchRequest{})
+				if err != nil {
+					return nil, err
+				}
+				mine, err := texts(domain.MessageSearchRequest{OnlyMyChannels: true})
+				if err != nil {
+					return nil, err
+				}
+				people, err := texts(domain.MessageSearchRequest{ExcludeAutomations: true})
+				if err != nil {
+					return nil, err
+				}
+				return []any{everything, mine, people}, nil
+			},
+		},
+		{
 			// A member's open clients cross the seam: opening one brings them
 			// online, the count and the renewed lease come back, and closing
 			// the last takes them offline; a closed connection is gone.
