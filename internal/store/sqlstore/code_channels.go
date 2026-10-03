@@ -25,13 +25,13 @@ const codeChannelSchema = `CREATE TABLE IF NOT EXISTS code_channels (
  app_id TEXT NOT NULL, bot_user_id TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '',
  origin_channel_id TEXT NOT NULL DEFAULT '', origin_ts TEXT NOT NULL DEFAULT '',
  context_bar TEXT NOT NULL DEFAULT '[]', summary_message_ts TEXT NOT NULL DEFAULT '', summary_thread_ts TEXT NOT NULL DEFAULT '',
- agent_resource TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+ agent_resource TEXT NOT NULL DEFAULT '{}', commands TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS code_channels_session ON code_channels(workspace_id, app_id, session_id) WHERE session_id <> '';
 `
 
-// storedContextItem and storedAgentResource are the JSON forms of the record's
-// two structured columns.
+// storedContextItem, storedAgentResource and storedCommand are the JSON forms
+// of the record's structured columns.
 type storedContextItem struct {
 	Key       string `json:"key"`
 	Label     string `json:"label"`
@@ -46,6 +46,25 @@ type storedAgentResource struct {
 	ResourceType string `json:"resource_type,omitempty"`
 	Title        string `json:"title,omitempty"`
 	Provider     string `json:"provider,omitempty"`
+}
+
+type storedCommand struct {
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	ArgumentHint string `json:"argument_hint,omitempty"`
+	ShouldEscape bool   `json:"should_escape,omitempty"`
+	AppID        string `json:"app_id"`
+	BotUserID    string `json:"bot_user_id"`
+}
+
+func encodeCodeChannelCommands(commands []domain.CodeChannelCommand) (string, error) {
+	stored := make([]storedCommand, 0, len(commands))
+	for _, command := range commands {
+		stored = append(stored, storedCommand{Name: command.Name, Description: command.Description, ArgumentHint: command.ArgumentHint,
+			ShouldEscape: command.ShouldEscape, AppID: string(command.AppID), BotUserID: string(command.BotUserID)})
+	}
+	encoded, err := json.Marshal(stored)
+	return string(encoded), err
 }
 
 func encodeCodeChannelColumns(value domain.CodeChannel) (string, string, error) {
@@ -66,6 +85,10 @@ func encodeCodeChannelColumns(value domain.CodeChannel) (string, string, error) 
 
 func (s *Store) CreateCodeChannel(ctx context.Context, conversation domain.Conversation, members []domain.UserID, value domain.CodeChannel, emitted []events.Event) error {
 	bar, resource, err := encodeCodeChannelColumns(value)
+	if err != nil {
+		return err
+	}
+	commands, err := encodeCodeChannelCommands(value.Commands)
 	if err != nil {
 		return err
 	}
@@ -90,10 +113,10 @@ func (s *Store) CreateCodeChannel(ctx context.Context, conversation domain.Conve
 			return classify(err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO code_channels(conversation_id, workspace_id, app_id, bot_user_id, session_id, origin_channel_id, origin_ts, context_bar, summary_message_ts, summary_thread_ts, agent_resource, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	if _, err := tx.ExecContext(ctx, `INSERT INTO code_channels(conversation_id, workspace_id, app_id, bot_user_id, session_id, origin_channel_id, origin_ts, context_bar, summary_message_ts, summary_thread_ts, agent_resource, commands, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.Conversation, value.WorkspaceID, value.AppID, value.BotUserID, value.SessionID, value.Origin.Channel, string(value.Origin.Timestamp),
-		bar, string(value.Summary.MessageTimestamp), string(value.Summary.ThreadTimestamp), resource, value.CreatedAt.UnixNano(), value.UpdatedAt.UnixNano()); err != nil {
+		bar, string(value.Summary.MessageTimestamp), string(value.Summary.ThreadTimestamp), resource, commands, value.CreatedAt.UnixNano(), value.UpdatedAt.UnixNano()); err != nil {
 		return classify(err)
 	}
 	for _, event := range emitted {
@@ -104,14 +127,14 @@ func (s *Store) CreateCodeChannel(ctx context.Context, conversation domain.Conve
 	return tx.Commit()
 }
 
-const codeChannelColumns = `conversation_id, workspace_id, app_id, bot_user_id, session_id, origin_channel_id, origin_ts, context_bar, summary_message_ts, summary_thread_ts, agent_resource, created_at, updated_at`
+const codeChannelColumns = `conversation_id, workspace_id, app_id, bot_user_id, session_id, origin_channel_id, origin_ts, context_bar, summary_message_ts, summary_thread_ts, agent_resource, commands, created_at, updated_at`
 
 func scanCodeChannel(row rowScanner) (domain.CodeChannel, error) {
 	var value domain.CodeChannel
-	var originTS, summaryTS, summaryThread, bar, resource string
+	var originTS, summaryTS, summaryThread, bar, resource, commands string
 	var created, updated int64
 	if err := row.Scan(&value.Conversation, &value.WorkspaceID, &value.AppID, &value.BotUserID, &value.SessionID, &value.Origin.Channel, &originTS,
-		&bar, &summaryTS, &summaryThread, &resource, &created, &updated); err != nil {
+		&bar, &summaryTS, &summaryThread, &resource, &commands, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.CodeChannel{}, store.ErrNotFound
 		}
@@ -132,6 +155,15 @@ func scanCodeChannel(row rowScanner) (domain.CodeChannel, error) {
 		return domain.CodeChannel{}, err
 	}
 	value.AgentResource = domain.AgentResource(stored)
+	var storedCommands []storedCommand
+	if err := json.Unmarshal([]byte(commands), &storedCommands); err != nil {
+		return domain.CodeChannel{}, err
+	}
+	value.Commands = make([]domain.CodeChannelCommand, 0, len(storedCommands))
+	for _, command := range storedCommands {
+		value.Commands = append(value.Commands, domain.CodeChannelCommand{Name: command.Name, Description: command.Description, ArgumentHint: command.ArgumentHint,
+			ShouldEscape: command.ShouldEscape, AppID: domain.AppID(command.AppID), BotUserID: domain.UserID(command.BotUserID)})
+	}
 	value.CreatedAt = time.Unix(0, created).UTC()
 	value.UpdatedAt = time.Unix(0, updated).UTC()
 	return value, nil
@@ -153,14 +185,18 @@ func (s *Store) UpdateCodeChannel(ctx context.Context, value domain.CodeChannel,
 	if err != nil {
 		return err
 	}
+	commands, err := encodeCodeChannelCommands(value.Commands)
+	if err != nil {
+		return err
+	}
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE code_channels SET context_bar = ?, summary_message_ts = ?, summary_thread_ts = ?, agent_resource = ?, updated_at = ?
+	result, err := tx.ExecContext(ctx, `UPDATE code_channels SET context_bar = ?, summary_message_ts = ?, summary_thread_ts = ?, agent_resource = ?, commands = ?, updated_at = ?
 		WHERE workspace_id = ? AND conversation_id = ? AND updated_at = ?`,
-		bar, string(value.Summary.MessageTimestamp), string(value.Summary.ThreadTimestamp), resource, value.UpdatedAt.UnixNano(),
+		bar, string(value.Summary.MessageTimestamp), string(value.Summary.ThreadTimestamp), resource, commands, value.UpdatedAt.UnixNano(),
 		value.WorkspaceID, value.Conversation, expected.UnixNano())
 	if err != nil {
 		return err

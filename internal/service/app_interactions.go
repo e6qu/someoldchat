@@ -70,20 +70,57 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 	if !strings.HasPrefix(command, "/") || strings.ContainsAny(command, " \t\r\n") {
 		return domain.ErrSlashCommandNotFound
 	}
+	// A code channel's agent command answers in its channel ahead of a
+	// workspace app command of the same name: it is the narrower of the two.
+	if agent, found, err := m.codeChannelCommand(ctx, workspaceID, conversationID, command); err != nil {
+		return err
+	} else if found {
+		snapshot, parsed, err := m.installedApp(ctx, workspaceID, agent.AppID)
+		if errors.Is(err, store.ErrNotFound) {
+			return domain.ErrSlashCommandNotFound
+		} else if err != nil {
+			return err
+		}
+		// An agent command is delivered where the agent's interactions are,
+		// since no manifest names a URL for it.
+		return m.deliverSlashCommand(ctx, workspaceID, userID, conversation, snapshot, parsed, parsed.InteractivityRequestURL, command, text, agent.ShouldEscape, responseBaseURL)
+	}
 	snapshot, parsed, slash, err := m.slashCommandApp(ctx, workspaceID, command)
 	if err != nil {
 		return err
 	}
+	return m.deliverSlashCommand(ctx, workspaceID, userID, conversation, snapshot, parsed, slash.URL, command, text, slash.ShouldEscape, responseBaseURL)
+}
+
+// codeChannelCommand finds the agent command a member typed in a code
+// channel. Any other conversation has none.
+func (m Messages) codeChannelCommand(ctx context.Context, workspaceID domain.WorkspaceID, conversationID domain.ConversationID, command string) (domain.CodeChannelCommand, bool, error) {
+	record, err := m.Store.GetCodeChannel(ctx, workspaceID, conversationID)
+	if errors.Is(err, store.ErrNotFound) {
+		return domain.CodeChannelCommand{}, false, nil
+	}
+	if err != nil {
+		return domain.CodeChannelCommand{}, false, err
+	}
+	agent, found := record.Command(command)
+	return agent, found, nil
+}
+
+// deliverSlashCommand sends a member's command to the app that owns it, over
+// Socket Mode or to requestURL, as Slack's slash command form.
+func (m Messages) deliverSlashCommand(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.Conversation, snapshot domain.AppManifestSnapshot, parsed appmanifest.Parsed, requestURL, command, text string, shouldEscape bool, responseBaseURL string) error {
+	conversationID := conversation.ID
 	if err := m.requireAppUse(ctx, workspaceID, userID, snapshot.App.ID, conversationID); err != nil {
 		return err
 	}
-	if slash.ShouldEscape {
+	var err error
+	if shouldEscape {
 		text, err = m.escapeSlashCommandText(ctx, workspaceID, userID, text)
 		if err != nil {
 			return err
 		}
 	}
-	if !parsed.SocketModeEnabled && slash.URL == "" {
+	if !parsed.SocketModeEnabled && requestURL == "" {
 		return domain.ErrAppInteractionUnavailable
 	}
 	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
@@ -127,7 +164,7 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 	if parsed.SocketModeEnabled {
 		return m.enqueueSocketModeInteraction(ctx, snapshot.App.ID, workspaceID, userID, "slash_commands", formValuesObject(form), capability)
 	}
-	body, err := m.postSignedAppForm(ctx, slash.URL, snapshot.App, form)
+	body, err := m.postSignedAppForm(ctx, requestURL, snapshot.App, form)
 	if err != nil {
 		return err
 	}

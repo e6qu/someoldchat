@@ -15,6 +15,7 @@ import (
 
 func cloneCodeChannel(value domain.CodeChannel) domain.CodeChannel {
 	value.ContextBar = append([]domain.CodeChannelContextItem{}, value.ContextBar...)
+	value.Commands = append([]domain.CodeChannelCommand{}, value.Commands...)
 	return value
 }
 
@@ -88,6 +89,7 @@ func (s *Store) UpdateCodeChannel(_ context.Context, value domain.CodeChannel, e
 		return store.ErrConflict
 	}
 	current.ContextBar = append([]domain.CodeChannelContextItem{}, value.ContextBar...)
+	current.Commands = append([]domain.CodeChannelCommand{}, value.Commands...)
 	current.Summary = value.Summary
 	current.AgentResource = value.AgentResource
 	current.UpdatedAt = value.UpdatedAt

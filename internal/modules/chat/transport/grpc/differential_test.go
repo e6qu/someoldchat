@@ -5517,6 +5517,69 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A code channel's commands and canvases cross the seam whole:
+			// each agent's set and the channel's count, the canvas with its
+			// comments, the sections a rewrite changed, and each refusal's
+			// sentinel.
+			name: "code channel commands and canvases keep their agents' work",
+			seed: seedAgentSessionParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.CreateCodeChannel(ctx, "T1", "UB", "AG", domain.CodeChannelRequest{Name: "commands"})
+				if err != nil {
+					return nil, err
+				}
+				channel := created.Conversation
+				if _, err := chat.InviteConversationMembers(ctx, "T1", "UB", channel, []domain.UserID{"UH", "U1"}); err != nil {
+					return nil, err
+				}
+				first, err := chat.SetCodeChannelCommands(ctx, "T1", "UB", "AG", channel, []domain.CodeChannelCommand{{Name: "review", Description: "Review", ArgumentHint: "[path]", ShouldEscape: true}})
+				if err != nil {
+					return nil, err
+				}
+				second, err := chat.SetCodeChannelCommands(ctx, "T1", "UH", "AH", channel, []domain.CodeChannelCommand{{Name: "test"}})
+				if err != nil {
+					return nil, err
+				}
+				record, err := chat.CodeChannel(ctx, "T1", "U1", channel)
+				if err != nil {
+					return nil, err
+				}
+				canvas, err := chat.CreateCanvas(ctx, "T1", "UB", "Plan", `{"type":"markdown","markdown":"# Plan\n\nPort the cron."}`, "")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetCodeChannelView(ctx, "T1", "UB", "AG", channel, domain.CodeChannelViewRequest{Type: domain.CodeChannelViewCanvas, Key: "plan", CanvasID: canvas.ID}); err != nil {
+					return nil, err
+				}
+				changed, err := chat.SetCodeChannelCanvasContent(ctx, "T1", "UB", "AG", channel, canvas.ID, "# Plan\n\nPort the cron.\n\nShip it.")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.CommentOnCanvas(ctx, "T1", "U1", canvas.ID, "", "Which cron?"); err != nil {
+					return nil, err
+				}
+				read, comments, err := chat.CodeChannelCanvas(ctx, "T1", "UB", "AG", channel, canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				texts := make([]any, 0, len(comments.Comments))
+				for _, comment := range comments.Comments {
+					texts = append(texts, comment.UserID, comment.Text)
+				}
+				_, reserved := chat.SetCodeChannelCommands(ctx, "T1", "UB", "AG", channel, []domain.CodeChannelCommand{{Name: "remind"}})
+				_, taken := chat.SetCodeChannelCommands(ctx, "T1", "UB", "AG", channel, []domain.CodeChannelCommand{{Name: "test"}})
+				_, _, notShown := chat.CodeChannelCanvas(ctx, "T1", "UB", "AG", "C1", canvas.ID)
+				other, err := chat.CreateCanvas(ctx, "T1", "UB", "Other", "", "")
+				if err != nil {
+					return nil, err
+				}
+				_, _, unattached := chat.CodeChannelCanvas(ctx, "T1", "UB", "AG", channel, other.ID)
+				return []any{first, second, record.Commands, changed, read.Title, read.DocumentContent != "", texts, comments.HasMore,
+					errors.Is(reserved, domain.ErrInvalidCodeChannel), errors.Is(taken, domain.ErrInvalidCodeChannel),
+					errors.Is(notShown, domain.ErrNotCodeChannel), errors.Is(unattached, domain.ErrCodeChannelViewCanvasNotFound)}, nil
+			},
+		},
+		{
 			// An agent session crosses the seam whole: the session and every
 			// agent's status and identity, the setStatus warning, the stop
 			// control, and each refusal's sentinel.

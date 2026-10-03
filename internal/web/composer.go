@@ -2,12 +2,14 @@ package web
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 // The message composer, as Slack draws it: a formatting bar above the text,
@@ -264,11 +266,20 @@ func (h Handler) composerUserGroups(ctx context.Context, principal auth.Principa
 }
 
 // composerCommands is the slash-command directory: Slack's built-ins first,
-// then every installed app command that does not collide with one, with the
-// installed apps' global shortcuts for the shortcut browser.
-func (h Handler) composerCommands(ctx context.Context, principal auth.Principal) ([]domain.AppShortcut, []domain.AppShortcut, []string) {
+// then a code channel's agent commands, then every installed app command that
+// does not collide with either, with the installed apps' global shortcuts for
+// the shortcut browser. An agent command answers ahead of an app command of
+// the same name in its channel, as DispatchSlashCommand delivers it.
+func (h Handler) composerCommands(ctx context.Context, principal auth.Principal, conversation domain.Conversation) ([]domain.AppShortcut, []domain.AppShortcut, []string) {
 	var notices []string
 	commands := builtInSlashCommands()
+	if !conversation.IsDirectOrGroup() && conversation.ID != "" {
+		if record, err := h.Messages.CodeChannel(ctx, principal.WorkspaceID, principal.UserID, conversation.ID); err == nil {
+			commands = append(commands, h.codeChannelCommands(ctx, principal, record)...)
+		} else if !errors.Is(err, store.ErrNotFound) {
+			notices = append(notices, "This channel's agent commands are temporarily unavailable.")
+		}
+	}
 	shortcuts, err := h.Messages.ListAppShortcuts(ctx, principal.WorkspaceID, principal.UserID, "global")
 	if err != nil {
 		notices = append(notices, "App shortcuts are temporarily unavailable.")
@@ -278,17 +289,39 @@ func (h Handler) composerCommands(ctx context.Context, principal auth.Principal)
 		notices = append(notices, "App slash commands are temporarily unavailable.")
 		return commands, shortcuts, notices
 	}
-	builtIns := make(map[string]struct{}, len(commands))
+	taken := make(map[string]struct{}, len(commands))
 	for _, command := range commands {
-		builtIns[command.Command] = struct{}{}
+		taken[command.Command] = struct{}{}
 	}
 	for _, command := range appCommands {
-		if _, reserved := builtIns[command.Command]; !reserved {
+		if _, reserved := taken[command.Command]; !reserved {
 			commands = append(commands, command)
 		}
 	}
 	sort.SliceStable(commands, func(left, right int) bool { return commands[left].Command < commands[right].Command })
 	return commands, shortcuts, notices
+}
+
+// codeChannelCommands is a code channel's agent commands as the composer
+// offers them, each under the name of the agent that registered it.
+func (h Handler) codeChannelCommands(ctx context.Context, principal auth.Principal, record domain.CodeChannel) []domain.AppShortcut {
+	agents := make(map[domain.UserID]string)
+	commands := make([]domain.AppShortcut, 0, len(record.Commands))
+	for _, command := range record.Commands {
+		name, known := agents[command.BotUserID]
+		if !known {
+			name = "Agent"
+			if bot, err := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, command.BotUserID); err == nil {
+				name = displayName(bot)
+			}
+			agents[command.BotUserID] = name
+		}
+		commands = append(commands, domain.AppShortcut{
+			AppID: command.AppID, AppName: name, Name: command.Slash(), Command: command.Slash(), Description: command.Description,
+			UsageHint: command.ArgumentHint, ShouldEscape: command.ShouldEscape, Type: "slash",
+		})
+	}
+	return commands
 }
 
 // composerBroadcastLabel is the text beside the thread composer's broadcast

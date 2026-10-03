@@ -33,7 +33,10 @@ type CodeChannel struct {
 	Origin CodeChannelOrigin
 	// ContextBar is every agent's items, ordered by agent and then as each
 	// agent gave them.
-	ContextBar    []CodeChannelContextItem
+	ContextBar []CodeChannelContextItem
+	// Commands is every agent's slash commands, ordered by agent and then as
+	// each agent gave them.
+	Commands      []CodeChannelCommand
 	Summary       CodeChannelSummary
 	AgentResource AgentResource
 	CreatedAt     time.Time

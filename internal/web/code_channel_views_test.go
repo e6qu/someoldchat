@@ -90,3 +90,33 @@ func TestCodeChannelShowsItsAgentsViews(t *testing.T) {
 	requireContains(t, "block_kit view", get(t, mux, "/app?channel=Ccode&tab=view&view=Ct3").Body.String(), "Tests are green")
 	requireContains(t, "an unknown view shows the messages", get(t, mux, "/app?channel=Ccode&tab=view&view=Ctnone").Body.String(), `id="timeline"`)
 }
+
+// A code channel's agent commands are offered in its composer under the
+// agent's name, and nowhere else.
+func TestCodeChannelComposerOffersItsAgentsCommands(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	now := time.Unix(1700000000, 0).UTC()
+	if err := s.SeedUser(domain.User{ID: "UAGENT", WorkspaceID: "T1", Name: "reviewer-bot", RealName: "Reviewer"}); err != nil {
+		t.Fatal(err)
+	}
+	conversation := domain.Conversation{ID: "Ccode", WorkspaceID: "T1", Name: "review-work", Kind: domain.ConversationKindFor(false, false, false), CreatorID: "UAGENT"}
+	record := domain.CodeChannel{WorkspaceID: "T1", Conversation: "Ccode", AppID: "A1", BotUserID: "UAGENT", CreatedAt: now, UpdatedAt: now,
+		Commands: []domain.CodeChannelCommand{{Name: "review", Description: "Review the diff", ArgumentHint: "[path]", AppID: "A1", BotUserID: "UAGENT"}}}
+	if err := s.CreateCodeChannel(ctx, conversation, []domain.UserID{"U1", "UAGENT"}, record, []events.Event{{ID: "Ecode", WorkspaceID: "T1", Topic: "channel.created", CreatedAt: now}}); err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, "code channel composer", get(t, mux, "/app?channel=Ccode").Body.String(),
+		`<i data-kind="command" data-name="/review" data-description="Review the diff" data-hint="[path]" data-app="Reviewer"></i>`)
+	requireMissing(t, "another channel's composer", get(t, mux, "/app?channel=Cdev").Body.String(), `data-name="/review"`)
+}
+
+// Every Slack command this client implements is one an agent may not take,
+// so an agent command can never shadow a built-in.
+func TestEveryBuiltInCommandIsReservedFromAgents(t *testing.T) {
+	for _, command := range builtInSlashCommands() {
+		if !domain.IsSlackBuiltinSlashCommand(command.Command) {
+			t.Errorf("%s is built in here but an agent could register it", command.Command)
+		}
+	}
+}

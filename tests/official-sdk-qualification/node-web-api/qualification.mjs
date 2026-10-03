@@ -1887,6 +1887,24 @@ assert.deepEqual(codeViews.views.map((view) => view.label), ["coverage", "Status
 const codeViewRemoved = await client.agents.conversations.removeView({ channel_id: codeChannel.channel_id, view_key: "status" });
 assert.equal(codeViewRemoved.ok, true);
 assert.equal((await client.agents.conversations.listViews({ channel_id: codeChannel.channel_id })).views.length, 1);
+// The agent registers its commands, shows a canvas in the channel, reads it
+// and rewrites it, and only the section it changed is counted.
+const codeCommands = await client.agents.conversations.setCommands({
+  channel_id: codeChannel.channel_id,
+  commands: [{ name: "review", description: "Review the diff", argument_hint: "[path]", should_escape: true }, { name: "ship" }],
+});
+assert.equal(codeCommands.ok, true);
+assert.equal(codeCommands.command_count, 2);
+const codeCanvas = await client.canvases.create({ title: "Node plan", document_content: { type: "markdown", markdown: "# Plan\n\nPort the cron." } });
+await client.agents.conversations.setView({ channel_id: codeChannel.channel_id, type: "canvas", view_key: "plan", canvas_id: codeCanvas.canvas_id });
+const codeCanvasRead = await client.agents.conversations.getCanvas({ channel: codeChannel.channel_id, canvas_id: codeCanvas.canvas_id });
+assert.equal(codeCanvasRead.title, "Node plan");
+assert.equal(codeCanvasRead.content, "# Plan\n\nPort the cron.\n");
+assert.deepEqual(codeCanvasRead.comments, []);
+const codeCanvasSet = await client.agents.conversations.setCanvasContent({
+  channel: codeChannel.channel_id, canvas_id: codeCanvas.canvas_id, content: "# Plan\n\nPort the cron.\n\nShip it.",
+});
+assert.equal(codeCanvasSet.sections_changed_count, 1);
 const codeSummary = await client.chat.postMessage({ channel: codeChannel.channel_id, text: "Node summary" });
 const codeArchived = await client.agents.conversations.archive({ channel_id: codeChannel.channel_id, summary_message_ts: codeSummary.ts });
 assert.equal(codeArchived.ok, true);

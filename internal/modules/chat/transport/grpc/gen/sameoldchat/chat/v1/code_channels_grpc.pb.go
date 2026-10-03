@@ -19,13 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CodeChannelsService_CreateCodeChannel_FullMethodName        = "/sameoldchat.chat.v1.CodeChannelsService/CreateCodeChannel"
-	CodeChannelsService_ArchiveCodeChannel_FullMethodName       = "/sameoldchat.chat.v1.CodeChannelsService/ArchiveCodeChannel"
-	CodeChannelsService_SetCodeChannelProperties_FullMethodName = "/sameoldchat.chat.v1.CodeChannelsService/SetCodeChannelProperties"
-	CodeChannelsService_GetCodeChannel_FullMethodName           = "/sameoldchat.chat.v1.CodeChannelsService/GetCodeChannel"
-	CodeChannelsService_SetCodeChannelView_FullMethodName       = "/sameoldchat.chat.v1.CodeChannelsService/SetCodeChannelView"
-	CodeChannelsService_ListCodeChannelViews_FullMethodName     = "/sameoldchat.chat.v1.CodeChannelsService/ListCodeChannelViews"
-	CodeChannelsService_RemoveCodeChannelView_FullMethodName    = "/sameoldchat.chat.v1.CodeChannelsService/RemoveCodeChannelView"
+	CodeChannelsService_CreateCodeChannel_FullMethodName           = "/sameoldchat.chat.v1.CodeChannelsService/CreateCodeChannel"
+	CodeChannelsService_ArchiveCodeChannel_FullMethodName          = "/sameoldchat.chat.v1.CodeChannelsService/ArchiveCodeChannel"
+	CodeChannelsService_SetCodeChannelProperties_FullMethodName    = "/sameoldchat.chat.v1.CodeChannelsService/SetCodeChannelProperties"
+	CodeChannelsService_GetCodeChannel_FullMethodName              = "/sameoldchat.chat.v1.CodeChannelsService/GetCodeChannel"
+	CodeChannelsService_SetCodeChannelView_FullMethodName          = "/sameoldchat.chat.v1.CodeChannelsService/SetCodeChannelView"
+	CodeChannelsService_ListCodeChannelViews_FullMethodName        = "/sameoldchat.chat.v1.CodeChannelsService/ListCodeChannelViews"
+	CodeChannelsService_RemoveCodeChannelView_FullMethodName       = "/sameoldchat.chat.v1.CodeChannelsService/RemoveCodeChannelView"
+	CodeChannelsService_SetCodeChannelCommands_FullMethodName      = "/sameoldchat.chat.v1.CodeChannelsService/SetCodeChannelCommands"
+	CodeChannelsService_GetCodeChannelCanvas_FullMethodName        = "/sameoldchat.chat.v1.CodeChannelsService/GetCodeChannelCanvas"
+	CodeChannelsService_SetCodeChannelCanvasContent_FullMethodName = "/sameoldchat.chat.v1.CodeChannelsService/SetCodeChannelCanvasContent"
 )
 
 // CodeChannelsServiceClient is the client API for CodeChannelsService service.
@@ -39,6 +42,9 @@ type CodeChannelsServiceClient interface {
 	SetCodeChannelView(ctx context.Context, in *SetCodeChannelViewRequest, opts ...grpc.CallOption) (*CodeChannelView, error)
 	ListCodeChannelViews(ctx context.Context, in *CodeChannelRequest, opts ...grpc.CallOption) (*CodeChannelViewsResponse, error)
 	RemoveCodeChannelView(ctx context.Context, in *RemoveCodeChannelViewRequest, opts ...grpc.CallOption) (*RemoveCodeChannelViewResponse, error)
+	SetCodeChannelCommands(ctx context.Context, in *SetCodeChannelCommandsRequest, opts ...grpc.CallOption) (*SetCodeChannelCommandsResponse, error)
+	GetCodeChannelCanvas(ctx context.Context, in *CodeChannelCanvasRequest, opts ...grpc.CallOption) (*CodeChannelCanvasResponse, error)
+	SetCodeChannelCanvasContent(ctx context.Context, in *SetCodeChannelCanvasContentRequest, opts ...grpc.CallOption) (*SetCodeChannelCanvasContentResponse, error)
 }
 
 type codeChannelsServiceClient struct {
@@ -119,6 +125,36 @@ func (c *codeChannelsServiceClient) RemoveCodeChannelView(ctx context.Context, i
 	return out, nil
 }
 
+func (c *codeChannelsServiceClient) SetCodeChannelCommands(ctx context.Context, in *SetCodeChannelCommandsRequest, opts ...grpc.CallOption) (*SetCodeChannelCommandsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetCodeChannelCommandsResponse)
+	err := c.cc.Invoke(ctx, CodeChannelsService_SetCodeChannelCommands_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *codeChannelsServiceClient) GetCodeChannelCanvas(ctx context.Context, in *CodeChannelCanvasRequest, opts ...grpc.CallOption) (*CodeChannelCanvasResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CodeChannelCanvasResponse)
+	err := c.cc.Invoke(ctx, CodeChannelsService_GetCodeChannelCanvas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *codeChannelsServiceClient) SetCodeChannelCanvasContent(ctx context.Context, in *SetCodeChannelCanvasContentRequest, opts ...grpc.CallOption) (*SetCodeChannelCanvasContentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetCodeChannelCanvasContentResponse)
+	err := c.cc.Invoke(ctx, CodeChannelsService_SetCodeChannelCanvasContent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CodeChannelsServiceServer is the server API for CodeChannelsService service.
 // All implementations should embed UnimplementedCodeChannelsServiceServer
 // for forward compatibility.
@@ -130,6 +166,9 @@ type CodeChannelsServiceServer interface {
 	SetCodeChannelView(context.Context, *SetCodeChannelViewRequest) (*CodeChannelView, error)
 	ListCodeChannelViews(context.Context, *CodeChannelRequest) (*CodeChannelViewsResponse, error)
 	RemoveCodeChannelView(context.Context, *RemoveCodeChannelViewRequest) (*RemoveCodeChannelViewResponse, error)
+	SetCodeChannelCommands(context.Context, *SetCodeChannelCommandsRequest) (*SetCodeChannelCommandsResponse, error)
+	GetCodeChannelCanvas(context.Context, *CodeChannelCanvasRequest) (*CodeChannelCanvasResponse, error)
+	SetCodeChannelCanvasContent(context.Context, *SetCodeChannelCanvasContentRequest) (*SetCodeChannelCanvasContentResponse, error)
 }
 
 // UnimplementedCodeChannelsServiceServer should be embedded to have
@@ -159,6 +198,15 @@ func (UnimplementedCodeChannelsServiceServer) ListCodeChannelViews(context.Conte
 }
 func (UnimplementedCodeChannelsServiceServer) RemoveCodeChannelView(context.Context, *RemoveCodeChannelViewRequest) (*RemoveCodeChannelViewResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveCodeChannelView not implemented")
+}
+func (UnimplementedCodeChannelsServiceServer) SetCodeChannelCommands(context.Context, *SetCodeChannelCommandsRequest) (*SetCodeChannelCommandsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetCodeChannelCommands not implemented")
+}
+func (UnimplementedCodeChannelsServiceServer) GetCodeChannelCanvas(context.Context, *CodeChannelCanvasRequest) (*CodeChannelCanvasResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCodeChannelCanvas not implemented")
+}
+func (UnimplementedCodeChannelsServiceServer) SetCodeChannelCanvasContent(context.Context, *SetCodeChannelCanvasContentRequest) (*SetCodeChannelCanvasContentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetCodeChannelCanvasContent not implemented")
 }
 func (UnimplementedCodeChannelsServiceServer) testEmbeddedByValue() {}
 
@@ -306,6 +354,60 @@ func _CodeChannelsService_RemoveCodeChannelView_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CodeChannelsService_SetCodeChannelCommands_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetCodeChannelCommandsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CodeChannelsServiceServer).SetCodeChannelCommands(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CodeChannelsService_SetCodeChannelCommands_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CodeChannelsServiceServer).SetCodeChannelCommands(ctx, req.(*SetCodeChannelCommandsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CodeChannelsService_GetCodeChannelCanvas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CodeChannelCanvasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CodeChannelsServiceServer).GetCodeChannelCanvas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CodeChannelsService_GetCodeChannelCanvas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CodeChannelsServiceServer).GetCodeChannelCanvas(ctx, req.(*CodeChannelCanvasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CodeChannelsService_SetCodeChannelCanvasContent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetCodeChannelCanvasContentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CodeChannelsServiceServer).SetCodeChannelCanvasContent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CodeChannelsService_SetCodeChannelCanvasContent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CodeChannelsServiceServer).SetCodeChannelCanvasContent(ctx, req.(*SetCodeChannelCanvasContentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CodeChannelsService_ServiceDesc is the grpc.ServiceDesc for CodeChannelsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -340,6 +442,18 @@ var CodeChannelsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RemoveCodeChannelView",
 			Handler:    _CodeChannelsService_RemoveCodeChannelView_Handler,
+		},
+		{
+			MethodName: "SetCodeChannelCommands",
+			Handler:    _CodeChannelsService_SetCodeChannelCommands_Handler,
+		},
+		{
+			MethodName: "GetCodeChannelCanvas",
+			Handler:    _CodeChannelsService_GetCodeChannelCanvas_Handler,
+		},
+		{
+			MethodName: "SetCodeChannelCanvasContent",
+			Handler:    _CodeChannelsService_SetCodeChannelCanvasContent_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

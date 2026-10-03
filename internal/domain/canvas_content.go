@@ -51,6 +51,12 @@ func decodeCanvasDocument(content string) (CanvasDocument, error) {
 	return document, nil
 }
 
+// CanvasDocumentSections is a stored canvas body's sections, in order.
+func CanvasDocumentSections(content string) ([]CanvasSection, error) {
+	document, err := decodeCanvasDocument(content)
+	return document.Sections, err
+}
+
 // CanvasDocumentMarkdown writes a stored canvas body back out as the markdown
 // canvases.create and canvases.edit accept: a heading section as its "#"
 // line, every other section as its text, sections separated by a blank line.

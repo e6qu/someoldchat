@@ -69,7 +69,8 @@ type appHomeRoundTrip struct {
 }
 
 // codeChannelRequestRoundTrip, codeChannelPropertiesRoundTrip,
-// codeChannelViewRequestRoundTrip and contextBarRoundTrip carry what the code channel converters encode beside
+// codeChannelViewRequestRoundTrip, contextBarRoundTrip and
+// codeChannelCommandsRoundTrip carry what the code channel converters encode beside
 // the domain value: the caller and the channel.
 type codeChannelRequestRoundTrip struct {
 	WorkspaceID domain.WorkspaceID
@@ -96,6 +97,10 @@ type codeChannelViewRequestRoundTrip struct {
 
 type contextBarRoundTrip struct {
 	Items []domain.CodeChannelContextItem
+}
+
+type codeChannelCommandsRoundTrip struct {
+	Commands []domain.CodeChannelCommand
 }
 
 // omittedMarker is the value an omitted field is filled with before the wire
@@ -675,6 +680,14 @@ func conversionCases() map[string]conversionCase {
 			},
 			func(value *chatv1.CodeChannel) contextBarRoundTrip {
 				return contextBarRoundTrip{Items: decodeProtoCodeChannelContextBar(value.GetContextBar())}
+			},
+		)},
+		"CodeChannelCommands": {sample: &codeChannelCommandsRoundTrip{}, through: throughInfallible(
+			func(value codeChannelCommandsRoundTrip) *chatv1.SetCodeChannelCommandsRequest {
+				return &chatv1.SetCodeChannelCommandsRequest{Commands: encodeProtoCodeChannelCommands(value.Commands)}
+			},
+			func(value *chatv1.SetCodeChannelCommandsRequest) codeChannelCommandsRoundTrip {
+				return codeChannelCommandsRoundTrip{Commands: decodeProtoCodeChannelCommands(value.GetCommands())}
 			},
 		)},
 		"CodeChannelRequest": {sample: &codeChannelRequestRoundTrip{}, through: throughInfallible(
