@@ -299,6 +299,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     <button type="button" role="tab" id="pref-tab-media" aria-controls="pref-media" aria-selected="false" tabindex="-1">{{icon "files"}}<span>Messages &amp; media</span></button>
     <button type="button" role="tab" id="pref-tab-region" aria-controls="pref-region" aria-selected="false" tabindex="-1">{{icon "later"}}<span>Language &amp; region</span></button>
     <button type="button" role="tab" id="pref-tab-av" aria-controls="pref-av" aria-selected="false" tabindex="-1">{{icon "huddle"}}<span>Audio &amp; video</span></button>
+    <button type="button" role="tab" id="pref-tab-privacy" aria-controls="pref-privacy" aria-selected="false" tabindex="-1">{{icon "lock"}}<span>Privacy &amp; visibility</span></button>
     <button type="button" role="tab" id="pref-tab-advanced" aria-controls="pref-advanced" aria-selected="false" tabindex="-1">{{icon "gear"}}<span>Advanced</span></button>
   </div>
   <div class="preferences-panels">
@@ -414,6 +415,13 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
         <label><input type="checkbox" data-preference="huddle-join-muted"> Mute my microphone when I join a huddle</label>
       </fieldset>
       <p class="dialog-note">Devices are named once this browser has been allowed to use them; until then they are numbered. A device that is no longer connected falls back to the system default.</p>
+    </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-privacy" aria-labelledby="pref-tab-privacy" tabindex="0" hidden>
+      <h3>Privacy &amp; visibility</h3>
+      <fieldset><legend>Slack Connect discoverability</legend>
+        <label><input type="checkbox" data-preference="discoverable-by-email" data-default="true"> Let people in other organizations find me by my email address</label>
+      </fieldset>
+      <p class="dialog-note">This applies only while your workspace is discoverable; when it is not, nobody outside finds you by email either way.</p>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-advanced" aria-labelledby="pref-tab-advanced" tabindex="0" hidden>
       <h3>Advanced</h3>

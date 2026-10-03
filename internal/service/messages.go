@@ -5087,9 +5087,15 @@ func (m Messages) roleAssignments(ctx context.Context, workspaceID domain.Worksp
 	return assignments, nil
 }
 
+// DiscoverableByEmailPreference is the member preference behind Privacy &
+// visibility's "Let people outside this workspace find me by email". It is on
+// unless the member stored "false".
+const DiscoverableByEmailPreference = "discoverable-by-email"
+
 // DiscoverableContacts reports which of the named email addresses belong to a
 // member this workspace lets others find. A workspace that is not discoverable
-// answers no contacts, whatever the addresses match.
+// answers no contacts, whatever the addresses match, and neither does a member
+// who opted out.
 func (m Messages) DiscoverableContacts(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, emails []string) ([]domain.User, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
 		return nil, err
@@ -5115,6 +5121,14 @@ func (m Messages) DiscoverableContacts(ctx context.Context, workspaceID domain.W
 			continue
 		}
 		if user.Deleted {
+			continue
+		}
+		// A member who turned off "find me by email" in Privacy & visibility
+		// is not found, whatever the workspace allows. A preference read that
+		// fails withholds the member too: answering would be the one outcome
+		// they may have asked not to have.
+		preferences, err := m.Store.MemberPreferences(ctx, workspaceID, user.ID)
+		if err != nil || preferences[DiscoverableByEmailPreference] == "false" {
 			continue
 		}
 		found = append(found, user)

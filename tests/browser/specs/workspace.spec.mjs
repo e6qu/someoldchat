@@ -2383,6 +2383,9 @@ test('[NAV-06 A11Y-01] accessibility and message display preferences change how 
   await expect(emoji).toBeHidden();
   await expect(message.locator('.emoji-code')).toHaveText(':tada:');
   await expect(message.locator('.emoji-code')).toBeVisible();
+  await preferences.getByRole('tab', { name: 'Privacy & visibility' }).click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-privacy');
+  await expect(preferences.getByRole('checkbox', { name: 'Let people in other organizations find me by my email address' })).toBeChecked();
 
   // The choice is the account's, so a reload (or another browser) keeps it.
   await page.keyboard.press('Escape');

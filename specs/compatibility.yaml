@@ -2485,6 +2485,7 @@ operations:
     reference: https://docs.slack.dev/reference/methods/users.discoverableContacts.lookup/
     evidence:
       - go-test:internal/api/slack:TestDiscoverableContactsLookupFollowsTheWorkspaceSetting
+      - go-test:internal/service:TestAMemberCanOptOutOfBeingFoundByEmail
   - method: workflows.featured.add
     status: sdk-compatible
     provenance: slack-reference
