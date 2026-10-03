@@ -3519,6 +3519,23 @@ test('[NAV-04 NAV-08] a sidebar section marks its own conversations read', async
   await asMember('conversations.archive', { channel: channel.id });
 });
 
+// A member's Add coworkers is a request to the administrators, as in Slack: it
+// opens a form rather than administration they cannot use, and says the
+// invitation waits on approval.
+test('[ADMIN-01 A11Y-01] a member requests an invitation from Add coworkers', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto(`/app?channel=${CHANNEL}`);
+  await page.getByRole('navigation', { name: 'Direct messages' }).getByRole('link', { name: 'Add coworkers' }).click();
+  const dialog = page.getByRole('dialog', { name: /Invite people to/ });
+  await expect(dialog).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page, '#invite-request-dialog');
+  const email = `coworker-${Date.now()}@example.com`;
+  await dialog.getByLabel('To').fill(email);
+  await dialog.getByLabel(/Reason for request/).fill('We are hiring for the platform team');
+  await dialog.getByRole('button', { name: 'Send request' }).click();
+  await expect(page.locator('.channel-notices .notice')).toContainText(`Your request to invite ${email} was sent to your workspace administrators.`);
+});
+
 test('[AUTH-04] workspace administration exists and refuses a member rather than 404ing', async ({ page, context }) => {
   await signIn(context);
 

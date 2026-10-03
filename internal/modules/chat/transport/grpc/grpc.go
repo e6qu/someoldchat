@@ -2610,12 +2610,19 @@ func (r Remote) AdminTeamUsers(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoUserPage(out)
 }
 
-func (r Remote) AdminInviteUser(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, email string, channels []domain.ConversationID, customMessage, realName string, resend, restricted, ultraRestricted bool, guestExpirationAt time.Time) error {
-	channelIDs := make([]string, 0, len(channels))
-	for _, channel := range channels {
-		channelIDs = append(channelIDs, string(channel))
+func (r Remote) RequestInvitation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, email string, channels []domain.ConversationID, customMessage string) error {
+	out, err := r.directory.RequestInvitation(ctx, &chatv1.RequestInvitationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Email: email, ChannelIds: conversationStrings(channels), CustomMessage: customMessage})
+	if err != nil {
+		return err
 	}
-	out, err := r.directory.AdminInviteUser(ctx, &chatv1.AdminInviteUserRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Email: email, ChannelIds: channelIDs, CustomMessage: customMessage, RealName: realName, Resend: resend, Restricted: restricted, UltraRestricted: ultraRestricted, GuestExpirationAt: guestExpirationAt.Unix()})
+	if !out.GetOk() {
+		return errors.New("invitation request was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) AdminInviteUser(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, email string, channels []domain.ConversationID, customMessage, realName string, resend, restricted, ultraRestricted bool, guestExpirationAt time.Time) error {
+	out, err := r.directory.AdminInviteUser(ctx, &chatv1.AdminInviteUserRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Email: email, ChannelIds: conversationStrings(channels), CustomMessage: customMessage, RealName: realName, Resend: resend, Restricted: restricted, UltraRestricted: ultraRestricted, GuestExpirationAt: guestExpirationAt.Unix()})
 	if err != nil {
 		return err
 	}
@@ -7301,15 +7308,19 @@ func (s *Server) AdminApproveInviteRequest(ctx context.Context, input *chatv1.In
 }
 
 func (s *Server) AdminInviteUser(ctx context.Context, input *chatv1.AdminInviteUserRequest) (*chatv1.MutationResponse, error) {
-	channels := make([]domain.ConversationID, 0, len(input.GetChannelIds()))
-	for _, channel := range input.GetChannelIds() {
-		channels = append(channels, domain.ConversationID(channel))
-	}
+	channels := conversationIDs(input.GetChannelIds())
 	var expiration time.Time
 	if input.GetGuestExpirationAt() != 0 {
 		expiration = time.Unix(input.GetGuestExpirationAt(), 0).UTC()
 	}
 	if err := s.implementation.AdminInviteUser(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetEmail(), channels, input.GetCustomMessage(), input.GetRealName(), input.GetResend(), input.GetRestricted(), input.GetUltraRestricted(), expiration); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) RequestInvitation(ctx context.Context, input *chatv1.RequestInvitationRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.RequestInvitation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetEmail(), conversationIDs(input.GetChannelIds()), input.GetCustomMessage()); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil

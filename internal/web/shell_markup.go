@@ -225,6 +225,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
 </dialog></template>{{end}}
 <div class="visually-hidden" id="shell-status" aria-live="polite" aria-atomic="true"></div>{{end}}
 
+{{define "invite-request-fields"}}<div class="dialog-body"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><p>Your workspace administrators review every invitation. Once one of them approves your request, the person you name is sent an invitation.</p><label for="invite-request-email">To</label><input id="invite-request-email" type="email" name="email" autocomplete="off" required placeholder="name@example.com"><label for="invite-request-reason">Reason for request <span class="optional">(optional)</span></label><textarea id="invite-request-reason" name="reason" maxlength="500" rows="3"></textarea></div>{{end}}
 {{define "status-form"}}<form class="status-form" method="post" action="/app/status" data-status-form>
   <div class="dialog-head"><h2 id="status-dialog-title" tabindex="-1">Set a status</h2><button class="dialog-close" type="button" data-dialog-close aria-label="Close status">{{icon "close"}}</button></div>
   <div class="dialog-body">
