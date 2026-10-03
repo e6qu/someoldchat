@@ -4279,6 +4279,28 @@ test('[COMP-01 FILE-02 A11Y-01] a recent file is shared from the composer menu',
   await expect(page.locator('#timeline').getByText(name).first()).toBeVisible();
 });
 
+// A thread reply that carries files and is also sent to the channel stays a
+// broadcast, as a reply without files does.
+test('[COMP-01 THREAD-02 FILE-01] a reply with a file is also sent to the channel when asked', async ({ page, context, request }) => {
+  await signIn(context);
+  const root = await postThroughTheAPI(request, `broadcast files ${Date.now()}`);
+  await page.goto(`/app?channel=${CHANNEL}&thread=${encodeURIComponent(root.ts)}`);
+  const name = `broadcast-${Date.now()}.txt`;
+  await page.locator('#thread-upload-file').setInputFiles({ name, mimeType: 'text/plain', buffer: Buffer.from('broadcast file') });
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('checkbox', { name: 'Also send to #general' }).check();
+  await page.locator('#thread-composer').getByRole('button', { name: 'Send now', exact: true }).click();
+  await expect(page.locator('#thread-messages .message-file', { hasText: name })).toBeVisible();
+  await expect.poll(async () => {
+    const history = await request.post('/api/conversations.replies', {
+      headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+      data: { channel: CHANNEL, ts: root.ts },
+    });
+    const reply = (await history.json()).messages.find((message) => (message.files || []).some((file) => file.name === name));
+    return reply ? reply.subtype : 'missing';
+  }).toBe('thread_broadcast');
+});
+
 // A canvas keeps what it said before, and a member can put it back. Restoring
 // is an ordinary edit rather than a rewind, so the content it replaced becomes
 // a revision of its own — which is what makes restoring the wrong one

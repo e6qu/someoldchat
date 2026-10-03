@@ -943,7 +943,7 @@ func (h Handler) uploadModalFiles(r *http.Request, principal auth.Principal, mod
 		if refused {
 			continue
 		}
-		files, err := h.Messages.CompleteExternalUploads(r.Context(), principal.WorkspaceID, principal.UserID, completions, nil, "", "", "")
+		files, err := h.Messages.CompleteExternalUploads(r.Context(), principal.WorkspaceID, principal.UserID, completions, nil, "", "", "", false)
 		if err != nil {
 			return nil, err
 		}

@@ -4923,7 +4923,7 @@ func parityCases() []parityCase {
 				}
 				files, err := chat.CompleteExternalUploads(ctx, "T1", "U1",
 					[]domain.ExternalUploadCompletion{{ID: upload.ID, Title: "Quarterly report"}},
-					[]domain.ConversationID{"C1"}, "Here it is", "", "")
+					[]domain.ConversationID{"C1"}, "Here it is", "", "", false)
 				if err != nil {
 					return nil, err
 				}

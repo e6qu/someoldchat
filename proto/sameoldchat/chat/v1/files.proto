@@ -105,6 +105,8 @@ message CompleteExternalUploadsRequest {
   string initial_comment = 5;
   string blocks = 6;
   string thread_timestamp = 7;
+  // A thread reply also sent to its channel.
+  bool reply_broadcast = 8;
 }
 
 message RemoteFile {

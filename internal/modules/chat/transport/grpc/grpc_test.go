@@ -445,7 +445,7 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	if err := remote.UploadExternalFile(ctx, secondBatch.ID, secondBatch.Size, bytes.NewReader([]byte("second"))); err != nil {
 		t.Fatal(err)
 	}
-	batch, err := remote.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: firstBatch.ID, Title: "First batch"}, {ID: secondBatch.ID, Title: "Second batch"}}, []domain.ConversationID{"C1"}, "Batch", "", "")
+	batch, err := remote.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: firstBatch.ID, Title: "First batch"}, {ID: secondBatch.ID, Title: "Second batch"}}, []domain.ConversationID{"C1"}, "Batch", "", "", false)
 	if err != nil || len(batch) != 2 || batch[0].Title != "First batch" || batch[1].Title != "Second batch" {
 		t.Fatalf("batch=%+v err=%v", batch, err)
 	}

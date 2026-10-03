@@ -846,8 +846,10 @@ type CompleteExternalUploadsRequest struct {
 	InitialComment  string                      `protobuf:"bytes,5,opt,name=initial_comment,json=initialComment,proto3" json:"initial_comment,omitempty"`
 	Blocks          string                      `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
 	ThreadTimestamp string                      `protobuf:"bytes,7,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// A thread reply also sent to its channel.
+	ReplyBroadcast bool `protobuf:"varint,8,opt,name=reply_broadcast,json=replyBroadcast,proto3" json:"reply_broadcast,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CompleteExternalUploadsRequest) Reset() {
@@ -927,6 +929,13 @@ func (x *CompleteExternalUploadsRequest) GetThreadTimestamp() string {
 		return x.ThreadTimestamp
 	}
 	return ""
+}
+
+func (x *CompleteExternalUploadsRequest) GetReplyBroadcast() bool {
+	if x != nil {
+		return x.ReplyBroadcast
+	}
+	return false
 }
 
 type RemoteFile struct {
@@ -2882,7 +2891,7 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"channelIds\x12'\n" +
 	"\x0finitial_comment\x18\x06 \x01(\tR\x0einitialComment\x12\x16\n" +
 	"\x06blocks\x18\a \x01(\tR\x06blocks\x12)\n" +
-	"\x10thread_timestamp\x18\b \x01(\tR\x0fthreadTimestamp\"\xae\x02\n" +
+	"\x10thread_timestamp\x18\b \x01(\tR\x0fthreadTimestamp\"\xd7\x02\n" +
 	"\x1eCompleteExternalUploadsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12C\n" +
@@ -2891,7 +2900,8 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"channelIds\x12'\n" +
 	"\x0finitial_comment\x18\x05 \x01(\tR\x0einitialComment\x12\x16\n" +
 	"\x06blocks\x18\x06 \x01(\tR\x06blocks\x12)\n" +
-	"\x10thread_timestamp\x18\a \x01(\tR\x0fthreadTimestamp\"\xec\x02\n" +
+	"\x10thread_timestamp\x18\a \x01(\tR\x0fthreadTimestamp\x12'\n" +
+	"\x0freply_broadcast\x18\b \x01(\bR\x0ereplyBroadcast\"\xec\x02\n" +
 	"\n" +
 	"RemoteFile\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
