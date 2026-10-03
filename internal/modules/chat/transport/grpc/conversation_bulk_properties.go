@@ -24,7 +24,7 @@ func (r Remote) AdminBulkSetConversationProperties(ctx context.Context, workspac
 
 func (s *Server) AdminBulkSetConversationProperties(ctx context.Context, input *chatv1.ConversationPropertiesRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.AdminBulkSetConversationProperties(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
-		decodeConversationIDs(input.GetConversationIds()), domain.ConversationProperty{ExcludeFromSlackAI: input.GetExcludeFromSlackAi()}); err != nil {
+		conversationIDs(input.GetConversationIds()), domain.ConversationProperty{ExcludeFromSlackAI: input.GetExcludeFromSlackAi()}); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil

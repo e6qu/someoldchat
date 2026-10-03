@@ -93,8 +93,9 @@ The sidebar lists the conversations the member belongs to: Starred first,
 then custom sections, Channels, Direct messages and Apps. A public channel the
 member has not joined is reached through Browse channels, not listed. Rows are
 alphabetical by default, and each section's menu sorts it alphabetically, by
-priority or (for direct messages) by most recent activity, and shows all
-conversations, unreads only or mentions only. An unread conversation is bold;
+priority or (for direct messages) by most recent activity, shows all
+conversations, unreads only or mentions only, and marks the section's unread
+conversations read. An unread conversation is bold;
 a count badge appears only for mentions in a channel and for every unread
 message in a direct message; a muted conversation is greyed and never bold.
 A private channel carries a lock rather than a `#`, and a self-DM is named

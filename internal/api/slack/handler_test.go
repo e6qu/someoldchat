@@ -4461,6 +4461,24 @@ func TestAdminEmojiLifecycle(t *testing.T) {
 	}
 }
 
+// The admin.emoji methods need an admin scope, which Slack grants to user
+// tokens only, so a bot token is refused for its type before any argument is
+// read.
+func TestAdminEmojiRefusesBotTokens(t *testing.T) {
+	bot, _ := testHandlerWithStore()
+	for _, call := range []struct{ method, form string }{
+		{"admin.emoji.add", "name=shipit&url=https%3A%2F%2Fcdn.example%2Fshipit.png"},
+		{"admin.emoji.addAlias", "name=hello&alias_for=shipit"},
+		{"admin.emoji.list", ""},
+		{"admin.emoji.remove", "name=shipit"},
+		{"admin.emoji.rename", "name=shipit&new_name=launched"},
+	} {
+		if code := errorCode(t, postForm(bot, "/api/"+call.method, call.form)); code != "not_allowed_token_type" {
+			t.Errorf("%s with a bot token: %q", call.method, code)
+		}
+	}
+}
+
 func TestAdminConversationSearchIsRegistered(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/admin.conversations.search?query=general&limit=10", nil)
 	request.Header.Set("Authorization", "Bearer token")

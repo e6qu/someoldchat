@@ -4834,6 +4834,14 @@ func (r Remote) MarkAllRead(ctx context.Context, workspaceID domain.WorkspaceID,
 	return int(out.GetConversations()), nil
 }
 
+func (r Remote) MarkConversationsRead(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversations []domain.ConversationID) (int, error) {
+	out, err := r.interactions.MarkConversationsRead(ctx, &chatv1.MarkConversationsReadRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: conversationStrings(conversations)})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetConversations()), nil
+}
+
 func (r Remote) ReadCursor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ReadCursor, error) {
 	out, err := r.interactions.GetReadCursor(ctx, &chatv1.ReadCursorRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
@@ -9377,6 +9385,14 @@ func (s *Server) MarkAllRead(ctx context.Context, input *chatv1.MarkAllReadReque
 	return &chatv1.MarkAllReadResponse{Conversations: int32(count)}, nil
 }
 
+func (s *Server) MarkConversationsRead(ctx context.Context, input *chatv1.MarkConversationsReadRequest) (*chatv1.MarkAllReadResponse, error) {
+	count, err := s.implementation.MarkConversationsRead(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), conversationIDs(input.GetConversationIds()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MarkAllReadResponse{Conversations: int32(count)}, nil
+}
+
 func (s *Server) SetAssistantThread(ctx context.Context, input *chatv1.SetAssistantThreadRequest) (*chatv1.SetAssistantThreadResponse, error) {
 	workspace := domain.WorkspaceID(input.GetWorkspaceId())
 	actor := domain.UserID(input.GetUserId())
@@ -11929,7 +11945,7 @@ func (r Remote) AdminConversationsExcludedFromAI(ctx context.Context, workspaceI
 	if err != nil {
 		return nil, err
 	}
-	return decodeConversationIDs(out.GetConversationIds()), nil
+	return conversationIDs(out.GetConversationIds()), nil
 }
 
 func (r Remote) AdminLinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ConversationID, orgID string, recordIDs []string) error {
@@ -12003,7 +12019,7 @@ func (s *Server) AdminLookupConversations(ctx context.Context, input *chatv1.Con
 
 func (s *Server) AdminBulkMoveConversations(ctx context.Context, input *chatv1.BulkMoveConversationsRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.AdminBulkMoveConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
-		decodeConversationIDs(input.GetConversationIds()), domain.WorkspaceID(input.GetTargetTeamId())); err != nil {
+		conversationIDs(input.GetConversationIds()), domain.WorkspaceID(input.GetTargetTeamId())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
@@ -12011,7 +12027,7 @@ func (s *Server) AdminBulkMoveConversations(ctx context.Context, input *chatv1.B
 
 func (s *Server) AdminSetConversationsExcludedFromAI(ctx context.Context, input *chatv1.ConversationAIExclusionRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.AdminSetConversationsExcludedFromAI(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
-		decodeConversationIDs(input.GetConversationIds()), input.GetExcluded()); err != nil {
+		conversationIDs(input.GetConversationIds()), input.GetExcluded()); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
@@ -12019,7 +12035,7 @@ func (s *Server) AdminSetConversationsExcludedFromAI(ctx context.Context, input 
 
 func (s *Server) AdminConversationsExcludedFromAI(ctx context.Context, input *chatv1.ConversationAIExclusionRequest) (*chatv1.ConversationAIExclusionResponse, error) {
 	ids, err := s.implementation.AdminConversationsExcludedFromAI(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
-		decodeConversationIDs(input.GetConversationIds()))
+		conversationIDs(input.GetConversationIds()))
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -12036,7 +12052,7 @@ func (s *Server) AdminLinkConversationObjects(ctx context.Context, input *chatv1
 
 func (s *Server) AdminUnlinkConversationObjects(ctx context.Context, input *chatv1.UnlinkConversationObjectsRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.AdminUnlinkConversationObjects(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
-		decodeConversationIDs(input.GetConversationIds())); err != nil {
+		conversationIDs(input.GetConversationIds())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
@@ -12062,14 +12078,6 @@ func (s *Server) AdminCreateConversationForObjects(ctx context.Context, input *c
 		return nil, mapError(err)
 	}
 	return encodeProtoConversation(conversation), nil
-}
-
-func decodeConversationIDs(values []string) []domain.ConversationID {
-	ids := make([]domain.ConversationID, 0, len(values))
-	for _, value := range values {
-		ids = append(ids, domain.ConversationID(value))
-	}
-	return ids
 }
 
 func encodeProtoLinkedObject(value domain.LinkedObject) *chatv1.LinkedObject {

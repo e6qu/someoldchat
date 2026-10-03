@@ -24,6 +24,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
         <div class="menu-list" role="menu" aria-label="{{$section.Label}} options">
           <a role="menuitem" href="{{$.Shell.With "/app/sidebar/sections/new"}}" data-dialog-open="section-dialog" data-section-dialog="create">{{icon "plus"}}<span>Create new section</span></a>
           {{if $section.Custom}}<a role="menuitem" href="{{$.Shell.With "/app/sidebar/sections/new"}}" data-dialog-open="section-rename-{{$section.ID}}">{{icon "compose"}}<span>Rename…</span></a>{{end}}
+          {{with $section.UnreadIDs}}<form class="menu-form" method="post" action="/app/read/section?channel={{$.Channel}}" role="none"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}">{{range .}}<input type="hidden" name="conversation" value="{{.}}">{{end}}<button type="submit" role="menuitem">{{icon "check"}}<span>Mark all as read</span></button></form>{{end}}
           <hr role="separator">
           <div role="group" aria-label="Sort">
             <p class="menu-heading" role="none">Sort</p>

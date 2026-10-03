@@ -63,6 +63,19 @@ func (s sidebarView) homeSections(canInvite, hasApps bool) []homeSectionView {
 	return sections
 }
 
+// UnreadIDs are the section's conversations with unread messages, which its
+// "Mark all as read" marks. A muted conversation counts: muting hides the
+// badge, not the unread state.
+func (s homeSectionView) UnreadIDs() []string {
+	var ids []string
+	for _, row := range s.Rows {
+		if row.IsUnread {
+			ids = append(ids, row.ID)
+		}
+	}
+	return ids
+}
+
 // SortName is what the client sorts a row by alphabetically.
 func (c conversationView) SortName() string { return strings.ToLower(c.Name) }
 

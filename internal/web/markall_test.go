@@ -95,3 +95,48 @@ func csrfFor(t *testing.T, mux *http.ServeMux) string {
 	start += len(marker)
 	return body[start : start+strings.Index(body[start:], `"`)]
 }
+
+// A section's "Mark all as read" names the section's unread rows as the page
+// drew them, and clears those alone: another section's unread conversation
+// keeps its state.
+func TestMarkSectionReadClearsOnlyTheNamedRows(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(1700000300, 0).UTC()
+	for index, name := range []string{"second", "third"} {
+		id := domain.ConversationID("C" + name)
+		if err := s.SeedConversation(domain.Conversation{ID: id, WorkspaceID: "T1", Name: name}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SeedConversationMember(id, "U1"); err != nil {
+			t.Fatal(err)
+		}
+		message := domain.Message{ID: domain.MessageID("Msection" + name), WorkspaceID: "T1", Conversation: id, AuthorID: "U2", Text: "unread", CreatedAt: at}
+		if err := s.CreateMessage(context.Background(), message, events.Event{ID: domain.EventID("Esection" + string(rune('a'+index))), WorkspaceID: "T1", Topic: "message.created", Payload: `{"type":"message.created"}`, CreatedAt: at}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := sidebar(t, mux)
+	for _, want := range []string{`action="/app/read/section?channel=Cdev"`, `name="conversation" value="Csecond"`, `name="conversation" value="Cthird"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("the Channels section menu lacks %s", want)
+		}
+	}
+
+	post := httptest.NewRequest(http.MethodPost, "/app/read/section?channel=Cdev", strings.NewReader("_csrf="+csrfFor(t, mux)+"&conversation=Csecond"))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	post.Header.Set("Sec-Fetch-Site", "same-origin")
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, post)
+	if recorder.Code != http.StatusSeeOther || !strings.Contains(recorder.Header().Get("Location"), "Marked+1+conversation+read") {
+		t.Fatalf("POST /app/read/section returned %d to %q: %s", recorder.Code, recorder.Header().Get("Location"), recorder.Body)
+	}
+
+	body = sidebar(t, mux)
+	if strings.Contains(body, `name="conversation" value="Csecond"`) || !strings.Contains(body, `name="conversation" value="Cthird"`) {
+		t.Fatalf("after marking #second read the menu names: %s", body)
+	}
+}

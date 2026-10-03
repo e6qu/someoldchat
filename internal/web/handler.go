@@ -3916,6 +3916,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/timeline", h.timeline)
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("POST /app/read/all", h.markAllRead)
+	mux.HandleFunc("POST /app/read/section", h.markSectionRead)
 	mux.HandleFunc("POST /app/active", h.recordActivity)
 	mux.HandleFunc("POST /app/typing", h.recordTyping)
 	mux.HandleFunc("GET /app/typing", h.typingFragment)
@@ -4723,16 +4724,52 @@ func (h Handler) markAllRead(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusServiceUnavailable, "Unread counts are temporarily unavailable", "Nothing was marked read. Nothing else was changed.")
 		return
 	}
-	// The count is the whole feedback: clearing every badge at once is
-	// irreversible enough that "nothing happened" and "seventeen conversations
-	// were cleared" must not look the same.
-	notice := "Everything was already read"
-	if cleared == 1 {
-		notice = "Marked 1 conversation read"
-	} else if cleared > 1 {
-		notice = fmt.Sprintf("Marked %d conversations read", cleared)
+	h.redirectMutation(w, r, h.viewURL(r, "")+"&notice="+url.QueryEscape(markedReadNotice(cleared)))
+}
+
+// markSectionRead is a sidebar section's "Mark all as read". The form names
+// the section's unread conversations as the member saw them; one that became
+// unread after the page rendered stays unread, because the member has not seen
+// it. The notice counts what moved, as markAllRead's does.
+func (h Handler) markSectionRead(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
 	}
-	h.redirectMutation(w, r, h.viewURL(r, "")+"&notice="+url.QueryEscape(notice))
+	_, values, err := decodeFormValues(w, r, "conversation")
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That form could not be read", "Reload the page and try again.")
+		return
+	}
+	if !h.requireCSRF(w, r) {
+		return
+	}
+	conversations := make([]domain.ConversationID, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			conversations = append(conversations, domain.ConversationID(value))
+		}
+	}
+	cleared, err := h.Messages.MarkConversationsRead(r.Context(), principal.WorkspaceID, principal.UserID, conversations)
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "Unread counts are temporarily unavailable", "Nothing was marked read. Nothing else was changed.")
+		return
+	}
+	h.redirectMutation(w, r, h.viewURL(r, "")+"&notice="+url.QueryEscape(markedReadNotice(cleared)))
+}
+
+// markedReadNotice is the feedback for a bulk mark-read: clearing many badges
+// at once is irreversible enough that "nothing happened" and "seventeen
+// conversations were cleared" must not look the same.
+func markedReadNotice(cleared int) string {
+	switch {
+	case cleared == 1:
+		return "Marked 1 conversation read"
+	case cleared > 1:
+		return fmt.Sprintf("Marked %d conversations read", cleared)
+	}
+	return "Everything was already read"
 }
 
 // recordActivity is the automatic-presence heartbeat. It answers 204 and
