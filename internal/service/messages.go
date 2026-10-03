@@ -2806,7 +2806,7 @@ func (m Messages) createView(ctx context.Context, workspaceID domain.WorkspaceID
 		value.RootViewID = rootID
 	}
 	value.PreviousViewID = previousID
-	event, err := newEvent(value.WorkspaceID, user, events.NewPayload(topic, events.String("view_id", string(value.ID)), events.String("app_id", string(appID)), events.String("user_id", string(user))), now)
+	event, err := newEvent(value.WorkspaceID, user, events.NewPayload(topic, events.String("view_id", string(value.ID)), events.String("app_id", string(appID)), events.String("user_id", string(user)), viewRevision(value)), now)
 	if err != nil {
 		return domain.View{}, err
 	}
@@ -2843,7 +2843,7 @@ func (m Messages) updateView(ctx context.Context, workspaceID domain.WorkspaceID
 	value.Hash = viewHash(value.ID, value.Payload, now)
 	value.UpdatedAt = now
 	value.UserID = current.UserID
-	event, err := newEvent(workspaceID, actor, events.NewPayload(topic, events.String("view_id", string(value.ID)), events.String("app_id", string(value.AppID)), events.String("user_id", string(value.UserID))), now)
+	event, err := newEvent(workspaceID, actor, events.NewPayload(topic, events.String("view_id", string(value.ID)), events.String("app_id", string(value.AppID)), events.String("user_id", string(value.UserID)), viewRevision(value)), now)
 	if err != nil {
 		return domain.View{}, err
 	}

@@ -2236,7 +2236,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
 {{if .IsMember}}{{template "channel-notifications" .}}{{end}}
 {{if .Modal}}
 <div class="modal-backdrop">
-  <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
+  <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title"{{if .Modal.Revision}} data-view-id="{{.Modal.ID}}" data-view-revision="{{.Modal.Revision}}"{{end}}>
     <form id="modal-close-form" method="post" action="{{if .Modal.Dialog}}/app/dialog/close{{else}}/app/view/close{{end}}?channel={{.Channel}}">
       <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="{{if .Modal.Dialog}}dialog_id{{else}}view_id{{end}}" value="{{.Modal.ID}}"><input type="hidden" name="clear" value="{{.Modal.ClearOnClose}}">
     </form>
@@ -3752,7 +3752,7 @@ var deliver=function(event){
 try{document.dispatchEvent(new CustomEvent('sameoldchat:event',{detail:{type:event.type,data:event.data}}))}catch(error){}
 if(event.type==='huddle.signal'||event.type==='huddle.reaction')return;
 if((event.type==='view.closed'||event.type==='view.submitted'||event.type==='dialog.closed')&&!document.querySelector('.app-modal'))return;
-if(event.type.indexOf('view.')===0||event.type.indexOf('dialog.')===0){var viewFrame=null;try{viewFrame=JSON.parse(event.data)}catch(error){}if(viewFrame&&viewFrame.state_only)return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload();return}
+if(event.type.indexOf('view.')===0||event.type.indexOf('dialog.')===0){var viewFrame=null;try{viewFrame=JSON.parse(event.data)}catch(error){}if(viewFrame&&viewFrame.state_only)return;if(viewFrame&&viewFrame.revision&&event.type!=='view.closed'&&document.querySelector('.app-modal[data-view-id="'+CSS.escape(viewFrame.view_id)+'"][data-view-revision="'+CSS.escape(viewFrame.revision)+'"]'))return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload();return}
 var live=regions(false);
 if(!live.length){announce('New activity is available in this conversation.');return}
 scheduleRefresh();

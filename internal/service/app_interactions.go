@@ -932,7 +932,7 @@ func (m Messages) applyViewSubmissionResponse(ctx context.Context, current domai
 			value.UpdatedAt = time.Now().UTC()
 			event, err := newEvent(value.WorkspaceID, actor, events.NewPayload("view.updated",
 				events.String("view_id", string(value.ID)), events.String("app_id", string(value.AppID)),
-				events.String("user_id", string(value.UserID)),
+				events.String("user_id", string(value.UserID)), viewRevision(value),
 			), value.UpdatedAt)
 			if err != nil {
 				return domain.ViewInteractionResult{}, err

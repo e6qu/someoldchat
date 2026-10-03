@@ -23,7 +23,11 @@ import (
 )
 
 type modalView struct {
-	ID              string
+	ID string
+	// Revision is the stored view's revision as the service's view events
+	// announce it, so the page can tell an event for the modal it already
+	// shows from one it has to reload for. A legacy dialog has none.
+	Revision        string
 	AppID           string
 	Title           string
 	Close           string
@@ -243,7 +247,7 @@ func (h Handler) newModalView(ctx context.Context, principal auth.Principal, val
 		return nil, errors.New("stored modal view is invalid")
 	}
 	result := &modalView{
-		ID: string(value.ID), AppID: string(value.AppID), Title: textObjectValue(envelope.Title),
+		ID: string(value.ID), Revision: strconv.FormatInt(value.UpdatedAt.UnixNano(), 10), AppID: string(value.AppID), Title: textObjectValue(envelope.Title),
 		Close: textObjectValue(envelope.Close), Submit: textObjectValue(envelope.Submit),
 		CallbackID: envelope.CallbackID, PrivateMetadata: envelope.PrivateMetadata,
 		ClearOnClose: envelope.ClearOnClose, SubmitDisabled: envelope.SubmitDisabled,

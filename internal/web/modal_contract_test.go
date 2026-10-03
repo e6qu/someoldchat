@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -441,13 +442,24 @@ func TestViewInputScriptIsPermittedAndStateSavesDoNotReload(t *testing.T) {
 	if !strings.Contains(workspaceContentSecurityPolicy(), inlineScriptHashes(viewInputScript)[0]) {
 		t.Fatal("the view input script is not permitted by the workspace policy")
 	}
-	if !strings.Contains(progressiveEnhancementScript, "viewFrame.state_only)return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload()") {
+	if !strings.Contains(progressiveEnhancementScript, "viewFrame.state_only)return;") {
 		t.Fatal("a state-only view record still reloads the workspace page")
+	}
+	// An event for the revision the page already shows (its own request
+	// rendered it) reloads nothing; any other revision still does.
+	if !strings.Contains(progressiveEnhancementScript, `.app-modal[data-view-id="'+CSS.escape(viewFrame.view_id)+'"][data-view-revision="'+CSS.escape(viewFrame.revision)+'"]'))return;if(event.type==='dialog.updated'&&viewFrame&&patchDialogErrors(viewFrame.dialog_id))return;window.location.reload()`) {
+		t.Fatal("a view event for the revision the page shows still reloads it")
 	}
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	seedSocketModeModalApp(t, s, "")
 	seedOpenModal(t, s, "Vp", elementsModal)
-	requireContains(t, "workspace scripts", get(t, mux, "/app?channel=Cdev").Body.String(), "window.sameoldchatLocalizeViews=localize")
+	page := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "workspace scripts", page, "window.sameoldchatLocalizeViews=localize")
+	stored, err := s.GetView(context.Background(), "T1", "Vp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, "modal revision", page, fmt.Sprintf(`data-view-id="Vp" data-view-revision="%d"`, stored.UpdatedAt.UnixNano()))
 	postForm(t, mux, "/app/view/action?channel=Cdev", url.Values{
 		"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vp"}, "modal_input_action": {"9"}, "input_0": {"x"}, "input_9": {"typed"},
 	}.Encode(), false)

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -20,6 +21,14 @@ func viewStateSavedPayload(value domain.View) events.Payload {
 		events.String("view_id", string(value.ID)), events.String("app_id", string(value.AppID)),
 		events.String("user_id", string(value.UserID)), events.Bool("state_only", true),
 	)
+}
+
+// viewRevision names the version of a view an event announces: its last
+// write time, which every store keeps to the nanosecond. A browser already
+// showing that revision, because its own request rendered it, has nothing to
+// reload; any other browser of the member's does.
+func viewRevision(value domain.View) events.Field {
+	return events.String("revision", strconv.FormatInt(value.UpdatedAt.UnixNano(), 10))
 }
 
 // withAcceptedOptionText gives a dispatched external-select action the text

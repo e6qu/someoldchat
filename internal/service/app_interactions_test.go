@@ -155,6 +155,12 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	if _, err := messages.OpenView(ctx, "T1", "UBOT", "A1", triggerID, `{"type":"modal","title":{"type":"plain_text","text":"Replay"},"blocks":[]}`, ""); err != domain.ErrTriggerExchanged {
 		t.Fatalf("trigger replay error=%v, want %v", err, domain.ErrTriggerExchanged)
 	}
+	requireViewEventRevision(t, repository, "view.opened", openedView)
+	updatedView, err := messages.UpdateView(ctx, "T1", "UBOT", "A1", string(openedView.ID), "", openedView.Payload, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireViewEventRevision(t, repository, "view.updated", updatedView)
 
 	blocks := `[{"type":"actions","block_id":"deployment","elements":[{"type":"static_select","action_id":"view_build","placeholder":{"type":"plain_text","text":"View build"},"options":[{"text":{"type":"plain_text","text":"Build 842"},"value":"842"}]}]}]`
 	original, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "UBOT", "C1", "Deployment", blocks, "", "", "", "A1")
