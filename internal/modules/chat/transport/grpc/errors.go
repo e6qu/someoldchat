@@ -153,6 +153,7 @@ var errorClasses = []errorClass{
 	{key: "service.origin_externally_shared", code: codes.FailedPrecondition, sentinel: domain.ErrOriginExternallyShared},
 	{key: "service.code_channel_message_not_found", code: codes.NotFound, sentinel: domain.ErrCodeChannelMessageNotFound},
 	{key: "service.invalid_code_channel_view", code: codes.InvalidArgument, sentinel: domain.ErrInvalidCodeChannelView},
+	{key: "service.invalid_slackbot_response", code: codes.InvalidArgument, sentinel: domain.ErrInvalidSlackbotResponse},
 	{key: "service.code_channel_view_too_large", code: codes.InvalidArgument, sentinel: domain.ErrCodeChannelViewTooLarge},
 	{key: "service.code_channel_view_not_found", code: codes.NotFound, sentinel: domain.ErrCodeChannelViewNotFound},
 	{key: "service.code_channel_view_canvas_not_found", code: codes.NotFound, sentinel: domain.ErrCodeChannelViewCanvasNotFound},

@@ -99,6 +99,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       <a role="menuitem" href="/app/admin/analytics"><span>Analytics</span></a>
       <a role="menuitem" href="/app/admin/audit"><span>Audit logs</span></a>{{end}}
       {{if .ShowAuthAdmin}}<a role="menuitem" href="/app/admin/auth"><span>Members and authorization</span></a>{{end}}
+      <a role="menuitem" href="/app/customize/emoji"><span>Customize workspace</span></a>
       <a role="menuitem" href="/app/developer/apps"><span>Developer apps</span></a>
       <a role="menuitem" href="/app/workflows"><span>Workflow Builder</span></a>
       {{if .ShowIdentity}}<a role="menuitem" href="/me"><span>Your account and release</span></a>{{end}}

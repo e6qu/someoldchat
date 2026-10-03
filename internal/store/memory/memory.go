@@ -57,6 +57,8 @@ type Store struct {
 	workflowRevisions             map[domain.WorkflowID][]domain.WorkflowRevision
 	workflowTriggers              map[domain.WorkflowTriggerID]domain.WorkflowTrigger
 	workflowEventCursor           map[domain.WorkspaceID]uint64
+	slackbotResponses             map[domain.SlackbotResponseID]domain.SlackbotResponse
+	slackbotResponseCursor        map[domain.WorkspaceID]uint64
 	workflowRuns                  map[domain.WorkflowRunID]domain.WorkflowRun
 	automationPermissions         map[string]domain.AutomationPermission
 	featuredWorkflows             map[domain.ConversationID][]domain.FeaturedWorkflow
@@ -341,6 +343,8 @@ func New() *Store {
 		workflowRevisions:             make(map[domain.WorkflowID][]domain.WorkflowRevision),
 		workflowTriggers:              make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger),
 		workflowEventCursor:           make(map[domain.WorkspaceID]uint64),
+		slackbotResponses:             make(map[domain.SlackbotResponseID]domain.SlackbotResponse),
+		slackbotResponseCursor:        make(map[domain.WorkspaceID]uint64),
 		workflowRuns:                  make(map[domain.WorkflowRunID]domain.WorkflowRun),
 		automationPermissions:         make(map[string]domain.AutomationPermission),
 		featuredWorkflows:             make(map[domain.ConversationID][]domain.FeaturedWorkflow),
@@ -13220,4 +13224,75 @@ func (s *Store) sharedWhereUserReads(shares []domain.ConversationID, user domain
 		}
 	}
 	return false
+}
+
+func cloneSlackbotResponse(value domain.SlackbotResponse) domain.SlackbotResponse {
+	value.Triggers = append([]string(nil), value.Triggers...)
+	value.Replies = append([]string(nil), value.Replies...)
+	return value
+}
+
+func (s *Store) CreateSlackbotResponse(_ context.Context, value domain.SlackbotResponse, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[value.WorkspaceID]; !exists {
+		return store.ErrNotFound
+	}
+	if _, exists := s.slackbotResponses[value.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	s.slackbotResponses[value.ID] = cloneSlackbotResponse(value)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListSlackbotResponses(_ context.Context, workspace domain.WorkspaceID) ([]domain.SlackbotResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := []domain.SlackbotResponse{}
+	for _, value := range s.slackbotResponses {
+		if value.WorkspaceID == workspace {
+			values = append(values, cloneSlackbotResponse(value))
+		}
+	}
+	sort.Slice(values, func(left, right int) bool {
+		if !values[left].CreatedAt.Equal(values[right].CreatedAt) {
+			return values[left].CreatedAt.Before(values[right].CreatedAt)
+		}
+		return values[left].ID < values[right].ID
+	})
+	return values, nil
+}
+
+func (s *Store) DeleteSlackbotResponse(_ context.Context, workspace domain.WorkspaceID, id domain.SlackbotResponseID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.slackbotResponses[id]
+	if !exists || value.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	delete(s.slackbotResponses, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) SlackbotResponseCursor(_ context.Context, workspace domain.WorkspaceID) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sequence, started := s.slackbotResponseCursor[workspace]
+	if !started {
+		// The journal's head: Slackbot answers from now on.
+		sequence = uint64(len(s.outbox))
+		s.slackbotResponseCursor[workspace] = sequence
+	}
+	return sequence, nil
+}
+
+func (s *Store) AdvanceSlackbotResponseCursor(_ context.Context, workspace domain.WorkspaceID, sequence uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.slackbotResponseCursor[workspace] < sequence {
+		s.slackbotResponseCursor[workspace] = sequence
+	}
+	return nil
 }

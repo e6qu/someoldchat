@@ -118,6 +118,7 @@ service.invalid_scheduled_status
 service.invalid_search
 service.invalid_shared_invite
 service.invalid_sidebar_section
+service.invalid_slackbot_response
 service.invalid_snooze
 service.invalid_stream_chunks
 service.invalid_timestamp

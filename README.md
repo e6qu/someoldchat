@@ -60,7 +60,7 @@ module interfaces support direct Go calls in local composition
 |---|---|---|
 | `sameoldchat` | `cmd/server` | web UI and Slack-compatible API |
 | `sameoldchat-chatd` | `cmd/chatd` | chat module behind gRPC in distributed composition |
-| `sameoldchat-worker` | `cmd/worker` | outbox, scheduled-message, and reminder delivery |
+| `sameoldchat-worker` | `cmd/worker` | outbox, scheduled-message, reminder, workflow-delay, and Slackbot-response delivery; guest expiry |
 | `sameoldchat-socketmode-worker` | `cmd/socketmode-worker` | Socket Mode response delivery |
 | `sameoldchat-blobgc` | `cmd/blobgc` | blob cleanup and reconciliation audit |
 | `sameoldchat-activator` | `cmd/activator` | wake coordinator and reverse proxy |

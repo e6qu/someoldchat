@@ -42,7 +42,10 @@ func (u User) IsSlackbot() bool {
 // Slackbot never reaches a conversation the member could not.
 type SlackbotPost struct {
 	Conversation ConversationID
-	Text         string
+	// ThreadTimestamp makes the post a reply in that thread of the
+	// conversation, as Slackbot answers a message posted in a thread.
+	ThreadTimestamp MessageTimestamp
+	Text            string
 	// Blocks is the message's Block Kit, such as a reminder's controls; Text
 	// is its fallback.
 	Blocks         string

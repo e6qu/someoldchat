@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+// SlackbotResponse is one of a workspace's Slackbot custom responses.
+message SlackbotResponse {
+  string workspace_id = 1;
+  string id = 2;
+  repeated string triggers = 3;
+  repeated string replies = 4;
+  string created_by = 5;
+  int64 created_at_unix_nano = 6;
+}
+
+message SlackbotResponsesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message SlackbotResponsesResponse {
+  repeated SlackbotResponse responses = 1;
+}
+
+message AddSlackbotResponseRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string triggers = 3;
+  repeated string replies = 4;
+}
+
+message DeleteSlackbotResponseRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string id = 3;
+}
+
+message DeleteSlackbotResponseResponse {
+  bool ok = 1;
+}
+
+message DispatchSlackbotResponsesRequest {
+  string workspace_id = 1;
+  int32 limit = 2;
+}
+
+message DispatchSlackbotResponsesResponse {
+  int32 answered = 1;
+}
+
+service SlackbotService {
+  rpc ListSlackbotResponses(SlackbotResponsesRequest) returns (SlackbotResponsesResponse);
+  rpc AddSlackbotResponse(AddSlackbotResponseRequest) returns (SlackbotResponse);
+  rpc DeleteSlackbotResponse(DeleteSlackbotResponseRequest) returns (DeleteSlackbotResponseResponse);
+  rpc DispatchSlackbotResponses(DispatchSlackbotResponsesRequest) returns (DispatchSlackbotResponsesResponse);
+}

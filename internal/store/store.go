@@ -1321,6 +1321,14 @@ type Store interface {
 	// them; the caller filters by conversation access.
 	ListFileShares(context.Context, domain.FileID) ([]domain.FileShare, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearch) (domain.FilePage, error)
+	// Slackbot's custom responses, oldest first, and how far Slackbot has
+	// read the journal for messages to answer. The cursor starts at the
+	// journal's head the first time it is read, and only moves forward.
+	CreateSlackbotResponse(context.Context, domain.SlackbotResponse, events.Event) error
+	ListSlackbotResponses(context.Context, domain.WorkspaceID) ([]domain.SlackbotResponse, error)
+	DeleteSlackbotResponse(context.Context, domain.WorkspaceID, domain.SlackbotResponseID, events.Event) error
+	SlackbotResponseCursor(context.Context, domain.WorkspaceID) (uint64, error)
+	AdvanceSlackbotResponseCursor(context.Context, domain.WorkspaceID, uint64) error
 	// SearchRemoteFiles answers the first limit remote files a search
 	// matches, in its order, among those shared where the user can read, and
 	// how many match in all. A remote file matches on its title and the

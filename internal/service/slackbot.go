@@ -51,13 +51,29 @@ func (m Messages) PostAsSlackbot(ctx context.Context, workspaceID domain.Workspa
 			return domain.Message{}, domain.ErrConversationAlreadyArchived
 		}
 	}
+	var thread domain.MessageTimestamp
+	if post.ThreadTimestamp != "" {
+		createdAt, err := domain.ParseMessageTimestamp(post.ThreadTimestamp)
+		if err != nil {
+			return domain.Message{}, domain.ErrInvalidTimestamp
+		}
+		parent, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
+		if err != nil || parent.WorkspaceID != workspaceID || parent.Deleted {
+			return domain.Message{}, domain.ErrThreadNotFound
+		}
+		// Threads are one level deep, as for any other reply.
+		thread = domain.NewMessageTimestamp(parent.CreatedAt)
+		if parent.ThreadTimestamp != "" {
+			thread = parent.ThreadTimestamp
+		}
+	}
 	id, err := domain.NewMessageID()
 	if err != nil {
 		return domain.Message{}, err
 	}
 	return m.createMessage(ctx, domain.Message{
 		ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: domain.SlackbotUserID,
-		Text: post.Text, Blocks: blocks, CreatedAt: domain.MessageInstant(time.Now()),
+		Text: post.Text, Blocks: blocks, ThreadTimestamp: thread, CreatedAt: domain.MessageInstant(time.Now()),
 	}, post.IdempotencyKey, "")
 }
 

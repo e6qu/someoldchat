@@ -718,6 +718,7 @@ func conversionCases() map[string]conversionCase {
 			},
 		)},
 		"CodeChannelView":      {sample: &domain.CodeChannelView{}, through: throughInfallible(encodeProtoCodeChannelView, decodeProtoCodeChannelView)},
+		"SlackbotResponse":     {sample: &domain.SlackbotResponse{}, through: throughInfallible(encodeProtoSlackbotResponse, decodeProtoSlackbotResponse)},
 		"AppPermission":        {sample: &domain.AppPermission{}, through: throughInfallible(encodeProtoAppPermission, decodeProtoAppPermission)},
 		"MCPServer":            {sample: &domain.MCPServer{}, through: throughInfallible(encodeProtoMCPServer, decodeProtoMCPServer)},
 		"MCPServerPermission":  {sample: &domain.MCPServerPermission{}, through: throughInfallible(encodeProtoMCPServerPermission, decodeProtoMCPServerPermission)},
