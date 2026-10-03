@@ -4098,6 +4098,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/sidebar/sections/new", h.shellFormPage("Create a section", "section"))
 	mux.HandleFunc("GET /app/invitations/request", h.shellFormPage("Invite people", "invite-request"))
 	mux.HandleFunc("POST /app/invitations/request", h.requestInvitation)
+	mux.HandleFunc("POST /app/preferences/timezone", h.setTimezone)
 	mux.HandleFunc("POST /app/status", h.setStatus)
 	mux.HandleFunc("POST /app/thread/follow", h.setThreadFollow)
 	mux.HandleFunc("POST /app/conversation/archive", h.setConversationArchived)
@@ -4835,6 +4836,13 @@ func (h Handler) recordTimezone(r *http.Request, principal auth.Principal, zone 
 	}
 	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
 	if err != nil || current.Profile.Timezone == zone {
+		return
+	}
+	// A member who chose their zone in Language & region turned the automatic
+	// zone off; a preference read that fails leaves their choice alone too,
+	// since overwriting it is the one outcome they asked not to have.
+	preferences, err := h.Messages.MemberPreferences(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil || preferences[timezoneAutomaticPreference] == "false" {
 		return
 	}
 	profile := current.Profile
