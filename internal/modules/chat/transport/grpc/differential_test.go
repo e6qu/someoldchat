@@ -6754,6 +6754,31 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A section's mark-read names its conversations, so the list must
+			// cross the transport intact: a dropped entry leaves one unread,
+			// and an empty list arriving as "all" would clear everything.
+			name: "mark a section's conversations read",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				newest, err := chat.Post(ctx, "T1", "U1", "C1", "unread", "", "")
+				if err != nil {
+					return nil, err
+				}
+				empty, err := chat.MarkConversationsRead(ctx, "T1", "U1", nil)
+				if err != nil {
+					return nil, err
+				}
+				moved, err := chat.MarkConversationsRead(ctx, "T1", "U1", []domain.ConversationID{"C1", "Cmissing"})
+				if err != nil {
+					return nil, err
+				}
+				cursor, err := chat.ReadCursor(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{empty, moved, cursor.LastRead == timestampOf(newest)}, nil
+			},
+		},
+		{
 			name: "conversation membership and cursor",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				message, err := chat.Post(ctx, "T1", "U1", "C1", "read me", "", "")

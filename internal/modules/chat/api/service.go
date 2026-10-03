@@ -410,6 +410,7 @@ type Service interface {
 	KickConversationMember(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID) error
 	MarkRead(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.ReadCursor, error)
 	MarkAllRead(context.Context, domain.WorkspaceID, domain.UserID) (int, error)
+	MarkConversationsRead(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) (int, error)
 	FollowedThreads(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FollowedThreadPage, error)
 	ResumeWorkflowDelays(context.Context, domain.WorkspaceID, time.Time, int) (int, error)
 	SetAssistantThreadTitle(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) error

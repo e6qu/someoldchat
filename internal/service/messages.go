@@ -6920,6 +6920,35 @@ func (m Messages) MarkAllRead(ctx context.Context, workspaceID domain.WorkspaceI
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return 0, err
 	}
+	return m.markReadWhere(ctx, workspaceID, userID, func(domain.ConversationID) bool { return true })
+}
+
+// MarkConversationsRead is a sidebar section's "Mark all as read": the named
+// conversations advance to their newest message exactly as MarkAllRead moves
+// every one, and the count of conversations that moved is returned.
+//
+// The walk is still MarkAllRead's, over the conversations the member can read,
+// so a name the member may not read, or one that does not exist, is passed
+// over rather than refused: a section rendered before the member left a
+// private channel must not fail for the rows that remain. An empty list marks
+// nothing; it never widens to every conversation.
+func (m Messages) MarkConversationsRead(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversations []domain.ConversationID) (int, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return 0, err
+	}
+	if len(conversations) == 0 {
+		return 0, nil
+	}
+	named := make(map[domain.ConversationID]bool, len(conversations))
+	for _, conversation := range conversations {
+		named[conversation] = true
+	}
+	return m.markReadWhere(ctx, workspaceID, userID, func(conversation domain.ConversationID) bool { return named[conversation] })
+}
+
+// markReadWhere advances the member's unread conversations that include
+// accepts. Its caller has authorized the member.
+func (m Messages) markReadWhere(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, include func(domain.ConversationID) bool) (int, error) {
 	// Every conversation, not the first page of them: "mark all read" that
 	// stopped at a page boundary would leave badges up with no way to tell
 	// which ones it skipped.
@@ -6931,7 +6960,7 @@ func (m Messages) MarkAllRead(ctx context.Context, workspaceID domain.WorkspaceI
 			return 0, err
 		}
 		for _, conversation := range page.Conversations {
-			if conversation.UnreadCount > 0 {
+			if conversation.UnreadCount > 0 && include(conversation.ID) {
 				unread = append(unread, conversation.ID)
 			}
 		}

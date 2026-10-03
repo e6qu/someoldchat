@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	InteractionsService_MarkRead_FullMethodName                     = "/sameoldchat.chat.v1.InteractionsService/MarkRead"
 	InteractionsService_MarkAllRead_FullMethodName                  = "/sameoldchat.chat.v1.InteractionsService/MarkAllRead"
+	InteractionsService_MarkConversationsRead_FullMethodName        = "/sameoldchat.chat.v1.InteractionsService/MarkConversationsRead"
 	InteractionsService_ListFollowedThreads_FullMethodName          = "/sameoldchat.chat.v1.InteractionsService/ListFollowedThreads"
 	InteractionsService_RecordActivity_FullMethodName               = "/sameoldchat.chat.v1.InteractionsService/RecordActivity"
 	InteractionsService_ResumeWorkflowDelays_FullMethodName         = "/sameoldchat.chat.v1.InteractionsService/ResumeWorkflowDelays"
@@ -51,6 +52,7 @@ const (
 type InteractionsServiceClient interface {
 	MarkRead(ctx context.Context, in *MarkReadRequest, opts ...grpc.CallOption) (*ReadCursor, error)
 	MarkAllRead(ctx context.Context, in *MarkAllReadRequest, opts ...grpc.CallOption) (*MarkAllReadResponse, error)
+	MarkConversationsRead(ctx context.Context, in *MarkConversationsReadRequest, opts ...grpc.CallOption) (*MarkAllReadResponse, error)
 	ListFollowedThreads(ctx context.Context, in *FollowedThreadsRequest, opts ...grpc.CallOption) (*FollowedThreadPage, error)
 	RecordActivity(ctx context.Context, in *RecordActivityRequest, opts ...grpc.CallOption) (*RecordActivityResponse, error)
 	ResumeWorkflowDelays(ctx context.Context, in *ResumeWorkflowDelaysRequest, opts ...grpc.CallOption) (*ResumeWorkflowDelaysResponse, error)
@@ -99,6 +101,16 @@ func (c *interactionsServiceClient) MarkAllRead(ctx context.Context, in *MarkAll
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MarkAllReadResponse)
 	err := c.cc.Invoke(ctx, InteractionsService_MarkAllRead_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) MarkConversationsRead(ctx context.Context, in *MarkConversationsReadRequest, opts ...grpc.CallOption) (*MarkAllReadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MarkAllReadResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_MarkConversationsRead_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -331,6 +343,7 @@ func (c *interactionsServiceClient) HandleSocketModeResponse(ctx context.Context
 type InteractionsServiceServer interface {
 	MarkRead(context.Context, *MarkReadRequest) (*ReadCursor, error)
 	MarkAllRead(context.Context, *MarkAllReadRequest) (*MarkAllReadResponse, error)
+	MarkConversationsRead(context.Context, *MarkConversationsReadRequest) (*MarkAllReadResponse, error)
 	ListFollowedThreads(context.Context, *FollowedThreadsRequest) (*FollowedThreadPage, error)
 	RecordActivity(context.Context, *RecordActivityRequest) (*RecordActivityResponse, error)
 	ResumeWorkflowDelays(context.Context, *ResumeWorkflowDelaysRequest) (*ResumeWorkflowDelaysResponse, error)
@@ -369,6 +382,9 @@ func (UnimplementedInteractionsServiceServer) MarkRead(context.Context, *MarkRea
 }
 func (UnimplementedInteractionsServiceServer) MarkAllRead(context.Context, *MarkAllReadRequest) (*MarkAllReadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MarkAllRead not implemented")
+}
+func (UnimplementedInteractionsServiceServer) MarkConversationsRead(context.Context, *MarkConversationsReadRequest) (*MarkAllReadResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MarkConversationsRead not implemented")
 }
 func (UnimplementedInteractionsServiceServer) ListFollowedThreads(context.Context, *FollowedThreadsRequest) (*FollowedThreadPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListFollowedThreads not implemented")
@@ -488,6 +504,24 @@ func _InteractionsService_MarkAllRead_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(InteractionsServiceServer).MarkAllRead(ctx, req.(*MarkAllReadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_MarkConversationsRead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MarkConversationsReadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).MarkConversationsRead(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_MarkConversationsRead_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).MarkConversationsRead(ctx, req.(*MarkConversationsReadRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -902,6 +936,10 @@ var InteractionsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MarkAllRead",
 			Handler:    _InteractionsService_MarkAllRead_Handler,
+		},
+		{
+			MethodName: "MarkConversationsRead",
+			Handler:    _InteractionsService_MarkConversationsRead_Handler,
 		},
 		{
 			MethodName: "ListFollowedThreads",

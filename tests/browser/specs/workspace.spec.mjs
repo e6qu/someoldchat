@@ -3431,18 +3431,25 @@ test('[NAV-02 NAV-04] section movement, unread movement, and mark-all-read work 
   expect(landed).not.toBe('');
 
   // NAV-04: unread movement walks only conversations that report unread
-  // messages, which is the same fact the sidebar announces.
-  const posted = await request.post('/api/chat.postMessage', {
+  // messages, which is the same fact the sidebar announces. The member's own
+  // message is never unread to them, so a bot writes into a channel the
+  // member is in but is not reading.
+  const bot = await installActivityBot(page, request);
+  const created = await request.post('/api/conversations.create', {
     headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
-    data: { channel: 'Cdev', text: `unread for keyboard navigation ${Date.now()}` },
+    data: { name: `keyboard-unread-${Date.now()}` },
   });
-  expect((await posted.json()).ok).toBe(true);
-  await page.goto('/app/activity');
-  const unreadNames = await page.locator('.side-section[aria-label="Channels"] .side-link[aria-label*="unread message"]').count();
-  if (unreadNames > 0) {
-    await page.keyboard.press('Alt+Shift+ArrowDown');
-    await expect(page).toHaveURL(/\/app\?channel=/);
+  const { channel } = await created.json();
+  for (const [method, data] of [['conversations.join', { channel: channel.id }], ['chat.postMessage', { channel: channel.id, text: 'unread for keyboard navigation' }]]) {
+    const response = await request.post(`/api/${method}`, {
+      headers: { authorization: `Bearer ${bot.token}`, 'content-type': 'application/json' },
+      data,
+    });
+    expect((await response.json()).ok, method).toBe(true);
   }
+  await page.goto(`/app?channel=${CHANNEL}`);
+  await page.keyboard.press('Alt+Shift+ArrowDown');
+  await expect(page).toHaveURL(new RegExp(`channel=${channel.id}`));
 
   // Shift+Escape is Slack's mark-everything-read, and it is a durable write:
   // it must go through the CSRF-carrying form, not a bare fetch.
@@ -3454,8 +3461,56 @@ test('[NAV-02 NAV-04] section movement, unread movement, and mark-all-read work 
   // A full navigation, not a background fetch: the sidebar badges are
   // server-rendered, so a member who cleared everything has to be shown a
   // sidebar that agrees.
-  await expect(page.locator('.channel-notices .notice')).toContainText(/Marked \d+ conversations? read|Everything was already read/);
+  await expect(page.locator('.channel-notices .notice')).toContainText(/Marked \d+ conversations? read/);
   await expect(page.locator('.side-section[aria-label="Channels"] .side-link[aria-label*="unread message"]')).toHaveCount(0);
+
+  const archived = await request.post('/api/conversations.archive', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: channel.id },
+  });
+  expect((await archived.json()).ok).toBe(true);
+});
+
+// A section's own menu marks the conversations in it read, as Slack's does,
+// and is offered only while the section has something unread.
+test('[NAV-04 NAV-08] a sidebar section marks its own conversations read', async ({ page, context, request }) => {
+  await signIn(context);
+  const asMember = async (method, data, token = API_TOKEN) => {
+    const response = await request.post(`/api/${method}`, {
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      data,
+    });
+    const payload = await response.json();
+    expect(payload.ok, `${method}: ${JSON.stringify(payload)}`).toBe(true);
+    return payload;
+  };
+  // The browser token posts as the signed-in member, whose own message is
+  // never unread to them, so a bot writes into a channel the member is in but
+  // is not reading.
+  const bot = await installActivityBot(page, request);
+  const { channel } = await asMember('conversations.create', { name: `section-read-${Date.now()}` });
+  await asMember('conversations.join', { channel: channel.id }, bot.token);
+  await asMember('chat.postMessage', { channel: channel.id, text: 'unread for the section menu' }, bot.token);
+
+  await page.goto(`/app?channel=${CHANNEL}`);
+  const channels = page.locator('.side-section[aria-label="Channels"]');
+  const unreadRow = channels.locator(`.side-link[aria-label^="${channel.name}, "][aria-label*="unread message"]`);
+  await expect(unreadRow).toHaveCount(1);
+
+  await channels.locator('.side-section-head').hover();
+  await channels.getByRole('button', { name: 'Options for Channels' }).click();
+  await channels.getByRole('menuitem', { name: 'Mark all as read' }).click();
+  await expect(page.locator('.channel-notices .notice')).toContainText(/Marked \d+ conversations? read/);
+  await expect(page).toHaveURL(new RegExp(`channel=${CHANNEL}`));
+  await expect(unreadRow).toHaveCount(0);
+
+  // With nothing unread left, the section no longer offers it.
+  await channels.locator('.side-section-head').hover();
+  await channels.getByRole('button', { name: 'Options for Channels' }).click();
+  await expect(channels.getByRole('menuitem', { name: 'Create new section' })).toBeVisible();
+  await expect(channels.getByRole('menuitem', { name: 'Mark all as read' })).toHaveCount(0);
+
+  await asMember('conversations.archive', { channel: channel.id });
 });
 
 test('[AUTH-04] workspace administration exists and refuses a member rather than 404ing', async ({ page, context }) => {
