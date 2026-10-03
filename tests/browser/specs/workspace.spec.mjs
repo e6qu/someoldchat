@@ -3450,10 +3450,16 @@ test('[NAV-02 NAV-04] section movement, unread movement, and mark-all-read work 
   await page.goto(`/app?channel=${CHANNEL}`);
   await page.keyboard.press('Alt+Shift+ArrowDown');
   await expect(page).toHaveURL(new RegExp(`channel=${channel.id}`));
+  // Opening the channel read it, so Shift+Escape below gets a fresh unread.
+  const again = await request.post('/api/chat.postMessage', {
+    headers: { authorization: `Bearer ${bot.token}`, 'content-type': 'application/json' },
+    data: { channel: channel.id, text: 'unread for mark-all-read' },
+  });
+  expect((await again.json()).ok).toBe(true);
 
   // Shift+Escape is Slack's mark-everything-read, and it is a durable write:
   // it must go through the CSRF-carrying form, not a bare fetch.
-  await page.goto('/app');
+  await page.goto(`/app?channel=${CHANNEL}`);
   // Deliberately from the composer, which is where focus lands on load: Shift
   // means nothing else to a text field, so the chord has to reach here.
   await composerEditor(page).focus();
