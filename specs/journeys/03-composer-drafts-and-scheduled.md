@@ -205,8 +205,10 @@ service and MUST NOT be advertised as a Slack Web API method.
 
 The send-arrow menu, headed "Schedule message", exposes Slack's suggested
 times ("Tomorrow at 9:00 AM", "Monday at 9:00 AM") and a "Custom time"
-date/time dialog in the member's time zone. The confirmation identifies the destination
-and exact local time. Slack's supported time window, per-channel quota,
+date/time dialog in the member's time zone. In a one-to-one DM whose recipient
+reported a time zone, each suggested time and the chosen custom time also say
+what that is for the recipient when it differs ("Monday 2:00 AM for Bob"). The
+confirmation identifies the destination and exact local time. Slack's supported time window, per-channel quota,
 content/attachment restrictions, thread rules, permissions, and invalid-time
 errors are enforced by the backend and match `chat.scheduleMessage`.
 

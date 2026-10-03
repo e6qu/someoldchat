@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"strings"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -64,6 +66,28 @@ type composerPageRequest struct {
 	State composerState
 }
 
+// directRecipientZone is the other person of a one-to-one DM and the time
+// zone their client reported. A zone this server cannot load is not offered,
+// because the browser would be asked to convert to a zone it may not know
+// either; a recipient who is unavailable simply gets no line.
+func (h Handler) directRecipientZone(ctx context.Context, principal auth.Principal, conversation domain.Conversation) (string, string) {
+	if conversation.Kind != domain.ConversationTypeIM || conversation.DirectUserID == "" || conversation.DirectUserID == principal.UserID || conversation.DirectUserDeleted {
+		return "", ""
+	}
+	user, err := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, conversation.DirectUserID)
+	if err != nil || user.IsBot() || user.IsSlackbot() {
+		return "", ""
+	}
+	zone := strings.TrimSpace(user.Profile.Timezone)
+	if zone == "" {
+		return "", ""
+	}
+	if _, err := time.LoadLocation(zone); err != nil {
+		return "", ""
+	}
+	return displayName(user), zone
+}
+
 // composerViews builds the conversation composer and, when a thread is open,
 // the thread pane's reply composer. Each restores its own saved draft.
 func (h Handler) composerViews(ctx context.Context, request composerPageRequest) (composerView, composerView, []string) {
@@ -71,6 +95,7 @@ func (h Handler) composerViews(ctx context.Context, request composerPageRequest)
 	principal, conversation := request.Principal, request.Conversation
 	channel := string(conversation.ID)
 	canInvite := !conversation.IsDirectOrGroup() && principal.HasScope(auth.ScopeChannelsManage)
+	recipientName, recipientZone := h.directRecipientZone(ctx, principal, conversation)
 	base := func(thread string) composerView {
 		view := composerView{
 			CSRFToken: request.CSRFToken, Channel: channel, ChannelLabel: request.ChannelName,
@@ -81,6 +106,7 @@ func (h Handler) composerViews(ctx context.Context, request composerPageRequest)
 			ScheduledURL:   "/app/drafts?" + url.Values{"channel": {channel}, "tab": {"scheduled"}}.Encode(),
 			CanUpload:      request.CanUpload, CanSchedule: principal.HasScope(auth.ScopeChatWrite),
 			HasShortcuts: true, IsDirect: conversation.IsDirectOrGroup(),
+			RecipientName: recipientName, RecipientZone: recipientZone,
 		}
 		if !view.IsDirect {
 			view.MemberCount = request.MemberCount
