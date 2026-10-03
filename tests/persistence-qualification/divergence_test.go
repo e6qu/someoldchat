@@ -3256,6 +3256,14 @@ func vipChannelMessagePiercesMuteOnEveryProfile(t *testing.T, open opener) {
 	if err := f.repository.SetConversationNotificationPreferences(ctx, muted, f.event("mute", "conversation.notification_preferences_changed", string(f.channelID))); err != nil {
 		t.Fatal(err)
 	}
+	// The sidebar reads every override in one pass; it must return the same
+	// one the per-conversation read does, and none for a member who set none.
+	if overrides, err := f.repository.ConversationNotificationOverrides(ctx, f.workspaceID, viaVIP); err != nil || len(overrides) != 1 || overrides[f.channelID] != muted {
+		t.Fatalf("overrides=%+v err=%v, want only the muted channel", overrides, err)
+	}
+	if overrides, err := f.repository.ConversationNotificationOverrides(ctx, f.workspaceID, plain); err != nil || len(overrides) != 0 {
+		t.Fatalf("a member with no overrides read %+v err=%v", overrides, err)
+	}
 	message := domain.Message{
 		ID: domain.MessageID("M-vip-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
 		AuthorID: author, Text: "morning all", Attachments: "[]", CreatedAt: domain.MessageInstant(time.Unix(1_700_000_900, 0).UTC()),

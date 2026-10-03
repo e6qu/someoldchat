@@ -333,7 +333,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       </fieldset>
       <fieldset><legend>Sort</legend>
         <label><input type="radio" name="pref-sidebar-sort" value="alpha" data-preference="sidebar-sort" data-default="alpha"> Alphabetically</label>
-        <label><input type="radio" name="pref-sidebar-sort" value="recent" data-preference="sidebar-sort"> By most recent activity (direct messages; other sections sort alphabetically)</label>
+        <label><input type="radio" name="pref-sidebar-sort" value="recent" data-preference="sidebar-sort"> By most recent activity</label>
         <label><input type="radio" name="pref-sidebar-sort" value="priority" data-preference="sidebar-sort"> Priority</label>
       </fieldset>
       <p class="dialog-note">A section’s own Sort and Show choices (in its ⋮ menu) override these.</p>

@@ -238,6 +238,22 @@ message ConversationNotificationPreferences {
   bool follow_every_thread = 5;
 }
 
+message SidebarActivityRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string conversation_ids = 3;
+}
+
+message ConversationActivity {
+  string conversation_id = 1;
+  int64 latest_at_unix_nano = 2;
+  ConversationNotificationPreferences notifications = 3;
+}
+
+message SidebarActivityResponse {
+  repeated ConversationActivity conversations = 1;
+}
+
 message SetConversationNotificationPreferencesRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -286,6 +302,7 @@ service ActivityService {
   rpc AssignConversationToSidebarSection(AssignConversationToSidebarSectionRequest) returns (MutationResponse);
   rpc GetConversationNotificationPreferences(ConversationNotificationPreferencesRequest) returns (ConversationNotificationPreferences);
   rpc SetConversationNotificationPreferences(SetConversationNotificationPreferencesRequest) returns (ConversationNotificationPreferences);
+  rpc GetSidebarActivity(SidebarActivityRequest) returns (SidebarActivityResponse);
   rpc GetThreadFollow(ThreadFollowRequest) returns (ThreadFollow);
   rpc SetThreadFollow(SetThreadFollowRequest) returns (ThreadFollow);
 }

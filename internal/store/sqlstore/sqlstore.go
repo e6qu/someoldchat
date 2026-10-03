@@ -14333,6 +14333,28 @@ func (s *Store) GetConversationNotificationPreferences(ctx context.Context, work
 	return preferences, nil
 }
 
+func (s *Store) ConversationNotificationOverrides(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (map[domain.ConversationID]domain.ConversationNotificationPreferences, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT conversation_id, level, follow_every_thread FROM conversation_notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	overrides := map[domain.ConversationID]domain.ConversationNotificationPreferences{}
+	for rows.Next() {
+		preferences := domain.ConversationNotificationPreferences{WorkspaceID: workspace, UserID: user}
+		var followEveryThread int
+		if err := rows.Scan(&preferences.Conversation, &preferences.Level, &followEveryThread); err != nil {
+			return nil, err
+		}
+		preferences.FollowEveryThread = followEveryThread != 0
+		if !preferences.Valid() {
+			return nil, errors.New("stored conversation notification preferences are invalid")
+		}
+		overrides[preferences.Conversation] = preferences
+	}
+	return overrides, rows.Err()
+}
+
 func (s *Store) SetConversationNotificationPreferences(ctx context.Context, preferences domain.ConversationNotificationPreferences, event events.Event) error {
 	if !preferences.Valid() {
 		return store.InvalidArgument("conversation notification preferences are invalid")

@@ -82,7 +82,7 @@ func (s *Server) DispatchSlackbotResponses(ctx context.Context, input *chatv1.Di
 func encodeProtoSlackbotResponse(value domain.SlackbotResponse) *chatv1.SlackbotResponse {
 	return &chatv1.SlackbotResponse{
 		WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), Triggers: value.Triggers, Replies: value.Replies,
-		CreatedBy: string(value.CreatedBy), CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt),
+		CreatedBy: string(value.CreatedBy), CreatedAtUnixNano: optionalUnixNano(value.CreatedAt),
 	}
 }
 

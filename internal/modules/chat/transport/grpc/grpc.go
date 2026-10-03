@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -1374,7 +1375,7 @@ func (r Remote) RemoveListColumn(ctx context.Context, workspaceID domain.Workspa
 func (r Remote) AssignListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID, assignee domain.UserID, dueAt time.Time) (domain.ListItem, error) {
 	out, err := r.lists.AssignListItem(ctx, &chatv1.AssignListItemRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemId: string(itemID),
-		AssigneeId: string(assignee), DueAtUnixNano: unixNanoOrZero(dueAt),
+		AssigneeId: string(assignee), DueAtUnixNano: optionalUnixNano(dueAt),
 	})
 	if err != nil {
 		return domain.ListItem{}, err
@@ -4820,7 +4821,7 @@ func (r Remote) TypingIn(ctx context.Context, workspaceID domain.WorkspaceID, re
 
 func (r Remote) ResumeWorkflowDelays(ctx context.Context, workspaceID domain.WorkspaceID, now time.Time, limit int) (int, error) {
 	out, err := r.interactions.ResumeWorkflowDelays(ctx, &chatv1.ResumeWorkflowDelaysRequest{
-		WorkspaceId: string(workspaceID), NowUnixNano: unixNanoOrZero(now), Limit: int32(limit),
+		WorkspaceId: string(workspaceID), NowUnixNano: optionalUnixNano(now), Limit: int32(limit),
 	})
 	if err != nil {
 		return 0, err
@@ -5545,7 +5546,7 @@ func encodeProtoSidebarSection(value domain.SidebarSection) *chatv1.SidebarSecti
 	return &chatv1.SidebarSection{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
 		Name: value.Name, Position: int32(value.Position), Collapsed: value.Collapsed,
-		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt), Conversations: conversations,
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), Conversations: conversations,
 		NotificationLevel: string(value.NotificationLevel),
 	}
 }
@@ -5668,6 +5669,22 @@ func (r Remote) SetWorkspaceNotificationPreferences(ctx context.Context, workspa
 		return domain.WorkspaceNotificationPreferences{}, err
 	}
 	return decodeProtoWorkspaceNotificationPreferences(out)
+}
+
+func (r Remote) SidebarActivity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversations []domain.ConversationID) (map[domain.ConversationID]domain.ConversationActivity, error) {
+	out, err := r.activity.GetSidebarActivity(ctx, &chatv1.SidebarActivityRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: conversationStrings(conversations)})
+	if err != nil {
+		return nil, err
+	}
+	activity := make(map[domain.ConversationID]domain.ConversationActivity, len(out.GetConversations()))
+	for _, entry := range out.GetConversations() {
+		notifications, err := decodeProtoConversationNotificationPreferences(entry.GetNotifications())
+		if err != nil {
+			return nil, err
+		}
+		activity[domain.ConversationID(entry.GetConversationId())] = domain.ConversationActivity{LatestAt: optionalTimeFromUnixNano(entry.GetLatestAtUnixNano()), Notifications: notifications}
+	}
+	return activity, nil
 }
 
 func (r Remote) ConversationNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ConversationNotificationPreferences, error) {
@@ -6140,7 +6157,7 @@ func encodeProtoCanvasComment(value domain.CanvasComment) *chatv1.CanvasComment 
 	return &chatv1.CanvasComment{
 		Id: string(value.ID), CanvasId: string(value.CanvasID), WorkspaceId: string(value.WorkspaceID),
 		SectionId: value.SectionID, UserId: string(value.UserID), Text: value.Text,
-		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt), Deleted: value.Deleted,
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), Deleted: value.Deleted,
 	}
 }
 
@@ -6229,7 +6246,7 @@ func encodeProtoListItemFile(value domain.ListItemFile) *chatv1.ListItemFile {
 	return &chatv1.ListItemFile{
 		Id: string(value.ID), ListId: string(value.ListID), ItemId: string(value.ItemID),
 		WorkspaceId: string(value.WorkspaceID), FileId: string(value.FileID),
-		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt),
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt),
 	}
 }
 
@@ -6248,7 +6265,7 @@ func encodeProtoListItemComment(value domain.ListItemComment) *chatv1.ListItemCo
 	return &chatv1.ListItemComment{
 		Id: string(value.ID), ListId: string(value.ListID), ItemId: string(value.ItemID), WorkspaceId: string(value.WorkspaceID),
 		UserId: string(value.UserID), Text: value.Text,
-		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt), Deleted: value.Deleted,
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), Deleted: value.Deleted,
 	}
 }
 
@@ -6343,7 +6360,7 @@ func encodeProtoCanvasRevision(value domain.CanvasRevision) *chatv1.CanvasRevisi
 	return &chatv1.CanvasRevision{
 		CanvasId: string(value.CanvasID), WorkspaceId: string(value.WorkspaceID), Version: value.Version,
 		Title: value.Title, DocumentContent: value.DocumentContent, EditedBy: string(value.EditedBy),
-		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt),
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt),
 	}
 }
 
@@ -8578,7 +8595,7 @@ func (s *Server) CurrentDialog(ctx context.Context, input *chatv1.CurrentDialogR
 	}
 	return &chatv1.Dialog{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), AppId: string(value.AppID),
-		Payload: value.Payload, Errors: value.Errors, CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt),
+		Payload: value.Payload, Errors: value.Errors, CreatedAtUnixNano: optionalUnixNano(value.CreatedAt),
 	}, nil
 }
 
@@ -9472,7 +9489,7 @@ func encodeProtoTypingSignals(values []domain.TypingSignal) []*chatv1.TypingSign
 			WorkspaceId:       string(signal.WorkspaceID),
 			Conversation:      string(signal.Conversation),
 			UserId:            string(signal.UserID),
-			ExpiresAtUnixNano: unixNanoOrZero(signal.ExpiresAt),
+			ExpiresAtUnixNano: optionalUnixNano(signal.ExpiresAt),
 		})
 	}
 	return signals
@@ -9512,7 +9529,7 @@ func encodeProtoAssistantThread(value domain.AssistantThread) *chatv1.AssistantT
 		WorkspaceId: string(value.WorkspaceID), Conversation: string(value.Conversation),
 		ThreadTs: string(value.ThreadTimestamp), Title: value.Title, Status: value.Status,
 		PromptsTitle: value.PromptsTitle, Prompts: encodeProtoAssistantPrompts(value.Prompts),
-		UpdatedAtUnixNano: unixNanoOrZero(value.UpdatedAt), LoadingMessages: value.LoadingMessages,
+		UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt), LoadingMessages: value.LoadingMessages,
 	}
 }
 
@@ -10134,6 +10151,24 @@ func (s *Server) SetWorkspaceNotificationPreferences(ctx context.Context, input 
 	return encodeProtoWorkspaceNotificationPreferences(preferences), nil
 }
 
+func (s *Server) GetSidebarActivity(ctx context.Context, input *chatv1.SidebarActivityRequest) (*chatv1.SidebarActivityResponse, error) {
+	activity, err := s.implementation.SidebarActivity(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), conversationIDs(input.GetConversationIds()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	ids := make([]string, 0, len(activity))
+	for id := range activity {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+	out := &chatv1.SidebarActivityResponse{Conversations: make([]*chatv1.ConversationActivity, 0, len(ids))}
+	for _, id := range ids {
+		entry := activity[domain.ConversationID(id)]
+		out.Conversations = append(out.Conversations, &chatv1.ConversationActivity{ConversationId: id, LatestAtUnixNano: optionalUnixNano(entry.LatestAt), Notifications: encodeProtoConversationNotificationPreferences(entry.Notifications)})
+	}
+	return out, nil
+}
+
 func (s *Server) GetConversationNotificationPreferences(ctx context.Context, input *chatv1.ConversationNotificationPreferencesRequest) (*chatv1.ConversationNotificationPreferences, error) {
 	preferences, err := s.implementation.ConversationNotificationPreferences(
 		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()),
@@ -10505,7 +10540,7 @@ func (s *Server) SetMemberPreference(ctx context.Context, input *chatv1.SetMembe
 }
 
 func encodeProtoClientConnection(value domain.ClientConnection) *chatv1.ClientConnection {
-	return &chatv1.ClientConnection{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ExpiresAtUnixNano: unixNanoOrZero(value.ExpiresAt)}
+	return &chatv1.ClientConnection{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ExpiresAtUnixNano: optionalUnixNano(value.ExpiresAt)}
 }
 
 func decodeProtoClientConnection(value *chatv1.ClientConnection) (domain.ClientConnection, error) {
@@ -11436,13 +11471,6 @@ func (s *Server) listEventsAfterProto(ctx context.Context, input *chatv1.EventsR
 // unixNanoOrZero is the encoding a "no instant" time needs. UnixNano on a zero
 // time is not zero, and every field that forgets this turns "never" into a date
 // in 1754.
-func unixNanoOrZero(value time.Time) int64 {
-	if value.IsZero() {
-		return 0
-	}
-	return value.UnixNano()
-}
-
 func encodeProtoUser(value domain.User) *chatv1.User {
 	return &chatv1.User{
 		Id:          string(value.ID),
@@ -11458,15 +11486,15 @@ func encodeProtoUser(value domain.User) *chatv1.User {
 		// negative number, which the decoder would read back as an instant in
 		// 1754 — so a member who had never been seen would come back from the
 		// remote composition as having been seen, three centuries ago.
-		LastActiveAtUnixNano:   unixNanoOrZero(value.LastActiveAt),
-		UpdatedUnixNano:        unixNanoOrZero(value.Updated),
+		LastActiveAtUnixNano:   optionalUnixNano(value.LastActiveAt),
+		UpdatedUnixNano:        optionalUnixNano(value.Updated),
 		BotId:                  string(value.BotID),
 		AppId:                  string(value.AppID),
 		Role:                   string(value.Role),
 		Restricted:             value.Restricted,
 		UltraRestricted:        value.UltraRestricted,
 		PrimaryOwner:           value.PrimaryOwner,
-		ConnectedUntilUnixNano: unixNanoOrZero(value.ConnectedUntil),
+		ConnectedUntilUnixNano: optionalUnixNano(value.ConnectedUntil),
 	}
 }
 
@@ -11841,7 +11869,7 @@ func decodeProtoListPage(value *chatv1.ListPage) (domain.ListPage, error) {
 }
 
 func encodeProtoListItem(value domain.ListItem) *chatv1.ListItem {
-	return &chatv1.ListItem{Id: string(value.ID), ListId: string(value.ListID), ParentItemId: string(value.ParentItemID), WorkspaceId: string(value.WorkspaceID), Fields: value.Fields, CreatedBy: string(value.CreatedBy), UpdatedBy: string(value.UpdatedBy), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Archived: value.Archived, Version: value.Version, AssigneeId: string(value.AssigneeID), DueAtUnixNano: unixNanoOrZero(value.DueAt)}
+	return &chatv1.ListItem{Id: string(value.ID), ListId: string(value.ListID), ParentItemId: string(value.ParentItemID), WorkspaceId: string(value.WorkspaceID), Fields: value.Fields, CreatedBy: string(value.CreatedBy), UpdatedBy: string(value.UpdatedBy), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Archived: value.Archived, Version: value.Version, AssigneeId: string(value.AssigneeID), DueAtUnixNano: optionalUnixNano(value.DueAt)}
 }
 
 func decodeProtoListItem(value *chatv1.ListItem) (domain.ListItem, error) {
@@ -11869,7 +11897,7 @@ func encodeProtoListItemSummary(value domain.ListItemSummary) *chatv1.ListItemSu
 	}
 	return &chatv1.ListItemSummary{
 		Id: string(value.ID), Fields: value.Fields, Archived: value.Archived,
-		DueAtUnixNano: unixNanoOrZero(value.DueAt),
+		DueAtUnixNano: optionalUnixNano(value.DueAt),
 	}
 }
 
@@ -13074,7 +13102,7 @@ func encodeProtoActivitySavedView(value domain.ActivitySavedView) *chatv1.Activi
 	}
 	return &chatv1.ActivitySavedView{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
-		Name: value.Name, Kinds: kinds, CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt),
+		Name: value.Name, Kinds: kinds, CreatedAtUnixNano: optionalUnixNano(value.CreatedAt),
 	}
 }
 
@@ -14669,7 +14697,7 @@ func (r Remote) RevokeDeveloperAppToken(ctx context.Context, workspaceID domain.
 
 func encodeProtoAppTokenSummary(value domain.AppTokenSummary) *chatv1.AppTokenSummary {
 	return &chatv1.AppTokenSummary{
-		Id: value.ID, IssuedAtUnixNano: unixNanoOrZero(value.IssuedAt),
+		Id: value.ID, IssuedAtUnixNano: optionalUnixNano(value.IssuedAt),
 		Scopes: append([]string(nil), value.Scopes...), Revoked: value.Revoked,
 	}
 }
@@ -15248,7 +15276,7 @@ func encodeFileShares(values []domain.FileShare) []*chatv1.FileShare {
 			replyUsers = append(replyUsers, string(user))
 		}
 		shares = append(shares, &chatv1.FileShare{ConversationId: string(value.Conversation), ConversationName: value.ConversationName, Private: value.Private, Ts: string(value.Timestamp), ThreadTs: string(value.ThreadTimestamp), SharedBy: string(value.SharedBy),
-			ReplyCount: int32(value.ReplyCount), ReplyUsers: replyUsers, LatestReplyUnixNano: unixNanoOrZero(value.LatestReply)})
+			ReplyCount: int32(value.ReplyCount), ReplyUsers: replyUsers, LatestReplyUnixNano: optionalUnixNano(value.LatestReply)})
 	}
 	return shares
 }

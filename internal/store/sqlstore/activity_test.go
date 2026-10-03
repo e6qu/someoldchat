@@ -227,6 +227,13 @@ func TestSQLiteNotificationPreferencesAndThreadFollowsSurviveReopen(t *testing.T
 	if err != nil || storedConversation.Level != domain.NotificationInherit || !storedConversation.FollowEveryThread {
 		t.Fatalf("conversation preferences=%+v err=%v", storedConversation, err)
 	}
+	overrides, err := s.ConversationNotificationOverrides(ctx, "T1", "U2")
+	if err != nil || len(overrides) != 1 || overrides["C1"] != storedConversation {
+		t.Fatalf("conversation overrides=%+v err=%v", overrides, err)
+	}
+	if others, err := s.ConversationNotificationOverrides(ctx, "T1", "U1"); err != nil || len(others) != 0 {
+		t.Fatalf("another member's overrides=%+v err=%v", others, err)
+	}
 	followed, err := s.IsThreadFollowed(ctx, "T1", "U2", "C1", rootTimestamp)
 	if err != nil || !followed {
 		t.Fatalf("thread followed=%v err=%v", followed, err)

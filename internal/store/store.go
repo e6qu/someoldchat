@@ -959,6 +959,11 @@ type Store interface {
 	// carry the list and race a concurrent toggle.
 	SetNotificationVIP(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, bool, events.Event) error
 	GetConversationNotificationPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationNotificationPreferences, error)
+	// ConversationNotificationOverrides is every per-conversation notification
+	// preference the member has stored, by conversation, in one read; a
+	// conversation with none takes the default. It answers no question of
+	// membership: a caller filters to the conversations the member may read.
+	ConversationNotificationOverrides(context.Context, domain.WorkspaceID, domain.UserID) (map[domain.ConversationID]domain.ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(context.Context, domain.ConversationNotificationPreferences, events.Event) error
 	IsThreadFollowed(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (bool, error)
 	SetThreadFollowed(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, bool, events.Event) error
