@@ -99,6 +99,7 @@ const composerPartial = `{{define "composer"}}  {{if .CanUpload}}<form class="up
             </details>
             <input type="hidden" name="post_at">
             <p class="schedule-zone" data-schedule-zone>Times are in your time zone.</p>
+            {{if .RecipientZone}}<p class="schedule-zone" data-schedule-recipient data-recipient-name="{{.RecipientName}}" data-recipient-zone="{{.RecipientZone}}">{{.RecipientName}} is in {{.RecipientZone}}.</p>{{end}}
             <a href="{{.ScheduledURL}}">View scheduled messages</a>
           </div>
         </details>{{end}}
@@ -149,6 +150,7 @@ const composerPartial = `{{define "composer"}}  {{if .CanUpload}}<form class="up
       <h2 id="composer-schedule-title">Schedule message</h2>
       <div class="composer-dialog-row"><label for="composer-schedule-date">Date<input id="composer-schedule-date" type="date" required></label><label for="composer-schedule-time">Time<input id="composer-schedule-time" type="time" required></label></div>
       <p class="composer-dialog-note" id="composer-schedule-zone">Times are in your time zone.</p>
+      <p class="composer-dialog-note" id="composer-schedule-recipient" aria-live="polite" hidden></p>
       <p class="composer-dialog-error" id="composer-schedule-error" role="alert" hidden></p>
       <div class="composer-dialog-actions"><button type="button" value="cancel" data-dialog-cancel>Cancel</button><button type="submit" value="save" class="composer-dialog-primary">Schedule message</button></div>
     </form>

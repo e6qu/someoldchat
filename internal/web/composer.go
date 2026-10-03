@@ -73,6 +73,12 @@ type composerView struct {
 	CanInvite   bool
 	InviteURL   string
 	IsDirect    bool
+	// RecipientName and RecipientZone are, in a one-to-one DM, the other
+	// person and the IANA zone their client reported, so scheduling can say
+	// what the chosen time is for them, as Slack does. Empty when they never
+	// reported one.
+	RecipientName string
+	RecipientZone string
 	// Typing is the conversation composer's "is typing" line, rendered empty
 	// so the live region exists before the stream first fills it.
 	Typing typingView
