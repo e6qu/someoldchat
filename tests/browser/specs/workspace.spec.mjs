@@ -2431,6 +2431,40 @@ test('[NAV-06 A11Y-01] Language & region sets the time zone by hand', async ({ p
   await preferences.getByRole('checkbox', { name: 'Set time zone automatically' }).check();
 });
 
+// Navigation chooses the rail's tabs and whether they show their names, as
+// Slack's does; a hidden tab stays reachable from More.
+test('[NAV-01 NAV-06 A11Y-01] Navigation chooses which tabs the rail shows', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto(`/app?channel=${CHANNEL}`);
+  const rail = page.getByRole('navigation', { name: 'Workspace' });
+  const { primary } = await slackModifiers(page);
+  await page.keyboard.press(`${primary}+Comma`);
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.getByRole('tab', { name: 'Navigation' }).click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-navigation');
+  await preferences.getByRole('checkbox', { name: 'Activity' }).uncheck();
+  await preferences.getByRole('checkbox', { name: 'Files' }).check();
+  await preferences.getByRole('checkbox', { name: 'Show tab names' }).uncheck();
+  await page.keyboard.press('Escape');
+
+  await expect(rail.getByRole('link', { name: 'Activity' })).toBeHidden();
+  await expect(rail.getByRole('link', { name: 'Files' })).toBeVisible();
+  await expect(rail.locator('.rail-label', { hasText: 'Files' })).toHaveCSS('position', 'absolute');
+  await rail.getByRole('button', { name: 'More' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Activity' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Files' })).toBeHidden();
+  await page.keyboard.press('Escape');
+
+  // Every test shares one member, so put the defaults back.
+  await page.keyboard.press(`${primary}+Comma`);
+  await preferences.getByRole('tab', { name: 'Navigation' }).click();
+  await preferences.getByRole('checkbox', { name: 'Activity' }).check();
+  await preferences.getByRole('checkbox', { name: 'Files' }).uncheck();
+  await preferences.getByRole('checkbox', { name: 'Show tab names' }).check();
+  await expect(rail.getByRole('link', { name: 'Activity' })).toBeVisible();
+  await expect(rail.getByRole('link', { name: 'Files' })).toBeHidden();
+});
+
 // Slack's switcher is a combobox over a listbox: the typed text filters, the
 // highlighted option is the active descendant, an empty result says so, and
 // with nothing typed the conversations just visited lead.

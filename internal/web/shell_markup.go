@@ -147,13 +147,17 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     {{template "workspace-menu" .}}
   </details>
   <a class="rail-item" href="{{.HomeURL}}"{{if eq .Destination "home"}} aria-current="page"{{end}}>{{icon "home"}}<span class="rail-label">Home</span></a>
-  <a class="rail-item" href="{{.With "/app/dms"}}"{{if eq .Destination "dms"}} aria-current="page"{{end}} {{ariaKeyshortcuts "Direct messages"}}>{{icon "dms"}}<span class="rail-label">DMs</span></a>
-  <a class="rail-item" id="activity-link" href="{{.With "/app/activity"}}"{{if eq .Destination "activity"}} aria-current="page"{{end}} aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Activity"}}>{{icon "activity"}}<span class="rail-label">Activity</span>{{if .ReminderUnread}}<span class="rail-dot" aria-hidden="true"></span>{{end}}</a>
-  <a class="rail-item" id="later-link" href="{{.With "/app/later"}}"{{if eq .Destination "later"}} aria-current="page"{{end}} aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Later"}}>{{icon "later"}}<span class="rail-label">Later</span></a>
+  <a class="rail-item" data-rail="dms" href="{{.With "/app/dms"}}"{{if eq .Destination "dms"}} aria-current="page"{{end}} {{ariaKeyshortcuts "Direct messages"}}>{{icon "dms"}}<span class="rail-label">DMs</span></a>
+  <a class="rail-item" data-rail="activity" id="activity-link" href="{{.With "/app/activity"}}"{{if eq .Destination "activity"}} aria-current="page"{{end}} aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Activity"}}>{{icon "activity"}}<span class="rail-label">Activity</span>{{if .ReminderUnread}}<span class="rail-dot" aria-hidden="true"></span>{{end}}</a>
+  <a class="rail-item" data-rail="later" id="later-link" href="{{.With "/app/later"}}"{{if eq .Destination "later"}} aria-current="page"{{end}} aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Later"}}>{{icon "later"}}<span class="rail-label">Later</span></a>
+  <a class="rail-item" data-rail="files" href="{{.With "/app/files"}}">{{icon "files"}}<span class="rail-label">Files</span></a>
   <details class="menu rail-more" data-menu>
     <summary class="rail-item" role="button" aria-haspopup="menu" aria-expanded="false"{{if eq .Destination "more"}} aria-current="page"{{end}}>{{icon "more"}}<span class="rail-label">More</span></summary>
     <div class="menu-list" role="menu" aria-label="More">
-      <a role="menuitem" href="{{.With "/app/files"}}">{{icon "files"}}<span>Files</span></a>
+      <a role="menuitem" data-more-tab="dms" href="{{.With "/app/dms"}}">{{icon "dms"}}<span>DMs</span></a>
+      <a role="menuitem" data-more-tab="activity" href="{{.With "/app/activity"}}">{{icon "activity"}}<span>Activity</span></a>
+      <a role="menuitem" data-more-tab="later" href="{{.With "/app/later"}}">{{icon "later"}}<span>Later</span></a>
+      <a role="menuitem" data-more-tab="files" href="{{.With "/app/files"}}">{{icon "files"}}<span>Files</span></a>
       <a role="menuitem" href="{{.With "/app/canvases"}}">{{icon "canvas"}}<span>Canvases</span></a>
       <a role="menuitem" href="{{.With "/app/lists"}}">{{icon "list"}}<span>Lists</span></a>
       <a role="menuitem" href="{{.With "/app/workflows"}}">{{icon "workflow"}}<span>Workflows</span></a>
@@ -289,6 +293,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     <button type="button" role="tab" id="pref-tab-home" aria-controls="pref-home" aria-selected="false" tabindex="-1">{{icon "home"}}<span>Home</span></button>
     <button type="button" role="tab" id="pref-tab-appearance" aria-controls="pref-appearance" aria-selected="false" tabindex="-1">{{icon "status"}}<span>Appearance</span></button>
     <button type="button" role="tab" id="pref-tab-accessibility" aria-controls="pref-accessibility" aria-selected="false" tabindex="-1">{{icon "info"}}<span>Accessibility</span></button>
+    <button type="button" role="tab" id="pref-tab-navigation" aria-controls="pref-navigation" aria-selected="false" tabindex="-1">{{icon "sidebar"}}<span>Navigation</span></button>
     <button type="button" role="tab" id="pref-tab-read" aria-controls="pref-read" aria-selected="false" tabindex="-1">{{icon "check"}}<span>Mark as read</span></button>
     <button type="button" role="tab" id="pref-tab-media" aria-controls="pref-media" aria-selected="false" tabindex="-1">{{icon "files"}}<span>Messages &amp; media</span></button>
     <button type="button" role="tab" id="pref-tab-region" aria-controls="pref-region" aria-selected="false" tabindex="-1">{{icon "later"}}<span>Language &amp; region</span></button>
@@ -342,6 +347,18 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       <fieldset><legend>Animation</legend>
         <label><input type="checkbox" data-preference="reduce-motion"> Turn off interface animations and transitions</label>
       </fieldset>
+    </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-navigation" aria-labelledby="pref-tab-navigation" tabindex="0" hidden>
+      <h3>Navigation</h3>
+      <fieldset><legend>Show these tabs</legend>
+        <label><input type="checkbox" checked disabled> Home</label>
+        <label><input type="checkbox" data-preference="nav-dms" data-default="true"> DMs</label>
+        <label><input type="checkbox" data-preference="nav-activity" data-default="true"> Activity</label>
+        <label><input type="checkbox" data-preference="nav-later" data-default="true"> Later</label>
+        <label><input type="checkbox" data-preference="nav-files"> Files</label>
+      </fieldset>
+      <label><input type="checkbox" data-preference="nav-labels" data-default="true"> Show tab names</label>
+      <p class="dialog-note">A tab you hide stays in More, and its keyboard shortcut still opens it.</p>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-read" aria-labelledby="pref-tab-read" tabindex="0" hidden>
       <h3>Mark as read</h3>

@@ -156,6 +156,11 @@ as Slack does by default, or by hand: choosing a zone turns the automatic zone
 off, so a browser in another zone no longer moves it, and turning it back on
 lets the browser's zone in again.
 
+Navigation chooses which of DMs, Activity, Later and Files the rail shows
+(Home always shows) and whether tabs show their names. A tab taken off the
+rail moves into More and keeps its keyboard shortcut; a name taken off the
+rail stays the tab's accessible name.
+
 ## NAV-07 — Review the threads you follow
 
 Slack's Threads view lists the threads a member follows, most recently replied
