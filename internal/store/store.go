@@ -1321,6 +1321,11 @@ type Store interface {
 	// them; the caller filters by conversation access.
 	ListFileShares(context.Context, domain.FileID) ([]domain.FileShare, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearch) (domain.FilePage, error)
+	// SearchRemoteFiles answers the first limit remote files a search
+	// matches, in its order, among those shared where the user can read, and
+	// how many match in all. A remote file matches on its title and the
+	// indexable contents its app gave; it has no uploader.
+	SearchRemoteFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearch, int) ([]domain.RemoteFile, int, error)
 	// SearchCanvases answers Slack's Canvases search tab. It applies exactly
 	// the visibility rule ListCanvases applies, because a search that matched
 	// more would disclose the title of a canvas the reader cannot open.

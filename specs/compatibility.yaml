@@ -2420,8 +2420,11 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/api/slack:TestFileSearchFindsRemoteFiles
+      - persistence:tests/persistence-qualification/remote_files_test.go
     deviations:
-      - Remote files and Slack's private relevance ranking are not yet represented.
+      - Slack's private relevance ranking is not represented.
+      - An app's remote file (files.remote.add) is found by its title and the indexable_file_contents its app gave, once it is shared into a channel the searcher can read, and is answered as an external file object (mode external, is_external, external_id, url_private its external_url). It has no uploader, so from- never matches it. Remote and hosted files are ordered together by when they were added.
       - Highlight-marker behavior has not been differentially qualified.
   - method: search.files
     status: sdk-compatible
@@ -2431,8 +2434,11 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/api/slack:TestFileSearchFindsRemoteFiles
+      - persistence:tests/persistence-qualification/remote_files_test.go
     deviations:
-      - Remote files and Slack's private relevance ranking are not yet represented.
+      - Slack's private relevance ranking is not represented.
+      - An app's remote file (files.remote.add) is found by its title and the indexable_file_contents its app gave, once it is shared into a channel the searcher can read, and is answered as an external file object (mode external, is_external, external_id, url_private its external_url). It has no uploader, so from- never matches it. Remote and hosted files are ordered together by when they were added.
       - Highlight-marker behavior has not been differentially qualified.
   - method: team.billing.info
     status: behavior-compatible

@@ -12256,6 +12256,7 @@ func encodeProtoFile(value domain.File) *chatv1.File {
 		Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size,
 		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, PublicToken: value.PublicToken,
 		SharedChannels: conversationStrings(value.SharedChannels), Description: value.Description, FileType: value.FileType, Shares: encodeFileShares(value.Shares),
+		ExternalId: value.External.ID, ExternalUrl: value.External.URL, ExternalFileType: value.External.FileType, ExternalPreviewImage: value.External.PreviewImage,
 	}
 }
 
@@ -12263,7 +12264,8 @@ func decodeProtoFile(value *chatv1.File) (domain.File, error) {
 	// Title and mime_type are not required: the local path returns a stored file
 	// with either one empty, so requiring them here would fail a call in the split
 	// composition that succeeds in the monolith.
-	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetUploader() == "" || value.GetName() == "" {
+	// An app's remote file has no uploader; every other file has one.
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || (value.GetUploader() == "" && value.GetExternalId() == "") || value.GetName() == "" {
 		return domain.File{}, errors.New("typed file response is incomplete")
 	}
 	if value.GetSize() < 0 {
@@ -12273,7 +12275,8 @@ func decodeProtoFile(value *chatv1.File) (domain.File, error) {
 	if err != nil {
 		return domain.File{}, errors.New("typed file created_at is invalid")
 	}
-	return domain.File{ID: domain.FileID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), PublicToken: value.GetPublicToken(), SharedChannels: conversationIDs(value.GetSharedChannels()), Description: value.GetDescription(), FileType: value.GetFileType(), Shares: decodeFileShares(value.GetShares())}, nil
+	return domain.File{ID: domain.FileID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), PublicToken: value.GetPublicToken(), SharedChannels: conversationIDs(value.GetSharedChannels()), Description: value.GetDescription(), FileType: value.GetFileType(), Shares: decodeFileShares(value.GetShares()),
+		External: domain.ExternalFile{ID: value.GetExternalId(), URL: value.GetExternalUrl(), FileType: value.GetExternalFileType(), PreviewImage: value.GetExternalPreviewImage()}}, nil
 }
 
 func encodeProtoFilePage(page domain.FilePage) *chatv1.FilePage {

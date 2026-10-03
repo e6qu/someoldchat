@@ -81,6 +81,16 @@ func InferMIMEType(name string) string {
 // type is the syntax its author chose; a hosted file's is read from its name.
 // A name with no extension is "binary".
 func (f File) FileTypes() (string, string) {
+	if f.IsExternal() {
+		fileType := strings.TrimSpace(f.External.FileType)
+		if fileType == "" {
+			return "remote", "Remote"
+		}
+		if kind, ok := fileKinds[fileType]; ok {
+			return kind.fileType, kind.prettyType
+		}
+		return fileType, strings.ToUpper(fileType)
+	}
 	if f.IsSnippet() {
 		fileType := strings.TrimSpace(f.FileType)
 		if kind, ok := fileKinds[fileType]; ok && kind.fileType == fileType {

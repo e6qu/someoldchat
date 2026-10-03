@@ -1268,6 +1268,9 @@ type searchFileView struct {
 	MachineTime  string
 	DownloadURL  string
 	ViewURL      string
+	// External is an app's remote file: it opens at the app, and nothing of
+	// it is hosted here to download.
+	External bool
 }
 
 type searchSuggestion struct {
@@ -2681,7 +2684,7 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 <div id="search-results" data-live-summary="{{.Summary}}">{{if .Searched}}<p class="search-summary">{{.Summary}}</p>{{end}}
 <section class="results" aria-label="{{.Type}} search results">
 {{if eq .Type "messages"}}{{if .Messages}}<ul class="v-list">{{range .Messages}}<li class="v-row result" data-row-href="{{.Permalink}}"><span class="v-avatar" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span><div class="v-row-main"><div class="v-row-meta"><span class="result-context">{{if .ChannelPrivate}}<span aria-label="Private">🔒</span>{{end}}{{if .DirectLabel}}{{.DirectLabel}}{{else}}{{.ChannelPrefix}}{{.ChannelName}}{{end}}</span></div><p class="result-title">{{if .AuthorID}}<a class="author" href="/app/members?user={{.AuthorID}}" data-profile-user="{{.AuthorID}}">{{.AuthorName}}</a>{{else}}<span class="author">{{.AuthorName}}</span>{{end}}{{if .AuthorStatus}} <span class="author-status"{{if .AuthorStatusText}} title="{{.AuthorStatusText}}"{{end}}>{{.AuthorStatus}}</span>{{end}} <a class="v-row-time" href="{{.Permalink}}"><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a></p><div class="text v-text">{{.DisplayText}}</div></div></li>{{end}}</ul>{{else}}{{if $.Searched}}<p class="v-empty">No matching messages.</p>{{end}}{{end}}
-{{else if eq .Type "files"}}{{if .Files}}<ul class="v-list">{{range .Files}}<li class="v-row result file-result" data-row-href="{{.ViewURL}}"><span class="result-glyph" aria-hidden="true">{{if .ThumbnailURL}}<img src="{{.ThumbnailURL}}" alt="" loading="lazy">{{else}}{{.Icon}}{{end}}</span><div class="v-row-main"><p class="result-title"><a href="{{.ViewURL}}">{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</a></p><div class="v-row-meta"><span>{{.KindLabel}} ({{.MIMEType}})</span><span aria-hidden="true">·</span><span>{{.Size}}</span><span aria-hidden="true">·</span><span>Shared by {{.Uploader}}</span><span aria-hidden="true">·</span><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></div></div><div class="result-side"><a class="v-icon" href="{{.DownloadURL}}" aria-label="Download {{.Name}}" title="Download"><span aria-hidden="true">⤓</span></a></div></li>{{end}}</ul>{{else}}<p class="v-empty">No matching files.</p>{{end}}
+{{else if eq .Type "files"}}{{if .Files}}<ul class="v-list">{{range .Files}}<li class="v-row result file-result" data-row-href="{{.ViewURL}}"><span class="result-glyph" aria-hidden="true">{{if .ThumbnailURL}}<img src="{{.ThumbnailURL}}" alt="" loading="lazy">{{else}}{{.Icon}}{{end}}</span><div class="v-row-main"><p class="result-title"><a href="{{.ViewURL}}">{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</a></p><div class="v-row-meta">{{if .External}}<span>{{.KindLabel}}</span><span aria-hidden="true">·</span><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{else}}<span>{{.KindLabel}} ({{.MIMEType}})</span><span aria-hidden="true">·</span><span>{{.Size}}</span><span aria-hidden="true">·</span><span>Shared by {{.Uploader}}</span><span aria-hidden="true">·</span><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{end}}</div></div>{{if .DownloadURL}}<div class="result-side"><a class="v-icon" href="{{.DownloadURL}}" aria-label="Download {{.Name}}" title="Download"><span aria-hidden="true">⤓</span></a></div>{{end}}</li>{{end}}</ul>{{else}}<p class="v-empty">No matching files.</p>{{end}}
 {{else if eq .Type "canvases"}}{{if .Canvases}}<ul class="v-list">{{range .Canvases}}<li class="v-row result canvas-result" data-row-href="{{.URL}}"><span class="result-glyph" aria-hidden="true">📝</span><div class="v-row-main"><p class="result-title"><a href="{{.URL}}">{{.Title}}</a></p><div class="v-row-meta"><span>Canvas · {{.Owner}}</span><span aria-hidden="true">·</span><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></div>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</div></li>{{end}}</ul>{{else}}<p class="v-empty">No matching canvases.</p>{{end}}
 {{else if eq .Type "lists"}}{{if .Lists}}<ul class="v-list">{{range .Lists}}<li class="v-row result list-result" data-row-href="{{.URL}}"><span class="result-glyph" aria-hidden="true">☑</span><div class="v-row-main"><p class="result-title"><a href="{{.URL}}">{{.Title}}</a></p><div class="v-row-meta"><span>List · {{.Owner}}</span><span aria-hidden="true">·</span><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></div>{{if .Snippet}}<p class="text">{{.Snippet}}</p>{{end}}</div></li>{{end}}</ul>{{else}}<p class="v-empty">No matching lists.</p>{{end}}
 {{else if eq .Type "people"}}{{if .People}}<ul class="v-list">{{range .People}}<li class="v-row result"><span class="v-avatar" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span><div class="v-row-main"><p class="result-title"><a href="/app/members?user={{.ID}}" data-profile-user="{{.ID}}">{{if .MarkedName}}{{.MarkedName}}{{else}}{{.Name}}{{end}}</a>{{if .IsSelf}} <span class="v-badge">you</span>{{end}}</p>{{if .Profile.Title}}<p class="text">{{.Profile.Title}}</p>{{else if and .RealName (ne .RealName .Name)}}<p class="text">{{.RealName}}</p>{{end}}</div></li>{{end}}</ul>{{else}}<p class="v-empty">No matching people.</p>{{end}}
@@ -8180,6 +8183,14 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 				DisplayTime: row.DisplayTime, MachineTime: row.MachineTime,
 				DownloadURL: row.DownloadURL, ViewURL: row.ViewURL,
 			})
+			if file.IsExternal() {
+				view := &data.Files[len(data.Files)-1]
+				view.External, view.KindLabel, view.MIMEType, view.Size, view.Uploader, view.DownloadURL, view.ThumbnailURL = true, "Remote file", "", "", "", "", ""
+				view.ViewURL = ""
+				if link, err := url.Parse(file.External.URL); err == nil && (link.Scheme == "https" || link.Scheme == "http") {
+					view.ViewURL = link.String()
+				}
+			}
 		}
 		data.ResultCount = results.Total
 		if results.HasMore {

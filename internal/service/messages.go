@@ -1071,7 +1071,46 @@ func (m Messages) SearchFiles(ctx context.Context, workspaceID domain.WorkspaceI
 	if parsed.excludedConversation != "" {
 		search.ExcludedConversation = m.resolveSearchConversation(ctx, workspaceID, userID, parsed.excludedConversation)
 	}
-	return m.Store.SearchFiles(ctx, workspaceID, userID, search)
+	// Slack finds an app's remote files beside hosted ones, by their title
+	// and the indexable contents the app gave. The two are kept apart, so the
+	// page is merged here: the first page*count of each, in one order.
+	window := search.Page * search.Count
+	remote, remoteTotal, err := m.Store.SearchRemoteFiles(ctx, workspaceID, userID, search, window)
+	if err != nil {
+		return domain.FilePage{}, err
+	}
+	if remoteTotal == 0 {
+		return m.Store.SearchFiles(ctx, workspaceID, userID, search)
+	}
+	hostedSearch := search
+	hostedSearch.Page, hostedSearch.Count = 1, window
+	hosted, err := m.Store.SearchFiles(ctx, workspaceID, userID, hostedSearch)
+	if err != nil {
+		return domain.FilePage{}, err
+	}
+	merged := append(make([]domain.File, 0, len(hosted.Files)+len(remote)), hosted.Files...)
+	for _, file := range remote {
+		merged = append(merged, file.AsFile())
+	}
+	sort.SliceStable(merged, func(left, right int) bool {
+		if merged[left].CreatedAt.Equal(merged[right].CreatedAt) {
+			if search.Direction == domain.SearchDirectionDescending {
+				return merged[left].ID > merged[right].ID
+			}
+			return merged[left].ID < merged[right].ID
+		}
+		if search.Direction == domain.SearchDirectionDescending {
+			return merged[left].CreatedAt.After(merged[right].CreatedAt)
+		}
+		return merged[left].CreatedAt.Before(merged[right].CreatedAt)
+	})
+	total := hosted.Total + remoteTotal
+	start := (search.Page - 1) * search.Count
+	if start >= len(merged) {
+		return domain.FilePage{Files: []domain.File{}, Total: total}, nil
+	}
+	end := min(start+search.Count, len(merged))
+	return domain.FilePage{Files: merged[start:end], HasMore: search.Page*search.Count < total, Total: total}, nil
 }
 
 func (m Messages) RecordSearch(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string) error {

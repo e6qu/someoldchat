@@ -6300,3 +6300,59 @@ func TestUsersIdentityFollowsItsScopes(t *testing.T) {
 		t.Fatalf("full identity=%+v", identity)
 	}
 }
+
+// search.files finds an app's remote file by its title and the indexable
+// contents the app gave, once it is shared where the searcher can read, and
+// answers it as Slack's external file object; search.all includes it.
+func TestFileSearchFindsRemoteFiles(t *testing.T) {
+	_, repository := testHandlerWithStore()
+	handler := userSearchHandler(t, repository)
+	call := func(method, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/"+method, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer user-token")
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var result map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result["ok"] != true {
+			t.Fatalf("%s status=%d body=%s", method, response.Code, response.Body)
+		}
+		return result
+	}
+	matches := func(result map[string]any, key string) []any {
+		t.Helper()
+		section, _ := result[key].(map[string]any)
+		found, _ := section["matches"].([]any)
+		return found
+	}
+	call("files.remote.add", "external_id=plan-1&title=Roadmap&filetype=gdoc&external_url=https%3A%2F%2Fdocs.example%2Fplan&indexable_file_contents=quarterly+hiring+targets")
+	if found := matches(call("search.files", "query=quarterly"), "files"); len(found) != 0 {
+		t.Fatalf("an unshared remote file was found: %v", found)
+	}
+	call("files.remote.share", "external_id=plan-1&channels=C1")
+	for _, query := range []string{"quarterly", "roadmap", "hiring type:gdoc"} {
+		found := matches(call("search.files", "query="+url.QueryEscape(query)), "files")
+		if len(found) != 1 {
+			t.Fatalf("%q found %v, want the remote file", query, found)
+		}
+		file := found[0].(map[string]any)
+		if file["is_external"] != true || file["external_type"] != "app" || file["mode"] != "external" || file["external_id"] != "plan-1" ||
+			file["url_private"] != "https://docs.example/plan" || file["title"] != "Roadmap" || file["filetype"] != "gdoc" {
+			t.Fatalf("%q answered %v", query, file)
+		}
+	}
+	if found := matches(call("search.files", "query=quarterly+-hiring"), "files"); len(found) != 0 {
+		t.Fatalf("an excluded term still matched: %v", found)
+	}
+	if found := matches(call("search.files", "query=quarterly+from%3A%40U1"), "files"); len(found) != 0 {
+		t.Fatalf("a remote file has no uploader, but from: matched it: %v", found)
+	}
+	if found := matches(call("search.all", "query=quarterly"), "files"); len(found) != 1 {
+		t.Fatalf("search.all files=%v", found)
+	}
+	call("files.remote.remove", "external_id=plan-1")
+	if found := matches(call("search.files", "query=quarterly"), "files"); len(found) != 0 {
+		t.Fatalf("a removed remote file was found: %v", found)
+	}
+}

@@ -23249,3 +23249,69 @@ func rewriteNULDirectKeys(ctx context.Context, db queryExecutor) error {
 	}
 	return nil
 }
+
+func (s *Store) SearchRemoteFiles(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, search domain.FileSearch, limit int) ([]domain.RemoteFile, int, error) {
+	if limit <= 0 {
+		return nil, 0, store.InvalidArgument("remote file search limit is invalid")
+	}
+	// A remote file has no uploader, so a search for one person's files
+	// finds none.
+	if search.Uploader != "" {
+		return []domain.RemoteFile{}, 0, nil
+	}
+	// The visibility and date filters run here; the terms are matched below
+	// on folded text, as the memory profile matches them, since remote files
+	// keep no folded columns.
+	query := `SELECT rf.id, rf.workspace_id, rf.external_id, rf.title, rf.file_type, rf.external_url, rf.preview_image, rf.indexable_contents, rf.created_at
+		FROM remote_files rf WHERE rf.workspace_id = ? AND rf.deleted = 0 AND EXISTS (
+			SELECT 1 FROM remote_file_shares rs JOIN conversations c ON c.id = rs.conversation_id
+			WHERE rs.remote_file_id = rf.id AND (c.is_private = 0 OR EXISTS (
+				SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = c.id AND cm.user_id = ?)))`
+	args := []any{workspace, user}
+	if !search.After.IsZero() {
+		query += ` AND rf.created_at >= ?`
+		args = append(args, search.After.UTC().Unix())
+	}
+	if !search.Before.IsZero() {
+		query += ` AND rf.created_at < ?`
+		args = append(args, search.Before.UTC().Unix())
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	candidates := make([]domain.RemoteFile, 0)
+	for rows.Next() {
+		var value domain.RemoteFile
+		var created int64
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.ExternalID, &value.Title, &value.FileType, &value.ExternalURL, &value.PreviewImage, &value.IndexableContents, &created); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		value.CreatedAt = time.Unix(created, 0).UTC()
+		candidates = append(candidates, value)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	values := make([]domain.RemoteFile, 0, len(candidates))
+	for _, value := range candidates {
+		if !store.SearchTextMatches(domain.FoldSearchText(value.Title+" "+value.IndexableContents), search.Terms, search.ExcludedTerms) ||
+			(search.FileType != "" && !store.RemoteFileMatchesType(value, search.FileType)) {
+			continue
+		}
+		if value.SharedChannels, err = s.remoteFileShares(ctx, s.db, value.ID); err != nil {
+			return nil, 0, err
+		}
+		if (search.Conversation != "" && !slices.Contains(value.SharedChannels, search.Conversation)) ||
+			(search.ExcludedConversation != "" && slices.Contains(value.SharedChannels, search.ExcludedConversation)) {
+			continue
+		}
+		values = append(values, value)
+	}
+	store.SortRemoteFiles(values, search.Direction)
+	return values[:min(limit, len(values))], len(values), nil
+}
