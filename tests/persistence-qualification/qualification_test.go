@@ -179,6 +179,7 @@ func runQualification(t *testing.T, open opener) {
 		{"Slackbot's custom responses are kept with their cursor", slackbotResponsesAreKept},
 		{"client connections decide presence", clientConnectionsDecidePresence},
 		{"search filters keep to the searcher's channels and to people", searchFiltersKeepToMembersAndPeople},
+		{"recent reactions are the member's latest", recentReactionsAreTheMembersLatest},
 		{"OAuth installs reuse their bot and redeem every grant shape", oauthInstallsReuseTheirBotAndRedeemEveryGrantShape},
 		{"file shares name their carrying messages", fileSharesNameTheirCarryingMessages},
 	} {

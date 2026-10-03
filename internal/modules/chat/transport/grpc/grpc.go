@@ -5086,6 +5086,14 @@ func (r Remote) UserReactions(ctx context.Context, workspaceID domain.WorkspaceI
 	return decodeProtoUserReactionPage(out)
 }
 
+func (r Remote) RecentReactions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, limit int) ([]string, error) {
+	out, err := r.reactions.RecentReactions(ctx, &chatv1.RecentReactionsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(limit)})
+	if err != nil {
+		return nil, err
+	}
+	return append([]string{}, out.GetNames()...), nil
+}
+
 func (r Remote) AddPin(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) error {
 	in := &chatv1.PinRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp)}
 	out, err := r.reactions.AddPin(ctx, in)
@@ -9742,6 +9750,14 @@ func (s *Server) Reactions(ctx context.Context, input *chatv1.ReactionPageReques
 
 func (s *Server) UserReactions(ctx context.Context, input *chatv1.UserReactionsRequest) (*chatv1.UserReactionPage, error) {
 	return s.userReactionsProto(ctx, input)
+}
+
+func (s *Server) RecentReactions(ctx context.Context, input *chatv1.RecentReactionsRequest) (*chatv1.RecentReactionsResponse, error) {
+	names, err := s.implementation.RecentReactions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), int(input.GetLimit()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.RecentReactionsResponse{Names: names}, nil
 }
 
 func (s *Server) AddPin(ctx context.Context, input *chatv1.PinRequest) (*chatv1.MutationResponse, error) {

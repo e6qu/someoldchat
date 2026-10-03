@@ -5645,6 +5645,41 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A member's recent reactions cross the seam: theirs only, the
+			// latest use of each emoji first, bounded by the limit, and a
+			// limit out of range refused.
+			name: "recent reactions are the caller's own, newest first",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				first, err := chat.Post(ctx, "T1", "U1", "C1", "first", "", "")
+				if err != nil {
+					return nil, err
+				}
+				second, err := chat.Post(ctx, "T1", "U1", "C1", "second", "", "")
+				if err != nil {
+					return nil, err
+				}
+				for _, reaction := range []struct {
+					user    domain.UserID
+					message domain.Message
+					name    string
+				}{{"U1", first, "tada"}, {"U2", first, "rocket"}, {"U1", second, "eyes"}} {
+					if err := chat.AddReaction(ctx, "T1", reaction.user, "C1", timestampOf(reaction.message), reaction.name); err != nil {
+						return nil, err
+					}
+				}
+				all, err := chat.RecentReactions(ctx, "T1", "U1", 10)
+				if err != nil {
+					return nil, err
+				}
+				one, err := chat.RecentReactions(ctx, "T1", "U1", 1)
+				if err != nil {
+					return nil, err
+				}
+				_, invalid := chat.RecentReactions(ctx, "T1", "U1", 0)
+				return []any{all, one, errors.Is(invalid, storepkg.ErrInvalidArgument)}, nil
+			},
+		},
+		{
 			// The web client's search filters cross the seam: "Only my
 			// channels" drops a public channel the searcher has not joined,
 			// and "Exclude automations" drops Slackbot's post.

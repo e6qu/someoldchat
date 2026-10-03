@@ -7239,6 +7239,22 @@ func (m Messages) UserReactions(ctx context.Context, workspaceID domain.Workspac
 	return m.Store.ListUserReactions(ctx, workspaceID, userID, request)
 }
 
+// recentReactionLimit bounds how many recent reactions one read returns.
+const recentReactionLimit = 50
+
+// RecentReactions is the emoji the member reacted with most recently, newest
+// first: the reactions Slack offers them in one click, wherever they use
+// Slack.
+func (m Messages) RecentReactions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, limit int) ([]string, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > recentReactionLimit {
+		return nil, store.InvalidArgument("recent reaction limit must be between 1 and 50")
+	}
+	return m.Store.RecentReactionNames(ctx, workspaceID, userID, limit)
+}
+
 func reactionPayload(topic string, reaction domain.Reaction, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) events.Payload {
 	return events.NewPayload(topic,
 		events.String("message_id", string(reaction.Message)),

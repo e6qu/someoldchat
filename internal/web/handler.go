@@ -5639,7 +5639,16 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 	} else {
 		emojiImages = customEmojiImages(customEmoji)
 	}
-	list.QuickReactions = quickReactions(request.RecentEmoji, emojiImages)
+	// The member's own recent reactions lead, as Slack's follow the account
+	// across clients; this browser's recent emoji fill in after them. A failed
+	// read leaves the browser's, not an error: the toolbar still works.
+	recent := request.RecentEmoji
+	if principal.HasScope(auth.ScopeReactionsRead) {
+		if account, err := h.Messages.RecentReactions(ctx, principal.WorkspaceID, principal.UserID, len(quickReactionDefaults)); err == nil {
+			recent = append(account, recent...)
+		}
+	}
+	list.QuickReactions = quickReactions(recent, emojiImages)
 	pinned := map[domain.MessageID]domain.UserID{}
 	if principal.HasScope(auth.ScopePinsRead) || principal.HasScope(auth.ScopePinsWrite) {
 		pins, _, _, err := h.Messages.Pins(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: pinWindow})
