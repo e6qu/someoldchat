@@ -200,6 +200,7 @@ details[open]>.menu-list{display:grid}
 .preferences-panel legend{margin-bottom:8px;font-weight:800}
 .preferences-panel label{display:flex;align-items:flex-start;gap:8px}
 .preferences-panel input[type=radio],.preferences-panel input[type=checkbox]{margin-top:4px}
+.preferences-panel .preference-select{min-height:36px;max-width:100%;padding:6px 8px;border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text)}
 .preferences-links{margin:0;padding-left:18px;display:grid;gap:6px}
 .status-dialog{width:min(520px,calc(100vw - 32px))}
 .status-inputs{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px}

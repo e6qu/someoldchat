@@ -4960,6 +4960,16 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   await page.goto('/app');
   await expect(page.locator('.channel-name-text')).toHaveText('general');
 
+  // Audio & video's "Mute my microphone when I join a huddle", as in Slack: the
+  // member arrives muted and unmutes when ready.
+  const { primary } = await slackModifiers(page);
+  await page.keyboard.press(`${primary}+Comma`);
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.getByRole('tab', { name: 'Audio & video' }).click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-av');
+  await preferences.getByRole('checkbox', { name: 'Mute my microphone when I join a huddle' }).check();
+  await page.keyboard.press('Escape');
+
   // Before joining, the bar offers a huddle and promises media rather than
   // explaining its absence.
   const huddleMenu = await openMenu(page, 'Huddle');
@@ -4977,9 +4987,14 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   const session = page.locator('.huddle-media-session');
   await expect(session).toBeVisible();
 
-  // The microphone is really opened: the attribute follows getUserMedia
-  // resolving, not the button being pressed.
-  await expect(session).toHaveAttribute('data-huddle-microphone', 'on', { timeout: 15000 });
+  // The microphone is really opened, and muted on arrival as the member chose;
+  // the attribute follows the track, not the button being pressed.
+  await expect(session).toHaveAttribute('data-huddle-microphone', 'off', { timeout: 15000 });
+  await expect(page.getByRole('button', { name: 'Unmute microphone' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Unmute microphone' }).click();
+  await expect(session).toHaveAttribute('data-huddle-microphone', 'on');
+  // Every test shares one member, so the preference goes back at once.
+  await page.evaluate(() => window.sameoldchatPreferences.set('huddle-join-muted', 'false'));
 
   const offerBody = new URLSearchParams((await offerPosted).postData() || '');
   const screenStreamId = offerBody.get('screen_stream');

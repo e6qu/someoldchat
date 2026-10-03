@@ -33,6 +33,8 @@ session.setAttribute('data-huddle-started','true');
 var status=document.querySelector('[data-huddle-status]');
 var tiles=session.querySelector('[data-huddle-tiles]');
 var announce=function(text){if(status)status.textContent=text};
+var preference=function(key,fallback){try{return window.sameoldchatPreferences?window.sameoldchatPreferences.get(key,fallback):fallback}catch(error){return fallback}};
+var openDevice=function(kind,key){var chosen=preference(key,'');var constraints={};constraints[kind]=chosen?{deviceId:{exact:chosen}}:true;return navigator.mediaDevices.getUserMedia(constraints).catch(function(error){if(!chosen)throw error;var fallback={};fallback[kind]=true;return navigator.mediaDevices.getUserMedia(fallback)})};
 if(!window.RTCPeerConnection||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
 announce('This browser cannot carry huddle audio. Everything else in the huddle still works.');
 return;
@@ -320,7 +322,7 @@ applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
 broadcastPresence();
 return;
 }
-navigator.mediaDevices.getUserMedia({video:true}).then(function(stream){
+openDevice('video','huddle-camera').then(function(stream){
 cameraTrack=stream.getVideoTracks()[0];
 if(!cameraTrack)return;
 videoSender.replaceTrack(cameraTrack);
@@ -367,10 +369,11 @@ applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
 broadcastPresence();
 }).catch(function(){announce('The screen was not shared.')});
 });
-navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+openDevice('audio','huddle-microphone').then(function(stream){
 local=stream;
 session.setAttribute('data-huddle-microphone','on');
 tileFor(selfID).querySelector('video').srcObject=local;
+if(preference('huddle-join-muted','false')==='true'&&microphone)microphone.click();
 applyPresence(selfID,selfMuted,selfCamera,selfPresenting);
 broadcastPresence();
 meterFor(selfID,local);

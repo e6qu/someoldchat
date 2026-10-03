@@ -298,6 +298,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     <button type="button" role="tab" id="pref-tab-read" aria-controls="pref-read" aria-selected="false" tabindex="-1">{{icon "check"}}<span>Mark as read</span></button>
     <button type="button" role="tab" id="pref-tab-media" aria-controls="pref-media" aria-selected="false" tabindex="-1">{{icon "files"}}<span>Messages &amp; media</span></button>
     <button type="button" role="tab" id="pref-tab-region" aria-controls="pref-region" aria-selected="false" tabindex="-1">{{icon "later"}}<span>Language &amp; region</span></button>
+    <button type="button" role="tab" id="pref-tab-av" aria-controls="pref-av" aria-selected="false" tabindex="-1">{{icon "huddle"}}<span>Audio &amp; video</span></button>
     <button type="button" role="tab" id="pref-tab-advanced" aria-controls="pref-advanced" aria-selected="false" tabindex="-1">{{icon "gear"}}<span>Advanced</span></button>
   </div>
   <div class="preferences-panels">
@@ -400,6 +401,19 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
         </form>
         <p class="dialog-note">Setting a time zone by hand turns the automatic one off. Times, reminders and scheduled messages follow it.</p>
       </fieldset>
+    </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-av" aria-labelledby="pref-tab-av" tabindex="0" hidden>
+      <h3>Audio &amp; video</h3>
+      <fieldset><legend>Devices</legend>
+        <label for="pref-huddle-microphone">Microphone</label>
+        <select id="pref-huddle-microphone" class="preference-select" data-preference="huddle-microphone" data-media-devices="audioinput"><option value="">System default</option></select>
+        <label for="pref-huddle-camera">Camera</label>
+        <select id="pref-huddle-camera" class="preference-select" data-preference="huddle-camera" data-media-devices="videoinput"><option value="">System default</option></select>
+      </fieldset>
+      <fieldset><legend>Joining a huddle</legend>
+        <label><input type="checkbox" data-preference="huddle-join-muted"> Mute my microphone when I join a huddle</label>
+      </fieldset>
+      <p class="dialog-note">Devices are named once this browser has been allowed to use them; until then they are numbered. A device that is no longer connected falls back to the system default.</p>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-advanced" aria-labelledby="pref-tab-advanced" tabindex="0" hidden>
       <h3>Advanced</h3>
