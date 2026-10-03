@@ -582,9 +582,14 @@ type pageData struct {
 	// starred and notification state, which the header's menu acts on. It is
 	// the zero value in preview, where the member has no such state.
 	Current conversationView
-	// Tab is the header tab being shown: "" for Messages, "pins" for Pins.
-	Tab           string
-	Pins          messageList
+	// Tab is the header tab being shown: "" for Messages, "pins" for Pins,
+	// "view" for one of a code channel's views.
+	Tab  string
+	Pins messageList
+	// CodeChannel is a code channel's context bar and view tabs, and CodeView
+	// the view tab being shown.
+	CodeChannel   codeChannelView
+	CodeView      *codeChannelPaneView
 	Bookmarks     []domain.Bookmark
 	CanBookmark   bool
 	Channel       string
@@ -2145,6 +2150,13 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
         {{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}
         <div id="huddle" data-fragment="{{.HuddleURL}}" data-live="true">{{template "huddle" .Huddle}}</div>
         {{if eq .Tab "pins"}}<section id="pins" class="timeline pins-view" tabindex="0" aria-label="Pinned messages">{{if .Pins.Messages}}{{template "messages" .Pins}}{{else}}<div class="empty"><strong>No pinned messages yet</strong><p>Pin a message from its More actions menu to keep it here for everyone in {{.ChannelPrefix}}{{.ChannelName}}.</p></div>{{end}}</section>
+        {{else if eq .Tab "view"}}{{with .CodeView}}<section id="code-view" class="code-view code-view-{{.Type}}" tabindex="0" aria-label="{{.Label}}">
+          {{if .FrameURL}}<iframe class="code-view-frame" title="{{.Label}}" sandbox="allow-scripts" referrerpolicy="no-referrer" src="{{.FrameURL}}"></iframe>
+          {{else if .Diff}}{{if or .BaseBranch .HeadBranch}}<p class="code-view-branches">{{.BaseBranch}} ← {{.HeadBranch}}</p>{{end}}<pre class="code-view-diff">{{range .Diff}}<span class="diff-{{.Kind}}">{{.Text}}</span>{{end}}</pre>
+          {{else if .Blocks}}<div class="message-blocks">{{range $block := .Blocks}}{{if eq $block.Kind "divider"}}<hr class="message-block divider">{{else}}<div class="message-block {{$block.Kind}}">{{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else}}<div class="block-text">{{$block.Text}}</div>{{end}}{{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}<div class="formatted-text">{{.}}</div>{{else}}<div class="block-text">{{$field}}</div>{{end}}</li>{{end}}</ul>{{end}}{{if $block.ImageURL}}<img class="message-media" src="{{$block.ImageURL}}" alt="{{$block.ImageAlt}}" loading="lazy">{{end}}</div>{{end}}{{end}}</div>
+          {{else if .CanvasURL}}<p class="code-view-link"><a href="{{.CanvasURL}}">{{icon "canvas"}}<span>Open {{.Label}}</span></a></p>
+          {{else if .PRURL}}<p class="code-view-link"><a href="{{.PRURL}}" rel="noopener noreferrer" target="_blank">{{icon "link"}}<span>{{.Label}}</span></a>{{if or .BaseBranch .HeadBranch}} <span class="code-view-branches">{{.BaseBranch}} ← {{.HeadBranch}}</span>{{end}}</p>{{end}}
+        </section>{{end}}
         {{else}}<section id="timeline" class="timeline" tabindex="0" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>{{end}}
         {{if .NewerURL}}<p class="pager pager-newer"><a href="{{.NewerURL}}">Show newer messages</a></p>{{end}}
         {{if .LatestURL}}<p class="pager pager-latest"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}
@@ -2171,7 +2183,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
       {{end}}
       <div class="composer-wrap channel-composer-wrap">
         <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
-        {{if eq .Tab "pins"}}{{else if .CanPost}}{{template "composer" .Composer}}
+        {{if or (eq .Tab "pins") (eq .Tab "view")}}{{else if .CanPost}}{{template "composer" .Composer}}
         {{else}}
         <section class="conversation-gate" aria-label="Conversation access">
           <div class="conversation-gate-copy">
@@ -3942,6 +3954,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/canvases/{canvasID}/delete", h.deleteCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/restore", h.restoreCanvas)
 	mux.HandleFunc("GET /app/channel-canvas", h.channelCanvas)
+	mux.HandleFunc("GET /app/code-views/content", h.codeViewContent)
 	mux.HandleFunc("POST /app/channel-canvas/create", h.createChannelCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/share", h.shareCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/share/revoke", h.revokeCanvasShare)
@@ -5103,6 +5116,14 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 				pinned = append(pinned, pin.Item)
 			}
 			data.Pins, _ = h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: pinned, Member: isMember, Names: names})
+		}
+	}
+	if !conversation.IsDirectOrGroup() {
+		data.CodeChannel, data.CodeView = h.newCodeChannelView(r, principal, channel, strings.TrimSpace(r.URL.Query().Get("view")))
+		if data.CodeView != nil && strings.TrimSpace(r.URL.Query().Get("tab")) == "view" {
+			data.Tab = "view"
+		} else {
+			data.CodeView = nil
 		}
 	}
 	if isMember && principal.HasScope(auth.ScopeBookmarksRead) {
@@ -13162,7 +13183,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 var workspaceContentSecurityPolicy = sync.OnceValue(func() string {
 	documents := append([]string{layoutMarkup}, pageMarkups...)
 	return "default-src 'none'; script-src " + strings.Join(inlineScriptHashes(documents...), " ") +
-		"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+		"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 })
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:

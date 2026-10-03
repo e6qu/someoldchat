@@ -164,3 +164,115 @@ func decodeProtoCodeChannel(value *chatv1.CodeChannel) domain.CodeChannel {
 		CreatedAt:     optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()), UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
 	}
 }
+
+func (r Remote) SetCodeChannelView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, app domain.AppID, conversation domain.ConversationID, request domain.CodeChannelViewRequest) (domain.CodeChannelView, error) {
+	out, err := r.codeChannels.SetCodeChannelView(ctx, encodeProtoCodeChannelViewRequest(workspaceID, actor, app, conversation, request))
+	if err != nil {
+		return domain.CodeChannelView{}, err
+	}
+	return decodeProtoCodeChannelView(out), nil
+}
+
+func (r Remote) CodeChannelViews(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID) ([]domain.CodeChannelView, error) {
+	out, err := r.codeChannels.ListCodeChannelViews(ctx, &chatv1.CodeChannelRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Conversation: string(conversation)})
+	if err != nil {
+		return nil, err
+	}
+	views := make([]domain.CodeChannelView, 0, len(out.GetViews()))
+	for _, view := range out.GetViews() {
+		views = append(views, decodeProtoCodeChannelView(view))
+	}
+	return views, nil
+}
+
+func (r Remote) RemoveCodeChannelView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, app domain.AppID, conversation domain.ConversationID, id domain.CodeChannelViewID, key string) (domain.CodeChannelViewID, error) {
+	out, err := r.codeChannels.RemoveCodeChannelView(ctx, &chatv1.RemoveCodeChannelViewRequest{
+		WorkspaceId: string(workspaceID), UserId: string(actor), AppId: string(app), Conversation: string(conversation), ViewId: string(id), ViewKey: key,
+	})
+	if err != nil {
+		return "", err
+	}
+	return domain.CodeChannelViewID(out.GetViewId()), nil
+}
+
+func (s *Server) SetCodeChannelView(ctx context.Context, input *chatv1.SetCodeChannelViewRequest) (*chatv1.CodeChannelView, error) {
+	workspaceID, actor, app, conversation, request := decodeProtoCodeChannelViewRequest(input)
+	view, err := s.implementation.SetCodeChannelView(ctx, workspaceID, actor, app, conversation, request)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCodeChannelView(view), nil
+}
+
+func (s *Server) ListCodeChannelViews(ctx context.Context, input *chatv1.CodeChannelRequest) (*chatv1.CodeChannelViewsResponse, error) {
+	views, err := s.implementation.CodeChannelViews(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversation()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	response := &chatv1.CodeChannelViewsResponse{Views: make([]*chatv1.CodeChannelView, 0, len(views))}
+	for _, view := range views {
+		response.Views = append(response.Views, encodeProtoCodeChannelView(view))
+	}
+	return response, nil
+}
+
+func (s *Server) RemoveCodeChannelView(ctx context.Context, input *chatv1.RemoveCodeChannelViewRequest) (*chatv1.RemoveCodeChannelViewResponse, error) {
+	id, err := s.implementation.RemoveCodeChannelView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
+		domain.ConversationID(input.GetConversation()), domain.CodeChannelViewID(input.GetViewId()), input.GetViewKey())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.RemoveCodeChannelViewResponse{ViewId: string(id)}, nil
+}
+
+func encodeProtoCodeChannelViewRequest(workspaceID domain.WorkspaceID, actor domain.UserID, app domain.AppID, conversation domain.ConversationID, request domain.CodeChannelViewRequest) *chatv1.SetCodeChannelViewRequest {
+	return &chatv1.SetCodeChannelViewRequest{
+		WorkspaceId: string(workspaceID), UserId: string(actor), AppId: string(app), Conversation: string(conversation),
+		Type: string(request.Type), Key: request.Key, Name: request.Name, Content: request.Content, Blocks: request.Blocks,
+		CanvasId: string(request.CanvasID), AccessLevel: string(request.AccessLevel), AgentContentHash: request.AgentContentHash,
+		PrUrl: request.PRURL, BaseBranch: request.BaseBranch, HeadBranch: request.HeadBranch,
+		CspConnectDomains: request.CSP.ConnectDomains, CspResourceDomains: request.CSP.ResourceDomains,
+	}
+}
+
+func decodeProtoCodeChannelViewRequest(input *chatv1.SetCodeChannelViewRequest) (domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, domain.CodeChannelViewRequest) {
+	return domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), domain.ConversationID(input.GetConversation()), domain.CodeChannelViewRequest{
+		Type: domain.CodeChannelViewType(input.GetType()), Key: input.GetKey(), Name: input.GetName(), Content: input.GetContent(), Blocks: input.GetBlocks(),
+		CanvasID: domain.CanvasID(input.GetCanvasId()), AccessLevel: domain.CodeChannelCanvasAccess(input.GetAccessLevel()), AgentContentHash: input.GetAgentContentHash(),
+		PRURL: input.GetPrUrl(), BaseBranch: input.GetBaseBranch(), HeadBranch: input.GetHeadBranch(),
+		CSP: domain.CodeChannelViewCSP{ConnectDomains: nonEmptyStrings(input.GetCspConnectDomains()), ResourceDomains: nonEmptyStrings(input.GetCspResourceDomains())},
+	}
+}
+
+func encodeProtoCodeChannelView(view domain.CodeChannelView) *chatv1.CodeChannelView {
+	return &chatv1.CodeChannelView{
+		WorkspaceId: string(view.WorkspaceID), Conversation: string(view.Conversation), Id: string(view.ID), FileId: string(view.FileID),
+		Key: view.Key, Type: string(view.Type), Label: view.Label, AppId: string(view.AppID), BotUserId: string(view.BotUserID),
+		Content: view.Content, Blocks: view.Blocks, CanvasId: string(view.CanvasID), AccessLevel: string(view.AccessLevel),
+		AgentContentHash: view.AgentContentHash, PrUrl: view.PRURL, BaseBranch: view.BaseBranch, HeadBranch: view.HeadBranch,
+		CspConnectDomains: view.CSP.ConnectDomains, CspResourceDomains: view.CSP.ResourceDomains, Version: view.Version,
+		CreatedAtUnixNano: unixNanoOrZero(view.CreatedAt), UpdatedAtUnixNano: unixNanoOrZero(view.UpdatedAt),
+	}
+}
+
+func decodeProtoCodeChannelView(view *chatv1.CodeChannelView) domain.CodeChannelView {
+	return domain.CodeChannelView{
+		WorkspaceID: domain.WorkspaceID(view.GetWorkspaceId()), Conversation: domain.ConversationID(view.GetConversation()),
+		ID: domain.CodeChannelViewID(view.GetId()), FileID: domain.FileID(view.GetFileId()), Key: view.GetKey(),
+		Type: domain.CodeChannelViewType(view.GetType()), Label: view.GetLabel(), AppID: domain.AppID(view.GetAppId()), BotUserID: domain.UserID(view.GetBotUserId()),
+		Content: view.GetContent(), Blocks: view.GetBlocks(), CanvasID: domain.CanvasID(view.GetCanvasId()),
+		AccessLevel: domain.CodeChannelCanvasAccess(view.GetAccessLevel()), AgentContentHash: view.GetAgentContentHash(),
+		PRURL: view.GetPrUrl(), BaseBranch: view.GetBaseBranch(), HeadBranch: view.GetHeadBranch(),
+		CSP:     domain.CodeChannelViewCSP{ConnectDomains: nonEmptyStrings(view.GetCspConnectDomains()), ResourceDomains: nonEmptyStrings(view.GetCspResourceDomains())},
+		Version: view.GetVersion(), CreatedAt: optionalTimeFromUnixNano(view.GetCreatedAtUnixNano()), UpdatedAt: optionalTimeFromUnixNano(view.GetUpdatedAtUnixNano()),
+	}
+}
+
+// nonEmptyStrings is a repeated field as a domain list: nil when empty, as the
+// domain keeps an absent CSP list.
+func nonEmptyStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]string(nil), values...)
+}

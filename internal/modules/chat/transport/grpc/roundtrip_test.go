@@ -68,8 +68,8 @@ type appHomeRoundTrip struct {
 	View domain.View
 }
 
-// codeChannelRequestRoundTrip, codeChannelPropertiesRoundTrip and
-// contextBarRoundTrip carry what the code channel converters encode beside
+// codeChannelRequestRoundTrip, codeChannelPropertiesRoundTrip,
+// codeChannelViewRequestRoundTrip and contextBarRoundTrip carry what the code channel converters encode beside
 // the domain value: the caller and the channel.
 type codeChannelRequestRoundTrip struct {
 	WorkspaceID domain.WorkspaceID
@@ -84,6 +84,14 @@ type codeChannelPropertiesRoundTrip struct {
 	App          domain.AppID
 	Conversation domain.ConversationID
 	Properties   domain.CodeChannelProperties
+}
+
+type codeChannelViewRequestRoundTrip struct {
+	WorkspaceID  domain.WorkspaceID
+	Actor        domain.UserID
+	App          domain.AppID
+	Conversation domain.ConversationID
+	Request      domain.CodeChannelViewRequest
 }
 
 type contextBarRoundTrip struct {
@@ -687,6 +695,16 @@ func conversionCases() map[string]conversionCase {
 				return codeChannelPropertiesRoundTrip{WorkspaceID: workspaceID, Actor: actor, App: app, Conversation: conversation, Properties: properties}
 			},
 		)},
+		"CodeChannelViewRequest": {sample: &codeChannelViewRequestRoundTrip{}, through: throughInfallible(
+			func(value codeChannelViewRequestRoundTrip) *chatv1.SetCodeChannelViewRequest {
+				return encodeProtoCodeChannelViewRequest(value.WorkspaceID, value.Actor, value.App, value.Conversation, value.Request)
+			},
+			func(value *chatv1.SetCodeChannelViewRequest) codeChannelViewRequestRoundTrip {
+				workspaceID, actor, app, conversation, request := decodeProtoCodeChannelViewRequest(value)
+				return codeChannelViewRequestRoundTrip{WorkspaceID: workspaceID, Actor: actor, App: app, Conversation: conversation, Request: request}
+			},
+		)},
+		"CodeChannelView":      {sample: &domain.CodeChannelView{}, through: throughInfallible(encodeProtoCodeChannelView, decodeProtoCodeChannelView)},
 		"AppPermission":        {sample: &domain.AppPermission{}, through: throughInfallible(encodeProtoAppPermission, decodeProtoAppPermission)},
 		"MCPServer":            {sample: &domain.MCPServer{}, through: throughInfallible(encodeProtoMCPServer, decodeProtoMCPServer)},
 		"MCPServerPermission":  {sample: &domain.MCPServerPermission{}, through: throughInfallible(encodeProtoMCPServerPermission, decodeProtoMCPServerPermission)},

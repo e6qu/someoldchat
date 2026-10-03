@@ -23,6 +23,9 @@ const (
 	CodeChannelsService_ArchiveCodeChannel_FullMethodName       = "/sameoldchat.chat.v1.CodeChannelsService/ArchiveCodeChannel"
 	CodeChannelsService_SetCodeChannelProperties_FullMethodName = "/sameoldchat.chat.v1.CodeChannelsService/SetCodeChannelProperties"
 	CodeChannelsService_GetCodeChannel_FullMethodName           = "/sameoldchat.chat.v1.CodeChannelsService/GetCodeChannel"
+	CodeChannelsService_SetCodeChannelView_FullMethodName       = "/sameoldchat.chat.v1.CodeChannelsService/SetCodeChannelView"
+	CodeChannelsService_ListCodeChannelViews_FullMethodName     = "/sameoldchat.chat.v1.CodeChannelsService/ListCodeChannelViews"
+	CodeChannelsService_RemoveCodeChannelView_FullMethodName    = "/sameoldchat.chat.v1.CodeChannelsService/RemoveCodeChannelView"
 )
 
 // CodeChannelsServiceClient is the client API for CodeChannelsService service.
@@ -33,6 +36,9 @@ type CodeChannelsServiceClient interface {
 	ArchiveCodeChannel(ctx context.Context, in *ArchiveCodeChannelRequest, opts ...grpc.CallOption) (*CodeChannelMutationResponse, error)
 	SetCodeChannelProperties(ctx context.Context, in *SetCodeChannelPropertiesRequest, opts ...grpc.CallOption) (*CodeChannelMutationResponse, error)
 	GetCodeChannel(ctx context.Context, in *CodeChannelRequest, opts ...grpc.CallOption) (*CodeChannel, error)
+	SetCodeChannelView(ctx context.Context, in *SetCodeChannelViewRequest, opts ...grpc.CallOption) (*CodeChannelView, error)
+	ListCodeChannelViews(ctx context.Context, in *CodeChannelRequest, opts ...grpc.CallOption) (*CodeChannelViewsResponse, error)
+	RemoveCodeChannelView(ctx context.Context, in *RemoveCodeChannelViewRequest, opts ...grpc.CallOption) (*RemoveCodeChannelViewResponse, error)
 }
 
 type codeChannelsServiceClient struct {
@@ -83,6 +89,36 @@ func (c *codeChannelsServiceClient) GetCodeChannel(ctx context.Context, in *Code
 	return out, nil
 }
 
+func (c *codeChannelsServiceClient) SetCodeChannelView(ctx context.Context, in *SetCodeChannelViewRequest, opts ...grpc.CallOption) (*CodeChannelView, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CodeChannelView)
+	err := c.cc.Invoke(ctx, CodeChannelsService_SetCodeChannelView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *codeChannelsServiceClient) ListCodeChannelViews(ctx context.Context, in *CodeChannelRequest, opts ...grpc.CallOption) (*CodeChannelViewsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CodeChannelViewsResponse)
+	err := c.cc.Invoke(ctx, CodeChannelsService_ListCodeChannelViews_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *codeChannelsServiceClient) RemoveCodeChannelView(ctx context.Context, in *RemoveCodeChannelViewRequest, opts ...grpc.CallOption) (*RemoveCodeChannelViewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveCodeChannelViewResponse)
+	err := c.cc.Invoke(ctx, CodeChannelsService_RemoveCodeChannelView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CodeChannelsServiceServer is the server API for CodeChannelsService service.
 // All implementations should embed UnimplementedCodeChannelsServiceServer
 // for forward compatibility.
@@ -91,6 +127,9 @@ type CodeChannelsServiceServer interface {
 	ArchiveCodeChannel(context.Context, *ArchiveCodeChannelRequest) (*CodeChannelMutationResponse, error)
 	SetCodeChannelProperties(context.Context, *SetCodeChannelPropertiesRequest) (*CodeChannelMutationResponse, error)
 	GetCodeChannel(context.Context, *CodeChannelRequest) (*CodeChannel, error)
+	SetCodeChannelView(context.Context, *SetCodeChannelViewRequest) (*CodeChannelView, error)
+	ListCodeChannelViews(context.Context, *CodeChannelRequest) (*CodeChannelViewsResponse, error)
+	RemoveCodeChannelView(context.Context, *RemoveCodeChannelViewRequest) (*RemoveCodeChannelViewResponse, error)
 }
 
 // UnimplementedCodeChannelsServiceServer should be embedded to have
@@ -111,6 +150,15 @@ func (UnimplementedCodeChannelsServiceServer) SetCodeChannelProperties(context.C
 }
 func (UnimplementedCodeChannelsServiceServer) GetCodeChannel(context.Context, *CodeChannelRequest) (*CodeChannel, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetCodeChannel not implemented")
+}
+func (UnimplementedCodeChannelsServiceServer) SetCodeChannelView(context.Context, *SetCodeChannelViewRequest) (*CodeChannelView, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetCodeChannelView not implemented")
+}
+func (UnimplementedCodeChannelsServiceServer) ListCodeChannelViews(context.Context, *CodeChannelRequest) (*CodeChannelViewsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCodeChannelViews not implemented")
+}
+func (UnimplementedCodeChannelsServiceServer) RemoveCodeChannelView(context.Context, *RemoveCodeChannelViewRequest) (*RemoveCodeChannelViewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveCodeChannelView not implemented")
 }
 func (UnimplementedCodeChannelsServiceServer) testEmbeddedByValue() {}
 
@@ -204,6 +252,60 @@ func _CodeChannelsService_GetCodeChannel_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CodeChannelsService_SetCodeChannelView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetCodeChannelViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CodeChannelsServiceServer).SetCodeChannelView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CodeChannelsService_SetCodeChannelView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CodeChannelsServiceServer).SetCodeChannelView(ctx, req.(*SetCodeChannelViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CodeChannelsService_ListCodeChannelViews_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CodeChannelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CodeChannelsServiceServer).ListCodeChannelViews(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CodeChannelsService_ListCodeChannelViews_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CodeChannelsServiceServer).ListCodeChannelViews(ctx, req.(*CodeChannelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CodeChannelsService_RemoveCodeChannelView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveCodeChannelViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CodeChannelsServiceServer).RemoveCodeChannelView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CodeChannelsService_RemoveCodeChannelView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CodeChannelsServiceServer).RemoveCodeChannelView(ctx, req.(*RemoveCodeChannelViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CodeChannelsService_ServiceDesc is the grpc.ServiceDesc for CodeChannelsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -226,6 +328,18 @@ var CodeChannelsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCodeChannel",
 			Handler:    _CodeChannelsService_GetCodeChannel_Handler,
+		},
+		{
+			MethodName: "SetCodeChannelView",
+			Handler:    _CodeChannelsService_SetCodeChannelView_Handler,
+		},
+		{
+			MethodName: "ListCodeChannelViews",
+			Handler:    _CodeChannelsService_ListCodeChannelViews_Handler,
+		},
+		{
+			MethodName: "RemoveCodeChannelView",
+			Handler:    _CodeChannelsService_RemoveCodeChannelView_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

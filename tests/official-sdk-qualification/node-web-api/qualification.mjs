@@ -1865,6 +1865,28 @@ const codeInfo = await client.conversations.info({ channel: codeChannel.channel_
 assert.equal(codeInfo.channel.name, "node-code-channel-task");
 assert.equal(codeInfo.channel.properties.code_channel.context_bar_items[0].key, "repo");
 assert.equal(codeInfo.channel.properties.agent_session.origin_link.channel_id, "C1");
+// A code channel's views are tabs keyed by the agent: setting a key again
+// updates the same view one version on, and removing it by key drops the tab.
+const codeView = await client.agents.conversations.setView({
+  channel_id: codeChannel.channel_id, view_key: "reports/coverage.html", content: "<!doctype html><p>81%</p>",
+  csp: { resource_domains: ["https://cdn.jsdelivr.net"] },
+});
+assert.equal(codeView.ok, true);
+assert.equal(codeView.content_version, 1);
+const codeViewAgain = await client.agents.conversations.setView({
+  channel_id: codeChannel.channel_id, view_key: "reports/coverage.html", content: "<!doctype html><p>84%</p>",
+});
+assert.equal(codeViewAgain.view_id, codeView.view_id);
+assert.equal(codeViewAgain.content_version, 2);
+await client.agents.conversations.setView({
+  channel_id: codeChannel.channel_id, type: "block_kit", view_key: "status", name: "Status",
+  blocks: [{ type: "section", text: { type: "mrkdwn", text: "*Green*" } }],
+});
+const codeViews = await client.agents.conversations.listViews({ channel_id: codeChannel.channel_id });
+assert.deepEqual(codeViews.views.map((view) => view.label), ["coverage", "Status"]);
+const codeViewRemoved = await client.agents.conversations.removeView({ channel_id: codeChannel.channel_id, view_key: "status" });
+assert.equal(codeViewRemoved.ok, true);
+assert.equal((await client.agents.conversations.listViews({ channel_id: codeChannel.channel_id })).views.length, 1);
 const codeSummary = await client.chat.postMessage({ channel: codeChannel.channel_id, text: "Node summary" });
 const codeArchived = await client.agents.conversations.archive({ channel_id: codeChannel.channel_id, summary_message_ts: codeSummary.ts });
 assert.equal(codeArchived.ok, true);

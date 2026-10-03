@@ -633,6 +633,12 @@ func (h Handler) registerWebAPI(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents.conversations.archive", h.archiveCodeChannel)
 	mux.HandleFunc("GET /api/agents.conversations.setProperties", h.setCodeChannelProperties)
 	mux.HandleFunc("POST /api/agents.conversations.setProperties", h.setCodeChannelProperties)
+	mux.HandleFunc("GET /api/agents.conversations.setView", h.setCodeChannelView)
+	mux.HandleFunc("POST /api/agents.conversations.setView", h.setCodeChannelView)
+	mux.HandleFunc("GET /api/agents.conversations.listViews", h.listCodeChannelViews)
+	mux.HandleFunc("POST /api/agents.conversations.listViews", h.listCodeChannelViews)
+	mux.HandleFunc("GET /api/agents.conversations.removeView", h.removeCodeChannelView)
+	mux.HandleFunc("POST /api/agents.conversations.removeView", h.removeCodeChannelView)
 	mux.HandleFunc("GET /api/pins.add", h.addPin)
 	mux.HandleFunc("POST /api/pins.add", h.addPin)
 	mux.HandleFunc("GET /api/pins.remove", h.removePin)
@@ -12929,7 +12935,7 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // methods answered invalid_array_arg to the SDK's own request.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages", "property", "recurrence", "code_channel", "agent_resource":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items", "expression_attributes", "expression_values", "prompts", "loading_messages", "property", "recurrence", "code_channel", "agent_resource", "csp":
 		return true
 	default:
 		return false

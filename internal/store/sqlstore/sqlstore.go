@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
 );
 ` + agentSessionSchema + `
 ` + codeChannelSchema + `
+` + codeChannelViewSchema + `
 CREATE TABLE IF NOT EXISTS conversation_typing (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
  user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL,
@@ -607,7 +608,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 205
+const schemaVersion = 206
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3584,6 +3585,15 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 206: code channel views ---
+	if version < 206 {
+		// agents.conversations.setView keeps each code channel view tab. The
+		// table is new, so an existing database gains it empty.
+		if _, err := db.ExecContext(ctx, codeChannelViewSchema); err != nil {
+			return fmt.Errorf("migrate code channel views: %w", err)
+		}
+	}
+	// --- end schema 206 ---
 	// --- schema 205: code channels ---
 	if version < 205 {
 		// agents.conversations.* keeps a record beside each code channel. The
@@ -8352,6 +8362,7 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		`DELETE FROM assistant_threads WHERE conversation_id = ?`,
 		`DELETE FROM agent_session_agents WHERE conversation_id = ?`,
 		`DELETE FROM agent_sessions WHERE conversation_id = ?`,
+		`DELETE FROM code_channel_views WHERE conversation_id = ?`,
 		`DELETE FROM code_channels WHERE conversation_id = ?`,
 		`DELETE FROM shared_invites WHERE conversation_id = ?`,
 		`DELETE FROM ephemeral_messages WHERE conversation_id = ?`,

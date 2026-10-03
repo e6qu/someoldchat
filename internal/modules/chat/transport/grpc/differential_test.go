@@ -5458,6 +5458,65 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A code channel's views cross the seam whole: each kind's content,
+			// the version an update advances, the CSP, removal by key and by
+			// tab, and each refusal's sentinel.
+			name: "code channel views keep their content, versions and refusals",
+			seed: seedAgentSessionParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.CreateCodeChannel(ctx, "T1", "UB", "AG", domain.CodeChannelRequest{Name: "views"})
+				if err != nil {
+					return nil, err
+				}
+				channel := created.Conversation
+				csp := domain.CodeChannelViewCSP{ResourceDomains: []string{"https://cdn.example.com"}, ConnectDomains: []string{"https://api.example.com"}}
+				first, err := chat.SetCodeChannelView(ctx, "T1", "UB", "AG", channel, domain.CodeChannelViewRequest{Key: "report.html", Content: "<p>1</p>", CSP: csp})
+				if err != nil {
+					return nil, err
+				}
+				second, err := chat.SetCodeChannelView(ctx, "T1", "UB", "AG", channel, domain.CodeChannelViewRequest{Key: "report.html", Name: "Report", Content: "<p>2</p>", CSP: csp})
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetCodeChannelView(ctx, "T1", "UB", "AG", channel, domain.CodeChannelViewRequest{Type: domain.CodeChannelViewDiff, Content: "+a", BaseBranch: "main", HeadBranch: "fix"}); err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetCodeChannelView(ctx, "T1", "UB", "AG", channel, domain.CodeChannelViewRequest{Type: domain.CodeChannelViewPullRequest, Key: "pr", PRURL: "https://example.com/pr/1"}); err != nil {
+					return nil, err
+				}
+				listed, err := chat.CodeChannelViews(ctx, "T1", "U1", channel)
+				if err != nil {
+					return nil, err
+				}
+				removedByKey, err := chat.RemoveCodeChannelView(ctx, "T1", "UB", "AG", channel, "", "pr")
+				if err != nil {
+					return nil, err
+				}
+				removedByID, err := chat.RemoveCodeChannelView(ctx, "T1", "UB", "AG", channel, second.ID, "")
+				if err != nil {
+					return nil, err
+				}
+				left, err := chat.CodeChannelViews(ctx, "T1", "U1", channel)
+				if err != nil {
+					return nil, err
+				}
+				shapes := make([]any, 0, len(listed))
+				for _, view := range listed {
+					shapes = append(shapes, []any{view.Key, view.Type, view.Label, view.Content, view.PRURL, view.BaseBranch, view.HeadBranch, view.CSP, view.Version, view.AppID, view.BotUserID})
+				}
+				_, invalid := chat.SetCodeChannelView(ctx, "T1", "UB", "AG", channel, domain.CodeChannelViewRequest{Key: "x.html"})
+				_, tooLarge := chat.SetCodeChannelView(ctx, "T1", "UB", "AG", channel, domain.CodeChannelViewRequest{Key: "x.html", Content: strings.Repeat("x", domain.CodeChannelViewContentLimit+1)})
+				_, noCanvas := chat.SetCodeChannelView(ctx, "T1", "UB", "AG", channel, domain.CodeChannelViewRequest{Type: domain.CodeChannelViewCanvas, Key: "plan", CanvasID: "F404"})
+				_, gone := chat.RemoveCodeChannelView(ctx, "T1", "UB", "AG", channel, "", "pr")
+				_, notCode := chat.CodeChannelViews(ctx, "T1", "U1", "C1")
+				return []any{shapes, first.ID == second.ID, first.FileID == second.FileID, first.Version, second.Version,
+					removedByKey != "", removedByID == second.ID, len(left),
+					errors.Is(invalid, domain.ErrInvalidCodeChannelView), errors.Is(tooLarge, domain.ErrCodeChannelViewTooLarge),
+					errors.Is(noCanvas, domain.ErrCodeChannelViewCanvasNotFound), errors.Is(gone, domain.ErrCodeChannelViewNotFound),
+					errors.Is(notCode, domain.ErrNotCodeChannel)}, nil
+			},
+		},
+		{
 			// An agent session crosses the seam whole: the session and every
 			// agent's status and identity, the setStatus warning, the stop
 			// control, and each refusal's sentinel.

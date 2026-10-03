@@ -18,6 +18,9 @@ type ConversationID string
 type MessageID string
 type EventID string
 type FileID string
+
+// CodeChannelViewID is a code channel view's tab ID.
+type CodeChannelViewID string
 type CanvasID string
 type ListID string
 type ListItemID string
@@ -193,9 +196,15 @@ func randomSuffix(prefix string) (string, error) {
 func NewMessageID() (MessageID, error) { value, err := PublicID("msg_"); return MessageID(value), err }
 func NewEventID() (EventID, error)     { value, err := SlackID("Ev"); return EventID(value), err }
 func NewFileID() (FileID, error)       { value, err := SlackID("F"); return FileID(value), err }
-func NewCanvasID() (CanvasID, error)   { value, err := SlackID("F"); return CanvasID(value), err }
-func NewUserID() (UserID, error)       { value, err := SlackID("U"); return UserID(value), err }
-func NewListID() (ListID, error)       { value, err := SlackID("F"); return ListID(value), err }
+
+// NewCodeChannelViewID is a channel tab ID, Ct as Slack's channel tabs are.
+func NewCodeChannelViewID() (CodeChannelViewID, error) {
+	value, err := SlackID("Ct")
+	return CodeChannelViewID(value), err
+}
+func NewCanvasID() (CanvasID, error) { value, err := SlackID("F"); return CanvasID(value), err }
+func NewUserID() (UserID, error)     { value, err := SlackID("U"); return UserID(value), err }
+func NewListID() (ListID, error)     { value, err := SlackID("F"); return ListID(value), err }
 func NewListTemplateID() (ListTemplateID, error) {
 	value, err := SlackID("Ft")
 	return ListTemplateID(value), err

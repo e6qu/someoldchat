@@ -27,3 +27,18 @@ type CodeChannelStore interface {
 	// came first and ErrNotFound when there is no record.
 	UpdateCodeChannel(context.Context, domain.CodeChannel, time.Time, events.Event) error
 }
+
+// CodeChannelViewStore is the persistence of code channel views. Every
+// mutation commits its events in the same transaction as its rows.
+type CodeChannelViewStore interface {
+	// SetCodeChannelView writes the view named by its key. A new key gets
+	// the given ID, file ID and creation instant at version 1; a key the
+	// channel already has keeps its ID, file ID and creation instant and
+	// advances its version. It answers the view as stored.
+	SetCodeChannelView(context.Context, domain.CodeChannelView, events.Event) (domain.CodeChannelView, error)
+	// ListCodeChannelViews answers a channel's views, oldest first.
+	ListCodeChannelViews(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.CodeChannelView, error)
+	// RemoveCodeChannelView deletes a view by its ID, answering ErrNotFound
+	// when the channel has no such view.
+	RemoveCodeChannelView(context.Context, domain.WorkspaceID, domain.ConversationID, domain.CodeChannelViewID, events.Event) error
+}

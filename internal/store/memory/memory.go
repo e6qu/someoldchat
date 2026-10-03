@@ -104,6 +104,7 @@ type Store struct {
 	assistantThreads              map[string]domain.AssistantThread
 	agentSessions                 map[string]domain.AgentSession
 	codeChannels                  map[domain.ConversationID]domain.CodeChannel
+	codeChannelViews              map[domain.CodeChannelViewID]domain.CodeChannelView
 	typing                        map[string]domain.TypingSignal
 	activityItems                 map[domain.ActivityID]domain.ActivityItem
 	activityPreferences           map[string]domain.ActivityPreferences
@@ -383,6 +384,7 @@ func New() *Store {
 		assistantThreads:              make(map[string]domain.AssistantThread),
 		agentSessions:                 make(map[string]domain.AgentSession),
 		codeChannels:                  make(map[domain.ConversationID]domain.CodeChannel),
+		codeChannelViews:              make(map[domain.CodeChannelViewID]domain.CodeChannelView),
 		typing:                        make(map[string]domain.TypingSignal),
 		activityItems:                 make(map[domain.ActivityID]domain.ActivityItem),
 		activityPreferences:           make(map[string]domain.ActivityPreferences),
@@ -4110,6 +4112,7 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 	}
 	s.deleteConversationAgentSessionsLocked(conversation)
 	delete(s.codeChannels, conversation)
+	s.deleteConversationCodeChannelViewsLocked(conversation)
 	for key, signal := range s.typing {
 		if signal.Conversation == conversation {
 			delete(s.typing, key)

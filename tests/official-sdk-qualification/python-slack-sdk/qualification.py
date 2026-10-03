@@ -1215,6 +1215,25 @@ assert code_properties["ok"] is True
 code_info = client.conversations_info(channel=code_channel["channel_id"])
 assert code_info["channel"]["name"] == "python-code-channel", code_info
 assert code_info["channel"]["properties"]["code_channel"]["context_bar_items"][0]["key"] == "branch"
+# A code channel's views are tabs keyed by the agent: setting a key again
+# updates the same view one version on, and removing it by key drops the tab.
+code_view = client.agents_conversations_setView(
+    channel_id=code_channel["channel_id"], view_key="reports/coverage.html", content="<!doctype html><p>81%</p>",
+    csp={"resource_domains": ["https://cdn.jsdelivr.net"]},
+)
+assert code_view["ok"] is True and code_view["content_version"] == 1, code_view
+code_view_again = client.agents_conversations_setView(
+    channel_id=code_channel["channel_id"], view_key="reports/coverage.html", content="<!doctype html><p>84%</p>"
+)
+assert code_view_again["view_id"] == code_view["view_id"] and code_view_again["content_version"] == 2, code_view_again
+client.agents_conversations_setView(
+    channel_id=code_channel["channel_id"], type="diff", content="--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n", base_branch="main", head_branch="fix"
+)
+code_views = client.agents_conversations_listViews(channel_id=code_channel["channel_id"])
+assert [view["label"] for view in code_views["views"]] == ["coverage", "Diff"], code_views
+code_view_removed = client.agents_conversations_removeView(channel_id=code_channel["channel_id"], view_id=code_view["view_id"])
+assert code_view_removed["ok"] is True
+assert len(client.agents_conversations_listViews(channel_id=code_channel["channel_id"])["views"]) == 1
 code_summary = client.chat_postMessage(channel=code_channel["channel_id"], text="Python summary")
 code_archived = client.agents_conversations_archive(channel_id=code_channel["channel_id"], summary_message_ts=code_summary["ts"])
 assert code_archived["ok"] is True

@@ -178,6 +178,18 @@ func writeCodeChannelError(w http.ResponseWriter, err error) {
 		writeError(w, "message_not_found")
 	case errors.Is(err, domain.ErrConversationAlreadyArchived):
 		writeError(w, "already_archived")
+	case errors.Is(err, domain.ErrCodeChannelViewTooLarge):
+		// The SDK's setView declaration names this code for content over
+		// its 1,000,000-byte cap.
+		writeError(w, "content_too_large")
+	case errors.Is(err, domain.ErrCodeChannelViewNotFound):
+		writeError(w, "not_found")
+	case errors.Is(err, domain.ErrCodeChannelViewCanvasNotFound):
+		writeError(w, "canvas_not_found")
+	case errors.Is(err, domain.ErrInvalidBlocks):
+		writeError(w, "invalid_blocks")
+	case errors.Is(err, domain.ErrInvalidCodeChannelView):
+		writeError(w, "invalid_arguments")
 	case errors.Is(err, domain.ErrInvalidCodeChannel), errors.Is(err, domain.ErrCodeChannelHasNoOrigin),
 		errors.Is(err, domain.ErrOriginExternallyShared), errors.Is(err, domain.ErrInvalidTimestamp):
 		writeError(w, "invalid_arguments")
@@ -230,4 +242,92 @@ func (h Handler) describeCodeChannel(r *http.Request, principal auth.Principal, 
 	properties["agent_session"] = session
 	response["properties"] = properties
 	return nil
+}
+
+// agents.conversations.setView, listViews and removeView: a code channel's
+// view tabs.
+
+// codeChannelViewCSPArgument is setView's csp object.
+type codeChannelViewCSPArgument struct {
+	ConnectDomains  []string `json:"connect_domains"`
+	ResourceDomains []string `json:"resource_domains"`
+}
+
+func (h Handler) setCodeChannelView(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.codeChannelRequest(w, r)
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	if channel == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	var csp codeChannelViewCSPArgument
+	if raw := strings.TrimSpace(fields["csp"]); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &csp); err != nil {
+			writeError(w, "invalid_arguments")
+			return
+		}
+	}
+	view, err := h.Messages.SetCodeChannelView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, channel, domain.CodeChannelViewRequest{
+		Type: domain.CodeChannelViewType(strings.TrimSpace(fields["type"])), Key: fields["view_key"], Name: fields["name"],
+		Content: fields["content"], Blocks: fields["blocks"], CanvasID: domain.CanvasID(strings.TrimSpace(fields["canvas_id"])),
+		AccessLevel: domain.CodeChannelCanvasAccess(strings.TrimSpace(fields["access_level"])), AgentContentHash: fields["agent_content_hash"],
+		PRURL: strings.TrimSpace(fields["pr_url"]), BaseBranch: strings.TrimSpace(fields["base_branch"]), HeadBranch: strings.TrimSpace(fields["head_branch"]),
+		CSP: domain.CodeChannelViewCSP{ConnectDomains: csp.ConnectDomains, ResourceDomains: csp.ResourceDomains},
+	})
+	if err != nil {
+		writeCodeChannelError(w, err)
+		return
+	}
+	response := map[string]any{"ok": true, "channel_id": channel, "view_id": view.ID, "file_id": view.FileID, "content_version": view.Version, "type": view.Type}
+	if view.CanvasID != "" {
+		response["canvas_id"] = view.CanvasID
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h Handler) listCodeChannelViews(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.codeChannelRequest(w, r)
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	if channel == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	views, err := h.Messages.CodeChannelViews(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		writeCodeChannelError(w, err)
+		return
+	}
+	listed := make([]map[string]any, 0, len(views))
+	for _, view := range views {
+		listed = append(listed, map[string]any{
+			"view_id": view.ID, "view_key": view.Key, "file_id": view.FileID, "label": view.Label,
+			"content_version": view.Version, "date_added": view.CreatedAt.Unix(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "views": listed})
+}
+
+func (h Handler) removeCodeChannelView(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.codeChannelRequest(w, r)
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	if channel == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	removed, err := h.Messages.RemoveCodeChannelView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, channel,
+		domain.CodeChannelViewID(strings.TrimSpace(fields["view_id"])), strings.TrimSpace(fields["view_key"]))
+	if err != nil {
+		writeCodeChannelError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": channel, "view_id": removed})
 }

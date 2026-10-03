@@ -3106,7 +3106,8 @@ func oneAppApprovalReadsBackByItself(t *testing.T, open opener) {
 // agents.conversations.*: a code channel's conversation, members and record
 // are created together; an agent's session key names one channel, so a second
 // channel for it is refused; a properties write applies only over the state
-// it read; and deleting the conversation takes the record with it.
+// it read; a view is upserted by its key, keeping its IDs while its version
+// advances; and deleting the conversation takes the record and views with it.
 func codeChannelsKeepTheirRecord(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -3172,11 +3173,59 @@ func codeChannelsKeepTheirRecord(t *testing.T, open opener) {
 	if after, err := repository.GetCodeChannel(ctx, workspaceID, conversation.ID); err != nil || len(after.ContextBar) != 0 || !after.UpdatedAt.Equal(updated.UpdatedAt) {
 		t.Fatalf("after update=%+v err=%v", after, err)
 	}
+	html := domain.CodeChannelView{
+		WorkspaceID: workspaceID, Conversation: conversation.ID, ID: domain.CodeChannelViewID("Ct-html-" + suffix), FileID: domain.FileID("F-html-" + suffix),
+		Key: "reports/coverage.html", Type: domain.CodeChannelViewHTML, Label: "coverage", AppID: "A-code", BotUserID: bot, Content: "<p>81%</p>",
+		CSP:       domain.CodeChannelViewCSP{ConnectDomains: []string{"https://api.example.com"}, ResourceDomains: []string{"https://cdn.example.com"}},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	written, err := repository.SetCodeChannelView(ctx, html, event("view-html"))
+	if err != nil || written.Version != 1 {
+		t.Fatalf("first write=%+v err=%v", written, err)
+	}
+	canvas := domain.CodeChannelView{
+		WorkspaceID: workspaceID, Conversation: conversation.ID, ID: domain.CodeChannelViewID("Ct-canvas-" + suffix), FileID: domain.FileID("F-canvas-" + suffix),
+		Key: "plan", Type: domain.CodeChannelViewCanvas, Label: "Plan", AppID: "A-code", BotUserID: bot, CanvasID: "F-plan", AccessLevel: domain.CodeChannelCanvasComment,
+		AgentContentHash: "sha256:1", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
+	}
+	if _, err := repository.SetCodeChannelView(ctx, canvas, event("view-canvas")); err != nil {
+		t.Fatal(err)
+	}
+	rewrite := html
+	rewrite.ID, rewrite.FileID, rewrite.Content, rewrite.CSP = domain.CodeChannelViewID("Ct-ignored-"+suffix), domain.FileID("F-ignored-"+suffix), "<p>84%</p>", domain.CodeChannelViewCSP{}
+	rewrite.CreatedAt, rewrite.UpdatedAt = now.Add(time.Hour), now.Add(time.Hour)
+	rewritten, err := repository.SetCodeChannelView(ctx, rewrite, event("view-rewrite"))
+	if err != nil || rewritten.ID != html.ID || rewritten.FileID != html.FileID || rewritten.Version != 2 || !rewritten.CreatedAt.Equal(now) {
+		t.Fatalf("a rewrite of the same key is not the same view one version on: %+v err=%v", rewritten, err)
+	}
+	views, err := repository.ListCodeChannelViews(ctx, workspaceID, conversation.ID)
+	if err != nil || len(views) != 2 {
+		t.Fatalf("views=%+v err=%v", views, err)
+	}
+	wantHTML := html
+	wantHTML.Content, wantHTML.CSP, wantHTML.Version, wantHTML.UpdatedAt = "<p>84%</p>", domain.CodeChannelViewCSP{}, 2, now.Add(time.Hour)
+	wantCanvas := canvas
+	wantCanvas.Version = 1
+	if !reflect.DeepEqual(views[0], wantHTML) || !reflect.DeepEqual(views[1], wantCanvas) {
+		t.Fatalf("views=%+v, want %+v then %+v", views, wantHTML, wantCanvas)
+	}
+	if err := repository.RemoveCodeChannelView(ctx, domain.WorkspaceID("T-other-"+suffix), conversation.ID, canvas.ID, event("view-cross")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a remove from another workspace: %v", err)
+	}
+	if err := repository.RemoveCodeChannelView(ctx, workspaceID, conversation.ID, canvas.ID, event("view-removed")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RemoveCodeChannelView(ctx, workspaceID, conversation.ID, canvas.ID, event("view-removed-again")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a second remove: %v", err)
+	}
 	if err := repository.DeleteConversation(ctx, workspaceID, conversation.ID, event("deleted")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repository.GetCodeChannel(ctx, workspaceID, conversation.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("the record outlived its conversation: %v", err)
+	}
+	if views, err := repository.ListCodeChannelViews(ctx, workspaceID, conversation.ID); err != nil || len(views) != 0 {
+		t.Fatalf("the views outlived their conversation: %+v err=%v", views, err)
 	}
 }
 

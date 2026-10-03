@@ -206,3 +206,83 @@ func TestCodeChannelsAreCreatedDescribedAndArchived(t *testing.T) {
 	requireCodeError(t, "a summary without an origin", callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.archive",
 		`{"channel_id":"`+named["channel_id"].(string)+`","summary_message_ts":"1.000001"}`, false), "invalid_arguments")
 }
+
+// TestCodeChannelViewsAreTabsAnAgentKeepsCurrent drives
+// agents.conversations.setView, listViews and removeView over HTTP: a view is
+// upserted by the agent's key and versioned, a diff is the channel's one diff,
+// each kind requires its own argument, and a view is removed by its key or tab.
+func TestCodeChannelViewsAreTabsAnAgentKeepsCurrent(t *testing.T) {
+	ctx := context.Background()
+	mux, repository, _ := codeChannelAPI(t)
+	created := callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.create", `{"name":"Coverage work"}`, false)
+	channel := created["channel_id"].(string)
+	set := func(body string) map[string]any {
+		return callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.setView", `{"channel_id":"`+channel+`",`+body+`}`, false)
+	}
+
+	html := set(`"view_key":"reports/coverage.html","content":"<!doctype html><p>81%</p>","csp":{"resource_domains":["https://cdn.jsdelivr.net"]}`)
+	requireCodeOK(t, "an html view", html)
+	if html["type"] != "html" || html["content_version"] != float64(1) || !strings.HasPrefix(html["view_id"].(string), "Ct") || !strings.HasPrefix(html["file_id"].(string), "F") {
+		t.Fatalf("html view=%v", html)
+	}
+	updated := set(`"view_key":"reports/coverage.html","content":"<!doctype html><p>84%</p>"`)
+	if updated["view_id"] != html["view_id"] || updated["file_id"] != html["file_id"] || updated["content_version"] != float64(2) {
+		t.Fatalf("an update is not the same view, one version on: %v then %v", html, updated)
+	}
+	diff := set(`"type":"diff","content":"--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n","base_branch":"main","head_branch":"agent/fix"`)
+	again := set(`"type":"diff","view_key":"ignored","content":"--- a/y\n+++ b/y\n"`)
+	if again["view_id"] != diff["view_id"] || again["content_version"] != float64(2) {
+		t.Fatalf("a diff is not the channel's one diff: %v then %v", diff, again)
+	}
+	requireCodeOK(t, "a block_kit view", set(`"type":"block_kit","view_key":"status","name":"Status","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"*Green*"}}]`))
+	requireCodeOK(t, "a pull_request view", set(`"type":"pull_request","view_key":"pr","pr_url":"https://github.com/borant/billing/pull/42"`))
+	canvas, err := service.Messages{Store: repository}.CreateCanvas(ctx, "T1", "UB1", "Plan", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canvasView := set(`"type":"canvas","view_key":"plan","canvas_id":"` + string(canvas.ID) + `","access_level":"comment"`)
+	if canvasView["canvas_id"] != string(canvas.ID) {
+		t.Fatalf("canvas view=%v", canvasView)
+	}
+
+	requireCodeError(t, "content over the cap", set(`"view_key":"big.html","content":"`+strings.Repeat("x", domain.CodeChannelViewContentLimit+1)+`"`), "content_too_large")
+	requireCodeError(t, "an html view without content", set(`"view_key":"empty.html"`), "invalid_arguments")
+	requireCodeError(t, "a block_kit view without blocks", set(`"type":"block_kit","view_key":"x"`), "invalid_arguments")
+	requireCodeError(t, "an unknown kind", set(`"type":"pdf","view_key":"x","content":"x"`), "invalid_arguments")
+	requireCodeError(t, "a plain-http CSP origin", set(`"view_key":"x.html","content":"x","csp":{"resource_domains":["http://cdn.example.com"]}`), "invalid_arguments")
+	requireCodeError(t, "a private CSP origin", set(`"view_key":"x.html","content":"x","csp":{"connect_domains":["https://10.0.0.1"]}`), "invalid_arguments")
+	requireCodeError(t, "a canvas that does not exist", set(`"type":"canvas","view_key":"x","canvas_id":"F00000000"`), "canvas_not_found")
+	requireCodeError(t, "invalid blocks", set(`"type":"block_kit","view_key":"x","blocks":[{"type":"nonsense"}]`), "invalid_blocks")
+
+	listed := callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.listViews", `{"channel_id":"`+channel+`"}`, false)
+	views, _ := listed["views"].([]any)
+	if len(views) != 5 {
+		t.Fatalf("listViews=%v, want five views", listed)
+	}
+	first := views[0].(map[string]any)
+	if first["view_key"] != "reports/coverage.html" || first["label"] != "coverage" || first["content_version"] != float64(2) || first["date_added"] == nil {
+		t.Fatalf("the first view=%v", first)
+	}
+	byKey := map[string]string{}
+	for _, view := range views {
+		entry := view.(map[string]any)
+		byKey[entry["view_key"].(string)] = entry["label"].(string)
+	}
+	if byKey["diff"] != "Diff" || byKey["status"] != "Status" || byKey["pr"] != "pr" {
+		t.Fatalf("labels=%v", byKey)
+	}
+
+	remove := func(body string) map[string]any {
+		return callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.removeView", `{"channel_id":"`+channel+`",`+body+`}`, false)
+	}
+	requireCodeOK(t, "remove by key", remove(`"view_key":"pr"`))
+	requireCodeOK(t, "remove by tab", remove(`"view_id":"`+html["view_id"].(string)+`"`))
+	requireCodeError(t, "remove by both", remove(`"view_key":"status","view_id":"`+diff["view_id"].(string)+`"`), "invalid_arguments")
+	requireCodeError(t, "remove a view that is gone", remove(`"view_key":"pr"`), "not_found")
+	left, err := repository.ListCodeChannelViews(ctx, "T1", domain.ConversationID(channel))
+	if err != nil || len(left) != 3 {
+		t.Fatalf("views left=%+v err=%v", left, err)
+	}
+	requireCodeError(t, "listViews on a channel that is not a code channel",
+		callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.listViews", `{"channel_id":"C1"}`, false), "channel_not_found")
+}

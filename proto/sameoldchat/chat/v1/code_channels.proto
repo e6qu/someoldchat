@@ -86,9 +86,75 @@ message CodeChannelMutationResponse {
   bool ok = 1;
 }
 
+// CodeChannelView is one view tab of a code channel.
+message CodeChannelView {
+  string workspace_id = 1;
+  string conversation = 2;
+  string id = 3;
+  string file_id = 4;
+  string key = 5;
+  string type = 6;
+  string label = 7;
+  string app_id = 8;
+  string bot_user_id = 9;
+  string content = 10;
+  string blocks = 11;
+  string canvas_id = 12;
+  string access_level = 13;
+  string agent_content_hash = 14;
+  string pr_url = 15;
+  string base_branch = 16;
+  string head_branch = 17;
+  repeated string csp_connect_domains = 18;
+  repeated string csp_resource_domains = 19;
+  int64 version = 20;
+  int64 created_at_unix_nano = 21;
+  int64 updated_at_unix_nano = 22;
+}
+
+message SetCodeChannelViewRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string conversation = 4;
+  string type = 5;
+  string key = 6;
+  string name = 7;
+  string content = 8;
+  string blocks = 9;
+  string canvas_id = 10;
+  string access_level = 11;
+  string agent_content_hash = 12;
+  string pr_url = 13;
+  string base_branch = 14;
+  string head_branch = 15;
+  repeated string csp_connect_domains = 16;
+  repeated string csp_resource_domains = 17;
+}
+
+message CodeChannelViewsResponse {
+  repeated CodeChannelView views = 1;
+}
+
+message RemoveCodeChannelViewRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string conversation = 4;
+  string view_id = 5;
+  string view_key = 6;
+}
+
+message RemoveCodeChannelViewResponse {
+  string view_id = 1;
+}
+
 service CodeChannelsService {
   rpc CreateCodeChannel(CreateCodeChannelRequest) returns (CodeChannel);
   rpc ArchiveCodeChannel(ArchiveCodeChannelRequest) returns (CodeChannelMutationResponse);
   rpc SetCodeChannelProperties(SetCodeChannelPropertiesRequest) returns (CodeChannelMutationResponse);
   rpc GetCodeChannel(CodeChannelRequest) returns (CodeChannel);
+  rpc SetCodeChannelView(SetCodeChannelViewRequest) returns (CodeChannelView);
+  rpc ListCodeChannelViews(CodeChannelRequest) returns (CodeChannelViewsResponse);
+  rpc RemoveCodeChannelView(RemoveCodeChannelViewRequest) returns (RemoveCodeChannelViewResponse);
 }

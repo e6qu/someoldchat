@@ -52,6 +52,9 @@ service.channel_restriction_mode
 service.channel_restriction_requires_app_access
 service.code_channel_has_no_origin
 service.code_channel_message_not_found
+service.code_channel_view_canvas_not_found
+service.code_channel_view_not_found
+service.code_channel_view_too_large
 service.conversation_already_archived
 service.conversation_archived
 service.conversation_not_archived
@@ -81,6 +84,7 @@ service.invalid_call
 service.invalid_canvas
 service.invalid_code_channel
 service.invalid_code_channel_name
+service.invalid_code_channel_view
 service.invalid_conversation
 service.invalid_conversation_prefs
 service.invalid_conversation_property

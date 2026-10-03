@@ -159,6 +159,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
     <a href="/app?channel={{.Channel}}"{{if eq .Tab ""}} aria-current="page"{{end}}>{{icon "dms"}}<span>Messages</span></a>
     {{if .CanvasURL}}<a href="{{.CanvasURL}}" aria-label="Canvas — open the canvas for this conversation">{{icon "canvas"}}<span>Canvas</span></a>{{end}}
     <a href="/app?channel={{.Channel}}&amp;tab=pins"{{if eq .Tab "pins"}} aria-current="page"{{end}}>{{icon "pin"}}<span>Pins</span></a>
+    {{range .CodeChannel.Tabs}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{icon "files"}}<span>{{.Label}}</span></a>{{end}}
     {{if .CanBookmark}}<details class="bookmark-add"><summary aria-label="Add a bookmark">{{icon "plus"}}</summary>
       <form class="bookmark-form" method="post" action="/app/bookmarks/add?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
         <label for="bookmark-link">Link</label><input id="bookmark-link" name="link" type="url" required placeholder="https://" maxlength="2000">
@@ -167,6 +168,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
       </form>
     </details>{{end}}
   </nav>
+  {{if or .CodeChannel.ContextBar .CodeChannel.Resource.URL}}<ul class="code-context-bar" aria-label="Agent context">{{with .CodeChannel.Resource}}{{if .URL}}<li><a href="{{.URL}}" rel="noopener noreferrer" target="_blank">{{icon "link"}}<span>{{if .Title}}{{.Title}}{{else}}{{.URL}}{{end}}</span></a></li>{{end}}{{end}}{{range .CodeChannel.ContextBar}}<li>{{if .URL}}<a href="{{.URL}}" rel="noopener noreferrer" target="_blank">{{.Label}}</a>{{else}}<span>{{.Label}}</span>{{end}}</li>{{end}}</ul>{{end}}
   {{if .Bookmarks}}<ul class="bookmarks-bar" aria-label="Bookmarks">{{range .Bookmarks}}<li><a href="{{.Link}}" rel="noopener noreferrer" target="_blank">{{icon "link"}}<span>{{.Title}}</span></a>{{if $.CanBookmark}}<form method="post" action="/app/bookmarks/remove?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="bookmark" value="{{.ID}}"><button type="submit" aria-label="Remove bookmark {{.Title}}">{{icon "close"}}</button></form>{{end}}</li>{{end}}</ul>{{end}}
   <div class="channel-notices">
     <p class="action-feedback" id="action-feedback" role="alert" tabindex="-1" hidden></p>

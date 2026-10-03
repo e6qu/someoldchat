@@ -738,6 +738,563 @@ func (x *CodeChannelMutationResponse) GetOk() bool {
 	return false
 }
 
+// CodeChannelView is one view tab of a code channel.
+type CodeChannelView struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId        string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Conversation       string                 `protobuf:"bytes,2,opt,name=conversation,proto3" json:"conversation,omitempty"`
+	Id                 string                 `protobuf:"bytes,3,opt,name=id,proto3" json:"id,omitempty"`
+	FileId             string                 `protobuf:"bytes,4,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`
+	Key                string                 `protobuf:"bytes,5,opt,name=key,proto3" json:"key,omitempty"`
+	Type               string                 `protobuf:"bytes,6,opt,name=type,proto3" json:"type,omitempty"`
+	Label              string                 `protobuf:"bytes,7,opt,name=label,proto3" json:"label,omitempty"`
+	AppId              string                 `protobuf:"bytes,8,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	BotUserId          string                 `protobuf:"bytes,9,opt,name=bot_user_id,json=botUserId,proto3" json:"bot_user_id,omitempty"`
+	Content            string                 `protobuf:"bytes,10,opt,name=content,proto3" json:"content,omitempty"`
+	Blocks             string                 `protobuf:"bytes,11,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	CanvasId           string                 `protobuf:"bytes,12,opt,name=canvas_id,json=canvasId,proto3" json:"canvas_id,omitempty"`
+	AccessLevel        string                 `protobuf:"bytes,13,opt,name=access_level,json=accessLevel,proto3" json:"access_level,omitempty"`
+	AgentContentHash   string                 `protobuf:"bytes,14,opt,name=agent_content_hash,json=agentContentHash,proto3" json:"agent_content_hash,omitempty"`
+	PrUrl              string                 `protobuf:"bytes,15,opt,name=pr_url,json=prUrl,proto3" json:"pr_url,omitempty"`
+	BaseBranch         string                 `protobuf:"bytes,16,opt,name=base_branch,json=baseBranch,proto3" json:"base_branch,omitempty"`
+	HeadBranch         string                 `protobuf:"bytes,17,opt,name=head_branch,json=headBranch,proto3" json:"head_branch,omitempty"`
+	CspConnectDomains  []string               `protobuf:"bytes,18,rep,name=csp_connect_domains,json=cspConnectDomains,proto3" json:"csp_connect_domains,omitempty"`
+	CspResourceDomains []string               `protobuf:"bytes,19,rep,name=csp_resource_domains,json=cspResourceDomains,proto3" json:"csp_resource_domains,omitempty"`
+	Version            int64                  `protobuf:"varint,20,opt,name=version,proto3" json:"version,omitempty"`
+	CreatedAtUnixNano  int64                  `protobuf:"varint,21,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
+	UpdatedAtUnixNano  int64                  `protobuf:"varint,22,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *CodeChannelView) Reset() {
+	*x = CodeChannelView{}
+	mi := &file_sameoldchat_chat_v1_code_channels_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CodeChannelView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CodeChannelView) ProtoMessage() {}
+
+func (x *CodeChannelView) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_code_channels_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CodeChannelView.ProtoReflect.Descriptor instead.
+func (*CodeChannelView) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_code_channels_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *CodeChannelView) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetConversation() string {
+	if x != nil {
+		return x.Conversation
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetFileId() string {
+	if x != nil {
+		return x.FileId
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetBotUserId() string {
+	if x != nil {
+		return x.BotUserId
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetBlocks() string {
+	if x != nil {
+		return x.Blocks
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetCanvasId() string {
+	if x != nil {
+		return x.CanvasId
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetAccessLevel() string {
+	if x != nil {
+		return x.AccessLevel
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetAgentContentHash() string {
+	if x != nil {
+		return x.AgentContentHash
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetPrUrl() string {
+	if x != nil {
+		return x.PrUrl
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetBaseBranch() string {
+	if x != nil {
+		return x.BaseBranch
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetHeadBranch() string {
+	if x != nil {
+		return x.HeadBranch
+	}
+	return ""
+}
+
+func (x *CodeChannelView) GetCspConnectDomains() []string {
+	if x != nil {
+		return x.CspConnectDomains
+	}
+	return nil
+}
+
+func (x *CodeChannelView) GetCspResourceDomains() []string {
+	if x != nil {
+		return x.CspResourceDomains
+	}
+	return nil
+}
+
+func (x *CodeChannelView) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *CodeChannelView) GetCreatedAtUnixNano() int64 {
+	if x != nil {
+		return x.CreatedAtUnixNano
+	}
+	return 0
+}
+
+func (x *CodeChannelView) GetUpdatedAtUnixNano() int64 {
+	if x != nil {
+		return x.UpdatedAtUnixNano
+	}
+	return 0
+}
+
+type SetCodeChannelViewRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId        string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId             string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId              string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Conversation       string                 `protobuf:"bytes,4,opt,name=conversation,proto3" json:"conversation,omitempty"`
+	Type               string                 `protobuf:"bytes,5,opt,name=type,proto3" json:"type,omitempty"`
+	Key                string                 `protobuf:"bytes,6,opt,name=key,proto3" json:"key,omitempty"`
+	Name               string                 `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`
+	Content            string                 `protobuf:"bytes,8,opt,name=content,proto3" json:"content,omitempty"`
+	Blocks             string                 `protobuf:"bytes,9,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	CanvasId           string                 `protobuf:"bytes,10,opt,name=canvas_id,json=canvasId,proto3" json:"canvas_id,omitempty"`
+	AccessLevel        string                 `protobuf:"bytes,11,opt,name=access_level,json=accessLevel,proto3" json:"access_level,omitempty"`
+	AgentContentHash   string                 `protobuf:"bytes,12,opt,name=agent_content_hash,json=agentContentHash,proto3" json:"agent_content_hash,omitempty"`
+	PrUrl              string                 `protobuf:"bytes,13,opt,name=pr_url,json=prUrl,proto3" json:"pr_url,omitempty"`
+	BaseBranch         string                 `protobuf:"bytes,14,opt,name=base_branch,json=baseBranch,proto3" json:"base_branch,omitempty"`
+	HeadBranch         string                 `protobuf:"bytes,15,opt,name=head_branch,json=headBranch,proto3" json:"head_branch,omitempty"`
+	CspConnectDomains  []string               `protobuf:"bytes,16,rep,name=csp_connect_domains,json=cspConnectDomains,proto3" json:"csp_connect_domains,omitempty"`
+	CspResourceDomains []string               `protobuf:"bytes,17,rep,name=csp_resource_domains,json=cspResourceDomains,proto3" json:"csp_resource_domains,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *SetCodeChannelViewRequest) Reset() {
+	*x = SetCodeChannelViewRequest{}
+	mi := &file_sameoldchat_chat_v1_code_channels_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetCodeChannelViewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetCodeChannelViewRequest) ProtoMessage() {}
+
+func (x *SetCodeChannelViewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_code_channels_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetCodeChannelViewRequest.ProtoReflect.Descriptor instead.
+func (*SetCodeChannelViewRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_code_channels_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SetCodeChannelViewRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetConversation() string {
+	if x != nil {
+		return x.Conversation
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetBlocks() string {
+	if x != nil {
+		return x.Blocks
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetCanvasId() string {
+	if x != nil {
+		return x.CanvasId
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetAccessLevel() string {
+	if x != nil {
+		return x.AccessLevel
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetAgentContentHash() string {
+	if x != nil {
+		return x.AgentContentHash
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetPrUrl() string {
+	if x != nil {
+		return x.PrUrl
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetBaseBranch() string {
+	if x != nil {
+		return x.BaseBranch
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetHeadBranch() string {
+	if x != nil {
+		return x.HeadBranch
+	}
+	return ""
+}
+
+func (x *SetCodeChannelViewRequest) GetCspConnectDomains() []string {
+	if x != nil {
+		return x.CspConnectDomains
+	}
+	return nil
+}
+
+func (x *SetCodeChannelViewRequest) GetCspResourceDomains() []string {
+	if x != nil {
+		return x.CspResourceDomains
+	}
+	return nil
+}
+
+type CodeChannelViewsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Views         []*CodeChannelView     `protobuf:"bytes,1,rep,name=views,proto3" json:"views,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CodeChannelViewsResponse) Reset() {
+	*x = CodeChannelViewsResponse{}
+	mi := &file_sameoldchat_chat_v1_code_channels_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CodeChannelViewsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CodeChannelViewsResponse) ProtoMessage() {}
+
+func (x *CodeChannelViewsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_code_channels_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CodeChannelViewsResponse.ProtoReflect.Descriptor instead.
+func (*CodeChannelViewsResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_code_channels_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CodeChannelViewsResponse) GetViews() []*CodeChannelView {
+	if x != nil {
+		return x.Views
+	}
+	return nil
+}
+
+type RemoveCodeChannelViewRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId         string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Conversation  string                 `protobuf:"bytes,4,opt,name=conversation,proto3" json:"conversation,omitempty"`
+	ViewId        string                 `protobuf:"bytes,5,opt,name=view_id,json=viewId,proto3" json:"view_id,omitempty"`
+	ViewKey       string                 `protobuf:"bytes,6,opt,name=view_key,json=viewKey,proto3" json:"view_key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveCodeChannelViewRequest) Reset() {
+	*x = RemoveCodeChannelViewRequest{}
+	mi := &file_sameoldchat_chat_v1_code_channels_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveCodeChannelViewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveCodeChannelViewRequest) ProtoMessage() {}
+
+func (x *RemoveCodeChannelViewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_code_channels_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveCodeChannelViewRequest.ProtoReflect.Descriptor instead.
+func (*RemoveCodeChannelViewRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_code_channels_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *RemoveCodeChannelViewRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *RemoveCodeChannelViewRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *RemoveCodeChannelViewRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *RemoveCodeChannelViewRequest) GetConversation() string {
+	if x != nil {
+		return x.Conversation
+	}
+	return ""
+}
+
+func (x *RemoveCodeChannelViewRequest) GetViewId() string {
+	if x != nil {
+		return x.ViewId
+	}
+	return ""
+}
+
+func (x *RemoveCodeChannelViewRequest) GetViewKey() string {
+	if x != nil {
+		return x.ViewKey
+	}
+	return ""
+}
+
+type RemoveCodeChannelViewResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ViewId        string                 `protobuf:"bytes,1,opt,name=view_id,json=viewId,proto3" json:"view_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveCodeChannelViewResponse) Reset() {
+	*x = RemoveCodeChannelViewResponse{}
+	mi := &file_sameoldchat_chat_v1_code_channels_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveCodeChannelViewResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveCodeChannelViewResponse) ProtoMessage() {}
+
+func (x *RemoveCodeChannelViewResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_code_channels_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveCodeChannelViewResponse.ProtoReflect.Descriptor instead.
+func (*RemoveCodeChannelViewResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_code_channels_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *RemoveCodeChannelViewResponse) GetViewId() string {
+	if x != nil {
+		return x.ViewId
+	}
+	return ""
+}
+
 var File_sameoldchat_chat_v1_code_channels_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_code_channels_proto_rawDesc = "" +
@@ -815,12 +1372,73 @@ const file_sameoldchat_chat_v1_code_channels_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
 	"\fconversation\x18\x03 \x01(\tR\fconversation\"-\n" +
 	"\x1bCodeChannelMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2\xd5\x03\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xcb\x05\n" +
+	"\x0fCodeChannelView\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\"\n" +
+	"\fconversation\x18\x02 \x01(\tR\fconversation\x12\x0e\n" +
+	"\x02id\x18\x03 \x01(\tR\x02id\x12\x17\n" +
+	"\afile_id\x18\x04 \x01(\tR\x06fileId\x12\x10\n" +
+	"\x03key\x18\x05 \x01(\tR\x03key\x12\x12\n" +
+	"\x04type\x18\x06 \x01(\tR\x04type\x12\x14\n" +
+	"\x05label\x18\a \x01(\tR\x05label\x12\x15\n" +
+	"\x06app_id\x18\b \x01(\tR\x05appId\x12\x1e\n" +
+	"\vbot_user_id\x18\t \x01(\tR\tbotUserId\x12\x18\n" +
+	"\acontent\x18\n" +
+	" \x01(\tR\acontent\x12\x16\n" +
+	"\x06blocks\x18\v \x01(\tR\x06blocks\x12\x1b\n" +
+	"\tcanvas_id\x18\f \x01(\tR\bcanvasId\x12!\n" +
+	"\faccess_level\x18\r \x01(\tR\vaccessLevel\x12,\n" +
+	"\x12agent_content_hash\x18\x0e \x01(\tR\x10agentContentHash\x12\x15\n" +
+	"\x06pr_url\x18\x0f \x01(\tR\x05prUrl\x12\x1f\n" +
+	"\vbase_branch\x18\x10 \x01(\tR\n" +
+	"baseBranch\x12\x1f\n" +
+	"\vhead_branch\x18\x11 \x01(\tR\n" +
+	"headBranch\x12.\n" +
+	"\x13csp_connect_domains\x18\x12 \x03(\tR\x11cspConnectDomains\x120\n" +
+	"\x14csp_resource_domains\x18\x13 \x03(\tR\x12cspResourceDomains\x12\x18\n" +
+	"\aversion\x18\x14 \x01(\x03R\aversion\x12/\n" +
+	"\x14created_at_unix_nano\x18\x15 \x01(\x03R\x11createdAtUnixNano\x12/\n" +
+	"\x14updated_at_unix_nano\x18\x16 \x01(\x03R\x11updatedAtUnixNano\"\xa7\x04\n" +
+	"\x19SetCodeChannelViewRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\x12\"\n" +
+	"\fconversation\x18\x04 \x01(\tR\fconversation\x12\x12\n" +
+	"\x04type\x18\x05 \x01(\tR\x04type\x12\x10\n" +
+	"\x03key\x18\x06 \x01(\tR\x03key\x12\x12\n" +
+	"\x04name\x18\a \x01(\tR\x04name\x12\x18\n" +
+	"\acontent\x18\b \x01(\tR\acontent\x12\x16\n" +
+	"\x06blocks\x18\t \x01(\tR\x06blocks\x12\x1b\n" +
+	"\tcanvas_id\x18\n" +
+	" \x01(\tR\bcanvasId\x12!\n" +
+	"\faccess_level\x18\v \x01(\tR\vaccessLevel\x12,\n" +
+	"\x12agent_content_hash\x18\f \x01(\tR\x10agentContentHash\x12\x15\n" +
+	"\x06pr_url\x18\r \x01(\tR\x05prUrl\x12\x1f\n" +
+	"\vbase_branch\x18\x0e \x01(\tR\n" +
+	"baseBranch\x12\x1f\n" +
+	"\vhead_branch\x18\x0f \x01(\tR\n" +
+	"headBranch\x12.\n" +
+	"\x13csp_connect_domains\x18\x10 \x03(\tR\x11cspConnectDomains\x120\n" +
+	"\x14csp_resource_domains\x18\x11 \x03(\tR\x12cspResourceDomains\"V\n" +
+	"\x18CodeChannelViewsResponse\x12:\n" +
+	"\x05views\x18\x01 \x03(\v2$.sameoldchat.chat.v1.CodeChannelViewR\x05views\"\xc9\x01\n" +
+	"\x1cRemoveCodeChannelViewRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\x12\"\n" +
+	"\fconversation\x18\x04 \x01(\tR\fconversation\x12\x17\n" +
+	"\aview_id\x18\x05 \x01(\tR\x06viewId\x12\x19\n" +
+	"\bview_key\x18\x06 \x01(\tR\aviewKey\"8\n" +
+	"\x1dRemoveCodeChannelViewResponse\x12\x17\n" +
+	"\aview_id\x18\x01 \x01(\tR\x06viewId2\xb1\x06\n" +
 	"\x13CodeChannelsService\x12d\n" +
 	"\x11CreateCodeChannel\x12-.sameoldchat.chat.v1.CreateCodeChannelRequest\x1a .sameoldchat.chat.v1.CodeChannel\x12v\n" +
 	"\x12ArchiveCodeChannel\x12..sameoldchat.chat.v1.ArchiveCodeChannelRequest\x1a0.sameoldchat.chat.v1.CodeChannelMutationResponse\x12\x82\x01\n" +
 	"\x18SetCodeChannelProperties\x124.sameoldchat.chat.v1.SetCodeChannelPropertiesRequest\x1a0.sameoldchat.chat.v1.CodeChannelMutationResponse\x12[\n" +
-	"\x0eGetCodeChannel\x12'.sameoldchat.chat.v1.CodeChannelRequest\x1a .sameoldchat.chat.v1.CodeChannelBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x0eGetCodeChannel\x12'.sameoldchat.chat.v1.CodeChannelRequest\x1a .sameoldchat.chat.v1.CodeChannel\x12j\n" +
+	"\x12SetCodeChannelView\x12..sameoldchat.chat.v1.SetCodeChannelViewRequest\x1a$.sameoldchat.chat.v1.CodeChannelView\x12n\n" +
+	"\x14ListCodeChannelViews\x12'.sameoldchat.chat.v1.CodeChannelRequest\x1a-.sameoldchat.chat.v1.CodeChannelViewsResponse\x12~\n" +
+	"\x15RemoveCodeChannelView\x121.sameoldchat.chat.v1.RemoveCodeChannelViewRequest\x1a2.sameoldchat.chat.v1.RemoveCodeChannelViewResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_code_channels_proto_rawDescOnce sync.Once
@@ -834,7 +1452,7 @@ func file_sameoldchat_chat_v1_code_channels_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_code_channels_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_code_channels_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_sameoldchat_chat_v1_code_channels_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_sameoldchat_chat_v1_code_channels_proto_goTypes = []any{
 	(*CodeChannelContextItem)(nil),          // 0: sameoldchat.chat.v1.CodeChannelContextItem
 	(*AgentResource)(nil),                   // 1: sameoldchat.chat.v1.AgentResource
@@ -844,24 +1462,36 @@ var file_sameoldchat_chat_v1_code_channels_proto_goTypes = []any{
 	(*SetCodeChannelPropertiesRequest)(nil), // 5: sameoldchat.chat.v1.SetCodeChannelPropertiesRequest
 	(*CodeChannelRequest)(nil),              // 6: sameoldchat.chat.v1.CodeChannelRequest
 	(*CodeChannelMutationResponse)(nil),     // 7: sameoldchat.chat.v1.CodeChannelMutationResponse
+	(*CodeChannelView)(nil),                 // 8: sameoldchat.chat.v1.CodeChannelView
+	(*SetCodeChannelViewRequest)(nil),       // 9: sameoldchat.chat.v1.SetCodeChannelViewRequest
+	(*CodeChannelViewsResponse)(nil),        // 10: sameoldchat.chat.v1.CodeChannelViewsResponse
+	(*RemoveCodeChannelViewRequest)(nil),    // 11: sameoldchat.chat.v1.RemoveCodeChannelViewRequest
+	(*RemoveCodeChannelViewResponse)(nil),   // 12: sameoldchat.chat.v1.RemoveCodeChannelViewResponse
 }
 var file_sameoldchat_chat_v1_code_channels_proto_depIdxs = []int32{
-	0, // 0: sameoldchat.chat.v1.CodeChannel.context_bar:type_name -> sameoldchat.chat.v1.CodeChannelContextItem
-	1, // 1: sameoldchat.chat.v1.CodeChannel.agent_resource:type_name -> sameoldchat.chat.v1.AgentResource
-	0, // 2: sameoldchat.chat.v1.SetCodeChannelPropertiesRequest.context_bar:type_name -> sameoldchat.chat.v1.CodeChannelContextItem
-	3, // 3: sameoldchat.chat.v1.CodeChannelsService.CreateCodeChannel:input_type -> sameoldchat.chat.v1.CreateCodeChannelRequest
-	4, // 4: sameoldchat.chat.v1.CodeChannelsService.ArchiveCodeChannel:input_type -> sameoldchat.chat.v1.ArchiveCodeChannelRequest
-	5, // 5: sameoldchat.chat.v1.CodeChannelsService.SetCodeChannelProperties:input_type -> sameoldchat.chat.v1.SetCodeChannelPropertiesRequest
-	6, // 6: sameoldchat.chat.v1.CodeChannelsService.GetCodeChannel:input_type -> sameoldchat.chat.v1.CodeChannelRequest
-	2, // 7: sameoldchat.chat.v1.CodeChannelsService.CreateCodeChannel:output_type -> sameoldchat.chat.v1.CodeChannel
-	7, // 8: sameoldchat.chat.v1.CodeChannelsService.ArchiveCodeChannel:output_type -> sameoldchat.chat.v1.CodeChannelMutationResponse
-	7, // 9: sameoldchat.chat.v1.CodeChannelsService.SetCodeChannelProperties:output_type -> sameoldchat.chat.v1.CodeChannelMutationResponse
-	2, // 10: sameoldchat.chat.v1.CodeChannelsService.GetCodeChannel:output_type -> sameoldchat.chat.v1.CodeChannel
-	7, // [7:11] is the sub-list for method output_type
-	3, // [3:7] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	0,  // 0: sameoldchat.chat.v1.CodeChannel.context_bar:type_name -> sameoldchat.chat.v1.CodeChannelContextItem
+	1,  // 1: sameoldchat.chat.v1.CodeChannel.agent_resource:type_name -> sameoldchat.chat.v1.AgentResource
+	0,  // 2: sameoldchat.chat.v1.SetCodeChannelPropertiesRequest.context_bar:type_name -> sameoldchat.chat.v1.CodeChannelContextItem
+	8,  // 3: sameoldchat.chat.v1.CodeChannelViewsResponse.views:type_name -> sameoldchat.chat.v1.CodeChannelView
+	3,  // 4: sameoldchat.chat.v1.CodeChannelsService.CreateCodeChannel:input_type -> sameoldchat.chat.v1.CreateCodeChannelRequest
+	4,  // 5: sameoldchat.chat.v1.CodeChannelsService.ArchiveCodeChannel:input_type -> sameoldchat.chat.v1.ArchiveCodeChannelRequest
+	5,  // 6: sameoldchat.chat.v1.CodeChannelsService.SetCodeChannelProperties:input_type -> sameoldchat.chat.v1.SetCodeChannelPropertiesRequest
+	6,  // 7: sameoldchat.chat.v1.CodeChannelsService.GetCodeChannel:input_type -> sameoldchat.chat.v1.CodeChannelRequest
+	9,  // 8: sameoldchat.chat.v1.CodeChannelsService.SetCodeChannelView:input_type -> sameoldchat.chat.v1.SetCodeChannelViewRequest
+	6,  // 9: sameoldchat.chat.v1.CodeChannelsService.ListCodeChannelViews:input_type -> sameoldchat.chat.v1.CodeChannelRequest
+	11, // 10: sameoldchat.chat.v1.CodeChannelsService.RemoveCodeChannelView:input_type -> sameoldchat.chat.v1.RemoveCodeChannelViewRequest
+	2,  // 11: sameoldchat.chat.v1.CodeChannelsService.CreateCodeChannel:output_type -> sameoldchat.chat.v1.CodeChannel
+	7,  // 12: sameoldchat.chat.v1.CodeChannelsService.ArchiveCodeChannel:output_type -> sameoldchat.chat.v1.CodeChannelMutationResponse
+	7,  // 13: sameoldchat.chat.v1.CodeChannelsService.SetCodeChannelProperties:output_type -> sameoldchat.chat.v1.CodeChannelMutationResponse
+	2,  // 14: sameoldchat.chat.v1.CodeChannelsService.GetCodeChannel:output_type -> sameoldchat.chat.v1.CodeChannel
+	8,  // 15: sameoldchat.chat.v1.CodeChannelsService.SetCodeChannelView:output_type -> sameoldchat.chat.v1.CodeChannelView
+	10, // 16: sameoldchat.chat.v1.CodeChannelsService.ListCodeChannelViews:output_type -> sameoldchat.chat.v1.CodeChannelViewsResponse
+	12, // 17: sameoldchat.chat.v1.CodeChannelsService.RemoveCodeChannelView:output_type -> sameoldchat.chat.v1.RemoveCodeChannelViewResponse
+	11, // [11:18] is the sub-list for method output_type
+	4,  // [4:11] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_code_channels_proto_init() }
@@ -876,7 +1506,7 @@ func file_sameoldchat_chat_v1_code_channels_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_code_channels_proto_rawDesc), len(file_sameoldchat_chat_v1_code_channels_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
