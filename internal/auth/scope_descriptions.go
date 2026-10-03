@@ -51,10 +51,11 @@ var scopeDescriptions = map[Scope]string{
 	ScopeRemoteFilesWrite: "Add and edit remote files",
 	ScopeRemoteFilesShare: "Share remote files into conversations",
 
-	ScopeCanvasesRead:  "View canvases",
-	ScopeCanvasesWrite: "Create and edit canvases",
-	ScopeListsRead:     "View lists",
-	ScopeListsWrite:    "Create and edit lists",
+	ScopeCanvasesRead:       "View canvases",
+	ScopeCanvasesWrite:      "Create and edit canvases",
+	ScopeCodeChannelsManage: "Create, describe and archive code channels for agent sessions",
+	ScopeListsRead:          "View lists",
+	ScopeListsWrite:         "Create and edit lists",
 
 	ScopeTeamRead:            "View basic information about the workspace",
 	ScopeTeamPreferencesRead: "View the workspace's preferences",

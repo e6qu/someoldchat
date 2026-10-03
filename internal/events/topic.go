@@ -438,6 +438,8 @@ var topicRules = []topicRule{
 		note: "not a Slack event: agents.sessions.setStatus answers the app itself, and the record exists so an open client re-renders the session"},
 	{topic: AgentSessionRenamedTopic,
 		note: "not a Slack event: agent_session_title_changed is for a member's change, and an app is not told of its own agents.sessions.rename"},
+	{topic: CodeChannelPropertiesSetTopic,
+		note: "not a Slack event: agents.conversations.setProperties answers the app itself, and the record exists so an open client re-renders the code channel"},
 }
 
 // rulesByTopic indexes the table. A duplicate row would make one of the two

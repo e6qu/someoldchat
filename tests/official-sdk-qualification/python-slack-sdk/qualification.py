@@ -1194,4 +1194,31 @@ assert id_claims["nonce"] == "python-nonce", id_claims
 assert id_claims["sub"] == "U1" and id_claims["https://slack.com/team_id"] == "T1", id_claims
 assert id_claims["exp"] > time.time() >= id_claims["iat"] - 60, id_claims
 
+# agents.conversations.* (Slack Code): a code channel created from a message
+# is described with a context bar and an agent resource, and archived with its
+# summary shared back on the message the work began from. slack_sdk makes
+# name a required keyword, so this channel is named rather than named after
+# its origin.
+code_origin = client.chat_postMessage(channel="C1", text="Python code channel task")
+code_channel = client.agents_conversations_create(
+    name="Python code channel", origin_channel_id="C1", origin_message_ts=code_origin["ts"], session_id="python-session"
+)
+assert code_channel["ok"] is True
+code_channel_again = client.agents_conversations_create(name="Ignored", session_id="python-session")
+assert code_channel_again["channel_id"] == code_channel["channel_id"]
+code_properties = client.agents_conversations_setProperties(
+    channel_id=code_channel["channel_id"],
+    code_channel={"context_bar_items": [{"key": "branch", "label": "agent/fix", "icon": "branch"}]},
+    agent_resource={"title": "Fix", "provider": "github"},
+)
+assert code_properties["ok"] is True
+code_info = client.conversations_info(channel=code_channel["channel_id"])
+assert code_info["channel"]["name"] == "python-code-channel", code_info
+assert code_info["channel"]["properties"]["code_channel"]["context_bar_items"][0]["key"] == "branch"
+code_summary = client.chat_postMessage(channel=code_channel["channel_id"], text="Python summary")
+code_archived = client.agents_conversations_archive(channel_id=code_channel["channel_id"], summary_message_ts=code_summary["ts"])
+assert code_archived["ok"] is True
+code_shared = client.conversations_replies(channel="C1", ts=code_origin["ts"])
+assert any(message["text"] == "Python summary" for message in code_shared["messages"])
+
 print("python-slack-sdk qualification passed")

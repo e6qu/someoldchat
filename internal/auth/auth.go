@@ -73,12 +73,15 @@ const (
 	ScopeRemoteFilesShare     Scope = "remote_files:share"
 	ScopeCanvasesRead         Scope = "canvases:read"
 	ScopeCanvasesWrite        Scope = "canvases:write"
-	ScopeListsRead            Scope = "lists:read"
-	ScopeListsWrite           Scope = "lists:write"
-	ScopeTeamRead             Scope = "team:read"
-	ScopeTeamPreferencesRead  Scope = "team.preferences:read"
-	ScopeEmojiRead            Scope = "emoji:read"
-	ScopeAuthorizationsRead   Scope = "authorizations:read"
+	// ScopeCodeChannelsManage is Slack Code's agents.conversations.* scope,
+	// granted to an agent's bot.
+	ScopeCodeChannelsManage  Scope = "code_channels:manage"
+	ScopeListsRead           Scope = "lists:read"
+	ScopeListsWrite          Scope = "lists:write"
+	ScopeTeamRead            Scope = "team:read"
+	ScopeTeamPreferencesRead Scope = "team.preferences:read"
+	ScopeEmojiRead           Scope = "emoji:read"
+	ScopeAuthorizationsRead  Scope = "authorizations:read"
 	// links:read receives link_shared, the event an app's unfurl domains
 	// raise (pinned AsyncAPI x-scopes-required); links:write answers it with
 	// chat.unfurl.
@@ -575,6 +578,7 @@ var allScopes = []Scope{
 	ScopeRemoteFilesShare,
 	ScopeCanvasesRead,
 	ScopeCanvasesWrite,
+	ScopeCodeChannelsManage,
 	ScopeListsRead,
 	ScopeListsWrite,
 	ScopeTeamRead,

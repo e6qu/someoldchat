@@ -5400,6 +5400,64 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A code channel crosses the seam whole: its record, its context
+			// bar and agent resource, the session channel's own session, the
+			// summary shared back on archive, and each refusal's sentinel.
+			name: "code channels keep their record, properties and refusals",
+			seed: seedAgentSessionParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				origin, err := chat.Post(ctx, "T1", "U1", "C1", "Port the billing cron", "", "")
+				if err != nil {
+					return nil, err
+				}
+				created, err := chat.CreateCodeChannel(ctx, "T1", "UB", "AG", domain.CodeChannelRequest{
+					SessionID: "ses", Origin: domain.CodeChannelOrigin{Channel: "C1", Timestamp: timestampOf(origin)},
+				})
+				if err != nil {
+					return nil, err
+				}
+				again, err := chat.CreateCodeChannel(ctx, "T1", "UB", "AG", domain.CodeChannelRequest{SessionID: "ses", Name: "other"})
+				if err != nil {
+					return nil, err
+				}
+				items := []domain.CodeChannelContextItem{{Key: "repo", Label: "borant/billing", Icon: "folder", URL: "https://example.com/billing"}}
+				title := "Port"
+				if err := chat.SetCodeChannelProperties(ctx, "T1", "UB", "AG", created.Conversation, domain.CodeChannelProperties{
+					ContextBar: &items, AgentResource: domain.AgentResourcePatch{Title: &title},
+				}); err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetAgentSessionStatus(ctx, "T1", "UB", "AG", created.Conversation, "", domain.AgentSessionStatusRequest{Status: domain.AgentSessionActive}); err != nil {
+					return nil, err
+				}
+				read, err := chat.CodeChannel(ctx, "T1", "U1", created.Conversation)
+				if err != nil {
+					return nil, err
+				}
+				summary, err := chat.Post(ctx, "T1", "UB", created.Conversation, "Ported", "", "")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.ArchiveCodeChannel(ctx, "T1", "UB", "AG", created.Conversation, timestampOf(summary)); err != nil {
+					return nil, err
+				}
+				tooMany := make([]domain.CodeChannelContextItem, 6)
+				for index := range tooMany {
+					tooMany[index] = domain.CodeChannelContextItem{Key: string(rune('a' + index)), Label: "l"}
+				}
+				_, nameless := chat.CreateCodeChannel(ctx, "T1", "UB", "AG", domain.CodeChannelRequest{})
+				badBar := chat.SetCodeChannelProperties(ctx, "T1", "UB", "AG", created.Conversation, domain.CodeChannelProperties{ContextBar: &tooMany})
+				notCode := chat.SetCodeChannelProperties(ctx, "T1", "UB", "AG", "C1", domain.CodeChannelProperties{AgentResource: domain.AgentResourcePatch{Title: &title}})
+				_, threaded := chat.SetAgentSessionStatus(ctx, "T1", "UB", "AG", created.Conversation, timestampOf(origin), domain.AgentSessionStatusRequest{Status: domain.AgentSessionActive})
+				_, unread := chat.CodeChannel(ctx, "T1", "U1", "C1")
+				read.CreatedAt, read.UpdatedAt = time.Time{}, time.Time{}
+				return []any{read.ContextBar, read.AgentResource, read.Origin.Channel, read.SessionID, again.Conversation == created.Conversation,
+					errors.Is(nameless, domain.ErrInvalidCodeChannel), errors.Is(badBar, domain.ErrInvalidCodeChannel),
+					errors.Is(notCode, domain.ErrNotCodeChannel), errors.Is(threaded, domain.ErrAgentSessionThreadNotAllowed),
+					errors.Is(unread, storepkg.ErrNotFound)}, nil
+			},
+		},
+		{
 			// An agent session crosses the seam whole: the session and every
 			// agent's status and identity, the setStatus warning, the stop
 			// control, and each refusal's sentinel.

@@ -145,6 +145,13 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_agent_session_status", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAgentSessionStatus},
 	{key: "service.agent_session_thread_required", code: codes.InvalidArgument, sentinel: domain.ErrAgentSessionThreadRequired},
 	{key: "service.agent_session_not_found", code: codes.NotFound, sentinel: domain.ErrAgentSessionNotFound},
+	{key: "service.agent_session_thread_not_allowed", code: codes.InvalidArgument, sentinel: domain.ErrAgentSessionThreadNotAllowed},
+	{key: "service.invalid_code_channel", code: codes.InvalidArgument, sentinel: domain.ErrInvalidCodeChannel},
+	{key: "service.invalid_code_channel_name", code: codes.InvalidArgument, sentinel: domain.ErrInvalidCodeChannelName},
+	{key: "service.not_code_channel", code: codes.NotFound, sentinel: domain.ErrNotCodeChannel},
+	{key: "service.code_channel_has_no_origin", code: codes.FailedPrecondition, sentinel: domain.ErrCodeChannelHasNoOrigin},
+	{key: "service.origin_externally_shared", code: codes.FailedPrecondition, sentinel: domain.ErrOriginExternallyShared},
+	{key: "service.code_channel_message_not_found", code: codes.NotFound, sentinel: domain.ErrCodeChannelMessageNotFound},
 	// PermissionDenied: the session exists and the caller is not one of its
 	// agents. FailedPrecondition: the session is real and well named, and it
 	// is its state — nothing processing that accepts a stop — that refuses.

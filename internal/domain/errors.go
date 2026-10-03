@@ -84,9 +84,13 @@ var (
 	// ErrInvalidAgentSessionStatus is a status outside active, processing,
 	// suspended and closed (invalid_status).
 	ErrInvalidAgentSessionStatus = errors.New("agent session status is invalid")
-	// ErrAgentSessionThreadRequired is a session named without its thread
-	// root; every session here is thread-based (thread_ts_required).
+	// ErrAgentSessionThreadRequired is a thread session named without its
+	// thread root (thread_ts_required).
 	ErrAgentSessionThreadRequired = errors.New("agent session thread_ts is required")
+	// ErrAgentSessionThreadNotAllowed is a session channel's session named
+	// with a thread; a code channel's session is the channel's own
+	// (thread_ts_not_allowed).
+	ErrAgentSessionThreadNotAllowed = errors.New("agent session thread_ts is not allowed in a session channel")
 	// ErrAgentSessionNotFound is a thread no agent session exists for
 	// (session_not_found). It is distinct from store.ErrNotFound, the answer
 	// for a conversation the caller cannot see.

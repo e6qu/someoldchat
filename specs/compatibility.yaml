@@ -2806,8 +2806,9 @@ operations:
       - go-test:internal/store/memory:TestAgentSessionsKeepTheSharedContract
       - go-test:internal/store/sqlstore:TestSQLiteAgentSessionsKeepTheSharedContract
       - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+      - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
     deviations:
-      - Session channels do not exist here, so every session is a thread session. A missing thread_ts is always thread_ts_required, and thread_ts_not_allowed, invalid_name, name_taken and is_archived — the codes for renaming a session channel — are never produced. channel_id is required (invalid_arguments when absent) even though the page makes it optional outside public channels, because the page does not say how the session is found without it.
+      - A code channel (agents.conversations.create) is a session channel, renamed with its session, so the rename page's invalid_name, name_taken and is_archived are its refusals; the new title is folded to a channel name (lowercase, hyphens for spaces, at most 80 characters). channel_id is required (invalid_arguments when absent) even though the page makes it optional outside public channels, because the page does not say how the session is found without it.
       - An agent's own rename is journaled for the first-party client only; agent_session_title_changed is sent for a member's change from the client, as the event page describes, never for the app's own rename. Renaming to the current title changes nothing and is reported to nobody.
       - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited answers at this method's Tier 3 budget, enforced per web replica.
     provenance: slack-reference
@@ -2826,8 +2827,9 @@ operations:
       - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
       - go-test:internal/web:TestTheThreadPaneShowsTheAgentSessionAndItsControls
       - go-test:tests/lifecycle:TestTheProductRefusesEveryTransitionTheMachineForbids
+      - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
     deviations:
-      - Session channels do not exist here, so every session is a thread session scoped to a live top-level message of the conversation (another thread_ts is invalid_arguments when it would create a session); thread_ts_not_allowed is never produced, and channel_id is required (invalid_arguments when absent) because the page does not say how a session is found without it.
+      - A thread session is scoped to a live top-level message of the conversation (another thread_ts is invalid_arguments when it would create a session); a code channel's session is the channel's own and is named without thread_ts. channel_id is required (invalid_arguments when absent) because the page does not say how a session is found without it.
       - The page requires initiator_user_id to be a member of the channel without naming a code; a non-member is invalid_arguments, and an unknown user is user_not_found as listed.
       - The missing_agent_session_stopped_event_subscription warning is answered, as the agent_session_stopped page states, on every call while the app's manifest subscribes to neither the bot nor the user event, in both `warning` and `response_metadata.warnings`; the page calls it a warning, so the call still succeeds. `title` is omitted from the response while the session has none.
       - The agent's icon_emoji, icon_url and username are stored with the page's set semantics (a JSON null is the same as leaving one out) and shown in the first-party session panel; they do not restyle the app's messages.
@@ -2835,6 +2837,47 @@ operations:
       - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited answers at this method's Tier 3 budget, enforced per web replica.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.sessions.setStatus/
+  - method: agents.conversations.archive
+    status: sdk-compatible
+    evidence:
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
+    deviations:
+      - With summary_message_ts, the summary message's text and blocks are posted by the agent's bot as a reply on the origin message before the channel is archived; Slack shares the message itself. The bot must be able to post in the origin channel. A channel created without an origin answers invalid_arguments, and an archived one already_archived.
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
+      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/agents.conversations.archive/
+  - method: agents.conversations.create
+    status: sdk-compatible
+    evidence:
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
+    deviations:
+      - The channel name is the friendly name folded to a channel name (lowercase, hyphens for spaces and punctuation, at most 80 characters), or the start of the origin message when no name is given; a taken name is numbered (-2, -3, ...). A code channel is not re-titled automatically after it is created; agents.sessions.rename renames it.
+      - The creating agent's bot and the origin message's author are its members. An origin channel the bot cannot read is channel_not_found, one shared with another organization invalid_arguments, and a missing origin message message_not_found. team_id may name only the token's own workspace.
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
+      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/agents.conversations.create/
+  - method: agents.conversations.setProperties
+    status: sdk-compatible
+    evidence:
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
+    deviations:
+      - context_bar_items replaces the calling agent's own items, each stamped with its bot_user_id, and the whole bar holds at most 5 items; keys must be unique within the agent's set. An item_type of action is stored and reported, but this deployment's client does not yet render the context bar, so no code_channel_action event is ever sent.
+      - summary_message must name a live message of the channel (thread_ts, when given, must be its thread). agent_resource writes each field given and keeps the rest.
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
+      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/agents.conversations.setProperties/
   - method: apps.managed.permissions.set
     status: schema-compatible
     provenance: slack-reference

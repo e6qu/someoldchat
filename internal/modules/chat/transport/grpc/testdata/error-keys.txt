@@ -14,6 +14,7 @@ events.slack_event_incomplete
 service.agent_session_not_agent
 service.agent_session_not_found
 service.agent_session_not_stoppable
+service.agent_session_thread_not_allowed
 service.agent_session_thread_required
 service.app_access_list_not_found
 service.app_configuration_authentication
@@ -49,6 +50,8 @@ service.cannot_unfurl_url
 service.channel_restriction_ids_required
 service.channel_restriction_mode
 service.channel_restriction_requires_app_access
+service.code_channel_has_no_origin
+service.code_channel_message_not_found
 service.conversation_already_archived
 service.conversation_archived
 service.conversation_not_archived
@@ -76,6 +79,8 @@ service.invalid_bookmark
 service.invalid_bot
 service.invalid_call
 service.invalid_canvas
+service.invalid_code_channel
+service.invalid_code_channel_name
 service.invalid_conversation
 service.invalid_conversation_prefs
 service.invalid_conversation_property
@@ -132,10 +137,12 @@ service.named_user_group_not_found
 service.no_valid_channels
 service.no_valid_named_entities
 service.no_valid_user_group_users
+service.not_code_channel
 service.not_in_conversation
 service.not_starred
 service.not_workspace_admin
 service.oauth_app_mismatch
+service.origin_externally_shared
 service.primary_owner
 service.recipient_not_in_conversation
 service.reminder_owned_by_other

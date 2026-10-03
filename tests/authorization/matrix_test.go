@@ -330,6 +330,12 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		if method == "ConvertGroupDirectToPrivate" {
 			return reflect.ValueOf(fixtureGroupDMID)
 		}
+		// The code channel operations act on a code channel, which the
+		// seeded channel is not.
+		switch method {
+		case "ArchiveCodeChannel", "CodeChannel", "SetCodeChannelProperties":
+			return reflect.ValueOf(fixtureCodeChannelID)
+		}
 		return reflect.ValueOf(domain.ConversationID("C1"))
 	case reflect.TypeOf(domain.CanvasID("")):
 		return reflect.ValueOf(fixtureCanvasID)
@@ -778,6 +784,13 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		Status: domain.AgentSessionProcessing, Title: "Fixture session", At: at,
 	}, event("E-agent-session", "agent_session.status_set"))
 	seed("agent session", sessionErr)
+	// A code channel the app created, which every tier that holds standing
+	// is a member of, so the code channel operations find what they act on.
+	seed("code channel", repository.CreateCodeChannel(ctx,
+		domain.Conversation{ID: fixtureCodeChannelID, WorkspaceID: "T1", Name: "fixture-code", Kind: domain.ConversationTypePublic, Created: at, CreatorID: "U-fixture-bot"},
+		[]domain.UserID{"U-fixture-bot", "U-owner", "U-admin", "U-member", "U-guest-multi", "U-guest-single"},
+		domain.CodeChannel{WorkspaceID: "T1", Conversation: fixtureCodeChannelID, AppID: fixtureAppID, BotUserID: "U-fixture-bot", ContextBar: []domain.CodeChannelContextItem{}, CreatedAt: at, UpdatedAt: at},
+		[]events.Event{event("E-code-channel", "conversation.created")}))
 	seed("dialog", repository.CreateDialog(ctx, domain.Dialog{
 		ID: fixtureDialogID, WorkspaceID: "T1", UserID: "U-owner", AppID: fixtureAppID, CreatedAt: at,
 		Payload: `{"callback_id":"fixture","title":"Fixture","elements":[{"type":"text","name":"answer","label":"Answer"}]}`,
@@ -1017,6 +1030,7 @@ const (
 	fixtureSidebarSectionID  domain.SidebarSectionID    = "F-sidebar-section"
 	fixtureListDownloadID    domain.ListDownloadID      = "F-list-download"
 	fixtureGroupDMID         domain.ConversationID      = "Cmpim"
+	fixtureCodeChannelID     domain.ConversationID      = "Ccode"
 	fixtureProfileFieldID    domain.ProfileFieldID      = "F-profile-field"
 )
 

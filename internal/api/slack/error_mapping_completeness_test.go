@@ -287,6 +287,7 @@ func recordedNonPinnedCodes() map[string]string {
 		"no_query":                  "current search.* method references require query; the immutable legacy OpenAPI snapshot omits the Web API error enum",
 		"auth_mismatch":             "current apps.event.authorizations.list method reference; the supplied app token belongs to a different app than event_context",
 		"thread_ts_required":        "current agents.sessions.setStatus and agents.sessions.rename method references; a thread-based session named without its thread root",
+		"thread_ts_not_allowed":     "current agents.sessions.setStatus and agents.sessions.rename method references; a session channel's session named with a thread",
 		"invalid_status":            "current agents.sessions.setStatus method reference; a status outside active, processing, suspended and closed",
 		"session_not_found":         "current agents.sessions.rename method reference; no agent session exists for the channel and thread",
 		"invalid_event_context":     "current apps.event.authorizations.list method reference; event_context does not resolve to an event visible to the authenticated app",

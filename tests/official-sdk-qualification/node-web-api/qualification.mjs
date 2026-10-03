@@ -1843,4 +1843,32 @@ assert.equal((await new WebClient(userInstall.user.token, clientOptions).auth.te
 const wrongSecret = await client.oauth.v2.access({ client_id: "install-client", client_secret: "wrong", code: "unused" }).catch((error) => error.data);
 assert.equal(wrongSecret.error, "bad_client_secret");
 
+// agents.conversations.* (Slack Code): a code channel created from a message
+// is named after it, described with a context bar and an agent resource, and
+// archived with its summary shared back on the message the work began from.
+const codeOrigin = await client.chat.postMessage({ channel: "C1", text: "Node code channel task" });
+const codeChannel = await client.agents.conversations.create({
+  origin_channel_id: "C1", origin_message_ts: codeOrigin.ts, session_id: "node-session",
+});
+assert.equal(codeChannel.ok, true);
+assert.equal(typeof codeChannel.channel_id, "string");
+const codeChannelAgain = await client.agents.conversations.create({ name: "Ignored", session_id: "node-session" });
+assert.equal(codeChannelAgain.channel_id, codeChannel.channel_id);
+const codeProperties = await client.agents.conversations.setProperties({
+  channel_id: codeChannel.channel_id,
+  code_channel: { context_bar_items: [{ key: "repo", label: "borant/billing", icon: "folder", url: "https://github.com/borant/billing" }] },
+  agent_resource: { url: "https://github.com/borant/billing/pull/42", resource_type: "pull_request", title: "Fix", provider: "github" },
+});
+assert.equal(codeProperties.ok, true);
+assert.equal(codeProperties.channel_id, codeChannel.channel_id);
+const codeInfo = await client.conversations.info({ channel: codeChannel.channel_id });
+assert.equal(codeInfo.channel.name, "node-code-channel-task");
+assert.equal(codeInfo.channel.properties.code_channel.context_bar_items[0].key, "repo");
+assert.equal(codeInfo.channel.properties.agent_session.origin_link.channel_id, "C1");
+const codeSummary = await client.chat.postMessage({ channel: codeChannel.channel_id, text: "Node summary" });
+const codeArchived = await client.agents.conversations.archive({ channel_id: codeChannel.channel_id, summary_message_ts: codeSummary.ts });
+assert.equal(codeArchived.ok, true);
+const codeShared = await client.conversations.replies({ channel: "C1", ts: codeOrigin.ts });
+assert.equal(codeShared.messages.some((message) => message.text === "Node summary"), true);
+
 console.log("node-web-api qualification passed");
