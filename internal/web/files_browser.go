@@ -17,12 +17,13 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
-// The Files browser is Slack's Files view (FILE-04): every hosted file the
-// member can reach, with Slack's three ownership tabs (All files, Created by
-// you, Shared with you), a type filter, a sort, and a search box, each file
-// opening a file view with its preview, details, where it was shared and its
-// actions. It reads the same visibility-checked listing files.list answers,
-// so it can never show a file the member could not download.
+// The Files browser is Slack's Files view (FILE-04): every hosted file,
+// canvas and list the member can reach, with Slack's three ownership tabs
+// (All files, Created by you, Shared with you), a type filter, a sort, and a
+// search box. A file opens a file view with its preview, details, where it
+// was shared and its actions; a canvas or a list opens its own page. It reads
+// the same visibility-checked listings files.list, canvases and lists answer,
+// so it can never show something the member could not open.
 
 // filesBrowserScan bounds how many files one page load reads. A workspace
 // with more visible files than this is told the list is truncated and to
@@ -122,51 +123,108 @@ func (h Handler) filesBrowser(w http.ResponseWriter, r *http.Request) {
 		data.FromName = names.name(domain.UserID(from))
 	}
 	folded := domain.FoldSearchText(query)
-	var files []domain.File
-	request := domain.PageRequest{Limit: 200}
-	for scanned := 0; ; {
-		page, listErr := h.Messages.Files(r.Context(), principal.WorkspaceID, principal.UserID, request)
-		if listErr != nil {
-			h.writeStoreError(w, listErr, "Files are temporarily unavailable.")
-			return
-		}
-		for _, file := range page.Files {
-			scanned++
-			if file.Deleted {
-				continue
-			}
-			mine := file.Uploader == principal.UserID
-			if (owner == "mine" && !mine) || (owner == "shared" && mine) || (from != "" && string(file.Uploader) != from) {
-				continue
-			}
-			if fileKindValue, _, _ := fileKind(file); kind != "" && kind != fileKindValue {
-				continue
-			}
-			if folded != "" && !strings.Contains(domain.FoldSearchText(file.Name+" "+file.Title+" "+file.Description), folded) {
-				continue
-			}
-			files = append(files, file)
-		}
-		if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
-			break
-		}
-		if scanned >= filesBrowserScan {
-			data.Truncated = true
-			break
-		}
-		request.Cursor = page.NextCursor
+	// Slack's Files view holds canvases and lists beside uploaded files, so
+	// one listing gathers all three and sorts them together. A type filter
+	// for one kind reads only that kind.
+	type entry struct {
+		row     fileRowView
+		created time.Time
 	}
-	sort.SliceStable(files, func(left, right int) bool {
+	var entries []entry
+	keep := func(ownerID domain.UserID, text string) bool {
+		mine := ownerID == principal.UserID
+		if (owner == "mine" && !mine) || (owner == "shared" && mine) || (from != "" && string(ownerID) != from) {
+			return false
+		}
+		return folded == "" || strings.Contains(domain.FoldSearchText(text), folded)
+	}
+	if kind != "canvases" && kind != "lists" {
+		request := domain.PageRequest{Limit: 200}
+		for scanned := 0; ; {
+			page, listErr := h.Messages.Files(r.Context(), principal.WorkspaceID, principal.UserID, request)
+			if listErr != nil {
+				h.writeStoreError(w, listErr, "Files are temporarily unavailable.")
+				return
+			}
+			for _, file := range page.Files {
+				scanned++
+				if file.Deleted || !keep(file.Uploader, file.Name+" "+file.Title+" "+file.Description) {
+					continue
+				}
+				if fileKindValue, _, _ := fileKind(file); kind != "" && kind != fileKindValue {
+					continue
+				}
+				entries = append(entries, entry{row: h.fileRow(file, names), created: file.CreatedAt})
+			}
+			if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
+				break
+			}
+			if scanned >= filesBrowserScan {
+				data.Truncated = true
+				break
+			}
+			request.Cursor = page.NextCursor
+		}
+	}
+	if (kind == "" || kind == "canvases") && principal.HasScope(auth.ScopeCanvasesRead) {
+		request := domain.PageRequest{Limit: 200}
+		for scanned := 0; ; {
+			page, listErr := h.Messages.Canvases(r.Context(), principal.WorkspaceID, principal.UserID, request)
+			if listErr != nil {
+				h.writeStoreError(w, listErr, "Canvases are temporarily unavailable.")
+				return
+			}
+			for _, canvas := range page.Canvases {
+				scanned++
+				if keep(canvas.OwnerID, canvas.Title) {
+					entries = append(entries, entry{row: documentRow("canvases", "Canvas", "📝", string(canvas.ID), canvas.Title, "/app/canvases/"+url.PathEscape(string(canvas.ID)), canvas.OwnerID, canvas.CreatedAt, names), created: canvas.CreatedAt})
+				}
+			}
+			if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
+				break
+			}
+			if scanned >= filesBrowserScan {
+				data.Truncated = true
+				break
+			}
+			request.Cursor = page.NextCursor
+		}
+	}
+	if (kind == "" || kind == "lists") && principal.HasScope(auth.ScopeListsRead) {
+		request := domain.PageRequest{Limit: 200}
+		for scanned := 0; ; {
+			page, listErr := h.Messages.Lists(r.Context(), principal.WorkspaceID, principal.UserID, request)
+			if listErr != nil {
+				h.writeStoreError(w, listErr, "Lists are temporarily unavailable.")
+				return
+			}
+			for _, list := range page.Lists {
+				scanned++
+				if keep(list.OwnerID, list.Name) {
+					entries = append(entries, entry{row: documentRow("lists", "List", "☑", string(list.ID), list.Name, "/app/lists/"+url.PathEscape(string(list.ID)), list.OwnerID, list.CreatedAt, names), created: list.CreatedAt})
+				}
+			}
+			if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
+				break
+			}
+			if scanned >= filesBrowserScan {
+				data.Truncated = true
+				break
+			}
+			request.Cursor = page.NextCursor
+		}
+	}
+	sort.SliceStable(entries, func(left, right int) bool {
 		switch sortOrder {
 		case "oldest":
-			return files[left].CreatedAt.Before(files[right].CreatedAt)
+			return entries[left].created.Before(entries[right].created)
 		case "name":
-			return strings.ToLower(fileTitle(files[left])) < strings.ToLower(fileTitle(files[right]))
+			return strings.ToLower(entries[left].row.Title) < strings.ToLower(entries[right].row.Title)
 		}
-		return files[left].CreatedAt.After(files[right].CreatedAt)
+		return entries[left].created.After(entries[right].created)
 	})
-	for _, file := range files {
-		data.Files = append(data.Files, h.fileRow(file, names))
+	for _, value := range entries {
+		data.Files = append(data.Files, value.row)
 	}
 	switch len(data.Files) {
 	case 0:
@@ -197,7 +255,7 @@ func (h Handler) filesBrowser(w http.ResponseWriter, r *http.Request) {
 		}
 		data.Tabs = append(data.Tabs, filesTabView{Label: tab.label, URL: address, Current: owner == tab.value && from == ""})
 	}
-	for _, option := range []struct{ value, label string }{{"", "All types"}, {"images", "Images"}, {"pdfs", "PDFs"}, {"documents", "Documents"}, {"snippets", "Snippets"}, {"media", "Audio and video"}, {"other", "Other"}} {
+	for _, option := range []struct{ value, label string }{{"", "All types"}, {"canvases", "Canvases"}, {"lists", "Lists"}, {"images", "Images"}, {"pdfs", "PDFs"}, {"documents", "Documents"}, {"snippets", "Snippets"}, {"media", "Audio and video"}, {"other", "Other"}} {
 		data.Types = append(data.Types, filesOptionView{Value: option.value, Label: option.label, Selected: kind == option.value})
 	}
 	for _, option := range []struct{ value, label string }{{"", "Newest first"}, {"oldest", "Oldest first"}, {"name", "Name A–Z"}} {
@@ -205,6 +263,21 @@ func (h Handler) filesBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationMore})
 	h.writeHTML(w, filesBrowserTemplate, data, http.StatusOK, "Files rendering unavailable")
+}
+
+// documentRow is a canvas's or a list's row in the Files view: it opens the
+// document's own page and, having no bytes of its own, offers no download
+// and shows no size.
+func documentRow(kind, label, icon, id, title, viewURL string, ownerID domain.UserID, created time.Time, names *userNames) fileRowView {
+	if strings.TrimSpace(title) == "" {
+		title = "Untitled " + strings.ToLower(label)
+	}
+	return fileRowView{
+		ID: id, Title: title, Kind: kind, KindLabel: label, Icon: icon,
+		Uploader: names.name(ownerID), UploaderID: string(ownerID),
+		MachineTime: created.UTC().Format(time.RFC3339Nano), DisplayTime: formatTime(created),
+		ViewURL: viewURL,
+	}
 }
 
 func fileTitle(file domain.File) string {
@@ -362,9 +435,9 @@ var filesBrowserTemplate = mustPage(`{{define "title"}}Files · SameOldChat{{end
 <div id="files-results" data-live-summary="{{.Summary}}">
 {{if .Files}}<ul class="v-list" aria-label="Files">{{range .Files}}<li class="v-row" data-row-href="{{.ViewURL}}">
 <span class="file-thumb" aria-hidden="true">{{if .ThumbnailURL}}<img src="{{.ThumbnailURL}}" alt="" loading="lazy">{{else}}{{.Icon}}{{end}}</span>
-<div class="v-row-main"><p class="file-title"><a href="{{.ViewURL}}">{{.Title}}</a></p><div class="v-row-meta"><a href="/app/members?user={{.UploaderID}}" data-profile-user="{{.UploaderID}}">{{.Uploader}}</a><span aria-hidden="true">·</span><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span aria-hidden="true">·</span><span>{{.KindLabel}}</span><span aria-hidden="true">·</span><span>{{.Size}}</span></div></div>
-<div class="v-row-side"><div class="v-hover-actions"><a class="v-icon" href="{{.DownloadURL}}" aria-label="Download {{.Title}}" title="Download"><span aria-hidden="true">⤓</span></a><button class="v-icon" type="button" data-copy-text="{{.ViewURL}}" data-copy-done="Link copied." aria-label="Copy link to {{.Title}}" title="Copy link"><span aria-hidden="true">🔗</span></button></div></div>
-</li>{{end}}</ul>{{else}}<p class="v-empty">{{if or .Query .Type .Owner .From}}<strong>No files match</strong>Try a different search or filter.{{else}}<strong>No files yet</strong>Files shared in conversations you can see appear here.{{end}}</p>{{end}}
+<div class="v-row-main"><p class="file-title"><a href="{{.ViewURL}}">{{.Title}}</a></p><div class="v-row-meta"><a href="/app/members?user={{.UploaderID}}" data-profile-user="{{.UploaderID}}">{{.Uploader}}</a><span aria-hidden="true">·</span><time datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span aria-hidden="true">·</span><span>{{.KindLabel}}</span>{{if .Size}}<span aria-hidden="true">·</span><span>{{.Size}}</span>{{end}}</div></div>
+<div class="v-row-side"><div class="v-hover-actions">{{if .DownloadURL}}<a class="v-icon" href="{{.DownloadURL}}" aria-label="Download {{.Title}}" title="Download"><span aria-hidden="true">⤓</span></a>{{end}}<button class="v-icon" type="button" data-copy-text="{{.ViewURL}}" data-copy-done="Link copied." aria-label="Copy link to {{.Title}}" title="Copy link"><span aria-hidden="true">🔗</span></button></div></div>
+</li>{{end}}</ul>{{else}}<p class="v-empty">{{if or .Query .Type .Owner .From}}<strong>No files match</strong>Try a different search or filter.{{else}}<strong>No files yet</strong>Files, canvases and lists shared in conversations you can see appear here.{{end}}</p>{{end}}
 {{if .Truncated}}<p class="pager">Only the most recent files were searched. Narrow the search to find older ones.</p>{{end}}
 </div>
 </main>{{end}}`)

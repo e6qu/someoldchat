@@ -53,8 +53,10 @@ files, and app-owned files follow Slack's distinguishable states.
 
 ## FILE-04 — Browse and search files
 
-Slack's Files/browse surface lists only visible files, supports current filters
-and search, paginates stably, and opens the file or containing message. File
+Slack's Files/browse surface lists only visible files, canvases and lists,
+supports current filters (including a Canvases and a Lists type) and search,
+paginates stably, and opens the file or containing message, or the canvas or
+list itself; a canvas or list has no download. File
 results in global search agree with this visibility. Empty, indexing, and
 failure states remain distinct.
 
