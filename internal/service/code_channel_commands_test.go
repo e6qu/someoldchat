@@ -26,6 +26,7 @@ func TestCodeChannelCommandsReachTheirAgentInTheirChannel(t *testing.T) {
 		},
 		func() error { return repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}) },
 		func() error { return repository.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "agent"}) },
+		func() error { return repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}) },
 		func() error {
 			return repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 		},
@@ -95,6 +96,14 @@ func TestCodeChannelCommandsReachTheirAgentInTheirChannel(t *testing.T) {
 	}
 	if err := messages.DispatchSlashCommand(ctx, "T1", "U1", "C1", "", "/review", "", "https://chat.example.test"); !errors.Is(err, domain.ErrSlashCommandNotFound) {
 		t.Fatalf("an agent command outside its channel: %v", err)
+	}
+	// A member of the workspace who is not in the channel cannot reach its
+	// agent: the command answers only where it was typed by a member.
+	if err := messages.DispatchSlashCommand(ctx, "T1", "U2", created.Conversation, "", "/review", "", "https://chat.example.test"); err == nil {
+		t.Fatal("a member outside the channel invoked its agent's command")
+	}
+	if _, found, err := repository.ClaimSocketModeInteraction(ctx, "A1", "socket", time.Minute); err != nil || found {
+		t.Fatalf("a refused command still reached the agent: found=%v err=%v", found, err)
 	}
 
 	for name, commands := range map[string][]domain.CodeChannelCommand{

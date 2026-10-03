@@ -361,6 +361,15 @@ func TestCodeChannelCommandsAndCanvasesBelongToTheirAgents(t *testing.T) {
 	// The canvas view shared the canvas with the channel, so every agent in
 	// it reads the canvas as its members do.
 	requireCodeOK(t, "another agent of the channel", getCanvas("xoxb-other", ``))
+	// Access is still the canvas's own: once its owner stops sharing it with
+	// the channel, the view no longer lets another agent read it.
+	if err := messages.DeleteCanvasAccess(ctx, "T1", "UB1", canvas.ID, []domain.ConversationID{domain.ConversationID(channel)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	requireCodeError(t, "a canvas no longer shared with the channel", getCanvas("xoxb-other", ``), "canvas_not_found")
+	if err := messages.SetCanvasAccess(ctx, "T1", "UB1", canvas.ID, domain.AccessWrite, []domain.ConversationID{domain.ConversationID(channel)}, nil); err != nil {
+		t.Fatal(err)
+	}
 	requireCodeError(t, "the canvas through a channel that does not show it", callAgentSessionMethod(t, mux, "xoxb-agent", "agents.conversations.getCanvas",
 		`{"channel":"C1","canvas_id":"`+string(canvas.ID)+`"}`, false), "channel_not_found")
 
