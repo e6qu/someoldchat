@@ -40,7 +40,7 @@ type homeSectionView struct {
 
 // homeSections lays the Home pane out in Slack's order: Starred, the member's
 // own sections, Channels, Direct messages, then Apps.
-func (s sidebarView) homeSections(canInvite, hasApps bool) []homeSectionView {
+func (s sidebarView) homeSections(canInvite, canRequest, hasApps bool) []homeSectionView {
 	sections := make([]homeSectionView, 0, len(s.Sections)+4)
 	if len(s.Starred) > 0 {
 		sections = append(sections, homeSectionView{Key: "starred", Label: "Starred", Rows: s.Starred})
@@ -55,7 +55,7 @@ func (s sidebarView) homeSections(canInvite, hasApps bool) []homeSectionView {
 	}
 	sections = append(sections,
 		homeSectionView{Key: "channels", Label: "Channels", Rows: s.Channels, Empty: "You are not in any channels yet.", Draggable: len(s.Sections) > 0, DropTarget: "channels", AddChannels: true},
-		homeSectionView{Key: "directs", Label: "Direct messages", Rows: s.Directs, Empty: "No direct messages yet.", AddCoworkers: canInvite, HasRecency: true},
+		homeSectionView{Key: "directs", Label: "Direct messages", Rows: s.Directs, Empty: "No direct messages yet.", AddCoworkers: canInvite || canRequest, HasRecency: true},
 	)
 	if hasApps {
 		sections = append(sections, homeSectionView{Key: "apps", Label: "Apps", Apps: true})

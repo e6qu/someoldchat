@@ -2185,16 +2185,44 @@ func (m Messages) AdminInviteUser(ctx context.Context, workspaceID domain.Worksp
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
-	if email == "" || !strings.Contains(email, "@") || strings.TrimSpace(customMessage) != customMessage || strings.TrimSpace(realName) != realName {
-		return domain.ErrInvalidInviteRequest
-	}
 	if len(channels) == 0 || (!restricted && !ultraRestricted && !guestExpirationAt.IsZero()) || (restricted && ultraRestricted) {
 		return domain.ErrInvalidInviteRequest
 	}
-	seen := make(map[domain.ConversationID]struct{}, len(channels))
-	normalizedChannels := make([]domain.ConversationID, 0, len(channels))
-	for _, channelID := range channels {
+	return m.recordInviteRequest(ctx, domain.InviteRequest{
+		WorkspaceID: workspaceID, Email: email, RequestedBy: actorID, ChannelIDs: channels, CustomMessage: customMessage, RealName: realName,
+		Resend: resend, Restricted: restricted, UltraRestricted: ultraRestricted, GuestExpirationAt: guestExpirationAt.UTC(),
+	}, func(domain.Conversation) bool { return true })
+}
+
+// RequestInvitation is a member's "Add coworkers" in a workspace where
+// invitations need an administrator: it records the same pending invite
+// request admin.users.invite does, which the administrators' queue
+// (admin.inviteRequests.list) shows with the member as its requester, and
+// nothing is sent until one of them approves it. Slack does not let a guest
+// invite or request one. The channels are optional, since an accepted
+// invitation joins the workspace's default channels anyway, and each must be
+// one the member is in, so a request cannot reveal or seat a newcomer in a
+// conversation the member cannot see.
+func (m Messages) RequestInvitation(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, email string, channels []domain.ConversationID, customMessage string) error {
+	if err := m.refuseGuest(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	return m.recordInviteRequest(ctx, domain.InviteRequest{WorkspaceID: workspaceID, Email: email, RequestedBy: actorID, ChannelIDs: channels, CustomMessage: customMessage}, func(conversation domain.Conversation) bool {
+		member, err := m.Store.IsConversationMember(ctx, conversation.ID, actorID)
+		return err == nil && member
+	})
+}
+
+// recordInviteRequest validates and stores a pending invite request; offered
+// reports whether its requester may name a channel.
+func (m Messages) recordInviteRequest(ctx context.Context, value domain.InviteRequest, offered func(domain.Conversation) bool) error {
+	value.Email = strings.ToLower(strings.TrimSpace(value.Email))
+	if value.Email == "" || !strings.Contains(value.Email, "@") || strings.TrimSpace(value.CustomMessage) != value.CustomMessage || strings.TrimSpace(value.RealName) != value.RealName {
+		return domain.ErrInvalidInviteRequest
+	}
+	seen := make(map[domain.ConversationID]struct{}, len(value.ChannelIDs))
+	normalizedChannels := make([]domain.ConversationID, 0, len(value.ChannelIDs))
+	for _, channelID := range value.ChannelIDs {
 		channelID = domain.ConversationID(strings.TrimSpace(string(channelID)))
 		if channelID == "" {
 			return domain.ErrInvalidInviteRequest
@@ -2203,25 +2231,20 @@ func (m Messages) AdminInviteUser(ctx context.Context, workspaceID domain.Worksp
 			continue
 		}
 		conversation, err := m.Store.GetConversation(ctx, channelID)
-		if err != nil || conversation.WorkspaceID != workspaceID || conversation.Kind == domain.ConversationTypeIM {
+		if err != nil || conversation.WorkspaceID != value.WorkspaceID || conversation.Kind == domain.ConversationTypeIM || !offered(conversation) {
 			return domain.ErrInvalidInviteRequest
 		}
 		seen[channelID] = struct{}{}
 		normalizedChannels = append(normalizedChannels, channelID)
 	}
-	if len(normalizedChannels) == 0 {
-		return domain.ErrInvalidInviteRequest
-	}
-	if !guestExpirationAt.IsZero() && !restricted && !ultraRestricted {
-		return domain.ErrInvalidInviteRequest
-	}
+	value.ChannelIDs = normalizedChannels
 	id, err := domain.PublicID("IR_")
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	value := domain.InviteRequest{ID: domain.InviteRequestID(id), WorkspaceID: workspaceID, Email: email, RequestedBy: actorID, ChannelIDs: normalizedChannels, CustomMessage: customMessage, RealName: realName, Resend: resend, Restricted: restricted, UltraRestricted: ultraRestricted, GuestExpirationAt: guestExpirationAt.UTC(), Status: domain.InviteRequestPending, CreatedAt: now, ExpiresAt: now.Add(InvitationLifetime)}
-	event, err := newEvent(workspaceID, actorID, events.NewPayload("invite_request.created", events.String("invite_request_id", string(value.ID))), now)
+	value.ID, value.Status, value.CreatedAt, value.ExpiresAt = domain.InviteRequestID(id), domain.InviteRequestPending, now, now.Add(InvitationLifetime)
+	event, err := newEvent(value.WorkspaceID, value.RequestedBy, events.NewPayload("invite_request.created", events.String("invite_request_id", string(value.ID))), now)
 	if err != nil {
 		return err
 	}

@@ -4096,6 +4096,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/preferences", h.shellFormPage("Preferences", "preferences"))
 	mux.HandleFunc("GET /app/status", h.shellFormPage("Set a status", "status"))
 	mux.HandleFunc("GET /app/sidebar/sections/new", h.shellFormPage("Create a section", "section"))
+	mux.HandleFunc("GET /app/invitations/request", h.shellFormPage("Invite people", "invite-request"))
+	mux.HandleFunc("POST /app/invitations/request", h.requestInvitation)
 	mux.HandleFunc("POST /app/status", h.setStatus)
 	mux.HandleFunc("POST /app/thread/follow", h.setThreadFollow)
 	mux.HandleFunc("POST /app/conversation/archive", h.setConversationArchived)
@@ -5107,7 +5109,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	shell := h.newShell(r, principal, shellRequest{Destination: destination, Channel: channel, CSRFToken: csrfToken, Conversations: &conversations})
 	data := pageData{
 		Shell:                shell,
-		HomeSections:         conversations.homeSections(shell.ShowAuthAdmin, len(workspaceApps) > 0),
+		HomeSections:         conversations.homeSections(shell.ShowAuthAdmin, shell.CanRequestInvite, len(workspaceApps) > 0),
 		SidebarTruncated:     conversations.Truncated,
 		Kind:                 kind,
 		KindText:             conversationKindText(kind),

@@ -94,7 +94,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
           <a role="menuitem" href="{{$.Shell.With "/app/channels"}}" {{ariaKeyshortcuts "Browse channels"}}><span>Browse channels</span></a>
         </div>
       </details>{{end}}
-      {{if $section.AddCoworkers}}<a class="side-add" href="/app/admin/auth"><span class="side-icon" aria-hidden="true">{{icon "plus"}}</span><span class="side-text">Add coworkers</span></a>{{end}}
+      {{if $section.AddCoworkers}}{{if $.Shell.ShowAuthAdmin}}<a class="side-add" href="/app/admin/auth">{{else}}<a class="side-add" href="{{$.Shell.With "/app/invitations/request"}}" data-dialog-open="invite-request-dialog">{{end}}<span class="side-icon" aria-hidden="true">{{icon "plus"}}</span><span class="side-text">Add coworkers</span></a>{{end}}
       {{if $section.Apps}}{{range $.Apps}}<div class="side-row"><a class="side-link" href="/app/apps/{{.ID}}?channel={{$.Channel}}" aria-label="{{.Name}}, app"><span class="side-icon" aria-hidden="true">{{icon "apps"}}</span><span class="side-text">{{.Name}}</span></a></div>{{end}}{{end}}
     </div>
   </nav>
@@ -102,6 +102,13 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
   {{if .SidebarTruncated}}<p class="side-note">You belong to more conversations than the sidebar shows. Use Jump to a conversation (Ctrl/⌘K) to reach the rest.</p>{{end}}
   <form id="sidebar-move-form" method="post" action="/app/sidebar/sections/assign?channel={{.Channel}}" hidden><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="conversation" value=""><input type="hidden" name="section" value=""></form>
 </div>
+{{if .Shell.CanRequestInvite}}<template data-dialog-template="invite-request-dialog"><dialog class="shell-dialog" id="invite-request-dialog" aria-labelledby="invite-request-dialog-title">
+  <form method="post" action="/app/invitations/request?channel={{.Channel}}">
+    <div class="dialog-head"><h2 id="invite-request-dialog-title" tabindex="-1">Invite people to {{.Shell.WorkspaceName}}</h2><button class="dialog-close" type="button" data-dialog-close aria-label="Close invite people">{{icon "close"}}</button></div>
+    {{template "invite-request-fields" .Shell}}
+    <div class="dialog-foot"><button class="button" type="button" data-dialog-close>Cancel</button><button class="button primary" type="submit">Send request</button></div>
+  </form>
+</dialog></template>{{end}}
 <template data-dialog-template="section-dialog"><dialog class="shell-dialog" id="section-dialog" aria-labelledby="section-dialog-title">
   <form method="post" action="/app/sidebar/sections/create?channel={{.Channel}}">
     <div class="dialog-head"><h2 id="section-dialog-title" tabindex="-1">Create a section</h2><button class="dialog-close" type="button" data-dialog-close aria-label="Close create a section">{{icon "close"}}</button></div>

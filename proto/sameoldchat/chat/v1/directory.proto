@@ -323,6 +323,14 @@ message AdminInviteUserRequest {
   int64 guest_expiration_at = 10;
 }
 
+message RequestInvitationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string email = 3;
+  repeated string channel_ids = 4;
+  string custom_message = 5;
+}
+
 message AdminCreateUserRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -693,6 +701,7 @@ service DirectoryService {
   rpc GetPostingPermissions(ConversationPrefsRequest) returns (PostingPermissions);
   rpc AdminTeamUsers(AdminTeamUsersRequest) returns (UserPage);
   rpc AdminInviteUser(AdminInviteUserRequest) returns (MutationResponse);
+  rpc RequestInvitation(RequestInvitationRequest) returns (MutationResponse);
   rpc AdminCreateUser(AdminCreateUserRequest) returns (User);
   rpc AdminListUsers(AdminUsersRequest) returns (AdminUserPage);
   rpc AdminAssignUser(AdminAssignUserRequest) returns (MutationResponse);

@@ -4503,6 +4503,28 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A member's request lands in the administrators' pending queue with
+			// the member as requester and the channels as named; a channel the
+			// member is not in is refused, so the transport must carry both the
+			// list and the refusal's class.
+			name: "a member's invitation request reaches the admin queue",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.RequestInvitation(ctx, "T1", "U2", "Friend@Example.test", []domain.ConversationID{"C1"}, "From my old team"); err != nil {
+					return nil, err
+				}
+				refused := chat.RequestInvitation(ctx, "T1", "U2", "other@example.test", []domain.ConversationID{"C2"}, "")
+				pending, err := chat.AdminListInviteRequests(ctx, "T1", "UA", domain.InviteRequestPending, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				projected := make([]any, 0, len(pending.Requests))
+				for _, request := range pending.Requests {
+					projected = append(projected, []any{request.Email, string(request.RequestedBy), request.ChannelIDs, request.CustomMessage})
+				}
+				return []any{projected, errors.Is(refused, domain.ErrInvalidInviteRequest)}, nil
+			},
+		},
+		{
 			// Workspace administration is one long sequence rather than a set of
 			// independent calls: a workspace is created, people are put in it by
 			// three different routes — created outright, invited and approved,

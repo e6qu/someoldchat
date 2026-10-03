@@ -180,6 +180,7 @@ type Service interface {
 	InvitationPreview(context.Context, domain.WorkspaceID, domain.InviteRequestID) (domain.InviteRequest, error)
 	AcceptInvitationForEmail(context.Context, domain.WorkspaceID, string, string) (domain.User, error)
 	AdminInviteUser(context.Context, domain.WorkspaceID, domain.UserID, string, []domain.ConversationID, string, string, bool, bool, bool, time.Time) error
+	RequestInvitation(context.Context, domain.WorkspaceID, domain.UserID, string, []domain.ConversationID, string) error
 	AdminCreateUser(context.Context, domain.WorkspaceID, domain.UserID, string, string, domain.WorkspaceRole) (domain.User, error)
 	AdminListUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.AdminUserPage, error)
 	AdminAssignUser(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, []domain.ConversationID) error

@@ -14,6 +14,12 @@ pending invitations, last-owner protection, and self-administration follow
 distinct Slack rules. Bulk operations report per-member outcomes and are safe
 to retry.
 
+A member who may not invite directly uses Add coworkers to request an
+invitation: the request, with an optional reason, joins the administrators'
+pending queue under the member's name, and nobody is invited until one of them
+approves it. Any channels it names must be ones the member is in. A guest may
+not request one.
+
 A guest account given an expiration is deactivated when it arrives, not merely
 refused. Credential lookup already declines a lapsed account, so access ends at
 the instant; deactivation is what makes the rest of the workspace agree, rather
