@@ -3551,7 +3551,27 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				return []any{len(messages.Messages), messages.Total, len(files.Files), files.Total, files.Files[0].Name}, nil
+				// An app's remote file shared into the channel joins the
+				// hosted results, external fields and all.
+				if _, err := chat.AddRemoteFile(ctx, "T1", "U1", domain.RemoteFile{
+					ExternalID: "parity-remote", Title: "Parity roadmap", FileType: "gdoc", ExternalURL: "https://docs.example/parity", IndexableContents: "parity plans",
+				}); err != nil {
+					return nil, err
+				}
+				if _, err := chat.ShareRemoteFile(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "parity-remote"}, []domain.ConversationID{"C1"}); err != nil {
+					return nil, err
+				}
+				mixed, err := chat.SearchFiles(ctx, "T1", "U1", domain.FileSearchRequest{
+					Query: "parity", Sort: domain.SearchSortTimestamp, Direction: domain.SearchDirectionAscending, Count: 10, Page: 1,
+				})
+				if err != nil {
+					return nil, err
+				}
+				kinds := make([]any, 0, len(mixed.Files))
+				for _, file := range mixed.Files {
+					kinds = append(kinds, file.Name, file.IsExternal(), file.External, fmt.Sprint(file.SharedChannels))
+				}
+				return []any{len(messages.Messages), messages.Total, len(files.Files), files.Total, files.Files[0].Name, mixed.Total, kinds}, nil
 			},
 		},
 		{

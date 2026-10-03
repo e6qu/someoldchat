@@ -12212,17 +12212,7 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 }
 
 func searchTextMatches(text string, terms, excluded []string) bool {
-	for _, term := range terms {
-		if !strings.Contains(text, domain.FoldSearchText(term)) {
-			return false
-		}
-	}
-	for _, term := range excluded {
-		if strings.Contains(text, domain.FoldSearchText(term)) {
-			return false
-		}
-	}
-	return true
+	return store.SearchTextMatches(text, terms, excluded)
 }
 
 // messageCarriesReaction answers both shapes of the question with one rule: an
@@ -13179,4 +13169,55 @@ func (s *Store) completeExternalUploads(_ context.Context, scheduledID domain.Sc
 		s.commitMessageLocked(message, messageEvents[index], key)
 	}
 	return nil
+}
+
+func (s *Store) SearchRemoteFiles(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, search domain.FileSearch, limit int) ([]domain.RemoteFile, int, error) {
+	if limit <= 0 {
+		return nil, 0, store.InvalidArgument("remote file search limit is invalid")
+	}
+	// A remote file has no uploader, so a search for one person's files
+	// finds none.
+	if search.Uploader != "" {
+		return []domain.RemoteFile{}, 0, nil
+	}
+	s.mu.RLock()
+	values := make([]domain.RemoteFile, 0)
+	for id, file := range s.remoteFiles {
+		shares := s.remoteFileShares[id]
+		if file.WorkspaceID != workspace || file.Deleted || !s.sharedWhereUserReads(shares, user) {
+			continue
+		}
+		text := domain.FoldSearchText(file.Title + " " + file.IndexableContents)
+		if !searchTextMatches(text, search.Terms, search.ExcludedTerms) ||
+			(search.Conversation != "" && !slices.Contains(shares, search.Conversation)) ||
+			(search.ExcludedConversation != "" && slices.Contains(shares, search.ExcludedConversation)) ||
+			(search.FileType != "" && !store.RemoteFileMatchesType(file, search.FileType)) ||
+			(!search.After.IsZero() && file.CreatedAt.Before(search.After)) ||
+			(!search.Before.IsZero() && !file.CreatedAt.Before(search.Before)) {
+			continue
+		}
+		file.SharedChannels = append([]domain.ConversationID(nil), shares...)
+		values = append(values, file)
+	}
+	s.mu.RUnlock()
+	store.SortRemoteFiles(values, search.Direction)
+	return values[:min(limit, len(values))], len(values), nil
+}
+
+// sharedWhereUserReads reports a share into a public channel or one the user
+// is a member of.
+func (s *Store) sharedWhereUserReads(shares []domain.ConversationID, user domain.UserID) bool {
+	for _, conversationID := range shares {
+		conversation, exists := s.conversations[conversationID]
+		if !exists {
+			continue
+		}
+		if !conversation.PrivateFlag() {
+			return true
+		}
+		if _, member := s.memberships[conversationID][user]; member {
+			return true
+		}
+	}
+	return false
 }

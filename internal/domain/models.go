@@ -2336,6 +2336,9 @@ type File struct {
 	CreatedAt      time.Time
 	Deleted        bool
 	SharedChannels []ConversationID
+	// External is set only on an app's remote file (files.remote.add), as a
+	// search returns one beside hosted files.
+	External ExternalFile
 	// Shares are the live messages that carry the file, as files.info
 	// reports them. Only files.info reads them, so every other file value
 	// leaves them empty rather than paying a join per file.
@@ -2372,6 +2375,9 @@ func (f File) IsSnippet() bool {
 func (f File) Mode() string {
 	if f.Deleted {
 		return "tombstone"
+	}
+	if f.IsExternal() {
+		return "external"
 	}
 	if f.IsSnippet() {
 		return "snippet"
@@ -3767,6 +3773,29 @@ type RemoteFile struct {
 	CreatedAt         time.Time
 	Deleted           bool
 	SharedChannels    []ConversationID
+}
+
+// ExternalFile is where a remote file lives: the app's own ID and URL for
+// it, its preview image, and the file type the app declared.
+type ExternalFile struct {
+	ID           string
+	URL          string
+	FileType     string
+	PreviewImage string
+}
+
+// IsExternal reports an app's remote file.
+func (f File) IsExternal() bool {
+	return f.External.ID != ""
+}
+
+// AsFile is the remote file as a file of the workspace, as search returns it.
+func (r RemoteFile) AsFile() File {
+	return File{
+		ID: r.ID, WorkspaceID: r.WorkspaceID, Name: r.Title, Title: r.Title, CreatedAt: r.CreatedAt, Deleted: r.Deleted,
+		SharedChannels: append([]ConversationID(nil), r.SharedChannels...),
+		External:       ExternalFile{ID: r.ExternalID, URL: r.ExternalURL, FileType: r.FileType, PreviewImage: r.PreviewImage},
+	}
 }
 
 type RemoteFilePage struct {

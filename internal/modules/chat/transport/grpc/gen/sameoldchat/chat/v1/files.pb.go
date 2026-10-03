@@ -37,8 +37,13 @@ type File struct {
 	Description    string                 `protobuf:"bytes,12,opt,name=description,proto3" json:"description,omitempty"`
 	FileType       string                 `protobuf:"bytes,13,opt,name=file_type,json=fileType,proto3" json:"file_type,omitempty"`
 	Shares         []*FileShare           `protobuf:"bytes,14,rep,name=shares,proto3" json:"shares,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// external_* are set only on an app's remote file, as a search returns one.
+	ExternalId           string `protobuf:"bytes,15,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	ExternalUrl          string `protobuf:"bytes,16,opt,name=external_url,json=externalUrl,proto3" json:"external_url,omitempty"`
+	ExternalFileType     string `protobuf:"bytes,17,opt,name=external_file_type,json=externalFileType,proto3" json:"external_file_type,omitempty"`
+	ExternalPreviewImage string `protobuf:"bytes,18,opt,name=external_preview_image,json=externalPreviewImage,proto3" json:"external_preview_image,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *File) Reset() {
@@ -167,6 +172,34 @@ func (x *File) GetShares() []*FileShare {
 		return x.Shares
 	}
 	return nil
+}
+
+func (x *File) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *File) GetExternalUrl() string {
+	if x != nil {
+		return x.ExternalUrl
+	}
+	return ""
+}
+
+func (x *File) GetExternalFileType() string {
+	if x != nil {
+		return x.ExternalFileType
+	}
+	return ""
+}
+
+func (x *File) GetExternalPreviewImage() string {
+	if x != nil {
+		return x.ExternalPreviewImage
+	}
+	return ""
 }
 
 type FileShare struct {
@@ -2766,7 +2799,7 @@ var File_sameoldchat_chat_v1_files_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/files.proto\x12\x13sameoldchat.chat.v1\x1a\"sameoldchat/chat/v1/presence.proto\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xac\x03\n" +
+	"\x1fsameoldchat/chat/v1/files.proto\x12\x13sameoldchat.chat.v1\x1a\"sameoldchat/chat/v1/presence.proto\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xd4\x04\n" +
 	"\x04File\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1a\n" +
@@ -2783,7 +2816,12 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\x0fshared_channels\x18\v \x03(\tR\x0esharedChannels\x12 \n" +
 	"\vdescription\x18\f \x01(\tR\vdescription\x12\x1b\n" +
 	"\tfile_type\x18\r \x01(\tR\bfileType\x126\n" +
-	"\x06shares\x18\x0e \x03(\v2\x1e.sameoldchat.chat.v1.FileShareR\x06shares\"\xbc\x02\n" +
+	"\x06shares\x18\x0e \x03(\v2\x1e.sameoldchat.chat.v1.FileShareR\x06shares\x12\x1f\n" +
+	"\vexternal_id\x18\x0f \x01(\tR\n" +
+	"externalId\x12!\n" +
+	"\fexternal_url\x18\x10 \x01(\tR\vexternalUrl\x12,\n" +
+	"\x12external_file_type\x18\x11 \x01(\tR\x10externalFileType\x124\n" +
+	"\x16external_preview_image\x18\x12 \x01(\tR\x14externalPreviewImage\"\xbc\x02\n" +
 	"\tFileShare\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12+\n" +
 	"\x11conversation_name\x18\x02 \x01(\tR\x10conversationName\x12\x18\n" +

@@ -22,6 +22,11 @@ message File {
   string description = 12;
   string file_type = 13;
   repeated FileShare shares = 14;
+  // external_* are set only on an app's remote file, as a search returns one.
+  string external_id = 15;
+  string external_url = 16;
+  string external_file_type = 17;
+  string external_preview_image = 18;
 }
 
 message FileShare {

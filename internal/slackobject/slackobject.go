@@ -298,6 +298,9 @@ func File(origin string, file domain.File) map[string]any {
 	if file.Deleted {
 		return map[string]any{"id": file.ID, "mode": file.Mode()}
 	}
+	if file.IsExternal() {
+		return externalFile(file)
+	}
 	fileType, prettyType := file.FileTypes()
 	urls := FileURLs{Origin: origin}
 	result := map[string]any{
@@ -325,6 +328,27 @@ func File(origin string, file domain.File) map[string]any {
 	}
 	if shares := fileShares(file); shares != nil {
 		result["shares"] = shares
+	}
+	return result
+}
+
+// externalFile is an app's remote file as Slack's file object describes one:
+// mode external, its links the app's own, and no bytes hosted here.
+func externalFile(file domain.File) map[string]any {
+	fileType, prettyType := file.FileTypes()
+	result := map[string]any{
+		"id": file.ID, "name": file.Name, "title": file.Title, "mimetype": "application/vnd.slack-remote",
+		"size": 0, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(), "team_id": file.WorkspaceID,
+		"filetype": fileType, "pretty_type": prettyType, "mode": file.Mode(),
+		"is_external": true, "external_type": "app", "external_id": file.External.ID, "external_url": file.External.URL,
+		"is_public": false, "public_url_shared": false, "editable": false, "display_as_bot": false,
+		"url_private": file.External.URL, "permalink": file.External.URL,
+	}
+	if file.External.PreviewImage != "" {
+		result["preview_image"] = file.External.PreviewImage
+	}
+	if len(file.SharedChannels) > 0 {
+		result["channels"] = file.SharedChannels
 	}
 	return result
 }

@@ -175,6 +175,7 @@ func runQualification(t *testing.T, open opener) {
 		{"Slackbot can DM a member of any workspace", slackbotDirectMessagesAMemberOfAnyWorkspace},
 		{"a code channel keeps its record beside its conversation", codeChannelsKeepTheirRecord},
 		{"visible files are newest first", visibleFilesAreNewestFirst},
+		{"remote files are searchable where they are shared", remoteFilesAreSearchable},
 		{"OAuth installs reuse their bot and redeem every grant shape", oauthInstallsReuseTheirBotAndRedeemEveryGrantShape},
 		{"file shares name their carrying messages", fileSharesNameTheirCarryingMessages},
 	} {
