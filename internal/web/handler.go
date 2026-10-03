@@ -11108,6 +11108,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			_, err = h.Messages.CompleteExternalUploads(
 				r.Context(), principal.WorkspaceID, principal.UserID, completions, []domain.ConversationID{channel},
 				fields["text"], "", domain.MessageTimestamp(fields["thread_ts"]),
+				strings.TrimSpace(fields["thread_ts"]) != "" && fields["reply_broadcast"] == "true",
 			)
 		}
 	} else if isSlashCommand {
@@ -11377,10 +11378,18 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	channel := h.requestChannel(r)
+	// The thread composer's "Also send to" travels with the scheduled reply,
+	// as chat.scheduleMessage's reply_broadcast does, and is delivered with it.
+	threadTimestamp := domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"]))
+	streamState := ""
+	if threadTimestamp != "" && fields["reply_broadcast"] == "true" {
+		streamState = `{"reply_broadcast":true}`
+	}
 	_, err = h.Messages.ScheduleMessageAs(r.Context(), principal.WorkspaceID, principal.UserID, domain.ScheduledMessageRequest{
 		Channel:         channel,
 		Text:            fields["text"],
-		ThreadTimestamp: domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
+		ThreadTimestamp: threadTimestamp,
+		StreamState:     streamState,
 		PostAt:          time.Unix(postAtUnix, 0).UTC(),
 		CredentialHash:  domain.InternalScheduledCredential(principal.WorkspaceID, principal.UserID),
 		FileAttachments: attachments,
@@ -11719,6 +11728,7 @@ func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Messages.CompleteExternalUploads(
 		r.Context(), principal.WorkspaceID, principal.UserID, completions, []domain.ConversationID{channel},
 		r.FormValue("initial_comment"), "", thread,
+		false,
 	); err != nil {
 		reason := "The files remain staged but were not shared into the conversation."
 		status := http.StatusServiceUnavailable

@@ -10272,16 +10272,18 @@ func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.Work
 			return domain.ScheduledMessage{}, domain.ErrInvalidMessage
 		}
 	}
-	if len(fileAttachments) != 0 && (normalizedAttachments != "" || request.AppID != "" || request.BotID != "" || metadata != "" || strings.TrimSpace(request.StreamState) != "") {
-		// Hosted composer files are a private first-party contract. Slack's
-		// published schedule API uses "attachments" for structured message
-		// attachments and exposes no hosted file-id parameter, so app-authored
-		// payload extensions must not be silently combined with this seam.
-		return domain.ScheduledMessage{}, domain.ErrInvalidMessage
-	}
 	streamState, err := normalizeScheduledMessageState(request.StreamState, text, normalizedBlocks, request.ThreadTimestamp)
 	if err != nil {
 		return domain.ScheduledMessage{}, err
+	}
+	if len(fileAttachments) != 0 && (normalizedAttachments != "" || request.AppID != "" || request.BotID != "" || metadata != "" || (streamState != "" && streamState != scheduledReplyBroadcastState)) {
+		// Hosted composer files are a private first-party contract. Slack's
+		// published schedule API uses "attachments" for structured message
+		// attachments and exposes no hosted file-id parameter, so app-authored
+		// payload extensions must not be silently combined with this seam. The
+		// composer's own "Also send to" on a thread reply is the one state a
+		// reply with files carries.
+		return domain.ScheduledMessage{}, domain.ErrInvalidMessage
 	}
 	now := time.Now().UTC()
 	// Slack's post_at contract is whole Unix seconds, and the SQL schema stores
@@ -10378,12 +10380,23 @@ func (m Messages) PostScheduledMessage(ctx context.Context, workspaceID domain.W
 	for _, attachment := range value.FileAttachments {
 		completions = append(completions, domain.ExternalUploadCompletion{ID: attachment.UploadID, Title: attachment.Title})
 	}
-	_, err = m.completeExternalUploads(ctx, value.WorkspaceID, value.Author, completions, []domain.ConversationID{value.Channel}, value.Text, value.Blocks, value.ThreadTimestamp, string(value.ID))
+	_, err = m.completeExternalUploads(ctx, value.WorkspaceID, value.Author, completions, []domain.ConversationID{value.Channel}, value.Text, value.Blocks, value.ThreadTimestamp, request.ReplyBroadcast, string(value.ID))
 	if err != nil {
 		return domain.Message{}, err
 	}
 	return m.Store.GetIdempotentMessage(ctx, value.WorkspaceID, value.Author, string(value.ID))
 }
+
+// scheduledReplyBroadcastState is the normalized state of a scheduled thread
+// reply that is also sent to its channel, and nothing else: the same
+// encoding normalizeScheduledMessageState produces for it.
+var scheduledReplyBroadcastState = func() string {
+	encoded, err := json.Marshal(domain.MessageStreamState{ReplyBroadcast: true})
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
+}()
 
 func normalizeScheduledMessageState(raw, text, blocks string, threadTimestamp domain.MessageTimestamp) (string, error) {
 	if strings.TrimSpace(raw) == "" {
@@ -10888,7 +10901,7 @@ func (m Messages) UploadExternalFile(ctx context.Context, id domain.ExternalUplo
 }
 
 func (m Messages) CompleteExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ExternalUploadID, title string, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp) (domain.File, error) {
-	files, err := m.CompleteExternalUploads(ctx, workspaceID, userID, []domain.ExternalUploadCompletion{{ID: id, Title: title}}, channels, initialComment, blocks, threadTimestamp)
+	files, err := m.CompleteExternalUploads(ctx, workspaceID, userID, []domain.ExternalUploadCompletion{{ID: id, Title: title}}, channels, initialComment, blocks, threadTimestamp, false)
 	if err != nil {
 		return domain.File{}, err
 	}
@@ -10915,11 +10928,15 @@ func normalizeFileShareChannels(values []domain.ConversationID) []domain.Convers
 	return result
 }
 
-func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp) ([]domain.File, error) {
-	return m.completeExternalUploads(ctx, workspaceID, userID, completions, channels, initialComment, blocks, threadTimestamp, "")
+// CompleteExternalUploads shares completed uploads as one message per
+// channel. replyBroadcast is the composer's "Also send to" for a thread reply
+// that carries files; files.completeUploadExternal has no such argument and
+// passes false.
+func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp, replyBroadcast bool) ([]domain.File, error) {
+	return m.completeExternalUploads(ctx, workspaceID, userID, completions, channels, initialComment, blocks, threadTimestamp, replyBroadcast, "")
 }
 
-func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) ([]domain.File, error) {
+func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp, replyBroadcast bool, idempotencyKey string) ([]domain.File, error) {
 	if idempotencyKey != "" {
 		cached, err := m.Store.GetIdempotentMessage(ctx, workspaceID, userID, idempotencyKey)
 		if err == nil {
@@ -10939,6 +10956,11 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 	channels = normalizeFileShareChannels(channels)
 	if len(channels) > 100 || (threadTimestamp != "" && len(channels) != 1) {
 		return nil, domain.ErrInvalidExternalUpload
+	}
+	// A broadcast is a thread reply also sent to its channel, as
+	// chat.postMessage's reply_broadcast is.
+	if replyBroadcast && threadTimestamp == "" {
+		return nil, domain.ErrInvalidMessage
 	}
 	if strings.TrimSpace(initialComment) != "" {
 		blocks = ""
@@ -11056,7 +11078,7 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 		}
 		messages[index] = domain.Message{
 			ID: messageID, WorkspaceID: workspaceID, Conversation: channel, AuthorID: userID,
-			Text: initialComment, Blocks: normalizedBlocks, ThreadTimestamp: threadTimestampValue,
+			Text: initialComment, Blocks: normalizedBlocks, ThreadTimestamp: threadTimestampValue, ReplyBroadcast: replyBroadcast,
 			CreatedAt: createdAt.Add(time.Duration(index) * time.Microsecond), Files: append([]domain.File(nil), files...),
 		}
 		emitted, eventErr := messageEventAt(workspaceID, "message.created", messages[index], nil, messages[index].CreatedAt)

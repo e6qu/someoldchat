@@ -14034,12 +14034,12 @@ func decodeOptionalProtoTime(value string) (time.Time, error) {
 	return parsed.UTC(), nil
 }
 
-func (r Remote) CompleteExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp) ([]domain.File, error) {
+func (r Remote) CompleteExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp, replyBroadcast bool) ([]domain.File, error) {
 	entries := make([]*chatv1.ExternalUploadCompletion, 0, len(completions))
 	for _, completion := range completions {
 		entries = append(entries, &chatv1.ExternalUploadCompletion{UploadId: string(completion.ID), Title: completion.Title})
 	}
-	out, err := r.files.CompleteExternalUploads(ctx, &chatv1.CompleteExternalUploadsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Files: entries, ChannelIds: conversationStrings(channels), InitialComment: initialComment, Blocks: blocks, ThreadTimestamp: string(threadTimestamp)})
+	out, err := r.files.CompleteExternalUploads(ctx, &chatv1.CompleteExternalUploadsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Files: entries, ChannelIds: conversationStrings(channels), InitialComment: initialComment, Blocks: blocks, ThreadTimestamp: string(threadTimestamp), ReplyBroadcast: replyBroadcast})
 	if err != nil {
 		return nil, err
 	}
@@ -14055,7 +14055,7 @@ func (s *Server) CompleteExternalUploads(ctx context.Context, input *chatv1.Comp
 	for _, value := range input.GetFiles() {
 		completions = append(completions, domain.ExternalUploadCompletion{ID: domain.ExternalUploadID(value.GetUploadId()), Title: value.GetTitle()})
 	}
-	files, err := s.implementation.CompleteExternalUploads(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), completions, conversationIDs(input.GetChannelIds()), input.GetInitialComment(), input.GetBlocks(), domain.MessageTimestamp(input.GetThreadTimestamp()))
+	files, err := s.implementation.CompleteExternalUploads(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), completions, conversationIDs(input.GetChannelIds()), input.GetInitialComment(), input.GetBlocks(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetReplyBroadcast())
 	if err != nil {
 		return nil, mapError(err)
 	}

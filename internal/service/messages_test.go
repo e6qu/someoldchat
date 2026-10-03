@@ -2943,7 +2943,7 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	if err := messages.UploadExternalFile(ctx, second.ID, second.Size, bytes.NewReader([]byte("second"))); err != nil {
 		t.Fatal(err)
 	}
-	files, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: first.ID, Title: "First"}, {ID: second.ID, Title: "Second"}}, []domain.ConversationID{"C1"}, "", `[ {"type":"section","text":{"type":"plain_text","text":"Uploaded"}} ]`, "")
+	files, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: first.ID, Title: "First"}, {ID: second.ID, Title: "Second"}}, []domain.ConversationID{"C1"}, "", `[ {"type":"section","text":{"type":"plain_text","text":"Uploaded"}} ]`, "", false)
 	if err != nil || len(files) != 2 || files[0].Title != "First" || files[1].Title != "Second" {
 		t.Fatalf("files=%+v err=%v", files, err)
 	}
@@ -2951,11 +2951,11 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Blocks == "" || len(page.Messages[0].Files) != 2 || page.Messages[0].Files[0].ID != files[0].ID || page.Messages[0].Files[1].ID != files[1].ID {
 		t.Fatalf("messages=%+v err=%v", page.Messages, err)
 	}
-	retry, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: second.ID}, {ID: first.ID}}, []domain.ConversationID{"C1"}, "", `[ {"type":"section","text":{"type":"plain_text","text":"Uploaded"}} ]`, "")
+	retry, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: second.ID}, {ID: first.ID}}, []domain.ConversationID{"C1"}, "", `[ {"type":"section","text":{"type":"plain_text","text":"Uploaded"}} ]`, "", false)
 	if err != nil || len(retry) != 2 || retry[0].ID != files[1].ID || retry[1].ID != files[0].ID {
 		t.Fatalf("retry=%+v err=%v", retry, err)
 	}
-	if _, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: first.ID}, {ID: second.ID}}, []domain.ConversationID{"C2"}, "wrong destination", "", ""); !errors.Is(err, domain.ErrInvalidExternalUpload) {
+	if _, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: first.ID}, {ID: second.ID}}, []domain.ConversationID{"C2"}, "wrong destination", "", "", false); !errors.Is(err, domain.ErrInvalidExternalUpload) {
 		t.Fatalf("completed tickets reused in another channel: %v", err)
 	}
 	page, err = messages.History(ctx, "T1", "U1", "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
@@ -2990,6 +2990,7 @@ func TestDraftOwnedUploadRemainsCompletableAfterTicketWindow(t *testing.T) {
 	files, err := (Messages{Store: s}).CompleteExternalUploads(
 		ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: upload.ID}},
 		[]domain.ConversationID{"C1"}, "finished", "", "",
+		false,
 	)
 	if err != nil || len(files) != 1 {
 		t.Fatalf("files=%+v err=%v", files, err)
@@ -3071,7 +3072,7 @@ func TestExternalUploadBatchKeepsEveryIdentifier(t *testing.T) {
 		}
 		completions = append(completions, domain.ExternalUploadCompletion{ID: upload.ID, Title: "Batch"})
 	}
-	files, err := messages.CompleteExternalUploads(ctx, "T1", "U1", completions, []domain.ConversationID{"C1"}, "", "", "")
+	files, err := messages.CompleteExternalUploads(ctx, "T1", "U1", completions, []domain.ConversationID{"C1"}, "", "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

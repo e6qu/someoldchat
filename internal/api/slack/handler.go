@@ -14354,7 +14354,7 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 	if channel := strings.TrimSpace(fields["channel_id"]); channel != "" {
 		channels = append(channels, domain.ConversationID(channel))
 	}
-	files, err := h.Messages.CompleteExternalUploads(r.Context(), principal.WorkspaceID, principal.UserID, completions, channels, fields["initial_comment"], fields["blocks"], domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
+	files, err := h.Messages.CompleteExternalUploads(r.Context(), principal.WorkspaceID, principal.UserID, completions, channels, fields["initial_comment"], fields["blocks"], domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])), false)
 	if err != nil {
 		if errors.Is(err, domain.ErrConversationAlreadyArchived) {
 			// The current method reference does not enumerate chat.postMessage's
