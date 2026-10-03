@@ -96,6 +96,10 @@ func (h Handler) composerViews(ctx context.Context, request composerPageRequest)
 	channel := string(conversation.ID)
 	canInvite := !conversation.IsDirectOrGroup() && principal.HasScope(auth.ScopeChannelsManage)
 	recipientName, recipientZone := h.directRecipientZone(ctx, principal, conversation)
+	var recentFiles []recentFileView
+	if request.Member && !conversation.Archived {
+		recentFiles = h.composerRecentFiles(ctx, principal)
+	}
 	base := func(thread string) composerView {
 		view := composerView{
 			CSRFToken: request.CSRFToken, Channel: channel, ChannelLabel: request.ChannelName,
@@ -107,6 +111,7 @@ func (h Handler) composerViews(ctx context.Context, request composerPageRequest)
 			CanUpload:      request.CanUpload, CanSchedule: principal.HasScope(auth.ScopeChatWrite),
 			HasShortcuts: true, IsDirect: conversation.IsDirectOrGroup(),
 			RecipientName: recipientName, RecipientZone: recipientZone,
+			RecentFiles: recentFiles, ShareFileURL: mutationURL("/app/file/share", channel, "", thread, ""),
 		}
 		if !view.IsDirect {
 			view.MemberCount = request.MemberCount

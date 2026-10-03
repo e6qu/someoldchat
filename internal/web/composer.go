@@ -79,6 +79,10 @@ type composerView struct {
 	// reported one.
 	RecipientName string
 	RecipientZone string
+	// RecentFiles are the member's own recent files, which the + menu
+	// offers to share here; ShareFileURL is where choosing one posts.
+	RecentFiles  []recentFileView
+	ShareFileURL string
 	// Typing is the conversation composer's "is typing" line, rendered empty
 	// so the live region exists before the stream first fills it.
 	Typing typingView

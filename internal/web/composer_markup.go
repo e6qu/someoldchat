@@ -75,6 +75,7 @@ const composerPartial = `{{define "composer"}}  {{if .CanUpload}}<form class="up
             <a role="menuitem" href="/app/workflows?channel={{.Channel}}">Workflow</a>
             {{if .CanUpload}}<button type="button" role="menuitem" data-composer-action="snippet" aria-haspopup="dialog">Text snippet</button>{{end}}
             {{if .HasShortcuts}}<button type="button" role="menuitem" data-composer-action="shortcuts" aria-haspopup="dialog">Shortcuts</button>{{end}}
+            {{if .RecentFiles}}<div class="composer-recent-files" role="group" aria-labelledby="{{.IDPrefix}}recent-files-heading"><p class="composer-popover-heading" id="{{.IDPrefix}}recent-files-heading">Recent files</p>{{range .RecentFiles}}<button type="submit" role="menuitem" form="{{$.IDPrefix}}share-recent-file" name="file" value="{{.ID}}" aria-label="Share {{.Title}}"><span>{{.Title}}</span><small>{{.Kind}}</small></button>{{end}}</div>{{end}}
           </div>
         </details>
         <button class="composer-tool" type="button" data-format-toggle aria-pressed="false" aria-controls="{{.IDPrefix}}composer-format" aria-label="Show formatting" data-tip="Show formatting" hidden>` + composerIconFormat + `</button>
@@ -106,6 +107,7 @@ const composerPartial = `{{define "composer"}}  {{if .CanUpload}}<form class="up
       </div>
     </div>
   </form>
+  {{if .RecentFiles}}<form id="{{.IDPrefix}}share-recent-file" method="post" action="{{.ShareFileURL}}" hidden><input type="hidden" name="_csrf" value="{{.CSRFToken}}"></form>{{end}}
   <div class="composer-below">
     {{if not .Thread}}<div id="typing" class="typing-region" data-typing="/app/typing?channel={{.Channel}}" data-channel="{{.Channel}}">{{template "typing" .Typing}}</div>{{end}}
     <p class="composer-hint" id="{{.IDPrefix}}composer-hint" data-composer-hint><span data-hint-send><kbd>Shift</kbd> + <kbd>Return</kbd> to add a new line</span></p>
@@ -222,6 +224,7 @@ const composerStyle = `<style>
 .composer-popover{position:absolute;z-index:12;left:0;bottom:calc(100% + 6px);display:grid;min-width:230px;max-width:min(320px,calc(100vw - 32px));border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
 .composer-popover button,.composer-popover a{display:flex;width:100%;min-height:32px;align-items:center;border:0;border-radius:5px;background:transparent;color:var(--text);padding:6px 10px;text-align:left;text-decoration:none;font:inherit;cursor:pointer}
 .composer-popover button:hover,.composer-popover button:focus-visible,.composer-popover a:hover,.composer-popover a:focus-visible{background:var(--action);color:var(--on-strong)}
+.composer-recent-files{display:grid;border-top:1px solid var(--line);margin-top:4px;padding-top:4px}.composer-popover-heading{margin:2px 10px 4px;font-size:12px;font-weight:700;color:var(--muted)}.composer-recent-files button{justify-content:space-between;gap:10px}.composer-recent-files button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.composer-recent-files small{flex:0 0 auto;color:var(--muted);font-size:11px}.composer-recent-files button:hover small,.composer-recent-files button:focus-visible small{color:inherit}
 .composer-suggestions{position:absolute;z-index:14;left:0;right:0;bottom:calc(100% + 6px);max-height:min(300px,45vh);overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
 .composer-suggestions [role=option]{display:flex;gap:10px;align-items:center;min-height:34px;border-radius:5px;padding:5px 9px;cursor:pointer;color:var(--text)}
 .composer-suggestions [role=option][aria-selected=true]{background:var(--action);color:var(--on-strong)}

@@ -4045,6 +4045,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/message/schedule/send-now", h.sendScheduledMessageNow)
 	mux.HandleFunc("POST /app/message/schedule/cancel", h.cancelScheduledMessage)
 	mux.HandleFunc("POST /app/file/stage", h.stageDraftFiles)
+	mux.HandleFunc("POST /app/file/share", h.shareRecentFile)
 	mux.HandleFunc("POST /app/file", h.uploadFile)
 	mux.HandleFunc("GET /app/files", h.filesBrowser)
 	mux.HandleFunc("GET /app/files/{fileID}/view", h.fileView)

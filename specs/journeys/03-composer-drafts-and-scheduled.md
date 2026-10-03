@@ -31,7 +31,9 @@
    bottom row of attach (`+`), formatting, emoji, mention, video clip, audio
    clip and shortcuts, ending in Send and a separate schedule chevron. The
    `+` menu offers uploading from the computer, a canvas, a list, a workflow,
-   a text snippet and the shortcuts browser. "Shift + Return to add a new
+   a text snippet and the shortcuts browser, then the member's own five most
+   recent files; choosing one shares it into the conversation, or into the
+   thread a reply composer belongs to, as its own message. "Shift + Return to add a new
    line" is shown only while there is text to send, and the composer grows
    with its content up to a maximum height.
 7. With a thread open, the conversation keeps its own composer and the thread
