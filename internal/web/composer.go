@@ -127,12 +127,16 @@ type composerDirectory struct {
 	// NonMembers is true when People carries workspace members outside the
 	// conversation, so the client can label them.
 	NonMembers bool
+	// SearchPeopleURL is set when People is not the whole directory: the
+	// client then asks it for the people a typed mention matches, as Slack
+	// searches the directory as the member types.
+	SearchPeopleURL string
 }
 
-// composerPeopleLimit bounds the workspace directory rendered into the page.
-// Slack searches the directory server-side as the member types; a bounded
-// first page keeps a large workspace's page from carrying every member. The
-// bound is recorded as a gap in the product audit rather than hidden.
+// composerPeopleLimit bounds the workspace directory rendered into the page,
+// so a large workspace's page does not carry every member. Past it, the
+// client searches the directory as the member types (/app/mentions), as
+// Slack does.
 const composerPeopleLimit = 500
 
 // composerSpecialMentions are Slack's broadcast mentions with the
@@ -157,7 +161,7 @@ func composerSpecialMentions(conversation domain.Conversation) []composerSpecial
 // workspace directory degrades to members only; a failure to read the
 // members degrades to nothing, and both are reported as notices rather than
 // taking the page down for a suggestion list.
-func (h Handler) composerPeople(ctx context.Context, principal auth.Principal, conversation domain.Conversation) ([]composerPerson, bool, []string) {
+func (h Handler) composerPeople(ctx context.Context, principal auth.Principal, conversation domain.Conversation) ([]composerPerson, bool, bool, []string) {
 	var notices []string
 	members := map[domain.UserID]bool{}
 	people := make([]composerPerson, 0)
@@ -176,15 +180,13 @@ func (h Handler) composerPeople(ctx context.Context, principal auth.Principal, c
 	}
 	memberPage, err := h.Messages.ConversationMembers(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: memberWindow})
 	if err != nil {
-		return nil, false, []string{"Mention suggestions are temporarily unavailable."}
+		return nil, false, false, []string{"Mention suggestions are temporarily unavailable."}
 	}
 	for _, user := range memberPage.Users {
 		members[user.ID] = true
 		add(user, true)
 	}
-	if memberPage.HasMore {
-		notices = append(notices, "Mention suggestions show the first 100 conversation members.")
-	}
+	truncated := memberPage.HasMore
 	nonMembers := false
 	cursor := domain.Cursor("")
 	seenCursors := map[domain.Cursor]bool{}
@@ -197,6 +199,7 @@ func (h Handler) composerPeople(ctx context.Context, principal auth.Principal, c
 		}
 		for _, user := range page.Users {
 			if len(people) >= composerPeopleLimit {
+				truncated = true
 				break
 			}
 			// Slackbot cannot be added to a channel, so it is never offered
@@ -220,7 +223,7 @@ func (h Handler) composerPeople(ctx context.Context, principal auth.Principal, c
 		}
 		return strings.ToLower(people[left].Name) < strings.ToLower(people[right].Name)
 	})
-	return people, nonMembers && !conversation.IsDirectOrGroup(), notices
+	return people, nonMembers && !conversation.IsDirectOrGroup(), truncated, notices
 }
 
 // composerChannels lists the channels the member can see, marking private

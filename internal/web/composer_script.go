@@ -91,6 +91,8 @@ var list={person:directory.people,group:directory.groups,special:directory.speci
 if(list)list.push(entry);
 })}
 function findEntry(list,id){for(var index=0;index<list.length;index++)if(list[index].id===id)return list[index];return null}
+var peopleSearch=directoryNode?directoryNode.getAttribute('data-people-search'):'';var searchedPeople={};var peopleTimer=null;
+function searchPeople(query,refresh){if(!peopleSearch||!query||searchedPeople[query])return;if(peopleTimer)window.clearTimeout(peopleTimer);peopleTimer=window.setTimeout(function(){searchedPeople[query]=true;fetch(peopleSearch+'&q='+encodeURIComponent(query),{credentials:'same-origin',headers:{accept:'application/json'}}).then(function(response){return response.ok?response.json():[]}).then(function(found){var added=false;(Array.isArray(found)?found:[]).forEach(function(person){if(!person||!person.id||findEntry(directory.people,person.id))return;directory.people.push({kind:'person',id:person.id,name:person.name||'',real:person.real||'',display:person.display||'',avatar:person.avatar||'',initial:person.initial||'',member:!!person.member||!!person.membership_unknown,bot:!!person.bot,self:!!person.self});added=true});if(added&&refresh)refresh(query)}).catch(function(){searchedPeople[query]=false})},150)}
 function isBlock(node){return node&&node.nodeType===1&&/^(P|DIV|PRE|BLOCKQUOTE|UL|OL|LI|H[1-6])$/.test(node.nodeName)}
 function wrapMark(mark,inner){var match=/^(\s*)([\s\S]*?)(\s*)$/.exec(inner);if(!match[2])return inner;return match[1]+mark+match[2]+mark+match[3]}
 function preText(node){var value='';Array.prototype.forEach.call(node.childNodes,function(child,index){if(child.nodeType===3)value+=child.data;else if(child.nodeName==='BR'){if(index<node.childNodes.length-1)value+='\n'}else if(isBlock(child)){if(value&&value.charAt(value.length-1)!=='\n')value+='\n';value+=preText(child)}else value+=preText(child)});return value}
@@ -328,6 +330,7 @@ if(!found){hideSuggestions();return}
 suggestion=found;var nodes=[];var index=0;
 if(found.type==='@'){
 var query=found.query;
+searchPeople(query,function(asked){var current=trigger();if(current&&current.type==='@'&&current.query===asked)updateSuggestions()});
 var people=directory.people.filter(function(person){return matches([person.name,person.real,person.display],query)});
 var members=people.filter(function(person){return person.member||direct});var outsiders=direct?[]:people.filter(function(person){return !person.member});
 members.slice(0,8).forEach(function(person){nodes.push(personOption(index++,person,found))});
