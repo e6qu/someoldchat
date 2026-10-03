@@ -2380,8 +2380,9 @@ test('[NAV-06 A11Y-01] accessibility and message display preferences change how 
   await expect(link).toHaveCSS('text-decoration-line', 'underline');
   await preferences.getByRole('tab', { name: 'Messages & media' }).click();
   await preferences.getByRole('checkbox', { name: 'Display emoji as plain text' }).check();
-  await expect(emoji).toHaveCSS('font-size', '0px');
-  expect(await emoji.evaluate((node) => getComputedStyle(node, '::after').content)).toBe('":tada:"');
+  await expect(emoji).toBeHidden();
+  await expect(message.locator('.emoji-code')).toHaveText(':tada:');
+  await expect(message.locator('.emoji-code')).toBeVisible();
 
   // The choice is the account's, so a reload (or another browser) keeps it.
   await page.keyboard.press('Escape');

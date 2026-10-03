@@ -2502,10 +2502,10 @@ func TestComposerAndMessagesUseWorkspaceEmojiAndVisibleChannelReferences(t *test
 		`id="emoji-tone-options"`,
 		`data-kind="channel" data-id="Cdev" data-name="general"`,
 		`class="custom-emoji" src="https://cdn.example/party.png" alt=":party_parrot:"`,
-		// The code beside a custom emoji is what "Display emoji as plain text"
-		// shows in place of the image; a standard emoji's is its aria-label.
+		// The code beside each emoji is what "Display emoji as plain text"
+		// shows in its place.
 		`loading="lazy"><span class="emoji-code" aria-hidden="true">:party_parrot:</span>`,
-		`aria-label=":tada:"`,
+		`aria-label=":tada:">🎉</span><span class="emoji-code" aria-hidden="true">:tada:</span>`,
 		`class="slack-mention" href="/app?channel=Cdev">#general</a>`,
 	)
 	requireMissing(t, "rendered channel reference", body, `class="message-text">Ship it :party_parrot:`)

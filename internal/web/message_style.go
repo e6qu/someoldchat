@@ -53,10 +53,8 @@ html[data-theme=dark]{` + messageDarkTokens + `}
 .message-text.jumbo .standard-emoji{font-size:32px;line-height:40px;width:auto;height:auto;vertical-align:middle}
 .message-text.jumbo .custom-emoji{width:32px;height:32px;vertical-align:middle}
 .emoji-code,.message-image-fallback{display:none}
-html[data-pref-emoji-as-text=true] .message-text .custom-emoji{display:none}
+html[data-pref-emoji-as-text=true] .message-text .custom-emoji,html[data-pref-emoji-as-text=true] .message-text .standard-emoji{display:none}
 html[data-pref-emoji-as-text=true] .message-text .emoji-code,html[data-pref-inline-media=false] .message-image-fallback{display:inline}
-html[data-pref-emoji-as-text=true] .message-text .standard-emoji{font-size:0}
-html[data-pref-emoji-as-text=true] .message-text .standard-emoji::after{content:attr(aria-label);font-size:15px;line-height:22px}
 html[data-pref-jumbomoji=false] .message-text.jumbo .standard-emoji{font-size:18px;line-height:20px}
 html[data-pref-jumbomoji=false] .message-text.jumbo .custom-emoji{width:20px;height:20px;vertical-align:-4px}
 html[data-pref-inline-media=false] .message-image{display:none}
