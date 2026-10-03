@@ -2131,7 +2131,7 @@ html.js .sidebar.is-open{transform:translateX(0)}
 </style>`
 
 const attachmentPartial = `{{define "attachment"}}
-<article class="message-attachment">
+<article class="message-attachment{{if .SourceURL}} is-unfurl{{end}}">
   {{if .Pretext}}<p class="pretext">{{.Pretext}}</p>{{end}}
   {{if .Author}}<div class="attachment-author">{{.Author}}</div>{{end}}
   {{if .Title}}{{if .TitleURL}}<a class="attachment-title" href="{{.TitleURL}}" rel="noreferrer noopener">{{.Title}}</a>{{else}}<strong class="attachment-title">{{.Title}}</strong>{{end}}{{end}}

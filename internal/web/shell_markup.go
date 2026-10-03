@@ -288,7 +288,9 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     <button type="button" role="tab" id="pref-tab-notifications" aria-controls="pref-notifications" aria-selected="true">{{icon "activity"}}<span>Notifications</span></button>
     <button type="button" role="tab" id="pref-tab-home" aria-controls="pref-home" aria-selected="false" tabindex="-1">{{icon "home"}}<span>Home</span></button>
     <button type="button" role="tab" id="pref-tab-appearance" aria-controls="pref-appearance" aria-selected="false" tabindex="-1">{{icon "status"}}<span>Appearance</span></button>
+    <button type="button" role="tab" id="pref-tab-accessibility" aria-controls="pref-accessibility" aria-selected="false" tabindex="-1">{{icon "info"}}<span>Accessibility</span></button>
     <button type="button" role="tab" id="pref-tab-read" aria-controls="pref-read" aria-selected="false" tabindex="-1">{{icon "check"}}<span>Mark as read</span></button>
+    <button type="button" role="tab" id="pref-tab-media" aria-controls="pref-media" aria-selected="false" tabindex="-1">{{icon "files"}}<span>Messages &amp; media</span></button>
     <button type="button" role="tab" id="pref-tab-advanced" aria-controls="pref-advanced" aria-selected="false" tabindex="-1">{{icon "gear"}}<span>Advanced</span></button>
   </div>
   <div class="preferences-panels">
@@ -320,7 +322,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
         <label><input type="radio" name="pref-sidebar-sort" value="recent" data-preference="sidebar-sort"> By most recent activity (direct messages; other sections sort alphabetically)</label>
         <label><input type="radio" name="pref-sidebar-sort" value="priority" data-preference="sidebar-sort"> Priority</label>
       </fieldset>
-      <p class="dialog-note">A section’s own Sort and Show choices (in its ⋮ menu) override these. These choices are kept in this browser.</p>
+      <p class="dialog-note">A section’s own Sort and Show choices (in its ⋮ menu) override these.</p>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-appearance" aria-labelledby="pref-tab-appearance" tabindex="0" hidden>
       <h3>Appearance</h3>
@@ -331,6 +333,15 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       </fieldset>
       <p class="dialog-note">The theme applies to every page in this browser as soon as you choose it.</p>
     </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-accessibility" aria-labelledby="pref-tab-accessibility" tabindex="0" hidden>
+      <h3>Accessibility</h3>
+      <fieldset><legend>Links</legend>
+        <label><input type="checkbox" data-preference="underline-links"> Underline links in messages</label>
+      </fieldset>
+      <fieldset><legend>Animation</legend>
+        <label><input type="checkbox" data-preference="reduce-motion"> Turn off interface animations and transitions</label>
+      </fieldset>
+    </section>
     <section class="preferences-panel" role="tabpanel" id="pref-read" aria-labelledby="pref-tab-read" tabindex="0" hidden>
       <h3>Mark as read</h3>
       <fieldset><legend>When I view a conversation</legend>
@@ -340,10 +351,21 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       </fieldset>
       <label><input type="checkbox" data-preference="confirm-mark-all"> Prompt to confirm that I want to mark all messages as read (Shift+Esc)</label>
     </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-media" aria-labelledby="pref-tab-media" tabindex="0" hidden>
+      <h3>Messages &amp; media</h3>
+      <fieldset><legend>Inline media and links</legend>
+        <label><input type="checkbox" data-preference="inline-media" data-default="true"> Show images uploaded to this workspace</label>
+        <label><input type="checkbox" data-preference="link-previews" data-default="true"> Show previews of linked websites</label>
+      </fieldset>
+      <fieldset><legend>Emoji</legend>
+        <label><input type="checkbox" data-preference="emoji-as-text"> Display emoji as plain text</label>
+        <label><input type="checkbox" data-preference="jumbomoji" data-default="true"> Show large emoji in messages that contain only emoji</label>
+      </fieldset>
+    </section>
     <section class="preferences-panel" role="tabpanel" id="pref-advanced" aria-labelledby="pref-tab-advanced" tabindex="0" hidden>
       <h3>Advanced</h3>
       {{template "composer-preferences"}}
-      <p class="dialog-note">Preferences here other than notifications are kept in this browser: they follow you across pages and reloads here, but not to another browser or device.</p>
+      <p class="dialog-note">Your preferences are kept with your account, so they follow you to every browser you sign in from.</p>
     </section>
   </div>
 </div>{{end}}`

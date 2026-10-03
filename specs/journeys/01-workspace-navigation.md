@@ -145,6 +145,12 @@ member has never used starts with it, and a preference a browser kept before
 its account did is kept for the account on that browser's next visit. Recent
 conversations stay with each browser.
 
+Accessibility underlines links in messages and turns off interface animation;
+Messages & media hides uploaded images (leaving a link to each) or link
+previews, shows emoji as their `:codes:`, and turns off large emoji. Each
+applies at once to every message on the page and is kept with the account like
+the rest.
+
 ## NAV-07 — Review the threads you follow
 
 Slack's Threads view lists the threads a member follows, most recently replied

@@ -437,7 +437,9 @@ func renderSlackInlineMarking(text string, customEmoji map[string]string, terms 
 				output.WriteString(html.EscapeString(name))
 				output.WriteString(`:" title=":`)
 				output.WriteString(html.EscapeString(name))
-				output.WriteString(`:" loading="lazy">`)
+				output.WriteString(`:" loading="lazy"><span class="emoji-code" aria-hidden="true">:`)
+				output.WriteString(html.EscapeString(name))
+				output.WriteString(`:</span>`)
 				offset = end + 1
 				continue
 			}

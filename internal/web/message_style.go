@@ -52,6 +52,17 @@ html[data-theme=dark]{` + messageDarkTokens + `}
 .message-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.46}
 .message-text.jumbo .standard-emoji{font-size:32px;line-height:40px;width:auto;height:auto;vertical-align:middle}
 .message-text.jumbo .custom-emoji{width:32px;height:32px;vertical-align:middle}
+.emoji-code,.message-image-fallback{display:none}
+html[data-pref-emoji-as-text=true] .message-text .custom-emoji{display:none}
+html[data-pref-emoji-as-text=true] .message-text .emoji-code,html[data-pref-inline-media=false] .message-image-fallback{display:inline}
+html[data-pref-emoji-as-text=true] .message-text .standard-emoji{font-size:0}
+html[data-pref-emoji-as-text=true] .message-text .standard-emoji::after{content:attr(aria-label);font-size:15px;line-height:22px}
+html[data-pref-jumbomoji=false] .message-text.jumbo .standard-emoji{font-size:18px;line-height:20px}
+html[data-pref-jumbomoji=false] .message-text.jumbo .custom-emoji{width:20px;height:20px;vertical-align:-4px}
+html[data-pref-inline-media=false] .message-image{display:none}
+html[data-pref-link-previews=false] .message-attachment.is-unfurl{display:none}
+html[data-pref-underline-links=true] .message-text a,html[data-pref-underline-links=true] .message-attachment a{text-decoration:underline}
+html[data-pref-reduce-motion=true] *,html[data-pref-reduce-motion=true] *::before,html[data-pref-reduce-motion=true] *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 .message-text blockquote,.formatted-text blockquote{margin:4px 0;padding:0 0 0 12px;border-left:4px solid var(--quote-bar);white-space:pre-wrap}
 .message-text pre,.formatted-text pre,.dialog-preview pre{margin:4px 0;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--code-bg);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:auto}
 .message-text pre code,.formatted-text pre code{border:0;padding:0;background:transparent;color:inherit;font:inherit}
