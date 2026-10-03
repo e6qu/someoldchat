@@ -11,6 +11,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/service"
 )
 
 // TestMarkAllReadClearsEveryConversation is the backend half of Shift+Escape.
@@ -138,5 +139,40 @@ func TestMarkSectionReadClearsOnlyTheNamedRows(t *testing.T) {
 	body = sidebar(t, mux)
 	if strings.Contains(body, `name="conversation" value="Csecond"`) || !strings.Contains(body, `name="conversation" value="Cthird"`) {
 		t.Fatalf("after marking #second read the menu names: %s", body)
+	}
+}
+
+// A row with both a draft and a mention shows the draft marker beside the
+// badge, as Slack does, and names both to assistive technology.
+func TestASidebarRowShowsItsDraftBesideItsBadge(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(domain.Conversation{ID: "Csecond", WorkspaceID: "T1", Name: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range []domain.UserID{"U1", "U2"} {
+		if err := s.SeedConversationMember("Csecond", user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages := service.Messages{Store: s}
+	if _, err := messages.Post(context.Background(), "T1", "U2", "Csecond", "<@U1> have a look", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.SaveDraft(context.Background(), "T1", "U1", "Csecond", "", "half a reply"); err != nil {
+		t.Fatal(err)
+	}
+	body := sidebar(t, mux)
+	start := strings.Index(body, `data-conversation="Csecond"`)
+	if start < 0 {
+		t.Fatalf("#second is not in the Channels section: %s", body)
+	}
+	row := body[start : start+strings.Index(body[start:], "</a>")]
+	for _, want := range []string{"1 mention", "has a draft", `<span class="draft-badge" aria-hidden="true">`, `<span class="badge" aria-hidden="true">1</span>`} {
+		if !strings.Contains(row, want) {
+			t.Errorf("the row lacks %s: %s", want, row)
+		}
 	}
 }
