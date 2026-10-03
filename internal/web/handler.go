@@ -5736,7 +5736,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			CanEdit:     ownsMessage && !hasStructuredMessageContent(message.Blocks) && !hasStructuredMessageContent(message.Attachments),
 			CanDelete:   ownsMessage,
 			AppID:       string(message.AppID),
-			CanInteract: request.Member && message.AppID != "",
+			CanInteract: request.Member && (message.AppID != "" || message.AuthorID == domain.SlackbotUserID),
 			Streaming:   messageStreamActive(message.StreamState),
 			Ephemeral:   ephemeral,
 			Subtype:     string(message.Subtype),
@@ -8924,8 +8924,13 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 		if cursor, err := domain.NewMessageCursor(boundary); err == nil {
 			before = string(cursor)
 		}
+		// A result is one line about the message, so it shows the message's
+		// text, which is Slack's fallback for its blocks, rather than the
+		// blocks: with them the line was empty, and Activity, Later and search
+		// called a message with blocks unavailable.
 		displayMessage := message
 		displayMessage.Text = resolveSlackUserMentions(message.Text, names)
+		displayMessage.Blocks = ""
 		view := messageView{
 			ID:             string(message.ID),
 			Anchor:         messageAnchor(message.ID),
@@ -11950,6 +11955,9 @@ func (h Handler) appInteraction(w http.ResponseWriter, r *http.Request) {
 			status, reason = http.StatusBadGateway, "The app returned a response that could not be applied."
 		case errors.Is(err, domain.ErrAppUseRestricted):
 			status, reason = http.StatusForbidden, appUseRestrictedReason
+		case errors.Is(err, domain.ErrReminderRecurring), errors.Is(err, domain.ErrReminderOwnedByOther), errors.Is(err, domain.ErrInvalidReminder):
+			// Slackbot's reminder controls are answered here, not by an app.
+			status, reason = http.StatusConflict, "That reminder could not be changed. Open your reminders to manage it."
 		}
 		h.writeMutationError(w, r, status, "That app action did not run", reason)
 		return

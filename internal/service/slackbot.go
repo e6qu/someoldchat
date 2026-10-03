@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -20,6 +21,17 @@ func (m Messages) PostAsSlackbot(ctx context.Context, workspaceID domain.Workspa
 	}
 	if strings.TrimSpace(post.Text) == "" || messageTextTooLong(post.Text) {
 		return domain.Message{}, domain.ErrInvalidMessage
+	}
+	blocks := ""
+	if strings.TrimSpace(post.Blocks) != "" {
+		normalized, err := domain.NormalizeBlocks([]byte(post.Blocks))
+		if err != nil || normalized == "" {
+			return domain.Message{}, domain.ErrInvalidBlocks
+		}
+		if err := validateMessageBlocks(normalized); err != nil {
+			return domain.Message{}, err
+		}
+		blocks = normalized
 	}
 	conversation := post.Conversation
 	if conversation == "" {
@@ -45,7 +57,7 @@ func (m Messages) PostAsSlackbot(ctx context.Context, workspaceID domain.Workspa
 	}
 	return m.createMessage(ctx, domain.Message{
 		ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: domain.SlackbotUserID,
-		Text: post.Text, CreatedAt: domain.MessageInstant(time.Now()),
+		Text: post.Text, Blocks: blocks, CreatedAt: domain.MessageInstant(time.Now()),
 	}, post.IdempotencyKey, "")
 }
 
@@ -81,4 +93,79 @@ func (m Messages) slackbotConversation(ctx context.Context, workspaceID domain.W
 		return existing.ID, nil
 	}
 	return id, nil
+}
+
+// answerSlackbotReminder answers a member's choice on a reminder Slackbot
+// delivered: Mark as complete completes it, and Remind me about this sets it
+// again for the moment chosen. The controls are then replaced by what was
+// done, as Slack's message is.
+func (m Messages) answerSlackbotReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, message domain.Message, action domain.AppBlockAction) error {
+	if !blocksContainDispatchableAction(message.Blocks, action.BlockID, action.ActionID, action.Type) {
+		return store.ErrNotFound
+	}
+	id, found := domain.SlackbotReminderOfBlock(action.BlockID)
+	if !found {
+		return store.ErrNotFound
+	}
+	reminder, err := m.ReminderInfo(ctx, workspaceID, userID, id)
+	if err != nil {
+		return err
+	}
+	var outcome string
+	switch action.ActionID {
+	case domain.SlackbotReminderCompleteAction:
+		if err := m.CompleteReminder(ctx, workspaceID, userID, id); err != nil {
+			return err
+		}
+		outcome = "You marked this reminder as complete."
+	case domain.SlackbotReminderSnoozeAction:
+		location := m.MemberLocation(ctx, workspaceID, userID)
+		due, known := domain.ReminderSnoozeDue(action.Value, time.Now(), location)
+		if !known {
+			return domain.ErrInvalidReminder
+		}
+		if _, err := m.AddReminder(ctx, workspaceID, userID, userID, reminder.Text, domain.ReminderSchedule{Due: due}); err != nil {
+			return err
+		}
+		outcome = "I'll remind you " + slackbotReminderWhen(action.Value, due.In(location)) + "."
+	default:
+		return store.ErrNotFound
+	}
+	blocks, err := slackbotReminderAnswered(message.Blocks, action.BlockID, outcome)
+	if err != nil {
+		return err
+	}
+	previous := message
+	message.Blocks = blocks
+	event, err := messageMutationEvent(workspaceID, "message.changed", message, previous)
+	if err != nil {
+		return err
+	}
+	return m.Store.UpdateMessage(ctx, message, event)
+}
+
+// slackbotReminderWhen says when a snoozed reminder comes back.
+func slackbotReminderWhen(choice string, due time.Time) string {
+	for _, option := range domain.ReminderSnoozeOptions {
+		if option.Value == choice && (choice == "20m" || choice == "1h" || choice == "3h") {
+			return strings.ToLower(option.Text)
+		}
+	}
+	return due.Format("Monday, January 2") + " at " + due.Format("3:04 PM")
+}
+
+// slackbotReminderAnswered is the reminder message's blocks with its controls
+// replaced by what the member chose.
+func slackbotReminderAnswered(raw, controls, outcome string) (string, error) {
+	var blocks []map[string]any
+	if err := json.Unmarshal([]byte(raw), &blocks); err != nil {
+		return "", err
+	}
+	for index, block := range blocks {
+		if block["block_id"] == controls {
+			blocks[index] = map[string]any{"type": "context", "block_id": controls, "elements": []any{map[string]any{"type": "mrkdwn", "text": outcome}}}
+		}
+	}
+	encoded, err := json.Marshal(blocks)
+	return string(encoded), err
 }

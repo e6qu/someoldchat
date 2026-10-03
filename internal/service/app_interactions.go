@@ -216,7 +216,9 @@ func (m Messages) interactiveMessage(ctx context.Context, workspaceID domain.Wor
 	} else if err != nil {
 		return domain.Message{}, false, err
 	}
-	if message.WorkspaceID != workspaceID || message.AppID == "" {
+	// A message is interactive when an app posted it, or when Slackbot did:
+	// Slackbot answers the controls on its own messages.
+	if message.WorkspaceID != workspaceID || (message.AppID == "" && message.AuthorID != domain.SlackbotUserID) {
 		return domain.Message{}, false, store.ErrNotFound
 	}
 	return message, ephemeral, nil
@@ -242,6 +244,10 @@ func (m Messages) DispatchBlockAction(ctx context.Context, workspaceID domain.Wo
 		if answered, err := m.answerUnfurlAuthPrompt(ctx, workspaceID, userID, message, action); answered {
 			return err
 		}
+	}
+	// Slackbot answers the controls on its own messages; no app is involved.
+	if message.AuthorID == domain.SlackbotUserID {
+		return m.answerSlackbotReminder(ctx, workspaceID, userID, message, action)
 	}
 	snapshot, parsed, err := m.installedApp(ctx, workspaceID, message.AppID)
 	if err != nil {

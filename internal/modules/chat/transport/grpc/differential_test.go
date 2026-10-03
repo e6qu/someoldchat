@@ -1265,7 +1265,11 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				second, err := chat.PostAsSlackbot(ctx, "T1", "U1", domain.SlackbotPost{Text: "Reminder: drink water.", IdempotencyKey: "second"})
+				controls, err := domain.SlackbotReminderBlocks("Reminder: drink water.", "Rm1", false)
+				if err != nil {
+					return nil, err
+				}
+				second, err := chat.PostAsSlackbot(ctx, "T1", "U1", domain.SlackbotPost{Text: "Reminder: drink water.", Blocks: controls, IdempotencyKey: "second"})
 				if err != nil {
 					return nil, err
 				}
@@ -1279,9 +1283,10 @@ func parityCases() []parityCase {
 				}
 				_, stranger := chat.PostAsSlackbot(ctx, "T1", "U-nobody", domain.SlackbotPost{Text: "Reminder: nothing."})
 				_, empty := chat.PostAsSlackbot(ctx, "T1", "U1", domain.SlackbotPost{Text: " "})
+				_, badBlocks := chat.PostAsSlackbot(ctx, "T1", "U1", domain.SlackbotPost{Text: "Reminder: x.", Blocks: `[{"type":"nonsense"}]`})
 				return []any{
-					first.AuthorID, first.Conversation == second.Conversation, replayed.ID == first.ID,
-					channel.Conversation, channel.AuthorID, stranger != nil, empty != nil,
+					first.AuthorID, first.Conversation == second.Conversation, replayed.ID == first.ID, second.Blocks,
+					channel.Conversation, channel.AuthorID, stranger != nil, empty != nil, errors.Is(badBlocks, domain.ErrInvalidBlocks),
 				}, nil
 			},
 		},

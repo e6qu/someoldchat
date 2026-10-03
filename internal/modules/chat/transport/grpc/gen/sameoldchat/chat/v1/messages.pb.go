@@ -3045,6 +3045,7 @@ type SlackbotPostRequest struct {
 	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	Text           string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
 	IdempotencyKey string                 `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	Blocks         string                 `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -3110,6 +3111,13 @@ func (x *SlackbotPostRequest) GetText() string {
 func (x *SlackbotPostRequest) GetIdempotencyKey() string {
 	if x != nil {
 		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *SlackbotPostRequest) GetBlocks() string {
+	if x != nil {
+		return x.Blocks
 	}
 	return ""
 }
@@ -3443,13 +3451,14 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x10thread_timestamp\x18\x05 \x01(\tR\x0fthreadTimestamp\x12'\n" +
 	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\x12\x16\n" +
 	"\x06blocks\x18\a \x01(\tR\x06blocks\x12 \n" +
-	"\vattachments\x18\b \x01(\tR\vattachments\"\xbb\x01\n" +
+	"\vattachments\x18\b \x01(\tR\vattachments\"\xd3\x01\n" +
 	"\x13SlackbotPostRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1b\n" +
 	"\tmember_id\x18\x02 \x01(\tR\bmemberId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x12\n" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12'\n" +
-	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\"1\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\x12\x16\n" +
+	"\x06blocks\x18\x06 \x01(\tR\x06blocks\"1\n" +
 	"\x1fIncomingWebhookMutationResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok2\xff\x12\n" +
 	"\x0fMessagesService\x12F\n" +

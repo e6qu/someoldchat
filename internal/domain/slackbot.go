@@ -41,8 +41,11 @@ func (u User) IsSlackbot() bool {
 // with one, it goes there, and the member must be able to post in it, so
 // Slackbot never reaches a conversation the member could not.
 type SlackbotPost struct {
-	Conversation   ConversationID
-	Text           string
+	Conversation ConversationID
+	Text         string
+	// Blocks is the message's Block Kit, such as a reminder's controls; Text
+	// is its fallback.
+	Blocks         string
 	IdempotencyKey string
 }
 

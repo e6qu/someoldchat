@@ -13443,7 +13443,7 @@ func (s *Server) PostIncomingWebhook(ctx context.Context, input *chatv1.Incoming
 
 func (s *Server) PostAsSlackbot(ctx context.Context, input *chatv1.SlackbotPostRequest) (*chatv1.Message, error) {
 	value, err := s.implementation.PostAsSlackbot(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetMemberId()), domain.SlackbotPost{
-		Conversation: domain.ConversationID(input.GetConversationId()), Text: input.GetText(), IdempotencyKey: input.GetIdempotencyKey(),
+		Conversation: domain.ConversationID(input.GetConversationId()), Text: input.GetText(), Blocks: input.GetBlocks(), IdempotencyKey: input.GetIdempotencyKey(),
 	})
 	if err != nil {
 		return nil, mapError(err)
@@ -13649,7 +13649,7 @@ func (r Remote) PostIncomingWebhookWithAttachments(ctx context.Context, workspac
 }
 
 func (r Remote) PostAsSlackbot(ctx context.Context, workspaceID domain.WorkspaceID, memberID domain.UserID, post domain.SlackbotPost) (domain.Message, error) {
-	out, err := r.messages.PostAsSlackbot(ctx, &chatv1.SlackbotPostRequest{WorkspaceId: string(workspaceID), MemberId: string(memberID), ConversationId: string(post.Conversation), Text: post.Text, IdempotencyKey: post.IdempotencyKey})
+	out, err := r.messages.PostAsSlackbot(ctx, &chatv1.SlackbotPostRequest{WorkspaceId: string(workspaceID), MemberId: string(memberID), ConversationId: string(post.Conversation), Text: post.Text, Blocks: post.Blocks, IdempotencyKey: post.IdempotencyKey})
 	if err != nil {
 		return domain.Message{}, err
 	}

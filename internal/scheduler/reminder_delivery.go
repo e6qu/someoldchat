@@ -72,8 +72,16 @@ func (w ReminderDeliveryWorker) RunOnceAt(ctx context.Context, workspaceID domai
 		// when the reminder is delivered again. A member who can no longer
 		// receive it - deactivated since - is past reminding: the occurrence
 		// is still claimed rather than retried forever.
+		// Slack's reminder carries its controls: Mark as complete, and
+		// Remind me about this.
+		text := ReminderText(reminder.Text)
+		blocks, err := domain.SlackbotReminderBlocks(text, reminder.ID, reminder.Recurring)
+		if err != nil {
+			failures = errors.Join(failures, err)
+			continue
+		}
 		if _, err := w.Poster.PostAsSlackbot(ctx, reminder.WorkspaceID, reminder.User, domain.SlackbotPost{
-			Text:           ReminderText(reminder.Text),
+			Text: text, Blocks: blocks,
 			IdempotencyKey: fmt.Sprintf("reminder:%s:%d", reminder.ID, reminder.Time.UTC().Unix()),
 		}); err != nil && permanentFailureCode(err) == "" {
 			failures = errors.Join(failures, err)

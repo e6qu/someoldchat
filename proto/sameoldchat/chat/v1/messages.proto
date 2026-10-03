@@ -354,6 +354,7 @@ message SlackbotPostRequest {
   string conversation_id = 3;
   string text = 4;
   string idempotency_key = 5;
+  string blocks = 6;
 }
 
 message IncomingWebhookMutationResponse {
