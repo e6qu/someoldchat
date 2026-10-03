@@ -50,7 +50,7 @@ const validViewBlocks = await client.apiCall("blocks.validate", {
 });
 assert.equal(validViewBlocks.ok, true);
 
-// @slack/web-api 8.0.0 does not currently generate convenience methods for
+// @slack/web-api 8.2.0 does not currently generate convenience methods for
 // apps.datastore.*, so qualify the documented methods through WebClient's
 // supported raw-method path. This still exercises the official SDK's JSON
 // argument serialization, bearer authentication, error handling, and response
@@ -1397,6 +1397,28 @@ const assistantPrompts = await client.assistant.threads.setSuggestedPrompts({
   prompts: [{ title: "Roll back", message: "How do I roll back?" }],
 });
 assert.equal(assistantPrompts.ok, true);
+
+// agents.sessions.*: a thread session is created by its first setStatus,
+// keeps the title it was created with, and is renamed by the agent. The
+// argument names come from this SDK's AgentsSessions*Arguments types.
+const agentSession = await client.agents.sessions.setStatus({
+  channel_id: "C1", thread_ts: root.ts, status: "processing", title: "Trip research", initiator_user_id: "U1",
+});
+assert.equal(agentSession.ok, true);
+assert.equal(agentSession.status, "processing");
+assert.equal(agentSession.title, "Trip research");
+const agentSessionAgain = await client.agents.sessions.setStatus({
+  channel_id: "C1", thread_ts: root.ts, status: "active", title: "Ignored once the session exists",
+});
+assert.equal(agentSessionAgain.ok, true);
+assert.equal(agentSessionAgain.status, "active");
+assert.equal(agentSessionAgain.title, "Trip research");
+const renamedSession = await client.agents.sessions.rename({ channel_id: "C1", thread_ts: root.ts, title: "Scuba trip" });
+assert.equal(renamedSession.ok, true);
+await assert.rejects(
+  client.agents.sessions.rename({ channel_id: "C1", title: "No thread" }),
+  (error) => error.data?.error === "thread_ts_required",
+);
 
 const history = await client.conversations.history({ channel: "C1", limit: 10 });
 assert.equal(history.ok, true);

@@ -25,7 +25,7 @@ import (
 // The code in the body is two different Slack codes, and clients read it:
 //
 //   - A method's tier budget answers `ratelimited` (writeRateLimited). That is
-//     the code python-slack-sdk 3.43.0 compares against before it waits out
+//     the code python-slack-sdk 3.45.0 compares against before it waits out
 //     Retry-After and retries apps.connections.open (SocketModeClient) and
 //     rtm.connect (rtm_v2.RTMClient); any other code is raised as a failure,
 //     so answering `rate_limited` here turned a transient limit into a crashed
