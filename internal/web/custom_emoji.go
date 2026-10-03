@@ -140,8 +140,10 @@ const customEmojiMarkup = `{{define "title"}}Custom emoji · SameOldChat{{end}}
 .emoji-table{width:100%;border-collapse:collapse}.emoji-table th,.emoji-table td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}
 .emoji-table img{width:28px;height:28px;object-fit:contain}
 .empty{padding:24px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}
+.customize-tabs{display:flex;gap:6px}.customize-tabs a{padding:6px 12px;border-radius:999px;border:1px solid var(--line);color:var(--text);text-decoration:none;font-weight:700}.customize-tabs a[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 </style>{{end}}
 {{define "content"}}<header class="bar"><a href="/app{{if .Channel}}?channel={{.Channel}}{{end}}">← Back to chat</a><h1>Custom emoji</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
+<nav class="customize-tabs" aria-label="Customize"><a href="/app/customize/emoji{{if .Channel}}?channel={{.Channel}}{{end}}" aria-current="page">Emoji</a><a href="/app/customize/slackbot{{if .Channel}}?channel={{.Channel}}{{end}}">Slackbot</a></nav>
 <div class="heading"><h2>Custom emoji</h2><p>Emoji added here can be used in messages and reactions by everyone in the workspace.</p></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if .CanManage}}<form class="emoji-form" method="post" action="/app/customize/emoji/add{{if .Channel}}?channel={{.Channel}}{{end}}">

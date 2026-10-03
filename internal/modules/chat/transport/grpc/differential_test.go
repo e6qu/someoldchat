@@ -5605,6 +5605,46 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Slackbot's custom responses cross the seam whole, and so does
+			// its dispatch: an answer to a member's message, a refusal for a
+			// response with no reply, and a removal.
+			name: "Slackbot custom responses and their answers",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if _, err := chat.DispatchSlackbotResponses(ctx, "T1", 50); err != nil {
+					return nil, err
+				}
+				added, err := chat.AddSlackbotResponse(ctx, "T1", "U1", []string{"lunch, wifi"}, []string{"Tacos at noon!"})
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.Post(ctx, "T1", "U1", "C1", "Lunch?", "", ""); err != nil {
+					return nil, err
+				}
+				answered, err := chat.DispatchSlackbotResponses(ctx, "T1", 50)
+				if err != nil {
+					return nil, err
+				}
+				listed, err := chat.SlackbotResponses(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				_, invalid := chat.AddSlackbotResponse(ctx, "T1", "U1", []string{"x"}, nil)
+				if err := chat.DeleteSlackbotResponse(ctx, "T1", "U1", added.ID); err != nil {
+					return nil, err
+				}
+				gone := chat.DeleteSlackbotResponse(ctx, "T1", "U1", added.ID)
+				after, err := chat.SlackbotResponses(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				shapes := make([]any, 0, len(listed))
+				for _, value := range listed {
+					shapes = append(shapes, value.Triggers, value.Replies, value.CreatedBy, value.ID == added.ID)
+				}
+				return []any{answered, shapes, errors.Is(invalid, domain.ErrInvalidSlackbotResponse), errors.Is(gone, storepkg.ErrNotFound), len(after)}, nil
+			},
+		},
+		{
 			// An agent session crosses the seam whole: the session and every
 			// agent's status and identity, the setStatus warning, the stop
 			// control, and each refusal's sentinel.

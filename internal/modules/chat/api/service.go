@@ -53,6 +53,14 @@ type Service interface {
 	PostIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	PostIncomingWebhookWithAttachments(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	PostAsSlackbot(context.Context, domain.WorkspaceID, domain.UserID, domain.SlackbotPost) (domain.Message, error)
+	// SlackbotResponses, AddSlackbotResponse and DeleteSlackbotResponse are
+	// the workspace's Slackbot custom responses.
+	SlackbotResponses(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.SlackbotResponse, error)
+	AddSlackbotResponse(context.Context, domain.WorkspaceID, domain.UserID, []string, []string) (domain.SlackbotResponse, error)
+	DeleteSlackbotResponse(context.Context, domain.WorkspaceID, domain.UserID, domain.SlackbotResponseID) error
+	// DispatchSlackbotResponses answers the messages posted since the last
+	// dispatch: the worker half of Slackbot's custom responses and help.
+	DispatchSlackbotResponses(context.Context, domain.WorkspaceID, int) (int, error)
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
 	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) (events.UserEventPage, error)
 	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.AppEventClaim, bool, error)

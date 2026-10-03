@@ -214,6 +214,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("configure workflow event worker", "error", err)
 		return exitConfiguration
 	}
+	slackbotResponseWorker, err := scheduler.NewSlackbotResponseWorker(runtime.Service, *limit)
+	if err != nil {
+		logger.Error("configure Slackbot response worker", "error", err)
+		return exitConfiguration
+	}
 	var deadlinePublisher scheduler.FencedDeadlinePublisher
 	if *wakeDeadlineURL != "" {
 		deadlinePublisher, err = scheduler.NewActivatorDeadlinePublisher(*wakeDeadlineURL, *wakeDeadlineToken, nil)
@@ -279,11 +284,21 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			if workflowEventErr != nil {
 				logger.Error("workflow event dispatch failed", "count", workflowEventCount, "error", workflowEventErr)
 			}
+			slackbotCount, slackbotErr := slackbotResponseWorker.RunOnce(cycleContext, "")
+			if slackbotErr != nil {
+				logger.Error("Slackbot response dispatch failed", "count", slackbotCount, "error", slackbotErr)
+			}
 			deadlineErr := publishDeadline(cycleContext, "")
 			if deadlineErr != nil {
 				logger.Error("wake deadline publication failed", "error", deadlineErr)
 			}
-			return eventCount > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0 || retentionCount > 0 || workflowScheduleCount > 0 || workflowEventCount > 0, errors.Join(eventErr, scheduledErr, reminderErr, scheduledStatusErr, statusErr, retentionErr, workflowScheduleErr, workflowEventErr, deadlineErr)
+			// Every worker's progress and failure counts: a worker left out
+			// here could fail forever without the failure budget seeing it.
+			progressed := eventCount > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || reminderDeliveryCount > 0 ||
+				statusCount > 0 || userExpirationCount > 0 || retentionCount > 0 || workflowScheduleCount > 0 || workflowDelayCount > 0 ||
+				workflowEventCount > 0 || slackbotCount > 0
+			return progressed, errors.Join(eventErr, scheduledErr, reminderErr, scheduledStatusErr, reminderDeliveryErr, statusErr, userExpirationErr,
+				retentionErr, workflowScheduleErr, workflowDelayErr, workflowEventErr, slackbotErr, deadlineErr)
 		}
 		var failures error
 		count, err := worker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
@@ -316,6 +331,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			failures = errors.Join(failures, statusErr)
 			logger.Error("status expiration failed", "count", statusCount, "error", statusErr)
 		}
+		userExpirationCount, userExpirationErr := userExpirationWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
+		if userExpirationErr != nil {
+			failures = errors.Join(failures, userExpirationErr)
+			logger.Error("user expiration failed", "count", userExpirationCount, "error", userExpirationErr)
+		}
 		retentionCount, retentionErr := retentionWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
 		if retentionErr != nil {
 			failures = errors.Join(failures, retentionErr)
@@ -336,12 +356,20 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			failures = errors.Join(failures, workflowEventErr)
 			logger.Error("workflow event dispatch failed", "count", workflowEventCount, "error", workflowEventErr)
 		}
+		slackbotCount, slackbotErr := slackbotResponseWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
+		if slackbotErr != nil {
+			failures = errors.Join(failures, slackbotErr)
+			logger.Error("Slackbot response dispatch failed", "count", slackbotCount, "error", slackbotErr)
+		}
 		deadlineErr := publishDeadline(cycleContext, domain.WorkspaceID(*workspace))
 		if deadlineErr != nil {
 			failures = errors.Join(failures, deadlineErr)
 			logger.Error("wake deadline publication failed", "error", deadlineErr)
 		}
-		return count > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0 || retentionCount > 0 || workflowScheduleCount > 0 || workflowEventCount > 0, failures
+		progressed := count > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || reminderDeliveryCount > 0 ||
+			statusCount > 0 || userExpirationCount > 0 || retentionCount > 0 || workflowScheduleCount > 0 || workflowDelayCount > 0 ||
+			workflowEventCount > 0 || slackbotCount > 0
+		return progressed, failures
 	}
 	return pollWithinFailureBudget(workerContext, logger, cycle, *poll, *failureBudget)
 }

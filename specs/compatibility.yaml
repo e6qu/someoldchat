@@ -592,8 +592,10 @@ operations:
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
       - go-test:internal/api/slack:TestSlackbotIsInEveryWorkspaceAsUSLACKBOT
+      - go-test:internal/scheduler:TestSlackbotAnswersCustomResponsesAndItsDirectMessages
+      - go-test:internal/web:TestSlackbotResponsesAreManagedFromCustomizeWorkspace
     deviations:
-      - Slackbot (USLACKBOT) ends the list, as in every Slack workspace. It does not answer messages sent to its direct message, where Slack's Slackbot replies with help and the workspace's custom responses.
+      - Slackbot (USLACKBOT) ends the list, as in every Slack workspace. It answers a member's message that says one of the workspace's custom response phrases (kept under Customize workspace › Slackbot, which any full member may change) with one of the response's replies, in the same place; a direct message to it that no response matches gets help. The worker answers each message once, after it is posted, from the journal onward from when it first read it; messages from apps, bots and Slackbot itself are never answered.
       - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's long name in force at the time (for example Eastern Daylight Time), from ICU's names; a zone or offset newer than the generated table keeps its abbreviation.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
   - method: users.lookupByEmail

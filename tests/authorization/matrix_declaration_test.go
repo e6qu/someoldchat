@@ -31,6 +31,7 @@ func authorityMatrix() map[string]authority {
 		"CreateSocketModeConnection":    authorityCredential,
 		"DeleteDeveloperApp":            authorityCredential,
 		"DispatchWorkflowEventTriggers": authorityCredential,
+		"DispatchSlackbotResponses":     authorityCredential,
 		"ExportAppManifest":             authorityCredential,
 		"ExternalAuthToken":             authorityCredential,
 		"SetAppExternalAuthProvider":    authorityCredential,
@@ -194,8 +195,10 @@ func authorityMatrix() map[string]authority {
 
 		// Kept away from guests: a guest reaches a channel by being added to it,
 		// never by naming one.
-		"CreateConversation": authorityNotGuest,
-		"JoinConversation":   authorityNotGuest,
+		"CreateConversation":     authorityNotGuest,
+		"JoinConversation":       authorityNotGuest,
+		"AddSlackbotResponse":    authorityNotGuest,
+		"DeleteSlackbotResponse": authorityNotGuest,
 
 		// Available to any active member, both guest tiers included.
 		"AcceptSharedInvite":                      authorityAnyMember,
@@ -327,6 +330,7 @@ func authorityMatrix() map[string]authority {
 		"EditBookmark":                            authorityAnyMember,
 		"EditCanvas":                              authorityAnyMember,
 		"Emojis":                                  authorityAnyMember,
+		"SlackbotResponses":                       authorityAnyMember,
 		"EmojiRevision":                           authorityAnyMember,
 		"EndCall":                                 authorityAnyMember,
 		"EndDND":                                  authorityAnyMember,

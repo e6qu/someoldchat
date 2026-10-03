@@ -56,6 +56,7 @@ type Remote struct {
 	canvases      chatv1.CanvasesServiceClient
 	agentSessions chatv1.AgentSessionsServiceClient
 	codeChannels  chatv1.CodeChannelsServiceClient
+	slackbot      chatv1.SlackbotServiceClient
 }
 
 // mappedClientConn preserves the domain error contract when an implementation is
@@ -137,6 +138,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 		canvases:      chatv1.NewCanvasesServiceClient(conn),
 		agentSessions: chatv1.NewAgentSessionsServiceClient(conn),
 		codeChannels:  chatv1.NewCodeChannelsServiceClient(conn),
+		slackbot:      chatv1.NewSlackbotServiceClient(conn),
 	}, nil
 }
 
@@ -5981,6 +5983,7 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterAppsServiceServer(registrar, server)
 	chatv1.RegisterAgentSessionsServiceServer(registrar, server)
 	chatv1.RegisterCodeChannelsServiceServer(registrar, server)
+	chatv1.RegisterSlackbotServiceServer(registrar, server)
 	return nil
 }
 
@@ -13446,7 +13449,7 @@ func (s *Server) PostIncomingWebhook(ctx context.Context, input *chatv1.Incoming
 
 func (s *Server) PostAsSlackbot(ctx context.Context, input *chatv1.SlackbotPostRequest) (*chatv1.Message, error) {
 	value, err := s.implementation.PostAsSlackbot(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetMemberId()), domain.SlackbotPost{
-		Conversation: domain.ConversationID(input.GetConversationId()), Text: input.GetText(), Blocks: input.GetBlocks(), IdempotencyKey: input.GetIdempotencyKey(),
+		Conversation: domain.ConversationID(input.GetConversationId()), ThreadTimestamp: domain.MessageTimestamp(input.GetThreadTs()), Text: input.GetText(), Blocks: input.GetBlocks(), IdempotencyKey: input.GetIdempotencyKey(),
 	})
 	if err != nil {
 		return nil, mapError(err)
@@ -13652,7 +13655,7 @@ func (r Remote) PostIncomingWebhookWithAttachments(ctx context.Context, workspac
 }
 
 func (r Remote) PostAsSlackbot(ctx context.Context, workspaceID domain.WorkspaceID, memberID domain.UserID, post domain.SlackbotPost) (domain.Message, error) {
-	out, err := r.messages.PostAsSlackbot(ctx, &chatv1.SlackbotPostRequest{WorkspaceId: string(workspaceID), MemberId: string(memberID), ConversationId: string(post.Conversation), Text: post.Text, Blocks: post.Blocks, IdempotencyKey: post.IdempotencyKey})
+	out, err := r.messages.PostAsSlackbot(ctx, &chatv1.SlackbotPostRequest{WorkspaceId: string(workspaceID), MemberId: string(memberID), ConversationId: string(post.Conversation), ThreadTs: string(post.ThreadTimestamp), Text: post.Text, Blocks: post.Blocks, IdempotencyKey: post.IdempotencyKey})
 	if err != nil {
 		return domain.Message{}, err
 	}

@@ -457,6 +457,8 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(domain.CodeChannelViewRequest{Key: "fixture.html", Content: "<p>fixture</p>"})
 	case reflect.TypeOf(domain.CodeChannelViewID("")):
 		return reflect.ValueOf(fixtureCodeChannelViewID)
+	case reflect.TypeOf(domain.SlackbotResponseID("")):
+		return reflect.ValueOf(fixtureSlackbotResponseID)
 	case reflect.TypeOf(domain.LaterReminderRequest{}):
 		// A valid personal reminder edit, so UpdateLaterReminder — acting on the
 		// holder's own seeded reminder after authorizeWorkspace — reaches success
@@ -811,6 +813,9 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		AccessLevel: domain.CodeChannelCanvasWrite, CreatedAt: at.Add(time.Second), UpdatedAt: at.Add(time.Second),
 	}, event("E-code-channel-canvas-view", "code_channel.view_set"))
 	seed("code channel canvas view", canvasViewErr)
+	seed("Slackbot response", repository.CreateSlackbotResponse(ctx, domain.SlackbotResponse{
+		WorkspaceID: "T1", ID: fixtureSlackbotResponseID, Triggers: []string{"fixture"}, Replies: []string{"fixture reply"}, CreatedBy: "U-owner", CreatedAt: at,
+	}, event("E-slackbot-response", "slackbot_response.created")))
 	seed("dialog", repository.CreateDialog(ctx, domain.Dialog{
 		ID: fixtureDialogID, WorkspaceID: "T1", UserID: "U-owner", AppID: fixtureAppID, CreatedAt: at,
 		Payload: `{"callback_id":"fixture","title":"Fixture","elements":[{"type":"text","name":"answer","label":"Answer"}]}`,
@@ -1037,22 +1042,23 @@ const (
 	fixtureDeactivatedDialogID domain.DialogID = "F-deactivated-dialog"
 	fixtureHuddleID            domain.CallID   = "F-huddle"
 
-	fixtureSharedInviteID    domain.SharedInviteID      = "F-invite"
-	fixtureApprovedInviteID  domain.SharedInviteID      = "F-approved-invite"
-	fixtureWorkflowTriggerD  domain.WorkflowTriggerID   = "F-trigger"
-	fixtureWorkflowRunID     domain.WorkflowRunID       = "F-run"
-	fixtureSavedItemID       domain.SavedItemID         = "F-saved"
-	fixtureHolderSavedItemID domain.SavedItemID         = "F-holder-saved"
-	fixtureMessageID         domain.MessageID           = "M1"
-	fixtureListItemID        domain.ListItemID          = "F-list-item"
-	fixtureScheduledStatusID domain.ScheduledStatusID   = "F-scheduled-status"
-	fixtureActivityViewID    domain.ActivitySavedViewID = "F-activity-view"
-	fixtureSidebarSectionID  domain.SidebarSectionID    = "F-sidebar-section"
-	fixtureListDownloadID    domain.ListDownloadID      = "F-list-download"
-	fixtureGroupDMID         domain.ConversationID      = "Cmpim"
-	fixtureCodeChannelID     domain.ConversationID      = "Ccode"
-	fixtureCodeChannelViewID domain.CodeChannelViewID   = "Ct-fixture"
-	fixtureProfileFieldID    domain.ProfileFieldID      = "F-profile-field"
+	fixtureSharedInviteID     domain.SharedInviteID      = "F-invite"
+	fixtureApprovedInviteID   domain.SharedInviteID      = "F-approved-invite"
+	fixtureWorkflowTriggerD   domain.WorkflowTriggerID   = "F-trigger"
+	fixtureWorkflowRunID      domain.WorkflowRunID       = "F-run"
+	fixtureSavedItemID        domain.SavedItemID         = "F-saved"
+	fixtureHolderSavedItemID  domain.SavedItemID         = "F-holder-saved"
+	fixtureMessageID          domain.MessageID           = "M1"
+	fixtureListItemID         domain.ListItemID          = "F-list-item"
+	fixtureScheduledStatusID  domain.ScheduledStatusID   = "F-scheduled-status"
+	fixtureActivityViewID     domain.ActivitySavedViewID = "F-activity-view"
+	fixtureSidebarSectionID   domain.SidebarSectionID    = "F-sidebar-section"
+	fixtureListDownloadID     domain.ListDownloadID      = "F-list-download"
+	fixtureGroupDMID          domain.ConversationID      = "Cmpim"
+	fixtureCodeChannelID      domain.ConversationID      = "Ccode"
+	fixtureCodeChannelViewID  domain.CodeChannelViewID   = "Ct-fixture"
+	fixtureSlackbotResponseID domain.SlackbotResponseID  = "Sr-fixture"
+	fixtureProfileFieldID     domain.ProfileFieldID      = "F-profile-field"
 )
 
 func requireSeed(t *testing.T, err error) {

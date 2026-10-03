@@ -202,6 +202,10 @@ func NewCodeChannelViewID() (CodeChannelViewID, error) {
 	value, err := SlackID("Ct")
 	return CodeChannelViewID(value), err
 }
+func NewSlackbotResponseID() (SlackbotResponseID, error) {
+	value, err := SlackID("Sr")
+	return SlackbotResponseID(value), err
+}
 func NewCanvasID() (CanvasID, error) { value, err := SlackID("F"); return CanvasID(value), err }
 func NewUserID() (UserID, error)     { value, err := SlackID("U"); return UserID(value), err }
 func NewListID() (ListID, error)     { value, err := SlackID("F"); return ListID(value), err }

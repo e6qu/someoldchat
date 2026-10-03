@@ -176,6 +176,7 @@ func runQualification(t *testing.T, open opener) {
 		{"a code channel keeps its record beside its conversation", codeChannelsKeepTheirRecord},
 		{"visible files are newest first", visibleFilesAreNewestFirst},
 		{"remote files are searchable where they are shared", remoteFilesAreSearchable},
+		{"Slackbot's custom responses are kept with their cursor", slackbotResponsesAreKept},
 		{"OAuth installs reuse their bot and redeem every grant shape", oauthInstallsReuseTheirBotAndRedeemEveryGrantShape},
 		{"file shares name their carrying messages", fileSharesNameTheirCarryingMessages},
 	} {

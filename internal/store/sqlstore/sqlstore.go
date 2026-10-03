@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
 ` + agentSessionSchema + `
 ` + codeChannelSchema + `
 ` + codeChannelViewSchema + `
+` + slackbotResponseSchema + `
 CREATE TABLE IF NOT EXISTS conversation_typing (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
  user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL,
@@ -608,7 +609,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 207
+const schemaVersion = 208
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3585,6 +3586,16 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 208: Slackbot custom responses ---
+	if version < 208 {
+		// Slackbot answers a workspace's custom responses and its direct
+		// messages. The tables are new, so an existing database gains them
+		// empty; the cursor starts at the journal's head when first read.
+		if _, err := db.ExecContext(ctx, slackbotResponseSchema); err != nil {
+			return fmt.Errorf("migrate Slackbot responses: %w", err)
+		}
+	}
+	// --- end schema 208 ---
 	// --- schema 207: code channel commands ---
 	if version < 207 {
 		// agents.conversations.setCommands keeps each agent's commands on the
