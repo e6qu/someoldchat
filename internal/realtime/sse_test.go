@@ -96,7 +96,7 @@ func TestSSEReplaysFromDurableSequence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestSSEResumesAfterTheReportedCursor(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		handler, err := NewHandler(source, authenticator, &testTypingSource{})
+		handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -166,7 +166,7 @@ func TestSSESkipsUndeliverableRecordsAndKeepsStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestSSESendsHeartbeatWhileIdle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestSSEEndsWhenTheSessionIsRevoked(t *testing.T) {
 	} {
 		source := &countingSource{}
 		authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: withdrawal}
-		handler, err := NewHandler(source, authenticator, &testTypingSource{})
+		handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -268,7 +268,7 @@ func TestSSESurvivesASessionStoreThatCannotAnswer(t *testing.T) {
 		failures:     2,
 		recoverAfter: true,
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestSSESurvivesASessionStoreThatCannotAnswer(t *testing.T) {
 func TestSSEEndsPromptlyWhenTheStoreSaysTheSessionIsGone(t *testing.T) {
 	source := &countingSource{}
 	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrInvalidToken}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestSSEEndsPromptlyWhenTheStoreSaysTheSessionIsGone(t *testing.T) {
 func TestSSEEndsAfterRepeatedInconclusiveReauthorization(t *testing.T) {
 	source := &countingSource{}
 	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrCredentialStoreUnavailable}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestSSEBoundsEveryWriteAndDropsAConsumerThatStopsReading(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestSSEReturnsPromptlyWhenItsRequestContextEnds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +665,7 @@ func TestRTMMessageRejectsInvalidCommands(t *testing.T) {
 
 func TestRTMWebSocketDispatchesMessageAndCorrelatesReply(t *testing.T) {
 	service := &testRTMMessageService{}
-	handler, err := NewRTMHandler(emptyEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, service, &testTypingSource{})
+	handler, err := NewRTMHandler(emptyEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, service, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -707,7 +707,7 @@ func TestRTMWebSocketDispatchesMessageAndCorrelatesReply(t *testing.T) {
 }
 
 func TestRTMWebSocketAcceptsNonBrowserClientHandshake(t *testing.T) {
-	handler, err := NewRTMHandler(emptyEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{}, &testTypingSource{})
+	handler, err := NewRTMHandler(emptyEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{}, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -738,7 +738,7 @@ func TestRTMWebSocketAcceptsNonBrowserClientHandshake(t *testing.T) {
 
 func TestRTMWebSocketCorrelatesMessageFailure(t *testing.T) {
 	service := &testRTMMessageService{err: errors.New("store unavailable")}
-	handler, err := NewRTMHandler(emptyEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, service, &testTypingSource{})
+	handler, err := NewRTMHandler(emptyEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, service, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +790,7 @@ func (failingEventSource) ListUserEventsAfter(context.Context, domain.WorkspaceI
 // frame, so an official client reconnects instead of treating the close as a
 // failure. Nothing said goodbye before; the socket just vanished.
 func TestRTMWebSocketSaysGoodbyeWhenTheStreamEnds(t *testing.T) {
-	handler, err := NewRTMHandler(failingEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{}, &testTypingSource{})
+	handler, err := NewRTMHandler(failingEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{}, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -866,7 +866,7 @@ func TestRTMStreamOpensAtTheTicketCursorRatherThanReplayingTheJournal(t *testing
 	}}}
 	handler, err := NewRTMHandler(source, testRTMConnectionSource{connection: domain.RTMConnection{
 		ID: "session-1", WorkspaceID: "T1", UserID: "U1", Cursor: 12,
-	}}, &testRTMMessageService{}, &testTypingSource{})
+	}}, &testRTMMessageService{}, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -907,7 +907,7 @@ func TestRTMStreamPrefersAnExplicitCursorOverTheTicket(t *testing.T) {
 	source := &recordingEventSource{}
 	handler, err := NewRTMHandler(source, testRTMConnectionSource{connection: domain.RTMConnection{
 		ID: "session-1", WorkspaceID: "T1", UserID: "U1", Cursor: 12,
-	}}, &testRTMMessageService{}, &testTypingSource{})
+	}}, &testRTMMessageService{}, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -59,6 +59,7 @@ type Store struct {
 	workflowEventCursor           map[domain.WorkspaceID]uint64
 	slackbotResponses             map[domain.SlackbotResponseID]domain.SlackbotResponse
 	slackbotResponseCursor        map[domain.WorkspaceID]uint64
+	clientConnections             map[domain.ClientConnectionID]domain.ClientConnection
 	workflowRuns                  map[domain.WorkflowRunID]domain.WorkflowRun
 	automationPermissions         map[string]domain.AutomationPermission
 	featuredWorkflows             map[domain.ConversationID][]domain.FeaturedWorkflow
@@ -345,6 +346,7 @@ func New() *Store {
 		workflowEventCursor:           make(map[domain.WorkspaceID]uint64),
 		slackbotResponses:             make(map[domain.SlackbotResponseID]domain.SlackbotResponse),
 		slackbotResponseCursor:        make(map[domain.WorkspaceID]uint64),
+		clientConnections:             make(map[domain.ClientConnectionID]domain.ClientConnection),
 		workflowRuns:                  make(map[domain.WorkflowRunID]domain.WorkflowRun),
 		automationPermissions:         make(map[string]domain.AutomationPermission),
 		featuredWorkflows:             make(map[domain.ConversationID][]domain.FeaturedWorkflow),

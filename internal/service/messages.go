@@ -3819,7 +3819,16 @@ func (m Messages) SetUserPresence(ctx context.Context, workspaceID domain.Worksp
 	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
 		return domain.User{}, domain.ErrInvalidPresence
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("user.presence_changed", events.String("user_id", string(userID)), events.String("presence", string(presence))), time.Now().UTC())
+	user, err := m.Store.GetUser(ctx, userID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	// The journal carries the presence others see, active or away, as
+	// Slack's presence_change does: never the manual setting, whose auto is
+	// not a presence.
+	now := time.Now().UTC()
+	user.Presence = presence
+	event, err := newEvent(workspaceID, userID, events.NewPayload("user.presence_changed", events.String("user_id", string(userID)), events.String("presence", user.PresenceAt(now))), now)
 	if err != nil {
 		return domain.User{}, err
 	}

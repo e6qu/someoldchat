@@ -143,7 +143,7 @@ const conversationShellStyle = `<style>
 .conversation-details .conversation-member[hidden]{display:none}
 .conversation-member-avatar{position:relative;display:grid;place-items:center;flex:0 0 auto;width:32px;height:32px;border-radius:7px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;font-weight:800}
 .conversation-member-avatar .presence-dot{border-color:var(--panel)}
-.conversation-member-avatar .presence-dot.auto{display:none}
+
 .conversation-member-name{flex:1 1 auto;min-width:0}
 .member-menu{margin-left:auto}
 .member-menu>summary{display:grid;place-items:center;width:28px;height:28px;border-radius:6px;color:var(--muted);cursor:pointer;opacity:0}

@@ -90,7 +90,7 @@ func TestTypingCommandIsParsedAndOtherwiseIgnored(t *testing.T) {
 func TestRTMWebSocketRecordsTypingAndDeliversUserTyping(t *testing.T) {
 	typing := &testTypingSource{}
 	typing.stage(domain.TypingSignal{WorkspaceID: "T1", Conversation: "C1", UserID: "U2", ExpiresAt: time.Now().Add(time.Minute)})
-	handler, err := NewRTMHandler(emptyEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{}, typing)
+	handler, err := NewRTMHandler(emptyEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{}, typing, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestSSETypingFrameCarriesNoCursor(t *testing.T) {
 	}
 	typing := &testTypingSource{}
 	typing.stage(domain.TypingSignal{WorkspaceID: "T1", Conversation: "C1", UserID: "U2", ExpiresAt: time.Now().Add(time.Minute)})
-	handler, err := NewHandler(source, authenticator, typing)
+	handler, err := NewHandler(source, authenticator, typing, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}

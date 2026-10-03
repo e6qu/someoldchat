@@ -620,9 +620,12 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
+      - go-test:internal/api/slack:TestPresenceFollowsOpenClientsAndTheManualSetting
+      - go-test:internal/service:TestPresenceChangesAnnounceWhatOthersSee
+      - go-test:internal/realtime:TestAStreamIsAClientConnectionWhileItIsOpen
     deviations:
-      - Automatic presence follows Slack's ten-minute inactivity rule against the member's last observed activity; websocket connectivity does not feed it.
-      - The caller's own presence carries online, auto_away, manual_away, connection_count and last_activity. Client connections are not tracked, so online and connection_count (0 or 1) follow observed activity rather than open connections.
+      - Presence follows Slack's rule - active only while at least one of the member's clients is connected and they are not away by choice or after ten minutes without activity; a bot user is active while connected. The clients are the web client's event stream and RTM sockets, each a lease its server renews every 20 seconds and that lapses 60 seconds after a server vanishes without closing it.
+      - The caller's own presence carries online, auto_away, manual_away, connection_count (their open clients) and last_activity. presence_change is sent to RTM when a member's first client connects or last disconnects and when they choose away or automatic; a lease that lapses, and the ten-minute inactivity, change presence without announcing it.
       - Current rate-limit behavior has not been qualified against Slack.
     audit:
       downgraded_from: behavior-compatible
@@ -641,7 +644,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
-      - The documented `auto` and `away` values persist and round-trip; automatic presence follows client activity, and connection state does not feed it.
+      - The documented `auto` and `away` values persist and round-trip; automatic presence is active while one of the member's clients is connected and they were active in the last ten minutes. The presence_change it announces carries active or away, never the setting `auto`.
       - Current Slack rate-limit and token-type behavior has not been differentially qualified.
     audit:
       downgraded_from: behavior-compatible

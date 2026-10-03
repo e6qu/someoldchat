@@ -28,7 +28,7 @@ func dialRTM(t *testing.T, handler Handler, header http.Header) *websocket.Conn 
 
 func livenessHandler(t *testing.T) Handler {
 	t.Helper()
-	handler, err := NewRTMHandler(emptyEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{}, &testTypingSource{})
+	handler, err := NewRTMHandler(emptyEventSource{}, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{}, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}

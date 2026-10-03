@@ -396,6 +396,22 @@ type Store interface {
 	// automatic presence automatic. It journals nothing: a heartbeat is derived
 	// state, not something a consumer needs delivered.
 	TouchUserActivity(context.Context, domain.WorkspaceID, domain.UserID, time.Time) error
+	// OpenClientConnection records one of a member's open clients, extends
+	// their ConnectedUntil to its lease and removes their lapsed leases. The
+	// online event, when it has an ID, is journalled only if the member had
+	// no connection at now: it announces them coming online.
+	OpenClientConnection(context.Context, domain.ClientConnection, time.Time, events.Event) error
+	// RenewClientConnection extends a connection's lease, never shortening
+	// it; ErrNotFound when the connection is gone.
+	RenewClientConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.ClientConnectionID, time.Time) error
+	// CloseClientConnection removes a connection and draws the member's
+	// ConnectedUntil back to their latest remaining lease. The offline event,
+	// when it has an ID, is journalled only if they were connected at now and
+	// no connection remains.
+	CloseClientConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.ClientConnectionID, time.Time, events.Event) error
+	// CountClientConnections is how many of a member's connections are live
+	// at now.
+	CountClientConnections(context.Context, domain.WorkspaceID, domain.UserID, time.Time) (int, error)
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
 	// SetRoleAssignments gives members a system role over entities. The store
 	// writes one row for each member and entity pair.

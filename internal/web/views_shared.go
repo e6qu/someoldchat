@@ -406,12 +406,8 @@ func (h Handler) buildProfileView(r *http.Request, principal auth.Principal, id 
 	switch {
 	case user.IsBot():
 		view.Presence, view.PresenceLabel = "active", "App"
-	case user.PresenceAt(now) == "away" && !view.IsSelf:
+	case viewPresence(user, view.IsSelf, now) == "away":
 		view.Presence, view.PresenceLabel = "away", "Away"
-	case view.IsSelf && user.Presence == domain.PresenceAway:
-		view.Presence, view.PresenceLabel = "away", "Away"
-	case !view.IsSelf && user.LastActiveAt.IsZero():
-		view.Presence, view.PresenceLabel = "auto", "Presence unavailable"
 	default:
 		view.Presence, view.PresenceLabel = "active", "Active"
 	}

@@ -25,7 +25,7 @@ func streamAs(t *testing.T, source UserEventSource, user domain.UserID, lastEven
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestEventStreamAdvancesPastWithheldRecords(t *testing.T) {
 
 func TestRTMStreamAdvancesPastWithheldRecords(t *testing.T) {
 	source := &throughSource{}
-	handler, err := NewRTMHandler(source, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{}, &testTypingSource{})
+	handler, err := NewRTMHandler(source, testRTMConnectionSource{connection: domain.RTMConnection{ID: "session-1", WorkspaceID: "T1", UserID: "U1"}}, &testRTMMessageService{}, &testTypingSource{}, &testConnectionTracker{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -77,7 +77,7 @@ func Mount(mux *http.ServeMux, surface Surface) error {
 			Responses: responses, Logger: surface.Logger,
 		})
 	}
-	rtm, err := realtime.NewRTMHandler(surface.Messages, surface.Messages, surface.Messages, surface.Messages)
+	rtm, err := realtime.NewRTMHandler(surface.Messages, surface.Messages, surface.Messages, surface.Messages, surface.Messages)
 	if err != nil {
 		return err
 	}

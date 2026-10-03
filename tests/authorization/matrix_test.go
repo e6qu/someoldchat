@@ -459,6 +459,8 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureCodeChannelViewID)
 	case reflect.TypeOf(domain.SlackbotResponseID("")):
 		return reflect.ValueOf(fixtureSlackbotResponseID)
+	case reflect.TypeOf(domain.ClientConnectionID("")):
+		return reflect.ValueOf(fixtureClientConnectionID)
 	case reflect.TypeOf(domain.LaterReminderRequest{}):
 		// A valid personal reminder edit, so UpdateLaterReminder — acting on the
 		// holder's own seeded reminder after authorizeWorkspace — reaches success
@@ -816,6 +818,9 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	seed("Slackbot response", repository.CreateSlackbotResponse(ctx, domain.SlackbotResponse{
 		WorkspaceID: "T1", ID: fixtureSlackbotResponseID, Triggers: []string{"fixture"}, Replies: []string{"fixture reply"}, CreatedBy: "U-owner", CreatedAt: at,
 	}, event("E-slackbot-response", "slackbot_response.created")))
+	seed("client connection", repository.OpenClientConnection(ctx, domain.ClientConnection{
+		ID: fixtureClientConnectionID, WorkspaceID: "T1", UserID: "U-owner", ExpiresAt: time.Now().Add(time.Hour),
+	}, time.Now(), events.Event{}))
 	seed("dialog", repository.CreateDialog(ctx, domain.Dialog{
 		ID: fixtureDialogID, WorkspaceID: "T1", UserID: "U-owner", AppID: fixtureAppID, CreatedAt: at,
 		Payload: `{"callback_id":"fixture","title":"Fixture","elements":[{"type":"text","name":"answer","label":"Answer"}]}`,
@@ -1058,6 +1063,7 @@ const (
 	fixtureCodeChannelID      domain.ConversationID      = "Ccode"
 	fixtureCodeChannelViewID  domain.CodeChannelViewID   = "Ct-fixture"
 	fixtureSlackbotResponseID domain.SlackbotResponseID  = "Sr-fixture"
+	fixtureClientConnectionID domain.ClientConnectionID  = "cc-fixture"
 	fixtureProfileFieldID     domain.ProfileFieldID      = "F-profile-field"
 )
 
