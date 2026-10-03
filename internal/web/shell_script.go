@@ -41,9 +41,12 @@ function writePref(key,value){try{window.localStorage.setItem(storageKey(key),va
 window.sameoldchatPreferences={get:readPref,set:writePref};
 var darkQuery=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
 function applyTheme(){var theme=readPref('theme','system');var dark=theme==='dark'||(theme!=='light'&&!!(darkQuery&&darkQuery.matches));root.setAttribute('data-theme',dark?'dark':'light');root.setAttribute('data-theme-explicit','')}
+var displayDefaults={'underline-links':'false','reduce-motion':'false','inline-media':'true','link-previews':'true','emoji-as-text':'false','jumbomoji':'true'};
+function applyDisplay(){Object.keys(displayDefaults).forEach(function(key){var value=readPref(key,displayDefaults[key]);if(value===displayDefaults[key])root.removeAttribute('data-pref-'+key);else root.setAttribute('data-pref-'+key,value)})}
+applyDisplay();
 if(darkQuery){if(typeof darkQuery.addEventListener==='function')darkQuery.addEventListener('change',applyTheme);else if(typeof darkQuery.addListener==='function')darkQuery.addListener(applyTheme)}
 function loadPreferenceInputs(scope){all('[data-preference]',scope).forEach(function(input){var key=input.getAttribute('data-preference');var fallback=input.getAttribute('data-default');var value=readPref(key,null);if(input.type==='checkbox'){input.checked=value===null?fallback==='true':value==='true'}else if(input.type==='radio'){var current=value===null?null:value;if(current===null){var group=all('[data-preference="'+key+'"]',scope);var defaulted=group.filter(function(item){return item.hasAttribute('data-default')})[0];current=defaulted?defaulted.value:''}input.checked=input.value===current}else{input.value=value===null?(fallback||''):value}})}
-document.addEventListener('change',function(event){var input=event.target;if(!input||!input.hasAttribute||!input.hasAttribute('data-preference'))return;var key=input.getAttribute('data-preference');writePref(key,input.type==='checkbox'?(input.checked?'true':'false'):input.value);if(key==='theme')applyTheme();applySidebar();say('Preference saved.')});
+document.addEventListener('change',function(event){var input=event.target;if(!input||!input.hasAttribute||!input.hasAttribute('data-preference'))return;var key=input.getAttribute('data-preference');writePref(key,input.type==='checkbox'?(input.checked?'true':'false'):input.value);if(key==='theme')applyTheme();if(Object.prototype.hasOwnProperty.call(displayDefaults,key))applyDisplay();applySidebar();say('Preference saved.')});
 loadPreferenceInputs(document);
 
 function openMenus(){return all('details[data-menu][open]')}

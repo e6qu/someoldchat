@@ -312,11 +312,13 @@ jobs:
     name: Browser qualification
     runs-on: ubuntu-24.04
     # The suite runs every test in three engines with workers: 1, and the job
-    # also pays for npm ci and three browser downloads. It last measured 7m37s
-    # at 40 tests; this PR adds journeys for huddles, Slack Connect, the
-    # workspace switcher and the administration surfaces, so the ceiling moves
-    # with them rather than being discovered by a timeout in CI.
-    timeout-minutes: 25
+    # also pays for npm ci and three browser downloads. At 359 runs (118
+    # journeys per engine and the administration project) it measured 19m18s
+    # on one runner and reached run 319 at the 25-minute ceiling on a slower
+    # one, so the ceiling moves with the suite rather than being discovered by
+    # a timeout in CI. A hung test still fails long before this: each has
+    # Playwright's own 60-second budget.
+    timeout-minutes: 40
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

@@ -2356,6 +2356,50 @@ test('[NAV-06] theme choice persists across workspace pages', async ({ page, con
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 });
 
+// Accessibility and Messages & media are Slack preference sections whose
+// choices change how every message reads, and they follow the account.
+test('[NAV-06 A11Y-01] accessibility and message display preferences change how messages read', async ({ page, context, request }) => {
+  await signIn(context);
+  const posted = await request.post('/api/chat.postMessage', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL, text: `display preferences :tada: <https://example.com|a link> ${Date.now()}` },
+  });
+  expect((await posted.json()).ok).toBe(true);
+  await page.goto(`/app?channel=${CHANNEL}`);
+  const message = page.locator('.message-text', { hasText: 'display preferences' }).last();
+  const emoji = message.locator('.standard-emoji');
+  const link = message.getByRole('link', { name: 'a link' });
+  await expect(emoji).toHaveCSS('font-size', '18px');
+
+  const { primary } = await slackModifiers(page);
+  await page.keyboard.press(`${primary}+Comma`);
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.getByRole('tab', { name: 'Accessibility' }).click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-accessibility');
+  await preferences.getByRole('checkbox', { name: 'Underline links in messages' }).check();
+  await expect(link).toHaveCSS('text-decoration-line', 'underline');
+  await preferences.getByRole('tab', { name: 'Messages & media' }).click();
+  await preferences.getByRole('checkbox', { name: 'Display emoji as plain text' }).check();
+  await expect(emoji).toBeHidden();
+  await expect(message.locator('.emoji-code')).toHaveText(':tada:');
+  await expect(message.locator('.emoji-code')).toBeVisible();
+
+  // The choice is the account's, so a reload (or another browser) keeps it.
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-pref-emoji-as-text', 'true');
+  await expect(page.locator('html')).toHaveAttribute('data-pref-underline-links', 'true');
+
+  // Every test shares one member, so put the defaults back.
+  await page.keyboard.press(`${primary}+Comma`);
+  await preferences.getByRole('tab', { name: 'Accessibility' }).click();
+  await preferences.getByRole('checkbox', { name: 'Underline links in messages' }).uncheck();
+  await preferences.getByRole('tab', { name: 'Messages & media' }).click();
+  await preferences.getByRole('checkbox', { name: 'Display emoji as plain text' }).uncheck();
+  await expect(page.locator('html')).not.toHaveAttribute('data-pref-emoji-as-text', /.*/);
+  await expect(page.locator('html')).not.toHaveAttribute('data-pref-underline-links', /.*/);
+});
+
 // Slack's switcher is a combobox over a listbox: the typed text filters, the
 // highlighted option is the active descendant, an empty result says so, and
 // with nothing typed the conversations just visited lead.
