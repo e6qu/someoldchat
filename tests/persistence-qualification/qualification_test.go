@@ -180,6 +180,7 @@ func runQualification(t *testing.T, open opener) {
 		{"client connections decide presence", clientConnectionsDecidePresence},
 		{"search filters keep to the searcher's channels and to people", searchFiltersKeepToMembersAndPeople},
 		{"recent reactions are the member's latest", recentReactionsAreTheMembersLatest},
+		{"member preferences are kept per member", memberPreferencesAreKeptPerMember},
 		{"OAuth installs reuse their bot and redeem every grant shape", oauthInstallsReuseTheirBotAndRedeemEveryGrantShape},
 		{"file shares name their carrying messages", fileSharesNameTheirCarryingMessages},
 	} {

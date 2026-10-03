@@ -2143,7 +2143,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
 {{define "scripts"}}` + shellScript + progressiveEnhancementScript + messageScript + composerScript + searchSuggestionsScript + appOptionsScript + viewInputScript + huddleMediaScript + rowLinkScript + profilePanelScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
-<div class="shell" data-channel="{{.Channel}}" data-conversation-open="{{if or .IsMember .Directs}}true{{else}}false{{end}}" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}"{{if .CanonicalURL}} data-canonical-url="{{.CanonicalURL}}"{{end}}>
+<div class="shell" data-channel="{{.Channel}}" data-conversation-open="{{if or .IsMember .Directs}}true{{else}}false{{end}}" data-browser-notifications="{{if .BrowserNotifications}}true{{else}}false{{end}}" data-notifications-paused="{{if .NotificationsPaused}}true{{else}}false{{end}}" data-channel-name="{{.ChannelName}}"{{if .CanonicalURL}} data-canonical-url="{{.CanonicalURL}}"{{end}}{{if .Shell.Preferences}} data-preferences="{{.Shell.Preferences}}" data-preferences-csrf="{{.Shell.CSRFToken}}"{{end}}>
   {{template "shell-top" .Shell}}
   {{template "message-dialogs" .}}
   {{if .CanPost}}{{template "composer-dialogs" .ComposerDialogs}}{{end}}
@@ -4046,6 +4046,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/message/schedule/cancel", h.cancelScheduledMessage)
 	mux.HandleFunc("POST /app/file/stage", h.stageDraftFiles)
 	mux.HandleFunc("POST /app/file/share", h.shareRecentFile)
+	mux.HandleFunc("POST /app/preferences", h.keepMemberPreference)
 	mux.HandleFunc("POST /app/file", h.uploadFile)
 	mux.HandleFunc("GET /app/files", h.filesBrowser)
 	mux.HandleFunc("GET /app/files/{fileID}/view", h.fileView)

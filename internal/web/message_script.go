@@ -315,7 +315,7 @@ if(toneButton&&toneOptions){
 var syncTone=function(){var current=tone();Array.prototype.forEach.call(toneOptions.querySelectorAll('[data-tone]'),function(option){option.setAttribute('aria-checked',option.getAttribute('data-tone')===current?'true':'false')});var shown=toneOptions.querySelector('[data-tone="'+current+'"]');toneButton.firstElementChild.textContent=shown?shown.textContent:'✋'};
 syncTone();
 toneButton.addEventListener('click',function(){toneOptions.hidden=!toneOptions.hidden;toneButton.setAttribute('aria-expanded',toneOptions.hidden?'false':'true');if(!toneOptions.hidden){var checked=toneOptions.querySelector('[aria-checked=true]')||toneOptions.querySelector('[data-tone]');if(checked)checked.focus()}});
-toneOptions.addEventListener('click',function(event){var option=event.target.closest('[data-tone]');if(!option)return;try{localStorage.setItem('sameoldchat-emoji-tone',option.getAttribute('data-tone'))}catch(error){}syncTone();toneOptions.hidden=true;toneButton.setAttribute('aria-expanded','false');load();if(pickerQuery)pickerQuery.focus()});
+toneOptions.addEventListener('click',function(event){var option=event.target.closest('[data-tone]');if(!option)return;try{localStorage.setItem('sameoldchat-emoji-tone',option.getAttribute('data-tone'))}catch(error){}if(window.sameoldchatKeepPreference)window.sameoldchatKeepPreference('emoji-tone',option.getAttribute('data-tone'));syncTone();toneOptions.hidden=true;toneButton.setAttribute('aria-expanded','false');load();if(pickerQuery)pickerQuery.focus()});
 }
 }
 

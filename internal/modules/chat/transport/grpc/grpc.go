@@ -3369,6 +3369,29 @@ func (r Remote) CloseClientConnection(ctx context.Context, workspaceID domain.Wo
 	return nil
 }
 
+func (r Remote) MemberPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (map[string]string, error) {
+	out, err := r.presence.MemberPreferences(ctx, &chatv1.MemberPreferencesRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return nil, err
+	}
+	values := make(map[string]string, len(out.GetPreferences()))
+	for name, value := range out.GetPreferences() {
+		values[name] = value
+	}
+	return values, nil
+}
+
+func (r Remote) SetMemberPreference(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, value string) error {
+	out, err := r.presence.SetMemberPreference(ctx, &chatv1.SetMemberPreferenceRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, Value: value})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed member preference response is not ok")
+	}
+	return nil
+}
+
 func (r Remote) ClientConnectionCount(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (int, error) {
 	out, err := r.presence.ClientConnectionCount(ctx, &chatv1.ClientConnectionRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
 	if err != nil {
@@ -10421,6 +10444,21 @@ func (s *Server) ClientConnectionCount(ctx context.Context, input *chatv1.Client
 		return nil, mapError(err)
 	}
 	return &chatv1.ClientConnectionCountResponse{Count: int64(count)}, nil
+}
+
+func (s *Server) MemberPreferences(ctx context.Context, input *chatv1.MemberPreferencesRequest) (*chatv1.MemberPreferencesResponse, error) {
+	values, err := s.implementation.MemberPreferences(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MemberPreferencesResponse{Preferences: values}, nil
+}
+
+func (s *Server) SetMemberPreference(ctx context.Context, input *chatv1.SetMemberPreferenceRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.SetMemberPreference(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetValue()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
 }
 
 func encodeProtoClientConnection(value domain.ClientConnection) *chatv1.ClientConnection {

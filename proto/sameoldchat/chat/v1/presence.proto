@@ -68,6 +68,23 @@ message ClientConnectionRequest {
   string id = 3;
 }
 
+message MemberPreferencesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message MemberPreferencesResponse {
+  map<string, string> preferences = 1;
+}
+
+message SetMemberPreferenceRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  // Empty removes the preference.
+  string value = 4;
+}
+
 message ClientConnectionCountResponse {
   int64 count = 1;
 }
@@ -251,4 +268,6 @@ service PresenceService {
   rpc RenewClientConnection(ClientConnectionRequest) returns (ClientConnection);
   rpc CloseClientConnection(ClientConnectionRequest) returns (MutationResponse);
   rpc ClientConnectionCount(ClientConnectionRequest) returns (ClientConnectionCountResponse);
+  rpc MemberPreferences(MemberPreferencesRequest) returns (MemberPreferencesResponse);
+  rpc SetMemberPreference(SetMemberPreferenceRequest) returns (MutationResponse);
 }

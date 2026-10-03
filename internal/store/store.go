@@ -409,6 +409,14 @@ type Store interface {
 	// when it has an ID, is journalled only if they were connected at now and
 	// no connection remains.
 	CloseClientConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.ClientConnectionID, time.Time, events.Event) error
+	// MemberPreferences is every preference the member has kept, by name.
+	MemberPreferences(context.Context, domain.WorkspaceID, domain.UserID) (map[string]string, error)
+	// SetMemberPreference keeps one preference, replacing its value; an empty
+	// value removes it. A member keeps at most domain.MemberPreferenceLimit,
+	// and a new one past that is domain.ErrInvalidMemberPreference. It
+	// journals nothing: a preference is the member's own, and no consumer
+	// needs it delivered.
+	SetMemberPreference(context.Context, domain.WorkspaceID, domain.UserID, string, string, time.Time) error
 	// CountClientConnections is how many of a member's connections are live
 	// at now.
 	CountClientConnections(context.Context, domain.WorkspaceID, domain.UserID, time.Time) (int, error)

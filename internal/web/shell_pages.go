@@ -45,7 +45,7 @@ const shellFormMarkup = `{{define "title"}}{{.Title}} · {{.Shell.WorkspaceName}
 {{define "styles"}}` + shellStyle + shellPageStyle + `{{end}}
 {{define "scripts"}}` + shellScript + searchSuggestionsScript + `{{end}}
 {{define "content"}}<a class="skip-link" href="#content">Skip to the content</a>
-<div class="shell" data-channel="{{.Shell.Channel}}">
+<div class="shell" data-channel="{{.Shell.Channel}}"{{if .Shell.Preferences}} data-preferences="{{.Shell.Preferences}}" data-preferences-csrf="{{.Shell.CSRFToken}}"{{end}}>
   {{template "shell-top" .Shell}}
   <div class="workspace without-pane">
     {{template "shell-rail" .Shell}}
@@ -301,7 +301,7 @@ const browseChannelsMarkup = `{{define "title"}}Browse channels · {{.Shell.Work
 {{define "styles"}}` + shellStyle + shellPageStyle + `{{end}}
 {{define "scripts"}}` + shellScript + searchSuggestionsScript + `{{end}}
 {{define "content"}}<a class="skip-link" href="#content">Skip to the content</a>
-<div class="shell" data-channel="{{.Shell.Channel}}">
+<div class="shell" data-channel="{{.Shell.Channel}}"{{if .Shell.Preferences}} data-preferences="{{.Shell.Preferences}}" data-preferences-csrf="{{.Shell.CSRFToken}}"{{end}}>
   {{template "shell-top" .Shell}}
   <div class="workspace without-pane">
     {{template "shell-rail" .Shell}}

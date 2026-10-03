@@ -509,6 +509,171 @@ func (x *ClientConnectionRequest) GetId() string {
 	return ""
 }
 
+type MemberPreferencesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemberPreferencesRequest) Reset() {
+	*x = MemberPreferencesRequest{}
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemberPreferencesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemberPreferencesRequest) ProtoMessage() {}
+
+func (x *MemberPreferencesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemberPreferencesRequest.ProtoReflect.Descriptor instead.
+func (*MemberPreferencesRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *MemberPreferencesRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *MemberPreferencesRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+type MemberPreferencesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Preferences   map[string]string      `protobuf:"bytes,1,rep,name=preferences,proto3" json:"preferences,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemberPreferencesResponse) Reset() {
+	*x = MemberPreferencesResponse{}
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemberPreferencesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemberPreferencesResponse) ProtoMessage() {}
+
+func (x *MemberPreferencesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemberPreferencesResponse.ProtoReflect.Descriptor instead.
+func (*MemberPreferencesResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *MemberPreferencesResponse) GetPreferences() map[string]string {
+	if x != nil {
+		return x.Preferences
+	}
+	return nil
+}
+
+type SetMemberPreferenceRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Name        string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	// Empty removes the preference.
+	Value         string `protobuf:"bytes,4,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetMemberPreferenceRequest) Reset() {
+	*x = SetMemberPreferenceRequest{}
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetMemberPreferenceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetMemberPreferenceRequest) ProtoMessage() {}
+
+func (x *SetMemberPreferenceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetMemberPreferenceRequest.ProtoReflect.Descriptor instead.
+func (*SetMemberPreferenceRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SetMemberPreferenceRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SetMemberPreferenceRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SetMemberPreferenceRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SetMemberPreferenceRequest) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
 type ClientConnectionCountResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Count         int64                  `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
@@ -518,7 +683,7 @@ type ClientConnectionCountResponse struct {
 
 func (x *ClientConnectionCountResponse) Reset() {
 	*x = ClientConnectionCountResponse{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -530,7 +695,7 @@ func (x *ClientConnectionCountResponse) String() string {
 func (*ClientConnectionCountResponse) ProtoMessage() {}
 
 func (x *ClientConnectionCountResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -543,7 +708,7 @@ func (x *ClientConnectionCountResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientConnectionCountResponse.ProtoReflect.Descriptor instead.
 func (*ClientConnectionCountResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{4}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ClientConnectionCountResponse) GetCount() int64 {
@@ -564,7 +729,7 @@ type SetUserPresenceRequest struct {
 
 func (x *SetUserPresenceRequest) Reset() {
 	*x = SetUserPresenceRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -576,7 +741,7 @@ func (x *SetUserPresenceRequest) String() string {
 func (*SetUserPresenceRequest) ProtoMessage() {}
 
 func (x *SetUserPresenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -589,7 +754,7 @@ func (x *SetUserPresenceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetUserPresenceRequest.ProtoReflect.Descriptor instead.
 func (*SetUserPresenceRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{5}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SetUserPresenceRequest) GetWorkspaceId() string {
@@ -624,7 +789,7 @@ type UserRequest struct {
 
 func (x *UserRequest) Reset() {
 	*x = UserRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -636,7 +801,7 @@ func (x *UserRequest) String() string {
 func (*UserRequest) ProtoMessage() {}
 
 func (x *UserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -649,7 +814,7 @@ func (x *UserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserRequest.ProtoReflect.Descriptor instead.
 func (*UserRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{6}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UserRequest) GetWorkspaceId() string {
@@ -684,7 +849,7 @@ type UserByEmailRequest struct {
 
 func (x *UserByEmailRequest) Reset() {
 	*x = UserByEmailRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -696,7 +861,7 @@ func (x *UserByEmailRequest) String() string {
 func (*UserByEmailRequest) ProtoMessage() {}
 
 func (x *UserByEmailRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -709,7 +874,7 @@ func (x *UserByEmailRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserByEmailRequest.ProtoReflect.Descriptor instead.
 func (*UserByEmailRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{7}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UserByEmailRequest) GetWorkspaceId() string {
@@ -744,7 +909,7 @@ type SetUserProfileRequest struct {
 
 func (x *SetUserProfileRequest) Reset() {
 	*x = SetUserProfileRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -756,7 +921,7 @@ func (x *SetUserProfileRequest) String() string {
 func (*SetUserProfileRequest) ProtoMessage() {}
 
 func (x *SetUserProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -769,7 +934,7 @@ func (x *SetUserProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetUserProfileRequest.ProtoReflect.Descriptor instead.
 func (*SetUserProfileRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{8}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SetUserProfileRequest) GetWorkspaceId() string {
@@ -810,7 +975,7 @@ type ScheduledStatus struct {
 
 func (x *ScheduledStatus) Reset() {
 	*x = ScheduledStatus{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -822,7 +987,7 @@ func (x *ScheduledStatus) String() string {
 func (*ScheduledStatus) ProtoMessage() {}
 
 func (x *ScheduledStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -835,7 +1000,7 @@ func (x *ScheduledStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduledStatus.ProtoReflect.Descriptor instead.
 func (*ScheduledStatus) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{9}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ScheduledStatus) GetId() string {
@@ -915,7 +1080,7 @@ type ScheduleUserStatusRequest struct {
 
 func (x *ScheduleUserStatusRequest) Reset() {
 	*x = ScheduleUserStatusRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -927,7 +1092,7 @@ func (x *ScheduleUserStatusRequest) String() string {
 func (*ScheduleUserStatusRequest) ProtoMessage() {}
 
 func (x *ScheduleUserStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -940,7 +1105,7 @@ func (x *ScheduleUserStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduleUserStatusRequest.ProtoReflect.Descriptor instead.
 func (*ScheduleUserStatusRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{10}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ScheduleUserStatusRequest) GetWorkspaceId() string {
@@ -995,7 +1160,7 @@ type ScheduledUserStatusesRequest struct {
 
 func (x *ScheduledUserStatusesRequest) Reset() {
 	*x = ScheduledUserStatusesRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1007,7 +1172,7 @@ func (x *ScheduledUserStatusesRequest) String() string {
 func (*ScheduledUserStatusesRequest) ProtoMessage() {}
 
 func (x *ScheduledUserStatusesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1020,7 +1185,7 @@ func (x *ScheduledUserStatusesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduledUserStatusesRequest.ProtoReflect.Descriptor instead.
 func (*ScheduledUserStatusesRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{11}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ScheduledUserStatusesRequest) GetWorkspaceId() string {
@@ -1046,7 +1211,7 @@ type ScheduledUserStatusesResponse struct {
 
 func (x *ScheduledUserStatusesResponse) Reset() {
 	*x = ScheduledUserStatusesResponse{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1058,7 +1223,7 @@ func (x *ScheduledUserStatusesResponse) String() string {
 func (*ScheduledUserStatusesResponse) ProtoMessage() {}
 
 func (x *ScheduledUserStatusesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1071,7 +1236,7 @@ func (x *ScheduledUserStatusesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduledUserStatusesResponse.ProtoReflect.Descriptor instead.
 func (*ScheduledUserStatusesResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{12}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ScheduledUserStatusesResponse) GetStatuses() []*ScheduledStatus {
@@ -1096,7 +1261,7 @@ type UpdateScheduledUserStatusRequest struct {
 
 func (x *UpdateScheduledUserStatusRequest) Reset() {
 	*x = UpdateScheduledUserStatusRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1108,7 +1273,7 @@ func (x *UpdateScheduledUserStatusRequest) String() string {
 func (*UpdateScheduledUserStatusRequest) ProtoMessage() {}
 
 func (x *UpdateScheduledUserStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1121,7 +1286,7 @@ func (x *UpdateScheduledUserStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateScheduledUserStatusRequest.ProtoReflect.Descriptor instead.
 func (*UpdateScheduledUserStatusRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{13}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *UpdateScheduledUserStatusRequest) GetWorkspaceId() string {
@@ -1184,7 +1349,7 @@ type DeleteScheduledUserStatusRequest struct {
 
 func (x *DeleteScheduledUserStatusRequest) Reset() {
 	*x = DeleteScheduledUserStatusRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1196,7 +1361,7 @@ func (x *DeleteScheduledUserStatusRequest) String() string {
 func (*DeleteScheduledUserStatusRequest) ProtoMessage() {}
 
 func (x *DeleteScheduledUserStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1209,7 +1374,7 @@ func (x *DeleteScheduledUserStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteScheduledUserStatusRequest.ProtoReflect.Descriptor instead.
 func (*DeleteScheduledUserStatusRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{14}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DeleteScheduledUserStatusRequest) GetWorkspaceId() string {
@@ -1247,7 +1412,7 @@ type DoNotDisturb struct {
 
 func (x *DoNotDisturb) Reset() {
 	*x = DoNotDisturb{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1259,7 +1424,7 @@ func (x *DoNotDisturb) String() string {
 func (*DoNotDisturb) ProtoMessage() {}
 
 func (x *DoNotDisturb) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1272,7 +1437,7 @@ func (x *DoNotDisturb) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DoNotDisturb.ProtoReflect.Descriptor instead.
 func (*DoNotDisturb) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{15}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DoNotDisturb) GetWorkspaceId() string {
@@ -1328,7 +1493,7 @@ type DoNotDisturbRequest struct {
 
 func (x *DoNotDisturbRequest) Reset() {
 	*x = DoNotDisturbRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[16]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1340,7 +1505,7 @@ func (x *DoNotDisturbRequest) String() string {
 func (*DoNotDisturbRequest) ProtoMessage() {}
 
 func (x *DoNotDisturbRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[16]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1353,7 +1518,7 @@ func (x *DoNotDisturbRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DoNotDisturbRequest.ProtoReflect.Descriptor instead.
 func (*DoNotDisturbRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{16}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DoNotDisturbRequest) GetWorkspaceId() string {
@@ -1388,7 +1553,7 @@ type SetSnoozeRequest struct {
 
 func (x *SetSnoozeRequest) Reset() {
 	*x = SetSnoozeRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[17]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1400,7 +1565,7 @@ func (x *SetSnoozeRequest) String() string {
 func (*SetSnoozeRequest) ProtoMessage() {}
 
 func (x *SetSnoozeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[17]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1413,7 +1578,7 @@ func (x *SetSnoozeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSnoozeRequest.ProtoReflect.Descriptor instead.
 func (*SetSnoozeRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{17}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SetSnoozeRequest) GetWorkspaceId() string {
@@ -1451,7 +1616,7 @@ type PauseNotificationsUntilRequest struct {
 
 func (x *PauseNotificationsUntilRequest) Reset() {
 	*x = PauseNotificationsUntilRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[18]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1463,7 +1628,7 @@ func (x *PauseNotificationsUntilRequest) String() string {
 func (*PauseNotificationsUntilRequest) ProtoMessage() {}
 
 func (x *PauseNotificationsUntilRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[18]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1476,7 +1641,7 @@ func (x *PauseNotificationsUntilRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PauseNotificationsUntilRequest.ProtoReflect.Descriptor instead.
 func (*PauseNotificationsUntilRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{18}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *PauseNotificationsUntilRequest) GetWorkspaceId() string {
@@ -1517,7 +1682,7 @@ type ProfileFieldDefinition struct {
 
 func (x *ProfileFieldDefinition) Reset() {
 	*x = ProfileFieldDefinition{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[19]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1529,7 +1694,7 @@ func (x *ProfileFieldDefinition) String() string {
 func (*ProfileFieldDefinition) ProtoMessage() {}
 
 func (x *ProfileFieldDefinition) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[19]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1542,7 +1707,7 @@ func (x *ProfileFieldDefinition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProfileFieldDefinition.ProtoReflect.Descriptor instead.
 func (*ProfileFieldDefinition) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{19}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ProfileFieldDefinition) GetWorkspaceId() string {
@@ -1619,7 +1784,7 @@ type SetWorkspaceProfileFieldRequest struct {
 
 func (x *SetWorkspaceProfileFieldRequest) Reset() {
 	*x = SetWorkspaceProfileFieldRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[20]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1631,7 +1796,7 @@ func (x *SetWorkspaceProfileFieldRequest) String() string {
 func (*SetWorkspaceProfileFieldRequest) ProtoMessage() {}
 
 func (x *SetWorkspaceProfileFieldRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[20]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1644,7 +1809,7 @@ func (x *SetWorkspaceProfileFieldRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceProfileFieldRequest.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceProfileFieldRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{20}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *SetWorkspaceProfileFieldRequest) GetWorkspaceId() string {
@@ -1678,7 +1843,7 @@ type WorkspaceProfileFieldsRequest struct {
 
 func (x *WorkspaceProfileFieldsRequest) Reset() {
 	*x = WorkspaceProfileFieldsRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[21]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1690,7 +1855,7 @@ func (x *WorkspaceProfileFieldsRequest) String() string {
 func (*WorkspaceProfileFieldsRequest) ProtoMessage() {}
 
 func (x *WorkspaceProfileFieldsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[21]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1703,7 +1868,7 @@ func (x *WorkspaceProfileFieldsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceProfileFieldsRequest.ProtoReflect.Descriptor instead.
 func (*WorkspaceProfileFieldsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{21}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *WorkspaceProfileFieldsRequest) GetWorkspaceId() string {
@@ -1729,7 +1894,7 @@ type WorkspaceProfileFieldsResponse struct {
 
 func (x *WorkspaceProfileFieldsResponse) Reset() {
 	*x = WorkspaceProfileFieldsResponse{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[22]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1741,7 +1906,7 @@ func (x *WorkspaceProfileFieldsResponse) String() string {
 func (*WorkspaceProfileFieldsResponse) ProtoMessage() {}
 
 func (x *WorkspaceProfileFieldsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[22]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1754,7 +1919,7 @@ func (x *WorkspaceProfileFieldsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceProfileFieldsResponse.ProtoReflect.Descriptor instead.
 func (*WorkspaceProfileFieldsResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{22}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *WorkspaceProfileFieldsResponse) GetFields() []*ProfileFieldDefinition {
@@ -1775,7 +1940,7 @@ type DeleteWorkspaceProfileFieldRequest struct {
 
 func (x *DeleteWorkspaceProfileFieldRequest) Reset() {
 	*x = DeleteWorkspaceProfileFieldRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[23]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1787,7 +1952,7 @@ func (x *DeleteWorkspaceProfileFieldRequest) String() string {
 func (*DeleteWorkspaceProfileFieldRequest) ProtoMessage() {}
 
 func (x *DeleteWorkspaceProfileFieldRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[23]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1800,7 +1965,7 @@ func (x *DeleteWorkspaceProfileFieldRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use DeleteWorkspaceProfileFieldRequest.ProtoReflect.Descriptor instead.
 func (*DeleteWorkspaceProfileFieldRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{23}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *DeleteWorkspaceProfileFieldRequest) GetWorkspaceId() string {
@@ -1835,7 +2000,7 @@ type UserProfileFieldValue struct {
 
 func (x *UserProfileFieldValue) Reset() {
 	*x = UserProfileFieldValue{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[24]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1847,7 +2012,7 @@ func (x *UserProfileFieldValue) String() string {
 func (*UserProfileFieldValue) ProtoMessage() {}
 
 func (x *UserProfileFieldValue) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[24]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1860,7 +2025,7 @@ func (x *UserProfileFieldValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserProfileFieldValue.ProtoReflect.Descriptor instead.
 func (*UserProfileFieldValue) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{24}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *UserProfileFieldValue) GetFieldId() string {
@@ -1896,7 +2061,7 @@ type SetUserProfileFieldsRequest struct {
 
 func (x *SetUserProfileFieldsRequest) Reset() {
 	*x = SetUserProfileFieldsRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[25]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1908,7 +2073,7 @@ func (x *SetUserProfileFieldsRequest) String() string {
 func (*SetUserProfileFieldsRequest) ProtoMessage() {}
 
 func (x *SetUserProfileFieldsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[25]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1921,7 +2086,7 @@ func (x *SetUserProfileFieldsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetUserProfileFieldsRequest.ProtoReflect.Descriptor instead.
 func (*SetUserProfileFieldsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{25}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SetUserProfileFieldsRequest) GetWorkspaceId() string {
@@ -1963,7 +2128,7 @@ type UserProfileFieldsRequest struct {
 
 func (x *UserProfileFieldsRequest) Reset() {
 	*x = UserProfileFieldsRequest{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[26]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1975,7 +2140,7 @@ func (x *UserProfileFieldsRequest) String() string {
 func (*UserProfileFieldsRequest) ProtoMessage() {}
 
 func (x *UserProfileFieldsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[26]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1988,7 +2153,7 @@ func (x *UserProfileFieldsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserProfileFieldsRequest.ProtoReflect.Descriptor instead.
 func (*UserProfileFieldsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{26}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *UserProfileFieldsRequest) GetWorkspaceId() string {
@@ -2021,7 +2186,7 @@ type UserProfileFieldsResponse struct {
 
 func (x *UserProfileFieldsResponse) Reset() {
 	*x = UserProfileFieldsResponse{}
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[27]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2033,7 +2198,7 @@ func (x *UserProfileFieldsResponse) String() string {
 func (*UserProfileFieldsResponse) ProtoMessage() {}
 
 func (x *UserProfileFieldsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[27]
+	mi := &file_sameoldchat_chat_v1_presence_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2046,7 +2211,7 @@ func (x *UserProfileFieldsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserProfileFieldsResponse.ProtoReflect.Descriptor instead.
 func (*UserProfileFieldsResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{27}
+	return file_sameoldchat_chat_v1_presence_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *UserProfileFieldsResponse) GetValues() []*UserProfileFieldValue {
@@ -2113,7 +2278,20 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\x17ClientConnectionRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x0e\n" +
-	"\x02id\x18\x03 \x01(\tR\x02id\"5\n" +
+	"\x02id\x18\x03 \x01(\tR\x02id\"V\n" +
+	"\x18MemberPreferencesRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"\xbe\x01\n" +
+	"\x19MemberPreferencesResponse\x12a\n" +
+	"\vpreferences\x18\x01 \x03(\v2?.sameoldchat.chat.v1.MemberPreferencesResponse.PreferencesEntryR\vpreferences\x1a>\n" +
+	"\x10PreferencesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x82\x01\n" +
+	"\x1aSetMemberPreferenceRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
+	"\x05value\x18\x04 \x01(\tR\x05value\"5\n" +
 	"\x1dClientConnectionCountResponse\x12\x14\n" +
 	"\x05count\x18\x01 \x01(\x03R\x05count\"p\n" +
 	"\x16SetUserPresenceRequest\x12!\n" +
@@ -2226,7 +2404,7 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12$\n" +
 	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\"_\n" +
 	"\x19UserProfileFieldsResponse\x12B\n" +
-	"\x06values\x18\x01 \x03(\v2*.sameoldchat.chat.v1.UserProfileFieldValueR\x06values2\xcd\x12\n" +
+	"\x06values\x18\x01 \x03(\v2*.sameoldchat.chat.v1.UserProfileFieldValueR\x06values2\xb0\x14\n" +
 	"\x0fPresenceService\x12G\n" +
 	"\bUserInfo\x12 .sameoldchat.chat.v1.UserRequest\x1a\x19.sameoldchat.chat.v1.User\x12}\n" +
 	"\x18SetWorkspaceProfileField\x124.sameoldchat.chat.v1.SetWorkspaceProfileFieldRequest\x1a+.sameoldchat.chat.v1.ProfileFieldDefinition\x12\x81\x01\n" +
@@ -2249,7 +2427,9 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\x14OpenClientConnection\x12,.sameoldchat.chat.v1.ClientConnectionRequest\x1a%.sameoldchat.chat.v1.ClientConnection\x12l\n" +
 	"\x15RenewClientConnection\x12,.sameoldchat.chat.v1.ClientConnectionRequest\x1a%.sameoldchat.chat.v1.ClientConnection\x12l\n" +
 	"\x15CloseClientConnection\x12,.sameoldchat.chat.v1.ClientConnectionRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12y\n" +
-	"\x15ClientConnectionCount\x12,.sameoldchat.chat.v1.ClientConnectionRequest\x1a2.sameoldchat.chat.v1.ClientConnectionCountResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x15ClientConnectionCount\x12,.sameoldchat.chat.v1.ClientConnectionRequest\x1a2.sameoldchat.chat.v1.ClientConnectionCountResponse\x12r\n" +
+	"\x11MemberPreferences\x12-.sameoldchat.chat.v1.MemberPreferencesRequest\x1a..sameoldchat.chat.v1.MemberPreferencesResponse\x12m\n" +
+	"\x13SetMemberPreference\x12/.sameoldchat.chat.v1.SetMemberPreferenceRequest\x1a%.sameoldchat.chat.v1.MutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_presence_proto_rawDescOnce sync.Once
@@ -2263,95 +2443,104 @@ func file_sameoldchat_chat_v1_presence_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_presence_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_presence_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_sameoldchat_chat_v1_presence_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_sameoldchat_chat_v1_presence_proto_goTypes = []any{
 	(*UserProfile)(nil),                        // 0: sameoldchat.chat.v1.UserProfile
 	(*User)(nil),                               // 1: sameoldchat.chat.v1.User
 	(*ClientConnection)(nil),                   // 2: sameoldchat.chat.v1.ClientConnection
 	(*ClientConnectionRequest)(nil),            // 3: sameoldchat.chat.v1.ClientConnectionRequest
-	(*ClientConnectionCountResponse)(nil),      // 4: sameoldchat.chat.v1.ClientConnectionCountResponse
-	(*SetUserPresenceRequest)(nil),             // 5: sameoldchat.chat.v1.SetUserPresenceRequest
-	(*UserRequest)(nil),                        // 6: sameoldchat.chat.v1.UserRequest
-	(*UserByEmailRequest)(nil),                 // 7: sameoldchat.chat.v1.UserByEmailRequest
-	(*SetUserProfileRequest)(nil),              // 8: sameoldchat.chat.v1.SetUserProfileRequest
-	(*ScheduledStatus)(nil),                    // 9: sameoldchat.chat.v1.ScheduledStatus
-	(*ScheduleUserStatusRequest)(nil),          // 10: sameoldchat.chat.v1.ScheduleUserStatusRequest
-	(*ScheduledUserStatusesRequest)(nil),       // 11: sameoldchat.chat.v1.ScheduledUserStatusesRequest
-	(*ScheduledUserStatusesResponse)(nil),      // 12: sameoldchat.chat.v1.ScheduledUserStatusesResponse
-	(*UpdateScheduledUserStatusRequest)(nil),   // 13: sameoldchat.chat.v1.UpdateScheduledUserStatusRequest
-	(*DeleteScheduledUserStatusRequest)(nil),   // 14: sameoldchat.chat.v1.DeleteScheduledUserStatusRequest
-	(*DoNotDisturb)(nil),                       // 15: sameoldchat.chat.v1.DoNotDisturb
-	(*DoNotDisturbRequest)(nil),                // 16: sameoldchat.chat.v1.DoNotDisturbRequest
-	(*SetSnoozeRequest)(nil),                   // 17: sameoldchat.chat.v1.SetSnoozeRequest
-	(*PauseNotificationsUntilRequest)(nil),     // 18: sameoldchat.chat.v1.PauseNotificationsUntilRequest
-	(*ProfileFieldDefinition)(nil),             // 19: sameoldchat.chat.v1.ProfileFieldDefinition
-	(*SetWorkspaceProfileFieldRequest)(nil),    // 20: sameoldchat.chat.v1.SetWorkspaceProfileFieldRequest
-	(*WorkspaceProfileFieldsRequest)(nil),      // 21: sameoldchat.chat.v1.WorkspaceProfileFieldsRequest
-	(*WorkspaceProfileFieldsResponse)(nil),     // 22: sameoldchat.chat.v1.WorkspaceProfileFieldsResponse
-	(*DeleteWorkspaceProfileFieldRequest)(nil), // 23: sameoldchat.chat.v1.DeleteWorkspaceProfileFieldRequest
-	(*UserProfileFieldValue)(nil),              // 24: sameoldchat.chat.v1.UserProfileFieldValue
-	(*SetUserProfileFieldsRequest)(nil),        // 25: sameoldchat.chat.v1.SetUserProfileFieldsRequest
-	(*UserProfileFieldsRequest)(nil),           // 26: sameoldchat.chat.v1.UserProfileFieldsRequest
-	(*UserProfileFieldsResponse)(nil),          // 27: sameoldchat.chat.v1.UserProfileFieldsResponse
-	(*MutationResponse)(nil),                   // 28: sameoldchat.chat.v1.MutationResponse
+	(*MemberPreferencesRequest)(nil),           // 4: sameoldchat.chat.v1.MemberPreferencesRequest
+	(*MemberPreferencesResponse)(nil),          // 5: sameoldchat.chat.v1.MemberPreferencesResponse
+	(*SetMemberPreferenceRequest)(nil),         // 6: sameoldchat.chat.v1.SetMemberPreferenceRequest
+	(*ClientConnectionCountResponse)(nil),      // 7: sameoldchat.chat.v1.ClientConnectionCountResponse
+	(*SetUserPresenceRequest)(nil),             // 8: sameoldchat.chat.v1.SetUserPresenceRequest
+	(*UserRequest)(nil),                        // 9: sameoldchat.chat.v1.UserRequest
+	(*UserByEmailRequest)(nil),                 // 10: sameoldchat.chat.v1.UserByEmailRequest
+	(*SetUserProfileRequest)(nil),              // 11: sameoldchat.chat.v1.SetUserProfileRequest
+	(*ScheduledStatus)(nil),                    // 12: sameoldchat.chat.v1.ScheduledStatus
+	(*ScheduleUserStatusRequest)(nil),          // 13: sameoldchat.chat.v1.ScheduleUserStatusRequest
+	(*ScheduledUserStatusesRequest)(nil),       // 14: sameoldchat.chat.v1.ScheduledUserStatusesRequest
+	(*ScheduledUserStatusesResponse)(nil),      // 15: sameoldchat.chat.v1.ScheduledUserStatusesResponse
+	(*UpdateScheduledUserStatusRequest)(nil),   // 16: sameoldchat.chat.v1.UpdateScheduledUserStatusRequest
+	(*DeleteScheduledUserStatusRequest)(nil),   // 17: sameoldchat.chat.v1.DeleteScheduledUserStatusRequest
+	(*DoNotDisturb)(nil),                       // 18: sameoldchat.chat.v1.DoNotDisturb
+	(*DoNotDisturbRequest)(nil),                // 19: sameoldchat.chat.v1.DoNotDisturbRequest
+	(*SetSnoozeRequest)(nil),                   // 20: sameoldchat.chat.v1.SetSnoozeRequest
+	(*PauseNotificationsUntilRequest)(nil),     // 21: sameoldchat.chat.v1.PauseNotificationsUntilRequest
+	(*ProfileFieldDefinition)(nil),             // 22: sameoldchat.chat.v1.ProfileFieldDefinition
+	(*SetWorkspaceProfileFieldRequest)(nil),    // 23: sameoldchat.chat.v1.SetWorkspaceProfileFieldRequest
+	(*WorkspaceProfileFieldsRequest)(nil),      // 24: sameoldchat.chat.v1.WorkspaceProfileFieldsRequest
+	(*WorkspaceProfileFieldsResponse)(nil),     // 25: sameoldchat.chat.v1.WorkspaceProfileFieldsResponse
+	(*DeleteWorkspaceProfileFieldRequest)(nil), // 26: sameoldchat.chat.v1.DeleteWorkspaceProfileFieldRequest
+	(*UserProfileFieldValue)(nil),              // 27: sameoldchat.chat.v1.UserProfileFieldValue
+	(*SetUserProfileFieldsRequest)(nil),        // 28: sameoldchat.chat.v1.SetUserProfileFieldsRequest
+	(*UserProfileFieldsRequest)(nil),           // 29: sameoldchat.chat.v1.UserProfileFieldsRequest
+	(*UserProfileFieldsResponse)(nil),          // 30: sameoldchat.chat.v1.UserProfileFieldsResponse
+	nil,                                        // 31: sameoldchat.chat.v1.MemberPreferencesResponse.PreferencesEntry
+	(*MutationResponse)(nil),                   // 32: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_presence_proto_depIdxs = []int32{
 	0,  // 0: sameoldchat.chat.v1.User.profile:type_name -> sameoldchat.chat.v1.UserProfile
-	0,  // 1: sameoldchat.chat.v1.SetUserProfileRequest.profile:type_name -> sameoldchat.chat.v1.UserProfile
-	9,  // 2: sameoldchat.chat.v1.ScheduledUserStatusesResponse.statuses:type_name -> sameoldchat.chat.v1.ScheduledStatus
-	19, // 3: sameoldchat.chat.v1.SetWorkspaceProfileFieldRequest.field:type_name -> sameoldchat.chat.v1.ProfileFieldDefinition
-	19, // 4: sameoldchat.chat.v1.WorkspaceProfileFieldsResponse.fields:type_name -> sameoldchat.chat.v1.ProfileFieldDefinition
-	24, // 5: sameoldchat.chat.v1.SetUserProfileFieldsRequest.values:type_name -> sameoldchat.chat.v1.UserProfileFieldValue
-	24, // 6: sameoldchat.chat.v1.UserProfileFieldsResponse.values:type_name -> sameoldchat.chat.v1.UserProfileFieldValue
-	6,  // 7: sameoldchat.chat.v1.PresenceService.UserInfo:input_type -> sameoldchat.chat.v1.UserRequest
-	20, // 8: sameoldchat.chat.v1.PresenceService.SetWorkspaceProfileField:input_type -> sameoldchat.chat.v1.SetWorkspaceProfileFieldRequest
-	21, // 9: sameoldchat.chat.v1.PresenceService.WorkspaceProfileFields:input_type -> sameoldchat.chat.v1.WorkspaceProfileFieldsRequest
-	23, // 10: sameoldchat.chat.v1.PresenceService.DeleteWorkspaceProfileField:input_type -> sameoldchat.chat.v1.DeleteWorkspaceProfileFieldRequest
-	25, // 11: sameoldchat.chat.v1.PresenceService.SetUserProfileFields:input_type -> sameoldchat.chat.v1.SetUserProfileFieldsRequest
-	26, // 12: sameoldchat.chat.v1.PresenceService.UserProfileFields:input_type -> sameoldchat.chat.v1.UserProfileFieldsRequest
-	7,  // 13: sameoldchat.chat.v1.PresenceService.UserByEmail:input_type -> sameoldchat.chat.v1.UserByEmailRequest
-	8,  // 14: sameoldchat.chat.v1.PresenceService.SetUserProfile:input_type -> sameoldchat.chat.v1.SetUserProfileRequest
-	10, // 15: sameoldchat.chat.v1.PresenceService.ScheduleUserStatus:input_type -> sameoldchat.chat.v1.ScheduleUserStatusRequest
-	11, // 16: sameoldchat.chat.v1.PresenceService.ScheduledUserStatuses:input_type -> sameoldchat.chat.v1.ScheduledUserStatusesRequest
-	13, // 17: sameoldchat.chat.v1.PresenceService.UpdateScheduledUserStatus:input_type -> sameoldchat.chat.v1.UpdateScheduledUserStatusRequest
-	14, // 18: sameoldchat.chat.v1.PresenceService.DeleteScheduledUserStatus:input_type -> sameoldchat.chat.v1.DeleteScheduledUserStatusRequest
-	5,  // 19: sameoldchat.chat.v1.PresenceService.SetUserPresence:input_type -> sameoldchat.chat.v1.SetUserPresenceRequest
-	16, // 20: sameoldchat.chat.v1.PresenceService.DoNotDisturbInfo:input_type -> sameoldchat.chat.v1.DoNotDisturbRequest
-	17, // 21: sameoldchat.chat.v1.PresenceService.SetSnooze:input_type -> sameoldchat.chat.v1.SetSnoozeRequest
-	18, // 22: sameoldchat.chat.v1.PresenceService.PauseNotificationsUntil:input_type -> sameoldchat.chat.v1.PauseNotificationsUntilRequest
-	16, // 23: sameoldchat.chat.v1.PresenceService.EndSnooze:input_type -> sameoldchat.chat.v1.DoNotDisturbRequest
-	16, // 24: sameoldchat.chat.v1.PresenceService.EndDND:input_type -> sameoldchat.chat.v1.DoNotDisturbRequest
-	3,  // 25: sameoldchat.chat.v1.PresenceService.OpenClientConnection:input_type -> sameoldchat.chat.v1.ClientConnectionRequest
-	3,  // 26: sameoldchat.chat.v1.PresenceService.RenewClientConnection:input_type -> sameoldchat.chat.v1.ClientConnectionRequest
-	3,  // 27: sameoldchat.chat.v1.PresenceService.CloseClientConnection:input_type -> sameoldchat.chat.v1.ClientConnectionRequest
-	3,  // 28: sameoldchat.chat.v1.PresenceService.ClientConnectionCount:input_type -> sameoldchat.chat.v1.ClientConnectionRequest
-	1,  // 29: sameoldchat.chat.v1.PresenceService.UserInfo:output_type -> sameoldchat.chat.v1.User
-	19, // 30: sameoldchat.chat.v1.PresenceService.SetWorkspaceProfileField:output_type -> sameoldchat.chat.v1.ProfileFieldDefinition
-	22, // 31: sameoldchat.chat.v1.PresenceService.WorkspaceProfileFields:output_type -> sameoldchat.chat.v1.WorkspaceProfileFieldsResponse
-	28, // 32: sameoldchat.chat.v1.PresenceService.DeleteWorkspaceProfileField:output_type -> sameoldchat.chat.v1.MutationResponse
-	28, // 33: sameoldchat.chat.v1.PresenceService.SetUserProfileFields:output_type -> sameoldchat.chat.v1.MutationResponse
-	27, // 34: sameoldchat.chat.v1.PresenceService.UserProfileFields:output_type -> sameoldchat.chat.v1.UserProfileFieldsResponse
-	1,  // 35: sameoldchat.chat.v1.PresenceService.UserByEmail:output_type -> sameoldchat.chat.v1.User
-	1,  // 36: sameoldchat.chat.v1.PresenceService.SetUserProfile:output_type -> sameoldchat.chat.v1.User
-	9,  // 37: sameoldchat.chat.v1.PresenceService.ScheduleUserStatus:output_type -> sameoldchat.chat.v1.ScheduledStatus
-	12, // 38: sameoldchat.chat.v1.PresenceService.ScheduledUserStatuses:output_type -> sameoldchat.chat.v1.ScheduledUserStatusesResponse
-	9,  // 39: sameoldchat.chat.v1.PresenceService.UpdateScheduledUserStatus:output_type -> sameoldchat.chat.v1.ScheduledStatus
-	28, // 40: sameoldchat.chat.v1.PresenceService.DeleteScheduledUserStatus:output_type -> sameoldchat.chat.v1.MutationResponse
-	1,  // 41: sameoldchat.chat.v1.PresenceService.SetUserPresence:output_type -> sameoldchat.chat.v1.User
-	15, // 42: sameoldchat.chat.v1.PresenceService.DoNotDisturbInfo:output_type -> sameoldchat.chat.v1.DoNotDisturb
-	15, // 43: sameoldchat.chat.v1.PresenceService.SetSnooze:output_type -> sameoldchat.chat.v1.DoNotDisturb
-	15, // 44: sameoldchat.chat.v1.PresenceService.PauseNotificationsUntil:output_type -> sameoldchat.chat.v1.DoNotDisturb
-	15, // 45: sameoldchat.chat.v1.PresenceService.EndSnooze:output_type -> sameoldchat.chat.v1.DoNotDisturb
-	28, // 46: sameoldchat.chat.v1.PresenceService.EndDND:output_type -> sameoldchat.chat.v1.MutationResponse
-	2,  // 47: sameoldchat.chat.v1.PresenceService.OpenClientConnection:output_type -> sameoldchat.chat.v1.ClientConnection
-	2,  // 48: sameoldchat.chat.v1.PresenceService.RenewClientConnection:output_type -> sameoldchat.chat.v1.ClientConnection
-	28, // 49: sameoldchat.chat.v1.PresenceService.CloseClientConnection:output_type -> sameoldchat.chat.v1.MutationResponse
-	4,  // 50: sameoldchat.chat.v1.PresenceService.ClientConnectionCount:output_type -> sameoldchat.chat.v1.ClientConnectionCountResponse
-	29, // [29:51] is the sub-list for method output_type
-	7,  // [7:29] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	31, // 1: sameoldchat.chat.v1.MemberPreferencesResponse.preferences:type_name -> sameoldchat.chat.v1.MemberPreferencesResponse.PreferencesEntry
+	0,  // 2: sameoldchat.chat.v1.SetUserProfileRequest.profile:type_name -> sameoldchat.chat.v1.UserProfile
+	12, // 3: sameoldchat.chat.v1.ScheduledUserStatusesResponse.statuses:type_name -> sameoldchat.chat.v1.ScheduledStatus
+	22, // 4: sameoldchat.chat.v1.SetWorkspaceProfileFieldRequest.field:type_name -> sameoldchat.chat.v1.ProfileFieldDefinition
+	22, // 5: sameoldchat.chat.v1.WorkspaceProfileFieldsResponse.fields:type_name -> sameoldchat.chat.v1.ProfileFieldDefinition
+	27, // 6: sameoldchat.chat.v1.SetUserProfileFieldsRequest.values:type_name -> sameoldchat.chat.v1.UserProfileFieldValue
+	27, // 7: sameoldchat.chat.v1.UserProfileFieldsResponse.values:type_name -> sameoldchat.chat.v1.UserProfileFieldValue
+	9,  // 8: sameoldchat.chat.v1.PresenceService.UserInfo:input_type -> sameoldchat.chat.v1.UserRequest
+	23, // 9: sameoldchat.chat.v1.PresenceService.SetWorkspaceProfileField:input_type -> sameoldchat.chat.v1.SetWorkspaceProfileFieldRequest
+	24, // 10: sameoldchat.chat.v1.PresenceService.WorkspaceProfileFields:input_type -> sameoldchat.chat.v1.WorkspaceProfileFieldsRequest
+	26, // 11: sameoldchat.chat.v1.PresenceService.DeleteWorkspaceProfileField:input_type -> sameoldchat.chat.v1.DeleteWorkspaceProfileFieldRequest
+	28, // 12: sameoldchat.chat.v1.PresenceService.SetUserProfileFields:input_type -> sameoldchat.chat.v1.SetUserProfileFieldsRequest
+	29, // 13: sameoldchat.chat.v1.PresenceService.UserProfileFields:input_type -> sameoldchat.chat.v1.UserProfileFieldsRequest
+	10, // 14: sameoldchat.chat.v1.PresenceService.UserByEmail:input_type -> sameoldchat.chat.v1.UserByEmailRequest
+	11, // 15: sameoldchat.chat.v1.PresenceService.SetUserProfile:input_type -> sameoldchat.chat.v1.SetUserProfileRequest
+	13, // 16: sameoldchat.chat.v1.PresenceService.ScheduleUserStatus:input_type -> sameoldchat.chat.v1.ScheduleUserStatusRequest
+	14, // 17: sameoldchat.chat.v1.PresenceService.ScheduledUserStatuses:input_type -> sameoldchat.chat.v1.ScheduledUserStatusesRequest
+	16, // 18: sameoldchat.chat.v1.PresenceService.UpdateScheduledUserStatus:input_type -> sameoldchat.chat.v1.UpdateScheduledUserStatusRequest
+	17, // 19: sameoldchat.chat.v1.PresenceService.DeleteScheduledUserStatus:input_type -> sameoldchat.chat.v1.DeleteScheduledUserStatusRequest
+	8,  // 20: sameoldchat.chat.v1.PresenceService.SetUserPresence:input_type -> sameoldchat.chat.v1.SetUserPresenceRequest
+	19, // 21: sameoldchat.chat.v1.PresenceService.DoNotDisturbInfo:input_type -> sameoldchat.chat.v1.DoNotDisturbRequest
+	20, // 22: sameoldchat.chat.v1.PresenceService.SetSnooze:input_type -> sameoldchat.chat.v1.SetSnoozeRequest
+	21, // 23: sameoldchat.chat.v1.PresenceService.PauseNotificationsUntil:input_type -> sameoldchat.chat.v1.PauseNotificationsUntilRequest
+	19, // 24: sameoldchat.chat.v1.PresenceService.EndSnooze:input_type -> sameoldchat.chat.v1.DoNotDisturbRequest
+	19, // 25: sameoldchat.chat.v1.PresenceService.EndDND:input_type -> sameoldchat.chat.v1.DoNotDisturbRequest
+	3,  // 26: sameoldchat.chat.v1.PresenceService.OpenClientConnection:input_type -> sameoldchat.chat.v1.ClientConnectionRequest
+	3,  // 27: sameoldchat.chat.v1.PresenceService.RenewClientConnection:input_type -> sameoldchat.chat.v1.ClientConnectionRequest
+	3,  // 28: sameoldchat.chat.v1.PresenceService.CloseClientConnection:input_type -> sameoldchat.chat.v1.ClientConnectionRequest
+	3,  // 29: sameoldchat.chat.v1.PresenceService.ClientConnectionCount:input_type -> sameoldchat.chat.v1.ClientConnectionRequest
+	4,  // 30: sameoldchat.chat.v1.PresenceService.MemberPreferences:input_type -> sameoldchat.chat.v1.MemberPreferencesRequest
+	6,  // 31: sameoldchat.chat.v1.PresenceService.SetMemberPreference:input_type -> sameoldchat.chat.v1.SetMemberPreferenceRequest
+	1,  // 32: sameoldchat.chat.v1.PresenceService.UserInfo:output_type -> sameoldchat.chat.v1.User
+	22, // 33: sameoldchat.chat.v1.PresenceService.SetWorkspaceProfileField:output_type -> sameoldchat.chat.v1.ProfileFieldDefinition
+	25, // 34: sameoldchat.chat.v1.PresenceService.WorkspaceProfileFields:output_type -> sameoldchat.chat.v1.WorkspaceProfileFieldsResponse
+	32, // 35: sameoldchat.chat.v1.PresenceService.DeleteWorkspaceProfileField:output_type -> sameoldchat.chat.v1.MutationResponse
+	32, // 36: sameoldchat.chat.v1.PresenceService.SetUserProfileFields:output_type -> sameoldchat.chat.v1.MutationResponse
+	30, // 37: sameoldchat.chat.v1.PresenceService.UserProfileFields:output_type -> sameoldchat.chat.v1.UserProfileFieldsResponse
+	1,  // 38: sameoldchat.chat.v1.PresenceService.UserByEmail:output_type -> sameoldchat.chat.v1.User
+	1,  // 39: sameoldchat.chat.v1.PresenceService.SetUserProfile:output_type -> sameoldchat.chat.v1.User
+	12, // 40: sameoldchat.chat.v1.PresenceService.ScheduleUserStatus:output_type -> sameoldchat.chat.v1.ScheduledStatus
+	15, // 41: sameoldchat.chat.v1.PresenceService.ScheduledUserStatuses:output_type -> sameoldchat.chat.v1.ScheduledUserStatusesResponse
+	12, // 42: sameoldchat.chat.v1.PresenceService.UpdateScheduledUserStatus:output_type -> sameoldchat.chat.v1.ScheduledStatus
+	32, // 43: sameoldchat.chat.v1.PresenceService.DeleteScheduledUserStatus:output_type -> sameoldchat.chat.v1.MutationResponse
+	1,  // 44: sameoldchat.chat.v1.PresenceService.SetUserPresence:output_type -> sameoldchat.chat.v1.User
+	18, // 45: sameoldchat.chat.v1.PresenceService.DoNotDisturbInfo:output_type -> sameoldchat.chat.v1.DoNotDisturb
+	18, // 46: sameoldchat.chat.v1.PresenceService.SetSnooze:output_type -> sameoldchat.chat.v1.DoNotDisturb
+	18, // 47: sameoldchat.chat.v1.PresenceService.PauseNotificationsUntil:output_type -> sameoldchat.chat.v1.DoNotDisturb
+	18, // 48: sameoldchat.chat.v1.PresenceService.EndSnooze:output_type -> sameoldchat.chat.v1.DoNotDisturb
+	32, // 49: sameoldchat.chat.v1.PresenceService.EndDND:output_type -> sameoldchat.chat.v1.MutationResponse
+	2,  // 50: sameoldchat.chat.v1.PresenceService.OpenClientConnection:output_type -> sameoldchat.chat.v1.ClientConnection
+	2,  // 51: sameoldchat.chat.v1.PresenceService.RenewClientConnection:output_type -> sameoldchat.chat.v1.ClientConnection
+	32, // 52: sameoldchat.chat.v1.PresenceService.CloseClientConnection:output_type -> sameoldchat.chat.v1.MutationResponse
+	7,  // 53: sameoldchat.chat.v1.PresenceService.ClientConnectionCount:output_type -> sameoldchat.chat.v1.ClientConnectionCountResponse
+	5,  // 54: sameoldchat.chat.v1.PresenceService.MemberPreferences:output_type -> sameoldchat.chat.v1.MemberPreferencesResponse
+	32, // 55: sameoldchat.chat.v1.PresenceService.SetMemberPreference:output_type -> sameoldchat.chat.v1.MutationResponse
+	32, // [32:56] is the sub-list for method output_type
+	8,  // [8:32] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_presence_proto_init() }
@@ -2366,7 +2555,7 @@ func file_sameoldchat_chat_v1_presence_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_presence_proto_rawDesc), len(file_sameoldchat_chat_v1_presence_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   28,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

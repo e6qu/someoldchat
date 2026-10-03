@@ -1,0 +1,42 @@
+package domain
+
+import (
+	"errors"
+	"regexp"
+	"strings"
+	"unicode/utf8"
+)
+
+// A member's preferences follow them to every client, as Slack's do: the
+// web client's appearance, sidebar, mark-as-read and composer choices are
+// kept for the member rather than for one browser. A preference is an opaque
+// name and value the client defines; the server bounds them and keeps them
+// apart per member and workspace.
+
+// The bounds of a member's preferences.
+const (
+	MemberPreferenceLimit      = 200
+	memberPreferenceValueLimit = 1024
+)
+
+// ErrInvalidMemberPreference is a preference outside its bounds.
+var ErrInvalidMemberPreference = errors.New("invalid member preference")
+
+// memberPreferenceName is a lower-case name, optionally qualified by the one
+// thing it is about, as "section-sort:starred" is the starred section's sort.
+var memberPreferenceName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}(:[A-Za-z0-9_.-]{1,64})?$`)
+
+// NormalizeMemberPreference checks a preference's name and value. A value
+// carries no control characters, which nothing a client sets needs.
+func NormalizeMemberPreference(name, value string) (string, string, error) {
+	name = strings.TrimSpace(name)
+	if !memberPreferenceName.MatchString(name) || !utf8.ValidString(value) || utf8.RuneCountInString(value) > memberPreferenceValueLimit {
+		return "", "", ErrInvalidMemberPreference
+	}
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return "", "", ErrInvalidMemberPreference
+		}
+	}
+	return name, value, nil
+}

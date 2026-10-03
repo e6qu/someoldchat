@@ -41,6 +41,8 @@ const (
 	PresenceService_RenewClientConnection_FullMethodName       = "/sameoldchat.chat.v1.PresenceService/RenewClientConnection"
 	PresenceService_CloseClientConnection_FullMethodName       = "/sameoldchat.chat.v1.PresenceService/CloseClientConnection"
 	PresenceService_ClientConnectionCount_FullMethodName       = "/sameoldchat.chat.v1.PresenceService/ClientConnectionCount"
+	PresenceService_MemberPreferences_FullMethodName           = "/sameoldchat.chat.v1.PresenceService/MemberPreferences"
+	PresenceService_SetMemberPreference_FullMethodName         = "/sameoldchat.chat.v1.PresenceService/SetMemberPreference"
 )
 
 // PresenceServiceClient is the client API for PresenceService service.
@@ -69,6 +71,8 @@ type PresenceServiceClient interface {
 	RenewClientConnection(ctx context.Context, in *ClientConnectionRequest, opts ...grpc.CallOption) (*ClientConnection, error)
 	CloseClientConnection(ctx context.Context, in *ClientConnectionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	ClientConnectionCount(ctx context.Context, in *ClientConnectionRequest, opts ...grpc.CallOption) (*ClientConnectionCountResponse, error)
+	MemberPreferences(ctx context.Context, in *MemberPreferencesRequest, opts ...grpc.CallOption) (*MemberPreferencesResponse, error)
+	SetMemberPreference(ctx context.Context, in *SetMemberPreferenceRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 }
 
 type presenceServiceClient struct {
@@ -299,6 +303,26 @@ func (c *presenceServiceClient) ClientConnectionCount(ctx context.Context, in *C
 	return out, nil
 }
 
+func (c *presenceServiceClient) MemberPreferences(ctx context.Context, in *MemberPreferencesRequest, opts ...grpc.CallOption) (*MemberPreferencesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MemberPreferencesResponse)
+	err := c.cc.Invoke(ctx, PresenceService_MemberPreferences_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *presenceServiceClient) SetMemberPreference(ctx context.Context, in *SetMemberPreferenceRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, PresenceService_SetMemberPreference_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PresenceServiceServer is the server API for PresenceService service.
 // All implementations should embed UnimplementedPresenceServiceServer
 // for forward compatibility.
@@ -325,6 +349,8 @@ type PresenceServiceServer interface {
 	RenewClientConnection(context.Context, *ClientConnectionRequest) (*ClientConnection, error)
 	CloseClientConnection(context.Context, *ClientConnectionRequest) (*MutationResponse, error)
 	ClientConnectionCount(context.Context, *ClientConnectionRequest) (*ClientConnectionCountResponse, error)
+	MemberPreferences(context.Context, *MemberPreferencesRequest) (*MemberPreferencesResponse, error)
+	SetMemberPreference(context.Context, *SetMemberPreferenceRequest) (*MutationResponse, error)
 }
 
 // UnimplementedPresenceServiceServer should be embedded to have
@@ -399,6 +425,12 @@ func (UnimplementedPresenceServiceServer) CloseClientConnection(context.Context,
 }
 func (UnimplementedPresenceServiceServer) ClientConnectionCount(context.Context, *ClientConnectionRequest) (*ClientConnectionCountResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClientConnectionCount not implemented")
+}
+func (UnimplementedPresenceServiceServer) MemberPreferences(context.Context, *MemberPreferencesRequest) (*MemberPreferencesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MemberPreferences not implemented")
+}
+func (UnimplementedPresenceServiceServer) SetMemberPreference(context.Context, *SetMemberPreferenceRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetMemberPreference not implemented")
 }
 func (UnimplementedPresenceServiceServer) testEmbeddedByValue() {}
 
@@ -816,6 +848,42 @@ func _PresenceService_ClientConnectionCount_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PresenceService_MemberPreferences_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MemberPreferencesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).MemberPreferences(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_MemberPreferences_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).MemberPreferences(ctx, req.(*MemberPreferencesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PresenceService_SetMemberPreference_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetMemberPreferenceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).SetMemberPreference(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_SetMemberPreference_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).SetMemberPreference(ctx, req.(*SetMemberPreferenceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PresenceService_ServiceDesc is the grpc.ServiceDesc for PresenceService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -910,6 +978,14 @@ var PresenceService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ClientConnectionCount",
 			Handler:    _PresenceService_ClientConnectionCount_Handler,
+		},
+		{
+			MethodName: "MemberPreferences",
+			Handler:    _PresenceService_MemberPreferences_Handler,
+		},
+		{
+			MethodName: "SetMemberPreference",
+			Handler:    _PresenceService_SetMemberPreference_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

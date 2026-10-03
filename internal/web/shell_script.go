@@ -4,7 +4,13 @@ package web
 // menus, dialogs, the Ctrl/Cmd+K switcher, the member's preferences, the Home
 // sidebar's per-section order and filters, the narrow navigation drawer, and
 // the global keyboard layer declared in keyboard.go. It carries no template
-// action, so its hash is exact (see workspaceContentSecurityPolicy).
+// action, so its hash is exact (see workspaceContentSecurityPolicy); for the
+// same reason it carries no JavaScript comment, which html/template strips.
+//
+// The member's preferences follow them to every client: the page carries what
+// their account keeps (data-preferences), which this browser takes on load,
+// a local preference the account lacks is kept for it, and every change is
+// sent to /app/preferences. Recent history (recent-*) stays with the browser.
 //
 // Everything a page needs to work without it is ordinary markup: every menu is
 // a <details> disclosure, every dialog opener is a link to a page that renders
@@ -24,9 +30,14 @@ var channel=shell?shell.getAttribute('data-channel')||'':'';
 function withChannel(path){if(!channel)return path;return path+(path.indexOf('?')<0?'?':'&')+'channel='+encodeURIComponent(channel)}
 
 var prefix='sameoldchat-pref:';
-function storageKey(key){return key==='theme'?'sameoldchat-theme':prefix+key}
+function storageKey(key){return key==='theme'||key==='emoji-tone'||key.indexOf('composer-')===0?'sameoldchat-'+key:prefix+key}
+function preferenceName(storage){if(storage.indexOf(prefix)===0)return storage.slice(prefix.length);if(storage==='sameoldchat-theme'||storage==='sameoldchat-emoji-tone'||storage.indexOf('sameoldchat-composer-')===0)return storage.slice('sameoldchat-'.length);return ''}
+var memberPrefs=null;try{memberPrefs=JSON.parse(shell&&shell.getAttribute('data-preferences')||'null')}catch(error){memberPrefs=null}
+function keepPref(key,value){if(!memberPrefs||typeof memberPrefs!=='object'||!key||/^recent-/.test(key))return;var token=shell.getAttribute('data-preferences-csrf');if(!token)return;memberPrefs[key]=String(value);var body=new URLSearchParams();body.set('_csrf',token);body.set('name',key);body.set('value',String(value));fetch('/app/preferences',{method:'POST',credentials:'same-origin',keepalive:true,headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()}).catch(function(){})}
+window.sameoldchatKeepPreference=keepPref;
+if(memberPrefs&&typeof memberPrefs==='object'){Object.keys(memberPrefs).forEach(function(key){try{window.localStorage.setItem(storageKey(key),String(memberPrefs[key]))}catch(error){}});try{var local=[];for(var index=0;index<window.localStorage.length;index++)local.push(window.localStorage.key(index));local.forEach(function(storage){var name=preferenceName(storage);if(name&&!Object.prototype.hasOwnProperty.call(memberPrefs,name))keepPref(name,window.localStorage.getItem(storage))})}catch(error){}}
 function readPref(key,fallback){try{var value=window.localStorage.getItem(storageKey(key));return value===null?fallback:value}catch(error){return fallback}}
-function writePref(key,value){try{window.localStorage.setItem(storageKey(key),value)}catch(error){}try{document.dispatchEvent(new CustomEvent('sameoldchat:preference',{detail:{key:key,value:value}}))}catch(error){}}
+function writePref(key,value){try{window.localStorage.setItem(storageKey(key),value)}catch(error){}keepPref(key,value);try{document.dispatchEvent(new CustomEvent('sameoldchat:preference',{detail:{key:key,value:value}}))}catch(error){}}
 window.sameoldchatPreferences={get:readPref,set:writePref};
 var darkQuery=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
 function applyTheme(){var theme=readPref('theme','system');var dark=theme==='dark'||(theme!=='light'&&!!(darkQuery&&darkQuery.matches));root.setAttribute('data-theme',dark?'dark':'light');root.setAttribute('data-theme-explicit','')}
@@ -93,7 +104,7 @@ function showPlatformChords(root){all('[data-keyboard-apple]',root).forEach(func
 showPlatformChords(document);dialogInitializers.push(showPlatformChords);
 function syncComposerPreferences(){var enter='send',markup=false;try{enter=window.localStorage.getItem('sameoldchat-composer-enter')==='newline'?'newline':'send';markup=window.localStorage.getItem('sameoldchat-composer-markup')==='true'}catch(error){}all('[data-composer-preference]').forEach(function(input){var key=input.getAttribute('data-composer-preference');if(key==='enter')input.checked=input.value===enter;if(key==='markup')input.checked=markup})}
 syncComposerPreferences();dialogInitializers.push(function(){syncComposerPreferences()});dialogInitializers.push(loadPreferenceInputs);
-document.addEventListener('change',function(event){var input=event.target;var key=input&&input.getAttribute?input.getAttribute('data-composer-preference'):null;if(!key||window.sameoldchatComposer)return;try{if(key==='enter'&&input.checked)window.localStorage.setItem('sameoldchat-composer-enter',input.value==='newline'?'newline':'send');if(key==='markup')window.localStorage.setItem('sameoldchat-composer-markup',input.checked?'true':'false')}catch(error){}say(key==='enter'?(input.value==='newline'?'Enter now starts a new line.':'Enter now sends a message.'):'Preference saved.')});
+document.addEventListener('change',function(event){var input=event.target;var key=input&&input.getAttribute?input.getAttribute('data-composer-preference'):null;if(!key||window.sameoldchatComposer)return;if(key==='enter'&&input.checked)writePref('composer-enter',input.value==='newline'?'newline':'send');if(key==='markup')writePref('composer-markup',input.checked?'true':'false');say(key==='enter'?(input.value==='newline'?'Enter now starts a new line.':'Enter now sends a message.'):'Preference saved.')});
 function bindKeyboardHelp(){if(keyboardHelp)return true;keyboardHelp=dialogByID('keyboard-help');if(!keyboardHelp)return false;keyboardHelpQuery=document.getElementById('keyboard-help-query');keyboardHelpEmpty=document.getElementById('keyboard-help-empty');keyboardHelp.addEventListener('sameoldchat:open',function(){if(keyboardHelpQuery){keyboardHelpQuery.value='';filterKeyboardHelp();keyboardHelpQuery.focus()}});if(keyboardHelpQuery)keyboardHelpQuery.addEventListener('input',filterKeyboardHelp);return true}
 dialogInitializers.push(function(dialog){if(dialog.id==='keyboard-help')bindKeyboardHelp()});
 function openKeyboardHelp(){return bindKeyboardHelp()&&openDialog(keyboardHelp,document.activeElement)}

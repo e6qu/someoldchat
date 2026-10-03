@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -47,6 +48,11 @@ type shellView struct {
 	Channel     string
 	Destination string
 	CSRFToken   string
+	// Preferences is the member's own preferences as JSON, which the page
+	// seeds this browser from so they follow the member to every client;
+	// empty when they could not be read, so a failed read never overwrites
+	// what this browser keeps.
+	Preferences string
 	UserID      string
 	Username    string
 	UserInitial string
@@ -188,6 +194,11 @@ func (h Handler) newShell(r *http.Request, principal auth.Principal, request she
 		WorkspaceName: "SameOldChat",
 	}
 	view.ShowAuthAdmin = h.Login != nil && view.ShowAdmin
+	if preferences, err := h.Messages.MemberPreferences(ctx, principal.WorkspaceID, principal.UserID); err == nil {
+		if encoded, err := json.Marshal(preferences); err == nil {
+			view.Preferences = string(encoded)
+		}
+	}
 	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/app") {
 		view.ReturnTo = r.URL.RequestURI()
 	}

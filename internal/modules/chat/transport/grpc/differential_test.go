@@ -5680,6 +5680,30 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A member's preferences cross the seam: kept and replaced by
+			// name, removed by an empty value, refused when malformed, and
+			// each member's own.
+			name: "member preferences are kept per member",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				for _, preference := range []struct{ name, value string }{{"theme", "dark"}, {"section-sort:starred", "recent"}, {"theme", "light"}, {"composer-enter", "newline"}, {"composer-enter", ""}} {
+					if err := chat.SetMemberPreference(ctx, "T1", "U1", preference.name, preference.value); err != nil {
+						return nil, err
+					}
+				}
+				invalid := chat.SetMemberPreference(ctx, "T1", "U1", "Not A Name", "x")
+				control := chat.SetMemberPreference(ctx, "T1", "U1", "theme", "dark\n")
+				mine, err := chat.MemberPreferences(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				theirs, err := chat.MemberPreferences(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				return []any{fmt.Sprint(mine), len(theirs), errors.Is(invalid, domain.ErrInvalidMemberPreference), errors.Is(control, domain.ErrInvalidMemberPreference)}, nil
+			},
+		},
+		{
 			// The web client's search filters cross the seam: "Only my
 			// channels" drops a public channel the searcher has not joined,
 			// and "Exclude automations" drops Slackbot's post.
