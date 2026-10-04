@@ -315,7 +315,7 @@ func (h Handler) writeAuthAdminProblem(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	var rendered bytes.Buffer
-	if err := renderPage(&rendered, authAdminErrorTemplate, authAdminErrorData{Title: problem.Title, Message: problem.Message}, liveHead{}); err != nil {
+	if err := renderPage(&rendered, authAdminErrorTemplate, authAdminErrorData{Title: problem.Title, Message: problem.Message}, liveHead{}, localeOf(w)); err != nil {
 		writeAuthAdminJSON(w, problem.Status, map[string]any{"ok": false, "error": problem.Code})
 		return
 	}
@@ -534,7 +534,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var rendered bytes.Buffer
-	if err := renderPage(&rendered, authAdminTemplate, data, liveHead{}); err != nil {
+	if err := renderPage(&rendered, authAdminTemplate, data, liveHead{}, localeOf(w)); err != nil {
 		h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "rendering_unavailable", Title: "Temporarily unavailable", Message: "The authorization page could not be rendered."})
 		return
 	}

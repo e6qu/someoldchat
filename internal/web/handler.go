@@ -27,6 +27,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/huddlesfu"
+	"github.com/sameoldchat/sameoldchat/internal/l10n"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
@@ -1708,18 +1709,27 @@ a{color:var(--action)}
 
 // themeBootstrap resolves the theme before the first paint, so a stored or
 // operating-system dark preference never flashes the light palette.
-const themeBootstrap = `<script>(function(){var root=document.documentElement;var dark=false;root.classList.add('js');try{var stored=localStorage.getItem('sameoldchat-theme');dark=stored==='dark'||(stored!=='light'&&!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches))}catch(error){dark=false}root.setAttribute('data-theme',dark?'dark':'light');root.setAttribute('data-theme-explicit','');try{var zoom=localStorage.getItem('sameoldchat-pref:zoom');if(zoom&&zoom!=='100'&&/^(80|90|110|125|150)$/.test(zoom))root.setAttribute('data-pref-zoom',zoom)}catch(error){}})();</script>`
+const themeBootstrap = `<script>(function(){var root=document.documentElement;var dark=false;root.classList.add('js');try{var stored=localStorage.getItem('sameoldchat-theme');dark=stored==='dark'||(stored!=='light'&&!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches))}catch(error){dark=false}root.setAttribute('data-theme',dark?'dark':'light');root.setAttribute('data-theme-explicit','');var catalog=null;window.sameoldchatT=function(key,args,count){if(catalog===null){try{catalog=JSON.parse(root.getAttribute('data-l10n')||'{}')}catch(error){catalog={}}}var value=catalog[key];if(value===undefined)return key;if(typeof value==='object'){var category='other';try{category=new Intl.PluralRules(root.lang||'en').select(count)}catch(error){}value=value[category]||value.other;args=Object.assign({count:count},args||{})}return String(value).replace(/\{([a-z][a-z0-9_]*)\}/g,function(match,name){return args&&Object.prototype.hasOwnProperty.call(args,name)?String(args[name]):match})};try{var zoom=localStorage.getItem('sameoldchat-pref:zoom');if(zoom&&zoom!=='100'&&/^(80|90|110|125|150)$/.test(zoom))root.setAttribute('data-pref-zoom',zoom)}catch(error){}})();</script>`
 
 const themeToggleScript = `<script>(function(){var root=document.documentElement;var toggle=document.getElementById('theme-toggle');function apply(theme){root.setAttribute('data-theme',theme);root.setAttribute('data-theme-explicit','');if(toggle)toggle.setAttribute('aria-pressed',theme==='dark'?'true':'false')}apply(root.getAttribute('data-theme')==='dark'?'dark':'light');if(!toggle)return;toggle.addEventListener('click',function(){var next=root.getAttribute('data-theme')==='dark'?'light':'dark';apply(next);try{localStorage.setItem('sameoldchat-theme',next)}catch(error){}})})();</script>`
 
 const layoutMarkup = `<!doctype html>
-<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{{template "title" .Page}}</title><style>` + sharedStyle + `</style>{{block "styles" .Page}}{{end}}` + themeBootstrap + `</head><body{{with .EventHead}} data-event-head="{{.}}"{{end}}>{{template "content" .Page}}` + themeToggleScript + `{{block "scripts" .Page}}{{end}}</body></html>`
+<html lang="{{.Lang}}" data-theme="light" data-l10n="{{.ClientCatalog}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{{template "title" .Page}}</title><style>` + sharedStyle + `</style>{{block "styles" .Page}}{{end}}` + themeBootstrap + `</head><body{{with .EventHead}} data-event-head="{{.}}"{{end}}>{{template "content" .Page}}` + themeToggleScript + `{{block "scripts" .Page}}{{end}}</body></html>`
 
 // templateFunctions is deliberately tiny: it exists so a template cannot write
 // an aria-keyshortcuts value by hand. Every advertised chord is looked up in
 // keyboardSections, which is what keeps the announced binding, the documented
 // binding and the implemented binding the same thing.
-var templateFunctions = template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts, "icon": icon, "laterRemind": laterRemind, "emojiSkinTones": emojiSkinTones, "emojiCategoryTabs": emojiCategoryTabs}
+var templateFunctions = withFunctions(template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts, "icon": icon, "laterRemind": laterRemind, "emojiSkinTones": emojiSkinTones, "emojiCategoryTabs": emojiCategoryTabs}, localeFunctions(l10n.Default))
+
+// withFunctions is base with extra added: the source locale's t and tn, which
+// a page's clone for another locale rebinds (see localizedPages).
+func withFunctions(base, extra template.FuncMap) template.FuncMap {
+	for name, function := range extra {
+		base[name] = function
+	}
+	return base
+}
 
 // laterRemindView is what Later's Remind me menu needs for one item: where
 // to post, the page's CSRF token, and what the menu is about.
@@ -1744,7 +1754,7 @@ var pageMarkups []string
 
 func mustPage(markup string) *template.Template {
 	pageMarkups = append(pageMarkups, markup)
-	return template.Must(template.Must(template.Must(layoutTemplate.Clone()).Parse(shellPartials + dmPanePartial + composerPreferencesPartial)).Parse(markup))
+	return registerLocalizable(template.Must(template.Must(template.Must(layoutTemplate.Clone()).Parse(shellPartials + dmPanePartial + composerPreferencesPartial)).Parse(markup)))
 }
 
 const pageStyle = `<style>
@@ -3876,7 +3886,9 @@ func liveEventTopicsLiteral() string {
 // Routing
 // ---------------------------------------------------------------------------
 
-func (h Handler) Register(mux *http.ServeMux) {
+func (h Handler) Register(serveMux *http.ServeMux) {
+	// Every web route answers in its reader's language; see withLocale.
+	mux := localizingMux{serveMux}
 	mux.HandleFunc("GET /signed-out", h.signedOut)
 	if h.Login != nil {
 		h.Login.Register(mux)
@@ -13491,6 +13503,10 @@ func secureHeaders(w http.ResponseWriter, policy string) {
 // never see the wrapper; the layout alone reads EventHead.
 type layoutData struct {
 	Page any
+	// Lang is the page's language, its <html lang>; ClientCatalog is the
+	// "client." messages scripts read through sameoldchatT.
+	Lang          string
+	ClientCatalog string
 	// EventHead is set only on a page that opens the live event stream. See
 	// liveHead.
 	EventHead string
@@ -13498,8 +13514,8 @@ type layoutData struct {
 
 // renderPage executes a layout page. Every layout page is executed here, so
 // none can be rendered without the wrapper the layout expects.
-func renderPage(output *bytes.Buffer, page *template.Template, data any, head liveHead) error {
-	return page.Execute(output, layoutData{Page: data, EventHead: head.attribute()})
+func renderPage(output *bytes.Buffer, page *template.Template, data any, head liveHead, locale l10n.Locale) error {
+	return localized(page, locale).Execute(output, layoutData{Page: data, EventHead: head.attribute(), Lang: string(locale), ClientCatalog: clientCatalog(locale)})
 }
 
 // liveHead is the journal position a page that opens /events was rendered
@@ -13559,7 +13575,7 @@ func (h Handler) writeHTMLWithPolicy(w http.ResponseWriter, page *template.Templ
 
 func (h Handler) writeRendered(w http.ResponseWriter, page *template.Template, data any, head liveHead, status int, unavailable, policy string) {
 	var output bytes.Buffer
-	if err := renderPage(&output, page, data, head); err != nil {
+	if err := renderPage(&output, page, data, head, localeOf(w)); err != nil {
 		// A template that cannot execute is a programming error rather than an
 		// outage, and the 503 below cannot say which it was; the log can.
 		log.Printf("web: rendering a page failed: %v", err)
@@ -13582,7 +13598,7 @@ func (h Handler) writeFragment(w http.ResponseWriter, list messageList) {
 // cannot disagree about the policy or the content type.
 func (h Handler) writePartial(w http.ResponseWriter, name string, data any, unavailable string) {
 	var output bytes.Buffer
-	if err := pageTemplate.ExecuteTemplate(&output, name, data); err != nil {
+	if err := localized(pageTemplate, localeOf(w)).ExecuteTemplate(&output, name, data); err != nil {
 		secureHeaders(w, workspaceContentSecurityPolicy())
 		http.Error(w, unavailable, http.StatusServiceUnavailable)
 		return
@@ -13594,7 +13610,7 @@ func (h Handler) writePartial(w http.ResponseWriter, name string, data any, unav
 
 func (h Handler) writePageError(w http.ResponseWriter, status int, heading, message string) {
 	var output bytes.Buffer
-	if err := renderPage(&output, errorTemplate, errorData{Heading: heading, Message: message}, liveHead{}); err != nil {
+	if err := renderPage(&output, errorTemplate, errorData{Heading: heading, Message: message}, liveHead{}, localeOf(w)); err != nil {
 		secureHeaders(w, workspaceContentSecurityPolicy())
 		http.Error(w, heading, status)
 		return

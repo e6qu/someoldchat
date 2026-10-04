@@ -23,6 +23,8 @@ how the application is structured, built, operated, and deployed.
   leases and the bounded reconciliation audit.
 - [Incoming Webhooks](incoming-webhooks.md) describes the delivery endpoint,
   administrative lifecycle, and payload compatibility boundary.
+- [Localization](localization.md) describes message catalogs, how a request
+  picks its language, the pseudo-locale, and how to add a language.
 - [Rebase audit](rebase-audit.md) describes `make rebase-audit`, which checks
   that a rebased branch kept the work it contained.
 - [Benchmarks and profiling](performance.md) describes measuring the message

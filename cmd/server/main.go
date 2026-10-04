@@ -25,6 +25,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/generated"
 	"github.com/sameoldchat/sameoldchat/internal/huddlesfu"
+	"github.com/sameoldchat/sameoldchat/internal/l10n"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	chatgrpc "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc"
 	"github.com/sameoldchat/sameoldchat/internal/observability"
@@ -187,6 +188,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	resolved, err := settings.resolve()
 	if err != nil {
 		logger.Error("invalid configuration", "error", err)
+		return exitConfiguration
+	}
+	// A broken message catalog stops the deployment rather than a page.
+	if err := l10n.Load(); err != nil {
+		logger.Error("load message catalogs", "error", err)
 		return exitConfiguration
 	}
 	if *checkConfiguration {

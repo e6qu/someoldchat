@@ -330,7 +330,7 @@ const profilePanelPartial = `{{define "profile-panel"}}<div class="pp-head"><h2 
 {{if .Fields}}<section class="pp-section" aria-labelledby="profile-about-heading"><h3 id="profile-about-heading">About</h3><dl>{{range .Fields}}<div><dt>{{.Label}}</dt><dd>{{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer" target="_blank">{{.Value}}</a>{{else}}{{.Value}}{{end}}</dd></div>{{end}}</dl></section>{{end}}
 </div>{{end}}`
 
-var profilePanelTemplate = template.Must(template.New("profile-panel-fragment").Funcs(templateFunctions).Parse(profilePanelPartial))
+var profilePanelTemplate = registerLocalizable(template.Must(template.New("profile-panel-fragment").Funcs(templateFunctions).Parse(profilePanelPartial)))
 
 // memberProfile answers the profile panel fragment. A navigation (no
 // fragment header) is sent to the People page with the panel open, so a
@@ -355,7 +355,7 @@ func (h Handler) memberProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var output bytes.Buffer
-	if err := profilePanelTemplate.ExecuteTemplate(&output, "profile-panel", view); err != nil {
+	if err := localized(profilePanelTemplate, localeOf(w)).ExecuteTemplate(&output, "profile-panel", view); err != nil {
 		http.Error(w, "The profile could not be rendered.", http.StatusServiceUnavailable)
 		return
 	}

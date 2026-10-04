@@ -2470,6 +2470,40 @@ test('[NAV-06 A11Y-01] the zoom preference scales the workspace and keeps it ins
   await expect(page.locator('html')).not.toHaveAttribute('data-pref-zoom', /.*/);
 });
 
+// The workspace is shown in the reader's language: a chosen one, else the
+// browser's. Only English has a catalog, so the generated pseudo-locale stands
+// in for a second language: it renders every catalog message accented and
+// bracketed, so localized text is told apart from text still in the markup.
+test('[NAV-06 A11Y-01] the workspace renders in the chosen language and the picker switches it', async ({ page, context }) => {
+  await signIn(context);
+  await context.addCookies([{ name: 'sameoldchat_locale', value: 'en-XA', url: 'http://127.0.0.1:18080' }]);
+  await page.goto(`/app?channel=${CHANNEL}`);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en-XA');
+  const { primary } = await slackModifiers(page);
+  await page.keyboard.press(`${primary}+Comma`);
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  const regionTab = preferences.getByRole('tab', { name: '[Ļåñĝûåĝé & ŕéĝîöñ]' });
+  await expect(regionTab).toHaveCount(1);
+  await expect(preferences.getByRole('tablist')).toHaveAttribute('aria-label', '[Ƥŕéƒéŕéñçé šéçţîöñš]');
+  // A script builds its announcement from the same catalog.
+  await preferences.getByRole('tab', { name: '[Åççéššîƀîļîţý]' }).click();
+  await preferences.getByRole('checkbox', { name: 'Underline links in messages' }).check();
+  await expect(page.locator('#shell-status')).toHaveText('[Ƥŕéƒéŕéñçé šåṽéđ.]');
+  await preferences.getByRole('checkbox', { name: 'Underline links in messages' }).uncheck();
+
+  // Language & region offers the listed languages; choosing one switches the
+  // page, and the choice is remembered.
+  await regionTab.click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-region');
+  const language = preferences.getByRole('combobox', { name: '[Ļåñĝûåĝé]' });
+  await expect(language.locator('option')).toHaveText(['English']);
+  await language.selectOption('en');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  expect((await context.cookies()).find((cookie) => cookie.name === 'sameoldchat_locale')?.value).toBe('en');
+  await page.keyboard.press(`${primary}+Comma`);
+  await expect(preferences.getByRole('tab', { name: 'Language & region' })).toBeVisible();
+});
+
 // Slack's "Announce incoming messages" reads an arriving message's sender and
 // text to a screen reader; turned off, arrivals are not announced at all.
 test('[NAV-06 A11Y-01] incoming messages are announced unless the member turns it off', async ({ page, context, request }) => {

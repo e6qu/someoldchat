@@ -172,6 +172,14 @@ as Slack does by default, or by hand: choosing a zone turns the automatic zone
 off, so a browser in another zone no longer moves it, and turning it back on
 lets the browser's zone in again.
 
+Language & region also chooses the language the workspace is shown in, from
+the languages that have a catalog (English only, so far). Without a choice a
+page follows the browser's languages, and otherwise English. A page MUST be in
+one language throughout — its `lang`, the text it renders and the text its
+scripts build — and choosing another language switches the page and is
+remembered for the member in every browser. Messages people write are never
+translated. See docs/localization.md.
+
 Navigation chooses which of DMs, Activity, Later and Files the rail shows
 (Home always shows) and whether tabs show their names. A tab taken off the
 rail moves into More and keeps its keyboard shortcut; a name taken off the

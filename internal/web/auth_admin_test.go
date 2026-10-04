@@ -130,7 +130,7 @@ func TestAuthAdminPageShowsOnlyAuthorizedSections(t *testing.T) {
 		// The page renders through the shared layout, so it honours the theme
 		// the administrator chose in the workspace instead of only the one the
 		// operating system reports.
-		`<html lang="en" data-theme="light">`,
+		`<html lang="en" data-theme="light" data-l10n=`,
 		`id="theme-toggle"`,
 	} {
 		if !strings.Contains(body, expected) {
