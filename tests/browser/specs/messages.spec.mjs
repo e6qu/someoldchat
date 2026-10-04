@@ -402,7 +402,9 @@ test('[NAV-07 THREAD-01] the Threads view lists threads with their latest replie
   await expect(card.locator('.thread-card-message').first().locator('strong')).toHaveText('threaded');
   await expect(card.locator('.thread-card-message.reply')).toContainText(`only reply ${stamp}`);
   await expect(card.locator('.thread-card-summary')).toContainText('1 reply');
-  await expect(card.getByRole('link', { name: 'Reply…' })).toHaveAttribute('href', new RegExp(`thread=${encodeURIComponent(root.ts)}`));
+  const replyBox = card.locator('form[data-thread-reply-slot]');
+  await expect(replyBox).toHaveAttribute('action', new RegExp(`thread=${encodeURIComponent(root.ts)}`));
+  await expect(replyBox.getByRole('textbox', { name: /^Reply to the thread in #/ })).toHaveAttribute('placeholder', 'Reply…');
   await expect(page.locator('.thread-card', { hasText: `no replies ${stamp}` })).toHaveCount(0);
   await expect(page.locator('main')).not.toContainText('Jan 1, 00:00');
 });

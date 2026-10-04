@@ -244,7 +244,7 @@ func TestReturnTargetAcceptsOnlyThisApplicationsPages(t *testing.T) {
 		"/api/chat.postMessage":     "/fallback",
 		"/app/\\evil":               "/fallback",
 		"":                          "/fallback",
-		"/app?channel=C1#composer":  "/app?channel=C1",
+		"/app?channel=C1#composer":  "/app?channel=C1#composer",
 		"javascript:alert(1)//app/": "/fallback",
 	} {
 		if got := returnTarget(map[string]string{"return": value}, "/fallback"); got != want {

@@ -184,6 +184,11 @@ first, with the containing conversation, the root message, the reply count and
 how many replies the member has not read. A thread whose root has been deleted
 MUST leave the view rather than appear as a row that opens onto nothing.
 
+Each card ends in a reply field, as in Slack. A reply sent from it MUST land in
+that thread and return the member to the same card; Enter follows the
+member's composer preference. A refused reply MUST open the thread with the
+draft kept and the reason shown, rather than lose the text.
+
 Unread MUST be derived from the member's read position in the containing
 conversation. A second, thread-only read position would let the Threads view
 and the conversation disagree about the same replies.

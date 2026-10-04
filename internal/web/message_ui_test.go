@@ -251,8 +251,51 @@ func TestThreadsViewListsThreadsWithTheirLatestReplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := get(t, mux, "/app/threads?channel=Cdev").Body.String()
-	requireContains(t, "threads view", body, "<strong>ship</strong> it?", "yes, <code>today</code>", "1 reply", "Last reply", "data-thread-reply-slot", ">Reply…<", "#general")
+	requireContains(t, "threads view", body, "<strong>ship</strong> it?", "yes, <code>today</code>", "1 reply", "Last reply", "data-thread-reply-slot", `placeholder="Reply…"`, "#general")
 	requireMissing(t, "threads view", body, "a lonely message", "0 replies", "Jan 1", "1 replies")
+}
+
+// NAV-07: a Threads card hosts its own reply form, as Slack's Threads view
+// does. The reply lands in the thread and the post answers with the Threads
+// view at that card; a return outside this application is not followed.
+func TestThreadsCardRepliesInPlace(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	ctx := context.Background()
+	root, err := messages.Post(ctx, "T1", "U1", "Cdev", "ship it?", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := domain.NewMessageTimestamp(root.CreatedAt)
+	if _, err := messages.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{Conversation: "Cdev", Text: "first", ThreadTimestamp: thread}); err != nil {
+		t.Fatal(err)
+	}
+	anchor := "thread-Cdev-" + string(thread)
+	body := get(t, mux, "/app/threads?channel=Cdev").Body.String()
+	form := body[strings.Index(body, `id="`+anchor+`"`):]
+	form = form[strings.Index(form, "<form"):]
+	form = form[:strings.Index(form, "</form>")]
+	action := "/app/message?channel=Cdev&amp;thread=" + url.QueryEscape(string(thread))
+	returnTo := "/app/threads?channel=Cdev#" + anchor
+	requireContains(t, "card reply form", form, `method="post"`, `action="`+action+`"`, `name="thread_ts" value="`+string(thread)+`"`, `name="return" value="`+returnTo+`"`, `name="text"`, `for="`+anchor+`-reply"`)
+
+	target := "/app/message?channel=Cdev&thread=" + url.QueryEscape(string(thread))
+	sent := postForm(t, mux, target, url.Values{"_csrf": {auth.CSRFToken("session")}, "thread_ts": {string(thread)}, "return": {returnTo}, "text": {"from the card"}}.Encode(), false)
+	if sent.Code != http.StatusSeeOther || sent.Header().Get("Location") != returnTo {
+		t.Fatalf("reply = %d to %q: %s", sent.Code, sent.Header().Get("Location"), sent.Body)
+	}
+	replies, err := messages.Replies(ctx, "T1", "U1", "Cdev", thread, domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := replies.Messages[len(replies.Messages)-1]; last.Text != "from the card" || last.ThreadTimestamp != thread {
+		t.Fatalf("the card's reply did not land in the thread: %+v", last)
+	}
+
+	offsite := postForm(t, mux, target, url.Values{"_csrf": {auth.CSRFToken("session")}, "thread_ts": {string(thread)}, "return": {"//evil.example/app"}, "text": {"again"}}.Encode(), false)
+	if location := offsite.Header().Get("Location"); offsite.Code != http.StatusSeeOther || !strings.HasPrefix(location, "/app?") {
+		t.Fatalf("an off-site return was followed: %d to %q", offsite.Code, location)
+	}
 }
 
 // The emoji picker browses a whole category, and names the thumbs as Slack

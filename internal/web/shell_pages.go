@@ -30,6 +30,11 @@ func returnTarget(fields map[string]string, fallback string) string {
 	if err != nil || parsed.IsAbs() || parsed.Host != "" || (parsed.Path != "/app" && !strings.HasPrefix(parsed.Path, "/app/")) {
 		return fallback
 	}
+	// The fragment is kept so a form inside a list, such as a Threads card,
+	// comes back to the item it was sent from.
+	if parsed.Fragment != "" {
+		return parsed.RequestURI() + "#" + parsed.EscapedFragment()
+	}
 	return parsed.RequestURI()
 }
 
