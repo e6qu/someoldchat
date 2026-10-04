@@ -3251,7 +3251,7 @@ func TestTheInlineScriptParserRefusesWhatItCannotHash(t *testing.T) {
 }
 
 // TestNewActivityIsAnnouncedForTheRegionItLandedIn covers two defects in the
-// live-status announcement. messageCount() counted `#timeline .message` while
+// live-status announcement. The arrival count read `#timeline .message` while
 // refresh() re-renders every live region, so a reply arriving in an open thread
 // pane — the one region that is live unconditionally — measured zero arrivals
 // and was never announced. And the "New activity is available" fallback ran
@@ -3259,11 +3259,21 @@ func TestTheInlineScriptParserRefusesWhatItCannotHash(t *testing.T) {
 // open (thread live, timeline not) got neither the count nor the fallback.
 func TestNewActivityIsAnnouncedForTheRegionItLandedIn(t *testing.T) {
 	requireContains(t, "client", progressiveEnhancementScript,
-		`function messageCount(){return document.querySelectorAll('[data-fragment] .message').length}`,
+		`Array.prototype.filter.call(document.querySelectorAll('[data-fragment] .message[data-ts]')`,
 		`var behind=document.querySelectorAll('[data-fragment]:not([data-live="true"])').length>0;`,
 		`if(behind)announce('New activity is available in this conversation.');`,
 	)
 	requireMissing(t, "client", progressiveEnhancementScript, `document.querySelectorAll('#timeline .message')`)
+	// Arrivals are the messages newer than the newest one shown before the
+	// refresh, not a difference in counts: the timeline is a bounded window,
+	// so on a busy channel one arrival pushes the oldest message out and the
+	// count does not change. The member's "Announce incoming messages"
+	// preference can silence the announcement.
+	requireContains(t, "client", progressiveEnhancementScript,
+		`var arrived=arrivalsSince(before);`,
+		`if(preference('announce-messages','true')!=='false')announce(arrivalSentence(arrived));`,
+	)
+	requireMissing(t, "client", progressiveEnhancementScript, `messageCount()-before`)
 }
 
 // TestTheClientNeverFetchesAnOriginItWasNotGiven pins the one property of the

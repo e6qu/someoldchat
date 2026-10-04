@@ -355,6 +355,9 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       <fieldset><legend>Animation</legend>
         <label><input type="checkbox" data-preference="reduce-motion"> Turn off interface animations and transitions</label>
       </fieldset>
+      <fieldset><legend>Screen reader</legend>
+        <label><input type="checkbox" data-preference="announce-messages" data-default="true"> Announce incoming messages in the conversation you are viewing</label>
+      </fieldset>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-navigation" aria-labelledby="pref-tab-navigation" tabindex="0" hidden>
       <h3>Navigation</h3>
