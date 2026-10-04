@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -1264,7 +1265,10 @@ func (s *Store) ListEmojis(_ context.Context, workspace domain.WorkspaceID) ([]d
 
 // RemoveEmoji removes a custom emoji together with every alias that points at
 // it, as the SQL store does.
-func (s *Store) RemoveEmoji(_ context.Context, workspace domain.WorkspaceID, name string, event events.Event) error {
+func (s *Store) RemoveEmoji(_ context.Context, workspace domain.WorkspaceID, name string, written ...events.Event) error {
+	if len(written) == 0 {
+		return errors.New("removing a custom emoji requires its event")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := emojiKey(workspace, name)
@@ -1277,8 +1281,8 @@ func (s *Store) RemoveEmoji(_ context.Context, workspace domain.WorkspaceID, nam
 			delete(s.emojis, aliasKey)
 		}
 	}
-	s.touchEmojiRevisionLocked(workspace, event.CreatedAt)
-	s.outbox = append(s.outbox, event)
+	s.touchEmojiRevisionLocked(workspace, written[0].CreatedAt)
+	s.outbox = append(s.outbox, written...)
 	return nil
 }
 
@@ -11395,6 +11399,14 @@ func (s *Store) blobReferences(workspace domain.WorkspaceID) []string {
 			continue
 		}
 		if key, ok := domain.UserPhotoBlobKey(workspace, user.ID, user.Profile.Image24); ok {
+			references = append(references, key)
+		}
+	}
+	for _, emoji := range s.emojis {
+		if emoji.WorkspaceID != workspace || emoji.AliasFor != "" {
+			continue
+		}
+		if key, ok := domain.CustomEmojiBlobKey(workspace, emoji.URL); ok {
 			references = append(references, key)
 		}
 	}

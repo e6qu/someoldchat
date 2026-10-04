@@ -10,6 +10,14 @@ import (
 
 const FileBlobDeleteTopic = "file.blob_delete"
 const UserPhotoBlobDeleteTopic = "user.photo_blob_delete"
+const CustomEmojiBlobDeleteTopic = "emoji.image_blob_delete"
+
+// BlobDeleteTopics are the internal records whose payload is an object-storage
+// key for the blob-cleanup worker to delete. The worker drains each of them,
+// and the repositories keep every one of them out of client-facing replays and
+// away from the general outbox worker, so all three read this one list.
+var BlobDeleteTopics = []string{FileBlobDeleteTopic, UserPhotoBlobDeleteTopic, CustomEmojiBlobDeleteTopic}
+
 const EphemeralMessageTopic = "message.ephemeral"
 
 type Source interface {

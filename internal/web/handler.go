@@ -9022,8 +9022,17 @@ func customEmojiImages(values []domain.CustomEmoji) map[string]string {
 	return result
 }
 
+// safeEmojiImageURL admits an http(s) image URL an administrator supplied, or
+// the origin-relative URL this server minted for an uploaded image
+// (domain.CustomEmojiImageURL). admin.emoji.add refuses any relative URL, so
+// only an upload can store the second form.
 func safeEmojiImageURL(raw string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
+	raw = strings.TrimSpace(raw)
+	if workspaceAndToken, ok := strings.CutPrefix(raw, "/emoji/"); ok {
+		workspace, token, found := strings.Cut(workspaceAndToken, "/")
+		return found && workspace != "" && token != "" && !strings.ContainsAny(token, "/?#%\\")
+	}
+	parsed, err := url.Parse(raw)
 	if err != nil {
 		return false
 	}

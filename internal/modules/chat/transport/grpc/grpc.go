@@ -3141,6 +3141,20 @@ func (r Remote) AdminRemoveEmoji(ctx context.Context, workspaceID domain.Workspa
 	}
 	return requireAcknowledgement(out.GetOk(), "emoji remove")
 }
+func (r Remote) AdminUploadEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, mimeType string, image []byte) error {
+	out, err := r.directory.UploadEmoji(ctx, &chatv1.UploadEmojiRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, MimeType: mimeType, Image: image})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "emoji upload")
+}
+func (r Remote) OpenEmojiImage(ctx context.Context, workspaceID domain.WorkspaceID, token string) (string, []byte, error) {
+	out, err := r.directory.OpenEmojiImage(ctx, &chatv1.EmojiImageRequest{WorkspaceId: string(workspaceID), Token: token})
+	if err != nil {
+		return "", nil, err
+	}
+	return out.GetMimeType(), out.GetImage(), nil
+}
 func (r Remote) AdminRenameEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, oldName, newName string) error {
 	out, err := r.directory.RenameEmoji(ctx, &chatv1.EmojiMutationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: oldName, Value: newName})
 	if err != nil {
@@ -7196,6 +7210,19 @@ func (s *Server) RemoveEmoji(ctx context.Context, input *chatv1.EmojiMutationReq
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+func (s *Server) UploadEmoji(ctx context.Context, input *chatv1.UploadEmojiRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AdminUploadEmoji(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetMimeType(), input.GetImage()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+func (s *Server) OpenEmojiImage(ctx context.Context, input *chatv1.EmojiImageRequest) (*chatv1.EmojiImage, error) {
+	mimeType, image, err := s.implementation.OpenEmojiImage(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetToken())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.EmojiImage{MimeType: mimeType, Image: image}, nil
 }
 func (s *Server) RenameEmoji(ctx context.Context, input *chatv1.EmojiMutationRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.AdminRenameEmoji(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetValue()); err != nil {

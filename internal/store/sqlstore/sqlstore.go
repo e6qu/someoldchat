@@ -13603,7 +13603,10 @@ func (s *Store) ListEmojis(ctx context.Context, workspace domain.WorkspaceID) ([
 // RemoveEmoji removes a custom emoji together with every alias that points at
 // it. Slack removes the aliases with their target; leaving them behind listed
 // `alias:<gone>` entries that no client can render.
-func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, name string, event events.Event) error {
+func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, name string, written ...events.Event) error {
+	if len(written) == 0 {
+		return errors.New("removing a custom emoji requires its event")
+	}
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
@@ -13623,11 +13626,13 @@ func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, n
 	if _, err := tx.ExecContext(ctx, `DELETE FROM custom_emoji WHERE workspace_id = ? AND alias_for = ?`, workspace, name); err != nil {
 		return err
 	}
-	if err := touchEmojiRevision(ctx, tx, workspace, event.CreatedAt); err != nil {
+	if err := touchEmojiRevision(ctx, tx, workspace, written[0].CreatedAt); err != nil {
 		return err
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return err
+	for _, event := range written {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -21046,7 +21051,29 @@ func (s *Store) collectBlobReferences(ctx context.Context, workspace domain.Work
 			references = append(references, key)
 		}
 	}
-	return references, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	// An uploaded custom emoji's image is a blob of ours too; without it here
+	// the reconciler would reclaim every uploaded emoji as an orphan.
+	emojiRows, err := s.db.QueryContext(ctx, `SELECT url FROM custom_emoji WHERE workspace_id = ? AND alias_for = ''`, workspace)
+	if err != nil {
+		return nil, err
+	}
+	defer emojiRows.Close()
+	for emojiRows.Next() {
+		var imageURL string
+		if err := emojiRows.Scan(&imageURL); err != nil {
+			return nil, err
+		}
+		if key, ok := domain.CustomEmojiBlobKey(workspace, imageURL); ok {
+			references = append(references, key)
+		}
+	}
+	return references, emojiRows.Err()
 }
 
 func (s *Store) AddRemoteFile(ctx context.Context, value domain.RemoteFile, event events.Event) error {

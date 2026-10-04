@@ -6373,16 +6373,32 @@ func (m Messages) AdminRemoveEmoji(ctx context.Context, workspaceID domain.Works
 		return err
 	}
 	names := []string{name}
+	blobKey := ""
 	for _, value := range emojis {
 		if value.AliasFor == name {
 			names = append(names, value.Name)
 		}
+		if value.Name == name && value.AliasFor == "" {
+			blobKey, _ = domain.CustomEmojiBlobKey(workspaceID, value.URL)
+		}
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.removed", events.String("name", name), events.Strings("names", names)), time.Now().UTC())
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.removed", events.String("name", name), events.Strings("names", names)), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.RemoveEmoji(ctx, workspaceID, name, event)
+	written := []events.Event{event}
+	// An uploaded image is reclaimed in the same commit that removes the
+	// emoji, as a replaced profile photo is, so a crash between the two cannot
+	// leave a blob nothing refers to.
+	if blobKey != "" {
+		cleanup, cleanupErr := newEvent(workspaceID, userID, events.BlobKey(events.CustomEmojiBlobDeleteTopic, blobKey), now)
+		if cleanupErr != nil {
+			return cleanupErr
+		}
+		written = append(written, cleanup)
+	}
+	return m.Store.RemoveEmoji(ctx, workspaceID, name, written...)
 }
 
 func (m Messages) AdminRenameEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, oldName, newName string) error {

@@ -215,6 +215,26 @@ message EmojiMutationRequest {
   string value = 4;
 }
 
+// UploadEmojiRequest carries a custom emoji image whole: Slack caps one at
+// 128 KB, far inside a single message, so it needs no stream.
+message UploadEmojiRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  string mime_type = 4;
+  bytes image = 5;
+}
+
+message EmojiImageRequest {
+  string workspace_id = 1;
+  string token = 2;
+}
+
+message EmojiImage {
+  string mime_type = 1;
+  bytes image = 2;
+}
+
 message EmojiListResponse {
   repeated Emoji emojis = 1;
 }
@@ -685,6 +705,8 @@ service DirectoryService {
   rpc AddEmoji(EmojiMutationRequest) returns (MutationResponse);
   rpc AddEmojiAlias(EmojiMutationRequest) returns (MutationResponse);
   rpc RemoveEmoji(EmojiMutationRequest) returns (MutationResponse);
+  rpc UploadEmoji(UploadEmojiRequest) returns (MutationResponse);
+  rpc OpenEmojiImage(EmojiImageRequest) returns (EmojiImage);
   rpc RenameEmoji(EmojiMutationRequest) returns (MutationResponse);
   rpc SearchConversations(SearchConversationsRequest) returns (ConversationPage);
   rpc SearchPeople(SearchPeopleRequest) returns (UserPage);

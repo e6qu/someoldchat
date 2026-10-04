@@ -21,6 +21,9 @@ const (
 // MaxUserPhotoBytes is the largest profile photo users.setPhoto accepts.
 const MaxUserPhotoBytes = 10 << 20
 
+// MaxCustomEmojiBytes is Slack's limit on an uploaded custom emoji image.
+const MaxCustomEmojiBytes = 128 << 10
+
 // MaxConversationTextLength is the longest topic or purpose Slack accepts, in
 // characters. It was compared with len(), which counts bytes, so a topic in any
 // non-Latin script was refused at a third of the length Slack allows.

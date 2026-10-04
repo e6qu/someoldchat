@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,12 +62,12 @@ func ScheduledMessageLimitExceeded(existing []time.Time, candidate time.Time, wi
 // must never appear in a client-facing replay, so both repositories consult this
 // one predicate instead of each maintaining its own list.
 func InternalTopic(topic string) bool {
-	return topic == events.FileBlobDeleteTopic || topic == events.UserPhotoBlobDeleteTopic
+	return slices.Contains(events.BlobDeleteTopics, topic)
 }
 
 // InternalTopics is the same set in the form a SQL IN predicate needs.
 func InternalTopics() []string {
-	return []string{events.FileBlobDeleteTopic, events.UserPhotoBlobDeleteTopic}
+	return slices.Clone(events.BlobDeleteTopics)
 }
 
 // OAuthCodeLifetime bounds how long an issued authorization code may be
@@ -919,7 +920,10 @@ type Store interface {
 	// EmojiRevision is when the workspace's custom emoji set last changed, or
 	// the zero time when it never has.
 	EmojiRevision(context.Context, domain.WorkspaceID) (time.Time, error)
-	RemoveEmoji(context.Context, domain.WorkspaceID, string, events.Event) error
+	// RemoveEmoji removes the emoji and the aliases that point at it, and
+	// writes the given events in the same commit: the removal's own event and,
+	// for an uploaded image, the instruction to reclaim its blob.
+	RemoveEmoji(context.Context, domain.WorkspaceID, string, ...events.Event) error
 	RenameEmoji(context.Context, domain.WorkspaceID, string, string, events.Event) error
 	// AddConversationMember and its siblings accept the notice message the
 	// change posts into the conversation — Slack's channel_join,

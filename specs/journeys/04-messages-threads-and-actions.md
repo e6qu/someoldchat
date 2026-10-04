@@ -146,8 +146,10 @@ control. Selection submits the canonical colon-code
 name, never arbitrary free text. Standard aliases and outer colons normalize
 before storage; a new reaction MUST match Slack's standard catalog or a durable
 workspace custom emoji/alias. Existing reactions remain removable after a
-custom emoji is deleted. Custom emoji render as their validated HTTP(S) image
-with `:name:` alternative text; standard reactions render the corresponding
+custom emoji is deleted. Custom emoji render as their validated HTTP(S) image,
+or the image an administrator uploaded (a PNG, GIF, or JPEG of at most 128 KB,
+served from a public URL and reclaimed when the emoji is removed), with
+`:name:` alternative text; standard reactions render the corresponding
 Unicode sequence; counts and `aria-pressed` identify the current member's
 membership independently of the visual.
 

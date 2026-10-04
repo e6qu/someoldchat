@@ -141,6 +141,8 @@ var topicRules = []topicRule{
 		note: "internal blob-cleanup work record; its payload is an object-storage key"},
 	{topic: UserPhotoBlobDeleteTopic, internal: true,
 		note: "internal blob-cleanup work record; its payload is an object-storage key"},
+	{topic: CustomEmojiBlobDeleteTopic, internal: true,
+		note: "internal blob-cleanup work record; its payload is an object-storage key"},
 
 	// ---- messages ----------------------------------------------------------
 	//

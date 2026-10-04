@@ -2,6 +2,7 @@ package web
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -19,10 +20,10 @@ import (
 // client had no way to see or manage them, so a custom emoji could only exist
 // if an administrator scripted it.
 //
-// Adding takes an image URL, which is the contract admin.emoji.add has and the
-// service validates (HTTP or HTTPS, a host, a bounded length). Uploading the
-// image itself would need a public, durable URL for a blob; that is recorded in
-// specs/product-gap-audit.md rather than faked here.
+// Adding takes an uploaded image, as Slack's "Add custom emoji" dialog does (a
+// PNG, GIF, or JPEG of at most 128 KB, stored as its own blob and served
+// without credentials), or an image URL, which is the contract admin.emoji.add
+// has and the service validates (HTTP or HTTPS, a host, a bounded length).
 
 type customEmojiPage struct {
 	Channel   string
@@ -68,6 +69,32 @@ func (h Handler) customEmojiPage(w http.ResponseWriter, r *http.Request) {
 	h.writeHTML(w, customEmojiTemplate, data, http.StatusOK, "Custom emoji rendering unavailable")
 }
 
+// customEmojiUpload reads the form's image, when one was chosen. It reads one
+// byte past Slack's limit so an oversized image is refused by the service's
+// rule rather than truncated into a different one.
+func customEmojiUpload(r *http.Request) (string, []byte, bool, error) {
+	if r.MultipartForm == nil || len(r.MultipartForm.File["image"]) == 0 {
+		return "", nil, false, nil
+	}
+	if len(r.MultipartForm.File["image"]) != 1 {
+		return "", nil, true, domain.ErrInvalidEmojiImage
+	}
+	header := r.MultipartForm.File["image"][0]
+	if header.Size == 0 {
+		return "", nil, false, nil
+	}
+	file, err := header.Open()
+	if err != nil {
+		return "", nil, true, err
+	}
+	defer file.Close()
+	image, err := io.ReadAll(io.LimitReader(file, domain.MaxCustomEmojiBytes+1))
+	if err != nil {
+		return "", nil, true, err
+	}
+	return header.Header.Get("Content-Type"), image, true, nil
+}
+
 func boundedNotice(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) > 200 {
@@ -97,8 +124,16 @@ func (h Handler) mutateCustomEmoji(w http.ResponseWriter, r *http.Request, add b
 	name := strings.Trim(strings.TrimSpace(fields["name"]), ":")
 	notice := "Removed :" + name + ":"
 	if add {
-		err = h.Messages.AdminAddEmoji(r.Context(), principal.WorkspaceID, principal.UserID, name, strings.TrimSpace(fields["url"]))
 		notice = "Added :" + name + ":"
+		mimeType, image, uploaded, readErr := customEmojiUpload(r)
+		switch {
+		case readErr != nil:
+			err = readErr
+		case uploaded:
+			err = h.Messages.AdminUploadEmoji(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, image)
+		default:
+			err = h.Messages.AdminAddEmoji(r.Context(), principal.WorkspaceID, principal.UserID, name, strings.TrimSpace(fields["url"]))
+		}
 	} else {
 		err = h.Messages.AdminRemoveEmoji(r.Context(), principal.WorkspaceID, principal.UserID, name)
 	}
@@ -107,8 +142,12 @@ func (h Handler) mutateCustomEmoji(w http.ResponseWriter, r *http.Request, add b
 		switch {
 		case errors.Is(err, domain.ErrNotWorkspaceAdmin):
 			status, reason = http.StatusForbidden, "Only workspace admins and owners can manage custom emoji."
+		case errors.Is(err, domain.ErrInvalidEmojiImage):
+			status, reason = http.StatusBadRequest, "Upload a PNG, GIF, or JPEG of 128 KB or less. Square images work best."
 		case errors.Is(err, domain.ErrInvalidEmoji):
-			status, reason = http.StatusBadRequest, "Use a name of lowercase letters, numbers, hyphens and underscores, and an http or https image URL."
+			status, reason = http.StatusBadRequest, "Use a name of lowercase letters, numbers, hyphens and underscores, and an image or an http or https image URL."
+		case errors.Is(err, domain.ErrBlobUnavailable):
+			status, reason = http.StatusServiceUnavailable, "Image storage is temporarily unavailable. Try again, or add the emoji by image URL."
 		case errors.Is(err, domain.ErrEmojiAlreadyExists):
 			status, reason = http.StatusConflict, "That name is already a standard or custom emoji. Choose another name."
 		case errors.Is(err, store.ErrNotFound):
@@ -132,7 +171,7 @@ const customEmojiMarkup = `{{define "title"}}Custom emoji · SameOldChat{{end}}
 .layout{width:min(760px,calc(100% - 32px));margin:28px auto 48px;display:grid;gap:20px}
 .heading h2,.heading p{margin:0}.heading p{color:var(--muted);margin-top:4px}
 .emoji-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;align-items:end;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
-.emoji-form h3{grid-column:1/-1;margin:0;font-size:16px}
+.emoji-form h3,.emoji-form .hint{grid-column:1/-1;margin:0;font-size:16px}.emoji-form .hint{font-size:13px;color:var(--muted)}
 .emoji-form label{display:grid;gap:4px;font-weight:700;font-size:14px}
 .emoji-form input{border:1px solid var(--field-line);border-radius:6px;padding:7px 10px;background:var(--panel-strong);color:var(--text);font:inherit}
 .emoji-form button,.emoji-table button{justify-self:start;border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:7px 12px;font-weight:700}
@@ -146,11 +185,13 @@ const customEmojiMarkup = `{{define "title"}}Custom emoji · SameOldChat{{end}}
 <nav class="customize-tabs" aria-label="Customize"><a href="/app/customize/emoji{{if .Channel}}?channel={{.Channel}}{{end}}" aria-current="page">Emoji</a><a href="/app/customize/slackbot{{if .Channel}}?channel={{.Channel}}{{end}}">Slackbot</a></nav>
 <div class="heading"><h2>Custom emoji</h2><p>Emoji added here can be used in messages and reactions by everyone in the workspace.</p></div>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-{{if .CanManage}}<form class="emoji-form" method="post" action="/app/customize/emoji/add{{if .Channel}}?channel={{.Channel}}{{end}}">
+{{if .CanManage}}<form class="emoji-form" method="post" enctype="multipart/form-data" action="/app/customize/emoji/add{{if .Channel}}?channel={{.Channel}}{{end}}">
   <h3>Add custom emoji</h3>
   <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
   <label>Name<input name="name" maxlength="100" pattern=":?[a-z0-9_+\-]+:?" placeholder="partyparrot" required></label>
-  <label>Image URL<input name="url" type="url" maxlength="2048" placeholder="https://…" required></label>
+  <label>Upload image<input name="image" type="file" accept="image/png,image/gif,image/jpeg" aria-describedby="emoji-image-hint"></label>
+  <label>Or image URL<input name="url" type="url" maxlength="2048" placeholder="https://…"></label>
+  <p class="hint" id="emoji-image-hint">A PNG, GIF, or JPEG of 128 KB or less. Square images work best.</p>
   <button type="submit">Save</button>
 </form>{{else}}<p class="notice" role="note">Only workspace admins and owners can add or remove custom emoji.</p>{{end}}
 {{if .Emoji}}<table class="emoji-table"><caption class="visually-hidden">Custom emoji</caption><thead><tr><th scope="col">Emoji</th><th scope="col">Name</th>{{if .CanManage}}<th scope="col"><span class="visually-hidden">Actions</span></th>{{end}}</tr></thead><tbody>{{range .Emoji}}<tr><td>{{if .ImageURL}}<img src="{{.ImageURL}}" alt=":{{.Name}}:" loading="lazy">{{end}}</td><td>:{{.Name}}:{{if .AliasFor}} <small>alias of :{{.AliasFor}}:</small>{{end}}</td>{{if $.CanManage}}<td><form method="post" action="/app/customize/emoji/remove{{if $.Channel}}?channel={{$.Channel}}{{end}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" aria-label="Remove :{{.Name}}:">Remove</button></form></td>{{end}}</tr>{{end}}</tbody></table>

@@ -201,8 +201,11 @@ var (
 	ErrInvalidAccessLog      = errors.New("access log fields are invalid")
 	ErrInvalidEmoji          = errors.New("custom emoji name or URL is invalid")
 	ErrEmojiAlreadyExists    = errors.New("custom emoji already exists")
-	ErrInvalidRemoteFile     = errors.New("remote file metadata is invalid")
-	ErrInvalidInviteRequest  = errors.New("invite request is invalid")
+	// ErrInvalidEmojiImage is an uploaded custom emoji image that is not a
+	// PNG, GIF, or JPEG of at most MaxCustomEmojiBytes, Slack's limit.
+	ErrInvalidEmojiImage    = errors.New("custom emoji image must be a PNG, GIF, or JPEG of at most 128 KB")
+	ErrInvalidRemoteFile    = errors.New("remote file metadata is invalid")
+	ErrInvalidInviteRequest = errors.New("invite request is invalid")
 	// ErrInvitationExpired is distinct from ErrInvalidInviteRequest because the
 	// person reading it needs to know whether to ask for a new invitation or
 	// to check which address they signed in with.

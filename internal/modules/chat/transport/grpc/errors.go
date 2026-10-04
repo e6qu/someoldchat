@@ -120,6 +120,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_ephemeral", code: codes.InvalidArgument, sentinel: domain.ErrInvalidEphemeral},
 	{key: "service.invalid_access_log", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAccessLog},
 	{key: "service.invalid_emoji", code: codes.InvalidArgument, sentinel: domain.ErrInvalidEmoji},
+	{key: "service.invalid_emoji_image", code: codes.InvalidArgument, sentinel: domain.ErrInvalidEmojiImage},
 	{key: "service.invalid_remote_file", code: codes.InvalidArgument, sentinel: domain.ErrInvalidRemoteFile},
 	{key: "service.invalid_invite_request", code: codes.InvalidArgument, sentinel: domain.ErrInvalidInviteRequest},
 	// FailedPrecondition, not InvalidArgument: the request is well formed and

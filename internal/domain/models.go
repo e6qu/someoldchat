@@ -1136,6 +1136,24 @@ func UserPhotoBlobKey(workspace WorkspaceID, user UserID, imageURL string) (stri
 	return string(workspace) + "/users/" + string(user) + "/" + token, true
 }
 
+// CustomEmojiImageURL is the origin-relative URL of an uploaded custom emoji's
+// image, as UserPhotoBlobKey's photo URLs are origin-relative.
+func CustomEmojiImageURL(workspace WorkspaceID, token string) string {
+	return "/emoji/" + string(workspace) + "/" + token
+}
+
+// CustomEmojiBlobKey reports the blob an uploaded custom emoji's image URL
+// names. An image URL an administrator supplied names no blob of ours:
+// admin.emoji.add accepts only absolute http(s) URLs, so only a URL this
+// deployment minted can match.
+func CustomEmojiBlobKey(workspace WorkspaceID, imageURL string) (string, bool) {
+	token, ok := strings.CutPrefix(imageURL, CustomEmojiImageURL(workspace, ""))
+	if !ok || token == "" || strings.Contains(token, "/") {
+		return "", false
+	}
+	return string(workspace) + "/emoji/" + token, true
+}
+
 func NormalizeScopes(scopes []string) []string {
 	seen := make(map[string]struct{}, len(scopes))
 	for _, scope := range scopes {

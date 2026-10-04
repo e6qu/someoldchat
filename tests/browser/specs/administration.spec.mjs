@@ -159,3 +159,29 @@ test('[ADMIN-03] audit and analytics render for an eligible role and agree with 
   expect(JSON.stringify(entries)).not.toContain('analytics subject');
   await expectNoSeriousAccessibilityViolations(page);
 });
+// Slack's "Add custom emoji" takes an uploaded image of at most 128 KB. The
+// image is served from a public URL, so the list renders it like any image,
+// and removing the emoji removes it.
+test('[ADMIN-02 A11Y-01] a custom emoji can be added by uploading its image', async ({ page, context }) => {
+  await signIn(context);
+  const name = `uploaded-${Date.now()}`;
+  await page.goto('/app/customize/emoji?channel=Cdev');
+  const form = page.locator('form.emoji-form');
+  await expect(form.getByRole('heading', { name: 'Add custom emoji' })).toBeVisible();
+  await form.getByLabel('Name').fill(name);
+  await form.getByLabel('Upload image').setInputFiles({
+    name: 'emoji.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'),
+  });
+  await form.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('status')).toContainText(`Added :${name}:`);
+  const image = page.getByRole('img', { name: `:${name}:` });
+  await expect(image).toHaveAttribute('src', /^\/emoji\//);
+  await expect.poll(() => image.evaluate((node) => node.complete && node.naturalWidth)).toBeGreaterThan(0);
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.getByRole('button', { name: `Remove :${name}:` }).click();
+  await expect(page.getByRole('status')).toContainText(`Removed :${name}:`);
+  await expect(page.getByRole('img', { name: `:${name}:` })).toHaveCount(0);
+});
