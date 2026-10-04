@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/png"
 	"path"
 	"path/filepath"
 	"testing"
@@ -35,7 +37,7 @@ func TestAnUploadedCustomEmojiIsServedAndReclaimed(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := Messages{Store: s, Blob: objects}
-	image := append([]byte("GIF89a"), bytes.Repeat([]byte{1}, 32)...)
+	image := []byte("GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;") // a real 1x1 GIF: the upload decodes it
 
 	if err := messages.AdminUploadEmoji(ctx, "T1", "U1", "nope", "image/gif", image); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		t.Fatalf("a member uploaded an emoji: %v", err)
@@ -80,5 +82,43 @@ func TestAnUploadedCustomEmojiIsServedAndReclaimed(t *testing.T) {
 	}
 	if cleanup != 1 {
 		t.Fatalf("removal recorded %d cleanups of the image blob, want 1", cleanup)
+	}
+}
+
+// Slack shrinks an uploaded custom emoji to fit 128 pixels; the stored image
+// is the resized one, in the format that was uploaded.
+func TestAnUploadedCustomEmojiIsResizedToFit(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	s.SeedUser(domain.User{ID: "UA", WorkspaceID: "T1"})
+	if err := s.SeedWorkspaceRole("T1", "UA", domain.WorkspaceRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s, Blob: objects}
+	var upload bytes.Buffer
+	if err := png.Encode(&upload, image.NewRGBA(image.Rect(0, 0, 300, 150))); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.AdminUploadEmoji(ctx, "T1", "UA", "wide", "image/png", upload.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	emojis, err := s.ListEmojis(ctx, "T1")
+	if err != nil || len(emojis) != 1 {
+		t.Fatalf("emoji=%v err=%v", emojis, err)
+	}
+	mimeType, served, err := messages.OpenEmojiImage(ctx, "T1", path.Base(emojis[0].URL))
+	if err != nil || mimeType != "image/png" {
+		t.Fatalf("served %q err=%v", mimeType, err)
+	}
+	stored, err := png.DecodeConfig(bytes.NewReader(served))
+	if err != nil || stored.Width != domain.CustomEmojiSide || stored.Height != domain.CustomEmojiSide/2 {
+		t.Fatalf("stored %dx%d err=%v, want %dx%d", stored.Width, stored.Height, err, domain.CustomEmojiSide, domain.CustomEmojiSide/2)
 	}
 }

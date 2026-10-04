@@ -33,7 +33,7 @@ func TestAnUploadedCustomEmojiIsListedAbsoluteAndServedPublicly(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := service.Messages{Store: s, Blob: blobs}
-	image := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{7}, 40)...)
+	image := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xf8\x0f\x00\x01\x01\x01\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB`\x82") // a real 1x1 PNG: the upload decodes it
 	if err := messages.AdminUploadEmoji(ctx, "T1", "U1", "shipit-cat", "image/png", image); err != nil {
 		t.Fatal(err)
 	}

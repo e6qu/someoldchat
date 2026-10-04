@@ -24,6 +24,11 @@ const MaxUserPhotoBytes = 10 << 20
 // MaxCustomEmojiBytes is Slack's limit on an uploaded custom emoji image.
 const MaxCustomEmojiBytes = 128 << 10
 
+// CustomEmojiSide is the largest side an uploaded custom emoji is stored at.
+// Slack resizes an upload that is larger, and shows an emoji no larger than
+// this even at its jumbo size, so the bytes past it are never displayed.
+const CustomEmojiSide = 128
+
 // MaxConversationTextLength is the longest topic or purpose Slack accepts, in
 // characters. It was compared with len(), which counts bytes, so a topic in any
 // non-Latin script was refused at a third of the length Slack allows.
