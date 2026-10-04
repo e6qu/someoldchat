@@ -5754,12 +5754,6 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 	}
 	list.QuickReactions = quickReactions(recent, emojiImages)
-	// The reader's hidden people. A failed read hides nobody, which is what
-	// the reader saw before they hid anyone.
-	hiddenPeople := map[domain.UserID]bool{}
-	if preferences, err := h.Messages.MemberPreferences(ctx, principal.WorkspaceID, principal.UserID); err == nil {
-		hiddenPeople = domain.HiddenPeople(preferences)
-	}
 	pinned := map[domain.MessageID]domain.UserID{}
 	if principal.HasScope(auth.ScopePinsRead) || principal.HasScope(auth.ScopePinsWrite) {
 		pins, _, _, err := h.Messages.Pins(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: pinWindow})
@@ -5902,9 +5896,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 		// A human posting as themselves carries their current status beside their
 		// name; an app message or one wearing a custom username is not a person.
-		if message.AuthorID != principal.UserID && hiddenPeople[message.AuthorID] {
-			view.HiddenAuthor = true
-		}
+		view.HiddenAuthor = names.hidden(message.AuthorID)
 		if message.AppID == "" && presentation.Username == "" && message.AuthorID != "" {
 			view.ProfileID = string(message.AuthorID)
 			if emoji := names.statusEmoji(message.AuthorID); emoji != "" {
@@ -7072,6 +7064,9 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 			MachineTime: item.OccurredAt.UTC().Format(time.RFC3339Nano), DisplayTime: formatTime(item.OccurredAt),
 			Unread: item.ReadAt.IsZero(), Cleared: !item.ClearedAt.IsZero(),
 			AvatarURL: names.avatarURL(actorID), kind: primaryActivityKind(item.Kinds), reaction: item.ReactionName,
+		}
+		if names.hidden(actorID) {
+			view.ActorName, view.AvatarURL = hiddenPersonName, ""
 		}
 		if view.kind == domain.ActivityReaction && item.ReactionName != "" {
 			view.Badge = renderReactionEmoji(item.ReactionName, emojiImages)
@@ -9162,6 +9157,15 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 				view.AuthorStatusText = names.statusText(message.AuthorID)
 			}
 		}
+		// A one-line result from a person the reader has hidden names neither
+		// them nor what they said; its link opens the message, where the
+		// click-through reveals it.
+		if names.hidden(message.AuthorID) {
+			view.HiddenAuthor = true
+			view.AuthorName, view.AuthorInitial, view.AvatarURL, view.AuthorID = hiddenPersonName, "?", "", ""
+			view.AuthorStatus, view.AuthorStatusText, view.Text = "", "", ""
+			view.DisplayText = template.HTML(hiddenPreviewText)
+		}
 		views = append(views, view)
 	}
 	return views
@@ -10640,6 +10644,9 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 			item.PreviewAt = latest.CreatedAt.UTC().Format(time.RFC3339)
 			item.PreviewTime = formatTime(latest.CreatedAt)
 			item.Preview = directMessagePreview(latest, principal.UserID, item.IsGroupDirect, userNames)
+			if userNames.hidden(latest.AuthorID) {
+				item.Preview = hiddenPreviewText
+			}
 		}
 		recent = append(recent, item)
 	}
@@ -13713,6 +13720,24 @@ type userNames struct {
 	channels     map[domain.ConversationID]string
 	groups       map[domain.UserGroupID]string
 	groupsLoaded bool
+	// hiddenPeople are the people the reader has hidden, read on first use.
+	hiddenPeople map[domain.UserID]bool
+}
+
+// hidden reports whether the reader has hidden the person, as Slack's "Hide a
+// person" does. A failed read hides nobody, which is what the reader saw
+// before they hid anyone; the reader never hides themselves.
+func (n *userNames) hidden(id domain.UserID) bool {
+	if id == "" || id == n.principal.UserID {
+		return false
+	}
+	if n.hiddenPeople == nil {
+		n.hiddenPeople = map[domain.UserID]bool{}
+		if preferences, err := n.handler.Messages.MemberPreferences(n.ctx, n.principal.WorkspaceID, n.principal.UserID); err == nil {
+			n.hiddenPeople = domain.HiddenPeople(preferences)
+		}
+	}
+	return n.hiddenPeople[id]
 }
 
 // userNameEntry is everything a caller resolves about a member from the single

@@ -196,6 +196,15 @@ func (h Handler) followedThreadCard(ctx context.Context, principal auth.Principa
 		return view, false
 	}
 	card := func(message domain.Message) threadCardMessage {
+		if names.hidden(message.AuthorID) {
+			return threadCardMessage{
+				AuthorName: hiddenPersonName, AuthorInitial: "?",
+				MachineTime: message.CreatedAt.UTC().Format(time.RFC3339Nano),
+				ClockTime:   clockTime(message.CreatedAt, location), FullTime: fullTime(message.CreatedAt, location),
+				Text: template.HTML(hiddenPreviewText),
+				URL:  domain.MessagePermalinkPath(message.Conversation, domain.NewMessageTimestamp(message.CreatedAt), message.ThreadTimestamp),
+			}
+		}
 		author := names.name(message.AuthorID)
 		if presentation := decodeMessageStreamPresentation(message.StreamState); presentation.Username != "" {
 			author = presentation.Username

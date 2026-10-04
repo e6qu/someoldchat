@@ -146,7 +146,7 @@ const messagesPartial = messageIcons + `{{define "messages"}}
       <span class="thread-view" aria-hidden="true">View thread</span>
     </a>{{end}}
   </div>
-  {{if not $message.Ephemeral}}<div class="message-actions" role="toolbar" aria-label="Actions for the message from {{$message.AuthorName}}">
+  {{if not $message.Ephemeral}}<div class="message-actions" role="toolbar" aria-label="Actions for the message from {{if $message.HiddenAuthor}}a person you have hidden{{else}}{{$message.AuthorName}}{{end}}">
     {{if $.CanReact}}{{range $.QuickReactions}}<button class="message-action quick-reaction" type="submit" form="reaction-form-{{$message.ID}}" name="name" value="{{.Name}}" data-quick-reaction aria-label="React with :{{.Label}}:" title=":{{.Label}}:">{{.Display}}</button>{{end}}
     <button class="message-action" type="button" data-open-emoji-picker data-emoji-target="reaction" data-reaction-form="reaction-form-{{$message.ID}}" aria-haspopup="dialog" aria-label="Add reaction" title="Add reaction">{{template "icon-emoji"}}</button>{{end}}
     {{if not $message.InThread}}<a class="message-action" href="{{$message.ReplyURL}}" data-thread-link aria-label="{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}" title="{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}">{{template "icon-thread"}}</a>{{end}}
