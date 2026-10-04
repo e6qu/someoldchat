@@ -28,6 +28,11 @@ const shellStyle = `<style>
 .rail summary::-webkit-details-marker{display:none}
 .team-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;background:var(--panel-strong);color:var(--chrome);font-weight:800;font-size:17px}
 .rail-item{display:flex;flex-direction:column;align-items:center;gap:3px;width:62px;padding:0;border:0;background:transparent;color:var(--on-accent);text-decoration:none;font-size:11px;font-weight:700;cursor:pointer;list-style:none;position:relative}
+html .rail-item[data-rail=files],html .menu-list a[data-more-tab]{display:none}
+html[data-pref-nav-dms=false] .rail-item[data-rail=dms],html[data-pref-nav-activity=false] .rail-item[data-rail=activity],html[data-pref-nav-later=false] .rail-item[data-rail=later]{display:none}
+html[data-pref-nav-files=true] .rail-item[data-rail=files]{display:flex}
+html[data-pref-nav-dms=false] .menu-list a[data-more-tab=dms],html[data-pref-nav-activity=false] .menu-list a[data-more-tab=activity],html[data-pref-nav-later=false] .menu-list a[data-more-tab=later],html:not([data-pref-nav-files=true]) .menu-list a[data-more-tab=files]{display:flex}
+html[data-pref-nav-labels=false] .rail-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .rail-item>.icon{box-sizing:content-box;width:20px;height:20px;padding:8px;border-radius:9px}
 .rail-item:hover>.icon,.menu[open]>.rail-item>.icon{background:#ffffff26}
 .rail-item[aria-current=page]>.icon{background:#ffffff3d}
@@ -195,6 +200,7 @@ details[open]>.menu-list{display:grid}
 .preferences-panel legend{margin-bottom:8px;font-weight:800}
 .preferences-panel label{display:flex;align-items:flex-start;gap:8px}
 .preferences-panel input[type=radio],.preferences-panel input[type=checkbox]{margin-top:4px}
+.preferences-panel .preference-select{min-height:36px;max-width:100%;padding:6px 8px;border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text)}
 .preferences-links{margin:0;padding-left:18px;display:grid;gap:6px}
 .status-dialog{width:min(520px,calc(100vw - 32px))}
 .status-inputs{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px}

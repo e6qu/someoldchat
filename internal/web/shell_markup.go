@@ -147,13 +147,17 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     {{template "workspace-menu" .}}
   </details>
   <a class="rail-item" href="{{.HomeURL}}"{{if eq .Destination "home"}} aria-current="page"{{end}}>{{icon "home"}}<span class="rail-label">Home</span></a>
-  <a class="rail-item" href="{{.With "/app/dms"}}"{{if eq .Destination "dms"}} aria-current="page"{{end}} {{ariaKeyshortcuts "Direct messages"}}>{{icon "dms"}}<span class="rail-label">DMs</span></a>
-  <a class="rail-item" id="activity-link" href="{{.With "/app/activity"}}"{{if eq .Destination "activity"}} aria-current="page"{{end}} aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Activity"}}>{{icon "activity"}}<span class="rail-label">Activity</span>{{if .ReminderUnread}}<span class="rail-dot" aria-hidden="true"></span>{{end}}</a>
-  <a class="rail-item" id="later-link" href="{{.With "/app/later"}}"{{if eq .Destination "later"}} aria-current="page"{{end}} aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Later"}}>{{icon "later"}}<span class="rail-label">Later</span></a>
+  <a class="rail-item" data-rail="dms" href="{{.With "/app/dms"}}"{{if eq .Destination "dms"}} aria-current="page"{{end}} {{ariaKeyshortcuts "Direct messages"}}>{{icon "dms"}}<span class="rail-label">DMs</span></a>
+  <a class="rail-item" data-rail="activity" id="activity-link" href="{{.With "/app/activity"}}"{{if eq .Destination "activity"}} aria-current="page"{{end}} aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Activity"}}>{{icon "activity"}}<span class="rail-label">Activity</span>{{if .ReminderUnread}}<span class="rail-dot" aria-hidden="true"></span>{{end}}</a>
+  <a class="rail-item" data-rail="later" id="later-link" href="{{.With "/app/later"}}"{{if eq .Destination "later"}} aria-current="page"{{end}} aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Later"}}>{{icon "later"}}<span class="rail-label">Later</span></a>
+  <a class="rail-item" data-rail="files" href="{{.With "/app/files"}}">{{icon "files"}}<span class="rail-label">Files</span></a>
   <details class="menu rail-more" data-menu>
     <summary class="rail-item" role="button" aria-haspopup="menu" aria-expanded="false"{{if eq .Destination "more"}} aria-current="page"{{end}}>{{icon "more"}}<span class="rail-label">More</span></summary>
     <div class="menu-list" role="menu" aria-label="More">
-      <a role="menuitem" href="{{.With "/app/files"}}">{{icon "files"}}<span>Files</span></a>
+      <a role="menuitem" data-more-tab="dms" href="{{.With "/app/dms"}}">{{icon "dms"}}<span>DMs</span></a>
+      <a role="menuitem" data-more-tab="activity" href="{{.With "/app/activity"}}">{{icon "activity"}}<span>Activity</span></a>
+      <a role="menuitem" data-more-tab="later" href="{{.With "/app/later"}}">{{icon "later"}}<span>Later</span></a>
+      <a role="menuitem" data-more-tab="files" href="{{.With "/app/files"}}">{{icon "files"}}<span>Files</span></a>
       <a role="menuitem" href="{{.With "/app/canvases"}}">{{icon "canvas"}}<span>Canvases</span></a>
       <a role="menuitem" href="{{.With "/app/lists"}}">{{icon "list"}}<span>Lists</span></a>
       <a role="menuitem" href="{{.With "/app/workflows"}}">{{icon "workflow"}}<span>Workflows</span></a>
@@ -286,12 +290,16 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
 {{define "preferences-panels"}}<div class="preferences-layout">
   <div class="preferences-tabs" role="tablist" data-shell-tabs aria-label="Preference sections" aria-orientation="vertical">
     <button type="button" role="tab" id="pref-tab-notifications" aria-controls="pref-notifications" aria-selected="true">{{icon "activity"}}<span>Notifications</span></button>
+    <button type="button" role="tab" id="pref-tab-vip" aria-controls="pref-vip" aria-selected="false" tabindex="-1">{{icon "star"}}<span>VIP</span></button>
     <button type="button" role="tab" id="pref-tab-home" aria-controls="pref-home" aria-selected="false" tabindex="-1">{{icon "home"}}<span>Home</span></button>
     <button type="button" role="tab" id="pref-tab-appearance" aria-controls="pref-appearance" aria-selected="false" tabindex="-1">{{icon "status"}}<span>Appearance</span></button>
     <button type="button" role="tab" id="pref-tab-accessibility" aria-controls="pref-accessibility" aria-selected="false" tabindex="-1">{{icon "info"}}<span>Accessibility</span></button>
+    <button type="button" role="tab" id="pref-tab-navigation" aria-controls="pref-navigation" aria-selected="false" tabindex="-1">{{icon "sidebar"}}<span>Navigation</span></button>
     <button type="button" role="tab" id="pref-tab-read" aria-controls="pref-read" aria-selected="false" tabindex="-1">{{icon "check"}}<span>Mark as read</span></button>
     <button type="button" role="tab" id="pref-tab-media" aria-controls="pref-media" aria-selected="false" tabindex="-1">{{icon "files"}}<span>Messages &amp; media</span></button>
     <button type="button" role="tab" id="pref-tab-region" aria-controls="pref-region" aria-selected="false" tabindex="-1">{{icon "later"}}<span>Language &amp; region</span></button>
+    <button type="button" role="tab" id="pref-tab-av" aria-controls="pref-av" aria-selected="false" tabindex="-1">{{icon "huddle"}}<span>Audio &amp; video</span></button>
+    <button type="button" role="tab" id="pref-tab-privacy" aria-controls="pref-privacy" aria-selected="false" tabindex="-1">{{icon "lock"}}<span>Privacy &amp; visibility</span></button>
     <button type="button" role="tab" id="pref-tab-advanced" aria-controls="pref-advanced" aria-selected="false" tabindex="-1">{{icon "gear"}}<span>Advanced</span></button>
   </div>
   <div class="preferences-panels">
@@ -302,8 +310,13 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       <ul class="preferences-links">
         <li><a href="{{.With "/app/notifications"}}#workspace-notifications-heading">Notify me about…</a></li>
         <li><a href="{{.With "/app/notifications"}}#schedule-heading">Notification schedule</a></li>
-        <li><a href="{{.With "/app/notifications"}}#notification-exceptions-heading">VIPs and exceptions</a></li>
+        <li><a href="{{.With "/app/notifications"}}#notification-exceptions-heading">Exceptions</a></li>
       </ul>
+    </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-vip" aria-labelledby="pref-tab-vip" tabindex="0" hidden>
+      <h3>VIP</h3>
+      <p>Every message a VIP posts in your channels notifies you, even in a channel you have muted or set to mentions only. Mark someone from their profile or from People; your list, with a way to remove each one, is on your notification preferences.</p>
+      <p><a class="button" href="{{.With "/app/notifications"}}#notification-vips-heading">Manage VIPs</a></p>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-home" aria-labelledby="pref-tab-home" tabindex="0" hidden>
       <h3>Home</h3>
@@ -343,6 +356,18 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
         <label><input type="checkbox" data-preference="reduce-motion"> Turn off interface animations and transitions</label>
       </fieldset>
     </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-navigation" aria-labelledby="pref-tab-navigation" tabindex="0" hidden>
+      <h3>Navigation</h3>
+      <fieldset><legend>Show these tabs</legend>
+        <label><input type="checkbox" checked disabled> Home</label>
+        <label><input type="checkbox" data-preference="nav-dms" data-default="true"> DMs</label>
+        <label><input type="checkbox" data-preference="nav-activity" data-default="true"> Activity</label>
+        <label><input type="checkbox" data-preference="nav-later" data-default="true"> Later</label>
+        <label><input type="checkbox" data-preference="nav-files"> Files</label>
+      </fieldset>
+      <label><input type="checkbox" data-preference="nav-labels" data-default="true"> Show tab names</label>
+      <p class="dialog-note">A tab you hide stays in More, and its keyboard shortcut still opens it.</p>
+    </section>
     <section class="preferences-panel" role="tabpanel" id="pref-read" aria-labelledby="pref-tab-read" tabindex="0" hidden>
       <h3>Mark as read</h3>
       <fieldset><legend>When I view a conversation</legend>
@@ -377,6 +402,26 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
         </form>
         <p class="dialog-note">Setting a time zone by hand turns the automatic one off. Times, reminders and scheduled messages follow it.</p>
       </fieldset>
+    </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-av" aria-labelledby="pref-tab-av" tabindex="0" hidden>
+      <h3>Audio &amp; video</h3>
+      <fieldset><legend>Devices</legend>
+        <label for="pref-huddle-microphone">Microphone</label>
+        <select id="pref-huddle-microphone" class="preference-select" data-preference="huddle-microphone" data-media-devices="audioinput"><option value="">System default</option></select>
+        <label for="pref-huddle-camera">Camera</label>
+        <select id="pref-huddle-camera" class="preference-select" data-preference="huddle-camera" data-media-devices="videoinput"><option value="">System default</option></select>
+      </fieldset>
+      <fieldset><legend>Joining a huddle</legend>
+        <label><input type="checkbox" data-preference="huddle-join-muted"> Mute my microphone when I join a huddle</label>
+      </fieldset>
+      <p class="dialog-note">Devices are named once this browser has been allowed to use them; until then they are numbered. A device that is no longer connected falls back to the system default.</p>
+    </section>
+    <section class="preferences-panel" role="tabpanel" id="pref-privacy" aria-labelledby="pref-tab-privacy" tabindex="0" hidden>
+      <h3>Privacy &amp; visibility</h3>
+      <fieldset><legend>Slack Connect discoverability</legend>
+        <label><input type="checkbox" data-preference="discoverable-by-email" data-default="true"> Let people in other organizations find me by my email address</label>
+      </fieldset>
+      <p class="dialog-note">This applies only while your workspace is discoverable; when it is not, nobody outside finds you by email either way.</p>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-advanced" aria-labelledby="pref-tab-advanced" tabindex="0" hidden>
       <h3>Advanced</h3>

@@ -2383,6 +2383,9 @@ test('[NAV-06 A11Y-01] accessibility and message display preferences change how 
   await expect(emoji).toBeHidden();
   await expect(message.locator('.emoji-code')).toHaveText(':tada:');
   await expect(message.locator('.emoji-code')).toBeVisible();
+  await preferences.getByRole('tab', { name: 'Privacy & visibility' }).click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-privacy');
+  await expect(preferences.getByRole('checkbox', { name: 'Let people in other organizations find me by my email address' })).toBeChecked();
 
   // The choice is the account's, so a reload (or another browser) keeps it.
   await page.keyboard.press('Escape');
@@ -2429,6 +2432,40 @@ test('[NAV-06 A11Y-01] Language & region sets the time zone by hand', async ({ p
   await page.keyboard.press(`${primary}+Comma`);
   await preferences.getByRole('tab', { name: 'Language & region' }).click();
   await preferences.getByRole('checkbox', { name: 'Set time zone automatically' }).check();
+});
+
+// Navigation chooses the rail's tabs and whether they show their names, as
+// Slack's does; a hidden tab stays reachable from More.
+test('[NAV-01 NAV-06 A11Y-01] Navigation chooses which tabs the rail shows', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto(`/app?channel=${CHANNEL}`);
+  const rail = page.getByRole('navigation', { name: 'Workspace' });
+  const { primary } = await slackModifiers(page);
+  await page.keyboard.press(`${primary}+Comma`);
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.getByRole('tab', { name: 'Navigation' }).click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-navigation');
+  await preferences.getByRole('checkbox', { name: 'Activity' }).uncheck();
+  await preferences.getByRole('checkbox', { name: 'Files' }).check();
+  await preferences.getByRole('checkbox', { name: 'Show tab names' }).uncheck();
+  await page.keyboard.press('Escape');
+
+  await expect(rail.getByRole('link', { name: 'Activity' })).toBeHidden();
+  await expect(rail.getByRole('link', { name: 'Files' })).toBeVisible();
+  await expect(rail.locator('.rail-label', { hasText: 'Files' })).toHaveCSS('position', 'absolute');
+  await rail.getByRole('button', { name: 'More' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Activity' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Files' })).toBeHidden();
+  await page.keyboard.press('Escape');
+
+  // Every test shares one member, so put the defaults back.
+  await page.keyboard.press(`${primary}+Comma`);
+  await preferences.getByRole('tab', { name: 'Navigation' }).click();
+  await preferences.getByRole('checkbox', { name: 'Activity' }).check();
+  await preferences.getByRole('checkbox', { name: 'Files' }).uncheck();
+  await preferences.getByRole('checkbox', { name: 'Show tab names' }).check();
+  await expect(rail.getByRole('link', { name: 'Activity' })).toBeVisible();
+  await expect(rail.getByRole('link', { name: 'Files' })).toBeHidden();
 });
 
 // Slack's switcher is a combobox over a listbox: the typed text filters, the
@@ -4926,6 +4963,16 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   await page.goto('/app');
   await expect(page.locator('.channel-name-text')).toHaveText('general');
 
+  // Audio & video's "Mute my microphone when I join a huddle", as in Slack: the
+  // member arrives muted and unmutes when ready.
+  const { primary } = await slackModifiers(page);
+  await page.keyboard.press(`${primary}+Comma`);
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.getByRole('tab', { name: 'Audio & video' }).click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-av');
+  await preferences.getByRole('checkbox', { name: 'Mute my microphone when I join a huddle' }).check();
+  await page.keyboard.press('Escape');
+
   // Before joining, the bar offers a huddle and promises media rather than
   // explaining its absence.
   const huddleMenu = await openMenu(page, 'Huddle');
@@ -4943,9 +4990,14 @@ test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and of
   const session = page.locator('.huddle-media-session');
   await expect(session).toBeVisible();
 
-  // The microphone is really opened: the attribute follows getUserMedia
-  // resolving, not the button being pressed.
-  await expect(session).toHaveAttribute('data-huddle-microphone', 'on', { timeout: 15000 });
+  // The microphone is really opened, and muted on arrival as the member chose;
+  // the attribute follows the track, not the button being pressed.
+  await expect(session).toHaveAttribute('data-huddle-microphone', 'off', { timeout: 15000 });
+  await expect(page.getByRole('button', { name: 'Unmute microphone' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Unmute microphone' }).click();
+  await expect(session).toHaveAttribute('data-huddle-microphone', 'on');
+  // Every test shares one member, so the preference goes back at once.
+  await page.evaluate(() => window.sameoldchatPreferences.set('huddle-join-muted', 'false'));
 
   const offerBody = new URLSearchParams((await offerPosted).postData() || '');
   const screenStreamId = offerBody.get('screen_stream');

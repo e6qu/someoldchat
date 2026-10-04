@@ -1382,6 +1382,13 @@ type activityItemView struct {
 	Unavailable bool
 }
 
+// notificationVIPView is one of the member's VIPs as the notifications page
+// lists them, each with its own Remove control.
+type notificationVIPView struct {
+	ID   string
+	Name string
+}
+
 type notificationExceptionView struct {
 	ID                string
 	Name              string
@@ -1414,6 +1421,8 @@ type notificationsData struct {
 	ScheduleDays             []scheduleDayView
 	SnoozeUntil              string
 	Exceptions               []notificationExceptionView
+	VIPs                     []notificationVIPView
+	VIPsUnreadable           int
 	Notice                   string
 }
 
@@ -2914,6 +2923,7 @@ var notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end}}
 <p class="hint">{{if .ScheduleZone}}Saved in {{.ScheduleZone}}. {{end}}Saving uses your browser’s time zone. A window ending before it starts runs overnight, and belongs to the day it began on.</p>
 <div class="actions"><button class="v-btn primary" type="submit">Save schedule</button></div></form>
 </section>
+<section class="card" aria-labelledby="notification-vips-heading"><h3 id="notification-vips-heading">VIPs</h3><p>Every message a VIP posts in your channels notifies you, even in a channel you have muted or set to mentions only. Add someone from their profile or from People.</p>{{if .VIPs}}<ul class="exceptions">{{range .VIPs}}<li><span>{{.Name}}</span><form method="post" action="/app/notifications/vips"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="target" value="{{.ID}}"><input type="hidden" name="add" value="false"><input type="hidden" name="return" value="/app/notifications?channel={{$.Channel}}#notification-vips-heading"><button class="v-btn" type="submit" aria-label="Remove {{.Name}} from VIPs">Remove</button></form></li>{{end}}</ul>{{else}}<p>You have no VIPs.</p>{{end}}{{if .VIPsUnreadable}}<p class="form-error">{{.VIPsUnreadable}} VIP{{if gt .VIPsUnreadable 1}}s{{end}} could not be shown right now.</p>{{end}}</section>
 <section class="card" aria-labelledby="notification-exceptions-heading"><h3 id="notification-exceptions-heading">Exceptions to defaults</h3>{{if .Exceptions}}<ul class="exceptions">{{range .Exceptions}}<li><a href="{{.URL}}"><span>{{.Prefix}}{{.Name}}</span><span>{{.Level}}{{if .FollowEveryThread}} · following every thread{{end}}</span></a></li>{{end}}</ul>{{else}}<p>No conversation-specific exceptions.</p>{{end}}</section>
 <section class="card" aria-labelledby="notification-absent-heading"><h3 id="notification-absent-heading">Not delivered here</h3><p>These are absent rather than off, so you know to look elsewhere for them.</p><ul class="not-delivered"><li><strong>Push to a phone.</strong> There is no mobile application and no push service.</li><li><strong>E-mail.</strong> This deployment sends no mail at all.</li><li><strong>Sounds.</strong> Desktop notifications arrive silently; there is no sound setting.</li></ul></section>
 </div></main>{{end}}`
@@ -7836,6 +7846,17 @@ func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
 		data.Notice = "Notifications resumed."
 	}
 
+	// Each VIP is named as the directory names them. One whose record cannot
+	// be read is counted rather than dropped silently, so the list does not
+	// pretend to be complete.
+	for _, id := range preferences.VIPs {
+		user, userErr := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, id)
+		if userErr != nil {
+			data.VIPsUnreadable++
+			continue
+		}
+		data.VIPs = append(data.VIPs, notificationVIPView{ID: string(user.ID), Name: displayName(user)})
+	}
 	var cursor domain.Cursor
 	unreadableExceptions := 0
 	for pageNumber := 0; pageNumber < 10; pageNumber++ {
@@ -7935,9 +7956,10 @@ func (h Handler) setWorkspaceNotifications(w http.ResponseWriter, r *http.Reques
 // The browser supplies its own zone, as it already does for a scheduled message
 // and a reminder: a schedule is a statement about the member's day, and the
 // server's clock is not their day.
-// setNotificationVIP toggles a person on the viewing member's VIP list from the
-// directory. Marking yourself or someone who is not here is refused; the page
-// returns to the directory either way.
+// setNotificationVIP toggles a person on the viewing member's VIP list, from
+// the directory, a profile, or the notifications page's VIP list. Marking
+// yourself or someone who is not here is refused; the member returns to the
+// page they acted from (the directory when it names none).
 func (h Handler) setNotificationVIP(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
@@ -7953,7 +7975,7 @@ func (h Handler) setNotificationVIP(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That VIP change was not saved", "Choose another member of this workspace and try again.")
 		return
 	}
-	h.redirectMutation(w, r, "/app/members")
+	h.redirectMutation(w, r, returnTarget(fields, "/app/members"))
 }
 
 func (h Handler) setNotificationSchedule(w http.ResponseWriter, r *http.Request) {

@@ -13,6 +13,11 @@ missing device, unsupported browser, network failure, plan/policy restriction,
 and an already active huddle are explicit and do not fabricate a connected
 state.
 
+Preferences' Audio & video chooses the microphone and camera a huddle opens
+(a device no longer connected falls back to the system default) and whether
+the member joins muted; joining muted is a muted track, reported to the other
+participants like any mute.
+
 ## HUDDLE-02 — Join and participate
 
 The active-huddle affordance identifies participants and join state. Joining
