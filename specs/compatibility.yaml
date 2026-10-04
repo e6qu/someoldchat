@@ -2037,6 +2037,12 @@ operations:
     reference: https://docs.slack.dev/reference/methods/admin.workflows.search/
     evidence:
       - go-test:internal/api/slack:TestAdminWorkflowSearchAndUnpublishReachWhatMembersCannot
+      - go-test:internal/api/slack:TestAdminWorkflowSearchFindsAMembersOwnWorkflow
+    deviations:
+      - >-
+        A member's own workflow, built in Workflow Builder with no developer
+        app, reports app_id as an empty string. Slack's reference does not say
+        what app a Workflow Builder workflow names, so none is invented.
   - method: admin.workflows.triggers.types.permissions.lookup
     status: behavior-compatible
     provenance: slack-reference
