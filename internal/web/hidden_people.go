@@ -87,6 +87,8 @@ func (h Handler) hiddenPeopleViews(r *http.Request, principal auth.Principal, pr
 		}
 		views = append(views, hiddenPersonView{ID: string(id), Name: name})
 	}
-	sort.SliceStable(views, func(left, right int) bool { return strings.ToLower(views[left].Name) < strings.ToLower(views[right].Name) })
+	sort.SliceStable(views, func(left, right int) bool {
+		return strings.ToLower(views[left].Name) < strings.ToLower(views[right].Name)
+	})
 	return views
 }
