@@ -1317,7 +1317,11 @@ type Store interface {
 	//
 	// The returned bool reports whether this call created the huddle, so the
 	// caller knows whether to announce a start or a join.
-	StartHuddle(context.Context, domain.Call, events.Event, events.Event) (domain.Call, bool, error)
+	//
+	// Creating a huddle also posts the given huddle_thread message into the
+	// conversation, in the same commit, and records its timestamp as the
+	// huddle's ThreadTimestamp; joining a running huddle posts nothing.
+	StartHuddle(context.Context, domain.Call, events.Event, events.Event, domain.Message) (domain.Call, bool, error)
 	// ActiveHuddle returns the conversation's running huddle, or ErrNotFound.
 	ActiveHuddle(context.Context, domain.WorkspaceID, domain.ConversationID) (domain.Call, error)
 	// JoinCall and LeaveCall move one participant, rather than replacing the

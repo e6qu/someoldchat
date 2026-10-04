@@ -839,7 +839,10 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		ID: fixtureHuddleID, WorkspaceID: "T1", Kind: domain.CallKindHuddle, ConversationID: "C1",
 		ExternalUniqueID: "fixture-huddle", JoinURL: "https://example.test/huddle", Title: "fixture huddle",
 		CreatedBy: "U-owner", Participants: []domain.UserID{"U-owner"}, StartedAt: at,
-	}, event("E-huddle", "huddle.started"), event("E-huddle-join", "huddle.joined")); err != nil {
+	}, event("E-huddle", "huddle.started"), event("E-huddle-join", "huddle.joined"), domain.Message{
+		ID: "M-fixture-huddle", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U-owner",
+		Subtype: domain.MessageSubtypeHuddleThread, CreatedAt: at, Attachments: "[]",
+	}); err != nil {
 		t.Fatalf("seed huddle: %v", err)
 	}
 	// An external authorization token for the installed app, so an operation

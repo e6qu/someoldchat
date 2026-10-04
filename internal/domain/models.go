@@ -417,6 +417,10 @@ type Call struct {
 	StartedAt            time.Time
 	EndedAt              time.Time
 	DurationSeconds      int64
+	// ThreadTimestamp is the huddle's message in its conversation, whose
+	// thread is the huddle's chat. It is empty for an external call and for a
+	// huddle started before huddles posted one.
+	ThreadTimestamp MessageTimestamp
 }
 
 // ExternalCallParticipant is a calls-API participant identified by the call
@@ -4030,6 +4034,11 @@ const (
 	MessageSubtypeChannelPurpose MessageSubtype = "channel_purpose"
 	MessageSubtypeChannelName    MessageSubtype = "channel_name"
 	MessageSubtypeMeMessage      MessageSubtype = "me_message"
+	// MessageSubtypeHuddleThread is the message a huddle posts into its
+	// conversation when it starts. The huddle's chat is that message's
+	// thread, as in Slack, so what was said stays with the conversation after
+	// the huddle ends.
+	MessageSubtypeHuddleThread MessageSubtype = "huddle_thread"
 )
 
 // Valid reports whether a subtype is one this repository writes. An
@@ -4038,7 +4047,7 @@ const (
 func (s MessageSubtype) Valid() bool {
 	switch s {
 	case "", MessageSubtypeChannelJoin, MessageSubtypeChannelLeave, MessageSubtypeChannelTopic,
-		MessageSubtypeChannelPurpose, MessageSubtypeChannelName, MessageSubtypeMeMessage:
+		MessageSubtypeChannelPurpose, MessageSubtypeChannelName, MessageSubtypeMeMessage, MessageSubtypeHuddleThread:
 		return true
 	}
 	return false

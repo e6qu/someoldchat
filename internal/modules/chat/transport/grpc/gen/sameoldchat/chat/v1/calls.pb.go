@@ -38,8 +38,11 @@ type Call struct {
 	Kind                 string                     `protobuf:"bytes,13,opt,name=kind,proto3" json:"kind,omitempty"`
 	ConversationId       string                     `protobuf:"bytes,14,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	ExternalParticipants []*ExternalCallParticipant `protobuf:"bytes,15,rep,name=external_participants,json=externalParticipants,proto3" json:"external_participants,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// thread_timestamp is the huddle's message in its conversation, whose
+	// thread is the huddle's chat; empty for an external call.
+	ThreadTimestamp string `protobuf:"bytes,16,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Call) Reset() {
@@ -175,6 +178,13 @@ func (x *Call) GetExternalParticipants() []*ExternalCallParticipant {
 		return x.ExternalParticipants
 	}
 	return nil
+}
+
+func (x *Call) GetThreadTimestamp() string {
+	if x != nil {
+		return x.ThreadTimestamp
+	}
+	return ""
 }
 
 // ExternalCallParticipant is a calls-API participant the provider names by
@@ -937,7 +947,7 @@ var File_sameoldchat_chat_v1_calls_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/calls.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xc1\x04\n" +
+	"\x1fsameoldchat/chat/v1/calls.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xec\x04\n" +
 	"\x04Call\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12,\n" +
@@ -956,7 +966,8 @@ const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\x10duration_seconds\x18\f \x01(\x03R\x0fdurationSeconds\x12\x12\n" +
 	"\x04kind\x18\r \x01(\tR\x04kind\x12'\n" +
 	"\x0fconversation_id\x18\x0e \x01(\tR\x0econversationId\x12a\n" +
-	"\x15external_participants\x18\x0f \x03(\v2,.sameoldchat.chat.v1.ExternalCallParticipantR\x14externalParticipants\"|\n" +
+	"\x15external_participants\x18\x0f \x03(\v2,.sameoldchat.chat.v1.ExternalCallParticipantR\x14externalParticipants\x12)\n" +
+	"\x10thread_timestamp\x18\x10 \x01(\tR\x0fthreadTimestamp\"|\n" +
 	"\x17ExternalCallParticipant\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12!\n" +

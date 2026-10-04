@@ -8835,8 +8835,33 @@ func (m Messages) StartHuddle(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil {
 		return domain.Call{}, err
 	}
-	call, _, err := m.Store.StartHuddle(ctx, value, started, joined)
+	thread, err := huddleThreadMessage(workspaceID, conversationID, actor, now)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	call, _, err := m.Store.StartHuddle(ctx, value, started, joined, thread)
 	return call, err
+}
+
+// huddleThreadMessage is the message a huddle posts into its conversation as
+// it starts, as Slack's does: its thread is the huddle's chat. It is written
+// by the store call that creates the huddle, so the two commit together, and
+// it is not written at all when the caller joins a huddle already running.
+//
+// Its text is written the way the channel notices are, with the starter as a
+// mention, so every surface that previews a message by its text (the DM list,
+// Unreads, search, notifications) names it rather than showing a blank row.
+func huddleThreadMessage(workspaceID domain.WorkspaceID, conversationID domain.ConversationID, actor domain.UserID, now time.Time) (domain.Message, error) {
+	id, err := domain.NewMessageID()
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return domain.Message{
+		ID: id, WorkspaceID: workspaceID, Conversation: conversationID, AuthorID: actor,
+		Text:    "<@" + string(actor) + "> started a huddle",
+		Subtype: domain.MessageSubtypeHuddleThread, CreatedAt: domain.MessageInstant(now),
+		Attachments: "[]",
+	}, nil
 }
 
 // JoinHuddle adds the actor to the conversation's running huddle. It is
@@ -10688,7 +10713,10 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 		messageTextTooLong(request.Text) || (request.MarkdownText && utf8.RuneCountInString(request.Text) > 12000) ||
 		(request.Parse != "" && request.Parse != "none" && request.Parse != "full") ||
 		(request.ReplyBroadcast && request.ThreadTimestamp == "") ||
-		!request.Subtype.Valid() {
+		// A system subtype is written only by the store call that makes the
+		// change it reports; a posted message claiming one would be a forged
+		// join, rename or huddle.
+		!request.Subtype.Valid() || request.Subtype.System() {
 		return domain.Message{}, domain.ErrInvalidMessage
 	}
 	if err := validateMessageBlocks(normalizedBlocks); err != nil {

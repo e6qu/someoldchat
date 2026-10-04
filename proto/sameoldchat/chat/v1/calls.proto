@@ -22,6 +22,9 @@ message Call {
   string kind = 13;
   string conversation_id = 14;
   repeated ExternalCallParticipant external_participants = 15;
+  // thread_timestamp is the huddle's message in its conversation, whose
+  // thread is the huddle's chat; empty for an external call.
+  string thread_timestamp = 16;
 }
 
 // ExternalCallParticipant is a calls-API participant the provider names by

@@ -141,9 +141,17 @@ live refresh of the huddle fragment. Microphone, camera, screen, reactions and
 More are icon buttons whose accessible names follow their state, Leave is the
 one red control, and ending for everyone sits behind More rather than beside
 Leave. A member who is not in a running huddle sees one quiet line with the
-participants' faces and Join huddle. Slack's huddle thread — a message thread
-the huddle opens in the channel — is not modelled: the channel itself is the
-huddle's chat.
+participants' faces and Join huddle.
+
+The huddle's chat is a thread, as in Slack. Starting a huddle posts a
+`huddle_thread` message into the conversation in the same commit that creates
+the huddle; joining a running huddle posts nothing. The timeline shows it as
+"started a huddle." with a link into its thread, the huddle window opens the
+same thread, and once someone replies the message counts the replies like any
+thread, so what was said stays with the conversation after the huddle ends.
+A posted message cannot claim the subtype: system subtypes are written only by
+the store call that makes the change they report. Slack's reference does not
+document the subtype's `room` object, so it is not projected.
 
 The forwarding path is covered by in-process loopback tests — two real pion peer
 connections stand in for browsers over the actual offer/answer/candidate

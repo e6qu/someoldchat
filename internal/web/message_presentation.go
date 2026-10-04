@@ -141,6 +141,8 @@ func startsGroup(previous, current messageView, previousAt, currentAt time.Time)
 func systemSentence(message domain.Message, channelLabel string) (string, bool) {
 	fields := domain.ChannelNoticeFields(message)
 	switch message.Subtype {
+	case domain.MessageSubtypeHuddleThread:
+		return "started a huddle.", true
 	case domain.MessageSubtypeChannelJoin:
 		if channelLabel == "" {
 			return "joined.", true

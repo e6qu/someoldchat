@@ -2322,6 +2322,7 @@ const huddlePartial = `{{define "huddle-faces"}}<span class="huddle-faces" aria-
   <header class="huddle-window-head">
     <span class="huddle-live" aria-hidden="true"></span>
     <div class="huddle-window-name"><h2 id="huddle-window-title">{{.Title}}</h2><span class="huddle-people">{{len .Participants}} {{if eq (len .Participants) 1}}person{{else}}people{{end}}: {{range $index, $person := .Participants}}{{if $index}}, {{end}}{{$person.Name}}{{end}}</span></div>
+    {{if .ThreadURL}}<a class="huddle-icon" href="{{.ThreadURL}}" data-thread-link aria-label="Open the huddle thread" title="Open the huddle thread"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v8.5h-7l-4 3.5V13h-2z"/></svg></a>{{end}}
     {{if .CanvasURL}}<a class="huddle-icon" href="{{.CanvasURL}}" aria-label="Open the huddle canvas" title="Open the huddle canvas"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z M12 2.5V6h3.5 M7.5 10h5 M7.5 13h5"/></svg></a>{{end}}
     <button type="button" class="huddle-icon" data-huddle-toggle="expanded" aria-pressed="false" aria-label="Expand huddle" title="Expand huddle"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 3.5h5v5 M16.5 3.5l-5.5 5.5 M8.5 16.5h-5v-5 M3.5 16.5L9 11"/></svg></button>
     <button type="button" class="huddle-icon" data-huddle-toggle="minimised" aria-pressed="false" aria-label="Minimise huddle" title="Minimise huddle"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 14.5h11"/></svg></button>
