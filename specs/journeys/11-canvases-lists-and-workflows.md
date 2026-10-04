@@ -75,6 +75,15 @@ is not a failure, or a workflow on a schedule fails forever on its second run.
 Every built-in step acts as the member who started the run, so a workflow can
 do nothing its owner could not and no change is attributed to nobody.
 
+A workflow MUST NOT need a developer app, because Workflow Builder's do not. A
+member's own workflow has no app: it is built from the steps that run without
+one — messages, adding people, canvases, forms, buttons and waits — and is
+published, triggered and run like any other. It cannot call a function, which
+belongs to an app, and that is refused when the workflow is saved rather than
+when it runs. Its runs and steps carry no app, every storage profile refuses a
+step whose app is not its run's, and an `app_collaborators` permission on it
+admits its owner, the collaborator a workflow with no app has.
+
 Waiting for a set time is different in kind: the run is suspended on the clock
 rather than on a person or an app. The instant it becomes due MUST be durable,
 because a remaining duration would start again from whenever the process did

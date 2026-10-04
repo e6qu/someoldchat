@@ -3297,6 +3297,44 @@ test('[WORKFLOW-02] a built-in message step posts and completes the run with no 
   await expect(page.locator('.message-text').filter({ hasText: announcement })).toHaveCount(1);
 });
 
+// Workflow Builder needs no developer app, as Slack's does not: a member's own
+// workflow is built from the steps that run without one, published, started
+// from a trigger and run to completion.
+test('[WORKFLOW-01 WORKFLOW-02] a member builds and runs a workflow of their own with no app', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app/workflows');
+  await page.getByText('Create a workflow').click();
+  await expect(page.getByText('A workflow with no app is yours')).toBeVisible();
+  const name = `Welcome wagon ${Date.now()}`;
+  await page.getByLabel('Name').fill(name);
+  const owningApp = page.getByLabel('Owning app');
+  if (await owningApp.count()) await owningApp.selectOption('');
+  const firstStep = page.getByLabel('First step');
+  if (await firstStep.count()) await firstStep.selectOption('');
+  await page.getByRole('button', { name: 'Create workflow' }).click();
+  await expect(page.getByText('Draft created')).toBeVisible();
+
+  const stepType = page.getByLabel('Step 1 type');
+  await expect(stepType.locator('option[value="function"]')).toHaveCount(0);
+  await stepType.selectOption('message');
+  await page.getByLabel('Step 1 message conversation').selectOption('Cdev');
+  const welcome = `welcome from a member's workflow ${Date.now()}`;
+  await page.getByLabel('Step 1 message text').fill(welcome);
+  await page.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByText('Workflow published')).toBeVisible();
+
+  await page.getByLabel('Trigger name').fill('Welcome');
+  await page.getByRole('button', { name: 'Create trigger' }).click();
+  await expect(page.getByText('Trigger created')).toBeVisible();
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9A-Z]+$/);
+  await expect(page.getByText('completed', { exact: true })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.goto('/app');
+  await expect(page.locator('.message-text').filter({ hasText: welcome })).toHaveCount(1);
+});
+
 test('[WORKFLOW-02] built-in steps add people and create a canvas, and chain into each other', async ({ page, context, request }) => {
   await signIn(context);
   const redirectURI = 'https://client.example/workflow-builtin-callback';

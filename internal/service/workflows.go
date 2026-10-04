@@ -488,9 +488,18 @@ func workflowStepOutputsByID(executions []domain.WorkflowStep) map[string]map[st
 // installed in the workspace, which is what makes its functions usable — Slack
 // does not require the builder to own the app, so a workflow manager can edit a
 // workflow referencing an installed app they do not own.
+//
+// A workflow with no app is a member's own, as Workflow Builder's are: it is
+// built from the steps that run without an app (messages, adding people,
+// canvases, forms, buttons and delays), so only the workspace is checked.
+// validateWorkflowFunctions refuses a function step in it, because a function
+// belongs to an app.
 func (m Messages) requireInstalledWorkflowApp(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
+	}
+	if appID == "" {
+		return nil
 	}
 	installed, err := m.appInstalledInWorkspace(ctx, appID, workspaceID)
 	if err != nil {
@@ -1735,6 +1744,11 @@ func (m Messages) automationPermits(ctx context.Context, workspaceID domain.Work
 	case domain.PermissionNamedEntities:
 		return slices.Contains(permission.UserIDs, actor), nil
 	case domain.PermissionAppCollaborators:
+		// A member's own workflow has no app, so it has no collaborators
+		// for this permission to admit.
+		if appID == "" {
+			return false, nil
+		}
 		app, _, err := m.Store.GetApp(ctx, appID)
 		if err != nil {
 			return false, err
@@ -2691,7 +2705,7 @@ func (m Messages) GetTriggerPermission(ctx context.Context, workspaceID domain.W
 			ResourceType: "trigger", ResourceID: string(triggerID), WorkspaceID: workspaceID, AppID: appID,
 			PermissionType: "app_collaborators",
 		}
-		return m.withAppCollaboratorOwner(ctx, value)
+		return m.withTriggerCollaborators(ctx, value, trigger)
 	}
 	if err != nil {
 		return domain.AutomationPermission{}, err
@@ -2699,7 +2713,7 @@ func (m Messages) GetTriggerPermission(ctx context.Context, workspaceID domain.W
 	if value.AppID != appID {
 		return domain.AutomationPermission{}, domain.ErrFunctionAccessDenied
 	}
-	return m.withAppCollaboratorOwner(ctx, value)
+	return m.withTriggerCollaborators(ctx, value, trigger)
 }
 
 func (m Messages) SetTriggerPermission(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, triggerID domain.WorkflowTriggerID, value domain.AutomationPermission) (domain.AutomationPermission, error) {
@@ -2735,7 +2749,23 @@ func (m Messages) SetTriggerPermission(ctx context.Context, workspaceID domain.W
 	if err := m.Store.SetAutomationPermission(ctx, value, event); err != nil {
 		return domain.AutomationPermission{}, err
 	}
-	return m.withAppCollaboratorOwner(ctx, value)
+	return m.withTriggerCollaborators(ctx, value, trigger)
+}
+
+// withTriggerCollaborators projects who a trigger's app_collaborators
+// permission admits. An app's trigger names the app's collaborators; a
+// member's own workflow has no app, and its collaborator is the workflow's
+// owner, who is also whom canRunWorkflowTrigger admits for that permission.
+func (m Messages) withTriggerCollaborators(ctx context.Context, value domain.AutomationPermission, trigger domain.WorkflowTrigger) (domain.AutomationPermission, error) {
+	if value.AppID != "" || value.PermissionType != domain.PermissionAppCollaborators {
+		return m.withAppCollaboratorOwner(ctx, value)
+	}
+	workflow, err := m.Store.GetWorkflow(ctx, trigger.WorkspaceID, trigger.WorkflowID)
+	if err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	value.UserIDs = []domain.UserID{workflow.OwnerID}
+	return value, nil
 }
 
 // withAppCollaboratorOwner projects the collaborator identity Slack includes

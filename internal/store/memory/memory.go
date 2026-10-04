@@ -4900,7 +4900,7 @@ func (s *Store) ListWorkflowRunSteps(_ context.Context, workspace domain.Workspa
 }
 
 func (s *Store) CreateWorkflow(_ context.Context, value domain.WorkflowDefinition, event events.Event) error {
-	if value.ID == "" || value.WorkspaceID == "" || value.AppID == "" || value.OwnerID == "" ||
+	if value.ID == "" || value.WorkspaceID == "" || value.OwnerID == "" ||
 		value.Title == "" || value.Status == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
 		return store.InvalidArgument("invalid workflow")
 	}
@@ -5172,7 +5172,7 @@ func (s *Store) SetWorkflowTrigger(_ context.Context, value domain.WorkflowTrigg
 	if value.Version > 1 {
 		expectedVersion = value.Version - 1
 	}
-	if value.ID == "" || value.WorkflowID == "" || value.WorkspaceID == "" || value.AppID == "" ||
+	if value.ID == "" || value.WorkflowID == "" || value.WorkspaceID == "" ||
 		value.Type == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
 		return store.InvalidArgument("invalid workflow trigger")
 	}
@@ -5328,7 +5328,7 @@ func (s *Store) AdvanceWorkflowEventCursor(_ context.Context, workspace domain.W
 }
 
 func (s *Store) CreateWorkflowRun(_ context.Context, value domain.WorkflowRun, firstStep *domain.WorkflowStep, emitted []events.Event) error {
-	if value.ID == "" || value.WorkflowID == "" || value.WorkspaceID == "" || value.AppID == "" ||
+	if value.ID == "" || value.WorkflowID == "" || value.WorkspaceID == "" ||
 		value.Status == "" || value.WorkflowVersion == 0 || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
 		return store.InvalidArgument("invalid workflow run")
 	}
@@ -5350,7 +5350,7 @@ func (s *Store) CreateWorkflowRun(_ context.Context, value domain.WorkflowRun, f
 	}
 	if firstStep != nil {
 		if firstStep.ID == "" || firstStep.WorkflowRunID != value.ID || firstStep.WorkspaceID != value.WorkspaceID ||
-			firstStep.AppID == "" || firstStep.UserID == "" ||
+			firstStep.AppID != value.AppID || firstStep.UserID == "" ||
 			(firstStep.Status != domain.WorkflowStepExecuting && firstStep.Status != domain.WorkflowStepWaiting) ||
 			firstStep.CreatedAt.IsZero() || firstStep.UpdatedAt.IsZero() {
 			return store.InvalidArgument("invalid first workflow step")
@@ -5388,7 +5388,7 @@ func (s *Store) AdvanceWorkflowRun(_ context.Context, completed domain.WorkflowS
 	}
 	if next != nil {
 		if next.ID == "" || next.WorkflowRunID != value.ID || next.WorkspaceID != value.WorkspaceID ||
-			next.AppID == "" || next.UserID == "" ||
+			next.AppID != value.AppID || next.UserID == "" ||
 			(next.Status != domain.WorkflowStepExecuting && next.Status != domain.WorkflowStepWaiting) ||
 			next.CreatedAt.IsZero() || next.UpdatedAt.IsZero() {
 			return store.InvalidArgument("invalid next workflow step")
