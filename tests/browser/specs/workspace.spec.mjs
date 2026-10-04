@@ -2383,6 +2383,15 @@ test('[NAV-06 A11Y-01] accessibility and message display preferences change how 
   await expect(emoji).toBeHidden();
   await expect(message.locator('.emoji-code')).toHaveText(':tada:');
   await expect(message.locator('.emoji-code')).toBeVisible();
+  // Compact drops profile photos beside messages; Just display names drops
+  // the full name shown beside a display name outside messages.
+  await expectNoSeriousAccessibilityViolations(page, '#pref-media');
+  const avatar = page.locator('.message:not(.is-continuation) .message-gutter > .avatar').first();
+  await expect(avatar).toBeVisible();
+  await preferences.getByRole('radio', { name: /^Compact/ }).check();
+  await expect(avatar).toBeHidden();
+  await preferences.getByRole('radio', { name: 'Just display names' }).check();
+  await expect(page.locator('html')).toHaveAttribute('data-pref-name-display', 'display');
   await preferences.getByRole('tab', { name: 'Privacy & visibility' }).click();
   await expectNoSeriousAccessibilityViolations(page, '#pref-privacy');
   await expect(preferences.getByRole('checkbox', { name: 'Let people in other organizations find me by my email address' })).toBeChecked();
@@ -2392,6 +2401,7 @@ test('[NAV-06 A11Y-01] accessibility and message display preferences change how 
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-pref-emoji-as-text', 'true');
   await expect(page.locator('html')).toHaveAttribute('data-pref-underline-links', 'true');
+  await expect(page.locator('html')).toHaveAttribute('data-pref-message-theme', 'compact');
 
   // Every test shares one member, so put the defaults back.
   await page.keyboard.press(`${primary}+Comma`);
@@ -2399,7 +2409,11 @@ test('[NAV-06 A11Y-01] accessibility and message display preferences change how 
   await preferences.getByRole('checkbox', { name: 'Underline links in messages' }).uncheck();
   await preferences.getByRole('tab', { name: 'Messages & media' }).click();
   await preferences.getByRole('checkbox', { name: 'Display emoji as plain text' }).uncheck();
+  await preferences.getByRole('radio', { name: /^Clean/ }).check();
+  await preferences.getByRole('radio', { name: /^Full & display names/ }).check();
   await expect(page.locator('html')).not.toHaveAttribute('data-pref-emoji-as-text', /.*/);
+  await expect(page.locator('html')).not.toHaveAttribute('data-pref-message-theme', /.*/);
+  await expect(page.locator('html')).not.toHaveAttribute('data-pref-name-display', /.*/);
   await expect(page.locator('html')).not.toHaveAttribute('data-pref-underline-links', /.*/);
 });
 

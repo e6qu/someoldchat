@@ -146,8 +146,11 @@ its account did is kept for the account on that browser's next visit. Recent
 conversations stay with each browser.
 
 Accessibility underlines links in messages and turns off interface animation;
-Messages & media hides uploaded images (leaving a link to each) or link
-previews, shows emoji as their `:codes:`, and turns off large emoji. Each
+Messages & media switches the Clean theme to Compact (no profile photos
+beside messages and less space between them), shows just display names (hiding
+the full name the directory, people search, and mention suggestions show beside
+one), hides uploaded images (leaving a link to each) or link previews, shows
+emoji as their `:codes:`, and turns off large emoji. Each
 applies at once to every message on the page and is kept with the account like
 the rest.
 
