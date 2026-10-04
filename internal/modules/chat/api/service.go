@@ -286,6 +286,8 @@ type Service interface {
 	AdminAddEmoji(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	AdminAddEmojiAlias(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	AdminRemoveEmoji(context.Context, domain.WorkspaceID, domain.UserID, string) error
+	AdminUploadEmoji(context.Context, domain.WorkspaceID, domain.UserID, string, string, []byte) error
+	OpenEmojiImage(context.Context, domain.WorkspaceID, string) (string, []byte, error)
 	AdminRenameEmoji(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	UserGroupChannels(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) ([]domain.ConversationID, error)
 	AddUserGroupChannels(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.ConversationID) error

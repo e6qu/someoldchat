@@ -57,8 +57,11 @@ func authorityMatrix() map[string]authority {
 		"OpenIDConnectToken":            authorityCredential,
 		"OpenIDConnectUserInfo":         authorityCredential,
 		// The key set is public: relying parties fetch it with no credential.
-		"OpenIDKeys":                         authorityCredential,
-		"OpenPublicFile":                     authorityCredential,
+		"OpenIDKeys":     authorityCredential,
+		"OpenPublicFile": authorityCredential,
+		// An uploaded custom emoji's image is public, as Slack's emoji URLs are:
+		// the unguessable token is the credential.
+		"OpenEmojiImage":                     authorityCredential,
 		"PostIncomingWebhook":                authorityCredential,
 		"PostIncomingWebhookWithAttachments": authorityCredential,
 		"PostScheduledMessage":               authorityCredential,
@@ -88,6 +91,7 @@ func authorityMatrix() map[string]authority {
 		// Administrative: refused to anyone below workspace administrator.
 		"AddUserGroupChannels":                authorityAdmin,
 		"AdminAddEmoji":                       authorityAdmin,
+		"AdminUploadEmoji":                    authorityAdmin,
 		"AdminAddEmojiAlias":                  authorityAdmin,
 		"AdminAddUserGroupTeams":              authorityAdmin,
 		"AdminAddUserGroupUsers":              authorityAdmin,

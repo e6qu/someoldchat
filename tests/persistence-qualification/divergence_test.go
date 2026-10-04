@@ -1058,6 +1058,44 @@ func blobReferencesTolerateAnArbitraryProfilePhotoURL(t *testing.T, open opener)
 	}
 }
 
+// blobReferencesIncludeUploadedCustomEmoji: an uploaded custom emoji's image is
+// a blob this deployment owns, so the reference walk must report it on every
+// profile or the reconciler reclaims every uploaded emoji as an orphan. An
+// emoji added by an external image URL, and an alias, name no blob of ours.
+func blobReferencesIncludeUploadedCustomEmoji(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	uploadedURL := domain.CustomEmojiImageURL(f.workspaceID, "emoji_"+f.suffix)
+	wantKey, _ := domain.CustomEmojiBlobKey(f.workspaceID, uploadedURL)
+	now := time.Unix(1_700_001_000, 0).UTC()
+	for _, emoji := range []domain.CustomEmoji{
+		{WorkspaceID: f.workspaceID, Name: "uploaded-" + f.suffix, URL: uploadedURL, CreatedAt: now, CreatedBy: f.userID},
+		{WorkspaceID: f.workspaceID, Name: "linked-" + f.suffix, URL: "https://example.test/linked.png", CreatedAt: now, CreatedBy: f.userID},
+		{WorkspaceID: f.workspaceID, Name: "alias-" + f.suffix, AliasFor: "uploaded-" + f.suffix, CreatedAt: now, CreatedBy: f.userID},
+	} {
+		if err := f.repository.AddEmoji(ctx, emoji, f.event("emoji-"+emoji.Name, "emoji.added", emoji.Name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	found := 0
+	if err := f.repository.WalkBlobReferences(ctx, f.workspaceID, func(reference string) error {
+		if reference == wantKey {
+			found++
+		}
+		if strings.Contains(reference, "example.test") || strings.Contains(reference, "alias-") {
+			t.Errorf("an emoji that names no blob of ours was reported: %q", reference)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if found != 1 {
+		t.Fatalf("the uploaded emoji's blob %q was reported %d times, want once", wantKey, found)
+	}
+}
+
 // emailIdentityIsNotUnicodeCaseFolded pins which canonical form the profiles
 // agree on. The in-memory repository compared addresses with strings.EqualFold,
 // which applies full Unicode simple folding: U+017F LATIN SMALL LETTER LONG S

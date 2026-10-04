@@ -33,12 +33,15 @@ func NewCleanupWorker(source CleanupSource, objects Store, owner string, limit i
 }
 
 func (w CleanupWorker) RunOnce(ctx context.Context, workspace domain.WorkspaceID) (int, error) {
-	count, err := w.runTopic(ctx, workspace, events.FileBlobDeleteTopic)
-	if err != nil {
-		return count, err
+	total := 0
+	for _, topic := range events.BlobDeleteTopics {
+		count, err := w.runTopic(ctx, workspace, topic)
+		total += count
+		if err != nil {
+			return total, err
+		}
 	}
-	photoCount, err := w.runTopic(ctx, workspace, events.UserPhotoBlobDeleteTopic)
-	return count + photoCount, err
+	return total, nil
 }
 
 func (w CleanupWorker) runTopic(ctx context.Context, workspace domain.WorkspaceID, topic string) (int, error) {

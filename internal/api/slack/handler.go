@@ -845,6 +845,7 @@ func (h Handler) registerSurfaces(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/exports/workflow-step-responses.csv", h.downloadWorkflowStepResponsesCSV)
 	mux.HandleFunc("GET /files/public/{token}", h.downloadPublicFile)
 	mux.HandleFunc("GET /users/{workspace}/{user}/photo/{token}", h.downloadUserPhoto)
+	mux.HandleFunc("GET /emoji/{workspace}/{token}", h.downloadEmojiImage)
 	mux.HandleFunc("GET /avatars/{workspace}/{user}/{file}", h.defaultAvatar)
 	mux.HandleFunc("GET /team-icons/{workspace}/{file}", h.defaultTeamIcon)
 	mux.HandleFunc("POST /services/{workspace}/{app}/{secret}", h.limitedIncomingWebhook)
@@ -6241,7 +6242,7 @@ func (h Handler) emojiList(w http.ResponseWriter, r *http.Request) {
 	}
 	response := map[string]any{
 		"ok":       true,
-		"emoji":    emojiResponse(values),
+		"emoji":    emojiResponse(h.origin(r), values),
 		"cache_ts": emojiCacheTimestamp(revision),
 	}
 	if includeCategories {
@@ -6258,13 +6259,15 @@ func emojiCacheTimestamp(revision time.Time) string {
 	return slackTimestamp(revision)
 }
 
-func emojiResponse(values []domain.CustomEmoji) map[string]string {
+// emojiResponse is emoji.list's name-to-URL map. An uploaded emoji's image URL
+// is stored origin-relative and is answered absolute, as Slack's are.
+func emojiResponse(origin string, values []domain.CustomEmoji) map[string]string {
 	result := make(map[string]string, len(values))
 	for _, value := range values {
 		if value.AliasFor != "" {
 			result[value.Name] = "alias:" + value.AliasFor
 		} else {
-			result[value.Name] = value.URL
+			result[value.Name] = slackobject.Absolute(origin, value.URL)
 		}
 	}
 	return result
@@ -6318,7 +6321,7 @@ func (h Handler) adminEmojiList(w http.ResponseWriter, r *http.Request) {
 	}
 	emoji := make(map[string]any, len(page))
 	for _, value := range page {
-		imageURL := value.URL
+		imageURL := slackobject.Absolute(h.origin(r), value.URL)
 		if value.AliasFor != "" {
 			imageURL = "alias:" + value.AliasFor
 		}
@@ -10114,6 +10117,27 @@ func (h Handler) downloadUserPhoto(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, source)
 }
 
+// downloadEmojiImage serves an uploaded custom emoji's image. Like Slack's
+// emoji URLs it needs no credentials, so the clients that render a message's
+// custom emoji can fetch it the way they fetch any image.
+func (h Handler) downloadEmojiImage(w http.ResponseWriter, r *http.Request) {
+	workspaceID := domain.WorkspaceID(strings.TrimSpace(r.PathValue("workspace")))
+	token := strings.TrimSpace(r.PathValue("token"))
+	if workspaceID == "" || token == "" {
+		http.NotFound(w, r)
+		return
+	}
+	mimeType, image, err := h.Messages.OpenEmojiImage(r.Context(), workspaceID, token)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	capabilityHeaders(w)
+	w.Header().Set("Content-Length", strconv.Itoa(len(image)))
+	blobHeaders(w, mimeType, "emoji")
+	_, _ = w.Write(image)
+}
+
 // bodyOnlyToken reports that the only place this request can carry its token is
 // the multipart body. auth.Stored.Authenticate falls back to r.FormValue, which
 // calls ParseMultipartForm and consumes the stream; r.MultipartReader() then fails
@@ -12330,7 +12354,7 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, domain.ErrInvalidBlocks) {
 		return "invalid_blocks"
 	}
-	if errors.Is(err, domain.ErrInvalidMessage) || errors.Is(err, domain.ErrInvalidTimestamp) || errors.Is(err, domain.ErrInvalidMessageTimestamp) || errors.Is(err, domain.ErrInvalidConversation) || errors.Is(err, domain.ErrInvalidReaction) || errors.Is(err, domain.ErrInvalidFile) || errors.Is(err, domain.ErrInvalidProfile) || errors.Is(err, domain.ErrInvalidProfileField) || errors.Is(err, domain.ErrInvalidScheduledStatus) || errors.Is(err, domain.ErrInvalidSnooze) || errors.Is(err, domain.ErrInvalidCall) || errors.Is(err, domain.ErrInvalidUserGroup) || errors.Is(err, domain.ErrInvalidEphemeral) || errors.Is(err, domain.ErrInvalidEmoji) || errors.Is(err, domain.ErrInvalidView) || errors.Is(err, domain.ErrInvalidDialog) || errors.Is(err, domain.ErrInvalidBot) || errors.Is(err, domain.ErrInvalidConversationPrefs) || errors.Is(err, domain.ErrInvalidRemoteFile) || errors.Is(err, domain.ErrInvalidInviteRequest) || errors.Is(err, domain.ErrInvalidSharedInvite) || errors.Is(err, domain.ErrInvalidAppApproval) || errors.Is(err, domain.ErrInvalidIntegrationLogs) || errors.Is(err, domain.ErrInvalidOAuth) || errors.Is(err, domain.ErrInvalidOAuthClient) || errors.Is(err, domain.ErrBadOAuthClientSecret) || errors.Is(err, store.ErrOAuthRedirectMismatch) || errors.Is(err, domain.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, domain.ErrInvalidCanvas) || errors.Is(err, domain.ErrInvalidList) || errors.Is(err, domain.ErrInvalidListTemplate) || errors.Is(err, domain.ErrInvalidEntity) || errors.Is(err, domain.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, domain.ErrInvalidAccessLog) || errors.Is(err, domain.ErrInvalidMigration) || errors.Is(err, domain.ErrInvalidReminder) || errors.Is(err, domain.ErrInvalidSlackbotResponse) || errors.Is(err, domain.ErrInvalidMemberPreference) || errors.Is(err, domain.ErrInvalidLaterReminder) || errors.Is(err, domain.ErrInvalidActivitySavedView) || errors.Is(err, domain.ErrInvalidSidebarSection) || errors.Is(err, domain.ErrReminderTimeInPast) || errors.Is(err, domain.ErrInvalidSearch) || errors.Is(err, domain.ErrInvalidWorkflowStep) || errors.Is(err, domain.ErrInvalidTriggerConfig) || errors.Is(err, domain.ErrInvalidWorkspace) || errors.Is(err, domain.ErrInvalidAppResponse) || errors.Is(err, domain.ErrInvalidTrigger) || errors.Is(err, domain.ErrTriggerExchanged) || errors.Is(err, domain.ErrTriggerExpired) || errors.Is(err, store.ErrTriggerExchanged) || errors.Is(err, store.ErrTriggerExpired) || errors.Is(err, domain.ErrViewPushLimit) || errors.Is(err, domain.ErrSlashCommandInThread) || errors.Is(err, domain.ErrInvalidAssistantThread) || errors.Is(err, domain.ErrAppNotDistributable) || errors.Is(err, domain.ErrInvalidExternalAuthProvider) || errors.Is(err, domain.ErrExternalAuthConnection) {
+	if errors.Is(err, domain.ErrInvalidMessage) || errors.Is(err, domain.ErrInvalidTimestamp) || errors.Is(err, domain.ErrInvalidMessageTimestamp) || errors.Is(err, domain.ErrInvalidConversation) || errors.Is(err, domain.ErrInvalidReaction) || errors.Is(err, domain.ErrInvalidFile) || errors.Is(err, domain.ErrInvalidProfile) || errors.Is(err, domain.ErrInvalidProfileField) || errors.Is(err, domain.ErrInvalidScheduledStatus) || errors.Is(err, domain.ErrInvalidSnooze) || errors.Is(err, domain.ErrInvalidCall) || errors.Is(err, domain.ErrInvalidUserGroup) || errors.Is(err, domain.ErrInvalidEphemeral) || errors.Is(err, domain.ErrInvalidEmoji) || errors.Is(err, domain.ErrInvalidEmojiImage) || errors.Is(err, domain.ErrInvalidView) || errors.Is(err, domain.ErrInvalidDialog) || errors.Is(err, domain.ErrInvalidBot) || errors.Is(err, domain.ErrInvalidConversationPrefs) || errors.Is(err, domain.ErrInvalidRemoteFile) || errors.Is(err, domain.ErrInvalidInviteRequest) || errors.Is(err, domain.ErrInvalidSharedInvite) || errors.Is(err, domain.ErrInvalidAppApproval) || errors.Is(err, domain.ErrInvalidIntegrationLogs) || errors.Is(err, domain.ErrInvalidOAuth) || errors.Is(err, domain.ErrInvalidOAuthClient) || errors.Is(err, domain.ErrBadOAuthClientSecret) || errors.Is(err, store.ErrOAuthRedirectMismatch) || errors.Is(err, domain.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, domain.ErrInvalidCanvas) || errors.Is(err, domain.ErrInvalidList) || errors.Is(err, domain.ErrInvalidListTemplate) || errors.Is(err, domain.ErrInvalidEntity) || errors.Is(err, domain.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, domain.ErrInvalidAccessLog) || errors.Is(err, domain.ErrInvalidMigration) || errors.Is(err, domain.ErrInvalidReminder) || errors.Is(err, domain.ErrInvalidSlackbotResponse) || errors.Is(err, domain.ErrInvalidMemberPreference) || errors.Is(err, domain.ErrInvalidLaterReminder) || errors.Is(err, domain.ErrInvalidActivitySavedView) || errors.Is(err, domain.ErrInvalidSidebarSection) || errors.Is(err, domain.ErrReminderTimeInPast) || errors.Is(err, domain.ErrInvalidSearch) || errors.Is(err, domain.ErrInvalidWorkflowStep) || errors.Is(err, domain.ErrInvalidTriggerConfig) || errors.Is(err, domain.ErrInvalidWorkspace) || errors.Is(err, domain.ErrInvalidAppResponse) || errors.Is(err, domain.ErrInvalidTrigger) || errors.Is(err, domain.ErrTriggerExchanged) || errors.Is(err, domain.ErrTriggerExpired) || errors.Is(err, store.ErrTriggerExchanged) || errors.Is(err, store.ErrTriggerExpired) || errors.Is(err, domain.ErrViewPushLimit) || errors.Is(err, domain.ErrSlashCommandInThread) || errors.Is(err, domain.ErrInvalidAssistantThread) || errors.Is(err, domain.ErrAppNotDistributable) || errors.Is(err, domain.ErrInvalidExternalAuthProvider) || errors.Is(err, domain.ErrExternalAuthConnection) {
 		return invalidReason
 	}
 	if errors.Is(err, domain.ErrAppInteractionUnavailable) {

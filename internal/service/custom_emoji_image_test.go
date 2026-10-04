@@ -1,0 +1,84 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"path"
+	"path/filepath"
+	"testing"
+
+	"github.com/sameoldchat/sameoldchat/internal/blob"
+	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/store"
+	"github.com/sameoldchat/sameoldchat/internal/store/memory"
+)
+
+// An uploaded custom emoji is stored as its own blob and served from a public
+// URL; Slack's rules refuse an image that is too large or not an image, and
+// removing the emoji stops its URL at once and records its blob for cleanup in
+// the same commit.
+func TestAnUploadedCustomEmojiIsServedAndReclaimed(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	s.SeedUser(domain.User{ID: "UA", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	if err := s.SeedWorkspaceRole("T1", "UA", domain.WorkspaceRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s, Blob: objects}
+	image := append([]byte("GIF89a"), bytes.Repeat([]byte{1}, 32)...)
+
+	if err := messages.AdminUploadEmoji(ctx, "T1", "U1", "nope", "image/gif", image); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
+		t.Fatalf("a member uploaded an emoji: %v", err)
+	}
+	if err := messages.AdminUploadEmoji(ctx, "T1", "UA", "huge", "image/gif", append(append([]byte(nil), image...), make([]byte, domain.MaxCustomEmojiBytes)...)); !errors.Is(err, domain.ErrInvalidEmojiImage) {
+		t.Fatalf("an image over 128 KB was accepted: %v", err)
+	}
+	if err := messages.AdminUploadEmoji(ctx, "T1", "UA", "page", "image/gif", []byte("<html><body>not an image</body></html>")); !errors.Is(err, domain.ErrInvalidEmojiImage) {
+		t.Fatalf("a document labelled as an image was accepted: %v", err)
+	}
+	if err := messages.AdminUploadEmoji(ctx, "T1", "UA", "wavy-cat", "image/gif", image); err != nil {
+		t.Fatal(err)
+	}
+	emojis, err := s.ListEmojis(ctx, "T1")
+	if err != nil || len(emojis) != 1 {
+		t.Fatalf("emoji=%v err=%v", emojis, err)
+	}
+	imageURL := emojis[0].URL
+	if want := "/emoji/T1/"; len(imageURL) <= len(want) || imageURL[:len(want)] != want {
+		t.Fatalf("image URL %q is not one this server serves", imageURL)
+	}
+	token := path.Base(imageURL)
+	mimeType, served, err := messages.OpenEmojiImage(ctx, "T1", token)
+	if err != nil || mimeType != "image/gif" || !bytes.Equal(served, image) {
+		t.Fatalf("served %q %d bytes err=%v", mimeType, len(served), err)
+	}
+	if _, _, err := messages.OpenEmojiImage(ctx, "T2", token); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("another workspace served the image: %v", err)
+	}
+
+	if err := messages.AdminRemoveEmoji(ctx, "T1", "UA", "wavy-cat"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := messages.OpenEmojiImage(ctx, "T1", token); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a removed emoji's image was still served: %v", err)
+	}
+	cleanup := 0
+	for _, event := range s.Outbox() {
+		if event.Topic == events.CustomEmojiBlobDeleteTopic && event.Payload == "T1/emoji/"+token {
+			cleanup++
+		}
+	}
+	if cleanup != 1 {
+		t.Fatalf("removal recorded %d cleanups of the image blob, want 1", cleanup)
+	}
+}

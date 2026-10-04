@@ -98,6 +98,7 @@ func runQualification(t *testing.T, open opener) {
 		{"seed helpers reject invalid input", seedHelpersRejectInvalidInput},
 		{"Socket Mode admission is atomic under concurrency", socketModeAdmissionIsAtomicUnderConcurrency},
 		{"blob references tolerate an arbitrary profile photo URL", blobReferencesTolerateAnArbitraryProfilePhotoURL},
+		{"blob references include uploaded custom emoji images", blobReferencesIncludeUploadedCustomEmoji},
 		{"email identity is not Unicode case folded", emailIdentityIsNotUnicodeCaseFolded},
 		{"stars page in chronological order", starsPageInChronologicalOrder},
 		{"personal listings stop at a private conversation the reader left", personalListingsStopAtALeftPrivateConversation},

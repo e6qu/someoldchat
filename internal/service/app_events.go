@@ -150,6 +150,10 @@ func PrepareUserEvent(ctx context.Context, state UserEventProjectionStore, origi
 		return prepared, visible, err
 	}
 	prepared, err = absoluteEventUser(origin, prepared)
+	if err != nil {
+		return prepared, false, err
+	}
+	prepared, err = absoluteEventEmoji(origin, prepared)
 	return prepared, err == nil, err
 }
 
@@ -225,7 +229,40 @@ func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, credent
 		return prepared, visible, err
 	}
 	prepared, err = absoluteEventUser(origin, prepared)
+	if err != nil {
+		return prepared, false, err
+	}
+	prepared, err = absoluteEventEmoji(origin, prepared)
 	return prepared, err == nil, err
+}
+
+// absoluteEventEmoji resolves the image URL an emoji.added record carries. An
+// uploaded custom emoji's image is stored origin-relative (customEmojiImageURL),
+// so a client told of the new emoji is given a URL it can fetch; an image URL
+// an administrator supplied is absolute already and passes through.
+func absoluteEventEmoji(origin string, record events.Record) (events.Record, error) {
+	if origin == "" || record.Event.Topic != "emoji.added" {
+		return record, nil
+	}
+	delivered, err := events.Deliverable(record.Event)
+	if err != nil {
+		return record, nil
+	}
+	value, ok := delivered.Field("value")
+	if !ok || slackobject.Absolute(origin, value) == value {
+		return record, nil
+	}
+	encoded, err := json.Marshal(slackobject.Absolute(origin, value))
+	if err != nil {
+		return events.Record{}, err
+	}
+	delivered.Object["value"] = encoded
+	payload, err := delivered.Encode()
+	if err != nil {
+		return events.Record{}, err
+	}
+	record.Event.Payload = payload
+	return record, nil
 }
 
 // absoluteEventUser resolves the image URLs of the user object a user.* record

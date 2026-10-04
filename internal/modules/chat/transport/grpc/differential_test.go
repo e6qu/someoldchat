@@ -1684,6 +1684,46 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// An uploaded custom emoji crosses the seam as bytes and comes back
+			// from its public image URL as the same bytes; the refusals (too
+			// large, not an image, not an admin) and the URL's death on removal
+			// must agree on both compositions.
+			name:  "custom emoji images are uploaded, served, and reclaimed identically",
+			blobs: true,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				image := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0x00, 0x01, 0x02, 0x03}, 64)...)
+				if err := chat.AdminUploadEmoji(ctx, "T1", "UA", "uploaded", "image/png", image); err != nil {
+					return nil, err
+				}
+				tooLarge := chat.AdminUploadEmoji(ctx, "T1", "UA", "huge", "image/png", append(append([]byte(nil), image...), make([]byte, domain.MaxCustomEmojiBytes)...))
+				notImage := chat.AdminUploadEmoji(ctx, "T1", "UA", "script", "image/png", []byte("<html><script>alert(1)</script></html>"))
+				member := chat.AdminUploadEmoji(ctx, "T1", "U1", "members-only", "image/png", image)
+				listed, err := chat.Emojis(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				// The token is minted per composition, so it is an input here and
+				// never part of the projection.
+				token := ""
+				for _, emoji := range listed {
+					if emoji.Name == "uploaded" {
+						token = path.Base(emoji.URL)
+					}
+				}
+				mimeType, served, err := chat.OpenEmojiImage(ctx, "T1", token)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AdminRemoveEmoji(ctx, "T1", "UA", "uploaded"); err != nil {
+					return nil, err
+				}
+				_, _, afterRemoval := chat.OpenEmojiImage(ctx, "T1", token)
+				return []any{len(listed), mimeType, bytes.Equal(served, image),
+					errors.Is(tooLarge, domain.ErrInvalidEmojiImage), errors.Is(notImage, domain.ErrInvalidEmojiImage),
+					errors.Is(member, domain.ErrNotWorkspaceAdmin), errors.Is(afterRemoval, storepkg.ErrNotFound)}, nil
+			},
+		},
+		{
 			// Custom emoji: add, alias, rename, remove, and what the workspace
 			// lists afterwards. An alias points at another emoji, so removing
 			// the target and renaming it both have to answer the same way on
