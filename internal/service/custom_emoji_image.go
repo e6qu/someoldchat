@@ -14,13 +14,15 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/store"
+	"github.com/sameoldchat/sameoldchat/internal/thumbnail"
 )
 
 // customEmojiImageTypes are the image types Slack accepts for a custom emoji.
 var customEmojiImageTypes = map[string]bool{"image/png": true, "image/gif": true, "image/jpeg": true}
 
 // AdminUploadEmoji adds a custom emoji from an uploaded image, as Slack's "Add
-// custom emoji" dialog does: a PNG, GIF, or JPEG of at most 128 KB. The image
+// custom emoji" dialog does: a PNG, GIF, or JPEG of at most 128 KB, scaled
+// down to fit CustomEmojiSide when it is larger. The image
 // is stored as its own blob rather than as a file, so it is not listed among
 // anyone's files and is reclaimed when the emoji is removed; its URL needs no
 // credentials, as Slack's emoji URLs do not.
@@ -35,6 +37,13 @@ func (m Messages) AdminUploadEmoji(ctx context.Context, workspaceID domain.Works
 	mimeType = normalizeImageContentType(mimeType)
 	sniffed := normalizeImageContentType(http.DetectContentType(image))
 	if len(image) == 0 || len(image) > domain.MaxCustomEmojiBytes || !customEmojiImageTypes[mimeType] || sniffed != mimeType {
+		return domain.ErrInvalidEmojiImage
+	}
+	// An image larger than an emoji is ever shown is scaled down, as Slack's
+	// upload does, keeping its format and, for a GIF, its animation. One that
+	// does not decode is refused here rather than stored as a broken emoji.
+	image, _, err := thumbnail.Fit(image, mimeType, domain.CustomEmojiSide)
+	if err != nil {
 		return domain.ErrInvalidEmojiImage
 	}
 	if nameShadowsBuiltInEmoji(name) {

@@ -1691,7 +1691,7 @@ func parityCases() []parityCase {
 			name:  "custom emoji images are uploaded, served, and reclaimed identically",
 			blobs: true,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				image := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0x00, 0x01, 0x02, 0x03}, 64)...)
+				image := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xf8\x0f\x00\x01\x01\x01\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB`\x82")
 				if err := chat.AdminUploadEmoji(ctx, "T1", "UA", "uploaded", "image/png", image); err != nil {
 					return nil, err
 				}

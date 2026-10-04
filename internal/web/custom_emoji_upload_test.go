@@ -47,7 +47,7 @@ func TestCustomEmojiCanBeAddedByUploadingAnImage(t *testing.T) {
 		mux.ServeHTTP(response, request)
 		return response
 	}
-	image := append([]byte("GIF89a"), bytes.Repeat([]byte{1}, 32)...)
+	image := []byte("GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;") // a real 1x1 GIF: the upload decodes it
 	if response := upload("dancing-cat", image); response.Code != http.StatusSeeOther {
 		t.Fatalf("upload answered %d: %s", response.Code, response.Body)
 	}
