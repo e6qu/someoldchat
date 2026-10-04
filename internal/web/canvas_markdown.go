@@ -32,3 +32,27 @@ func renderCanvasMarkdown(text string, names *userNames) template.HTML {
 	}
 	return template.HTML(domain.CanvasMarkdownHTML(text, style)) // #nosec G203 -- every stored byte is escaped by domain.CanvasMarkdownHTML; the tags are its own and this style's.
 }
+
+// renderCanvasEditorMarkdown renders one canvas block for the editor. It is
+// the same rendering as the reading view with two differences an editor
+// needs: a mention is an atomic pill carrying the <@U…> it saves as, so it is
+// deleted whole and never typed into, and a checklist box is a control the
+// writer can toggle.
+func renderCanvasEditorMarkdown(text string, names *userNames) template.HTML {
+	style := domain.CanvasHTMLStyle{
+		Mention: func(id domain.UserID) string {
+			name := string(id)
+			if names != nil {
+				name = names.name(id)
+			}
+			return `<span class="canvas-mention" contenteditable="false" data-entity="&lt;@` + html.EscapeString(string(id)) + `&gt;">@` + html.EscapeString(name) + "</span>"
+		},
+		Checkbox: func(checked bool) string {
+			if checked {
+				return `<span class="check done" contenteditable="false" role="checkbox" aria-checked="true" aria-label="Done" data-check>☑</span>`
+			}
+			return `<span class="check" contenteditable="false" role="checkbox" aria-checked="false" aria-label="Done" data-check>☐</span>`
+		},
+	}
+	return template.HTML(domain.CanvasMarkdownHTML(text, style)) // #nosec G203 -- every stored byte is escaped by domain.CanvasMarkdownHTML; the tags are its own and this style's.
+}

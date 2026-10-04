@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -383,4 +384,88 @@ func TestCanvasMarkdownBecomesHeadingAndProseSections(t *testing.T) {
 	if len(document.Sections) != 4 || kinds[1] != domain.CanvasSectionHeading2 || document.Sections[2].Text != "Ana runs it." || document.Sections[3].Text != "- Freeze\n- Deploy" {
 		t.Fatalf("after replace sections=%+v", document.Sections)
 	}
+}
+
+// The web editor saves the whole document as markdown. A section the writer
+// did not change keeps its identity, and so its comments; an app's section
+// kind survives the trip through markdown; a save against a version someone
+// else has moved past is refused; and a save that changes nothing writes
+// nothing.
+func TestSavingACanvasAsMarkdownKeepsWhatDidNotChange(t *testing.T) {
+	ctx, repository, messages := canvasWorld(t)
+	canvas, err := messages.CreateCanvas(ctx, "T1", "U1", "Plan", `{"type":"markdown","markdown":"Keep me\n\nChange me"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, `[{"operation":"insert_at_end","document_content":{"type":"rich_text","markdown":"An app wrote this"}}]`); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := repository.GetCanvas(ctx, "T1", canvas.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := canvasDocumentSections(t, opened)
+	comment, err := messages.CommentOnCanvas(ctx, "T1", "U1", canvas.ID, original[0].ID, "Looks right")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := messages.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Keep me\n\nChanged, with <@U2>\n\n## Next\n\nAn app wrote this")
+	if err != nil || changed != 2 {
+		t.Fatalf("changed=%d err=%v, want 2 (the rewritten paragraph and the new heading)", changed, err)
+	}
+	saved, err := repository.GetCanvas(ctx, "T1", canvas.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sections := canvasDocumentSections(t, saved)
+	want := []domain.CanvasSection{
+		{Type: domain.CanvasSectionMarkdown, Text: "Keep me"},
+		{Type: domain.CanvasSectionMarkdown, Text: "Changed, with <@U2>"},
+		{Type: domain.CanvasSectionHeading2, Text: "Next"},
+		{Type: "rich_text", Text: "An app wrote this"},
+	}
+	if len(sections) != len(want) {
+		t.Fatalf("sections=%+v", sections)
+	}
+	for index := range want {
+		if sections[index].Type != want[index].Type || sections[index].Text != want[index].Text || sections[index].ID == "" {
+			t.Fatalf("section %d=%+v, want %+v", index, sections[index], want[index])
+		}
+	}
+	if sections[0].ID != original[0].ID || sections[3].ID != original[2].ID {
+		t.Fatalf("unchanged sections were rewritten: before=%+v after=%+v", original, sections)
+	}
+	if sections[1].ID == original[1].ID {
+		t.Fatalf("a rewritten section kept its old identity")
+	}
+	if saved.Version != opened.Version+1 {
+		t.Fatalf("version=%d, want %d", saved.Version, opened.Version+1)
+	}
+	comments, err := messages.CanvasComments(ctx, "T1", "U1", canvas.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(comments.Comments) != 1 || comments.Comments[0].ID != comment.ID || comments.Comments[0].SectionID != sections[0].ID {
+		t.Fatalf("comments=%+v err=%v, want the comment still on the kept section", comments, err)
+	}
+
+	if _, err := messages.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Overwrite"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale save err=%v, want ErrConflict", err)
+	}
+	if unchanged, err := messages.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, saved.Version, "Keep me\n\nChanged, with <@U2>\n\n## Next\n\nAn app wrote this"); err != nil || unchanged != 0 {
+		t.Fatalf("no-op save changed=%d err=%v", unchanged, err)
+	}
+	if again, _ := repository.GetCanvas(ctx, "T1", canvas.ID); again.Version != saved.Version {
+		t.Fatalf("a save that changed nothing wrote a revision: version %d", again.Version)
+	}
+	if _, err := messages.SaveCanvasMarkdown(ctx, "T1", "U2", canvas.ID, saved.Version, "Not mine"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a member without access saved: %v", err)
+	}
+}
+
+func canvasDocumentSections(t *testing.T, canvas domain.Canvas) []domain.CanvasSection {
+	t.Helper()
+	var document domain.CanvasDocument
+	if err := json.Unmarshal([]byte(canvas.DocumentContent), &document); err != nil {
+		t.Fatal(err)
+	}
+	return document.Sections
 }

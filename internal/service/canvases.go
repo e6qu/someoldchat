@@ -191,6 +191,78 @@ func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 	return m.Store.UpdateCanvas(ctx, canvas, event)
 }
 
+// SaveCanvasMarkdown is the web editor's save: the whole document, written as
+// one, becomes the canvas. version is the revision the editor opened, so a save
+// from a page another writer has since changed is refused with
+// store.ErrConflict instead of silently overwriting their work. Only the
+// sections that differ are rewritten, so an unchanged section keeps its ID and
+// the comments anchored to it. It answers how many sections changed and writes
+// nothing when none did.
+func (m Messages) SaveCanvasMarkdown(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64, markdown string) (int, error) {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessWrite); err != nil {
+		return 0, err
+	}
+	canvas, err := m.Store.GetCanvas(ctx, workspaceID, id)
+	if err != nil {
+		return 0, err
+	}
+	if canvas.Version != version {
+		return 0, store.ErrConflict
+	}
+	return m.rewriteCanvasMarkdown(ctx, workspaceID, userID, canvas, markdown)
+}
+
+// rewriteCanvasMarkdown makes the canvas the markdown given, keeping every
+// section that did not change. A section of a kind the markdown cannot spell —
+// an app's own — comes back from markdown as prose with its text intact; it
+// keeps its kind when its text is unchanged, so writing the document through
+// markdown does not turn an app's section into a paragraph.
+func (m Messages) rewriteCanvasMarkdown(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, canvas domain.Canvas, markdown string) (int, error) {
+	document, err := decodeCanvasDocument(canvas.DocumentContent)
+	if err != nil {
+		return 0, err
+	}
+	next := domain.CanvasMarkdownBlocks(markdown)
+	kinds := make(map[string]domain.CanvasSectionType)
+	for _, section := range document.Sections {
+		if !section.Type.Markdown() {
+			kinds[section.Text] = section.Type
+		}
+	}
+	for index := range next {
+		if kind, ok := kinds[next[index].Text]; ok && next[index].Type == domain.CanvasSectionMarkdown {
+			next[index].Type = kind
+		}
+	}
+	merged, changed := domain.MergeCanvasSections(document.Sections, next)
+	if changed == 0 {
+		return 0, nil
+	}
+	for index := range merged {
+		if merged[index].ID == "" {
+			if merged[index].ID, err = newCanvasSectionID(); err != nil {
+				return 0, err
+			}
+		}
+	}
+	document.Sections = merged
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return 0, err
+	}
+	canvas.DocumentContent = string(encoded)
+	canvas.Version++
+	canvas.UpdatedAt = time.Now().UTC()
+	event, err := canvasEvent(workspaceID, actor, "canvas.updated", canvas.ID, canvas.UpdatedAt)
+	if err != nil {
+		return 0, err
+	}
+	if err := m.Store.UpdateCanvas(ctx, canvas, event); err != nil {
+		return 0, err
+	}
+	return changed, nil
+}
+
 func (m Messages) DeleteCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) error {
 	// Destroying a canvas is reserved to whoever owns it: a collaborator granted
 	// write access may change the document, not remove it from everyone else.

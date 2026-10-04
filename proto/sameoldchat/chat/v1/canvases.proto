@@ -149,6 +149,18 @@ message EditCanvasRequest {
   string changes = 4;
 }
 
+message SaveCanvasMarkdownRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  int64 version = 4;
+  string markdown = 5;
+}
+
+message SaveCanvasMarkdownResponse {
+  int32 sections_changed_count = 1;
+}
+
 message CanvasAccessRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -205,6 +217,7 @@ service CanvasesService {
   rpc DeleteCanvasComment(DeleteCanvasCommentRequest) returns (MutationResponse);
   rpc RestoreCanvasRevision(RestoreCanvasRevisionRequest) returns (Canvas);
   rpc EditCanvas(EditCanvasRequest) returns (MutationResponse);
+  rpc SaveCanvasMarkdown(SaveCanvasMarkdownRequest) returns (SaveCanvasMarkdownResponse);
   rpc DeleteCanvas(CanvasRequest) returns (MutationResponse);
   rpc SetCanvasAccess(CanvasAccessRequest) returns (MutationResponse);
   rpc DeleteCanvasAccess(CanvasAccessDeleteRequest) returns (MutationResponse);

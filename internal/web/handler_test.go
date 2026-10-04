@@ -169,21 +169,17 @@ func TestCanvasAndListJourneysUseDurableDocuments(t *testing.T) {
 	if canvasPage.Code != http.StatusOK {
 		t.Fatalf("open canvas = %d: %s", canvasPage.Code, canvasPage.Body)
 	}
-	// Each block carries its own editor, so the control names the block it saves
-	// rather than the whole canvas; the title has its own rename control.
-	requireContains(t, "canvas", canvasPage.Body.String(), "Release plan", "Ship the durable UI", "Save block 1", "Rename canvas")
-	sectionMatch := regexp.MustCompile(`name="section_id" value="([^"]+)"`).FindStringSubmatch(canvasPage.Body.String())
-	if len(sectionMatch) != 2 {
-		t.Fatalf("canvas editor block is missing: %s", canvasPage.Body)
-	}
+	// The document is one editor saved as a whole; the title has its own
+	// rename control.
+	requireContains(t, "canvas", canvasPage.Body.String(), "Release plan", "Ship the durable UI", "Save canvas", "Rename canvas")
 
-	if renamed := postForm(t, mux, canvasURL+"/sections", url.Values{
-		"_csrf": {csrf}, "op": {"title"}, "title": {"Release plan v2"},
+	if renamed := postForm(t, mux, canvasURL+"/rename", url.Values{
+		"_csrf": {csrf}, "title": {"Release plan v2"},
 	}.Encode(), false); renamed.Code != http.StatusSeeOther {
 		t.Fatalf("rename canvas = %d: %s", renamed.Code, renamed.Body)
 	}
-	canvasSaved := postForm(t, mux, canvasURL+"/sections", url.Values{
-		"_csrf": {csrf}, "op": {"save"}, "section_id": {sectionMatch[1]}, "type": {"markdown"}, "body": {"Shipped atomically"},
+	canvasSaved := postForm(t, mux, canvasURL+"/document", url.Values{
+		"_csrf": {csrf}, "version": {pageVersion(t, get(t, mux, canvasURL).Body.String())}, "markdown": {"Shipped atomically"},
 	}.Encode(), false)
 	if canvasSaved.Code != http.StatusSeeOther {
 		t.Fatalf("save canvas = %d: %s", canvasSaved.Code, canvasSaved.Body)
@@ -963,45 +959,6 @@ func TestChannelCanvasIsOfferedToMembersAndCreatedOnPurpose(t *testing.T) {
 	}.Encode(), false)
 	if second.Code != http.StatusSeeOther || strings.Split(second.Header().Get("Location"), "?")[0] != canvasURL {
 		t.Fatalf("second create = %d %q, want the existing canvas", second.Code, second.Header().Get("Location"))
-	}
-}
-
-// TestCanvasBlockSaveRefusesAStaleBlockReference covers the block editor's
-// no-silent-overwrite guarantee: a save naming a block that is no longer part of
-// the canvas — the document changed under the editor — is a conflict, and the
-// stored canvas is left exactly as it was rather than a new block being written
-// in the missing one's place.
-func TestCanvasBlockSaveRefusesAStaleBlockReference(t *testing.T) {
-	s, mux := browserWorkspace(t, auth.AllScopes())
-	messages := service.Messages{Store: s}
-	value, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Structured plan", `{"type":"markdown","markdown":"Keep this body"}`, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	target := "/app/canvases/" + string(value.ID)
-
-	page := get(t, mux, target)
-	if page.Code != http.StatusOK {
-		t.Fatalf("open canvas = %d: %s", page.Code, page.Body)
-	}
-	before, err := s.GetCanvas(context.Background(), "T1", value.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	response := postForm(t, mux, target+"/sections", url.Values{
-		"_csrf": {auth.CSRFToken("session")}, "op": {"save"}, "section_id": {"temp:C:doesnotexist"},
-		"type": {"markdown"}, "body": {"Lost content"},
-	}.Encode(), false)
-	if response.Code != http.StatusConflict {
-		t.Fatalf("stale-block save = %d: %s", response.Code, response.Body)
-	}
-	stored, err := s.GetCanvas(context.Background(), "T1", value.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.DocumentContent != before.DocumentContent || stored.Version != before.Version {
-		t.Fatalf("refused save changed canvas: got %#v want %#v", stored, before)
 	}
 }
 

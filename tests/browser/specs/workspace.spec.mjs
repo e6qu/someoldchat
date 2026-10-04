@@ -3043,22 +3043,54 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   const renameForm = page.locator('form').filter({ has: page.getByRole('button', { name: 'Rename' }) });
   await renameForm.getByLabel('Title').fill(`${canvasName} revised`);
   await renameForm.getByRole('button', { name: 'Rename' }).click();
+  await expect(page.getByText('Canvas renamed')).toBeVisible();
+  // The canvas is one document to write in, not a form per block: the text
+  // flows on from the created content, a heading comes from the toolbar, @
+  // offers people to mention and inserts a pill, and a checklist item is a
+  // box that can be ticked off.
+  const editor = page.getByRole('textbox', { name: 'Canvas content' });
+  await expect(editor).toContainText('Initial durable content');
+  await expect(page.getByText('Edit as markdown')).toBeHidden();
+  const formatting = page.getByRole('toolbar', { name: 'Formatting' });
+  await editor.click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('Enter');
+  await formatting.getByRole('button', { name: 'Heading 2' }).click();
+  await page.keyboard.type('Milestones');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Ship with @pe');
+  const people = page.getByRole('listbox', { name: 'People to mention' });
+  await expect(people.getByRole('option', { name: /Peer/ })).toBeVisible();
+  await expect(editor).toHaveAttribute('aria-activedescendant', 'canvas-mention-0');
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.keyboard.press('Enter');
+  await expect(people).toBeHidden();
+  await page.keyboard.type('today.');
+  await page.keyboard.press('Enter');
+  await formatting.getByRole('button', { name: 'Checklist, or mark the item done' }).click();
+  await page.keyboard.type('Verify the launch');
+  await expect(page.locator('[data-canvas-status]')).toHaveText('Unsaved changes');
+  await page.getByRole('button', { name: 'Save canvas' }).click();
   await expect(page.getByText('Canvas saved')).toBeVisible();
-  // Each block carries its own editor, so the control names the block it saves.
-  // A canvas created through the UI has exactly one block to start.
-  await page.getByRole('button', { name: 'Edit block 1' }).click();
-  await page.getByLabel('Block 1 content').fill('One atomic revision');
-  await page.getByRole('button', { name: 'Save block 1' }).click();
+  // What was saved comes back as the document: the heading, the mention as the
+  // member it names, the unticked item, and the untouched first paragraph.
+  await expect(editor.locator('h4')).toHaveText('Milestones');
+  await expect(editor.locator('.canvas-mention')).toHaveAttribute('data-entity', '<@Upeer>');
+  await expect(editor).toContainText('Initial durable content');
+  const item = editor.getByRole('checkbox', { name: 'Done' });
+  await expect(item).toHaveAttribute('aria-checked', 'false');
+  await item.click();
+  await expect(item).toHaveAttribute('aria-checked', 'true');
+  await page.getByRole('button', { name: 'Save canvas' }).click();
   await expect(page.getByText('Canvas saved')).toBeVisible();
-  // Add a heading block through the block editor and confirm it renders.
-  await page.getByText('Add a block').click();
-  const addBlock = page.locator('form').filter({ has: page.getByRole('button', { name: 'Add block' }) });
-  await addBlock.getByRole('combobox', { name: 'Kind' }).selectOption('h2');
-  await addBlock.getByLabel('Content').fill('Milestones');
-  await addBlock.getByRole('button', { name: 'Add block' }).click();
-  // The new block's text renders in the read-only block body and is mirrored in
-  // its editor textarea, so scope the assertion to the rendered body.
-  await expect(page.locator('.canvas-body').filter({ hasText: 'Milestones' })).toBeVisible();
+  await expect(editor.getByRole('checkbox', { name: 'Done' })).toHaveAttribute('aria-checked', 'true');
+  await expect(editor.locator('li')).toContainText('Verify the launch');
+  // The markdown field holds the stored document, which is what the editor
+  // wrote: one section per paragraph, the heading, the mention as <@U…>, and
+  // the ticked item.
+  await expect(page.locator('textarea[name="markdown"]')).toHaveValue(
+    'Initial durable content\n\n## Milestones\n\nShip with <@Upeer> today.\n\n- [x] Verify the launch\n',
+  );
   await page.getByRole('link', { name: 'Canvases' }).click();
   await expect(page.getByRole('heading', { name: `${canvasName} revised` })).toBeVisible();
 
@@ -4911,13 +4943,14 @@ test('[CANVAS-01 A11Y-01] a canvas keeps its history and an earlier revision can
   // A canvas nobody has edited has no history to show.
   await expect(page.getByRole('heading', { name: 'History', exact: true })).toHaveCount(0);
 
-  // A canvas created with content has one block, edited in place through its own
-  // block editor. Its text is shown in the block body and mirrored in the editor
-  // textarea, so it appears twice.
-  await page.getByRole('button', { name: 'Edit block 1' }).click();
-  await page.getByLabel('Block 1 content').fill('the replacement body');
-  await page.getByRole('button', { name: 'Save block 1' }).click();
-  await expect(page.getByText('the replacement body')).toHaveCount(2);
+  // The canvas is one document: replace its text where it is shown and save.
+  const editor = page.getByRole('textbox', { name: 'Canvas content' });
+  await editor.click();
+  await page.keyboard.press('Control+A');
+  await page.keyboard.type('the replacement body');
+  await page.getByRole('button', { name: 'Save canvas' }).click();
+  await expect(page.getByText('Canvas saved')).toBeVisible();
+  await expect(editor).toHaveText('the replacement body');
 
   // The history shows what it said before, not what it says now.
   await expect(page.getByRole('heading', { name: 'History', exact: true })).toBeVisible();
@@ -4926,10 +4959,8 @@ test('[CANVAS-01 A11Y-01] a canvas keeps its history and an earlier revision can
   await expectNoSeriousAccessibilityViolations(page);
 
   await revision.getByRole('button', { name: 'Restore this revision' }).click();
-  // Restoring brings the original body back into the rendered block (it also
-  // appears in that block's editor and now in a revision excerpt, so scope to
-  // the body).
-  await expect(page.locator('.canvas-body').filter({ hasText: 'the original body' })).toBeVisible();
+  // Restoring brings the original body back into the document.
+  await expect(page.getByRole('textbox', { name: 'Canvas content' })).toHaveText('the original body');
   // The replaced content is now itself a revision, so the restore is undoable.
   await expect(page.locator('.revision').first()).toContainText('the replacement body');
 });
@@ -4956,11 +4987,25 @@ test('[CANVAS-01 A11Y-01] a canvas section can be commented on and the comment o
   await expect(comment).toContainText('on Section 1');
   await expectNoSeriousAccessibilityViolations(page);
 
-  // Rewriting the paragraph the comment was about leaves the comment in place.
-  await page.getByRole('button', { name: 'Edit block 1' }).click();
-  await page.getByLabel('Block 1 content').fill('a rewrite');
-  await page.getByRole('button', { name: 'Save block 1' }).click();
+  // Writing a paragraph above the one under review leaves the comment on it:
+  // the reviewed paragraph is unchanged, so it is still the same section.
+  const editor = page.getByRole('textbox', { name: 'Canvas content' });
+  await editor.click();
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.type('an introduction');
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Save canvas' }).click();
+  await expect(page.getByText('Canvas saved')).toBeVisible();
+  await expect(page.locator('.comment').first()).toContainText('on Section 2');
+  // Rewriting the paragraph itself leaves the comment in place, saying that
+  // what it was about has gone.
+  await editor.locator('#block-2').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(', rewritten');
+  await page.getByRole('button', { name: 'Save canvas' }).click();
+  await expect(page.getByText('Canvas saved')).toBeVisible();
   await expect(page.locator('.comment').first()).toContainText('this paragraph is wrong');
+  await expect(page.locator('.comment').first()).toContainText('on a removed section');
 
   // A comment belongs to whoever wrote it, and this session wrote this one.
   await page.locator('.comment').first().getByRole('button', { name: 'Delete comment' }).click();
