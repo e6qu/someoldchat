@@ -18,6 +18,13 @@ import (
 // member's own preference, so nobody — the hidden person and administrators
 // included — is told or can see it.
 
+// hiddenPersonName and hiddenPreviewText stand in for a hidden person's name
+// and words wherever a message is previewed outside its conversation.
+const (
+	hiddenPersonName  = "A person you have hidden"
+	hiddenPreviewText = "Message from a person you have hidden. Open it to show it."
+)
+
 // hiddenPeopleShown bounds the Privacy & visibility list, which reads one
 // profile per entry.
 const hiddenPeopleShown = 50

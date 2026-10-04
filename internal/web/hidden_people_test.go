@@ -55,9 +55,19 @@ func TestAHiddenPersonsMessagesAreBehindAClickThrough(t *testing.T) {
 	article := articleOf(page)
 	requireContains(t, "hidden message", article, "is-hidden-author", `aria-label="Message from a person you have hidden at`, `<details class="hidden-author-reveal"><summary>Message from a person you have hidden. <span class="hidden-author-show">Show message</span></summary></details>`)
 	requireContains(t, "privacy list", page, `<ul class="hidden-people"`, `aria-label="Unhide Noisy Neighbour"`)
-	if strings.Contains(article, `aria-label="Message from Noisy`) {
+	if strings.Contains(article, `aria-label="Message from Noisy`) || strings.Contains(article, "the message from Noisy") {
 		t.Fatal("the hidden person's name labels their message")
 	}
+	// Outside the conversation, a preview names neither them nor what they
+	// said: a search hit links to the message, where it can be revealed.
+	results := get(t, mux, "/app/search?q=rather&channel=Cdev").Body.String()
+	start := strings.Index(results, `<ul class="v-list">`)
+	if start < 0 {
+		t.Fatal("the search found nothing; the hidden person's message is still delivered and searchable")
+	}
+	hits := results[start : start+strings.Index(results[start:], "</ul>")]
+	requireContains(t, "hidden search result", hits, "A person you have hidden", "Message from a person you have hidden. Open it to show it.")
+	requireMissing(t, "hidden search result", hits, "Noisy Neighbour", "rather not read")
 
 	if code := set("U2", "false"); code != http.StatusSeeOther {
 		t.Fatalf("unhiding answered %d", code)

@@ -162,6 +162,8 @@ A member hides a person from that person's profile, as Slack's "Hide a
 person" does. The person's messages are still delivered and counted unread, but
 each sits behind a "Show message" click-through that hides their name and
 photo, and a screen reader announces an arrival from them without reading it.
+Outside the conversation — thread cards, search results, Unreads, Activity, and
+the direct-message list — a preview names neither them nor what they said.
 Privacy & visibility lists the people hidden, each with Unhide. Hiding is the
 member's own preference: nobody is told, and administrators cannot see it.
 
