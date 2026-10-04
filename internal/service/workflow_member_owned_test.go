@@ -115,3 +115,21 @@ func TestAppCollaboratorRestrictionsAdmitNobodyToAWorkflowWithNoApp(t *testing.T
 		t.Fatalf("err=%v, want ErrTriggerTypeRestricted", err)
 	}
 }
+
+// Only a workflow's managers configure how it starts. A member who may run a
+// workflow but does not manage it cannot add a trigger to it — that would let
+// anyone wire somebody else's workflow to a schedule, a webhook or a channel.
+func TestOnlyAWorkflowsManagersAddTriggers(t *testing.T) {
+	ctx, _, messages, _ := seedWorkflowTriggerWorld(t)
+	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{Title: "Owner's"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := domain.WorkflowTrigger{WorkflowID: workflow.ID, Title: "Start", Type: "link", Config: `{}`, Enabled: true}
+	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U2", trigger, 0); err == nil {
+		t.Fatal("a member who does not manage the workflow added a trigger to it")
+	}
+	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", trigger, 0); err != nil {
+		t.Fatalf("the owner adding a trigger: %v", err)
+	}
+}

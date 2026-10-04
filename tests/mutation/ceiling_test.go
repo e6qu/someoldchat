@@ -72,4 +72,8 @@ package mutation
 // block actions, views, Home and Messages tabs, and app_mention; the tests
 // that refuse each of those catch one more operation whose guard ran on
 // unnoticed.
-const survivingGuardCeiling = 72
+//
+// 72 to 71: a service test now refuses a member who does not manage a
+// workflow the trigger they try to add to it, so SetWorkflowTrigger's
+// manager guard is load-bearing.
+const survivingGuardCeiling = 71
