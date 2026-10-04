@@ -361,6 +361,23 @@ The published container image `ghcr.io/e6qu/someoldchat` contains only
 and the WebSocket edge. Publishing the other binaries is planned in
 [Phase 7](../PLAN.md#phase-7-compile-time-module-composition).
 
+## Rate limits across replicas
+
+The Web API budgets (Slack's method tiers, chat.postMessage's per-channel
+allowance, and each incoming webhook's) are one budget per deployment, not one
+per replica. Where more than one web replica can run — the distributed
+composition, and a local one on PostgreSQL or dqlite — every replica draws each
+call from the chat module's store, which costs one small conditional write per
+Web API call. On memory and SQLite, which are single-replica, the budget is
+held in process and a call costs no write. `-api-rate-limit=false` turns
+limiting off for qualification harnesses only.
+
+A call the store cannot decide is served rather than answered 429, and logs
+`rate limit undecided; serving the call` with the error: the store being
+unreachable is the request's own failure to report, and a 429 would send a
+client's retry handler waiting on a limit nobody hit. Repeated warnings mean
+the chat store is unhealthy, not that clients are over budget.
+
 ## Client addresses behind a reverse proxy
 
 The Web API rate limiter keys a request with no bearer token by its client

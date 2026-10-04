@@ -1199,6 +1199,122 @@ func (x *RevokeOIDCSessionsRequest) GetExpiresAt() string {
 	return ""
 }
 
+// RateTokenRequest is one Web API call drawn against a shared rate limit:
+// the key names the limit (method or channel, and the hashed credential), and
+// the allowance is a sustained interval plus the burst admitted at once.
+type RateTokenRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Key            string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	IntervalMicros int64                  `protobuf:"varint,2,opt,name=interval_micros,json=intervalMicros,proto3" json:"interval_micros,omitempty"`
+	Burst          int32                  `protobuf:"varint,3,opt,name=burst,proto3" json:"burst,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *RateTokenRequest) Reset() {
+	*x = RateTokenRequest{}
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RateTokenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RateTokenRequest) ProtoMessage() {}
+
+func (x *RateTokenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RateTokenRequest.ProtoReflect.Descriptor instead.
+func (*RateTokenRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *RateTokenRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *RateTokenRequest) GetIntervalMicros() int64 {
+	if x != nil {
+		return x.IntervalMicros
+	}
+	return 0
+}
+
+func (x *RateTokenRequest) GetBurst() int32 {
+	if x != nil {
+		return x.Burst
+	}
+	return 0
+}
+
+// RateTokenDecision admits the call, or refuses it with how long to wait.
+type RateTokenDecision struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Admitted         bool                   `protobuf:"varint,1,opt,name=admitted,proto3" json:"admitted,omitempty"`
+	RetryAfterMicros int64                  `protobuf:"varint,2,opt,name=retry_after_micros,json=retryAfterMicros,proto3" json:"retry_after_micros,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *RateTokenDecision) Reset() {
+	*x = RateTokenDecision{}
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RateTokenDecision) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RateTokenDecision) ProtoMessage() {}
+
+func (x *RateTokenDecision) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RateTokenDecision.ProtoReflect.Descriptor instead.
+func (*RateTokenDecision) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *RateTokenDecision) GetAdmitted() bool {
+	if x != nil {
+		return x.Admitted
+	}
+	return false
+}
+
+func (x *RateTokenDecision) GetRetryAfterMicros() int64 {
+	if x != nil {
+		return x.RetryAfterMicros
+	}
+	return 0
+}
+
 var File_sameoldchat_chat_v1_auth_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_auth_proto_rawDesc = "" +
@@ -1295,10 +1411,18 @@ const file_sameoldchat_chat_v1_auth_proto_rawDesc = "" +
 	"\x03sid\x18\x04 \x01(\tR\x03sid\x12\x19\n" +
 	"\btoken_id\x18\x05 \x01(\tR\atokenId\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x06 \x01(\tR\texpiresAt2\xf6\v\n" +
+	"expires_at\x18\x06 \x01(\tR\texpiresAt\"c\n" +
+	"\x10RateTokenRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12'\n" +
+	"\x0finterval_micros\x18\x02 \x01(\x03R\x0eintervalMicros\x12\x14\n" +
+	"\x05burst\x18\x03 \x01(\x05R\x05burst\"]\n" +
+	"\x11RateTokenDecision\x12\x1a\n" +
+	"\badmitted\x18\x01 \x01(\bR\badmitted\x12,\n" +
+	"\x12retry_after_micros\x18\x02 \x01(\x03R\x10retryAfterMicros2\xd6\f\n" +
 	"\vAuthService\x12R\n" +
 	"\vLookupToken\x12!.sameoldchat.chat.v1.TokenRequest\x1a .sameoldchat.chat.v1.TokenRecord\x12X\n" +
-	"\x0eLookupAppToken\x12!.sameoldchat.chat.v1.TokenRequest\x1a#.sameoldchat.chat.v1.AppTokenRecord\x12m\n" +
+	"\x0eLookupAppToken\x12!.sameoldchat.chat.v1.TokenRequest\x1a#.sameoldchat.chat.v1.AppTokenRecord\x12^\n" +
+	"\rTakeRateToken\x12%.sameoldchat.chat.v1.RateTokenRequest\x1a&.sameoldchat.chat.v1.RateTokenDecision\x12m\n" +
 	"\x15CreateAppInstallation\x12+.sameoldchat.chat.v1.AppInstallationRequest\x1a'.sameoldchat.chat.v1.AuthRevokeResponse\x12r\n" +
 	"\x14ListAppInstallations\x12+.sameoldchat.chat.v1.AppInstallationRequest\x1a-.sameoldchat.chat.v1.AppInstallationsResponse\x12v\n" +
 	"\x15ListAppAuthorizations\x12-.sameoldchat.chat.v1.AppAuthorizationsRequest\x1a..sameoldchat.chat.v1.AppAuthorizationsResponse\x12a\n" +
@@ -1325,7 +1449,7 @@ func file_sameoldchat_chat_v1_auth_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_auth_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_sameoldchat_chat_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_sameoldchat_chat_v1_auth_proto_goTypes = []any{
 	(*TokenRecord)(nil),               // 0: sameoldchat.chat.v1.TokenRecord
 	(*AppTokenRecord)(nil),            // 1: sameoldchat.chat.v1.AppTokenRecord
@@ -1345,6 +1469,8 @@ var file_sameoldchat_chat_v1_auth_proto_goTypes = []any{
 	(*ExternalIdentityRequest)(nil),   // 15: sameoldchat.chat.v1.ExternalIdentityRequest
 	(*ExternalIdentity)(nil),          // 16: sameoldchat.chat.v1.ExternalIdentity
 	(*RevokeOIDCSessionsRequest)(nil), // 17: sameoldchat.chat.v1.RevokeOIDCSessionsRequest
+	(*RateTokenRequest)(nil),          // 18: sameoldchat.chat.v1.RateTokenRequest
+	(*RateTokenDecision)(nil),         // 19: sameoldchat.chat.v1.RateTokenDecision
 }
 var file_sameoldchat_chat_v1_auth_proto_depIdxs = []int32{
 	2,  // 0: sameoldchat.chat.v1.AppInstallationRequest.installation:type_name -> sameoldchat.chat.v1.AppInstallation
@@ -1353,36 +1479,38 @@ var file_sameoldchat_chat_v1_auth_proto_depIdxs = []int32{
 	9,  // 3: sameoldchat.chat.v1.CreateSessionRequest.session:type_name -> sameoldchat.chat.v1.SessionRecord
 	10, // 4: sameoldchat.chat.v1.AuthService.LookupToken:input_type -> sameoldchat.chat.v1.TokenRequest
 	10, // 5: sameoldchat.chat.v1.AuthService.LookupAppToken:input_type -> sameoldchat.chat.v1.TokenRequest
-	3,  // 6: sameoldchat.chat.v1.AuthService.CreateAppInstallation:input_type -> sameoldchat.chat.v1.AppInstallationRequest
-	3,  // 7: sameoldchat.chat.v1.AuthService.ListAppInstallations:input_type -> sameoldchat.chat.v1.AppInstallationRequest
-	6,  // 8: sameoldchat.chat.v1.AuthService.ListAppAuthorizations:input_type -> sameoldchat.chat.v1.AppAuthorizationsRequest
-	4,  // 9: sameoldchat.chat.v1.AuthService.UninstallApp:input_type -> sameoldchat.chat.v1.UninstallAppRequest
-	10, // 10: sameoldchat.chat.v1.AuthService.LookupSession:input_type -> sameoldchat.chat.v1.TokenRequest
-	10, // 11: sameoldchat.chat.v1.AuthService.RevokeSession:input_type -> sameoldchat.chat.v1.TokenRequest
-	10, // 12: sameoldchat.chat.v1.AuthService.RevokeToken:input_type -> sameoldchat.chat.v1.TokenRequest
-	12, // 13: sameoldchat.chat.v1.AuthService.CreateSession:input_type -> sameoldchat.chat.v1.CreateSessionRequest
-	13, // 14: sameoldchat.chat.v1.AuthService.GetAuthMethod:input_type -> sameoldchat.chat.v1.AuthMethodRequest
-	13, // 15: sameoldchat.chat.v1.AuthService.SetAuthMethod:input_type -> sameoldchat.chat.v1.AuthMethodRequest
-	15, // 16: sameoldchat.chat.v1.AuthService.GetExternalIdentity:input_type -> sameoldchat.chat.v1.ExternalIdentityRequest
-	15, // 17: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:input_type -> sameoldchat.chat.v1.ExternalIdentityRequest
-	17, // 18: sameoldchat.chat.v1.AuthService.RevokeOIDCSessions:input_type -> sameoldchat.chat.v1.RevokeOIDCSessionsRequest
-	0,  // 19: sameoldchat.chat.v1.AuthService.LookupToken:output_type -> sameoldchat.chat.v1.TokenRecord
-	1,  // 20: sameoldchat.chat.v1.AuthService.LookupAppToken:output_type -> sameoldchat.chat.v1.AppTokenRecord
-	11, // 21: sameoldchat.chat.v1.AuthService.CreateAppInstallation:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	5,  // 22: sameoldchat.chat.v1.AuthService.ListAppInstallations:output_type -> sameoldchat.chat.v1.AppInstallationsResponse
-	8,  // 23: sameoldchat.chat.v1.AuthService.ListAppAuthorizations:output_type -> sameoldchat.chat.v1.AppAuthorizationsResponse
-	11, // 24: sameoldchat.chat.v1.AuthService.UninstallApp:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	9,  // 25: sameoldchat.chat.v1.AuthService.LookupSession:output_type -> sameoldchat.chat.v1.SessionRecord
-	11, // 26: sameoldchat.chat.v1.AuthService.RevokeSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	11, // 27: sameoldchat.chat.v1.AuthService.RevokeToken:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	11, // 28: sameoldchat.chat.v1.AuthService.CreateSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	14, // 29: sameoldchat.chat.v1.AuthService.GetAuthMethod:output_type -> sameoldchat.chat.v1.AuthMethod
-	11, // 30: sameoldchat.chat.v1.AuthService.SetAuthMethod:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	16, // 31: sameoldchat.chat.v1.AuthService.GetExternalIdentity:output_type -> sameoldchat.chat.v1.ExternalIdentity
-	11, // 32: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	11, // 33: sameoldchat.chat.v1.AuthService.RevokeOIDCSessions:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	19, // [19:34] is the sub-list for method output_type
-	4,  // [4:19] is the sub-list for method input_type
+	18, // 6: sameoldchat.chat.v1.AuthService.TakeRateToken:input_type -> sameoldchat.chat.v1.RateTokenRequest
+	3,  // 7: sameoldchat.chat.v1.AuthService.CreateAppInstallation:input_type -> sameoldchat.chat.v1.AppInstallationRequest
+	3,  // 8: sameoldchat.chat.v1.AuthService.ListAppInstallations:input_type -> sameoldchat.chat.v1.AppInstallationRequest
+	6,  // 9: sameoldchat.chat.v1.AuthService.ListAppAuthorizations:input_type -> sameoldchat.chat.v1.AppAuthorizationsRequest
+	4,  // 10: sameoldchat.chat.v1.AuthService.UninstallApp:input_type -> sameoldchat.chat.v1.UninstallAppRequest
+	10, // 11: sameoldchat.chat.v1.AuthService.LookupSession:input_type -> sameoldchat.chat.v1.TokenRequest
+	10, // 12: sameoldchat.chat.v1.AuthService.RevokeSession:input_type -> sameoldchat.chat.v1.TokenRequest
+	10, // 13: sameoldchat.chat.v1.AuthService.RevokeToken:input_type -> sameoldchat.chat.v1.TokenRequest
+	12, // 14: sameoldchat.chat.v1.AuthService.CreateSession:input_type -> sameoldchat.chat.v1.CreateSessionRequest
+	13, // 15: sameoldchat.chat.v1.AuthService.GetAuthMethod:input_type -> sameoldchat.chat.v1.AuthMethodRequest
+	13, // 16: sameoldchat.chat.v1.AuthService.SetAuthMethod:input_type -> sameoldchat.chat.v1.AuthMethodRequest
+	15, // 17: sameoldchat.chat.v1.AuthService.GetExternalIdentity:input_type -> sameoldchat.chat.v1.ExternalIdentityRequest
+	15, // 18: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:input_type -> sameoldchat.chat.v1.ExternalIdentityRequest
+	17, // 19: sameoldchat.chat.v1.AuthService.RevokeOIDCSessions:input_type -> sameoldchat.chat.v1.RevokeOIDCSessionsRequest
+	0,  // 20: sameoldchat.chat.v1.AuthService.LookupToken:output_type -> sameoldchat.chat.v1.TokenRecord
+	1,  // 21: sameoldchat.chat.v1.AuthService.LookupAppToken:output_type -> sameoldchat.chat.v1.AppTokenRecord
+	19, // 22: sameoldchat.chat.v1.AuthService.TakeRateToken:output_type -> sameoldchat.chat.v1.RateTokenDecision
+	11, // 23: sameoldchat.chat.v1.AuthService.CreateAppInstallation:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	5,  // 24: sameoldchat.chat.v1.AuthService.ListAppInstallations:output_type -> sameoldchat.chat.v1.AppInstallationsResponse
+	8,  // 25: sameoldchat.chat.v1.AuthService.ListAppAuthorizations:output_type -> sameoldchat.chat.v1.AppAuthorizationsResponse
+	11, // 26: sameoldchat.chat.v1.AuthService.UninstallApp:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	9,  // 27: sameoldchat.chat.v1.AuthService.LookupSession:output_type -> sameoldchat.chat.v1.SessionRecord
+	11, // 28: sameoldchat.chat.v1.AuthService.RevokeSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	11, // 29: sameoldchat.chat.v1.AuthService.RevokeToken:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	11, // 30: sameoldchat.chat.v1.AuthService.CreateSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	14, // 31: sameoldchat.chat.v1.AuthService.GetAuthMethod:output_type -> sameoldchat.chat.v1.AuthMethod
+	11, // 32: sameoldchat.chat.v1.AuthService.SetAuthMethod:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	16, // 33: sameoldchat.chat.v1.AuthService.GetExternalIdentity:output_type -> sameoldchat.chat.v1.ExternalIdentity
+	11, // 34: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	11, // 35: sameoldchat.chat.v1.AuthService.RevokeOIDCSessions:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	20, // [20:36] is the sub-list for method output_type
+	4,  // [4:20] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -1399,7 +1527,7 @@ func file_sameoldchat_chat_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_auth_proto_rawDesc), len(file_sameoldchat_chat_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

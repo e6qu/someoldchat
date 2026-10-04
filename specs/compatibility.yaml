@@ -169,7 +169,7 @@ operations:
         The full current payload is validated and persisted, but link-name
         expansion and external media unfurl fetching have not been qualified
         against live Slack outcomes.
-      - The Web API now enforces the documented posting allowance — one message per second per channel with a short burst — and a per-method budget, answering 429 with Retry-After. A method is held to the stricter tier its Slack reference names where one is cited (Tiers 1 to 3 for twenty-three methods) and to Tier 4's floor otherwise. A method budget answers Slack's ratelimited and the per-channel posting allowance answers the pinned rate_limited (provenance under rate-limit-codes). Budgets are replica-local, and a method whose stricter tier is not yet cited is held to Tier 4.
+      - The Web API now enforces the documented posting allowance — one message per second per channel with a short burst — and a per-method budget, answering 429 with Retry-After. A method is held to the stricter tier its Slack reference names where one is cited (Tiers 1 to 3 for twenty-three methods) and to Tier 4's floor otherwise. A method budget answers Slack's ratelimited and the per-channel posting allowance answers the pinned rate_limited (provenance under rate-limit-codes). Every web replica of a deployment draws from one budget, held in the chat module's store wherever more than one replica can run, and a method whose stricter tier is not yet cited is held to Tier 4.
     audit:
       downgraded_from: behavior-compatible
       reason: >-
@@ -1114,7 +1114,6 @@ operations:
       - go-test:internal/api/slack:TestPostMessageResolvesNamesAndUsers
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
     deviations:
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
       - schedules created before schema 102 lack reconstructable app attribution
   - method: chat.scheduledMessages.list
     status: behavior-compatible
@@ -1131,7 +1130,6 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
       - team_id names the workspace of an organization-wide token; the organization here is the token's own workspace, so team_id may name only that one and another is invalid_arg_name
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
       - schedules created before schema 102 recorded no app or bot, so schema 186 assigns them to their author with no app; they list for the author's first-party session, not for an app's token
   - method: chat.unfurl
     status: behavior-compatible
@@ -2225,7 +2223,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:internal/modules/chat/transport/grpc:TestEveryChatMethodHasAParityCaseOrADocumentedGap
     deviations:
-      - Enabled per-app workspace installations, deterministic cursor paging, and optional persisted icons are supported, but SameOldChat does not yet model Slack Enterprise organization-ready approval policy. Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
+      - Enabled per-app workspace installations, deterministic cursor paging, and optional persisted icons are supported, but SameOldChat does not yet model Slack Enterprise organization-ready approval policy.
   - method: blocks.validate
     status: sdk-compatible
     provenance: slack-reference
@@ -2408,7 +2406,6 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
       - Historical function-step occurrences are durable, but removed-step is_deleted projection has not been live-Slack qualified.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: functions.workflows.steps.responses.export
     status: behavior-compatible
     provenance: slack-reference
@@ -2481,7 +2478,6 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - SameOldChat returns its enforced workspace-wide product policies; it does not yet model administrator-configurable variants of those policies.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: tooling.tokens.rotate
     status: behavior-compatible
     provenance: slack-reference
@@ -2523,8 +2519,6 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
-    deviations:
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: workflows.triggers.permissions.add
     status: sdk-compatible
     provenance: slack-reference
@@ -2571,7 +2565,6 @@ operations:
       - The organization's MCP server allowlist is the app approval decision, so the servers of approved, undeleted apps are listed.
       - feature_not_enabled is never emitted because the feature is always available.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.apps.mcp.servers.permissions.list
     status: schema-compatible
     provenance: slack-reference
@@ -2587,7 +2580,6 @@ operations:
       - feature_not_enabled is never emitted because the feature is always available.
       - There is no MCP runtime, so the permissions are stored and reported but gate nothing.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.apps.mcp.servers.permissions.set
     status: schema-compatible
     provenance: slack-reference
@@ -2607,7 +2599,6 @@ operations:
       - feature_not_enabled is never emitted because the feature is always available.
       - There is no MCP runtime, so the permission is stored and reported but gates nothing.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.apps.permissions.add
     status: schema-compatible
     provenance: slack-reference
@@ -2627,7 +2618,6 @@ operations:
       - The access control list and channel restriction are enforced wherever a member uses an app — a slash command or shortcut (and the composer offers no command of an app the member may not use), an interactive element of its message or view, its Home and Messages tabs, and a mention, which reaches the app as app_mention only from a member the list admits in a channel it allows. Other event delivery follows the app's own access to the conversation, not the acting member's.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
       - failed_to_update_channels is never emitted because the list and its channels are written in one transaction, so a storage failure is reported with the shared engine codes instead.
-      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.apps.permissions.list
     status: schema-compatible
     provenance: slack-reference
@@ -2644,7 +2634,6 @@ operations:
       - invalid_permission_type (an ACL holding an invalid type) cannot occur because the stored type is validated on every write.
       - The access control list and channel restriction are enforced wherever a member uses an app — a slash command or shortcut (and the composer offers no command of an app the member may not use), an interactive element of its message or view, its Home and Messages tabs, and a mention, which reaches the app as app_mention only from a member the list admits in a channel it allows. Other event delivery follows the app's own access to the conversation, not the acting member's.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.apps.permissions.remove
     status: schema-compatible
     provenance: slack-reference
@@ -2663,7 +2652,6 @@ operations:
       - The access control list and channel restriction are enforced wherever a member uses an app — a slash command or shortcut (and the composer offers no command of an app the member may not use), an interactive element of its message or view, its Home and Messages tabs, and a mention, which reaches the app as app_mention only from a member the list admits in a channel it allows. Other event delivery follows the app's own access to the conversation, not the acting member's.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
       - failed_to_update_channels is never emitted because the list and its channels are written in one transaction, so a storage failure is reported with the shared engine codes instead.
-      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.apps.permissions.set
     status: schema-compatible
     provenance: slack-reference
@@ -2684,7 +2672,6 @@ operations:
       - More than 200 channel_ids is refused with invalid_arguments; the reference states the maximum but no code for it.
       - The access control list and channel restriction are enforced wherever a member uses an app — a slash command or shortcut (and the composer offers no command of an app the member may not use), an interactive element of its message or view, its Home and Messages tabs, and a mention, which reaches the app as app_mention only from a member the list admits in a channel it allows. Other event delivery follows the app's own access to the conversation, not the acting member's.
       - Enterprise plan gating is not modelled, so not_an_enterprise and enterprise_is_restricted are never emitted, and the list is kept per workspace rather than per Enterprise organization.
-      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.conversations.bulkSetProperties
     status: schema-compatible
     provenance: slack-reference
@@ -2716,7 +2703,6 @@ operations:
       - 'There are no role-assignment groups, so cannot_modify_role_admin is never emitted.'
       - 'The reference does not say which users are listed in invalid_users and which fail the call. Here a user who is not an active member of the organization (unknown, deactivated, or of another workspace) fails the whole call with user_not_found and changes nothing; a guest is listed with reason guest_user while the others are added; a call in which every user is a guest is invalid_users.'
       - 'users is accepted as a comma-separated string, a JSON-encoded array string, or a JSON array in a JSON body; more than 15000 users or none is invalid_arguments.'
-      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.usergroups.create
     status: schema-compatible
     provenance: slack-reference
@@ -2733,7 +2719,6 @@ operations:
       - 'handle_already_exists and name_already_exists are checked against the workspace''s other user groups (names without regard to case); a handle that collides with another kind of entity is not refused. A group created without a handle is given one derived from its name, as usergroups.create does.'
       - 'is_visible defaults to true when omitted; the reference states no default.'
       - 'is_visible is stored and reported, but the reference does not say what hiding a group changes, so a hidden group is still listed by usergroups.list and can still be mentioned by its handle.'
-      - Its Tier 1 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.usergroups.fetch
     status: schema-compatible
     provenance: slack-reference
@@ -2748,7 +2733,6 @@ operations:
       - 'This deployment has no Enterprise Grid organization above its workspace: the organization is the single workspace, so team_id and enterprise_id both name it and an organization administrator is that workspace''s administrator or owner. The Enterprise and platform conditions behind not_an_enterprise, enterprise_is_restricted, feature_not_enabled, team_access_not_granted, org_login_required, team_added_to_org, ekm_access_denied, two_factor_setup_required, accesslimited, deprecated_endpoint and method_deprecated never arise, so those codes are never emitted.'
       - 'No group here is managed by an identity provider (is_idp_group is always false), so the SCIM-managed branch of restricted_action never arises; restricted_action is the answer to a caller who is not an administrator.'
       - 'Any user group of the workspace may be fetched, as admin.usergroups.listChannels reads any; one usergroups.create made reports is_org_level false. teams lists the workspaces admin.usergroups.addTeams assigned the group to.'
-      - Its Tier 1 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.usergroups.removeTeams
     status: schema-compatible
     provenance: slack-reference
@@ -2764,7 +2748,6 @@ operations:
       - 'No group here is managed by an identity provider (is_idp_group is always false), so the SCIM-managed branch of restricted_action never arises; restricted_action is the answer to a caller who is not an administrator.'
       - 'The organization''s only workspace is the token''s own, so any other team ID is invalid_team_ids. The reference does not give the shape of the errors field; it is the list of the invalid team IDs.'
       - 'A missing usergroup_id, or more than 100 team IDs, is invalid_arguments; an empty team_ids is no_team_ids_given.'
-      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.usergroups.removeUsers
     status: schema-compatible
     provenance: slack-reference
@@ -2780,7 +2763,6 @@ operations:
       - 'No group here is managed by an identity provider (is_idp_group is always false), so the SCIM-managed branch of restricted_action never arises; restricted_action is the answer to a caller who is not an administrator.'
       - 'invalid_users is never emitted: the reference does not say which users cannot be removed, no member here is un-removable, and removing a user who is not in the group succeeds without change, as admin.usergroups.removeChannels does for a channel. A user of no account in the organization is user_not_found and changes nothing; a deactivated member may be removed.'
       - 'users is accepted as a comma-separated string, a JSON-encoded array string, or a JSON array in a JSON body; more than 15000 users or none is invalid_arguments.'
-      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.usergroups.update
     status: schema-compatible
     provenance: slack-reference
@@ -2799,7 +2781,6 @@ operations:
       - 'The reference does not name the preference cannot_modify_pref_after_creation protects, and the method takes no channels, so neither it nor user_channel_limit_exceeded is emitted.'
       - 'Every group here has a handle. Naming an empty handle for a group that is or becomes visible is visible_group_needs_handle; for a hidden group it is invalid_arguments, because a handle cannot be removed.'
       - 'Name and handle collisions are checked against the workspace''s other user groups only, as for admin.usergroups.create. An argument that is present but empty clears the description.'
-      - Its Tier 1 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: admin.usergroups.uploadUsers
     status: schema-compatible
     provenance: slack-reference
@@ -2818,7 +2799,6 @@ operations:
       - 'There are no role-assignment groups, so cannot_modify_role_admin is never emitted.'
       - 'The file is read from a form or JSON string argument, or from a multipart file part. Each record is a member ID and an optional email address, the user being found by email when the ID is empty; a first record naming the columns is skipped. More than two columns, an empty record, or malformed CSV is unable_to_parse_csv. An omitted file names no users and is no_valid_users.'
       - 'A row naming nobody who is an active member of the organization is listed in invalid_users with reason user_not_found (its member ID, or its email address when it gave none), and a guest with reason guest_user; the reference shows only guest_user. successful_user_count counts the distinct users the file names who are members of the group afterwards, including any who already were.'
-      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: agents.sessions.rename
     status: sdk-compatible
     evidence:
@@ -2833,7 +2813,7 @@ operations:
     deviations:
       - A code channel (agents.conversations.create) is a session channel, renamed with its session, so the rename page's invalid_name, name_taken and is_archived are its refusals; the new title is folded to a channel name (lowercase, hyphens for spaces, at most 80 characters). channel_id is required (invalid_arguments when absent) even though the page makes it optional outside public channels, because the page does not say how the session is found without it.
       - An agent's own rename is journaled for the first-party client only; agent_session_title_changed is sent for a member's change from the client, as the event page describes, never for the app's own rename. Renaming to the current title changes nothing and is reported to nobody.
-      - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited answers at this method's Tier 3 budget, enforced per web replica.
+      - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited answers at this method's Tier 3 budget.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.sessions.rename/
   - method: agents.sessions.setStatus
@@ -2857,7 +2837,7 @@ operations:
       - The missing_agent_session_stopped_event_subscription warning is answered, as the agent_session_stopped page states, on every call while the app's manifest subscribes to neither the bot nor the user event, in both `warning` and `response_metadata.warnings`; the page calls it a warning, so the call still succeeds. `title` is omitted from the response while the session has none.
       - The agent's icon_emoji, icon_url and username are stored with the page's set semantics (a JSON null is the same as leaving one out) and shown in the first-party session panel; they do not restyle the app's messages.
       - The agent_session_stopped page lets an app leave processing with chat.stopStream, but no page says which status that sets, so chat.stopStream does not change a session's status here; the app moves it with this method.
-      - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited answers at this method's Tier 3 budget, enforced per web replica.
+      - Deployment conditions this product does not have are never produced — feature_disabled, ekm_access_denied, enterprise_is_restricted, org_login_required, team_added_to_org, two_factor_setup_required, accesslimited, deprecated_endpoint, method_deprecated — and ratelimited answers at this method's Tier 3 budget.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.sessions.setStatus/
   - method: agents.conversations.archive
@@ -2870,7 +2850,6 @@ operations:
       - With summary_message_ts, the summary message's text and blocks are posted by the agent's bot as a reply on the origin message before the channel is archived; Slack shares the message itself. The bot must be able to post in the origin channel. A channel created without an origin answers invalid_arguments, and an archived one already_archived.
       - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
-      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.archive/
   - method: agents.conversations.create
@@ -2884,7 +2863,6 @@ operations:
       - The creating agent's bot and the origin message's author are its members. An origin channel the bot cannot read is channel_not_found, one shared with another organization invalid_arguments, and a missing origin message message_not_found. team_id may name only the token's own workspace.
       - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
-      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.create/
   - method: agents.conversations.getCanvas
@@ -2898,7 +2876,6 @@ operations:
       - content_format is markdown (the default) or html, rendered as canvases.getContent renders them. Comments are this deployment's canvas comments, oldest first, at most 100 with has_more_comments for the rest; each quotes the text of the section it is anchored to. Canvas comments here have no replies and are never resolved, so replies is always empty, is_resolved always false, and include_resolved changes nothing.
       - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.getCanvas/
   - method: agents.conversations.listViews
@@ -2912,7 +2889,6 @@ operations:
       - Each view reports view_id, view_key, file_id, label, content_version and date_added, oldest first. Any member who can read the channel sees the same tabs in the web client; the method itself answers the agent's token.
       - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.listViews/
   - method: agents.conversations.removeView
@@ -2925,7 +2901,6 @@ operations:
       - Exactly one of view_id or view_key names the view (invalid_arguments otherwise), and a view the channel does not have is not_found.
       - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.removeView/
   - method: agents.conversations.setCanvasContent
@@ -2940,7 +2915,6 @@ operations:
       - content is split into sections as canvases.create splits markdown, and laid over the current sections in order. A section whose kind and text are unchanged keeps its identity and its comments; sections_changed_count counts, within each run of edits between unchanged sections, the larger of the sections removed and added. Content that changes nothing writes nothing and answers 0.
       - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setCanvasContent/
   - method: agents.conversations.setCommands
@@ -2955,7 +2929,6 @@ operations:
       - A member typing an agent's command in its channel reaches that agent as a slash command, ahead of a workspace app command of the same name; the web client's command menu lists the channel's commands under each agent's name. It is delivered over Socket Mode, or otherwise to the agent's interactivity request URL, since no manifest names a URL for it; an agent with neither cannot be reached. Outside its channel the name is not a command.
       - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
-      - Its Tier 1 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setCommands/
   - method: agents.conversations.setProperties
@@ -2969,7 +2942,6 @@ operations:
       - summary_message must name a live message of the channel (thread_ts, when given, must be its thread). agent_resource writes each field given and keeps the rest.
       - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setProperties/
   - method: agents.conversations.setView
@@ -2985,7 +2957,6 @@ operations:
       - The web client renders an html view in a frame sandboxed to an opaque origin, under a policy that allows inline script and loads from a curated CDN list (cdnjs, jsDelivr, unpkg and Google Fonts; Slack does not publish its own) plus resource_domains. connect_domains is validated (https only, never a private or internal host) and stored, but, as the SDK documents, not honored, so the view may not connect anywhere. A diff renders with added and removed lines marked, block_kit as read-only blocks, canvas and pull_request as links.
       - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
-      - Its Tier 3 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setView/
   - method: apps.managed.permissions.set
@@ -2998,7 +2969,6 @@ operations:
     deviations:
       - There is no manager-app or partner-platform model. Every app is created by its developer through apps.manifest.*, so no app is managed. After the configuration token, app_id and permissions are validated, an app the token's user owns answers app_not_managed and any other app answers app_not_found; app_not_owned_by_manager_app, app_owner_not_found, manager_app_not_eligible, enterprise_only_feature and feature_not_enabled are never emitted, and no success response (the stored or current permissions) is ever produced.
       - The reference's description speaks of a user token from the manager app while its token section names a configuration token with app_configurations:write; the method authenticates the configuration token, as apps.manifest.* does.
-      - Its Tier 2 budget is enforced per web replica, so a deployment of N replicas allows up to N times the documented rate.
   - method: canvases.getContent
     status: schema-compatible
     provenance: slack-reference

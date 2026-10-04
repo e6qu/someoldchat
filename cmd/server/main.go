@@ -367,7 +367,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// harnesses, which seed fixtures at superhuman request rates, turn it off.
 	var limiter *slack.RateLimiter
 	if *apiRateLimit {
-		limiter = slack.NewRateLimiter()
+		limiter = newRateLimiter(settings, chatService, logger)
 	}
 	// The Web API, Socket Mode and RTM are mounted by the one composition the
 	// SDK qualification fixture also uses, so qualification exercises this
@@ -1064,4 +1064,26 @@ func readinessHandler(chatService chatapi.Service, logger *slog.Logger, workspac
 func readinessCheck(ctx context.Context, chatService chatapi.Service, workspace, user string) error {
 	_, err := chatService.Conversations(ctx, domain.WorkspaceID(workspace), domain.UserID(user), domain.ConversationListRequest{Limit: 1})
 	return err
+}
+
+// newRateLimiter shares the Web API budget wherever a deployment may run more
+// than one web replica — the distributed composition, and a local one on
+// PostgreSQL or dqlite — by drawing every call from the chat module's store.
+// Memory and SQLite are single-replica, so the budget stays in process there
+// and a call costs no write.
+func newRateLimiter(settings startupConfig, tokens slack.RateTokens, logger *slog.Logger) *slack.RateLimiter {
+	if !sharesRateLimits(settings) {
+		return slack.NewRateLimiter()
+	}
+	return slack.NewSharedRateLimiter(tokens, logger)
+}
+
+// sharesRateLimits reports whether the deployment's replicas must share one
+// rate-limit budget.
+func sharesRateLimits(settings startupConfig) bool {
+	if settings.chatMode != "local" {
+		return true
+	}
+	backend := localchat.Backend(settings.storeName)
+	return backend == localchat.BackendPostgreSQL || backend == localchat.BackendDqlite
 }

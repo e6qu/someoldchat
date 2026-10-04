@@ -671,3 +671,23 @@ func TestSeedDevelopmentCredentialsToleratesNoSeededConversation(t *testing.T) {
 		t.Fatalf("startup failed because there was no seeded conversation: %v", err)
 	}
 }
+
+// The Web API budget is shared wherever a deployment may run more than one web
+// replica, and kept in process where it cannot: memory and SQLite are
+// single-replica, so sharing there would cost a write per call for nothing.
+func TestRateLimitsAreSharedWhereReplicasCanBeMany(t *testing.T) {
+	for _, item := range []struct {
+		chatMode, store string
+		shared          bool
+	}{
+		{"local", "memory", false},
+		{"local", "sqlite", false},
+		{"local", "postgresql", true},
+		{"local", "dqlite", true},
+		{"grpc", "", true},
+	} {
+		if got := sharesRateLimits(startupConfig{chatMode: item.chatMode, storeName: item.store}); got != item.shared {
+			t.Errorf("chat-mode %s store %q: shared=%v, want %v", item.chatMode, item.store, got, item.shared)
+		}
+	}
+}

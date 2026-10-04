@@ -97,6 +97,7 @@ func runQualification(t *testing.T, open opener) {
 		{"Socket Mode batches are all or nothing", socketModeBatchesAreAllOrNothing},
 		{"seed helpers reject invalid input", seedHelpersRejectInvalidInput},
 		{"Socket Mode admission is atomic under concurrency", socketModeAdmissionIsAtomicUnderConcurrency},
+		{"a shared rate limit admits exactly its burst under concurrency", sharedRateLimitAdmitsExactlyItsBurst},
 		{"blob references tolerate an arbitrary profile photo URL", blobReferencesTolerateAnArbitraryProfilePhotoURL},
 		{"blob references include uploaded custom emoji images", blobReferencesIncludeUploadedCustomEmoji},
 		{"email identity is not Unicode case folded", emailIdentityIsNotUnicodeCaseFolded},

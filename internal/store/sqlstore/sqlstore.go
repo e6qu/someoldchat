@@ -224,6 +224,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
 ` + slackbotResponseSchema + `
 ` + clientConnectionSchema + `
 ` + memberPreferenceSchema + `
+` + rateLimitSchema + `
 CREATE TABLE IF NOT EXISTS conversation_typing (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
  user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL,
@@ -613,7 +614,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 211
+const schemaVersion = 212
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -763,6 +764,12 @@ type Store struct {
 	// being sampled from the wall clock; internal/activator/spool.go uses the
 	// same shape.
 	now func() time.Time
+	// rateSweep records when this process last collected passed rate-limit
+	// keys; see sweepRateLimits.
+	rateSweep struct {
+		sync.Mutex
+		last time.Time
+	}
 	// backfills owns the data-migration drain that Migrate starts and Close
 	// stops. See AwaitBackfills.
 	backfills backfillDrain
@@ -3590,6 +3597,15 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 212: shared rate limits ---
+	if version < 212 {
+		// Rate limits were held by each process. The table starts empty,
+		// which admits exactly what a restarted process admitted.
+		if _, err := db.ExecContext(ctx, rateLimitSchema); err != nil {
+			return fmt.Errorf("migrate rate limits: %w", err)
+		}
+	}
+	// --- end schema 212 ---
 	// --- schema 211: huddle threads ---
 	if version < 211 {
 		// A huddle now posts a message whose thread is its chat. Huddles from

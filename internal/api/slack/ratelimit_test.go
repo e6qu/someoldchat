@@ -1,7 +1,9 @@
 package slack
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,11 +14,12 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
 func limiterAt(now *time.Time) *RateLimiter {
 	limiter := NewRateLimiter()
-	limiter.now = func() time.Time { return *now }
+	limiter.tokens.(*localRateTokens).now = func() time.Time { return *now }
 	return limiter
 }
 
@@ -301,5 +304,63 @@ func TestEveryTieredMethodIsALedgerMethod(t *testing.T) {
 		if !strings.Contains(string(ledger), "\n  - method: "+method+"\n") {
 			t.Errorf("methodTiers names %s, which the compatibility ledger does not", method)
 		}
+	}
+}
+
+// storeRateTokens is the shared backend as the chat service presents it: the
+// store every replica shares, at a fixed instant.
+type storeRateTokens struct {
+	store *memory.Store
+	now   time.Time
+}
+
+func (s storeRateTokens) TakeRateToken(ctx context.Context, key string, allowance domain.RateAllowance) (time.Duration, bool, error) {
+	return s.store.TakeRateToken(ctx, key, allowance, s.now)
+}
+
+type failingRateTokens struct{}
+
+func (failingRateTokens) TakeRateToken(context.Context, string, domain.RateAllowance) (time.Duration, bool, error) {
+	return 0, false, errors.New("store unavailable")
+}
+
+// Two web replicas of one deployment share the Web API budget: what one
+// admits is gone for the other, so N replicas admit what one would rather
+// than N times the documented rate.
+func TestSharedRateLimiterSharesOneBudgetAcrossReplicas(t *testing.T) {
+	shared := storeRateTokens{store: memory.New(), now: time.Unix(1_700_000_000, 0).UTC()}
+	passed := 0
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { passed++ })
+	first := NewSharedRateLimiter(shared, nil).Middleware(next)
+	second := NewSharedRateLimiter(shared, nil).Middleware(next)
+	tier := methodTier("chat.scheduleMessage")
+	for i := 0; i < int(tier.burst); i++ {
+		replica := first
+		if i%2 == 1 {
+			replica = second
+		}
+		if response := limitedRequest(t, replica, http.MethodPost, "/api/chat.scheduleMessage", "xoxb-shared", "", ""); response.Code != http.StatusOK {
+			t.Fatalf("call %d status=%d", i, response.Code)
+		}
+	}
+	for name, replica := range map[string]http.Handler{"first": first, "second": second} {
+		limited := limitedRequest(t, replica, http.MethodPost, "/api/chat.scheduleMessage", "xoxb-shared", "", "")
+		if limited.Code != http.StatusTooManyRequests || limited.Header().Get("Retry-After") == "" || !strings.Contains(limited.Body.String(), `"error":"ratelimited"`) {
+			t.Fatalf("%s replica past the shared budget: status=%d retry-after=%q body=%s", name, limited.Code, limited.Header().Get("Retry-After"), limited.Body)
+		}
+	}
+	if passed != int(tier.burst) {
+		t.Fatalf("the handler ran %d times, want the shared burst of %v", passed, tier.burst)
+	}
+}
+
+// A call the shared store cannot decide is served, not refused as rate
+// limited: the store's failure is the request's own to report, and a 429
+// would send the client's retry handler waiting on a limit that was never hit.
+func TestSharedRateLimiterServesACallItCannotDecide(t *testing.T) {
+	passed := 0
+	wrapped := NewSharedRateLimiter(failingRateTokens{}, nil).Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { passed++ }))
+	if response := limitedRequest(t, wrapped, http.MethodPost, "/api/users.list", "xoxb-one", "", ""); response.Code != http.StatusOK || passed != 1 {
+		t.Fatalf("status=%d passed=%d, want the call served", response.Code, passed)
 	}
 }

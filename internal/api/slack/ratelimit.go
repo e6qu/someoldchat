@@ -2,8 +2,10 @@ package slack
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -51,25 +53,54 @@ import (
 //     behavior — one message per second per channel with short bursts
 //     tolerated — and is enforced per credential and channel. The burst
 //     capacity of five is a chosen constant, recorded, not a pinned value.
-//   - Budgets are replica-local. A deployment with N web replicas multiplies
-//     the effective budget by up to N; the deviation records this.
+//   - A deployment with more than one web replica shares one budget: the
+//     shared limiter (NewSharedRateLimiter) draws every call from the chat
+//     module's store, which all replicas share, so N replicas admit what one
+//     would. A single-replica deployment keeps the budget in process.
 //
-// Buckets are keyed by the presented credential (hashed bearer token) so one
+// Limits are keyed by the presented credential (hashed bearer token) so one
 // app cannot starve another, and by client address when no bearer token is
 // presented, so an unauthenticated flood is bounded too.
 type RateLimiter struct {
+	tokens RateTokens
+	logger *slog.Logger
+}
+
+// RateTokens admits or refuses one call against a key's allowance. The chat
+// service implements it over the store every replica shares; localRateTokens
+// implements it in process.
+type RateTokens interface {
+	TakeRateToken(ctx context.Context, key string, allowance domain.RateAllowance) (time.Duration, bool, error)
+}
+
+// localRateTokens is one process's rate limits: each key's theoretical
+// arrival time (domain.RateAllowance), with keys whose time has passed
+// collected at most once per rateLimitSweepInterval.
+type localRateTokens struct {
 	mu        sync.Mutex
-	buckets   map[string]*rateBucket
+	arrivals  map[string]time.Time
 	lastSweep time.Time
 	// now is a test seam; production uses the wall clock.
 	now func() time.Time
 }
 
-type rateBucket struct {
-	tokens    float64
-	capacity  float64
-	perSecond float64
-	last      time.Time
+func (l *localRateTokens) TakeRateToken(_ context.Context, key string, allowance domain.RateAllowance) (time.Duration, bool, error) {
+	now := l.now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if now.Sub(l.lastSweep) >= rateLimitSweepInterval {
+		l.lastSweep = now
+		for existing, arrival := range l.arrivals {
+			if arrival.Before(now) {
+				delete(l.arrivals, existing)
+			}
+		}
+	}
+	arrival, wait, admitted := allowance.Admit(l.arrivals[key], now)
+	if admitted {
+		l.arrivals[key] = arrival
+	}
+	return wait, admitted, nil
 }
 
 // rateTier is a documented Web API tier: its per-minute floor, and how many
@@ -151,8 +182,22 @@ const (
 	postedChannelBodyLimit = 1 << 20
 )
 
+// NewRateLimiter keeps the budget in this process, which is exact for a
+// deployment with one web replica.
 func NewRateLimiter() *RateLimiter {
-	return &RateLimiter{buckets: make(map[string]*rateBucket), now: time.Now}
+	return &RateLimiter{tokens: &localRateTokens{arrivals: make(map[string]time.Time), now: time.Now}}
+}
+
+// NewSharedRateLimiter draws every call from tokens, which every web replica
+// shares. A call the shared store cannot decide is served rather than
+// refused: the store being unreachable is the request's own failure to
+// report, and refusing it as rate limited would misname that failure to the
+// client and its retry handler.
+func NewSharedRateLimiter(tokens RateTokens, logger *slog.Logger) *RateLimiter {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &RateLimiter{tokens: tokens, logger: logger}
 }
 
 // Middleware wraps the /api/ tree. It answers 429 before the wrapped handler
@@ -167,13 +212,13 @@ func (l *RateLimiter) Middleware(next http.Handler) http.Handler {
 		}
 		credential := rateLimitCredential(r)
 		tier := methodTier(method)
-		if retryAfter, limited := l.take("method\x00"+method+"\x00"+credential, tier.burst, tier.perMinute/60); limited {
+		if retryAfter, limited := l.take(r.Context(), "method\x00"+method+"\x00"+credential, tier.allowance()); limited {
 			writeRateLimited(w, retryAfter)
 			return
 		}
 		if method == "chat.postMessage" {
 			if channel, ok := postedChannel(r); ok {
-				if retryAfter, limited := l.take("channel\x00"+channel+"\x00"+credential, postMessageBurst, postMessagePerSecond); limited {
+				if retryAfter, limited := l.take(r.Context(), "channel\x00"+channel+"\x00"+credential, postingAllowance); limited {
 					writePostingLimited(w, retryAfter)
 					return
 				}
@@ -193,7 +238,7 @@ func (l *RateLimiter) Middleware(next http.Handler) http.Handler {
 // key on. A Handler without a limiter serves unlimited, like the Web API.
 func (h Handler) limitedIncomingWebhook(w http.ResponseWriter, r *http.Request) {
 	if h.Limiter != nil {
-		if retryAfter, limited := h.Limiter.take("webhook\x00"+domain.HashToken(r.URL.Path), postMessageBurst, postMessagePerSecond); limited {
+		if retryAfter, limited := h.Limiter.take(r.Context(), "webhook\x00"+domain.HashToken(r.URL.Path), postingAllowance); limited {
 			w.Header().Set("Retry-After", retryAfterSeconds(retryAfter))
 			writePlain(w, http.StatusTooManyRequests, "rate_limited")
 			return
@@ -202,41 +247,33 @@ func (h Handler) limitedIncomingWebhook(w http.ResponseWriter, r *http.Request) 
 	h.incomingWebhook(w, r)
 }
 
-// take draws one token from the named bucket, reporting how long the caller
-// must wait when the bucket is dry.
-func (l *RateLimiter) take(key string, capacity, perSecond float64) (time.Duration, bool) {
-	now := l.now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.sweep(now)
-	bucket, ok := l.buckets[key]
-	if !ok {
-		bucket = &rateBucket{tokens: capacity, capacity: capacity, perSecond: perSecond, last: now}
-		l.buckets[key] = bucket
-	}
-	bucket.tokens = math.Min(bucket.capacity, bucket.tokens+now.Sub(bucket.last).Seconds()*bucket.perSecond)
-	bucket.last = now
-	if bucket.tokens >= 1 {
-		bucket.tokens--
+// take draws one call from the named limit, reporting how long the caller
+// must wait when it is refused.
+//
+// The limit is named by a hash of its key. The key joins its parts with NUL,
+// which no part can contain, and carries the client address or a hashed
+// credential; the hash keeps all of that out of the store while keeping keys
+// distinct and bounded.
+func (l *RateLimiter) take(ctx context.Context, key string, allowance domain.RateAllowance) (time.Duration, bool) {
+	wait, admitted, err := l.tokens.TakeRateToken(ctx, domain.HashToken(key), allowance)
+	if err != nil {
+		if l.logger != nil {
+			l.logger.WarnContext(ctx, "rate limit undecided; serving the call", "error", err)
+		}
 		return 0, false
 	}
-	wait := time.Duration((1 - bucket.tokens) / bucket.perSecond * float64(time.Second))
-	return wait, true
+	return wait, !admitted
 }
 
-// sweep drops buckets that have refilled completely: they hold no state a
-// fresh bucket would not reproduce.
-func (l *RateLimiter) sweep(now time.Time) {
-	if now.Sub(l.lastSweep) < rateLimitSweepInterval {
-		return
-	}
-	l.lastSweep = now
-	for key, bucket := range l.buckets {
-		if bucket.tokens+now.Sub(bucket.last).Seconds()*bucket.perSecond >= bucket.capacity {
-			delete(l.buckets, key)
-		}
-	}
+// allowance is the tier as a rate allowance: one call per minute divided by
+// the per-minute floor, with the tier's burst.
+func (t rateTier) allowance() domain.RateAllowance {
+	return domain.RateAllowance{Interval: time.Duration(float64(time.Minute) / t.perMinute), Burst: int(t.burst)}
 }
+
+// postingAllowance is chat.postMessage's per-channel allowance and an
+// incoming webhook's: one message a second with a short burst.
+var postingAllowance = domain.RateAllowance{Interval: time.Second / postMessagePerSecond, Burst: postMessageBurst}
 
 // rateLimitCredential buckets by the presented bearer credential — Slack
 // counts per app per workspace, and the token is that identity — falling back

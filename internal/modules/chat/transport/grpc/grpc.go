@@ -880,6 +880,14 @@ func (r Remote) LookupToken(ctx context.Context, token string) (domain.TokenReco
 	return decodeProtoToken(out)
 }
 
+func (r Remote) TakeRateToken(ctx context.Context, key string, allowance domain.RateAllowance) (time.Duration, bool, error) {
+	out, err := r.auth.TakeRateToken(ctx, &chatv1.RateTokenRequest{Key: key, IntervalMicros: allowance.Interval.Microseconds(), Burst: int32(allowance.Burst)})
+	if err != nil {
+		return 0, false, err
+	}
+	return time.Duration(out.GetRetryAfterMicros()) * time.Microsecond, out.GetAdmitted(), nil
+}
+
 func (r Remote) LookupAppToken(ctx context.Context, token string) (domain.AppTokenRecord, error) {
 	out, err := r.auth.LookupAppToken(ctx, &chatv1.TokenRequest{Token: token})
 	if err != nil {
@@ -7686,6 +7694,15 @@ func (s *Server) AdminListApps(ctx context.Context, input *chatv1.AppApprovalsRe
 
 func (s *Server) LookupToken(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.TokenRecord, error) {
 	return s.lookupTokenProto(ctx, input)
+}
+
+func (s *Server) TakeRateToken(ctx context.Context, input *chatv1.RateTokenRequest) (*chatv1.RateTokenDecision, error) {
+	allowance := domain.RateAllowance{Interval: time.Duration(input.GetIntervalMicros()) * time.Microsecond, Burst: int(input.GetBurst())}
+	wait, admitted, err := s.implementation.TakeRateToken(ctx, input.GetKey(), allowance)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.RateTokenDecision{Admitted: admitted, RetryAfterMicros: wait.Microseconds()}, nil
 }
 
 func (s *Server) LookupAppToken(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.AppTokenRecord, error) {

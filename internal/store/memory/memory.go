@@ -21,7 +21,12 @@ import (
 )
 
 type Store struct {
-	mu                 sync.RWMutex
+	mu sync.RWMutex
+	// rateArrivals is each rate-limit key's theoretical arrival time, and
+	// rateSwept when keys whose time has passed were last collected. See
+	// TakeRateToken.
+	rateArrivals       map[string]time.Time
+	rateSwept          time.Time
 	workspaces         map[domain.WorkspaceID]domain.Workspace
 	members            map[string]domain.WorkspaceMembership
 	users              map[domain.UserID]domain.User
@@ -307,6 +312,7 @@ func New() *Store {
 	// be a single 103-field literal, and a map field added to Store but not
 	// here compiles and panics on the first write to it.
 	s := &Store{
+		rateArrivals:                  make(map[string]time.Time),
 		lists:                         make(map[domain.ListID]domain.List),
 		listTemplates:                 make(map[domain.ListTemplateID]domain.ListTemplate),
 		listItems:                     make(map[domain.ListID]map[domain.ListItemID]domain.ListItem),
@@ -10873,6 +10879,37 @@ func (s *Store) StartHuddle(_ context.Context, value domain.Call, started, joine
 	s.outbox = append(s.outbox, started)
 	return cloneCall(value), true, nil
 }
+
+// TakeRateToken admits or refuses one call against the key's allowance. A key
+// whose theoretical arrival time has passed holds nothing a fresh key would
+// not, so such keys are collected at most once per rateSweepInterval.
+func (s *Store) TakeRateToken(_ context.Context, key string, allowance domain.RateAllowance, now time.Time) (time.Duration, bool, error) {
+	if !domain.ValidRateLimitKey(key) {
+		return 0, false, store.InvalidArgument("a rate limit needs a key of bounded text")
+	}
+	if !allowance.Valid() {
+		return 0, false, store.InvalidArgument("a rate limit needs a positive interval and burst")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if now.Sub(s.rateSwept) >= rateSweepInterval {
+		s.rateSwept = now
+		for existing, arrival := range s.rateArrivals {
+			if arrival.Before(now) {
+				delete(s.rateArrivals, existing)
+			}
+		}
+	}
+	arrival, wait, admitted := allowance.Admit(s.rateArrivals[key], now)
+	if !admitted {
+		return wait, false, nil
+	}
+	s.rateArrivals[key] = arrival
+	return 0, true, nil
+}
+
+// rateSweepInterval bounds how often expired rate-limit keys are collected.
+const rateSweepInterval = time.Minute
 
 func (s *Store) ActiveHuddle(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) (domain.Call, error) {
 	s.mu.RLock()

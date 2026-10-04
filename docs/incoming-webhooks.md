@@ -23,7 +23,10 @@ With `-api-rate-limit` on (the default), each webhook URL carries Slack's
 documented allowance of one message per second with a short burst. A delivery
 beyond it answers HTTP 429 with a `Retry-After` header and the plain-text body
 `rate_limited`, which the official SDK webhook clients' retry handlers read.
-The budget is replica-local, as the Web API budgets are.
+The budget is shared like the Web API budgets: where a deployment can run
+more than one web replica (the distributed composition, PostgreSQL, or
+dqlite) every replica draws from one budget in the chat module's store, and on
+memory and SQLite, which are single-replica, it is held in process.
 
 Each webhook belongs to one workspace, application, and conversation. The
 endpoint does not accept a channel override. The secret is returned once — by
