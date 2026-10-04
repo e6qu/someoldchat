@@ -41,7 +41,7 @@ type invitePageData struct {
 
 const inviteMarkup = `{{define "title"}}{{.Title}} · SameOldChat{{end}}
 {{define "styles"}}<style>
-body{min-height:100vh;display:grid;place-items:center;padding:24px}
+body{min-height:calc(100vh / var(--zoom, 1));display:grid;place-items:center;padding:24px}
 .invite{width:min(520px,100%);padding:32px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
 .invite h1{margin:0 0 10px;font-size:1.9rem}
 .invite p{margin:0 0 16px}

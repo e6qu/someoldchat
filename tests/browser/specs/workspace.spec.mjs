@@ -2417,6 +2417,59 @@ test('[NAV-06 A11Y-01] accessibility and message display preferences change how 
   await expect(page.locator('html')).not.toHaveAttribute('data-pref-underline-links', /.*/);
 });
 
+// Slack's Accessibility zoom makes everything larger or smaller. The page is
+// zoomed as a whole, so what is sized to the window (the shell, dialogs) still
+// fits it, menus still open beside what opened them, and the choice is kept.
+test('[NAV-06 A11Y-01] the zoom preference scales the workspace and keeps it inside the window', async ({ page, context, request }) => {
+  await signIn(context);
+  const text = `zoomed message ${Date.now()}`;
+  const posted = await request.post('/api/chat.postMessage', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL, text },
+  });
+  expect((await posted.json()).ok).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/app?channel=${CHANNEL}`);
+  const { primary } = await slackModifiers(page);
+  await page.keyboard.press(`${primary}+Comma`);
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.getByRole('tab', { name: 'Accessibility' }).click();
+  const zoom = preferences.getByRole('combobox', { name: 'Make everything larger or smaller' });
+  await expect(zoom).toHaveValue('100');
+  await zoom.selectOption('150');
+  await expect(page.locator('html')).toHaveAttribute('data-pref-zoom', '150');
+  await expectNoSeriousAccessibilityViolations(page, '#pref-accessibility');
+
+  const inside = async (locator) => {
+    const box = await locator.boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(1280);
+    expect(box.y + box.height).toBeLessThanOrEqual(800);
+    return box;
+  };
+  await inside(preferences);
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-pref-zoom', '150');
+  expect(await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.scrollHeight])).toEqual([1280, 800]);
+
+  const message = page.locator('.message', { hasText: text }).last();
+  await message.hover();
+  const more = message.locator('summary[aria-label="More actions"]');
+  await more.focus();
+  await page.keyboard.press('Enter');
+  const menu = await inside(message.getByRole('menu', { name: 'More actions' }));
+  const anchor = await more.boundingBox();
+  expect(Math.abs(menu.x + menu.width - (anchor.x + anchor.width))).toBeLessThan(2);
+  await page.keyboard.press('Escape');
+
+  await page.keyboard.press(`${primary}+Comma`);
+  await preferences.getByRole('tab', { name: 'Accessibility' }).click();
+  await zoom.selectOption('100');
+  await expect(page.locator('html')).not.toHaveAttribute('data-pref-zoom', /.*/);
+});
+
 // Slack's "Announce incoming messages" reads an arriving message's sender and
 // text to a screen reader; turned off, arrivals are not announced at all.
 test('[NAV-06 A11Y-01] incoming messages are announced unless the member turns it off', async ({ page, context, request }) => {

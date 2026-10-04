@@ -399,8 +399,8 @@ const filesBrowserStyle = `<style>
 .file-title a{display:inline-block;min-height:24px;line-height:24px;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:top;color:var(--text);text-decoration:none}.file-title a:hover{text-decoration:underline}
 .file-view{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
 .file-preview{display:grid;place-items:center;min-height:260px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
-.file-preview img{max-width:100%;max-height:70vh;border-radius:6px}
-.file-preview pre{justify-self:stretch;margin:0;max-height:70vh;overflow:auto;padding:12px;border-radius:6px;background:var(--bg);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+.file-preview img{max-width:100%;max-height:calc(70vh / var(--zoom, 1));border-radius:6px}
+.file-preview pre{justify-self:stretch;margin:0;max-height:calc(70vh / var(--zoom, 1));overflow:auto;padding:12px;border-radius:6px;background:var(--bg);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
 .file-preview .big-icon{font-size:64px}
 .file-details{display:grid;gap:14px}
 .file-details h3{margin:0 0 6px;font-size:14px}

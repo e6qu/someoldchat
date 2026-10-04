@@ -46,23 +46,27 @@ var menuPoint=null;var menuByKeyboard=false;
 function openMenus(){return Array.prototype.slice.call(doc.querySelectorAll('details[data-message-menu][open],details.file-more[open]'))}
 function closeMenus(except){openMenus().forEach(function(details){if(details!==except&&!details.contains(except)){details.open=false;var panel=details.querySelector('.message-menu');if(panel){panel.classList.remove('is-fixed');panel.style.left='';panel.style.top=''}}})}
 function itemsOf(menu){return Array.prototype.slice.call(menu.querySelectorAll('[role=menuitem]')).filter(function(item){return item.closest('[role=menu]')===menu&&visible(item)})}
+function pageZoom(){var zoom=parseFloat(getComputedStyle(document.documentElement).zoom);return zoom>0?zoom:1}
+function zoomedRect(element,zoom){var rect=element.getBoundingClientRect();return{left:rect.left/zoom,right:rect.right/zoom,top:rect.top/zoom,bottom:rect.bottom/zoom}}
 function place(panel,anchor,point){
 if(narrow&&narrow.matches){panel.classList.remove('is-fixed');panel.style.left='';panel.style.top='';return}
 panel.classList.add('is-fixed');panel.style.left='0px';panel.style.top='0px';
+var zoom=pageZoom(),viewWidth=window.innerWidth/zoom,viewHeight=window.innerHeight/zoom;
 var width=panel.offsetWidth,height=panel.offsetHeight,margin=8;
 var left,top;
-if(point){left=point.x;top=point.y}else{var rect=anchor.getBoundingClientRect();left=rect.right-width;top=rect.bottom+4;if(top+height>window.innerHeight-margin)top=rect.top-height-4}
-if(left+width>window.innerWidth-margin)left=window.innerWidth-width-margin;
-if(top+height>window.innerHeight-margin)top=window.innerHeight-height-margin;
+if(point){left=point.x/zoom;top=point.y/zoom}else{var rect=zoomedRect(anchor,zoom);left=rect.right-width;top=rect.bottom+4;if(top+height>viewHeight-margin)top=rect.top-height-4}
+if(left+width>viewWidth-margin)left=viewWidth-width-margin;
+if(top+height>viewHeight-margin)top=viewHeight-height-margin;
 panel.style.left=Math.max(margin,left)+'px';panel.style.top=Math.max(margin,top)+'px';
 }
 function placeSubmenu(details){
 var panel=details.querySelector('.message-submenu');if(!panel)return;
 if(narrow&&narrow.matches){panel.classList.remove('is-fixed');panel.style.left='';panel.style.top='';return}
-var rect=details.getBoundingClientRect();panel.classList.add('is-fixed');panel.style.left='0px';panel.style.top='0px';
+var zoom=pageZoom(),viewWidth=window.innerWidth/zoom,viewHeight=window.innerHeight/zoom;
+var rect=zoomedRect(details,zoom);panel.classList.add('is-fixed');panel.style.left='0px';panel.style.top='0px';
 var width=panel.offsetWidth,height=panel.offsetHeight;
-var left=rect.left-width+4;if(left<8)left=Math.min(rect.right-4,window.innerWidth-width-8);
-var top=rect.top-6;if(top+height>window.innerHeight-8)top=window.innerHeight-height-8;
+var left=rect.left-width+4;if(left<8)left=Math.min(rect.right-4,viewWidth-width-8);
+var top=rect.top-6;if(top+height>viewHeight-8)top=viewHeight-height-8;
 panel.style.left=Math.max(8,left)+'px';panel.style.top=Math.max(8,top)+'px';
 }
 doc.addEventListener('toggle',function(event){
@@ -264,9 +268,10 @@ if(pickerStatus)pickerStatus.textContent=values.length?'':(query?'No emoji match
 }
 function positionPicker(trigger){
 if(narrow&&narrow.matches){picker.style.left='';picker.style.top='';return}
-var rect=trigger.getBoundingClientRect();var width=picker.offsetWidth,height=picker.offsetHeight;
-var left=Math.min(Math.max(8,rect.right-width),window.innerWidth-width-8);
-var top=rect.bottom+6;if(top+height>window.innerHeight-8)top=Math.max(8,rect.top-height-6);
+var zoom=pageZoom(),viewWidth=window.innerWidth/zoom,viewHeight=window.innerHeight/zoom;
+var rect=zoomedRect(trigger,zoom);var width=picker.offsetWidth,height=picker.offsetHeight;
+var left=Math.min(Math.max(8,rect.right-width),viewWidth-width-8);
+var top=rect.bottom+6;if(top+height>viewHeight-8)top=Math.max(8,rect.top-height-6);
 picker.style.left=left+'px';picker.style.top=top+'px';
 }
 function openPicker(trigger,onSelect){
