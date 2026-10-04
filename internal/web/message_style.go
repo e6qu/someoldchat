@@ -58,6 +58,8 @@ html[data-pref-emoji-as-text=true] .message-text .emoji-code,html[data-pref-inli
 html[data-pref-jumbomoji=false] .message-text.jumbo .standard-emoji{font-size:18px;line-height:20px}
 html[data-pref-jumbomoji=false] .message-text.jumbo .custom-emoji{width:20px;height:20px;vertical-align:-4px}
 html[data-pref-inline-media=false] .message-image{display:none}
+[data-media=collapsed] .message-image,[data-media=collapsed] .message-unfurls{display:none}
+[data-media=collapsed] .message-image-fallback{display:inline}
 html[data-pref-message-theme=compact] .message{grid-template-columns:44px minmax(0,1fr);padding-top:2px;padding-bottom:2px}
 html[data-pref-message-theme=compact] .message.is-continuation{padding-top:0;padding-bottom:0}
 html[data-pref-message-theme=compact] .message-gutter>.avatar{display:none}
