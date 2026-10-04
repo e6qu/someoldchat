@@ -158,6 +158,13 @@ emoji as their `:codes:`, and turns off large emoji. Each
 applies at once to every message on the page and is kept with the account like
 the rest.
 
+A member hides a person from that person's profile, as Slack's "Hide a
+person" does. The person's messages are still delivered and counted unread, but
+each sits behind a "Show message" click-through that hides their name and
+photo, and a screen reader announces an arrival from them without reading it.
+Privacy & visibility lists the people hidden, each with Unhide. Hiding is the
+member's own preference: nobody is told, and administrators cannot see it.
+
 Language & region sets the member's time zone automatically from the browser,
 as Slack does by default, or by hand: choosing a zone turns the automatic zone
 off, so a browser in another zone no longer moves it, and turning it back on

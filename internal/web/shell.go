@@ -53,11 +53,14 @@ type shellView struct {
 	// empty when they could not be read, so a failed read never overwrites
 	// what this browser keeps.
 	Preferences string
-	UserID      string
-	Username    string
-	UserInitial string
-	AvatarURL   string
-	Away        bool
+	// HiddenPeople are the people the member has hidden, which Privacy &
+	// visibility lists for unhiding.
+	HiddenPeople []hiddenPersonView
+	UserID       string
+	Username     string
+	UserInitial  string
+	AvatarURL    string
+	Away         bool
 	// Status is the member's own status, shown in the avatar menu and edited by
 	// the status dialog.
 	StatusDisplay    template.HTML
@@ -205,6 +208,7 @@ func (h Handler) newShell(r *http.Request, principal auth.Principal, request she
 		if encoded, err := json.Marshal(preferences); err == nil {
 			view.Preferences = string(encoded)
 		}
+		view.HiddenPeople = h.hiddenPeopleViews(r, principal, preferences)
 	}
 	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/app") {
 		view.ReturnTo = r.URL.RequestURI()

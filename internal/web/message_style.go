@@ -58,6 +58,13 @@ html[data-pref-emoji-as-text=true] .message-text .emoji-code,html[data-pref-inli
 html[data-pref-jumbomoji=false] .message-text.jumbo .standard-emoji{font-size:18px;line-height:20px}
 html[data-pref-jumbomoji=false] .message-text.jumbo .custom-emoji{width:20px;height:20px;vertical-align:-4px}
 html[data-pref-inline-media=false] .message-image{display:none}
+.hidden-author-reveal{margin:0 0 2px;color:var(--muted);font-size:14px}
+.hidden-author-reveal summary{cursor:pointer;min-height:24px;display:inline-flex;align-items:center;gap:6px;list-style:none}
+.hidden-author-reveal summary::-webkit-details-marker{display:none}
+.hidden-author-show{color:var(--text);font-weight:700;text-decoration:underline}
+.hidden-author-reveal[open] summary .hidden-author-show{display:none}
+.message.is-hidden-author:not(:has(.hidden-author-reveal[open])) :is(.message-head,.message-content,.reactions,.thread-summary,.broadcast-label,.message-context){display:none}
+.message.is-hidden-author:not(:has(.hidden-author-reveal[open])) .message-gutter>.avatar{visibility:hidden}
 [data-media=collapsed] .message-image,[data-media=collapsed] .message-unfurls{display:none}
 [data-media=collapsed] .message-image-fallback{display:inline}
 html[data-pref-message-theme=compact] .message{grid-template-columns:44px minmax(0,1fr);padding-top:2px;padding-bottom:2px}

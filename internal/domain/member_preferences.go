@@ -40,3 +40,24 @@ func NormalizeMemberPreference(name, value string) (string, string, error) {
 	}
 	return name, value, nil
 }
+
+// hiddenPersonPreference prefixes the preference that records a person the
+// member has hidden, as Slack's "Hide a person" does. It is the member's own
+// preference: nobody else, administrators included, can read it.
+const hiddenPersonPreference = "hidden-person:"
+
+// HiddenPersonPreference names the preference that hides person.
+func HiddenPersonPreference(person UserID) string {
+	return hiddenPersonPreference + string(person)
+}
+
+// HiddenPeople reads the people a member has hidden from their preferences.
+func HiddenPeople(preferences map[string]string) map[UserID]bool {
+	hidden := make(map[UserID]bool)
+	for name, value := range preferences {
+		if person, ok := strings.CutPrefix(name, hiddenPersonPreference); ok && person != "" && value == "true" {
+			hidden[UserID(person)] = true
+		}
+	}
+	return hidden
+}

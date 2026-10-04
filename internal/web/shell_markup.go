@@ -433,6 +433,9 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
         <label><input type="checkbox" data-preference="discoverable-by-email" data-default="true"> Let people in other organizations find me by my email address</label>
       </fieldset>
       <p class="dialog-note">This applies only while your workspace is discoverable; when it is not, nobody outside finds you by email either way.</p>
+      <h4 id="pref-hidden-heading">People you've hidden</h4>
+      <p class="dialog-note">Their messages are hidden behind a click-through and their names and photos are hidden in conversations. Nobody is told who you hide. Hide someone from their profile.</p>
+      {{if .HiddenPeople}}<ul class="hidden-people" aria-labelledby="pref-hidden-heading">{{range .HiddenPeople}}<li><span>{{.Name}}</span><form method="post" action="/app/people/hidden"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="target" value="{{.ID}}"><input type="hidden" name="hidden" value="false"><input type="hidden" name="return" value="{{$.ReturnTo}}"><button type="submit" aria-label="Unhide {{.Name}}">Unhide</button></form></li>{{end}}</ul>{{else}}<p class="dialog-note">You haven't hidden anyone.</p>{{end}}
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-advanced" aria-labelledby="pref-tab-advanced" tabindex="0" hidden>
       <h3>Advanced</h3>
