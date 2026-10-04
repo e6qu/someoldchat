@@ -11454,7 +11454,9 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		h.writeFragment(w, list)
 		return
 	}
-	http.Redirect(w, r, h.viewURL(r, returnThread), http.StatusSeeOther)
+	// A form outside the conversation, such as a Threads card's reply,
+	// names the page it was sent from.
+	http.Redirect(w, r, returnTarget(fields, h.viewURL(r, returnThread)), http.StatusSeeOther)
 }
 
 func (h Handler) saveDraft(w http.ResponseWriter, r *http.Request) {

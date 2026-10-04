@@ -3753,6 +3753,20 @@ test('[NAV-07 NAV-08] the Threads view lists followed threads and Unreads groups
   await expect(page.getByText(rootText)).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 
+  // Each card replies in place, as Slack's does: Enter sends into that thread
+  // and the view comes back at the same card.
+  const card = page.locator('.thread-card').filter({ hasText: rootText });
+  const replyText = `replied from threads ${Date.now()}`;
+  const field = card.getByRole('textbox', { name: 'Reply to the thread in #general' });
+  await field.fill(replyText);
+  await field.press('Shift+Enter');
+  await expect(page).toHaveURL(/\/app\/threads/);
+  await field.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/app/threads.*#thread-Cdev-${rootPayload.ts.replace('.', '\\.')}$`));
+  await expect(card.getByText(replyText)).toBeVisible();
+  await expect(card.getByText('2 replies')).toBeVisible();
+  await expect(card.getByRole('textbox', { name: 'Reply to the thread in #general' })).toHaveValue('');
+
   await page.goto('/app/unreads');
   await expect(page.getByRole('heading', { name: 'Unreads', exact: true, level: 1 })).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);

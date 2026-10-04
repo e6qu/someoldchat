@@ -5,6 +5,7 @@ import (
 	"errors"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -63,6 +64,12 @@ type followedThreadView struct {
 	LastReplyMachine   string
 	LastReplyRelative  string
 	URL                string
+	// Anchor names the card so a reply sent from it comes back to it.
+	Anchor string
+	// ReplyURL is where the card's reply form posts, and ReplyReturn the
+	// Threads view the post answers with.
+	ReplyURL    string
+	ReplyReturn string
 }
 
 // threadCardMessage is a message as a Threads card shows it: author, time and
@@ -168,6 +175,7 @@ func (h Handler) threadsPage(w http.ResponseWriter, r *http.Request) {
 			data.Notice = "Some threads could not be shown right now."
 			continue
 		}
+		view.ReplyReturn = "/app/threads?" + url.Values{"channel": {channel}}.Encode() + "#" + view.Anchor
 		data.Threads = append(data.Threads, view)
 	}
 	data.Empty = len(data.Threads) == 0
@@ -186,6 +194,8 @@ func (h Handler) followedThreadCard(ctx context.Context, principal auth.Principa
 		ReplyCountLabel: replyCountLabel(thread.ReplyCount),
 		Unread:          thread.UnreadReplies,
 		URL:             appURL(string(thread.Conversation), string(thread.Root), "", "", ""),
+		Anchor:          "thread-" + string(thread.Conversation) + "-" + string(thread.Root),
+		ReplyURL:        mutationURL("/app/message", string(thread.Conversation), "", string(thread.Root), ""),
 	}
 	if !thread.LastReplyAt.IsZero() {
 		view.LastReplyMachine = thread.LastReplyAt.UTC().Format(time.RFC3339Nano)
@@ -426,7 +436,7 @@ const threadsMarkup = `{{define "title"}}Threads · SameOldChat{{end}}
 ` + threadsViewStyle + `
 @media(max-width:600px){.layout{width:min(100% - 20px,900px);margin-top:18px}}
 </style>{{end}}
-{{define "scripts"}}` + shellScript + searchSuggestionsScript + localTimeScript + `{{end}}
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + localTimeScript + threadReplyScript + `{{end}}
 {{define "content"}}{{template "shell-open" .Shell}}<main class="layout">
 <div class="heading"><h1>Threads</h1><p>Threads you follow, most recently replied first.</p></div>
 {{template "threads-list" .}}
@@ -436,14 +446,14 @@ const threadsMarkup = `{{define "title"}}Threads · SameOldChat{{end}}
 // threadsListPartial is the Threads view's content, kept apart from its page
 // chrome so the workspace shell can render the same list inside itself.
 //
-// Each card ends in a reply slot, [data-thread-reply-slot], naming the thread
-// by data-channel and data-thread-ts. Without script it links into the thread,
-// where the reply composer is; a composer that can post from here replaces it.
+// Each card ends in a reply form, [data-thread-reply-slot], as Slack's Threads
+// view does: it posts the reply into the thread and comes back to the card.
+// A refused reply opens the thread with the draft kept and the reason shown.
 const threadsListPartial = `{{define "threads-list"}}
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if .Empty}}<p class="empty">No threads yet. When you reply to a message, or are mentioned in a thread, it shows up here.</p>
 {{else}}<ul class="thread-list" aria-label="Threads">{{range .Threads}}
-  <li class="thread-card">
+  <li class="thread-card" id="{{.Anchor}}">
     <header class="thread-card-head">
       <a class="thread-card-channel" href="{{.URL}}">#{{.ChannelName}}</a>
       {{if .Participants}}<span class="thread-card-people">{{.Participants}}</span>{{end}}
@@ -459,12 +469,31 @@ const threadsListPartial = `{{define "threads-list"}}
       <div class="thread-card-body"><p class="thread-card-meta"><span class="author">{{.AuthorName}}</span> <a class="time" href="{{.URL}}"><time datetime="{{.MachineTime}}" title="{{.FullTime}}" data-format="time">{{.ClockTime}}</time></a></p><div class="message-text">{{.Text}}{{if .Edited}}<span class="edited-label"> (edited)</span>{{end}}</div></div>
     </article>{{end}}
     <footer class="thread-card-foot">
-      <a class="thread-card-reply" href="{{.URL}}" data-thread-reply-slot data-channel="{{.Conversation}}" data-thread-ts="{{.Root}}">Reply…</a>
+      <form class="thread-card-reply" method="post" action="{{.ReplyURL}}" data-thread-reply-slot data-channel="{{.Conversation}}" data-thread-ts="{{.Root}}">
+        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="thread_ts" value="{{.Root}}"><input type="hidden" name="return" value="{{.ReplyReturn}}"><input type="hidden" name="client_msg_id" value="">
+        <label class="visually-hidden" for="{{.Anchor}}-reply">Reply to the thread in #{{.ChannelName}}</label>
+        <textarea id="{{.Anchor}}-reply" name="text" rows="1" required placeholder="Reply…" aria-keyshortcuts="Enter"></textarea>
+        <button class="thread-card-send" type="submit">Send<span class="visually-hidden"> reply</span></button>
+      </form>
       <span class="thread-card-summary">{{.ReplyCountLabel}}{{if .LastReplyRelative}} · Last reply <time datetime="{{.LastReplyMachine}}" data-format="relative">{{.LastReplyRelative}}</time>{{end}}</span>
     </footer>
   </li>{{end}}
 </ul>{{end}}
 {{end}}`
+
+// threadReplyScript makes a Threads card's reply form behave like the thread
+// composer: Enter sends or starts a new line as the member's composer
+// preference says, each send carries a client_msg_id so a retried post cannot
+// post twice, and the form cannot be sent again while a send is in flight.
+const threadReplyScript = `<script>(function(){
+var doc=document;
+function enterSends(){try{return localStorage.getItem('sameoldchat-composer-enter')!=='newline'}catch(error){return true}}
+function primary(event){return /Mac|iPhone|iPad/.test(navigator.platform||'')?event.metaKey:event.ctrlKey}
+function send(form){var field=form.querySelector('textarea[name=text]');if(!field||!field.value.trim())return;if(form.requestSubmit)form.requestSubmit();else form.submit()}
+doc.addEventListener('keydown',function(event){var field=event.target;if(!field||field.tagName!=='TEXTAREA'||event.key!=='Enter'||event.altKey||event.isComposing)return;var form=field.closest('[data-thread-reply-slot]');if(!form)return;var chord=enterSends()?(!event.shiftKey&&!event.ctrlKey&&!event.metaKey):(primary(event)&&!event.shiftKey);if(!chord)return;event.preventDefault();send(form)});
+doc.addEventListener('submit',function(event){var form=event.target;if(!form||!form.matches||!form.matches('[data-thread-reply-slot]'))return;if(form.getAttribute('data-sending')){event.preventDefault();return}form.setAttribute('data-sending','true');var id=form.querySelector('input[name=client_msg_id]');if(id&&!id.value&&window.crypto&&crypto.randomUUID)id.value=crypto.randomUUID();var button=form.querySelector('button[type=submit]');if(button)button.setAttribute('aria-disabled','true')});
+window.addEventListener('pageshow',function(){Array.prototype.forEach.call(doc.querySelectorAll('[data-thread-reply-slot][data-sending]'),function(form){form.removeAttribute('data-sending');var button=form.querySelector('button[type=submit]');if(button)button.removeAttribute('aria-disabled')})});
+})();</script>`
 
 // threadsViewStyle styles the Threads cards, including the formatted message
 // text they share with the timeline.
@@ -494,8 +523,10 @@ html[data-theme=dark]{` + messageDarkTokens + `}
 .thread-card-more:hover{text-decoration:underline}
 .thread-card-message.reply{padding-left:16px}
 .thread-card-foot{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;padding:8px 16px 14px}
-.thread-card-reply{flex:1 1 260px;display:block;padding:9px 12px;border:1px solid var(--field-line);border-radius:8px;color:var(--muted);text-decoration:none}
-.thread-card-reply:hover{border-color:var(--focus);color:var(--text)}
+.thread-card-reply{flex:1 1 260px;display:flex;align-items:flex-end;gap:8px;margin:0;padding:6px 6px 6px 12px;border:1px solid var(--field-line);border-radius:8px;background:var(--panel-strong)}
+.thread-card-reply:focus-within{border-color:var(--focus)}
+.thread-card-reply textarea{flex:1 1 auto;min-width:0;min-height:24px;max-height:180px;padding:3px 0;border:0;outline:0;background:transparent;color:var(--text);font:inherit;resize:vertical}
+.thread-card-send{flex:0 0 auto;padding:5px 12px;border:0;border-radius:6px;background:var(--action);color:var(--on-strong);font-weight:700;cursor:pointer}
 .thread-card-summary{color:var(--muted);font-size:12px}
 .empty{padding:30px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}`
 
