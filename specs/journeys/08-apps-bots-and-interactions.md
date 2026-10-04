@@ -99,7 +99,8 @@ Submitting an app command:
 
 Slack built-ins such as `/shrug`, `/search`, `/people`, `/archive`, `/leave`,
 `/topic`, `/rename`, `/remind`, `/dnd`, `/status`, `/drafts`, `/mentions`,
-`/saved`, and `/shortcuts` perform their current Slack actions and MUST not be
+`/saved`, `/shortcuts`, `/collapse`, and `/expand` perform their current Slack
+actions and MUST not be
 intercepted by an installed app. Built-ins that Slack permits in threads remain
 available there.
 

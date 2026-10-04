@@ -655,9 +655,12 @@ type pageData struct {
 	MarkReadURL       string
 	MarkReadTimestamp string
 	AtLatest          bool
-	Notice            string
-	TimelineURL       string
-	ThreadURL         string
+	// MediaCollapsed is Slack's /collapse: inline images and link previews in
+	// this view show as links until /expand or the next visit.
+	MediaCollapsed bool
+	Notice         string
+	TimelineURL    string
+	ThreadURL      string
 	// ForwardDestinations are the conversations this reader may forward a
 	// message into, offered by the one Forward message dialog on the page.
 	// ACT-03 requires a forward not to disclose a destination the actor
@@ -2180,7 +2183,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
           {{else if .CanvasURL}}<p class="code-view-link"><a href="{{.CanvasURL}}">{{icon "canvas"}}<span>Open {{.Label}}</span></a></p>
           {{else if .PRURL}}<p class="code-view-link"><a href="{{.PRURL}}" rel="noopener noreferrer" target="_blank">{{icon "link"}}<span>{{.Label}}</span></a>{{if or .BaseBranch .HeadBranch}} <span class="code-view-branches">{{.BaseBranch}} ← {{.HeadBranch}}</span>{{end}}</p>{{end}}
         </section>{{end}}
-        {{else}}<section id="timeline" class="timeline" tabindex="0" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>{{end}}
+        {{else}}<section id="timeline" class="timeline" tabindex="0" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}"{{if .MediaCollapsed}} data-media="collapsed"{{end}}>{{template "messages" .Timeline}}</section>{{end}}
         {{if .NewerURL}}<p class="pager pager-newer"><a href="{{.NewerURL}}">Show newer messages</a></p>{{end}}
         {{if .LatestURL}}<p class="pager pager-latest"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}
       </div>
@@ -2200,7 +2203,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
           </div>{{end}}
         </div>{{end}}
         <div id="agent-session" data-fragment="{{.AgentSession.FragmentURL}}" data-live="true">{{template "agent-session" .AgentSession}}</div>
-        <div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div>
+        <div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true"{{if .MediaCollapsed}} data-media="collapsed"{{end}}>{{template "messages" .Thread}}</div>
         {{if .CanReply}}<div class="composer-wrap thread-composer-wrap">{{template "composer" .ThreadComposer}}</div>{{else if .CanPost}}<p class="posting-restricted" role="note">Only some members can reply to threads in {{.ChannelPrefix}}{{.ChannelName}}.</p>{{end}}
       </aside>
       {{end}}
@@ -5179,6 +5182,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		UserInitial:          initial(username),
 		AtLatest:             history.AtLatest,
 		Notice:               strings.Join(notices, " "),
+		MediaCollapsed:       r.URL.Query().Get("media") == "collapsed",
 		TimelineURL:          fragmentURL(string(channel), "", string(before)),
 		ThreadURL:            fragmentURL(string(channel), threadTimestamp, ""),
 		Composer:             mainComposer,

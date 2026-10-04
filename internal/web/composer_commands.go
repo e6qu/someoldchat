@@ -17,14 +17,15 @@ import (
 )
 
 // builtInSlashCommands are the Slack-owned commands this product implements.
-// Only a command with a real first-party effect is listed: /collapse and
-// /expand have no collapsible inline media to act on here, and /giphy needs a
-// third-party service, so they remain recorded gaps rather than menu entries
-// that post a success-looking no-op.
+// Only a command with a real first-party effect is listed: /giphy needs a
+// third-party service, so it remains a recorded gap rather than a menu entry
+// that posts a success-looking no-op.
 func builtInSlashCommands() []domain.AppShortcut {
 	return []domain.AppShortcut{
 		{AppName: "Slack", Name: "/away", Command: "/away", Description: "Toggle your away status", Type: "slash"},
+		{AppName: "Slack", Name: "/collapse", Command: "/collapse", Description: "Collapse all inline images and link previews in this conversation", Type: "slash"},
 		{AppName: "Slack", Name: "/dm", Command: "/dm", Description: "Send a direct message to someone", UsageHint: "@person [your message]", Type: "slash"},
+		{AppName: "Slack", Name: "/expand", Command: "/expand", Description: "Expand all inline images and link previews in this conversation", Type: "slash"},
 		{AppName: "Slack", Name: "/dnd", Command: "/dnd", Description: "Pause notifications", UsageHint: "[30 minutes, 2 hours] or off", Type: "slash"},
 		{AppName: "Slack", Name: "/invite", Command: "/invite", Description: "Add someone to this channel", UsageHint: "@person [#channel]", Type: "slash"},
 		{AppName: "Slack", Name: "/join", Command: "/join", Description: "Join a channel", UsageHint: "#channel", Type: "slash"},
@@ -91,6 +92,20 @@ func (h Handler) dispatchBuiltInSlashCommand(ctx context.Context, principal auth
 		return domain.Message{}, "/app/search?" + values.Encode(), true, nil
 	case "/people":
 		return domain.Message{}, "/app/members", true, nil
+	case "/collapse", "/expand":
+		// Slack's /collapse and /expand change only the member's own view of
+		// this conversation, so nothing is posted: the view returns with its
+		// inline media collapsed, or as the member's preferences show it.
+		collapse := strings.EqualFold(command, "/collapse")
+		notice := "Expanded inline images and link previews in this conversation."
+		if collapse {
+			notice = "Collapsed inline images and link previews in this conversation. Use /expand to show them again."
+		}
+		target := commandNoticeURL(channel, thread, notice)
+		if collapse {
+			target += "&media=collapsed"
+		}
+		return domain.Message{}, target, true, nil
 	case "/mentions":
 		return domain.Message{}, "/app/activity?channel=" + url.QueryEscape(string(channel)), true, nil
 	case "/remind":

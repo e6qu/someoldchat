@@ -4350,6 +4350,39 @@ test('[FILE-01 A11Y-01 A11Y-02] an uploaded image is shown and its uploader can 
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+// Slack's /collapse hides every inline image and link preview in the
+// conversation, leaving a link to each, and /expand shows them again. Nothing
+// is posted: the commands change only the member's own view.
+test('[APP-05 FILE-01 A11Y-01] /collapse and /expand hide and show inline images', async ({ page, context }) => {
+  await signIn(context);
+  const title = `collapsible-${Date.now()}.png`;
+  await page.goto('/app?channel=Cdev');
+  await page.locator('#upload-file').setInputFiles({
+    name: title,
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'),
+  });
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('button', { name: 'Send now', exact: true }).click();
+  const card = page.locator('.message-file', { hasText: title });
+  await expect(card.locator('img.message-image')).toBeVisible();
+
+  const composer = composerEditor(page);
+  await composer.fill('/collapse');
+  await page.getByRole('button', { name: 'Send now' }).click();
+  await expect(page).toHaveURL(/media=collapsed/);
+  await expect(page.locator('#notice, .notice')).toContainText('Use /expand to show them again.');
+  await expect(card.locator('img.message-image')).toBeHidden();
+  await expect(card.getByRole('link', { name: 'Open image' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await composer.fill('/expand');
+  await page.getByRole('button', { name: 'Send now' }).click();
+  await expect(page).not.toHaveURL(/media=collapsed/);
+  await expect(card.locator('img.message-image')).toBeVisible();
+  await expect(page.locator('.message-text', { hasText: '/collapse' })).toHaveCount(0);
+});
+
 // Sharing a canvas is news, and Activity is where a member finds out. The share
 // is made by an installed app rather than by this session, because the
 // development API token and the browser session are the same member and nobody
