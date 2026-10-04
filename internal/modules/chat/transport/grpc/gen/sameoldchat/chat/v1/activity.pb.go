@@ -48,6 +48,7 @@ type ActivityItem struct {
 	SharedInviteStatus string                 `protobuf:"bytes,23,opt,name=shared_invite_status,json=sharedInviteStatus,proto3" json:"shared_invite_status,omitempty"`
 	AppReminderId      string                 `protobuf:"bytes,24,opt,name=app_reminder_id,json=appReminderId,proto3" json:"app_reminder_id,omitempty"`
 	AppReminder        *Reminder              `protobuf:"bytes,25,opt,name=app_reminder,json=appReminder,proto3" json:"app_reminder,omitempty"`
+	CallId             string                 `protobuf:"bytes,26,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -255,6 +256,13 @@ func (x *ActivityItem) GetAppReminder() *Reminder {
 		return x.AppReminder
 	}
 	return nil
+}
+
+func (x *ActivityItem) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
 }
 
 // ListItemSummary is what an Activity row needs to name assigned work without
@@ -2627,7 +2635,7 @@ var File_sameoldchat_chat_v1_activity_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/activity.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a#sameoldchat/chat/v1/reminders.proto\"\xb6\a\n" +
+	"\"sameoldchat/chat/v1/activity.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a#sameoldchat/chat/v1/reminders.proto\"\xcf\a\n" +
 	"\fActivityItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -2659,7 +2667,8 @@ const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\x10shared_invite_id\x18\x16 \x01(\tR\x0esharedInviteId\x120\n" +
 	"\x14shared_invite_status\x18\x17 \x01(\tR\x12sharedInviteStatus\x12&\n" +
 	"\x0fapp_reminder_id\x18\x18 \x01(\tR\rappReminderId\x12@\n" +
-	"\fapp_reminder\x18\x19 \x01(\v2\x1d.sameoldchat.chat.v1.ReminderR\vappReminder\"~\n" +
+	"\fapp_reminder\x18\x19 \x01(\v2\x1d.sameoldchat.chat.v1.ReminderR\vappReminder\x12\x17\n" +
+	"\acall_id\x18\x1a \x01(\tR\x06callId\"~\n" +
 	"\x0fListItemSummary\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06fields\x18\x02 \x01(\tR\x06fields\x12\x1a\n" +

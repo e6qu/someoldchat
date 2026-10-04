@@ -39,6 +39,14 @@ type Runtime struct {
 	BlobStore       blob.Store
 }
 
+// DevelopmentPeerUser is the second development member Config.DevelopmentPeer
+// seeds.
+const DevelopmentPeerUser domain.UserID = "Upeer"
+
+func developmentPeer() domain.User {
+	return domain.User{ID: DevelopmentPeerUser, WorkspaceID: "Tdev", Name: "peer", RealName: "Peer"}
+}
+
 type Backend string
 
 const (
@@ -60,7 +68,11 @@ type Config struct {
 	BlobS3Prefix        string
 	BlobMaxBytes        int64
 	BootstrapAdminEmail string
-	AppCredentialKey    []byte
+	// DevelopmentPeer seeds DevelopmentPeerUser, a second plain member of the
+	// development workspace, so a development deployment has somebody for its
+	// first member to message, invite and call.
+	DevelopmentPeer  bool
+	AppCredentialKey []byte
 	// PublicURL is the deployment's public URL (-auth-public-url), the origin
 	// of every absolute URL the chat service builds into an event.
 	PublicURL string
@@ -144,6 +156,11 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 				return Runtime{}, fmt.Errorf("seed bootstrap administrator role: %w", err)
 			}
 		}
+		if config.DevelopmentPeer {
+			if err := memoryStore.SeedUser(developmentPeer()); err != nil {
+				return Runtime{}, fmt.Errorf("seed development peer: %w", err)
+			}
+		}
 		memoryStore.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "Tdev", Name: "general"})
 		chatStore, closer = memoryStore, memoryCloser{}
 	case BackendSQLite:
@@ -171,7 +188,7 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 			_ = closer.Close()
 			return Runtime{}, errors.New("selected SQL store does not support bootstrap")
 		}
-		if err := bootstrap(ctx, selected, config.BootstrapAdminEmail); err != nil {
+		if err := bootstrap(ctx, selected, config.BootstrapAdminEmail, config.DevelopmentPeer); err != nil {
 			_ = closer.Close()
 			return Runtime{}, err
 		}
@@ -244,7 +261,7 @@ func openBlobStore(ctx context.Context, config Config) (blob.Store, error) {
 	return blob.NewS3(s3.NewFromConfig(awsConfig), config.BlobS3Bucket, config.BlobS3Prefix, config.BlobMaxBytes)
 }
 
-func bootstrap(ctx context.Context, selected bootstrapStore, adminEmail string) error {
+func bootstrap(ctx context.Context, selected bootstrapStore, adminEmail string, peer bool) error {
 	adminEmail = strings.TrimSpace(adminEmail)
 	if err := selected.SeedWorkspace(ctx, domain.Workspace{ID: "Tdev", Name: "SameOldChat"}); err != nil {
 		return err
@@ -256,6 +273,11 @@ func bootstrap(ctx context.Context, selected bootstrapStore, adminEmail string) 
 		}
 	} else if err := selected.SeedUser(ctx, user); err != nil {
 		return err
+	}
+	if peer {
+		if err := selected.SeedUser(ctx, developmentPeer()); err != nil {
+			return fmt.Errorf("seed development peer: %w", err)
+		}
 	}
 	return selected.SeedConversation(ctx, domain.Conversation{ID: "Cdev", WorkspaceID: "Tdev", Name: "general"})
 }

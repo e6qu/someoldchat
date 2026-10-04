@@ -132,6 +132,12 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// wherever a real identity exists, and announcing it at startup keeps that
 	// default intact while giving a development deployment a way to reach its
 	// own administration.
+	// -peer-session-token seeds a second static session, for a second plain
+	// member, because a journey between two people — a direct message, an
+	// invitation, a huddle someone else ends — cannot be qualified by one. It
+	// carries the same refusals as -session-token and never administrator
+	// scopes.
+	peerSessionToken := flags.String("peer-session-token", os.Getenv("SAMEOLDCHAT_PEER_SESSION_TOKEN"), "static development browser session for a second, plain member of the development workspace; local composition only, and rejected when an identity provider is configured")
 	sessionAdmin := flags.Bool("session-admin", os.Getenv("SAMEOLDCHAT_SESSION_ADMIN") == "1", "grant the static development browser session workspace-administrator scopes; requires -session-token and is rejected when an identity provider is configured")
 	metricsListen := flags.String("metrics-listen", os.Getenv("SAMEOLDCHAT_METRICS_LISTEN"), "operator-only listen address publishing /metrics; empty serves no metrics endpoint")
 	monitoringToken := flags.String("monitoring-token", os.Getenv("SAMEOLDCHAT_MONITORING_TOKEN"), "deployment bearer token publishing /monitoring/observation; empty disables authenticated access")
@@ -177,7 +183,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		dqliteDirectory: *dqliteDirectory, dqliteAddress: *dqliteAddress, dqliteCluster: *dqliteCluster, dqliteDatabase: *dqliteDatabase,
 		blobDirectory: *blobDirectory, blobS3Bucket: *blobS3Bucket, blobS3Prefix: *blobS3Prefix,
 		chatAddress: *chatAddress, chatCA: *chatCA, chatServerName: *chatServerName, chatClientCert: *chatClientCert, chatClientKey: *chatClientKey,
-		apiToken: *apiToken, sessionToken: *sessionToken, sessionAdmin: *sessionAdmin,
+		apiToken: *apiToken, sessionToken: *sessionToken, peerSessionToken: *peerSessionToken, sessionAdmin: *sessionAdmin,
 		authWorkspace: *authWorkspace, authLookupUser: *authLookupUser, authPublicURL: *authPublicURL, authStateKeyHex: *authStateKeyHex, appCredentialKeyHex: *appCredentialKeyHex,
 		bootstrapAdminEmail: *bootstrapAdminEmail, appToken: *appToken, appID: *appID, socketHost: *socketHost,
 		googleClientID: *googleClientID, googleClientSecret: *googleClientSecret,
@@ -237,7 +243,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			// request, so its URLs stay origin-relative. See docs/operations.md.
 			logger.Warn("no -auth-public-url: URLs in event payloads are origin-relative")
 		}
-		runtime, err := localchat.Open(applicationContext, localchat.Config{Backend: localchat.Backend(settings.storeName), DSN: resolved.databaseDSN, DqliteDirectory: settings.dqliteDirectory, DqliteAddress: settings.dqliteAddress, DqliteCluster: cluster, DqliteDatabase: settings.dqliteDatabase, BlobDirectory: settings.blobDirectory, BlobS3Bucket: settings.blobS3Bucket, BlobS3Prefix: settings.blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: settings.bootstrapAdminEmail, AppCredentialKey: resolved.appCredentialKey, PublicURL: slackobject.Origin(settings.authPublicURL)})
+		runtime, err := localchat.Open(applicationContext, localchat.Config{Backend: localchat.Backend(settings.storeName), DSN: resolved.databaseDSN, DqliteDirectory: settings.dqliteDirectory, DqliteAddress: settings.dqliteAddress, DqliteCluster: cluster, DqliteDatabase: settings.dqliteDatabase, BlobDirectory: settings.blobDirectory, BlobS3Bucket: settings.blobS3Bucket, BlobS3Prefix: settings.blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: settings.bootstrapAdminEmail, DevelopmentPeer: resolved.peerSessionToken != "", AppCredentialKey: resolved.appCredentialKey, PublicURL: slackobject.Origin(settings.authPublicURL)})
 		if err != nil {
 			return startupFailure(applicationContext, logger, "open local chat", err)
 		}
@@ -643,6 +649,7 @@ type startupConfig struct {
 	chatClientKey       string
 	apiToken            string
 	sessionToken        string
+	peerSessionToken    string
 	sessionAdmin        bool
 	authWorkspace       string
 	authLookupUser      string
@@ -674,6 +681,7 @@ type resolvedConfig struct {
 	lookupUser            string
 	apiToken              string
 	sessionToken          string
+	peerSessionToken      string
 	sessionAdmin          bool
 	sessionScopes         []string
 	authStateKey          []byte
@@ -760,6 +768,7 @@ func (c startupConfig) resolve() (resolvedConfig, error) {
 	}
 	resolved.apiToken = c.apiToken
 	resolved.sessionToken = c.sessionToken
+	resolved.peerSessionToken = strings.TrimSpace(c.peerSessionToken)
 	if strings.TrimSpace(c.entraClientID) != "" {
 		tenant := strings.TrimSpace(c.entraTenant)
 		if tenant == "" {
@@ -772,6 +781,17 @@ func (c startupConfig) resolve() (resolvedConfig, error) {
 	if strings.TrimSpace(c.sessionToken) != "" {
 		if providers := c.configuredProviders(); len(providers) != 0 {
 			return resolvedConfig{}, fmt.Errorf("-session-token is a static browser session shared by every holder and cannot be combined with the configured identity provider (%s); remove -session-token", strings.Join(providers, ", "))
+		}
+	}
+	if resolved.peerSessionToken != "" {
+		if providers := c.configuredProviders(); len(providers) != 0 {
+			return resolvedConfig{}, fmt.Errorf("-peer-session-token is a static browser session shared by every holder and cannot be combined with the configured identity provider (%s); remove -peer-session-token", strings.Join(providers, ", "))
+		}
+		if resolved.peerSessionToken == strings.TrimSpace(c.sessionToken) {
+			return resolvedConfig{}, errors.New("-peer-session-token must differ from -session-token: each names a different member")
+		}
+		if workspace := strings.TrimSpace(c.authWorkspace); workspace != "" && workspace != defaultWorkspace {
+			return resolvedConfig{}, fmt.Errorf("-peer-session-token seeds a member of the development workspace %s, not of -auth-workspace %s", defaultWorkspace, workspace)
 		}
 	}
 	// -session-admin fails closed twice over: it is meaningless without the
@@ -932,6 +952,7 @@ func (c startupConfig) localOnlySettings() []string {
 		{flag: "-app-credential-key-hex", value: c.appCredentialKeyHex},
 		{flag: "-app-token", value: c.appToken},
 		{flag: "-app-id", value: c.appID},
+		{flag: "-peer-session-token", value: c.peerSessionToken},
 	} {
 		if strings.TrimSpace(candidate.value) != "" {
 			settings = append(settings, candidate.flag)
@@ -987,6 +1008,18 @@ func seedDevelopmentCredentials(ctx context.Context, runtime localchat.Runtime, 
 			return fmt.Errorf("join seeded conversation: %w", err)
 		}
 		logger.Info("seeded conversation not joined", "conversation", defaultConversation, "workspace", resolved.workspace, "user", resolved.lookupUser, "reason", "no such open conversation in this workspace")
+	}
+	if resolved.peerSessionToken != "" {
+		if _, err := runtime.Service.JoinConversation(ctx, defaultWorkspace, localchat.DevelopmentPeerUser, defaultConversation); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("join development peer to seeded conversation: %w", err)
+		}
+		peerScopes, err := developmentScopes(false)
+		if err != nil {
+			return err
+		}
+		if err := runtime.SessionSeeder.SeedSession(ctx, resolved.peerSessionToken, domain.SessionRecord{WorkspaceID: defaultWorkspace, UserID: localchat.DevelopmentPeerUser, Scopes: peerScopes, ExpiresAt: now.Add(devSessionLifetime)}); err != nil {
+			return fmt.Errorf("seed peer browser session: %w", err)
+		}
 	}
 	if strings.TrimSpace(resolved.sessionToken) == "" {
 		return nil

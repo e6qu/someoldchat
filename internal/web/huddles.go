@@ -34,8 +34,14 @@ type huddleView struct {
 	CanEnd  bool
 	// Title names the huddle the way Slack's window does: "Huddle in #name"
 	// for a channel, "Huddle with <people>" for a DM.
-	Title        string
-	CSRFToken    string
+	Title     string
+	CSRFToken string
+	// Channel is the conversation, for the menu's copy-link item. MenuURL
+	// refreshes the conversation header's huddle menu, which is a live region
+	// of its own: it said "in progress" after a huddle ended until the page
+	// was reloaded, because only the huddle window followed the events.
+	Channel      string
+	MenuURL      string
 	Notice       string
 	Participants []huddleParticipant
 	StartURL     string
@@ -131,6 +137,8 @@ func (h Handler) huddleFor(ctx context.Context, principal auth.Principal, conver
 	}
 	view := huddleView{
 		Visible: true, Title: h.huddleTitle(ctx, principal, conversation), CSRFToken: csrfToken, Notice: notice,
+		Channel:  string(conversation.ID),
+		MenuURL:  "/app/huddle?part=menu&channel=" + url.QueryEscape(string(conversation.ID)),
 		StartURL: huddleActionURL("start", string(conversation.ID)),
 		JoinURL:  huddleActionURL("join", string(conversation.ID)),
 		LeaveURL: huddleActionURL("leave", string(conversation.ID)),
@@ -230,6 +238,10 @@ func (h Handler) huddleFragment(w http.ResponseWriter, r *http.Request) {
 	}
 	view := h.huddleFor(r.Context(), principal, conversation, auth.CSRFToken(sessionCookie.Value),
 		strings.TrimSpace(r.URL.Query().Get("notice")), h.newUserNames(r.Context(), principal))
+	if r.URL.Query().Get("part") == "menu" {
+		h.writePartial(w, "huddle-menu", view, "the huddle menu could not be rendered")
+		return
+	}
 	h.writeHuddleFragment(w, view)
 }
 

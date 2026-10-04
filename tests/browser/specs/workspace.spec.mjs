@@ -5,6 +5,18 @@ const SESSION = 'browser-session';
 const API_TOKEN = 'xoxb-browser';
 const CHANNEL = 'Cdev';
 
+// The second person every server in this suite seeds with -peer-session-token:
+// a plain member of the workspace, signed in through a browser context of
+// their own, so a journey between two people runs as two people.
+const PEER_SESSION = 'browser-peer';
+const PEER = 'Upeer';
+
+async function openPeer(browser, baseURL) {
+  const context = await browser.newContext({ baseURL });
+  await context.addCookies([{ name: 'sameoldchat_session', value: PEER_SESSION, url: baseURL }]);
+  return { context, page: await context.newPage() };
+}
+
 async function signIn(context) {
   await context.addCookies([
     {
@@ -2089,6 +2101,13 @@ test('[CONV-03 CONV-04] conversation details manage a channel without falling ba
 
   details = await openDetails(page);
   await details.getByRole('tab', { name: /^Members/ }).click();
+  // The details add a member without the API: the second member is offered,
+  // added, counted, and then there is nobody left to offer.
+  await details.getByLabel('Add people').selectOption(PEER);
+  await details.getByRole('button', { name: 'Add', exact: true }).click();
+  details = page.locator('#conversation-details');
+  await expect(details.getByRole('tab', { name: 'Members 2' })).toBeVisible();
+  await details.getByRole('tab', { name: /^Members/ }).click();
   await expect(details).toContainText('Every available workspace member is already in this channel.');
   await details.getByRole('tab', { name: 'About' }).click();
 
@@ -3619,6 +3638,71 @@ test('[HUDDLE-01] a huddle runs its lifecycle and offers the media it promises',
 
   await page.getByRole('button', { name: 'End for everyone' }).click();
   await expect((await openMenu(page, 'Huddle')).getByRole('menuitem', { name: 'Start a huddle' })).toBeVisible();
+});
+
+// HUDDLE-03 and HUDDLE-04 are between two people: one invites, the other is
+// told and joins through the ordinary join; leaving takes only the leaver out,
+// and ending takes everybody out. Each side is its own signed-in browser.
+test('[HUDDLE-03 HUDDLE-04 A11Y-01] an invited member joins, leaves, and sees the huddle end', async ({ page, context, browser, request, baseURL }) => {
+  await signIn(context);
+  const channelName = `huddle-pair-${Date.now()}`;
+  const created = await request.post('/api/conversations.create', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { name: channelName },
+  });
+  const { channel } = await created.json();
+  const invited = await request.post('/api/conversations.invite', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: channel.id, users: PEER },
+  });
+  expect((await invited.json()).ok).toBe(true);
+  const peer = await openPeer(browser, baseURL);
+  try {
+    await page.goto(`/app?channel=${channel.id}`);
+    await (await openMenu(page, 'Huddle')).getByRole('menuitem', { name: 'Start a huddle' }).click();
+    const huddleWindow = page.getByRole('region', { name: `Huddle in #${channelName}` });
+    await expect(huddleWindow).toBeVisible();
+
+    // HUDDLE-03: the invitation offers the conversation's members who are not
+    // in the huddle, and the invitee finds it in Activity, named as a huddle
+    // invitation rather than as being added to the channel.
+    await huddleWindow.getByRole('button', { name: 'More huddle options' }).click();
+    const invitee = huddleWindow.getByLabel('Invite to the huddle');
+    await expect(invitee.locator('option')).toHaveCount(1);
+    await invitee.selectOption(PEER);
+    await expectNoSeriousAccessibilityViolations(page);
+    await huddleWindow.getByRole('button', { name: 'Invite', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Invitation sent' })).toBeVisible();
+
+    await peer.page.goto('/app/activity?kind=invitation');
+    const invitation = peer.page.locator('[data-activity-row]', { hasText: `Invited you to the huddle in #${channelName}.` });
+    await expect(invitation).toBeVisible();
+    await expect(invitation.locator('[data-activity-source]')).toHaveAttribute('href', `/app?channel=${channel.id}`);
+    await expectNoSeriousAccessibilityViolations(peer.page);
+    await invitation.locator('[data-activity-source]').click();
+    await (await openMenu(peer.page, 'Huddle, in progress')).getByRole('menuitem', { name: 'Join huddle' }).click();
+    const peerWindow = peer.page.getByRole('region', { name: `Huddle in #${channelName}` });
+    await expect(peerWindow).toBeVisible();
+
+    // HUDDLE-04: leaving takes only the leaver out. The huddle goes on for the
+    // member who started it, and the leaver can join it again.
+    await peerWindow.getByRole('button', { name: 'Leave huddle' }).click();
+    await expect(peerWindow).toBeHidden();
+    await expect((await openMenu(peer.page, 'Huddle, in progress')).getByRole('menuitem', { name: 'Join huddle' })).toBeVisible();
+    await expect(huddleWindow.getByRole('button', { name: 'Leave huddle' })).toBeVisible();
+
+    // Ending is for everyone: the other member's window closes and the
+    // conversation offers a new huddle, without either of them reloading.
+    await peer.page.getByRole('menuitem', { name: 'Join huddle' }).click();
+    await expect(peerWindow).toBeVisible();
+    await huddleWindow.getByRole('button', { name: 'More huddle options' }).click();
+    await huddleWindow.getByRole('button', { name: 'End for everyone' }).click();
+    await expect(huddleWindow).toBeHidden();
+    await expect(peerWindow).toBeHidden();
+    await expect(peer.page.getByRole('button', { name: 'Huddle', exact: true })).toBeVisible();
+  } finally {
+    await peer.context.close();
+  }
 });
 
 test('[CONNECT-01][CONNECT-03] the details panel separates an invitation from a connection', async ({ page, context }) => {

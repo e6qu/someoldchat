@@ -40,7 +40,7 @@ func TestBootstrapSeedsOIDCResolvableAdministrator(t *testing.T) {
 	if err := store.SeedUser(context.Background(), domain.User{ID: "Udev", WorkspaceID: "Tdev", Name: "legacy-bootstrap"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap(context.Background(), store, " admin@example.com "); err != nil {
+	if err := bootstrap(context.Background(), store, " admin@example.com ", false); err != nil {
 		t.Fatal(err)
 	}
 	user, err := store.FindUserByEmail(context.Background(), "Tdev", "ADMIN@example.com")
@@ -71,7 +71,7 @@ func TestBootstrapSeedsOIDCResolvableAdministrator(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap(context.Background(), store, "admin@example.com"); err != nil {
+	if err := bootstrap(context.Background(), store, "admin@example.com", false); err != nil {
 		t.Fatal(err)
 	}
 	membership, err = store.GetWorkspaceMembership(context.Background(), "Tdev", "Udev")
@@ -147,5 +147,24 @@ func TestOpenBlobStoreRequiresOneExplicitProvider(t *testing.T) {
 	}
 	if _, ok := selected.(blob.S3); !ok {
 		t.Fatalf("selected blob store=%T, want blob.S3", selected)
+	}
+}
+
+// The development peer is a plain member, seeded on every start without
+// disturbing anything a previous start or an operator changed.
+func TestBootstrapSeedsTheDevelopmentPeerAsAMember(t *testing.T) {
+	store, err := sqlstore.Open(context.Background(), filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for attempt := range 2 {
+		if err := bootstrap(context.Background(), store, "admin@example.com", true); err != nil {
+			t.Fatalf("attempt %d: %v", attempt, err)
+		}
+	}
+	membership, err := store.GetWorkspaceMembership(context.Background(), "Tdev", DevelopmentPeerUser)
+	if err != nil || membership.Role != domain.WorkspaceRoleMember {
+		t.Fatalf("peer membership=%+v err=%v", membership, err)
 	}
 }

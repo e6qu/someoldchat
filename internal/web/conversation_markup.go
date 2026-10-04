@@ -125,6 +125,15 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
   </form>
 </dialog></template>{{end}}{{end}}{{end}}
 
+{{define "huddle-menu"}}{{if .Visible}}<details class="menu huddle-menu" data-menu>
+        <summary class="header-button{{if .Active}} is-live{{end}}" role="button" aria-haspopup="menu" aria-expanded="false" aria-label="Huddle{{if .Active}}, in progress{{end}}">{{icon "huddle"}}{{icon "chevron"}}</summary>
+        <div class="menu-list menu-end" role="menu" aria-label="Huddle">
+          {{if .Active}}{{if not .Joined}}<form class="menu-form" method="post" action="{{.JoinURL}}" hx-post="{{.JoinURL}}" role="none"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit" role="menuitem">{{icon "huddle"}}<span>Join huddle</span></button></form>{{else}}<p class="menu-note" role="none">You are in this huddle.</p>{{end}}
+          {{else}}<form class="menu-form" method="post" action="{{.StartURL}}" hx-post="{{.StartURL}}" role="none"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit" role="menuitem" aria-describedby="huddle-start-note">{{icon "huddle"}}<span>Start a huddle</span></button></form><p class="menu-note" id="huddle-start-note" role="none">Starting a huddle opens a call: your browser connects to each person who joins.</p>{{end}}
+          <button type="button" role="menuitem" data-copy-text="/app?channel={{.Channel}}" data-copy-url data-copied="Huddle link copied.">{{icon "link"}}<span>Copy huddle link</span></button>
+        </div>
+      </details>{{end}}{{end}}
+
 {{define "channel-header"}}<div class="channel-header">
   <div class="channel-header-row">
     <div class="channel-identity">
@@ -133,14 +142,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
     </div>
     <div class="channel-actions">
       {{if .MemberCount}}<a class="member-count facepile" href="/app?channel={{.Channel}}&amp;details=1&amp;tab=members" data-details-trigger aria-label="{{.MemberCount}} member{{if ne .MemberCount 1}}s{{end}} — open the member list"><span class="faces" aria-hidden="true">{{range .FaceInitials}}<span>{{.}}</span>{{end}}</span><span aria-hidden="true">{{.MemberCount}}</span></a>{{end}}
-      {{if .Huddle.Visible}}<details class="menu huddle-menu" data-menu>
-        <summary class="header-button{{if .Huddle.Active}} is-live{{end}}" role="button" aria-haspopup="menu" aria-expanded="false" aria-label="Huddle{{if .Huddle.Active}}, in progress{{end}}">{{icon "huddle"}}{{icon "chevron"}}</summary>
-        <div class="menu-list menu-end" role="menu" aria-label="Huddle">
-          {{if .Huddle.Active}}{{if not .Huddle.Joined}}<form class="menu-form" method="post" action="{{.Huddle.JoinURL}}" hx-post="{{.Huddle.JoinURL}}" role="none"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit" role="menuitem">{{icon "huddle"}}<span>Join huddle</span></button></form>{{else}}<p class="menu-note" role="none">You are in this huddle.</p>{{end}}
-          {{else}}<form class="menu-form" method="post" action="{{.Huddle.StartURL}}" hx-post="{{.Huddle.StartURL}}" role="none"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit" role="menuitem" aria-describedby="huddle-start-note">{{icon "huddle"}}<span>Start a huddle</span></button></form><p class="menu-note" id="huddle-start-note" role="none">Starting a huddle opens a call: your browser connects to each person who joins.</p>{{end}}
-          <button type="button" role="menuitem" data-copy-text="/app?channel={{.Channel}}" data-copy-url data-copied="Huddle link copied.">{{icon "link"}}<span>Copy huddle link</span></button>
-        </div>
-      </details>{{end}}
+      {{if .Huddle.Visible}}<div class="huddle-menu-slot" id="huddle-menu" data-fragment="{{.Huddle.MenuURL}}" data-live="true">{{template "huddle-menu" .Huddle}}</div>{{end}}
       <details class="menu channel-overflow" data-menu>
         <summary class="header-button" role="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions for this conversation">{{icon "kebab"}}</summary>
         <div class="menu-list menu-end channel-overflow-menu" role="menu" aria-label="Conversation actions">

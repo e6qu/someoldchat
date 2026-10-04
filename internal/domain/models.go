@@ -2077,8 +2077,12 @@ type ActivityItem struct {
 	// were added to #general" and "your invitation to #general was approved"
 	// are different things to be told.
 	SharedInviteID SharedInviteID
-	MessageID      MessageID
-	ReminderID     LaterReminderID
+	// CallID is set when the item is an invitation to a huddle. Conversation
+	// carries where the huddle is; this tells "you were added to #general"
+	// from "you were invited to the huddle in #general".
+	CallID     CallID
+	MessageID  MessageID
+	ReminderID LaterReminderID
 	// AppReminderID is a reminders.add reminder coming due. It sits beside
 	// ReminderID rather than replacing it because the two are different
 	// identifiers for different things: Later is where a member puts something
