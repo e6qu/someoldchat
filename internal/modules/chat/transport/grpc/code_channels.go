@@ -147,7 +147,7 @@ func encodeProtoCodeChannel(value domain.CodeChannel) *chatv1.CodeChannel {
 			Url: value.AgentResource.URL, ResourceType: value.AgentResource.ResourceType, Title: value.AgentResource.Title, Provider: value.AgentResource.Provider,
 		},
 		Commands:          encodeProtoCodeChannelCommands(value.Commands),
-		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt), UpdatedAtUnixNano: unixNanoOrZero(value.UpdatedAt),
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
 	}
 }
 
@@ -253,7 +253,7 @@ func encodeProtoCodeChannelView(view domain.CodeChannelView) *chatv1.CodeChannel
 		Content: view.Content, Blocks: view.Blocks, CanvasId: string(view.CanvasID), AccessLevel: string(view.AccessLevel),
 		AgentContentHash: view.AgentContentHash, PrUrl: view.PRURL, BaseBranch: view.BaseBranch, HeadBranch: view.HeadBranch,
 		CspConnectDomains: view.CSP.ConnectDomains, CspResourceDomains: view.CSP.ResourceDomains, Version: view.Version,
-		CreatedAtUnixNano: unixNanoOrZero(view.CreatedAt), UpdatedAtUnixNano: unixNanoOrZero(view.UpdatedAt),
+		CreatedAtUnixNano: optionalUnixNano(view.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(view.UpdatedAt),
 	}
 }
 

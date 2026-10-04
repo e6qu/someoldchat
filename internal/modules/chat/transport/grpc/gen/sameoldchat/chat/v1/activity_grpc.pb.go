@@ -39,6 +39,7 @@ const (
 	ActivityService_AssignConversationToSidebarSection_FullMethodName     = "/sameoldchat.chat.v1.ActivityService/AssignConversationToSidebarSection"
 	ActivityService_GetConversationNotificationPreferences_FullMethodName = "/sameoldchat.chat.v1.ActivityService/GetConversationNotificationPreferences"
 	ActivityService_SetConversationNotificationPreferences_FullMethodName = "/sameoldchat.chat.v1.ActivityService/SetConversationNotificationPreferences"
+	ActivityService_GetSidebarActivity_FullMethodName                     = "/sameoldchat.chat.v1.ActivityService/GetSidebarActivity"
 	ActivityService_GetThreadFollow_FullMethodName                        = "/sameoldchat.chat.v1.ActivityService/GetThreadFollow"
 	ActivityService_SetThreadFollow_FullMethodName                        = "/sameoldchat.chat.v1.ActivityService/SetThreadFollow"
 )
@@ -67,6 +68,7 @@ type ActivityServiceClient interface {
 	AssignConversationToSidebarSection(ctx context.Context, in *AssignConversationToSidebarSectionRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	GetConversationNotificationPreferences(ctx context.Context, in *ConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(ctx context.Context, in *SetConversationNotificationPreferencesRequest, opts ...grpc.CallOption) (*ConversationNotificationPreferences, error)
+	GetSidebarActivity(ctx context.Context, in *SidebarActivityRequest, opts ...grpc.CallOption) (*SidebarActivityResponse, error)
 	GetThreadFollow(ctx context.Context, in *ThreadFollowRequest, opts ...grpc.CallOption) (*ThreadFollow, error)
 	SetThreadFollow(ctx context.Context, in *SetThreadFollowRequest, opts ...grpc.CallOption) (*ThreadFollow, error)
 }
@@ -279,6 +281,16 @@ func (c *activityServiceClient) SetConversationNotificationPreferences(ctx conte
 	return out, nil
 }
 
+func (c *activityServiceClient) GetSidebarActivity(ctx context.Context, in *SidebarActivityRequest, opts ...grpc.CallOption) (*SidebarActivityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SidebarActivityResponse)
+	err := c.cc.Invoke(ctx, ActivityService_GetSidebarActivity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *activityServiceClient) GetThreadFollow(ctx context.Context, in *ThreadFollowRequest, opts ...grpc.CallOption) (*ThreadFollow, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ThreadFollow)
@@ -323,6 +335,7 @@ type ActivityServiceServer interface {
 	AssignConversationToSidebarSection(context.Context, *AssignConversationToSidebarSectionRequest) (*MutationResponse, error)
 	GetConversationNotificationPreferences(context.Context, *ConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error)
 	SetConversationNotificationPreferences(context.Context, *SetConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error)
+	GetSidebarActivity(context.Context, *SidebarActivityRequest) (*SidebarActivityResponse, error)
 	GetThreadFollow(context.Context, *ThreadFollowRequest) (*ThreadFollow, error)
 	SetThreadFollow(context.Context, *SetThreadFollowRequest) (*ThreadFollow, error)
 }
@@ -393,6 +406,9 @@ func (UnimplementedActivityServiceServer) GetConversationNotificationPreferences
 }
 func (UnimplementedActivityServiceServer) SetConversationNotificationPreferences(context.Context, *SetConversationNotificationPreferencesRequest) (*ConversationNotificationPreferences, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetConversationNotificationPreferences not implemented")
+}
+func (UnimplementedActivityServiceServer) GetSidebarActivity(context.Context, *SidebarActivityRequest) (*SidebarActivityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSidebarActivity not implemented")
 }
 func (UnimplementedActivityServiceServer) GetThreadFollow(context.Context, *ThreadFollowRequest) (*ThreadFollow, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetThreadFollow not implemented")
@@ -780,6 +796,24 @@ func _ActivityService_SetConversationNotificationPreferences_Handler(srv interfa
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ActivityService_GetSidebarActivity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SidebarActivityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ActivityServiceServer).GetSidebarActivity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ActivityService_GetSidebarActivity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ActivityServiceServer).GetSidebarActivity(ctx, req.(*SidebarActivityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ActivityService_GetThreadFollow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ThreadFollowRequest)
 	if err := dec(in); err != nil {
@@ -902,6 +936,10 @@ var ActivityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetConversationNotificationPreferences",
 			Handler:    _ActivityService_SetConversationNotificationPreferences_Handler,
+		},
+		{
+			MethodName: "GetSidebarActivity",
+			Handler:    _ActivityService_GetSidebarActivity_Handler,
 		},
 		{
 			MethodName: "GetThreadFollow",

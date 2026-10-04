@@ -33,9 +33,6 @@ type homeSectionView struct {
 	AddChannels  bool
 	AddCoworkers bool
 	Apps         bool
-	// HasRecency offers "By most recent activity": only DMs carry the time of
-	// their newest message (see sidebar).
-	HasRecency bool
 }
 
 // homeSections lays the Home pane out in Slack's order: Starred, the member's
@@ -55,7 +52,7 @@ func (s sidebarView) homeSections(canInvite, canRequest, hasApps bool) []homeSec
 	}
 	sections = append(sections,
 		homeSectionView{Key: "channels", Label: "Channels", Rows: s.Channels, Empty: "You are not in any channels yet.", Draggable: len(s.Sections) > 0, DropTarget: "channels", AddChannels: true},
-		homeSectionView{Key: "directs", Label: "Direct messages", Rows: s.Directs, Empty: "No direct messages yet.", AddCoworkers: canInvite || canRequest, HasRecency: true},
+		homeSectionView{Key: "directs", Label: "Direct messages", Rows: s.Directs, Empty: "No direct messages yet.", AddCoworkers: canInvite || canRequest},
 	)
 	if hasApps {
 		sections = append(sections, homeSectionView{Key: "apps", Label: "Apps", Apps: true})

@@ -7604,6 +7604,18 @@ func (s *Store) GetConversationNotificationPreferences(_ context.Context, worksp
 	return domain.DefaultConversationNotificationPreferences(workspace, user, conversation), nil
 }
 
+func (s *Store) ConversationNotificationOverrides(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (map[domain.ConversationID]domain.ConversationNotificationPreferences, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	overrides := map[domain.ConversationID]domain.ConversationNotificationPreferences{}
+	for _, preferences := range s.conversationNotificationPrefs {
+		if preferences.WorkspaceID == workspace && preferences.UserID == user {
+			overrides[preferences.Conversation] = preferences
+		}
+	}
+	return overrides, nil
+}
+
 func (s *Store) SetConversationNotificationPreferences(_ context.Context, preferences domain.ConversationNotificationPreferences, event events.Event) error {
 	if !preferences.Valid() {
 		return store.InvalidArgument("conversation notification preferences are invalid")

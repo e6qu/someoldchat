@@ -6793,6 +6793,37 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The sidebar's batched read must carry every conversation's
+			// newest-message time and notification level across the transport,
+			// leave out a name the member cannot read, and refuse an
+			// oversized batch alike.
+			name: "sidebar activity",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				newest, err := chat.Post(ctx, "T1", "U1", "C1", "latest", "", "")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetConversationNotificationPreferences(ctx, "T1", "U1", "C1", domain.NotificationMute, true); err != nil {
+					return nil, err
+				}
+				activity, err := chat.SidebarActivity(ctx, "T1", "U1", []domain.ConversationID{"C1", "C1", "Cmissing"})
+				if err != nil {
+					return nil, err
+				}
+				entry := activity["C1"]
+				oversized := make([]domain.ConversationID, 1001)
+				for index := range oversized {
+					oversized[index] = domain.ConversationID(fmt.Sprintf("C%d", index))
+				}
+				_, tooMany := chat.SidebarActivity(ctx, "T1", "U1", oversized)
+				posted, err := domain.ParseMessageTimestamp(timestampOf(newest))
+				if err != nil {
+					return nil, err
+				}
+				return []any{len(activity), entry.Notifications, posted.Equal(entry.LatestAt), errors.Is(tooMany, storepkg.ErrInvalidArgument)}, nil
+			},
+		},
+		{
 			// A section's mark-read names its conversations, so the list must
 			// cross the transport intact: a dropped entry leaves one unread,
 			// and an empty list arriving as "all" would clear everything.

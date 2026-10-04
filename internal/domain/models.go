@@ -1785,6 +1785,14 @@ type ConversationNotificationPreferences struct {
 	FollowEveryThread bool
 }
 
+// ConversationActivity is what the sidebar needs about one conversation: when
+// its newest message was posted (zero when it has none) and the member's own
+// notification preferences for it.
+type ConversationActivity struct {
+	LatestAt      time.Time
+	Notifications ConversationNotificationPreferences
+}
+
 func DefaultConversationNotificationPreferences(workspace WorkspaceID, user UserID, conversation ConversationID) ConversationNotificationPreferences {
 	return ConversationNotificationPreferences{
 		WorkspaceID: workspace, UserID: user, Conversation: conversation, Level: NotificationInherit,

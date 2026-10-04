@@ -459,29 +459,26 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 		byID[conversation.ID] = item
 	}
 
-	// The newest message's time orders the DM pane and a DM section sorted by
-	// recent activity. It costs one read per conversation, so it is read for at
-	// most directNameWindow DMs, the bound the DM names above already use; a
-	// channel's recency would need a batched read the service does not offer
-	// (specs/product-gap-audit.md), so channel sections sort alphabetically or
-	// by priority only.
-	for index, id := range directOrder {
-		if index >= directNameWindow {
-			break
-		}
-		if history, err := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, id, domain.HistoryRequest{Page: domain.PageRequest{Limit: 1, Descending: true}}); err == nil && len(history.Messages) == 1 {
-			item := byID[id]
-			item.RecentAt = history.Messages[0].CreatedAt
-			byID[id] = item
-		}
+	// One read answers, for every conversation in the sidebar, the time of its
+	// newest message (what "By most recent activity" sorts by, in every
+	// section) and the member's own notification level (what marks a row
+	// muted); a section's level applies to the conversations in it below. A
+	// failed read leaves the rows unsorted by recency and unmuted, which is
+	// what they showed before either was known.
+	ids := make([]domain.ConversationID, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
 	}
-	// Muted state is the member's own per-conversation level; a section's
-	// level applies to the conversations in it below.
-	for id, item := range byID {
-		if preferences, err := h.Messages.ConversationNotificationPreferences(ctx, principal.WorkspaceID, principal.UserID, id); err == nil {
-			item.NotificationLevel = string(preferences.Level)
-			item.FollowEveryThread = preferences.FollowEveryThread
-			item.Muted = preferences.Level == domain.NotificationMute
+	if activity, err := h.Messages.SidebarActivity(ctx, principal.WorkspaceID, principal.UserID, ids); err == nil {
+		for id, entry := range activity {
+			item, ok := byID[id]
+			if !ok {
+				continue
+			}
+			item.RecentAt = entry.LatestAt
+			item.NotificationLevel = string(entry.Notifications.Level)
+			item.FollowEveryThread = entry.Notifications.FollowEveryThread
+			item.Muted = entry.Notifications.Level == domain.NotificationMute
 			byID[id] = item
 		}
 	}

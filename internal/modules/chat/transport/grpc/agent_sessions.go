@@ -127,13 +127,13 @@ func encodeProtoAgentSession(value domain.AgentSession) *chatv1.AgentSession {
 		agents = append(agents, &chatv1.AgentSessionAgent{
 			AppId: string(agent.AppID), Status: string(agent.Status),
 			Username: agent.Identity.Username, IconEmoji: agent.Identity.IconEmoji, IconUrl: agent.Identity.IconURL,
-			UpdatedAtUnixNano: unixNanoOrZero(agent.UpdatedAt),
+			UpdatedAtUnixNano: optionalUnixNano(agent.UpdatedAt),
 		})
 	}
 	return &chatv1.AgentSession{
 		WorkspaceId: string(value.WorkspaceID), Conversation: string(value.Conversation), ThreadTs: string(value.ThreadTimestamp),
 		Title: value.Title, InitiatorUserId: string(value.InitiatorUserID),
-		CreatedAtUnixNano: unixNanoOrZero(value.CreatedAt), UpdatedAtUnixNano: unixNanoOrZero(value.UpdatedAt),
+		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
 		Agents: agents,
 	}
 }

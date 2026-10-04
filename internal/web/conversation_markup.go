@@ -29,7 +29,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
           <div role="group" aria-label="Sort">
             <p class="menu-heading" role="none">Sort</p>
             <button type="button" role="menuitemradio" aria-checked="false" data-section-sort="alpha"><span>Alphabetically</span></button>
-            {{if $section.HasRecency}}<button type="button" role="menuitemradio" aria-checked="false" data-section-sort="recent"><span>By most recent activity</span></button>{{end}}
+            {{if not $section.Apps}}<button type="button" role="menuitemradio" aria-checked="false" data-section-sort="recent"><span>By most recent activity</span></button>{{end}}
             <button type="button" role="menuitemradio" aria-checked="false" data-section-sort="priority"><span>Priority</span></button>
           </div>
           <div role="group" aria-label="Show">
