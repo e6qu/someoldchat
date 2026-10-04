@@ -1,0 +1,27 @@
+{
+  "locale": "en",
+  "name": "English",
+  "messages": {
+    "prefs.sections": "Preference sections",
+    "prefs.tab.notifications": "Notifications",
+    "prefs.tab.vip": "VIP",
+    "prefs.tab.home": "Home",
+    "prefs.tab.appearance": "Appearance",
+    "prefs.tab.accessibility": "Accessibility",
+    "prefs.tab.navigation": "Navigation",
+    "prefs.tab.read": "Mark as read",
+    "prefs.tab.media": "Messages & media",
+    "prefs.tab.region": "Language & region",
+    "prefs.tab.av": "Audio & video",
+    "prefs.tab.privacy": "Privacy & visibility",
+    "prefs.tab.advanced": "Advanced",
+    "prefs.region.title": "Language & region",
+    "prefs.region.language": "Language",
+    "prefs.region.language_note": "The language the workspace is shown in. Messages people write are never translated.",
+    "prefs.region.timezone": "Time zone",
+    "prefs.region.timezone_auto": "Set time zone automatically",
+    "prefs.region.timezone_set": "Set time zone",
+    "prefs.region.timezone_note": "Setting a time zone by hand turns the automatic one off. Times, reminders and scheduled messages follow it.",
+    "client.prefs.saved": "Preference saved."
+  }
+}

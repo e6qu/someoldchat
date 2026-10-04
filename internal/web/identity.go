@@ -219,7 +219,7 @@ func normalizeScopes(values []string) ([]string, error) {
 	return normalized, nil
 }
 
-func (h LoginHandler) Register(mux *http.ServeMux) {
+func (h LoginHandler) Register(mux routes) {
 	mux.HandleFunc("GET /login", h.login)
 	for name := range h.providers {
 		provider := name

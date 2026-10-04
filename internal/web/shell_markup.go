@@ -288,19 +288,19 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
 </form>{{end}}
 
 {{define "preferences-panels"}}<div class="preferences-layout">
-  <div class="preferences-tabs" role="tablist" data-shell-tabs aria-label="Preference sections" aria-orientation="vertical">
-    <button type="button" role="tab" id="pref-tab-notifications" aria-controls="pref-notifications" aria-selected="true">{{icon "activity"}}<span>Notifications</span></button>
-    <button type="button" role="tab" id="pref-tab-vip" aria-controls="pref-vip" aria-selected="false" tabindex="-1">{{icon "star"}}<span>VIP</span></button>
-    <button type="button" role="tab" id="pref-tab-home" aria-controls="pref-home" aria-selected="false" tabindex="-1">{{icon "home"}}<span>Home</span></button>
-    <button type="button" role="tab" id="pref-tab-appearance" aria-controls="pref-appearance" aria-selected="false" tabindex="-1">{{icon "status"}}<span>Appearance</span></button>
-    <button type="button" role="tab" id="pref-tab-accessibility" aria-controls="pref-accessibility" aria-selected="false" tabindex="-1">{{icon "info"}}<span>Accessibility</span></button>
-    <button type="button" role="tab" id="pref-tab-navigation" aria-controls="pref-navigation" aria-selected="false" tabindex="-1">{{icon "sidebar"}}<span>Navigation</span></button>
-    <button type="button" role="tab" id="pref-tab-read" aria-controls="pref-read" aria-selected="false" tabindex="-1">{{icon "check"}}<span>Mark as read</span></button>
-    <button type="button" role="tab" id="pref-tab-media" aria-controls="pref-media" aria-selected="false" tabindex="-1">{{icon "files"}}<span>Messages &amp; media</span></button>
-    <button type="button" role="tab" id="pref-tab-region" aria-controls="pref-region" aria-selected="false" tabindex="-1">{{icon "later"}}<span>Language &amp; region</span></button>
-    <button type="button" role="tab" id="pref-tab-av" aria-controls="pref-av" aria-selected="false" tabindex="-1">{{icon "huddle"}}<span>Audio &amp; video</span></button>
-    <button type="button" role="tab" id="pref-tab-privacy" aria-controls="pref-privacy" aria-selected="false" tabindex="-1">{{icon "lock"}}<span>Privacy &amp; visibility</span></button>
-    <button type="button" role="tab" id="pref-tab-advanced" aria-controls="pref-advanced" aria-selected="false" tabindex="-1">{{icon "gear"}}<span>Advanced</span></button>
+  <div class="preferences-tabs" role="tablist" data-shell-tabs aria-label="{{t "prefs.sections"}}" aria-orientation="vertical">
+    <button type="button" role="tab" id="pref-tab-notifications" aria-controls="pref-notifications" aria-selected="true">{{icon "activity"}}<span>{{t "prefs.tab.notifications"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-vip" aria-controls="pref-vip" aria-selected="false" tabindex="-1">{{icon "star"}}<span>{{t "prefs.tab.vip"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-home" aria-controls="pref-home" aria-selected="false" tabindex="-1">{{icon "home"}}<span>{{t "prefs.tab.home"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-appearance" aria-controls="pref-appearance" aria-selected="false" tabindex="-1">{{icon "status"}}<span>{{t "prefs.tab.appearance"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-accessibility" aria-controls="pref-accessibility" aria-selected="false" tabindex="-1">{{icon "info"}}<span>{{t "prefs.tab.accessibility"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-navigation" aria-controls="pref-navigation" aria-selected="false" tabindex="-1">{{icon "sidebar"}}<span>{{t "prefs.tab.navigation"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-read" aria-controls="pref-read" aria-selected="false" tabindex="-1">{{icon "check"}}<span>{{t "prefs.tab.read"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-media" aria-controls="pref-media" aria-selected="false" tabindex="-1">{{icon "files"}}<span>{{t "prefs.tab.media"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-region" aria-controls="pref-region" aria-selected="false" tabindex="-1">{{icon "later"}}<span>{{t "prefs.tab.region"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-av" aria-controls="pref-av" aria-selected="false" tabindex="-1">{{icon "huddle"}}<span>{{t "prefs.tab.av"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-privacy" aria-controls="pref-privacy" aria-selected="false" tabindex="-1">{{icon "lock"}}<span>{{t "prefs.tab.privacy"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-advanced" aria-controls="pref-advanced" aria-selected="false" tabindex="-1">{{icon "gear"}}<span>{{t "prefs.tab.advanced"}}</span></button>
   </div>
   <div class="preferences-panels">
     <section class="preferences-panel" role="tabpanel" id="pref-notifications" aria-labelledby="pref-tab-notifications" tabindex="0">
@@ -406,18 +406,22 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
       </fieldset>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-region" aria-labelledby="pref-tab-region" tabindex="0" hidden>
-      <h3>Language &amp; region</h3>
-      <p>Language: English. This workspace is not offered in another language.</p>
-      <fieldset><legend>Time zone</legend>
-        <label><input type="checkbox" data-preference="timezone-auto" data-default="true"> Set time zone automatically</label>
+      <h3>{{t "prefs.region.title"}}</h3>
+      <fieldset><legend>{{t "prefs.region.language"}}</legend>
+        <label for="pref-language" class="visually-hidden">{{t "prefs.region.language"}}</label>
+        <select id="pref-language" class="preference-select" data-preference="language" data-default="{{.Language}}">{{range .Languages}}<option value="{{.Locale}}" lang="{{.Locale}}"{{if eq .Locale $.Language}} selected{{end}}>{{.Name}}</option>{{end}}</select>
+        <p class="dialog-note">{{t "prefs.region.language_note"}}</p>
+      </fieldset>
+      <fieldset><legend>{{t "prefs.region.timezone"}}</legend>
+        <label><input type="checkbox" data-preference="timezone-auto" data-default="true"> {{t "prefs.region.timezone_auto"}}</label>
         <form class="timezone-form" method="post" action="/app/preferences/timezone?channel={{.Channel}}">
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-          <label for="pref-timezone">Time zone</label>
+          <label for="pref-timezone">{{t "prefs.region.timezone"}}</label>
           <input id="pref-timezone" type="text" name="timezone" value="{{.Timezone}}" list="pref-timezone-options" autocomplete="off" required>
           <datalist id="pref-timezone-options" data-timezone-options></datalist>
-          <button class="button" type="submit">Set time zone</button>
+          <button class="button" type="submit">{{t "prefs.region.timezone_set"}}</button>
         </form>
-        <p class="dialog-note">Setting a time zone by hand turns the automatic one off. Times, reminders and scheduled messages follow it.</p>
+        <p class="dialog-note">{{t "prefs.region.timezone_note"}}</p>
       </fieldset>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-av" aria-labelledby="pref-tab-av" tabindex="0" hidden>

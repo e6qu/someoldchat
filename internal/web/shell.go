@@ -79,7 +79,11 @@ type shellView struct {
 	CanRequestInvite bool
 	// Timezone is the member's profile zone, which Language & region shows
 	// and lets them set by hand.
-	Timezone       string
+	Timezone string
+	// Language is the locale the page renders in and Languages the ones
+	// Language & region offers.
+	Language       string
+	Languages      []languageOption
 	ShowIdentity   bool
 	CanCreate      bool
 	CanSchedule    bool
@@ -193,6 +197,8 @@ func (h Handler) newShell(r *http.Request, principal auth.Principal, request she
 		CSRFToken:     csrf,
 		UserID:        string(principal.UserID),
 		Keyboard:      keyboardHelp(),
+		Language:      string(requestLocale(r)),
+		Languages:     languageOptions(),
 		Workspaces:    h.workspaceChoices(r, principal),
 		ShowIdentity:  h.canShowIdentity(),
 		ShowAdmin:     h.canShowWorkspaceAdmin(ctx, principal),
