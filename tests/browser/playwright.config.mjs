@@ -79,25 +79,25 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18080 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs-chromium" -bootstrap-admin-email browser-admin@localhost.test -api-token xoxb-browser -session-token browser-session -api-rate-limit=false',
+      command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18080 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs-chromium" -bootstrap-admin-email browser-admin@localhost.test -api-token xoxb-browser -session-token browser-session -peer-session-token browser-peer -api-rate-limit=false',
       url: 'http://127.0.0.1:18080/healthz',
       timeout: 120_000,
       reuseExistingServer: false,
     },
     {
-      command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18081 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs-firefox" -bootstrap-admin-email browser-admin@localhost.test -api-token xoxb-browser -session-token browser-session -api-rate-limit=false',
+      command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18081 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs-firefox" -bootstrap-admin-email browser-admin@localhost.test -api-token xoxb-browser -session-token browser-session -peer-session-token browser-peer -api-rate-limit=false',
       url: 'http://127.0.0.1:18081/healthz',
       timeout: 120_000,
       reuseExistingServer: false,
     },
     {
-      command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18082 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs-webkit" -bootstrap-admin-email browser-admin@localhost.test -api-token xoxb-browser -session-token browser-session -api-rate-limit=false',
+      command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18082 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs-webkit" -bootstrap-admin-email browser-admin@localhost.test -api-token xoxb-browser -session-token browser-session -peer-session-token browser-peer -api-rate-limit=false',
       url: 'http://127.0.0.1:18082/healthz',
       timeout: 120_000,
       reuseExistingServer: false,
     },
     {
-      command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18083 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs-admin" -bootstrap-admin-email browser-admin@localhost.test -api-token xoxb-browser -session-token browser-session -session-admin -api-rate-limit=false',
+      command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18083 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs-admin" -bootstrap-admin-email browser-admin@localhost.test -api-token xoxb-browser -session-token browser-session -peer-session-token browser-peer -session-admin -api-rate-limit=false',
       url: 'http://127.0.0.1:18083/healthz',
       timeout: 120_000,
       reuseExistingServer: false,

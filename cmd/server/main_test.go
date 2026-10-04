@@ -691,3 +691,76 @@ func TestRateLimitsAreSharedWhereReplicasCanBeMany(t *testing.T) {
 		}
 	}
 }
+
+// The peer session is a second static credential every holder shares, so it is
+// refused wherever the first one is, and it cannot alias the first member.
+func TestResolveRefusesAPeerSessionItCannotSeedSafely(t *testing.T) {
+	withProvider := localConfig()
+	withProvider.peerSessionToken = "peer-session"
+	withProvider.oidcIssuer = "https://id.example.com"
+	withProvider.oidcClientID = "client"
+	withProvider.oidcClientSecret = "secret"
+	withProvider.authWorkspace = "Tdev"
+	withProvider.authLookupUser = "Udev"
+	withProvider.authPublicURL = "https://chat.example.com"
+	withProvider.authStateKeyHex = strings.Repeat("ab", 32)
+	if _, err := withProvider.resolve(); err == nil || !strings.Contains(err.Error(), "-peer-session-token") {
+		t.Fatalf("error = %v, want the peer session refused alongside a provider", err)
+	}
+	same := localConfig()
+	same.sessionToken = "dev-session"
+	same.peerSessionToken = "dev-session"
+	if _, err := same.resolve(); err == nil || !strings.Contains(err.Error(), "-peer-session-token") {
+		t.Fatalf("error = %v, want one token for two members refused", err)
+	}
+	elsewhere := localConfig()
+	elsewhere.peerSessionToken = "peer-session"
+	elsewhere.authWorkspace = "Tacme"
+	if _, err := elsewhere.resolve(); err == nil || !strings.Contains(err.Error(), "-peer-session-token") {
+		t.Fatalf("error = %v, want the peer refused outside the development workspace", err)
+	}
+	accepted := localConfig()
+	accepted.sessionToken = "dev-session"
+	accepted.peerSessionToken = "peer-session"
+	if resolved, err := accepted.resolve(); err != nil || resolved.peerSessionToken != "peer-session" {
+		t.Fatalf("resolved=%q err=%v", resolved.peerSessionToken, err)
+	}
+}
+
+// The peer is a plain member of the seeded conversation, signed in through its
+// own session, whatever scopes the first session was escalated to.
+func TestSeedDevelopmentCredentialsSeedsThePeer(t *testing.T) {
+	backing := memory.New()
+	backing.SeedWorkspace(domain.Workspace{ID: defaultWorkspace})
+	backing.SeedUser(domain.User{ID: defaultLookupUser, WorkspaceID: defaultWorkspace})
+	backing.SeedUser(domain.User{ID: localchat.DevelopmentPeerUser, WorkspaceID: defaultWorkspace})
+	backing.SeedConversation(domain.Conversation{ID: defaultConversation, WorkspaceID: defaultWorkspace, Name: "general"})
+	runtime := localchat.Runtime{Service: service.Messages{Store: backing}, Store: backing, TokenSeeder: backing, SessionSeeder: backing}
+	adminScopes, err := developmentScopes(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := resolvedConfig{workspace: defaultWorkspace, lookupUser: defaultLookupUser, apiToken: "xoxb-test", scopes: []string{"chat:write"}, sessionToken: "dev-session", sessionAdmin: true, sessionScopes: adminScopes, peerSessionToken: "peer-session"}
+	if err := seedDevelopmentCredentials(t.Context(), runtime, resolved, discardLogger(), time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := backing.LookupSession(t.Context(), "peer-session")
+	if err != nil || session.UserID != localchat.DevelopmentPeerUser {
+		t.Fatalf("peer session=%+v err=%v", session, err)
+	}
+	memberScopes, _ := developmentScopes(false)
+	if len(session.Scopes) != len(memberScopes) {
+		t.Fatalf("peer scopes=%v, want the member's %v", session.Scopes, memberScopes)
+	}
+	members, err := backing.ListConversationMembers(t.Context(), defaultConversation, domain.PageRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := false
+	for _, member := range members.Users {
+		joined = joined || member.ID == localchat.DevelopmentPeerUser
+	}
+	if !joined {
+		t.Fatalf("the peer is not a member of %s: %v", defaultConversation, members.Users)
+	}
+}

@@ -61,8 +61,13 @@ func TestAHuddleInvitationReachesTheInviteesActivity(t *testing.T) {
 		t.Fatalf("the invitee's activity = %+v, want one invitation", page.Items)
 	}
 	item := page.Items[0]
-	if item.ActorID != "U1" || item.Conversation != "C1" {
-		t.Fatalf("invitation item = %+v, want it from U1 in C1", item)
+	// It names the huddle, which is what tells it from being added to C1.
+	huddle, err := messages.ActiveHuddle(ctx, "T1", "U1", "C1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.ActorID != "U1" || item.Conversation != "C1" || item.CallID != huddle.ID {
+		t.Fatalf("invitation item = %+v, want it from U1 in C1 naming huddle %s", item, huddle.ID)
 	}
 	found := false
 	for _, kind := range item.Kinds {

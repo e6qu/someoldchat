@@ -2155,6 +2155,11 @@ func parityCases() []parityCase {
 				inviteJoined := chat.InviteToHuddle(ctx, "T1", "U1", "U2", "C1")
 				inviteOutsider := chat.InviteToHuddle(ctx, "T1", "U1", "UA", "C1")
 				inviteFromNonParticipant := chat.InviteToHuddle(ctx, "T1", "UA", "U3", "C1")
+				invitation, err := chat.Activity(ctx, "T1", "U3", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+				if err != nil {
+					return nil, err
+				}
+				invitationNamesTheHuddle := len(invitation.Items) == 1 && invitation.Items[0].CallID == started.ID
 
 				active, err := chat.ActiveHuddle(ctx, "T1", "U1", "C1")
 				if err != nil {
@@ -2182,6 +2187,7 @@ func parityCases() []parityCase {
 				reactAfterEnding := chat.SendHuddleReaction(ctx, "T1", "U1", started.ID, "tada")
 				_, gone := chat.ActiveHuddle(ctx, "T1", "U1", "C1")
 				return []any{
+					invitationNamesTheHuddle,
 					started.Title, len(started.Participants), len(joined.Participants), len(active.Participants),
 					ended.EndedAt.IsZero(), gone != nil,
 					alone != nil, offered != nil, answered != nil, candidate != nil,

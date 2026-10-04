@@ -60,6 +60,7 @@ GitHub, and Microsoft Entra ID settings are flags only.
 | `-api-token` | `SAMEOLDCHAT_API_TOKEN` |
 | `-session-token` | `SAMEOLDCHAT_SESSION_TOKEN` |
 | `-session-admin` | `SAMEOLDCHAT_SESSION_ADMIN=1` |
+| `-peer-session-token` | `SAMEOLDCHAT_PEER_SESSION_TOKEN` |
 | `-app-credential-key-hex` | `SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX` |
 | `-bootstrap-admin-email` | `SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL` |
 | `-release-revision` | `SAMEOLDCHAT_RELEASE_REVISION` |
@@ -100,6 +101,16 @@ browser session: the API token keeps member scopes, because nothing about
 administering a workspace through a page requires an integration credential to
 gain control-plane authority as a side effect. A workspace with real identities
 administers itself through them, never through a token every holder shares.
+
+`-peer-session-token` seeds a second static session for a second, plain member
+of the development workspace (`Upeer`, "Peer"), joined to `#general`. A journey
+between two people (an invitation, a huddle someone else ends) cannot be
+qualified by one, and the browser suite signs the second person in with it. It
+carries the same refusals as `-session-token`: it is refused alongside any
+configured provider, refused when it equals `-session-token`, refused when
+`-auth-workspace` names a workspace other than the development one, and belongs
+to local composition only. It never carries administrator scopes, whatever
+`-session-admin` grants the first session.
 
 The application credential key must decode to exactly 32 bytes. It encrypts
 developer-app signing secrets and verification tokens at rest, and the

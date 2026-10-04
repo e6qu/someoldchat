@@ -150,8 +150,7 @@ citation, and the reason is structural rather than an unwritten test: it lives
 on the identity-provider administration page, whose routes are registered only
 where a provider is configured, and the browser servers run without one. That is
 the same reason already recorded for AUTH-02 and AUTH-05. The web tests and the
-cross-profile contract carry it instead, and they can arrange a second member,
-which this suite's single signed-in member cannot.
+cross-profile contract carry it instead.
 
 An administrator can also see the whole picture rather than one channel of it:
 the workspace settings page lists every organization this workspace shares

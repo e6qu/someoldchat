@@ -15,7 +15,9 @@ make browser-qualification-run    # run again without reinstalling
 The suite uses the Playwright and `@axe-core/playwright` versions pinned in
 `package.json` and the lock file. For each engine, and once more for
 administration, it starts `cmd/server` in local composition with the in-memory
-store and a disposable browser session. It does not test a production
+store and two disposable browser sessions: the member every test signs in as,
+and a second plain member (`-peer-session-token`) that a test opens in a
+browser context of its own when a journey needs two people. It does not test a production
 deployment or use a remote authorization provider.
 
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` may point at an already-installed
@@ -64,6 +66,11 @@ The suite exercises behavior that server-side tests cannot observe:
   a modal (validation errors, submission, close), a legacy dialog with a
   `dialog_suggestion`-loaded select, and an App Home published on
   `app_home_opened` and re-rendered after a button are exercised end to end.
+- **Huddles:** starting, the huddle thread, minimising, microphone, camera and
+  screen-share controls with synthetic devices, and, as two signed-in members
+  in two browsers, an invitation found in the invitee's Activity, joining,
+  leaving while the huddle goes on, and ending for everyone, followed live by
+  the other member's header and window.
 - **Sign-out:** signing out through the UI, a signed-out destination that stays
   terminal across reload, no invented sign-in route when the fixture has no
   provider, and a revoked session that cannot reopen a protected page.

@@ -36,6 +36,7 @@ const shellPageStyle = `<style>
 const conversationShellStyle = `<style>
 .shell .channel-header{display:block;min-height:0;padding:0;border-bottom:1px solid var(--line);background:var(--panel-strong)}
 .channel-header-row{display:flex;align-items:center;gap:12px;min-height:48px;padding:6px 16px 4px 20px}
+.huddle-menu-slot{display:flex;align-items:center}
 .shell .channel-identity{display:flex;align-items:center;gap:12px;flex:1 1 auto;min-width:0}
 .shell .channel-title{flex:0 1 auto;margin:0 0 0 -8px;min-width:0;font-size:18px;font-weight:800;display:flex;white-space:nowrap}
 .channel-name-button{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%;padding:3px 8px;border-radius:7px;color:var(--text);text-decoration:none}

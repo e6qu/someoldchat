@@ -5865,7 +5865,13 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 	// One participant remains, so the huddle is still running and this reader
 	// is offered the way back in rather than a way to start a second one.
 	afterLeaving := get(t, mux, "/app?channel=Cdev").Body.String()
-	requireContains(t, "after leaving", afterLeaving, "Join huddle")
+	requireContains(t, "after leaving", afterLeaving, "Join huddle", `id="huddle-menu" data-fragment="/app/huddle?part=menu&amp;channel=Cdev" data-live="true"`)
+	// The header's menu is a live region of its own and follows the huddle
+	// without a page load, so it cannot go on saying "in progress" after the
+	// huddle has ended.
+	menu := get(t, mux, "/app/huddle?part=menu&channel=Cdev").Body.String()
+	requireContains(t, "huddle menu fragment", menu, `aria-label="Huddle, in progress"`, "Join huddle")
+	requireMissing(t, "huddle menu fragment", menu, "<html", "huddle-window")
 	// Somebody who is not in the huddle has no media session: the controls
 	// belong to a connection this reader does not have.
 	requireMissing(t, "after leaving", afterLeaving, "Start a huddle", "data-huddle-call=")
@@ -5879,6 +5885,9 @@ func TestTheHuddleBarRunsTheLifecycleAndOffersItsMedia(t *testing.T) {
 		t.Fatal("the huddle outlived its last participant")
 	}
 	requireContains(t, "after the last person left", get(t, mux, "/app?channel=Cdev").Body.String(), "Start a huddle")
+	ended := get(t, mux, "/app/huddle?part=menu&channel=Cdev").Body.String()
+	requireContains(t, "huddle menu after it ended", ended, `aria-label="Huddle"`, "Start a huddle")
+	requireMissing(t, "huddle menu after it ended", ended, "in progress")
 }
 
 // HUDDLE-01: two people pressing start at the same moment must end up in one

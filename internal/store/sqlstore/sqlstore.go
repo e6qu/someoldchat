@@ -418,7 +418,7 @@ CREATE INDEX IF NOT EXISTS thread_follows_conversation_root ON thread_follows(co
 CREATE TABLE IF NOT EXISTS activity_items (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  actor_id TEXT NOT NULL DEFAULT '', conversation_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '',
- reminder_id TEXT NOT NULL DEFAULT '', canvas_id TEXT NOT NULL DEFAULT '', list_item_id TEXT NOT NULL DEFAULT '', list_id TEXT NOT NULL DEFAULT '', shared_invite_id TEXT NOT NULL DEFAULT '', reaction_name TEXT NOT NULL DEFAULT '', occurred_at INTEGER NOT NULL,
+ reminder_id TEXT NOT NULL DEFAULT '', canvas_id TEXT NOT NULL DEFAULT '', list_item_id TEXT NOT NULL DEFAULT '', list_id TEXT NOT NULL DEFAULT '', shared_invite_id TEXT NOT NULL DEFAULT '', call_id TEXT NOT NULL DEFAULT '', reaction_name TEXT NOT NULL DEFAULT '', occurred_at INTEGER NOT NULL,
  read_at INTEGER NOT NULL DEFAULT 0, cleared_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS activity_items_user_time ON activity_items(workspace_id, user_id, cleared_at, occurred_at DESC, id DESC);
@@ -614,7 +614,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 212
+const schemaVersion = 213
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3597,6 +3597,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 213: huddle invitations in Activity ---
+	if version < 213 {
+		// A huddle invitation was filed as a bare conversation invitation and
+		// read as "Added you to #channel". Invitations from before cannot be
+		// told apart, so they keep that reading; new ones name their huddle.
+		columns, err := s.tableColumns(ctx, db, "activity_items")
+		if err != nil {
+			return err
+		}
+		if !columns["call_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE activity_items ADD COLUMN call_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate huddle invitations: %w", err)
+			}
+		}
+	}
+	// --- end schema 213 ---
 	// --- schema 212: shared rate limits ---
 	if version < 212 {
 		// Rate limits were held by each process. The table starts empty,
@@ -14663,7 +14679,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 	if !request.Valid() {
 		return domain.ActivityPage{}, store.InvalidArgument("activity filter is invalid")
 	}
-	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.app_reminder_id, a.canvas_id, a.list_item_id, a.list_id, a.shared_invite_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
+	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.app_reminder_id, a.canvas_id, a.list_item_id, a.list_id, a.shared_invite_id, a.call_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
 		FROM activity_items a WHERE a.workspace_id = ? AND a.user_id = ?`
 	args := []any{workspace, user}
 	if request.ClearedOnly {
@@ -14698,7 +14714,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 	for rows.Next() {
 		var item domain.ActivityItem
 		var occurredAt, readAt, clearedAt int64
-		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.AppReminderID, &item.CanvasID, &item.ListItemID, &item.ListID, &item.SharedInviteID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.AppReminderID, &item.CanvasID, &item.ListItemID, &item.ListID, &item.SharedInviteID, &item.CallID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
 			rows.Close()
 			return domain.ActivityPage{}, err
 		}
@@ -14949,8 +14965,9 @@ func (s *Store) InviteToHuddle(ctx context.Context, event events.Event) error {
 	}
 	defer tx.Rollback()
 	id := domain.ActivityIDFor(domain.UserID(invitee), "huddle_invite:"+string(event.ID))
-	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, conversation_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-		id, event.WorkspaceID, invitee, event.ActorID, channel, event.CreatedAt.UTC().UnixNano()); err != nil {
+	call, _ := delivered.Field("call_id")
+	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, conversation_id, call_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+		id, event.WorkspaceID, invitee, event.ActorID, channel, call, event.CreatedAt.UTC().UnixNano()); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, id, domain.ActivityInvitation); err != nil {

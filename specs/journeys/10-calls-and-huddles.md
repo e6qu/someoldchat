@@ -160,8 +160,9 @@ flowing; a second proves a participant's camera and screen are forwarded at once
 as two distinct streams, each carrying RTP, so a subscriber can show a screen
 share beside the sharer's camera rather than in place of it. Bounded gaps,
 recorded rather than hidden: two browsers forwarding to each other end to end is
-still not covered by the browser suite, because the harness authenticates one
-session, so it drives one browser into a huddle and not two. What the browser
+still not covered by the browser suite. It signs in two members and drives both
+through a huddle's invitation, leaving and ending, but asserts no media crossing
+between them. What the browser
 suite covers is everything one browser decides — the microphone opening, the
 connection to the SFU establishing, the track muting, the camera starting,
 sharing the screen as a second presenter tile while the camera keeps playing,
@@ -173,14 +174,16 @@ and its own presence broadcast returning to badge its tile.
   Firefox, and WebKit where supported and records explicit unsupported
   boundaries.
 - Multi-client tests prove join/leave/reconnect/end state and accessible
-  mute/video/share announcements. Inviting a specific member (HUDDLE-03) is
-  proven at the seam and the service rather than in the browser suite, for the
-  same reason the peer-to-peer handshake is: the harness authenticates one
-  session and cannot arrange the second member an invitation needs. The seam
-  parity suite drives the invitation across both compositions with every
-  refusal — self, already-joined, an outsider to the conversation, and a
-  non-participant inviting — and a service test reads the invitation back
-  through the invitee's Activity and confirms nobody else is told.
+  mute/video/share announcements. Inviting a specific member (HUDDLE-03) and
+  leaving and ending (HUDDLE-04) run in the browser suite as two signed-in
+  members, each in their own browser: one invites, the other finds the
+  invitation in Activity named as a huddle invitation, joins, leaves while the
+  huddle goes on, and sees the huddle end in the conversation header and the
+  huddle window without reloading. The seam parity suite drives the invitation
+  across both compositions with every refusal — self, already-joined, an
+  outsider to the conversation, and a non-participant inviting — and a service
+  test reads the invitation back through the invitee's Activity and confirms
+  nobody else is told.
 - Official SDKs exercise `calls.*` with app ownership and error variants.
 - A live Slack sandbox records conversation events and metadata behavior;
   media quality comparison is separately bounded and MUST not be inferred from

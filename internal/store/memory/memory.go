@@ -204,6 +204,7 @@ func (s *Store) InviteToHuddle(_ context.Context, event events.Event) error {
 	}
 	invitee, _ := delivered.Field("user_id")
 	channel, _ := delivered.Field("channel_id")
+	call, _ := delivered.Field("call_id")
 	if invitee == "" {
 		return store.InvalidArgument("a huddle invitation names no invitee")
 	}
@@ -213,7 +214,7 @@ func (s *Store) InviteToHuddle(_ context.Context, event events.Event) error {
 	s.activityItems[id] = domain.ActivityItem{
 		ID: id, WorkspaceID: event.WorkspaceID, UserID: domain.UserID(invitee),
 		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, ActorID: event.ActorID,
-		Conversation: domain.ConversationID(channel), OccurredAt: event.CreatedAt.UTC(),
+		Conversation: domain.ConversationID(channel), CallID: domain.CallID(call), OccurredAt: event.CreatedAt.UTC(),
 	}
 	s.outbox = append(s.outbox, event)
 	return nil

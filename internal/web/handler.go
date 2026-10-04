@@ -7193,7 +7193,11 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 				if !strings.HasPrefix(name, "#") {
 					name = "#" + name
 				}
-				view.Text = template.HTML("Added you to " + template.HTMLEscapeString(name) + ".")
+				if item.CallID != "" {
+					view.Text = template.HTML("Invited you to the huddle in " + template.HTMLEscapeString(name) + ".")
+				} else {
+					view.Text = template.HTML("Added you to " + template.HTMLEscapeString(name) + ".")
+				}
 				view.SourceURL = appURL(string(conversation.ID), "", "", "", "")
 				view.ChannelName = name
 			} else if !errors.Is(conversationErr, store.ErrNotFound) {
