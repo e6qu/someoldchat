@@ -59,7 +59,7 @@ func writeAuthAdminJSON(w http.ResponseWriter, status int, value any) {
 const authAdminStyle = `<style>
 .bar{min-height:52px;display:flex;align-items:center;gap:18px;padding:10px max(18px,calc((100% - 960px)/2));background:var(--accent);color:var(--on-accent)}.bar strong{font-size:17px}.bar .bar-end{margin-left:auto;display:flex;align-items:center;gap:12px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}
 .wrap{max-width:960px;margin:32px auto;padding:0 18px 48px}
-.heading{margin-bottom:22px}.heading h1{margin:0 0 4px;font-size:clamp(1.8rem,5vw,2.5rem)}.heading p,.section-head p{margin:0;color:var(--muted)}
+.heading{margin-bottom:22px}.heading h1{margin:0 0 4px;font-size:clamp(1.8rem,calc(5vw / var(--zoom, 1)),2.5rem)}.heading p,.section-head p{margin:0;color:var(--muted)}
 .card{margin:16px 0;padding:22px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .section-head{margin-bottom:14px}.section-head h2{margin:0 0 3px;font-size:20px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:18px;border-top:1px solid var(--line);padding:14px 0}.row:last-child{padding-bottom:0}

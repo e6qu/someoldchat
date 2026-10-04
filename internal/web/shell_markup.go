@@ -349,6 +349,12 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-accessibility" aria-labelledby="pref-tab-accessibility" tabindex="0" hidden>
       <h3>Accessibility</h3>
+      <fieldset><legend>Zoom</legend>
+        <label for="pref-zoom">Make everything larger or smaller</label>
+        <select id="pref-zoom" data-preference="zoom" data-default="100">
+          <option value="80">80%</option><option value="90">90%</option><option value="100">100%</option><option value="110">110%</option><option value="125">125%</option><option value="150">150%</option>
+        </select>
+      </fieldset>
       <fieldset><legend>Links</legend>
         <label><input type="checkbox" data-preference="underline-links"> Underline links in messages</label>
       </fieldset>

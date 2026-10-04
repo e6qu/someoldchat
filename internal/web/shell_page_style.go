@@ -64,7 +64,7 @@ const conversationShellStyle = `<style>
 .bookmark-add>summary{display:grid;place-items:center;width:26px;height:26px;border-radius:6px;color:var(--muted);cursor:pointer;list-style:none}
 .bookmark-add>summary::-webkit-details-marker{display:none}
 .bookmark-add>summary:hover{background:var(--hover);color:var(--text)}
-.bookmark-form{position:absolute;z-index:40;top:30px;left:0;display:grid;gap:6px;width:min(320px,calc(100vw - 32px));padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.bookmark-form{position:absolute;z-index:40;top:30px;left:0;display:grid;gap:6px;width:min(320px,calc(100vw / var(--zoom, 1) - 32px));padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);box-shadow:var(--shadow)}
 .bookmark-form label{font-size:13px;font-weight:700}
 .bookmark-form input{padding:7px 9px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);font:inherit}
 .bookmarks-bar{display:flex;align-items:center;gap:4px;margin:0;padding:2px 16px 6px;list-style:none;overflow-x:auto;scrollbar-width:thin}
@@ -105,7 +105,7 @@ const conversationShellStyle = `<style>
 .side-link[aria-current=page] .dm-copy small,.side-link[aria-current=page] .dm-time{color:var(--muted)}
 .conversation-gate-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .conversation-gate-actions form{margin:0}
-.conversation-details{width:min(640px,calc(100vw - 32px));height:min(720px,calc(100vh - 32px))}
+.conversation-details{width:min(640px,calc(100vw / var(--zoom, 1) - 32px));height:min(720px,calc(100vh / var(--zoom, 1) - 32px))}
 .conversation-details[open]{display:flex;flex-direction:column}
 .conversation-details-head h2{display:flex;align-items:center;gap:6px;font-size:22px}
 .details-type{padding:0 20px 8px}
@@ -157,7 +157,7 @@ const conversationShellStyle = `<style>
 .channel-tabs{padding:0 8px}
 .bookmarks-bar{padding:0 8px 4px}
 .bookmark-form{position:fixed;top:auto;left:16px;right:16px;width:auto;margin-top:6px}
-.conversation-details{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;border-radius:0}
+.conversation-details{width:calc(100vw / var(--zoom, 1));max-width:calc(100vw / var(--zoom, 1));height:calc(100dvh / var(--zoom, 1));max-height:calc(100dvh / var(--zoom, 1));border-radius:0}
 .details-row{flex-wrap:wrap}
 }
 @media(max-height:520px){

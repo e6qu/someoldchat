@@ -102,7 +102,7 @@ const viewStyle = `<style>
 // are declared on the dropdown's own classes with enough specificity that a
 // header's link colour (white on the purple bar) cannot bleed into it, which
 // is how the search page's suggestions became white on white.
-const searchSuggestionStyle = `.search-suggestions{position:absolute;z-index:30;top:calc(100% + 6px);left:0;right:0;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
+const searchSuggestionStyle = `.search-suggestions{position:absolute;z-index:30;top:calc(100% + 6px);left:0;right:0;max-height:min(420px,calc(70vh / var(--zoom, 1)));overflow:auto;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
 .search-suggestions[hidden]{display:none}
 .search-suggestions a.search-suggestion{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:4px 10px;padding:7px 10px;border-radius:6px;color:var(--text);font-weight:400;text-decoration:none}
 .search-suggestions a.search-suggestion:hover,.search-suggestions a.search-suggestion[aria-selected=true]{background:var(--hover);color:var(--text)}
@@ -185,7 +185,7 @@ const viewControlRules = `.v-btn{display:inline-flex;align-items:center;justify-
 // profilePanelStyle is the member profile panel's own stylesheet. It is part
 // of viewStyle, and the workspace page includes it on its own, because the
 // panel opens over the timeline too.
-const profilePanelStyle = `.profile-panel{position:fixed;z-index:60;top:0;right:0;bottom:0;display:flex;flex-direction:column;width:min(400px,100vw);border-left:1px solid var(--line);background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);overflow:hidden}
+const profilePanelStyle = `.profile-panel{position:fixed;z-index:60;top:0;right:0;bottom:0;display:flex;flex-direction:column;width:min(400px,calc(100vw / var(--zoom, 1)));border-left:1px solid var(--line);background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);overflow:hidden}
 .profile-panel[hidden]{display:none}
 .pp-head{display:flex;align-items:center;gap:8px;min-height:52px;padding:0 10px 0 18px;border-bottom:1px solid var(--line)}
 .pp-head h2{margin:0 auto 0 0;font-size:18px}
@@ -208,7 +208,7 @@ const profilePanelStyle = `.profile-panel{position:fixed;z-index:60;top:0;right:
 .pp-section dt{color:var(--muted);font-size:12px;font-weight:700}
 .pp-section dd{margin:2px 0 0;overflow-wrap:anywhere}
 .pp-error{margin:0;padding:18px;color:var(--danger)}
-@media(max-width:650px){.profile-panel{width:100vw;border-left:0}}`
+@media(max-width:650px){.profile-panel{width:calc(100vw / var(--zoom, 1));border-left:0}}`
 
 // profilePanelScript opens a member's profile in the side panel. It is the
 // single entry point every surface uses: window.sameoldchatOpenProfile(id,

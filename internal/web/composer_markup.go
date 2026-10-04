@@ -194,8 +194,8 @@ const composerStyle = `<style>
 .composer.is-dragging{border-color:var(--action);box-shadow:0 0 0 3px color-mix(in srgb,var(--action) 25%,transparent)}
 .composer>.form-error{margin:8px 8px 0}
 .composer-format{display:flex;align-items:center;flex-wrap:wrap;gap:2px;padding:4px 6px;border-bottom:1px solid var(--line);border-radius:9px 9px 0 0;background:color-mix(in srgb,var(--panel) 60%,transparent)}
-.composer-input{display:block;width:100%;min-height:42px;max-height:40vh;resize:none;overflow-y:auto;border:0;outline:0;background:transparent;color:var(--text);padding:10px 12px 4px;font:inherit;line-height:1.45}
-.composer-editor{min-height:42px;max-height:40vh;overflow-y:auto;padding:10px 12px 4px;outline:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);line-height:1.45;cursor:text}
+.composer-input{display:block;width:100%;min-height:42px;max-height:calc(40vh / var(--zoom, 1));resize:none;overflow-y:auto;border:0;outline:0;background:transparent;color:var(--text);padding:10px 12px 4px;font:inherit;line-height:1.45}
+.composer-editor{min-height:42px;max-height:calc(40vh / var(--zoom, 1));overflow-y:auto;padding:10px 12px 4px;outline:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);line-height:1.45;cursor:text}
 .composer-editor>*{margin:0}
 .composer-editor.is-empty::before{content:attr(data-placeholder);color:var(--muted);pointer-events:none;position:absolute}
 .composer-editor p{margin:0;min-height:1.45em}
@@ -221,11 +221,11 @@ const composerStyle = `<style>
 [data-tip]:hover::after,[data-tip]:focus-visible::after{content:attr(data-tip);position:absolute;z-index:20;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);padding:4px 8px;border-radius:5px;background:var(--text);color:var(--bg);font-size:12px;font-weight:700;white-space:nowrap;pointer-events:none}
 .composer-menu{position:relative}
 .composer-menu>summary{list-style:none}
-.composer-popover{position:absolute;z-index:12;left:0;bottom:calc(100% + 6px);display:grid;min-width:230px;max-width:min(320px,calc(100vw - 32px));border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
+.composer-popover{position:absolute;z-index:12;left:0;bottom:calc(100% + 6px);display:grid;min-width:230px;max-width:min(320px,calc(100vw / var(--zoom, 1) - 32px));border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
 .composer-popover button,.composer-popover a{display:flex;width:100%;min-height:32px;align-items:center;border:0;border-radius:5px;background:transparent;color:var(--text);padding:6px 10px;text-align:left;text-decoration:none;font:inherit;cursor:pointer}
 .composer-popover button:hover,.composer-popover button:focus-visible,.composer-popover a:hover,.composer-popover a:focus-visible{background:var(--action);color:var(--on-strong)}
 .composer-recent-files{display:grid;border-top:1px solid var(--line);margin-top:4px;padding-top:4px}.composer-popover-heading{margin:2px 10px 4px;font-size:12px;font-weight:700;color:var(--muted)}.composer-recent-files button{justify-content:space-between;gap:10px}.composer-recent-files button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.composer-recent-files small{flex:0 0 auto;color:var(--muted);font-size:11px}.composer-recent-files button:hover small,.composer-recent-files button:focus-visible small{color:inherit}
-.composer-suggestions{position:absolute;z-index:14;left:0;right:0;bottom:calc(100% + 6px);max-height:min(300px,45vh);overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
+.composer-suggestions{position:absolute;z-index:14;left:0;right:0;bottom:calc(100% + 6px);max-height:min(300px,calc(45vh / var(--zoom, 1)));overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
 .composer-suggestions [role=option]{display:flex;gap:10px;align-items:center;min-height:34px;border-radius:5px;padding:5px 9px;cursor:pointer;color:var(--text)}
 .composer-suggestions [role=option][aria-selected=true]{background:var(--action);color:var(--on-strong)}
 .composer-suggestions [role=option][aria-selected=true] .suggestion-meta{color:inherit}
@@ -254,7 +254,7 @@ const composerStyle = `<style>
 .schedule-menu{position:relative}
 .schedule-toggle{border-radius:0 6px 6px 0;border-left:1px solid color-mix(in srgb,var(--on-strong) 35%,transparent);min-width:28px;padding:0 4px;list-style:none}
 .schedule-toggle::-webkit-details-marker{display:none}
-.schedule-popover{position:absolute;z-index:12;right:0;bottom:calc(100% + 6px);display:grid;gap:2px;width:min(280px,calc(100vw - 32px));padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.schedule-popover{position:absolute;z-index:12;right:0;bottom:calc(100% + 6px);display:grid;gap:2px;width:min(280px,calc(100vw / var(--zoom, 1) - 32px));padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);box-shadow:var(--shadow)}
 .schedule-popover h3{margin:2px 8px 6px;font-size:14px}
 .schedule-popover>button,.schedule-custom>summary{display:flex;align-items:center;width:100%;min-height:32px;border:0;border-radius:5px;background:transparent;color:var(--text);padding:6px 8px;text-align:left;font:inherit;cursor:pointer;list-style:none}
 .schedule-custom>summary::-webkit-details-marker{display:none}
@@ -279,7 +279,7 @@ const composerStyle = `<style>
 .composer-outbox-item.is-prompt .composer-outbox-state{color:var(--muted);font-weight:400}
 .composer-outbox-actions{grid-column:2;grid-row:1/span 2;display:flex;gap:6px}
 .composer-outbox-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 10px;font-weight:700;cursor:pointer}
-.composer-dialog{width:min(460px,calc(100vw - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}
+.composer-dialog{width:min(460px,calc(100vw / var(--zoom, 1) - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}
 .composer-dialog::backdrop{background:#0008}
 .composer-dialog-form{display:grid;gap:12px;padding:18px}
 .composer-dialog h2{margin:0;font-size:18px}

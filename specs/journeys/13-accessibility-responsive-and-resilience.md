@@ -16,6 +16,12 @@ Slack's documented shortcuts coexist with browser, operating-system, and
 assistive-technology commands. The shortcut help surface reports the actual
 platform mapping implemented.
 
+Preferences › Accessibility › Zoom makes everything larger or smaller (80% to
+150%), as Slack's does, and follows the account like other preferences. The
+page is zoomed as a whole, so anything sized to the window — the shell,
+dialogs, popovers — MUST still fit it at every step, and a menu placed by
+script MUST still open beside what opened it.
+
 ## A11Y-02 — Navigate with a screen reader
 
 Workspace navigation, channel/DM lists, conversation, thread, Activity, Later,

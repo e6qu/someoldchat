@@ -84,7 +84,7 @@ a.slack-mention:hover{text-decoration:underline}
 .slack-mention[data-self],.slack-mention.mention-broadcast{background:var(--mention-pill);color:var(--mention-pill-text)}
 .message-content[hidden],.message-editor[hidden]{display:none}
 .message-editor{margin:4px 0 2px;padding:8px;border:1px solid var(--field-line);border-radius:8px;background:var(--panel-strong)}
-.message-editor textarea{display:block;width:100%;min-height:44px;max-height:40vh;resize:vertical;border:0;outline:0;background:transparent;color:var(--text);font:inherit;line-height:1.46}
+.message-editor textarea{display:block;width:100%;min-height:44px;max-height:calc(40vh / var(--zoom, 1));resize:vertical;border:0;outline:0;background:transparent;color:var(--text);font:inherit;line-height:1.46}
 .message-editor:focus-within{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
 .editor-foot{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:6px}
 .editor-hint{margin-right:auto;color:var(--muted);font-size:12px}
@@ -136,8 +136,8 @@ a.slack-mention:hover{text-decoration:underline}
 .quick-reaction .custom-emoji{width:18px;height:18px}
 .message-more{position:relative;display:inline-block}
 .message-more>summary{list-style:none}
-.message-menu,.message-submenu,.file-menu{display:grid;min-width:260px;max-width:min(340px,calc(100vw - 16px));padding:6px 0;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);text-align:left}
-.message-more>.message-menu{position:absolute;z-index:40;top:36px;right:0;max-height:min(70vh,520px);overflow:auto}
+.message-menu,.message-submenu,.file-menu{display:grid;min-width:260px;max-width:min(340px,calc(100vw / var(--zoom, 1) - 16px));padding:6px 0;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);text-align:left}
+.message-more>.message-menu{position:absolute;z-index:40;top:36px;right:0;max-height:min(calc(70vh / var(--zoom, 1)),520px);overflow:auto}
 .message-menu.is-fixed,.message-submenu.is-fixed{position:fixed;top:auto;right:auto}
 .message-menu form{display:block}
 .message-menu [role=menuitem],.message-submenu [role=menuitem],.file-menu summary{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;min-height:30px;margin:0;padding:4px 20px;border:0;border-radius:0;background:transparent;color:var(--text);font:inherit;font-size:14px;font-weight:400;text-align:left;text-decoration:none;cursor:pointer;list-style:none;white-space:nowrap}
@@ -187,7 +187,7 @@ a.slack-mention:hover{text-decoration:underline}
 .block-action.style-primary:hover{filter:brightness(.92);background:var(--ok)}
 .block-action.style-danger{border-color:var(--danger);background:var(--panel-strong);color:var(--danger)}
 .block-action.style-danger:hover{background:var(--danger);color:var(--on-strong)}
-.emoji-picker{position:fixed;z-index:60;display:flex;flex-direction:column;width:min(360px,calc(100vw - 16px));height:min(440px,calc(100vh - 16px));border:1px solid var(--line);border-radius:10px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);overflow:hidden}
+.emoji-picker{position:fixed;z-index:60;display:flex;flex-direction:column;width:min(360px,calc(100vw / var(--zoom, 1) - 16px));height:min(440px,calc(100vh / var(--zoom, 1) - 16px));border:1px solid var(--line);border-radius:10px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);overflow:hidden}
 .emoji-picker[hidden]{display:none}
 .emoji-picker>*{flex:0 0 auto}
 .emoji-picker-head{display:flex;gap:6px;align-items:center;padding:10px 10px 6px}
@@ -215,7 +215,7 @@ a.slack-mention:hover{text-decoration:underline}
 .emoji-preview-glyph .custom-emoji{width:28px;height:28px}
 .emoji-preview-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;font-size:13px}
 .emoji-add{flex:0 0 auto;padding:5px 10px;border:1px solid var(--field-line);border-radius:6px;color:var(--text);font-size:13px;font-weight:700;text-decoration:none}
-.message-dialog{width:min(520px,calc(100vw - 24px));max-height:calc(100vh - 32px);padding:0;border:1px solid var(--line);border-radius:10px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
+.message-dialog{width:min(520px,calc(100vw / var(--zoom, 1) - 24px));max-height:calc(100vh / var(--zoom, 1) - 32px);padding:0;border:1px solid var(--line);border-radius:10px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
 .message-dialog::backdrop{background:#0000008c}
 .message-dialog[open]:not(:modal){position:fixed;inset:0;z-index:70;margin:auto}
 .message-dialog form{display:grid;gap:10px;padding:20px 24px}
@@ -236,7 +236,7 @@ a.slack-mention:hover{text-decoration:underline}
 .forward-destinations option{padding:5px 8px;border-radius:4px}
 .dialog-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:6px}
 .dialog-spacer{flex:1 1 auto}
-.lightbox{width:100vw;height:100vh;max-width:none;max-height:none;margin:0;padding:0;border:0;background:#111214f2;color:var(--on-strong)}
+.lightbox{width:calc(100vw / var(--zoom, 1));height:calc(100vh / var(--zoom, 1));max-width:none;max-height:none;margin:0;padding:0;border:0;background:#111214f2;color:var(--on-strong)}
 .lightbox::backdrop{background:#000c}
 .lightbox[open]{display:grid;grid-template-rows:auto minmax(0,1fr)}
 .lightbox-head{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#000000a6}
@@ -249,7 +249,7 @@ a.slack-mention:hover{text-decoration:underline}
 .lightbox-button .action-icon{width:20px;height:20px}
 .lightbox-stage{display:grid;place-items:center;min-height:0;padding:16px}
 .lightbox-stage img{max-width:100%;max-height:100%;object-fit:contain}
-.toast{position:fixed;z-index:80;left:50%;bottom:24px;transform:translateX(-50%);max-width:calc(100vw - 32px);padding:10px 16px;border-radius:8px;background:#1d1c1d;color:#fff;box-shadow:var(--shadow);font-size:14px}
+.toast{position:fixed;z-index:80;left:50%;bottom:24px;transform:translateX(-50%);max-width:calc(100vw / var(--zoom, 1) - 32px);padding:10px 16px;border-radius:8px;background:#1d1c1d;color:#fff;box-shadow:var(--shadow);font-size:14px}
 html[data-theme=dark] .toast{background:#e9e7ea;color:#1a1d21}
 .toast[hidden]{display:none}
 .content:has(>.thread){grid-template-columns:minmax(0,1fr) minmax(0,400px);grid-template-areas:"head thread" "timeline thread" "composer thread"}
@@ -269,12 +269,12 @@ html[data-theme=dark] .toast{background:#e9e7ea;color:#1a1d21}
 .message-actions,.message-actions:has(details[open]){position:absolute;top:auto;bottom:calc(100% - 8px);right:8px;display:none;padding:2px;border:1px solid var(--line);background:var(--panel-strong);box-shadow:0 2px 6px #0000001f}
 .message:focus-within>.message-actions,.message:focus>.message-actions,.message-actions:has(details[open]){display:flex}
 .message:hover:not(:focus-within)>.message-actions{display:none}
-.message-more>.message-menu{position:fixed;left:8px;right:8px;top:auto;bottom:8px;min-width:0;max-width:none;max-height:70vh}
+.message-more>.message-menu{position:fixed;left:8px;right:8px;top:auto;bottom:8px;min-width:0;max-width:none;max-height:calc(70vh / var(--zoom, 1))}
 .menu-submenu>.message-submenu{position:static;box-shadow:none;border:0;border-top:1px solid var(--line);border-radius:0;min-width:0}
 .message-block-fields{grid-template-columns:minmax(0,1fr)}
 .content:has(>.thread){grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "thread" "composer"}
 .content:has(>.thread) .timeline-wrap{display:none}
-.emoji-picker{left:8px !important;right:8px;width:auto;bottom:8px;top:auto !important;height:min(420px,70vh)}
+.emoji-picker{left:8px !important;right:8px;width:auto;bottom:8px;top:auto !important;height:min(420px,calc(70vh / var(--zoom, 1)))}
 }
 /* A closed disclosure hides its content in every engine. The menus' own
    display rules (a grid submenu, flex items) otherwise win over WebKit's
