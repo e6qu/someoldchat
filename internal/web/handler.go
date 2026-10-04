@@ -232,8 +232,12 @@ type messageView struct {
 	// ProfileID is set only for a member posting as themselves, so their name
 	// and avatar open their profile (PROFILE-01); an app or a custom username
 	// is not a member whose profile the name could honestly open.
-	ProfileID  string
-	AuthorName string
+	ProfileID string
+	// HiddenAuthor marks a message from a person the reader has hidden: as in
+	// Slack it is still delivered and counted, but shown behind a click-through
+	// with its author's name and photo.
+	HiddenAuthor bool
+	AuthorName   string
 	// ChannelPrivate and DirectLabel are a search hit's context: a lock for a
 	// private channel, "Direct message with Ana Lima" for a DM.
 	ChannelPrivate bool
@@ -3591,6 +3595,7 @@ function newestMessage(){var newest=null;Array.prototype.forEach.call(document.q
 function arrivalsSince(newest){var since=newest?parseFloat(newest.getAttribute('data-ts')):0;return Array.prototype.filter.call(document.querySelectorAll('[data-fragment] .message[data-ts]'),function(node){return parseFloat(node.getAttribute('data-ts'))>since}).length}
 function arrivalSentence(arrived){
 var latest=newestMessage();
+if(latest&&latest.classList.contains('is-hidden-author'))return arrived===1?'New message from a person you have hidden.':arrived+' new messages.';
 var author=latest&&latest.querySelector('.message-head .author');
 var text=latest&&latest.querySelector('.message-text');
 var said=text?text.textContent.replace(/\s+/g,' ').trim():'';
@@ -3981,6 +3986,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/sidebar/sections/collapse", h.setSidebarSectionCollapsed)
 	mux.HandleFunc("POST /app/sidebar/sections/notify", h.setSidebarSectionNotificationLevel)
 	mux.HandleFunc("POST /app/sidebar/sections/move", h.moveSidebarSection)
+	mux.HandleFunc("POST /app/people/hidden", h.setPersonHidden)
 	mux.HandleFunc("POST /app/sidebar/sections/assign", h.assignConversationToSidebarSection)
 	mux.HandleFunc("POST /app/activity/read", h.acknowledgeActivityReminders)
 	mux.HandleFunc("GET /app/notifications", h.notifications)
@@ -5748,6 +5754,12 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 	}
 	list.QuickReactions = quickReactions(recent, emojiImages)
+	// The reader's hidden people. A failed read hides nobody, which is what
+	// the reader saw before they hid anyone.
+	hiddenPeople := map[domain.UserID]bool{}
+	if preferences, err := h.Messages.MemberPreferences(ctx, principal.WorkspaceID, principal.UserID); err == nil {
+		hiddenPeople = domain.HiddenPeople(preferences)
+	}
 	pinned := map[domain.MessageID]domain.UserID{}
 	if principal.HasScope(auth.ScopePinsRead) || principal.HasScope(auth.ScopePinsWrite) {
 		pins, _, _, err := h.Messages.Pins(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: pinWindow})
@@ -5890,6 +5902,9 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 		// A human posting as themselves carries their current status beside their
 		// name; an app message or one wearing a custom username is not a person.
+		if message.AuthorID != principal.UserID && hiddenPeople[message.AuthorID] {
+			view.HiddenAuthor = true
+		}
 		if message.AppID == "" && presentation.Username == "" && message.AuthorID != "" {
 			view.ProfileID = string(message.AuthorID)
 			if emoji := names.statusEmoji(message.AuthorID); emoji != "" {

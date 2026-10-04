@@ -30,6 +30,7 @@ const shellStyle = `<style>
 .rail-item{display:flex;flex-direction:column;align-items:center;gap:3px;width:62px;padding:0;border:0;background:transparent;color:var(--on-accent);text-decoration:none;font-size:11px;font-weight:700;cursor:pointer;list-style:none;position:relative}
 html .rail-item[data-rail=files],html .menu-list a[data-more-tab]{display:none}
 html[data-pref-name-display=display] .full-name{display:none}
+.hidden-people{list-style:none;margin:0;padding:0;display:grid;gap:6px}.hidden-people li{display:flex;align-items:center;justify-content:space-between;gap:12px}.hidden-people form{margin:0}.hidden-people button{min-height:28px}
 html[data-pref-nav-dms=false] .rail-item[data-rail=dms],html[data-pref-nav-activity=false] .rail-item[data-rail=activity],html[data-pref-nav-later=false] .rail-item[data-rail=later]{display:none}
 html[data-pref-nav-files=true] .rail-item[data-rail=files]{display:flex}
 html[data-pref-nav-dms=false] .menu-list a[data-more-tab=dms],html[data-pref-nav-activity=false] .menu-list a[data-more-tab=activity],html[data-pref-nav-later=false] .menu-list a[data-more-tab=later],html:not([data-pref-nav-files=true]) .menu-list a[data-more-tab=files]{display:flex}

@@ -4383,6 +4383,44 @@ test('[APP-05 FILE-01 A11Y-01] /collapse and /expand hide and show inline images
   await expect(page.locator('.message-text', { hasText: '/collapse' })).toHaveCount(0);
 });
 
+// Slack's "Hide a person": hidden from their profile, the person's messages
+// are still delivered but sit behind a click-through without their name, and
+// Privacy & visibility lists them for unhiding.
+test('[PROFILE-01 NAV-06 A11Y-01] a person can be hidden from their profile and unhidden from Privacy & visibility', async ({ page, context, request }) => {
+  await signIn(context);
+  const bot = await installActivityBot(page, request);
+  const identity = await (await request.post('/api/auth.test', { headers: { authorization: `Bearer ${bot.token}` } })).json();
+  expect(identity.ok, JSON.stringify(identity)).toBe(true);
+  const text = `from someone hidden ${Date.now()}`;
+  const posted = await request.post('/api/chat.postMessage', {
+    headers: { authorization: `Bearer ${bot.token}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL, text },
+  });
+  expect((await posted.json()).ok).toBe(true);
+
+  await page.goto(`/app/members?user=${identity.user_id}`);
+  const panel = page.locator('[data-profile-panel]');
+  await panel.locator('summary[aria-label^="More actions for"]').click();
+  await panel.getByRole('button', { name: /^Hide / }).click();
+
+  await page.goto(`/app?channel=${CHANNEL}`);
+  const message = page.locator('.message.is-hidden-author', { has: page.locator('.message-text', { hasText: text }) });
+  await expect(message).toHaveCount(1);
+  await expect(message.locator('.message-text')).toBeHidden();
+  await expect(message.locator('.message-head')).toBeHidden();
+  await expectNoSeriousAccessibilityViolations(page, '#timeline');
+  await message.getByText('Show message').click();
+  await expect(message.locator('.message-text')).toBeVisible();
+
+  const { primary } = await slackModifiers(page);
+  await page.keyboard.press(`${primary}+Comma`);
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.getByRole('tab', { name: 'Privacy & visibility' }).click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-privacy');
+  await preferences.getByRole('button', { name: /^Unhide / }).first().click();
+  await expect(page.locator('.message', { has: page.locator('.message-text', { hasText: text }) })).not.toHaveClass(/is-hidden-author/);
+});
+
 // Sharing a canvas is news, and Activity is where a member finds out. The share
 // is made by an installed app rather than by this session, because the
 // development API token and the browser session are the same member and nobody

@@ -284,6 +284,7 @@ type profileView struct {
 	IsBot         bool
 	IsSelf        bool
 	IsVIP         bool
+	IsHidden      bool
 	CanMessage    bool
 	CanEdit       bool
 	CSRFToken     string
@@ -320,7 +321,8 @@ const profilePanelPartial = `{{define "profile-panel"}}<div class="pp-head"><h2 
 <button type="button" data-copy-text="{{.ID}}" data-copy-done="Member ID copied.">Copy member ID</button>
 <a href="{{.FilesURL}}">View files</a>
 <a href="{{.SearchURL}}">Search messages from {{.Name}}</a>
-{{if not .IsSelf}}<form method="post" action="/app/notifications/vips"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="target" value="{{.ID}}"><input type="hidden" name="add" value="{{if .IsVIP}}false{{else}}true{{end}}"><button type="submit">{{if .IsVIP}}Remove from VIPs{{else}}Add to VIPs{{end}}</button></form>{{end}}
+{{if not .IsSelf}}<form method="post" action="/app/notifications/vips"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="target" value="{{.ID}}"><input type="hidden" name="add" value="{{if .IsVIP}}false{{else}}true{{end}}"><button type="submit">{{if .IsVIP}}Remove from VIPs{{else}}Add to VIPs{{end}}</button></form>
+<form method="post" action="/app/people/hidden"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="target" value="{{.ID}}"><input type="hidden" name="hidden" value="{{if .IsHidden}}false{{else}}true{{end}}"><button type="submit">{{if .IsHidden}}Unhide {{.Name}}{{else}}Hide {{.Name}}{{end}}</button></form>{{end}}
 </div></details>
 </div>
 <p class="v-sr" role="status" data-profile-status></p>
@@ -436,6 +438,9 @@ func (h Handler) buildProfileView(r *http.Request, principal auth.Principal, id 
 		view.CSRFToken = auth.CSRFToken(sessionCookie.Value)
 	}
 	if !view.IsSelf {
+		if preferences, prefErr := h.Messages.MemberPreferences(r.Context(), principal.WorkspaceID, principal.UserID); prefErr == nil {
+			view.IsHidden = domain.HiddenPeople(preferences)[user.ID]
+		}
 		if preferences, prefErr := h.Messages.WorkspaceNotificationPreferences(r.Context(), principal.WorkspaceID, principal.UserID); prefErr == nil {
 			for _, vip := range preferences.VIPs {
 				if vip == user.ID {
