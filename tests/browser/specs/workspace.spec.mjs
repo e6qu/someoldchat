@@ -3815,6 +3815,50 @@ test('[NAV-05] a permalink lands on its message, and history returns without rep
   await expect(page.getByRole('heading', { name: 'Threads', exact: true, level: 1 })).toBeVisible();
 });
 
+// Sections reorder by dragging one onto another, as in Slack. Playwright's
+// WebKit never fires dragstart for a drag that begins inside a custom section,
+// so the drag is dispatched with a real DataTransfer: the same handlers run in
+// every engine.
+test('[NAV-01 A11Y-01] a custom section can be dragged to a new position', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app?channel=Cdev');
+  const channels = page.locator('.side-section[aria-label="Channels"]');
+  const createSection = async (name) => {
+    await channels.locator('.side-section-head').hover();
+    await channels.getByRole('button', { name: 'Options for Channels' }).click();
+    await page.getByRole('menuitem', { name: 'Create new section' }).click();
+    await page.getByRole('dialog', { name: 'Create a section' }).getByLabel('Section name').fill(name);
+    await page.getByRole('button', { name: 'Create section' }).click();
+    await expect(page.getByRole('navigation', { name })).toBeVisible();
+  };
+  const dragSections = page.locator('.side-section-custom[aria-label^="Drag "]');
+  const expectOrder = async (names) => {
+    await expect(dragSections).toHaveCount(names.length);
+    for (const [index, name] of names.entries()) await expect(dragSections.nth(index)).toHaveAttribute('aria-label', name);
+  };
+  await createSection('Drag first');
+  await createSection('Drag second');
+  await expectOrder(['Drag first', 'Drag second']);
+
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  const first = page.getByRole('navigation', { name: 'Drag first' });
+  await page.getByRole('navigation', { name: 'Drag second' }).locator('[data-section-drag]').dispatchEvent('dragstart', { dataTransfer });
+  await first.locator('.side-section-head').dispatchEvent('dragover', { dataTransfer });
+  await expect(first).toHaveClass(/drop-target/);
+  await first.locator('.side-section-head').dispatchEvent('drop', { dataTransfer });
+  await expectOrder(['Drag second', 'Drag first']);
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // Every test shares one member, so remove the sections again.
+  for (const name of ['Drag first', 'Drag second']) {
+    const section = page.getByRole('navigation', { name });
+    await section.locator('.side-section-head').hover();
+    await section.getByRole('button', { name: `Options for ${name}` }).click();
+    await section.getByRole('menuitem', { name: 'Delete section' }).click();
+    await expect(page.getByRole('navigation', { name })).toHaveCount(0);
+  }
+});
+
 // A member organises their channel sidebar into named, collapsible sections and
 // moves channels between them, the way Slack lets them.
 test('[NAV-01 A11Y-01] channels can be organised into a custom sidebar section', async ({ page, context }) => {

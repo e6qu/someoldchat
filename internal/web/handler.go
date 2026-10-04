@@ -7722,8 +7722,10 @@ func (h Handler) setSidebarSectionNotificationLevel(w http.ResponseWriter, r *ht
 	h.redirectMutation(w, r, sidebarRedirect(strings.TrimSpace(r.URL.Query().Get("channel"))))
 }
 
-// moveSidebarSection turns a one-step up/down into the full reorder the store
-// takes: it swaps the section with its neighbour and submits the new order.
+// moveSidebarSection turns a move into the full reorder the store takes. The
+// section menu's Move up/down swaps the section with its neighbour; a drag
+// names the section it lands before ("end" for the last place), as Slack lets a
+// member drag a section to a new position.
 func (h Handler) moveSidebarSection(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
@@ -7749,20 +7751,53 @@ func (h Handler) moveSidebarSection(w http.ResponseWriter, r *http.Request) {
 			index = position
 		}
 	}
-	target := index - 1
-	if fields["direction"] == "down" {
-		target = index + 1
-	}
-	if index == -1 || target < 0 || target >= len(order) {
+	if index == -1 {
 		h.redirectMutation(w, r, sidebarRedirect(channel))
 		return
 	}
-	order[index], order[target] = order[target], order[index]
+	if before := domain.SidebarSectionID(strings.TrimSpace(fields["before"])); before != "" {
+		order = placeSidebarSectionBefore(order, id, before)
+	} else {
+		target := index - 1
+		if fields["direction"] == "down" {
+			target = index + 1
+		}
+		if target < 0 || target >= len(order) {
+			h.redirectMutation(w, r, sidebarRedirect(channel))
+			return
+		}
+		order[index], order[target] = order[target], order[index]
+	}
 	if err := h.Messages.ReorderSidebarSections(r.Context(), principal.WorkspaceID, principal.UserID, order); err != nil {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That section was not moved", "Reload and try again.")
 		return
 	}
 	h.redirectMutation(w, r, sidebarRedirect(channel))
+}
+
+// placeSidebarSectionBefore moves id to just before the named section, or to
+// the end for "end". A target that is not one of the member's sections leaves
+// the order as it was, so a stale drag cannot drop a section.
+func placeSidebarSectionBefore(order []domain.SidebarSectionID, id, before domain.SidebarSectionID) []domain.SidebarSectionID {
+	if before == id {
+		return order
+	}
+	rest := make([]domain.SidebarSectionID, 0, len(order))
+	for _, section := range order {
+		if section != id {
+			rest = append(rest, section)
+		}
+	}
+	if before == "end" {
+		return append(rest, id)
+	}
+	for position, section := range rest {
+		if section == before {
+			placed := append(append(append([]domain.SidebarSectionID{}, rest[:position]...), id), rest[position:]...)
+			return placed
+		}
+	}
+	return order
 }
 
 func (h Handler) assignConversationToSidebarSection(w http.ResponseWriter, r *http.Request) {

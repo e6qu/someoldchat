@@ -16,7 +16,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
   </nav>
   {{range $section := .HomeSections}}
   <nav class="side-section{{if $section.Custom}} side-section-custom{{end}}" aria-label="{{$section.Label}}" data-section-key="{{$section.Key}}"{{if $section.DropTarget}} data-drop-section="{{$section.DropTarget}}"{{end}}>
-    <div class="side-section-head">
+    <div class="side-section-head"{{if $section.Custom}} draggable="true" data-section-drag="{{$section.ID}}"{{end}}>
       {{if $section.Custom}}<form class="section-collapse" method="post" action="/app/sidebar/sections/collapse?channel={{$.Channel}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="section_id" value="{{$section.ID}}"><input type="hidden" name="collapsed" value="{{if $section.Collapsed}}false{{else}}true{{end}}"><button class="section-toggle" type="submit" aria-expanded="{{if $section.Collapsed}}false{{else}}true{{end}}" aria-label="{{if $section.Collapsed}}Expand{{else}}Collapse{{end}} {{$section.Label}}">{{icon "caret"}}<span>{{$section.Label}}</span></button></form>
       {{else}}<button class="section-toggle" type="button" data-section-toggle aria-expanded="true">{{icon "caret"}}<span>{{$section.Label}}</span></button>{{end}}
       <details class="menu section-menu" data-menu>
@@ -100,6 +100,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
   </nav>
   {{end}}
   {{if .SidebarTruncated}}<p class="side-note">You belong to more conversations than the sidebar shows. Use Jump to a conversation (Ctrl/⌘K) to reach the rest.</p>{{end}}
+  <form id="sidebar-section-move-form" method="post" action="/app/sidebar/sections/move?channel={{.Channel}}" hidden><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="section_id" value=""><input type="hidden" name="before" value=""></form>
   <form id="sidebar-move-form" method="post" action="/app/sidebar/sections/assign?channel={{.Channel}}" hidden><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="conversation" value=""><input type="hidden" name="section" value=""></form>
 </div>
 {{if .Shell.CanRequestInvite}}<template data-dialog-template="invite-request-dialog"><dialog class="shell-dialog" id="invite-request-dialog" aria-labelledby="invite-request-dialog-title">

@@ -107,7 +107,9 @@ navigation MUST not submit a composer, lose a draft, or select hidden DOM
 leftovers.
 
 Custom sidebar sections are implemented: a member creates named sections, moves
-channels between them and reorders the sections, and collapses a section so its
+channels between them and reorders the sections (by dragging one onto another,
+as in Slack, or with the section menu's Move up and Move down), and collapses a
+section so its
 channels are hidden — all durable, all the member's own. Each section is its own
 named navigation region; a channel not assigned to any section falls to the
 default Channels group, and a channel the member has left drops out of its
