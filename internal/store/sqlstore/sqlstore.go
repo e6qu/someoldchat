@@ -538,7 +538,8 @@ CREATE TABLE IF NOT EXISTS calls (
  external_display_id TEXT NOT NULL DEFAULT '', join_url TEXT NOT NULL, desktop_app_join_url TEXT NOT NULL DEFAULT '',
  title TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL REFERENCES users(id), started_at INTEGER NOT NULL,
  ended_at INTEGER NOT NULL DEFAULT 0, duration_seconds INTEGER NOT NULL DEFAULT 0,
- kind TEXT NOT NULL DEFAULT 'external', conversation_id TEXT NOT NULL DEFAULT ''
+ kind TEXT NOT NULL DEFAULT 'external', conversation_id TEXT NOT NULL DEFAULT '',
+ thread_timestamp TEXT NOT NULL DEFAULT ''
 );
 -- The external identity is unique among external calls and absent from every
 -- huddle, so the uniqueness must not span the empty string: without the
@@ -612,7 +613,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 210
+const schemaVersion = 211
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3589,6 +3590,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 211: huddle threads ---
+	if version < 211 {
+		// A huddle now posts a message whose thread is its chat. Huddles from
+		// before have none and keep the empty timestamp.
+		columns, err := s.tableColumns(ctx, db, "calls")
+		if err != nil {
+			return err
+		}
+		if !columns["thread_timestamp"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN thread_timestamp TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate huddle threads: %w", err)
+			}
+		}
+	}
+	// --- end schema 211 ---
 	// --- schema 210: member preferences ---
 	if version < 210 {
 		// Preferences were kept by each browser; a new table starts empty and
@@ -5169,6 +5185,14 @@ func (s *Store) outboxColumns(ctx context.Context, db queryExecutor) (map[string
 // stepping to the next free microsecond, because a notice must never fail a
 // membership change.
 func insertConversationNotice(ctx context.Context, tx txRunner, notice domain.Message) error {
+	_, err := insertConversationNoticeAt(ctx, tx, notice)
+	return err
+}
+
+// insertConversationNoticeAt is insertConversationNotice reporting the instant
+// the notice was stored at, which a collision may have moved: a huddle names
+// its thread by it.
+func insertConversationNoticeAt(ctx context.Context, tx txRunner, notice domain.Message) (time.Time, error) {
 	for attempt := 0; attempt < 1000; attempt++ {
 		stored := domain.NewStoredTime(notice.CreatedAt)
 		var owner domain.MessageID
@@ -5178,17 +5202,17 @@ func insertConversationNotice(ctx context.Context, tx txRunner, notice domain.Me
 			continue
 		case errors.Is(err, sql.ErrNoRows):
 		default:
-			return err
+			return time.Time{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded, edited_at, edited_by, subtype)
 			VALUES (?, ?, ?, ?, '', ?, '', '[]', '', '', '', ?, 0, '{}', ?, '', '', ?)`,
 			notice.ID, notice.WorkspaceID, notice.Conversation, notice.AuthorID, notice.Text, stored,
 			domain.FoldSearchText(notice.Text), notice.Subtype); err != nil {
-			return classify(err)
+			return time.Time{}, classify(err)
 		}
-		return nil
+		return notice.CreatedAt, nil
 	}
-	return store.ErrMessageTimestampTaken
+	return time.Time{}, store.ErrMessageTimestampTaken
 }
 
 // messageSelectColumns is the one message projection every read shares. The
@@ -20058,12 +20082,12 @@ func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.
 }
 
 // callSelectColumns is the one column list every call read uses.
-const callSelectColumns = `id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, ended_at, duration_seconds, kind, conversation_id`
+const callSelectColumns = `id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, ended_at, duration_seconds, kind, conversation_id, thread_timestamp`
 
 func scanCall(row rowScanner) (domain.Call, error) {
 	var value domain.Call
 	var started, ended int64
-	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.ExternalUniqueID, &value.ExternalDisplayID, &value.JoinURL, &value.DesktopAppJoinURL, &value.Title, &value.CreatedBy, &started, &ended, &value.DurationSeconds, &value.Kind, &value.ConversationID); err != nil {
+	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.ExternalUniqueID, &value.ExternalDisplayID, &value.JoinURL, &value.DesktopAppJoinURL, &value.Title, &value.CreatedBy, &started, &ended, &value.DurationSeconds, &value.Kind, &value.ConversationID, &value.ThreadTimestamp); err != nil {
 		return domain.Call{}, err
 	}
 	value.StartedAt = time.Unix(started, 0).UTC()
@@ -20122,9 +20146,12 @@ func callParticipants(ctx context.Context, query rowQuerier, id domain.CallID) (
 	return participants, rows.Err()
 }
 
-func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joined events.Event) (domain.Call, bool, error) {
+func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joined events.Event, thread domain.Message) (domain.Call, bool, error) {
 	if value.Kind != domain.CallKindHuddle || value.ConversationID == "" || value.CreatedBy == "" {
 		return domain.Call{}, false, store.InvalidArgument("a huddle requires a conversation and a creator")
+	}
+	if thread.Subtype != domain.MessageSubtypeHuddleThread || thread.Conversation != value.ConversationID || thread.WorkspaceID != value.WorkspaceID {
+		return domain.Call{}, false, store.InvalidArgument("a huddle's thread is a huddle message in its conversation")
 	}
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
@@ -20161,8 +20188,15 @@ func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joi
 	case !errors.Is(err, sql.ErrNoRows):
 		return domain.Call{}, false, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO calls(id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, kind, conversation_id) VALUES (?, ?, '', '', '', '', ?, ?, ?, ?, ?)`,
-		value.ID, value.WorkspaceID, value.Title, value.CreatedBy, value.StartedAt.Unix(), domain.CallKindHuddle, value.ConversationID); err != nil {
+	// The huddle's message and the huddle commit together, so a huddle is
+	// never without the thread its chat goes into.
+	threadAt, err := insertConversationNoticeAt(ctx, tx, thread)
+	if err != nil {
+		return domain.Call{}, false, err
+	}
+	value.ThreadTimestamp = domain.NewMessageTimestamp(threadAt)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO calls(id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at, kind, conversation_id, thread_timestamp) VALUES (?, ?, '', '', '', '', ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.WorkspaceID, value.Title, value.CreatedBy, value.StartedAt.Unix(), domain.CallKindHuddle, value.ConversationID, value.ThreadTimestamp); err != nil {
 		return domain.Call{}, false, classify(err)
 	}
 	if _, err := addCallParticipantTx(ctx, tx, value.ID, value.CreatedBy, value.WorkspaceID); err != nil {

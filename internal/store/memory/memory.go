@@ -7319,22 +7319,29 @@ func (s *Store) SetConversationPrefs(_ context.Context, conversation domain.Conv
 // the SQL transaction.
 func (s *Store) appendConversationNotices(notices []domain.Message) {
 	for _, notice := range notices {
-		for {
-			taken := false
-			for _, existing := range s.messages[notice.Conversation] {
-				if existing.CreatedAt.Equal(notice.CreatedAt) {
-					taken = true
-					break
-				}
-			}
-			if !taken {
+		s.appendConversationNotice(notice)
+	}
+}
+
+// appendConversationNotice records one notice and reports the instant it was
+// stored at, which a collision may have moved.
+func (s *Store) appendConversationNotice(notice domain.Message) time.Time {
+	for {
+		taken := false
+		for _, existing := range s.messages[notice.Conversation] {
+			if existing.CreatedAt.Equal(notice.CreatedAt) {
+				taken = true
 				break
 			}
-			notice.CreatedAt = notice.CreatedAt.Add(time.Microsecond)
 		}
-		notice.Unfurls = copyUnfurls(notice.Unfurls)
-		s.messages[notice.Conversation] = append(s.messages[notice.Conversation], notice)
+		if !taken {
+			break
+		}
+		notice.CreatedAt = notice.CreatedAt.Add(time.Microsecond)
 	}
+	notice.Unfurls = copyUnfurls(notice.Unfurls)
+	s.messages[notice.Conversation] = append(s.messages[notice.Conversation], notice)
+	return notice.CreatedAt
 }
 
 func (s *Store) AddConversationMember(_ context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event, notices ...domain.Message) error {
@@ -10834,9 +10841,12 @@ func (s *Store) CreateCall(_ context.Context, value domain.Call, event events.Ev
 	return nil
 }
 
-func (s *Store) StartHuddle(_ context.Context, value domain.Call, started, joined events.Event) (domain.Call, bool, error) {
+func (s *Store) StartHuddle(_ context.Context, value domain.Call, started, joined events.Event, thread domain.Message) (domain.Call, bool, error) {
 	if value.Kind != domain.CallKindHuddle || value.ConversationID == "" || value.CreatedBy == "" {
 		return domain.Call{}, false, store.InvalidArgument("a huddle requires a conversation and a creator")
+	}
+	if thread.Subtype != domain.MessageSubtypeHuddleThread || thread.Conversation != value.ConversationID || thread.WorkspaceID != value.WorkspaceID {
+		return domain.Call{}, false, store.InvalidArgument("a huddle's thread is a huddle message in its conversation")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -10858,6 +10868,7 @@ func (s *Store) StartHuddle(_ context.Context, value domain.Call, started, joine
 		return domain.Call{}, false, store.ErrAlreadyExists
 	}
 	value.Participants = []domain.UserID{value.CreatedBy}
+	value.ThreadTimestamp = domain.NewMessageTimestamp(s.appendConversationNotice(thread))
 	s.calls[value.ID] = cloneCall(value)
 	s.outbox = append(s.outbox, started)
 	return cloneCall(value), true, nil

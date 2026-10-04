@@ -2253,7 +2253,11 @@ func huddlesConvergeAndEndWithTheirLastParticipant(t *testing.T, open opener) {
 		}
 		value, created, err := f.repository.StartHuddle(ctx, call,
 			f.event(name+"-started", "huddle.started", string(call.ID)),
-			f.event(name+"-joined", "huddle.joined", string(call.ID)))
+			f.event(name+"-joined", "huddle.joined", string(call.ID)),
+			domain.Message{
+				ID: domain.MessageID("M-" + name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID,
+				AuthorID: actor, Subtype: domain.MessageSubtypeHuddleThread, CreatedAt: call.StartedAt, Attachments: "[]",
+			})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -2273,6 +2277,24 @@ func huddlesConvergeAndEndWithTheirLastParticipant(t *testing.T, open opener) {
 	}
 	if len(joinedExisting.Participants) != 2 {
 		t.Fatalf("participants=%v, want both starters", joinedExisting.Participants)
+	}
+	// Starting posts the huddle's message, whose thread is its chat; joining
+	// the running huddle posts nothing, so the conversation holds one.
+	if first.ThreadTimestamp == "" || joinedExisting.ThreadTimestamp != first.ThreadTimestamp {
+		t.Fatalf("thread=%q then %q, want the starter's huddle message both times", first.ThreadTimestamp, joinedExisting.ThreadTimestamp)
+	}
+	history, err := f.repository.ListMessages(ctx, f.channelID, domain.HistoryRequest{Page: domain.PageRequest{Limit: 100}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var huddleMessages []domain.Message
+	for _, message := range history.Messages {
+		if message.Subtype == domain.MessageSubtypeHuddleThread {
+			huddleMessages = append(huddleMessages, message)
+		}
+	}
+	if len(huddleMessages) != 1 || domain.NewMessageTimestamp(huddleMessages[0].CreatedAt) != first.ThreadTimestamp || huddleMessages[0].AuthorID != f.userID {
+		t.Fatalf("huddle messages=%+v, want one by the starter at %s", huddleMessages, first.ThreadTimestamp)
 	}
 
 	active, err := f.repository.ActiveHuddle(ctx, f.workspaceID, f.channelID)

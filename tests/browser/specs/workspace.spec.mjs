@@ -3513,6 +3513,19 @@ test('[HUDDLE-01] a huddle runs its lifecycle and offers the media it promises',
   const huddleWindow = page.getByRole('region', { name: 'Huddle in #general' });
   await expect(huddleWindow).toBeVisible();
   await expect(huddleWindow.getByRole('toolbar', { name: 'Huddle controls' })).toBeVisible();
+  // Starting posts the huddle's message, and its thread is the huddle's chat:
+  // the window opens it, a reply goes into it, and the message in the
+  // timeline counts it.
+  const huddleMessage = page.locator('#timeline .system-message[data-subtype="huddle_thread"]').last();
+  await expect(huddleMessage).toContainText('started a huddle.');
+  await huddleWindow.getByRole('link', { name: 'Open the huddle thread' }).click();
+  const threadPane = page.locator('#thread-messages');
+  await expect(threadPane.locator('.system-message[data-subtype="huddle_thread"]')).toBeVisible();
+  const huddleReply = `huddle chat ${Date.now()}`;
+  await composerEditor(page, 'thread-').fill(huddleReply);
+  await page.locator('#thread-composer').getByRole('button', { name: 'Send now' }).click();
+  await expect(threadPane.locator('.message-text', { hasText: huddleReply })).toBeVisible();
+  await expect(huddleMessage.locator('.thread-summary')).toContainText('1 reply');
   // Minimising keeps the controls and hides the tiles; it survives the live
   // refresh of the huddle fragment because the window remembers it.
   await huddleWindow.getByRole('button', { name: 'Minimise huddle' }).click();

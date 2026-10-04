@@ -2192,6 +2192,10 @@ func parityCases() []parityCase {
 					reactOutsider != nil, reactAfterEnding != nil,
 					inviteMember == nil, inviteSelf != nil, inviteJoined != nil,
 					inviteOutsider != nil, inviteFromNonParticipant != nil,
+					// The huddle's thread crosses the boundary, and joining or
+					// ending the huddle keeps the one the start posted.
+					started.ThreadTimestamp != "", joined.ThreadTimestamp == started.ThreadTimestamp,
+					active.ThreadTimestamp == started.ThreadTimestamp, ended.ThreadTimestamp == started.ThreadTimestamp,
 				}, nil
 			},
 		},

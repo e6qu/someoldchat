@@ -253,6 +253,14 @@ operations:
       - go-test:internal/api/slack:TestBotTokenMessagesCarryBotIdentity
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
       - go-test:internal/api/slack:TestChannelNoticesCarryTheirSlackFieldsInHistory
+      - go-test:internal/api/slack:TestHuddleMessageCarriesTheHuddleChat
+    deviations:
+      - >-
+        A huddle posts a huddle_thread message, as Slack's do, whose thread is
+        the huddle's chat. Slack's current reference does not document that
+        subtype or the room object Slack attaches to it, so the message
+        carries no room object, and its text is this deployment's sentence
+        (<@starter> started a huddle) rather than an unpublished Slack one.
   - method: conversations.replies
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -262,6 +270,7 @@ operations:
       - go-test:internal/api/slack:TestReplyingToAReplyJoinsTheRootThread
       - go-test:internal/api/slack:TestThreadParentsCarryTheirSummary
       - go-test:internal/api/slack:TestHistoryWindowIsPartOfTheRead
+      - go-test:internal/api/slack:TestHuddleMessageCarriesTheHuddleChat
   - method: reactions.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi

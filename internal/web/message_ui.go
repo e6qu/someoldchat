@@ -38,13 +38,20 @@ const messageIcons = `{{define "icon-emoji"}}<svg class="action-icon" viewBox="0
 
 // messagesPartial is the message list: the timeline, the thread pane, and
 // every fragment the live refresh swaps in.
-const messagesPartial = messageIcons + `{{define "messages"}}
+const messagesPartial = messageIcons + `{{define "thread-summary"}}<a class="thread-summary" href="{{.ReplyURL}}" data-thread-link aria-label="{{.ReplySummary}}{{if .LastReplyRelative}}, last reply {{.LastReplyRelative}}{{end}}. View thread">
+      <span class="thread-avatars" aria-hidden="true">{{range .ThreadRepliers}}<span class="avatar avatar-tiny" title="{{.Name}}">{{.Initial}}</span>{{end}}</span>
+      <span class="thread-count">{{.ReplyCountLabel}}</span>
+      {{if .LastReplyRelative}}<span class="thread-last-reply">Last reply <time datetime="{{.LastReplyMachine}}" data-format="relative">{{.LastReplyRelative}}</time></span>{{end}}
+      <span class="thread-view" aria-hidden="true">View thread</span>
+    </a>{{end}}
+{{define "messages"}}
 {{range $message := .Messages}}
 {{if $message.DaySeparator}}<div class="day-separator" role="separator" aria-label="{{$message.DaySeparator}}"><time class="day-pill" datetime="{{$message.DaySeparatorMachine}}" data-format="day">{{$message.DaySeparator}}</time></div>{{end}}
 {{if $message.FirstUnread}}<div class="unread-divider" role="separator" aria-label="New messages"><span>New</span></div>{{end}}
 {{if $message.System}}<article class="message system-message{{if $message.Continuation}} is-continuation{{end}}" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" data-ts="{{$message.Timestamp}}" data-subtype="{{$message.Subtype}}" tabindex="-1" aria-label="{{if $message.SystemSentence}}{{$message.AuthorName}} {{$message.SystemSentence}}{{else}}{{$message.Preview}}{{end}}">
   <div class="message-gutter"><span class="avatar avatar-small" aria-hidden="true">{{$message.AuthorInitial}}</span></div>
-  <div class="message-body"><p class="system-text">{{if $message.SystemSentence}}<span class="author">{{$message.AuthorName}}</span> {{$message.SystemSentence}}{{else}}{{$message.DisplayText}}{{end}} <time class="time" datetime="{{$message.MachineTime}}" title="{{$message.FullTime}}" data-format="time">{{$message.ClockTime}}</time></p></div>
+  <div class="message-body"><p class="system-text">{{if $message.SystemSentence}}<span class="author">{{$message.AuthorName}}</span> {{$message.SystemSentence}}{{else}}{{$message.DisplayText}}{{end}} <time class="time" datetime="{{$message.MachineTime}}" title="{{$message.FullTime}}" data-format="time">{{$message.ClockTime}}</time></p>
+  {{if eq $message.Subtype "huddle_thread"}}{{if $message.ReplyCount}}{{template "thread-summary" $message}}{{else if not $message.InThread}}<a class="thread-summary huddle-thread-link" href="{{$message.ReplyURL}}" data-thread-link>Open the huddle thread</a>{{end}}{{end}}</div>
 </article>
 {{else}}
 <article class="message{{if $message.HiddenAuthor}} is-hidden-author{{end}}{{if $message.Continuation}} is-continuation{{end}}{{if $message.MentionsMe}} mentions-me{{end}}{{if $message.Pinned}} is-pinned{{end}}{{if $message.Editing}} is-editing{{end}}" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" data-ts="{{$message.Timestamp}}"{{if $message.ThreadRoot}} data-thread-root{{end}} tabindex="-1" aria-label="{{if $message.HiddenAuthor}}Message from a person you have hidden{{else}}{{if $message.Ephemeral}}Private message only visible to you{{else}}Message{{end}} from {{$message.AuthorName}}{{end}} at {{$message.ClockTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End{{if not $message.InThread}} ArrowRight T{{end}}{{if not $message.Ephemeral}} A M F{{end}}{{if $message.MarkUnreadURL}} U{{end}}{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
@@ -139,12 +146,7 @@ const messagesPartial = messageIcons + `{{define "messages"}}
       {{else}}<span class="chip" role="img"{{if $reaction.Tooltip}} title="{{$reaction.Tooltip}}"{{end}} aria-label="{{if $reaction.Tooltip}}{{$reaction.Tooltip}}{{else}}{{$reaction.Count}} reacted with :{{$reaction.Name}}:{{end}}"><span class="reaction-emoji">{{$reaction.Display}}</span><span class="chip-count">{{$reaction.Count}}</span></span>{{end}}{{end}}
       {{if $.CanReact}}<button class="chip add-reaction-chip" type="button" data-open-emoji-picker data-emoji-target="reaction" data-reaction-form="reaction-form-{{$message.ID}}" aria-haspopup="dialog" aria-label="Add reaction" title="Add reaction">{{template "icon-emoji"}}</button>{{end}}
     </div>{{end}}
-    {{if $message.ReplyCount}}<a class="thread-summary" href="{{$message.ReplyURL}}" data-thread-link aria-label="{{$message.ReplySummary}}{{if $message.LastReplyRelative}}, last reply {{$message.LastReplyRelative}}{{end}}. View thread">
-      <span class="thread-avatars" aria-hidden="true">{{range $message.ThreadRepliers}}<span class="avatar avatar-tiny" title="{{.Name}}">{{.Initial}}</span>{{end}}</span>
-      <span class="thread-count">{{$message.ReplyCountLabel}}</span>
-      {{if $message.LastReplyRelative}}<span class="thread-last-reply">Last reply <time datetime="{{$message.LastReplyMachine}}" data-format="relative">{{$message.LastReplyRelative}}</time></span>{{end}}
-      <span class="thread-view" aria-hidden="true">View thread</span>
-    </a>{{end}}
+    {{if $message.ReplyCount}}{{template "thread-summary" $message}}{{end}}
   </div>
   {{if not $message.Ephemeral}}<div class="message-actions" role="toolbar" aria-label="Actions for the message from {{if $message.HiddenAuthor}}a person you have hidden{{else}}{{$message.AuthorName}}{{end}}">
     {{if $.CanReact}}{{range $.QuickReactions}}<button class="message-action quick-reaction" type="submit" form="reaction-form-{{$message.ID}}" name="name" value="{{.Name}}" data-quick-reaction aria-label="React with :{{.Label}}:" title=":{{.Label}}:">{{.Display}}</button>{{end}}
