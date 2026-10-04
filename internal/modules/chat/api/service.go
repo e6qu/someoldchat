@@ -17,6 +17,11 @@ type Service interface {
 	CodeChannels
 	RevokeToken(context.Context, string) error
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
+	// TakeRateToken admits or refuses one Web API call against the key's
+	// allowance, reporting how long a refused caller waits. It is the chat
+	// module's because the budget must be shared by every web replica, and
+	// the chat module's store is the state they share.
+	TakeRateToken(context.Context, string, domain.RateAllowance) (time.Duration, bool, error)
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
 	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)

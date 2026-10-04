@@ -126,9 +126,25 @@ message RevokeOIDCSessionsRequest {
   string expires_at = 6;
 }
 
+// RateTokenRequest is one Web API call drawn against a shared rate limit:
+// the key names the limit (method or channel, and the hashed credential), and
+// the allowance is a sustained interval plus the burst admitted at once.
+message RateTokenRequest {
+  string key = 1;
+  int64 interval_micros = 2;
+  int32 burst = 3;
+}
+
+// RateTokenDecision admits the call, or refuses it with how long to wait.
+message RateTokenDecision {
+  bool admitted = 1;
+  int64 retry_after_micros = 2;
+}
+
 service AuthService {
   rpc LookupToken(TokenRequest) returns (TokenRecord);
   rpc LookupAppToken(TokenRequest) returns (AppTokenRecord);
+  rpc TakeRateToken(RateTokenRequest) returns (RateTokenDecision);
   rpc CreateAppInstallation(AppInstallationRequest) returns (AuthRevokeResponse);
   rpc ListAppInstallations(AppInstallationRequest) returns (AppInstallationsResponse);
   rpc ListAppAuthorizations(AppAuthorizationsRequest) returns (AppAuthorizationsResponse);

@@ -1324,6 +1324,12 @@ type Store interface {
 	StartHuddle(context.Context, domain.Call, events.Event, events.Event, domain.Message) (domain.Call, bool, error)
 	// ActiveHuddle returns the conversation's running huddle, or ErrNotFound.
 	ActiveHuddle(context.Context, domain.WorkspaceID, domain.ConversationID) (domain.Call, error)
+	// TakeRateToken admits or refuses one call at now against the key's
+	// allowance, reporting how long a refused caller must wait. Every replica
+	// sharing the store shares the key's budget, so two replicas admitting
+	// concurrently cannot both take the last call: the admission is one
+	// conditional write, not a read followed by a write.
+	TakeRateToken(ctx context.Context, key string, allowance domain.RateAllowance, now time.Time) (time.Duration, bool, error)
 	// JoinCall and LeaveCall move one participant, rather than replacing the
 	// whole set as SetCallParticipants does. Two people joining concurrently
 	// through a whole-set write lose one of the two additions.

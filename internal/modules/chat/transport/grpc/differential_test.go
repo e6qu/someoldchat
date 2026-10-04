@@ -4881,6 +4881,40 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// A rate limit is shared through the chat module so every web
+			// replica draws from one budget. Both compositions admit the
+			// burst, refuse the next call with a wait, keep keys apart, and
+			// refuse a key or allowance that cannot be enforced.
+			name: "a shared rate limit admits its burst and refuses the next call",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				allowance := domain.RateAllowance{Interval: time.Hour, Burst: 2}
+				_, first, err := chat.TakeRateToken(ctx, "limit-users-list-credential", allowance)
+				if err != nil {
+					return nil, err
+				}
+				_, second, err := chat.TakeRateToken(ctx, "limit-users-list-credential", allowance)
+				if err != nil {
+					return nil, err
+				}
+				wait, third, err := chat.TakeRateToken(ctx, "limit-users-list-credential", allowance)
+				if err != nil {
+					return nil, err
+				}
+				_, other, err := chat.TakeRateToken(ctx, "limit-users-list-another", allowance)
+				if err != nil {
+					return nil, err
+				}
+				_, _, noKey := chat.TakeRateToken(ctx, "", allowance)
+				_, _, nulKey := chat.TakeRateToken(ctx, "limit\x00nul", allowance)
+				_, _, noBurst := chat.TakeRateToken(ctx, "limit-users-list-credential", domain.RateAllowance{Interval: time.Hour})
+				return []any{
+					first, second, third, wait > 59*time.Minute && wait <= time.Hour, other,
+					errors.Is(noKey, storepkg.ErrInvalidArgument), errors.Is(nulKey, storepkg.ErrInvalidArgument),
+					errors.Is(noBurst, storepkg.ErrInvalidArgument),
+				}, nil
+			},
+		},
+		{
 			// A workflow step is finished by the app that ran it, and the three
 			// ways it can end — configured, completed, failed — are separate
 			// methods writing separate durable states. seedWorkflowParity

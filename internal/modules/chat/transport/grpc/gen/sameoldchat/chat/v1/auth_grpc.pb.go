@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	AuthService_LookupToken_FullMethodName            = "/sameoldchat.chat.v1.AuthService/LookupToken"
 	AuthService_LookupAppToken_FullMethodName         = "/sameoldchat.chat.v1.AuthService/LookupAppToken"
+	AuthService_TakeRateToken_FullMethodName          = "/sameoldchat.chat.v1.AuthService/TakeRateToken"
 	AuthService_CreateAppInstallation_FullMethodName  = "/sameoldchat.chat.v1.AuthService/CreateAppInstallation"
 	AuthService_ListAppInstallations_FullMethodName   = "/sameoldchat.chat.v1.AuthService/ListAppInstallations"
 	AuthService_ListAppAuthorizations_FullMethodName  = "/sameoldchat.chat.v1.AuthService/ListAppAuthorizations"
@@ -42,6 +43,7 @@ const (
 type AuthServiceClient interface {
 	LookupToken(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*TokenRecord, error)
 	LookupAppToken(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*AppTokenRecord, error)
+	TakeRateToken(ctx context.Context, in *RateTokenRequest, opts ...grpc.CallOption) (*RateTokenDecision, error)
 	CreateAppInstallation(ctx context.Context, in *AppInstallationRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error)
 	ListAppInstallations(ctx context.Context, in *AppInstallationRequest, opts ...grpc.CallOption) (*AppInstallationsResponse, error)
 	ListAppAuthorizations(ctx context.Context, in *AppAuthorizationsRequest, opts ...grpc.CallOption) (*AppAuthorizationsResponse, error)
@@ -79,6 +81,16 @@ func (c *authServiceClient) LookupAppToken(ctx context.Context, in *TokenRequest
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AppTokenRecord)
 	err := c.cc.Invoke(ctx, AuthService_LookupAppToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) TakeRateToken(ctx context.Context, in *RateTokenRequest, opts ...grpc.CallOption) (*RateTokenDecision, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RateTokenDecision)
+	err := c.cc.Invoke(ctx, AuthService_TakeRateToken_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -221,6 +233,7 @@ func (c *authServiceClient) RevokeOIDCSessions(ctx context.Context, in *RevokeOI
 type AuthServiceServer interface {
 	LookupToken(context.Context, *TokenRequest) (*TokenRecord, error)
 	LookupAppToken(context.Context, *TokenRequest) (*AppTokenRecord, error)
+	TakeRateToken(context.Context, *RateTokenRequest) (*RateTokenDecision, error)
 	CreateAppInstallation(context.Context, *AppInstallationRequest) (*AuthRevokeResponse, error)
 	ListAppInstallations(context.Context, *AppInstallationRequest) (*AppInstallationsResponse, error)
 	ListAppAuthorizations(context.Context, *AppAuthorizationsRequest) (*AppAuthorizationsResponse, error)
@@ -248,6 +261,9 @@ func (UnimplementedAuthServiceServer) LookupToken(context.Context, *TokenRequest
 }
 func (UnimplementedAuthServiceServer) LookupAppToken(context.Context, *TokenRequest) (*AppTokenRecord, error) {
 	return nil, status.Error(codes.Unimplemented, "method LookupAppToken not implemented")
+}
+func (UnimplementedAuthServiceServer) TakeRateToken(context.Context, *RateTokenRequest) (*RateTokenDecision, error) {
+	return nil, status.Error(codes.Unimplemented, "method TakeRateToken not implemented")
 }
 func (UnimplementedAuthServiceServer) CreateAppInstallation(context.Context, *AppInstallationRequest) (*AuthRevokeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateAppInstallation not implemented")
@@ -340,6 +356,24 @@ func _AuthService_LookupAppToken_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).LookupAppToken(ctx, req.(*TokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_TakeRateToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RateTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).TakeRateToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_TakeRateToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).TakeRateToken(ctx, req.(*RateTokenRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -592,6 +626,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "LookupAppToken",
 			Handler:    _AuthService_LookupAppToken_Handler,
+		},
+		{
+			MethodName: "TakeRateToken",
+			Handler:    _AuthService_TakeRateToken_Handler,
 		},
 		{
 			MethodName: "CreateAppInstallation",

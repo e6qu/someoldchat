@@ -72,6 +72,12 @@ func (m Messages) LookupAppToken(ctx context.Context, token string) (domain.AppT
 	return m.Store.LookupAppToken(ctx, token)
 }
 
+// TakeRateToken admits or refuses one Web API call against the key's
+// allowance, at this process's clock.
+func (m Messages) TakeRateToken(ctx context.Context, key string, allowance domain.RateAllowance) (time.Duration, bool, error) {
+	return m.Store.TakeRateToken(ctx, key, allowance, time.Now())
+}
+
 func (m Messages) CreateAppInstallation(ctx context.Context, value domain.AppInstallation) error {
 	return m.Store.CreateAppInstallation(ctx, value)
 }
