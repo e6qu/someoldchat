@@ -2417,6 +2417,44 @@ test('[NAV-06 A11Y-01] accessibility and message display preferences change how 
   await expect(page.locator('html')).not.toHaveAttribute('data-pref-underline-links', /.*/);
 });
 
+// Slack's "Announce incoming messages" reads an arriving message's sender and
+// text to a screen reader; turned off, arrivals are not announced at all.
+test('[NAV-06 A11Y-01] incoming messages are announced unless the member turns it off', async ({ page, context, request }) => {
+  await signIn(context);
+  await page.goto(`/app?channel=${CHANNEL}`);
+  const post = async (text) => {
+    const posted = await request.post('/api/chat.postMessage', {
+      headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+      data: { channel: CHANNEL, text },
+    });
+    expect((await posted.json()).ok).toBe(true);
+  };
+  const status = page.locator('#live-status');
+  const first = `announce on ${Date.now()}`;
+  await post(first);
+  await expect(status).toHaveText(new RegExp(`^New message from .+: ${first}$`));
+
+  const { primary } = await slackModifiers(page);
+  await page.keyboard.press(`${primary}+Comma`);
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.getByRole('tab', { name: 'Accessibility' }).click();
+  await expectNoSeriousAccessibilityViolations(page, '#pref-accessibility');
+  const announce = preferences.getByRole('checkbox', { name: 'Announce incoming messages in the conversation you are viewing' });
+  await expect(announce).toBeChecked();
+  await announce.uncheck();
+  await page.keyboard.press('Escape');
+  const second = `announce off ${Date.now()}`;
+  await post(second);
+  await expect(page.locator('.message-text', { hasText: second })).toBeVisible();
+  await expect(status).not.toContainText(second);
+
+  // Every test shares one member, so put the default back.
+  await page.keyboard.press(`${primary}+Comma`);
+  await preferences.getByRole('tab', { name: 'Accessibility' }).click();
+  await announce.check();
+  await expect.poll(() => page.evaluate(() => window.sameoldchatPreferences.get('announce-messages', 'unset'))).toBe('true');
+});
+
 // Language & region sets the time zone by hand, which turns the automatic zone
 // off, as Slack's does.
 test('[NAV-06 A11Y-01] Language & region sets the time zone by hand', async ({ page, context }) => {

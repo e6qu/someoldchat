@@ -3264,6 +3264,12 @@ func TestNewActivityIsAnnouncedForTheRegionItLandedIn(t *testing.T) {
 		`if(behind)announce('New activity is available in this conversation.');`,
 	)
 	requireMissing(t, "client", progressiveEnhancementScript, `document.querySelectorAll('#timeline .message')`)
+	// The arrival read aloud is the newest across every live region, and the
+	// member's "Announce incoming messages" preference can silence it.
+	requireContains(t, "client", progressiveEnhancementScript,
+		`document.querySelectorAll('[data-fragment] .message[data-ts]')`,
+		`if(preference('announce-messages','true')!=='false')announce(arrivalSentence(arrived));`,
+	)
 }
 
 // TestTheClientNeverFetchesAnOriginItWasNotGiven pins the one property of the

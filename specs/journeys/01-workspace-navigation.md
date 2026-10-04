@@ -145,7 +145,9 @@ member has never used starts with it, and a preference a browser kept before
 its account did is kept for the account on that browser's next visit. Recent
 conversations stay with each browser.
 
-Accessibility underlines links in messages and turns off interface animation;
+Accessibility underlines links in messages, turns off interface animation,
+and stops announcing incoming messages (by default a screen reader hears each
+arrival's sender and text, as Slack's "Announce incoming messages" does);
 Messages & media switches the Clean theme to Compact (no profile photos
 beside messages and less space between them), shows just display names (hiding
 the full name the directory, people search, and mention suggestions show beside

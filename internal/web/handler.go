@@ -3585,6 +3585,17 @@ try{new Notification(arrived===1?'1 new message in '+channel:arrived+' new messa
 }
 function regions(force){return document.querySelectorAll(force?'[data-fragment]':'[data-fragment][data-live="true"]')}
 function messageCount(){return document.querySelectorAll('[data-fragment] .message').length}
+function arrivalSentence(arrived){
+var latest=null;
+Array.prototype.forEach.call(document.querySelectorAll('[data-fragment] .message[data-ts]'),function(node){if(!latest||parseFloat(node.getAttribute('data-ts'))>parseFloat(latest.getAttribute('data-ts')))latest=node});
+var author=latest&&latest.querySelector('.message-head .author');
+var text=latest&&latest.querySelector('.message-text');
+var said=text?text.textContent.replace(/\s+/g,' ').trim():'';
+if(said.length>200)said=said.slice(0,200)+'…';
+var line=author&&said?author.textContent.trim()+': '+said:'';
+if(arrived===1)return line?'New message from '+line:'1 new message.';
+return arrived+' new messages.'+(line?' Latest from '+line:'');
+}
 function refresh(force){
 if(!force&&forcing>0)return Promise.resolve([]);
 var candidates=[];
@@ -3641,7 +3652,7 @@ var behind=document.querySelectorAll('[data-fragment]:not([data-live="true"])').
 var before=messageCount();
 refresh(false).then(function(){
 var arrived=messageCount()-before;
-if(arrived>0){announce(arrived===1?'1 new message.':arrived+' new messages.');notify(arrived);return}
+if(arrived>0){if(preference('announce-messages','true')!=='false')announce(arrivalSentence(arrived));notify(arrived);return}
 if(behind)announce('New activity is available in this conversation.');
 }).catch(function(error){if(error&&error.name==='AbortError')return;announce('New activity could not be loaded. Reload the page.')});
 },250);
