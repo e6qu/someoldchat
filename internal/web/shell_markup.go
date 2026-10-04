@@ -379,6 +379,14 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-media" aria-labelledby="pref-tab-media" tabindex="0" hidden>
       <h3>Messages &amp; media</h3>
+      <fieldset><legend>Theme</legend>
+        <label><input type="radio" name="pref-message-theme" value="clean" data-preference="message-theme" data-default="clean"> Clean: profile photos beside messages, with more space between them</label>
+        <label><input type="radio" name="pref-message-theme" value="compact" data-preference="message-theme"> Compact: no profile photos and less space, to see more messages at once</label>
+      </fieldset>
+      <fieldset><legend>Names</legend>
+        <label><input type="radio" name="pref-name-display" value="full" data-preference="name-display" data-default="full"> Full &amp; display names: display names in messages, full names beside them elsewhere</label>
+        <label><input type="radio" name="pref-name-display" value="display" data-preference="name-display"> Just display names</label>
+      </fieldset>
       <fieldset><legend>Inline media and links</legend>
         <label><input type="checkbox" data-preference="inline-media" data-default="true"> Show images uploaded to this workspace</label>
         <label><input type="checkbox" data-preference="link-previews" data-default="true"> Show previews of linked websites</label>

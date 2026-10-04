@@ -355,7 +355,8 @@ suggestionTimer=window.setTimeout(function(){fetchEmoji(asked).then(function(val
 }
 function personOption(index,person,found){
 var badge=person.self?'(you)':[person.bot?'App':'',!person.member&&!direct?'Not in channel':''].filter(Boolean).join(' \u00b7 ');
-var secondary=person.real&&person.real!==person.name?person.real:(person.display&&person.display!==person.name?person.display:'');
+var displayOnly=!!window.sameoldchatPreferences&&window.sameoldchatPreferences.get('name-display','full')==='display';
+var secondary=person.real&&person.real!==person.name&&!displayOnly?person.real:(person.display&&person.display!==person.name?person.display:'');
 return option(index,[{className:'suggestion-avatar',text:person.avatar?undefined:person.initial,image:person.avatar,hidden:true},{className:'suggestion-name',text:person.name},secondary?{className:'suggestion-meta',text:secondary}:null,badge?{className:'suggestion-badge',text:badge}:null],function(){replaceTrigger(found,'<@'+person.id+'>','@'+person.name,'person');hideSuggestions()});
 }
 function acceptSuggestion(){var options=suggestionOptions();var chosen=options.filter(function(node){return node.getAttribute('aria-selected')==='true'})[0]||options[0];if(chosen&&chosen._accept){chosen._accept();return true}return false}
