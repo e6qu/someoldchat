@@ -114,7 +114,7 @@ deviations.
 - Work down the 92 known deviations in the ledger, and keep each claim at the
   level its evidence supports; the contract ratchet permits an audited
   downgrade when a claim is found to be overstated.
-- Close the journey gaps `make journey-check` prints: eight journeys without a
+- Close the journey gaps `make journey-check` prints: six journeys without a
   browser scenario and 55 without a current official-source assertion.
 - Add visual baselines and manual assistive-technology evidence to the
   browser qualification.
