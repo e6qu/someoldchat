@@ -463,8 +463,8 @@ assert_contains "$work/accessibility.html" 'keyboard' \
 assert_contains "$work/screen-reader.html" 'screen reader' \
 	'[A11Y-02] Slack documents a dedicated screen-reader journey' "$screen_reader_url"
 
-assert_contains "$work/reminders.html" 'Later tab in your sidebar.' \
-	'[REMIND-02] personal reminder creation starts in Later' "$reminder_help_url"
+assert_contains "$work/reminders.html" 'Click the To-dos tab in your sidebar.' \
+	'[REMIND-02] personal reminder creation starts in To-dos, which the product still calls Later' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'Remind me about this' \
 	'[REMIND-01] message and file reminders use the message action' "$reminder_help_url"
 assert_contains "$work/reminders.html" '/remind [#channel] [what] [when]' \
@@ -518,9 +518,16 @@ assert_contains "$work/keyboard-navigation.html" 'Ctrl 3' \
 assert_contains "$work/keyboard-navigation.html" 'Ctrl Shift 3' \
 	'[ACTIVITY-01] Slack web on Windows and Linux opens Activity with the third navigation-tab shortcut' "$keyboard_navigation_url"
 
-for section in 'In progress' 'Archived' 'Completed' 'Show upcoming reminders'; do
-	assert_contains "$work/later.html" "$section" "[LATER-02] Later exposes $section" "$later_help_url"
-done
+# Slack is rolling out To-dos and Saved in place of Later; the product still has
+# the Later it replaces (see the LATER-02 row of specs/product-gap-audit.md).
+# These hold the gap to Slack's current wording, so the row is revisited when
+# Slack's articles change again.
+assert_contains "$work/later.html" 'Saved items have moved out of Later (which is now To-dos)' \
+	'[LATER-02] Slack is replacing Later with To-dos and Saved' "$later_help_url"
+assert_contains "$work/later.html" 'access them from the Saved section of Home' \
+	'[LATER-01] saved items live in the Saved section of Home' "$later_help_url"
+assert_contains "$work/reminders.html" 'Overdue to-dos with reminders in the past' \
+	'[LATER-02] To-dos filter reminders by overdue, upcoming and none' "$reminder_help_url"
 
 assert_contains "$work/reminders-add.html" 'natural language description (Ex. "in 15 minutes," or "every Thursday")' \
 	'[REMIND-API-01] reminders.add natural-language argument' "$reminder_api_url"
