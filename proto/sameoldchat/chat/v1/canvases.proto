@@ -159,6 +159,7 @@ message SaveCanvasMarkdownRequest {
 
 message SaveCanvasMarkdownResponse {
   int32 sections_changed_count = 1;
+  int64 version = 2;
 }
 
 message CanvasAccessRequest {

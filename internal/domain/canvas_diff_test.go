@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestMergeCanvasSectionsKeepsUnchangedSectionsAndCountsEdits(t *testing.T) {
 	section := func(id, text string) CanvasSection {
@@ -48,5 +51,28 @@ func TestMergeCanvasSectionsKeepsAnAppKindThroughAnEdit(t *testing.T) {
 	merged, _ = MergeCanvasSections([]CanvasSection{{ID: "h", Type: CanvasSectionHeading1, Text: "Plan"}}, []CanvasSection{{Type: CanvasSectionMarkdown, Text: "Plan, as prose"}})
 	if merged[0].Type != CanvasSectionMarkdown {
 		t.Fatalf("a heading rewritten as prose kept its heading kind: %+v", merged)
+	}
+}
+
+// A writer's run of ordinary edits keeps one revision; another writer, a
+// restore, or the run outlasting the window keeps one of its own.
+func TestCanvasRevisionGrouping(t *testing.T) {
+	made := time.Unix(1_700_000_000, 0)
+	for _, test := range []struct {
+		name    string
+		topic   string
+		actor   UserID
+		after   time.Duration
+		grouped bool
+	}{
+		{"the same writer moments later", "canvas.updated", "U1", time.Minute, true},
+		{"another writer", "canvas.updated", "U2", time.Minute, false},
+		{"a restore", "canvas.restored", "U1", time.Minute, false},
+		{"past the window", "canvas.updated", "U1", CanvasRevisionGroupWindow, false},
+		{"no actor", "canvas.updated", "", time.Minute, false},
+	} {
+		if got := CanvasRevisionGrouped(test.topic, test.actor, made.Add(test.after), "U1", made); got != test.grouped {
+			t.Errorf("%s: grouped=%v, want %v", test.name, got, test.grouped)
+		}
 	}
 }

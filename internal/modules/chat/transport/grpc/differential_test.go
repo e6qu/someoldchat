@@ -6652,16 +6652,16 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				changed, err := chat.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Keep me\n\nChanged, with <@U2>\n\nAn app wrote this")
+				changed, savedVersion, err := chat.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Keep me\n\nChanged, with <@U2>\n\nAn app wrote this")
 				if err != nil {
 					return nil, err
 				}
-				_, staleErr := chat.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Overwrite")
+				_, _, staleErr := chat.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Overwrite")
 				saved, err := chat.Canvas(ctx, "T1", "U1", canvas.ID)
 				if err != nil {
 					return nil, err
 				}
-				unchanged, err := chat.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, saved.Version, "Keep me\n\nChanged, with <@U2>\n\nAn app wrote this")
+				unchanged, unchangedVersion, err := chat.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, saved.Version, "Keep me\n\nChanged, with <@U2>\n\nAn app wrote this")
 				if err != nil {
 					return nil, err
 				}
@@ -6677,9 +6677,10 @@ func parityCases() []parityCase {
 				for _, section := range document.Sections {
 					kinds = append(kinds, string(section.Type)+":"+section.Text)
 				}
-				_, outsiderErr := chat.SaveCanvasMarkdown(ctx, "T1", "U2", canvas.ID, saved.Version, "Not mine")
+				_, _, outsiderErr := chat.SaveCanvasMarkdown(ctx, "T1", "U2", canvas.ID, saved.Version, "Not mine")
 				return []any{
 					changed, errors.Is(staleErr, storepkg.ErrConflict), unchanged, saved.Version - opened.Version,
+					savedVersion == saved.Version, unchangedVersion == saved.Version,
 					len(before) == 1 && len(after) == 1 && before[0].ID == after[0].ID, kinds,
 					errors.Is(outsiderErr, storepkg.ErrNotFound),
 				}, nil

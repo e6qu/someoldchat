@@ -710,7 +710,16 @@ func (s *Store) UpdateCanvas(_ context.Context, canvas domain.Canvas, event even
 	}
 	canvas.CreatedAt = current.CreatedAt
 	// The revision records what was superseded, so it is built from the state
-	// being replaced rather than the one arriving.
+	// being replaced rather than the one arriving. A writer's run of edits
+	// keeps one (domain.CanvasRevisionGroupWindow).
+	if revisions := s.canvasRevisions[canvas.ID]; len(revisions) > 0 {
+		newest := revisions[len(revisions)-1]
+		if domain.CanvasRevisionGrouped(event.Topic, event.ActorID, canvas.UpdatedAt, newest.EditedBy, newest.CreatedAt) {
+			s.canvases[canvas.ID] = canvas
+			s.outbox = append(s.outbox, event)
+			return nil
+		}
+	}
 	s.canvasRevisions[canvas.ID] = append(s.canvasRevisions[canvas.ID], domain.CanvasRevision{
 		CanvasID: canvas.ID, WorkspaceID: canvas.WorkspaceID, Version: current.Version,
 		Title: current.Title, DocumentContent: current.DocumentContent,

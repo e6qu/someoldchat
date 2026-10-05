@@ -3069,7 +3069,6 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   await page.keyboard.press('Enter');
   await formatting.getByRole('button', { name: 'Checklist, or mark the item done' }).click();
   await page.keyboard.type('Verify the launch');
-  await expect(page.locator('[data-canvas-status]')).toHaveText('Unsaved changes');
   await page.getByRole('button', { name: 'Save canvas' }).click();
   await expect(page.getByText('Canvas saved')).toBeVisible();
   // What was saved comes back as the document: the heading, the mention as the
@@ -4955,6 +4954,50 @@ test('[COMP-01 THREAD-02 FILE-01] a reply with a file is also sent to the channe
 // is an ordinary edit rather than a rewind, so the content it replaced becomes
 // a revision of its own — which is what makes restoring the wrong one
 // recoverable rather than a second mistake.
+// A canvas saves itself as it is written, as Slack's does: no Save press, and
+// what was written is there after a reload. A second tab that changes it
+// first stops the first tab's autosave rather than being overwritten, and the
+// first tab's text is kept and brought back with the reason.
+test('[CANVAS-02 A11Y-01] a canvas saves itself and stops when someone else changes it', async ({ page, context }) => {
+  await signIn(context);
+  const name = `autosave-${Date.now()}`;
+  await page.goto('/app/canvases');
+  await page.getByRole('group').filter({ hasText: 'Create a canvas' }).locator('summary').click();
+  await page.getByLabel('Name').fill(name);
+  await page.getByLabel('Content').fill('the first line');
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+
+  const editor = page.getByRole('textbox', { name: 'Canvas content' });
+  const state = page.locator('[data-canvas-status]');
+  await editor.click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(', and what followed it');
+  await expect(state).toHaveText('Saved');
+  await page.reload();
+  await expect(editor).toHaveText('the first line, and what followed it');
+
+  // Another tab writes first.
+  const other = await context.newPage();
+  await other.goto(page.url());
+  const otherEditor = other.getByRole('textbox', { name: 'Canvas content' });
+  await otherEditor.click();
+  await other.keyboard.press('Control+End');
+  await other.keyboard.type(' (edited elsewhere)');
+  await expect(other.locator('[data-canvas-status]')).toHaveText('Saved');
+  await other.close();
+
+  await editor.click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(' plus my own ending');
+  await expect(state).toContainText('Someone else changed this canvas after you opened it');
+  await expect(editor).toContainText('plus my own ending');
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.getByRole('button', { name: 'Save canvas' }).click();
+  await expect(page.getByRole('alert')).toContainText('someone else changed it after you opened it');
+  await expect(page.locator('textarea[name="markdown"]')).toHaveValue(/plus my own ending/);
+});
+
 test('[CANVAS-01 A11Y-01] a canvas keeps its history and an earlier revision can be restored', async ({ page, context }) => {
   await signIn(context);
   const first = `canvas-past-${Date.now()}`;

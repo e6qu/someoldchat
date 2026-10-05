@@ -579,8 +579,9 @@ type Service interface {
 	// SaveCanvasMarkdown makes the canvas the markdown given, as the web
 	// editor writes it: the whole document at once, refused with
 	// store.ErrConflict when the canvas is no longer at the version the
-	// editor opened. It answers how many sections changed.
-	SaveCanvasMarkdown(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, int64, string) (int, error)
+	// editor opened. It answers how many sections changed and the version the
+	// canvas is now at, which the editor saves against next.
+	SaveCanvasMarkdown(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, int64, string) (int, int64, error)
 	DeleteCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) error
 	SetCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.AccessLevel, []domain.ConversationID, []domain.UserID) error
 	DeleteCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, []domain.ConversationID, []domain.UserID) error

@@ -2577,6 +2577,22 @@ type CanvasRevisionPage struct {
 // first screen of, and Slack's own history is not infinite either.
 const CanvasRevisionLimit = 50
 
+// CanvasRevisionGroupWindow groups one writer's run of edits into one
+// revision, as Slack's version history does. An edit made within this long of
+// a revision the same writer made keeps no revision of its own: the state
+// before their run is already kept, and the states in between are keystroke
+// noise that would push the history's meaningful revisions out of
+// CanvasRevisionLimit. Another writer's edit, or a restore, always keeps one,
+// and a run lasts no longer than this window from its first revision.
+const CanvasRevisionGroupWindow = 5 * time.Minute
+
+// CanvasRevisionGrouped reports whether an ordinary edit (topic
+// canvas.updated) by actor at at continues the run whose newest revision was
+// made by editedBy at made, and so keeps no revision of its own.
+func CanvasRevisionGrouped(topic string, actor UserID, at time.Time, editedBy UserID, made time.Time) bool {
+	return topic == "canvas.updated" && actor != "" && editedBy == actor && !made.IsZero() && at.Sub(made) < CanvasRevisionGroupWindow
+}
+
 // AccessLevel is what a grant lets someone do with a document. It is a closed
 // set because every layer compares it — the service to decide an operation, the
 // stores to write it, the client to label it — and a level nobody declared can
