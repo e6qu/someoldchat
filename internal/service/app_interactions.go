@@ -1586,81 +1586,32 @@ func (m Messages) appInstallationInWorkspace(ctx context.Context, appID domain.A
 	return domain.AppInstallation{}, false, nil
 }
 
-var (
-	slashUserReference    = regexp.MustCompile(`(^|[[:space:](])@([[:alnum:]_.-]+)`)
-	slashChannelReference = regexp.MustCompile(`(^|[[:space:](])#([[:alnum:]_-]+)`)
-	slashURLReference     = regexp.MustCompile(`https?://[^\s<>]+`)
-)
+var slashURLReference = regexp.MustCompile(`https?://[^\s<>]+`)
 
 // escapeSlashCommandText implements the manifest's should_escape contract
 // before either HTTP or Socket Mode delivery. Slack resolves human-readable
 // mentions to stable IDs and wraps links; keeping this in the service makes
 // local and remote composition produce the same app payload.
 func (m Messages) escapeSlashCommandText(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, text string) (string, error) {
-	users := make(map[string]domain.UserID)
-	var cursor domain.Cursor
-	for {
-		page, err := m.Store.ListUsers(ctx, workspaceID, domain.PageRequest{Limit: 200, Cursor: cursor})
-		if err != nil {
-			return "", err
-		}
-		for _, user := range page.Users {
-			if user.Deleted {
-				continue
+	directory, err := m.loadNameDirectory(ctx, workspaceID, userID, false)
+	if err != nil {
+		return "", err
+	}
+	text = domain.LinkNameReferences(text, func(kind domain.NameReferenceKind, name string) (string, bool) {
+		switch kind {
+		case domain.MemberNameReference:
+			if id, ok := directory.member(name); ok {
+				return "<@" + string(id) + ">", true
 			}
-			for _, name := range []string{user.Name, user.Profile.DisplayName} {
-				if name = strings.ToLower(strings.TrimSpace(name)); name != "" && !strings.ContainsAny(name, " \t\r\n") {
-					users[name] = user.ID
+		case domain.ChannelNameReference:
+			if conversation, ok := directory.channel(name); ok {
+				if conversation.PrivateFlag() {
+					return "<#" + string(conversation.ID) + "|>", true
 				}
+				return "<#" + string(conversation.ID) + "|" + conversation.Name + ">", true
 			}
 		}
-		if !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor {
-			break
-		}
-		cursor = page.NextCursor
-	}
-	channels := make(map[string]domain.Conversation)
-	cursor = ""
-	for {
-		page, err := m.Store.ListConversations(ctx, workspaceID, userID, domain.ConversationListRequest{Limit: 200, Cursor: cursor})
-		if err != nil {
-			return "", err
-		}
-		for _, conversation := range page.Conversations {
-			if conversation.Name != "" && !conversation.IsDirectOrGroup() {
-				channels[strings.ToLower(conversation.Name)] = conversation
-			}
-		}
-		if !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor {
-			break
-		}
-		cursor = page.NextCursor
-	}
-	text = slashUserReference.ReplaceAllStringFunc(text, func(match string) string {
-		prefixLength := 0
-		if match[0] != '@' {
-			prefixLength = 1
-		}
-		name := strings.ToLower(match[prefixLength+1:])
-		if id := users[name]; id != "" {
-			return match[:prefixLength] + "<@" + string(id) + ">"
-		}
-		return match
-	})
-	text = slashChannelReference.ReplaceAllStringFunc(text, func(match string) string {
-		prefixLength := 0
-		if match[0] != '#' {
-			prefixLength = 1
-		}
-		name := strings.ToLower(match[prefixLength+1:])
-		conversation, ok := channels[name]
-		if !ok {
-			return match
-		}
-		if conversation.PrivateFlag() {
-			return match[:prefixLength] + "<#" + string(conversation.ID) + "|>"
-		}
-		return match[:prefixLength] + "<#" + string(conversation.ID) + "|" + conversation.Name + ">"
+		return "", false
 	})
 	indices := slashURLReference.FindAllStringIndex(text, -1)
 	if len(indices) == 0 {
@@ -1849,7 +1800,7 @@ func (m Messages) applyAppResponse(ctx context.Context, capability domain.AppRes
 		_, err := m.PostWithBlocksAndAttachments(ctx, capability.WorkspaceID, bot.UserID, capability.ConversationID, response.Text, blocks, attachments, capability.ThreadTimestamp, idempotencyKey, capability.AppID)
 		return err
 	}
-	_, err = m.postEphemeralWithBlocksAndAttachments(ctx, capability.WorkspaceID, bot.UserID, capability.ConversationID, capability.UserID, response.Text, blocks, attachments, capability.AppID, idempotencyKey, "")
+	_, err = m.postEphemeralWithBlocksAndAttachments(ctx, capability.WorkspaceID, bot.UserID, capability.ConversationID, capability.UserID, response.Text, blocks, attachments, capability.AppID, idempotencyKey, "", false)
 	return err
 }
 

@@ -893,8 +893,11 @@ type PostEphemeralRequest struct {
 	Attachments     string                 `protobuf:"bytes,7,opt,name=attachments,proto3" json:"attachments,omitempty"`
 	AppId           string                 `protobuf:"bytes,8,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	ThreadTimestamp string                 `protobuf:"bytes,9,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// link_names links the @names and #names of text, as chat.postMessage's
+	// link_names does.
+	LinkNames     bool `protobuf:"varint,10,opt,name=link_names,json=linkNames,proto3" json:"link_names,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PostEphemeralRequest) Reset() {
@@ -988,6 +991,13 @@ func (x *PostEphemeralRequest) GetThreadTimestamp() string {
 		return x.ThreadTimestamp
 	}
 	return ""
+}
+
+func (x *PostEphemeralRequest) GetLinkNames() bool {
+	if x != nil {
+		return x.LinkNames
+	}
+	return false
 }
 
 type EphemeralMessagesRequest struct {
@@ -1279,8 +1289,11 @@ type UpdateMessageRequest struct {
 	Text           *string                `protobuf:"bytes,5,opt,name=text,proto3,oneof" json:"text,omitempty"`
 	Blocks         *string                `protobuf:"bytes,6,opt,name=blocks,proto3,oneof" json:"blocks,omitempty"`
 	Attachments    *string                `protobuf:"bytes,7,opt,name=attachments,proto3,oneof" json:"attachments,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// link_names links the @names and #names of the new text, as
+	// chat.update's link_names does. It describes this edit only.
+	LinkNames     bool `protobuf:"varint,8,opt,name=link_names,json=linkNames,proto3" json:"link_names,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateMessageRequest) Reset() {
@@ -1360,6 +1373,13 @@ func (x *UpdateMessageRequest) GetAttachments() string {
 		return *x.Attachments
 	}
 	return ""
+}
+
+func (x *UpdateMessageRequest) GetLinkNames() bool {
+	if x != nil {
+		return x.LinkNames
+	}
+	return false
 }
 
 type StartMessageStreamRequest struct {
@@ -3288,7 +3308,7 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	" \x01(\tR\x05appId\x12\x1d\n" +
 	"\n" +
 	"created_at\x18\v \x01(\tR\tcreatedAt\x12)\n" +
-	"\x10thread_timestamp\x18\f \x01(\tR\x0fthreadTimestamp\"\xae\x02\n" +
+	"\x10thread_timestamp\x18\f \x01(\tR\x0fthreadTimestamp\"\xcd\x02\n" +
 	"\x14PostEphemeralRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -3298,7 +3318,10 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x06blocks\x18\x06 \x01(\tR\x06blocks\x12 \n" +
 	"\vattachments\x18\a \x01(\tR\vattachments\x12\x15\n" +
 	"\x06app_id\x18\b \x01(\tR\x05appId\x12)\n" +
-	"\x10thread_timestamp\x18\t \x01(\tR\x0fthreadTimestamp\"\x95\x01\n" +
+	"\x10thread_timestamp\x18\t \x01(\tR\x0fthreadTimestamp\x12\x1d\n" +
+	"\n" +
+	"link_names\x18\n" +
+	" \x01(\bR\tlinkNames\"\x95\x01\n" +
 	"\x18EphemeralMessagesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -3319,7 +3342,7 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\x12\x12\n" +
 	"\x04text\x18\x05 \x01(\tR\x04text\x12\x16\n" +
 	"\x06blocks\x18\x06 \x01(\tR\x06blocks\x12 \n" +
-	"\vattachments\x18\a \x01(\tR\vattachments\"\x9a\x02\n" +
+	"\vattachments\x18\a \x01(\tR\vattachments\"\xb9\x02\n" +
 	"\x14UpdateMessageRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -3327,7 +3350,9 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\x12\x17\n" +
 	"\x04text\x18\x05 \x01(\tH\x00R\x04text\x88\x01\x01\x12\x1b\n" +
 	"\x06blocks\x18\x06 \x01(\tH\x01R\x06blocks\x88\x01\x01\x12%\n" +
-	"\vattachments\x18\a \x01(\tH\x02R\vattachments\x88\x01\x01B\a\n" +
+	"\vattachments\x18\a \x01(\tH\x02R\vattachments\x88\x01\x01\x12\x1d\n" +
+	"\n" +
+	"link_names\x18\b \x01(\bR\tlinkNamesB\a\n" +
 	"\x05_textB\t\n" +
 	"\a_blocksB\x0e\n" +
 	"\f_attachments\"\xf0\x03\n" +

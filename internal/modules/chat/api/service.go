@@ -110,7 +110,7 @@ type Service interface {
 	StartMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamStart) (domain.Message, error)
 	AppendMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
 	StopMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
-	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID, domain.MessageTimestamp) (domain.EphemeralMessage, error)
+	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID, domain.MessageTimestamp, bool) (domain.EphemeralMessage, error)
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
 	RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) (domain.AccessLogPage, error)

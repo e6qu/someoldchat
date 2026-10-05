@@ -3579,7 +3579,10 @@ func parityCases() []parityCase {
 				if _, err := chat.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", "", `[{"type":"divider"}]`); err != nil {
 					return nil, err
 				}
-				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1", ""); err != nil {
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1", "", false); err != nil {
+					return nil, err
+				}
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "linked for @bob", "", "", "A1", "", true); err != nil {
 					return nil, err
 				}
 				values, err := chat.ListEphemeralMessages(ctx, "T1", "U2", "C1", 10)
@@ -4110,9 +4113,11 @@ func parityCases() []parityCase {
 				// they were, and one that must carry a field the first omitted. A
 				// converter that dropped a pointer, or that turned an absent one
 				// into an empty string, fails exactly one of the two.
-				patchedText := "reply patched"
+				// link_names crosses the seam too: a composition that dropped
+				// it stores "@bob" where the other stores "<@U2>".
+				patchedText := "reply patched for @bob"
 				patched, err := chat.UpdateMessage(ctx, "T1", "U1", "C1", replyTimestamp,
-					domain.MessagePatch{Text: &patchedText})
+					domain.MessagePatch{Text: &patchedText, LinkNames: true})
 				if err != nil {
 					return nil, err
 				}

@@ -122,6 +122,9 @@ message PostEphemeralRequest {
   string attachments = 7;
   string app_id = 8;
   string thread_timestamp = 9;
+  // link_names links the @names and #names of text, as chat.postMessage's
+  // link_names does.
+  bool link_names = 10;
 }
 
 message EphemeralMessagesRequest {
@@ -161,6 +164,9 @@ message UpdateMessageRequest {
   optional string text = 5;
   optional string blocks = 6;
   optional string attachments = 7;
+  // link_names links the @names and #names of the new text, as
+  // chat.update's link_names does. It describes this edit only.
+  bool link_names = 8;
 }
 
 message StartMessageStreamRequest {

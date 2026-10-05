@@ -4277,6 +4277,42 @@ func (m Message) PostingBot() BotID {
 	return state.BotID
 }
 
+// TextIsMarkup reports whether the message's text is Slack markup: neither
+// markdown_text, which is Markdown, nor text posted with mrkdwn=false, which
+// Slack shows without parsing. link_names applies only to markup.
+func (m Message) TextIsMarkup() bool {
+	if m.StreamState == "" {
+		return true
+	}
+	var state MessageStreamState
+	if json.Unmarshal([]byte(m.StreamState), &state) != nil {
+		return true
+	}
+	return !state.MarkdownText && !state.MrkdwnDisabled
+}
+
+// UnfurlsLinks reports whether the links in the message may be unfurled as
+// text-based content — the kind an app's unfurl domains produce through
+// link_shared and chat.unfurl. chat.postMessage's unfurl_links ("Pass true to
+// enable unfurling of primarily text-based content") decides when the poster
+// gave it explicitly. A message that omits it is unfurled, whoever posted it:
+// no published source in the repository states a different default for bot
+// and person messages, so the behaviour before unfurl_links was applied is
+// kept (specs/product-gap-audit.md).
+func (m Message) UnfurlsLinks() bool {
+	if m.StreamState == "" {
+		return true
+	}
+	var state MessageStreamState
+	if json.Unmarshal([]byte(m.StreamState), &state) != nil {
+		return true
+	}
+	if state.UnfurlLinks != nil {
+		return *state.UnfurlLinks
+	}
+	return true
+}
+
 // FunctionExecution is the function execution whose token posted the
 // message, or empty for every other message.
 func (m Message) FunctionExecution() WorkflowStepID {
@@ -4338,6 +4374,11 @@ type MessagePatch struct {
 	Text        *string
 	Blocks      *string
 	Attachments *string
+	// LinkNames is chat.update's link_names: it links the @names and #names
+	// of the new text. It describes this edit only — the pinned reference
+	// says an omitted link_names is overwritten with the default, none — so
+	// an edit without it is not linked, whatever the message was posted with.
+	LinkNames bool
 }
 
 // NoStructuredContent reports whether a normalized blocks or attachments value

@@ -178,12 +178,32 @@ operations:
       - go-test:internal/api/slack:TestAsUserIsAcceptedFromAUserToken
       - go-test:internal/api/slack:TestReplyingToAReplyJoinsTheRootThread
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
+      - go-test:internal/api/slack:TestLinkNamesLinksMembersChannelsAndUserGroups
+      - go-test:internal/api/slack:TestLinkNamesOnlyLinksChannelsTheAuthorCanSee
+      - go-test:internal/api/slack:TestUnfurlLinksGatesTheLinksAppsAreAskedToUnfurl
+      - go-test:internal/service:TestUnfurlLinksDecidesWhetherAppsAreAskedToUnfurl
+      - go-test:internal/domain:TestLinkNameReferences
     deviations:
       - >-
-        The full current payload is validated and persisted. link_names,
-        unfurl_links and unfurl_media are stored with the message but not acted
-        on: the reference's user-group linking for link_names and its link and
-        media unfurling are not implemented.
+        link_names ("Find and link channel names and usernames" in the pinned
+        schema; user groups in the current reference) links a plain-text @name
+        to <@U…> when it is a member's username or display name and to
+        <!subteam^S…> when it is an enabled user group's handle, and #name to
+        <#C…> for a channel the author can see. Names inside code or existing
+        markup and names that resolve to nothing stay as written. It is not
+        applied to markdown_text or to text sent with mrkdwn=false, which is
+        not parsed as markup, and it does not turn @here, @channel or
+        @everyone into special mentions.
+      - >-
+        An explicit unfurl_links decides whether apps are asked to unfurl the
+        message's links (link_shared, answered by chat.unfurl), and an edit
+        follows the choice the message was posted with. A message that omits
+        it is handed to apps whether a person or a bot posted it: no published
+        source in the repository states a different default for bot messages,
+        so the prior behaviour is kept (product-gap-audit). The server fetches
+        no link or media previews of its own, so unfurl_media is validated and
+        recorded but has no media unfurl to suppress, and chat.unfurl called
+        directly still attaches previews to any message.
       - The Web API now enforces the documented posting allowance — one message per second per channel with a short burst — and a per-method budget, answering 429 with Retry-After. Every method is held to the tier Slack publishes for it (rate-limit-tiers decision); chat.postMessage's method budget is the special tier's several hundred a minute, enforced as the pinned SDK's 600. A method budget answers Slack's ratelimited and the per-channel posting allowance answers the pinned rate_limited (provenance under rate-limit-codes). Every web replica of a deployment draws from one budget, held in the chat module's store wherever more than one replica can run.
     audit:
       downgraded_from: behavior-compatible
@@ -207,6 +227,7 @@ operations:
       - go-test:internal/api/slack:TestChatUpdateKeepsWhatItWasNotGiven
       - go-test:internal/api/slack:TestEditingSomebodyElsesMessageUsesSlacksCodes
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
+      - go-test:internal/api/slack:TestChatUpdateLinkNamesDescribesTheEdit
   - method: chat.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1109,6 +1130,7 @@ operations:
       - go-test:internal/api/slack:TestPostEphemeralReturnsMessageTimestamp
       - go-test:internal/api/slack:TestPostEphemeralContract
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
+      - go-test:internal/api/slack:TestChatPostEphemeralLinkNames
   - method: chat.scheduleMessage
     status: behavior-compatible
     provenance: slack-reference
@@ -1126,6 +1148,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestPostMessageResolvesNamesAndUsers
+      - go-test:internal/api/slack:TestScheduledMessageLinksNamesWhenDelivered
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
     deviations:
       - schedules created before schema 102 lack reconstructable app attribution
@@ -1157,6 +1180,7 @@ operations:
       - go-test:internal/api/slack:TestChatUnfurlInvitesTheSharerToAuthenticate
       - go-test:tests/persistence-qualification:unfurlAuthDeclineIsDurable
       - go-test:internal/slackapp:TestEventProcessorDeliversLinkSharedForTheAppsUnfurlDomains
+      - go-test:internal/service:TestUnfurlLinksDecidesWhetherAppsAreAskedToUnfurl
       - official-sdk:tests/official-sdk-qualification/node-bolt/qualification.mjs
     deviations:
       - link_shared always carries source=conversations_history; source=composer is answered cannot_unfurl_url because the first-party client previews no unsent draft, so no composer unfurl_id exists.

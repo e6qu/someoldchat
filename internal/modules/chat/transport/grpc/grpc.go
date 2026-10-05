@@ -8941,7 +8941,7 @@ func (s *Server) PromptUnfurlAuthentication(ctx context.Context, input *chatv1.U
 }
 
 func (s *Server) PostEphemeral(ctx context.Context, input *chatv1.PostEphemeralRequest) (*chatv1.EphemeralMessage, error) {
-	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.AppID(input.GetAppId()), domain.MessageTimestamp(input.GetThreadTimestamp()))
+	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.AppID(input.GetAppId()), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetLinkNames())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -13852,7 +13852,7 @@ func (s *Server) UpdateWithBlocks(ctx context.Context, input *chatv1.UpdateWithB
 }
 
 func (s *Server) UpdateMessage(ctx context.Context, input *chatv1.UpdateMessageRequest) (*chatv1.Message, error) {
-	patch := domain.MessagePatch{Text: input.Text, Blocks: input.Blocks, Attachments: input.Attachments}
+	patch := domain.MessagePatch{Text: input.Text, Blocks: input.Blocks, Attachments: input.Attachments, LinkNames: input.GetLinkNames()}
 	value, err := s.implementation.UpdateMessage(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), patch)
 	if err != nil {
 		return nil, mapError(err)
@@ -13903,7 +13903,7 @@ func (r Remote) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domai
 }
 
 func (r Remote) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "", "", "")
+	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "", "", "", false)
 }
 
 func (r Remote) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string, appID domain.AppID) (domain.Message, error) {
@@ -13994,8 +13994,8 @@ func (r Remote) PostAsSlackbot(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoMessage(out)
 }
 
-func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp) (domain.EphemeralMessage, error) {
-	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments, AppId: string(appID), ThreadTimestamp: string(threadTimestamp)})
+func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp, linkNames bool) (domain.EphemeralMessage, error) {
+	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments, AppId: string(appID), ThreadTimestamp: string(threadTimestamp), LinkNames: linkNames})
 	if err != nil {
 		return domain.EphemeralMessage{}, err
 	}
@@ -14035,6 +14035,7 @@ func (r Remote) UpdateMessage(ctx context.Context, workspaceID domain.WorkspaceI
 		Text:           patch.Text,
 		Blocks:         patch.Blocks,
 		Attachments:    patch.Attachments,
+		LinkNames:      patch.LinkNames,
 	})
 	if err != nil {
 		return domain.Message{}, err

@@ -9334,7 +9334,7 @@ func (m Messages) Permalink(ctx context.Context, workspaceID domain.WorkspaceID,
 }
 
 func (m Messages) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "", "", "")
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "", "", "", false)
 }
 
 func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ip, userAgent string) error {
@@ -10388,7 +10388,7 @@ func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID dom
 }
 
 func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "", "", "")
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "", "", "", false)
 }
 
 func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
@@ -10587,15 +10587,24 @@ func normalizeScheduledMessageState(raw, text, blocks string, threadTimestamp do
 	return string(encoded), nil
 }
 
-func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp) (domain.EphemeralMessage, error) {
-	return m.postEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, attachments, appID, "", threadTimestamp)
+// PostEphemeralWithBlocksAndAttachments is chat.postEphemeral. linkNames is
+// its link_names, applied to text as chat.postMessage applies it.
+func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp, linkNames bool) (domain.EphemeralMessage, error) {
+	return m.postEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, attachments, appID, "", threadTimestamp, linkNames)
 }
 
-func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, idempotencyKey string, threadTimestamp domain.MessageTimestamp) (domain.EphemeralMessage, error) {
+func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, idempotencyKey string, threadTimestamp domain.MessageTimestamp, linkNames bool) (domain.EphemeralMessage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
 	text = strings.TrimSpace(text)
+	if linkNames {
+		linked, err := m.linkMessageNames(ctx, workspaceID, authorID, text)
+		if err != nil {
+			return domain.EphemeralMessage{}, err
+		}
+		text = linked
+	}
 	if messagePayloadTooLong(blocks, attachments) {
 		return domain.EphemeralMessage{}, domain.ErrInvalidEphemeral
 	}
@@ -10807,6 +10816,17 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 			threadTimestampValue = parent.ThreadTimestamp
 		}
 	}
+	// link_names rewrites the text only once the author is known to be
+	// allowed to post here, so a refused post never reads the directory. It
+	// does not apply to markdown_text, which is not Slack markup, or to text
+	// posted with mrkdwn=false, which Slack does not parse for markup at all.
+	text := request.Text
+	if request.LinkNames && !request.MarkdownText && !request.MrkdwnDisabled {
+		text, err = m.linkMessageNames(ctx, workspaceID, authorID, text)
+		if err != nil {
+			return domain.Message{}, err
+		}
+	}
 	id, err := domain.NewMessageID()
 	if err != nil {
 		return domain.Message{}, err
@@ -10829,7 +10849,7 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	}
 	message := domain.Message{
 		ID: id, WorkspaceID: workspaceID, Conversation: request.Conversation, AuthorID: authorID,
-		AppID: request.AppID, Text: request.Text, Blocks: normalizedBlocks, Attachments: normalizedAttachments,
+		AppID: request.AppID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments,
 		Metadata: metadata, StreamState: streamState, ThreadTimestamp: threadTimestampValue,
 		ReplyBroadcast: request.ReplyBroadcast,
 		CreatedAt:      domain.MessageInstant(time.Now()), Subtype: request.Subtype,
@@ -10923,6 +10943,12 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 	previous := message
 	if patch.Text != nil {
 		message.Text = *patch.Text
+		if patch.LinkNames && message.TextIsMarkup() {
+			message.Text, err = m.linkMessageNames(ctx, workspaceID, userID, message.Text)
+			if err != nil {
+				return domain.Message{}, err
+			}
+		}
 	}
 	if patch.Blocks != nil {
 		message.Blocks, err = domain.NormalizeBlocks([]byte(*patch.Blocks))

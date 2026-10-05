@@ -10709,7 +10709,15 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "no_text")
 		return
 	}
-	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks, attachments, principal.AppID, domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
+	// link_names is a boolean on chat.postEphemeral, as on chat.postMessage.
+	// A value that is not one answers invalid_arg_name, the argument code
+	// the method declares.
+	linkNames, err := parseBoolField(fields["link_names"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks, attachments, principal.AppID, domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])), linkNames)
 	switch {
 	case errors.Is(err, domain.ErrRecipientNotInConversation):
 		writeError(w, "user_not_in_channel")
@@ -10954,7 +10962,19 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "no_text")
 		return
 	}
-	patch := domain.MessagePatch{}
+	// chat.update's link_names is a string in the pinned schema, defaulting
+	// to none; clients send it as a boolean (python-slack-sdk's chat_update
+	// types it bool). none, an omitted value and the false forms leave the
+	// text as written.
+	linkNames := false
+	if raw := strings.TrimSpace(fields["link_names"]); !strings.EqualFold(raw, "none") {
+		linkNames, err = parseBoolField(raw)
+		if err != nil {
+			writeError(w, "invalid_arg_name")
+			return
+		}
+	}
+	patch := domain.MessagePatch{LinkNames: linkNames}
 	if hasText {
 		patch.Text = &text
 	}

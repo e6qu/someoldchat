@@ -55,6 +55,18 @@ Connect, and Enterprise administration depth. The datastore query/count
 evaluator is extended only when a current Slack contract establishes
 additional operators.
 
+Message formatting arguments: `chat.postMessage`, `chat.postEphemeral`,
+`chat.update` and `chat.scheduleMessage` apply `link_names`, and an explicit
+`unfurl_links` decides whether a message's links are handed to apps to
+unfurl (the method rows in `specs/compatibility.yaml` carry the remaining
+deviations). A message that omits `unfurl_links` keeps the prior behaviour:
+its links are handed to apps whether a person or a bot posted it, because no
+published source in the repository (the pinned OpenAPI document, the
+reference lists, or the SDK fixtures) states a different default for bot and
+person messages. Incoming webhooks do not yet read `link_names`,
+`unfurl_links` or `unfurl_media` from their payload
+([Incoming Webhooks](../docs/incoming-webhooks.md)).
+
 ## Qualification gaps
 
 Official SDK qualification proves, method by method, that a genuine client

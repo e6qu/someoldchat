@@ -1867,7 +1867,7 @@ func TestWorkspaceRendersEphemeralAppResponsesOnlyToTheirRecipient(t *testing.T)
 	}
 	if _, err := (service.Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(
 		context.Background(), "T1", "UBOT", "Cdev", "U1", "Private result",
-		`[{"type":"section","text":{"type":"plain_text","text":"Build is ready"}},{"type":"actions","block_id":"private-result","elements":[{"type":"button","action_id":"acknowledge","text":{"type":"plain_text","text":"Acknowledge"},"value":"yes"}]}]`, "", "A1", "",
+		`[{"type":"section","text":{"type":"plain_text","text":"Build is ready"}},{"type":"actions","block_id":"private-result","elements":[{"type":"button","action_id":"acknowledge","text":{"type":"plain_text","text":"Acknowledge"},"value":"yes"}]}]`, "", "A1", "", false,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -1903,7 +1903,7 @@ func TestAThreadedEphemeralMessageRendersInItsThreadOnly(t *testing.T) {
 	root := seedMessage(t, s, "M1", "the root of the thread", time.Now().UTC().Add(-time.Minute))
 	rootTimestamp := domain.NewMessageTimestamp(root.CreatedAt)
 	if _, err := (service.Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(
-		context.Background(), "T1", "UBOT", "Cdev", "U1", "Private threaded answer", "", "", "A1", rootTimestamp,
+		context.Background(), "T1", "UBOT", "Cdev", "U1", "Private threaded answer", "", "", "A1", rootTimestamp, false,
 	); err != nil {
 		t.Fatal(err)
 	}

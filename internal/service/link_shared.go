@@ -41,7 +41,14 @@ type linkSharedSnapshot struct {
 // shares that previous did not, or none when it shares no new link. previous
 // is nil for a new message; an edit notifies only the links it adds, so an
 // app is not asked again to unfurl a link it has already been handed.
+//
+// A message posted with unfurl_links=false shares none
+// (domain.Message.UnfurlsLinks): Slack asks an app to unfurl only the links it
+// would unfurl, so no app is handed a link_shared for such a message.
 func linkSharedEvents(workspaceID domain.WorkspaceID, message domain.Message, previous *domain.Message, createdAt time.Time) ([]events.Event, error) {
+	if !message.UnfurlsLinks() {
+		return nil, nil
+	}
 	links := domain.LinksInMessage(message.Text, message.Blocks)
 	if previous != nil && len(links) != 0 {
 		before := make(map[string]struct{})
