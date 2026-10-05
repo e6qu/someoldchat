@@ -41,17 +41,23 @@ import (
 // Grounding and recorded boundaries (see the rate-limiting deviations in
 // specs/compatibility.yaml):
 //
-//   - Slack's current reference defines per-method tiers, counted per app per
-//     workspace: Tier 1 "1+ per minute", Tier 2 "20+", Tier 3 "50+" and
-//     Tier 4 "100+". A method whose stricter tier its reference page names is
-//     enforced at that tier (methodTiers); every other method gets the
-//     uniform budget at Tier 4's floor. Enforcing a laxer limit than Slack's
-//     can never break a conforming client, while a tier written from memory
-//     could refuse one, so the table holds only cited tiers. Every method's
-//     tier is published — on its reference page, and as one table in the
-//     pinned Java SDK's MethodsRateLimits — so the methods held to Tier 4
-//     although that table names a stricter tier are a recorded gap (the
-//     rate-limit-tiers decision in specs/compatibility.yaml), not an unknown.
+//   - Slack publishes every method's tier, counted per app per workspace:
+//     Tier 1 "1+ per minute", Tier 2 "20+", Tier 3 "50+" and Tier 4 "100+".
+//     Each ledger method is enforced at its published tier (methodTier):
+//     the pinned official Java SDK's table where it lists the method
+//     (publishedMethodTiers, tested against the vendored table), the tier
+//     the method's reference page names where that table predates it
+//     (referenceMethodTiers), and Tier 4's floor — the laxest documented
+//     tier, which can never refuse a conforming client — for the methods
+//     whose reference tier is not yet cited (uncitedTierMethods). A
+//     method outside the ledger (the unknown-method catch-all) has the
+//     Tier 4 floor too. The table's special tiers — auth.test and
+//     chat.getPermalink "hundreds of requests per minute",
+//     chat.postMessage "several hundred messages per minute" to the
+//     workspace, and assistant.threads.setStatus "similar" to it — are
+//     tierHundreds, the pinned SDK's 600 per minute. assistant.threads.setStatus's
+//     per-conversation allowance is not enforced separately: laxer than
+//     Slack, so it refuses no conforming client.
 //   - chat.postMessage's special allowance IS documented method-level
 //     behavior — one message per second per channel with short bursts
 //     tolerated — and is enforced per credential and channel. The burst
@@ -109,7 +115,7 @@ func (l *localRateTokens) TakeRateToken(_ context.Context, key string, allowance
 // rateTier is a documented Web API tier: its per-minute floor, and how many
 // calls may arrive at once. Slack documents bursts for every tier without a
 // number ("a small amount of burst behavior" for Tier 1); a full minute's
-// budget is the burst for Tiers 2 to 4, and Tier 1's is a chosen constant.
+// budget is the burst for the other tiers, and Tier 1's is a chosen constant.
 type rateTier struct {
 	perMinute float64
 	burst     float64
@@ -120,48 +126,18 @@ var (
 	tier2 = rateTier{perMinute: 20, burst: 20}
 	tier3 = rateTier{perMinute: 50, burst: 50}
 	tier4 = rateTier{perMinute: methodBudgetPerMinute, burst: methodBudgetPerMinute}
+	// tierHundreds is the special tier the pinned SDK names for auth.test,
+	// chat.getPermalink, chat.postMessage and assistant.threads.setStatus:
+	// "hundreds of requests per minute", which the SDK paces at 600.
+	tierHundreds = rateTier{perMinute: specialBudgetPerMinute, burst: specialBudgetPerMinute}
 )
-
-// methodTiers is each method enforced below Tier 4, at the tier its Slack
-// reference page names. A method absent here is held to Tier 4.
-var methodTiers = map[string]rateTier{
-	"admin.apps.mcp.servers.list":             tier3,
-	"admin.apps.mcp.servers.permissions.list": tier3,
-	"admin.apps.mcp.servers.permissions.set":  tier3,
-	"admin.apps.permissions.add":              tier2,
-	"admin.apps.permissions.list":             tier3,
-	"admin.apps.permissions.remove":           tier2,
-	"admin.apps.permissions.set":              tier2,
-	"admin.usergroups.addUsers":               tier2,
-	"admin.usergroups.create":                 tier1,
-	"admin.usergroups.fetch":                  tier1,
-	"admin.usergroups.removeTeams":            tier2,
-	"admin.usergroups.removeUsers":            tier2,
-	"admin.usergroups.update":                 tier1,
-	"admin.usergroups.uploadUsers":            tier2,
-	"agents.conversations.archive":            tier2,
-	"agents.conversations.create":             tier2,
-	"agents.conversations.getCanvas":          tier3,
-	"agents.conversations.listViews":          tier3,
-	"agents.conversations.removeView":         tier3,
-	"agents.conversations.setCanvasContent":   tier3,
-	"agents.conversations.setCommands":        tier1,
-	"agents.conversations.setProperties":      tier3,
-	"agents.conversations.setView":            tier3,
-	"agents.sessions.rename":                  tier3,
-	"agents.sessions.setStatus":               tier3,
-	"apps.managed.permissions.set":            tier2,
-	"auth.teams.list":                         tier2,
-	"chat.scheduleMessage":                    tier3,
-	"chat.scheduledMessages.list":             tier3,
-	"functions.workflows.steps.list":          tier3,
-	"team.preferences.list":                   tier3,
-	"workflows.featured.set":                  tier3,
-}
 
 // methodTier is the tier the method is enforced at.
 func methodTier(method string) rateTier {
-	if tier, ok := methodTiers[method]; ok {
+	if tier, ok := publishedMethodTiers[method]; ok {
+		return tier
+	}
+	if tier, ok := referenceMethodTiers[method]; ok {
 		return tier
 	}
 	return tier4
@@ -169,8 +145,12 @@ func methodTier(method string) rateTier {
 
 const (
 	// methodBudgetPerMinute is Tier 4's documented floor, the budget of every
-	// method methodTiers does not name.
+	// method no tier table names.
 	methodBudgetPerMinute = 100
+	// specialBudgetPerMinute is the special tiers' budget: the 600 a minute
+	// the pinned Java SDK's MethodsRateLimitTier gives "hundreds of requests
+	// per minute".
+	specialBudgetPerMinute = 600
 	// tier1Burst is how many Tier 1 calls may arrive at once before the
 	// one-per-minute refill governs.
 	tier1Burst = 3

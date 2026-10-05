@@ -48,9 +48,10 @@ Every current Web API method has a registered handler; `make compatibility-repor
 lists the evidence level and known-deviation count for each. The remaining
 app-platform work, in dependency order, is tracked in
 [Slack app platform compatibility](slack-app-platform.md#measured-remaining-gaps):
-published per-method rate-limit tiers, manifest sections that are stored but
-not executed, cross-app and connector workflow functions, and then assistant,
-Slack Connect, and Enterprise administration depth. The datastore query/count
+the reference-page rate-limit tiers of the 43 methods the pinned SDK tier
+table predates, manifest sections that are stored but not executed,
+cross-app and connector workflow functions, and then assistant, Slack
+Connect, and Enterprise administration depth. The datastore query/count
 evaluator is extended only when a current Slack contract establishes
 additional operators.
 

@@ -66,7 +66,7 @@ The figures below come from `make compatibility-report` and
 | …with method-level evidence | 331 of 331 |
 | …`behavior-compatible` or better | 270 of 331 |
 | …`conforms-to-published-source` | 0 of 331 |
-| Recorded known deviations | 93 |
+| Recorded known deviations | 92 |
 | Retained legacy methods implemented | 10 of 10 |
 | User journeys in the normative catalog | 108 |
 | …cited by a browser scenario | 102 of 108 |
@@ -114,16 +114,17 @@ Exit criteria for every supported profile:
 The surface is implemented; what remains is evidence and the recorded
 deviations.
 
-- Work down the 93 known deviations in the ledger, and keep each claim at the
+- Work down the 92 known deviations in the ledger, and keep each claim at the
   level its evidence supports; the contract ratchet permits an audited
   downgrade when a claim is found to be overstated.
 - Close the journey gaps `make journey-check` prints: six journeys without a
   browser scenario and 55 without a current official-source assertion.
 - Add visual baselines and manual assistive-technology evidence to the
   browser qualification.
-- Enforce each method's published rate-limit tier: 245 ledger methods are
-  held to Tier 4's floor although Slack publishes a stricter tier for them
-  (see the `rate-limit-tiers` decision in the ledger).
+- Cite the reference-page rate-limit tier of the 43 ledger methods the pinned
+  Java SDK's tier table predates (`uncitedTierMethods` in
+  `internal/api/slack/ratelimit_tiers.go`); until then they hold Tier 4's
+  floor (see the `rate-limit-tiers` decision in the ledger).
 - Phase 5 exits only when each method names its current official sources,
   executable evidence, and known deviations; an aggregate green suite supports
   that record but does not replace it. A method reaches

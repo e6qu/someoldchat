@@ -51,8 +51,10 @@ method is implemented and names method-level evidence. Implemented is a
 coverage statement, not a claim that every published detail of the method is
 asserted.
 
-The next app-runtime priorities are the published per-method rate-limit tiers
-(the `rate-limit-tiers` decision in the ledger), then the manifest sections that are parsed and stored but not
+Every method is enforced at the rate-limit tier the pinned Java SDK's table
+publishes for it. The next app-runtime priorities are citing the reference-page
+tiers of the 43 methods that table predates (the `rate-limit-tiers` decision in
+the ledger), then the manifest sections that are parsed and stored but not
 executed (for example agent/assistant views), then cross-app and connector
 workflow functions, before Enterprise-only breadth.
 
