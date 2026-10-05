@@ -8859,11 +8859,11 @@ func (m Messages) StartHuddle(ctx context.Context, workspaceID domain.WorkspaceI
 		ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindHuddle, ConversationID: conversationID,
 		Title: strings.TrimSpace(title), CreatedBy: actor, StartedAt: now,
 	}
-	started, err := huddleEvent(workspaceID, actor, "huddle.started", id, conversationID, now)
+	started, err := events.HuddleEvent(workspaceID, actor, "huddle.started", id, conversationID, now)
 	if err != nil {
 		return domain.Call{}, err
 	}
-	joined, err := huddleEvent(workspaceID, actor, "huddle.joined", id, conversationID, now)
+	joined, err := events.HuddleEvent(workspaceID, actor, "huddle.joined", id, conversationID, now)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -8904,7 +8904,7 @@ func (m Messages) JoinHuddle(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.Call{}, err
 	}
-	joined, err := huddleEvent(workspaceID, actor, "huddle.joined", call.ID, conversationID, time.Now().UTC())
+	joined, err := events.HuddleEvent(workspaceID, actor, "huddle.joined", call.ID, conversationID, time.Now().UTC())
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -8920,11 +8920,11 @@ func (m Messages) LeaveHuddle(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.Call{}, err
 	}
 	now := time.Now().UTC()
-	left, err := huddleEvent(workspaceID, actor, "huddle.left", call.ID, conversationID, now)
+	left, err := events.HuddleEvent(workspaceID, actor, "huddle.left", call.ID, conversationID, now)
 	if err != nil {
 		return domain.Call{}, err
 	}
-	ended, err := huddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
+	ended, err := events.HuddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -8945,7 +8945,7 @@ func (m Messages) EndHuddle(ctx context.Context, workspaceID domain.WorkspaceID,
 		}
 	}
 	now := time.Now().UTC()
-	ended, err := huddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
+	ended, err := events.HuddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -9130,14 +9130,6 @@ func (m Messages) huddleReactionEmoji(ctx context.Context, workspaceID domain.Wo
 		}
 	}
 	return "", domain.ErrInvalidReaction
-}
-
-func huddleEvent(workspaceID domain.WorkspaceID, actor domain.UserID, topic string, id domain.CallID, conversationID domain.ConversationID, at time.Time) (events.Event, error) {
-	return newEvent(workspaceID, actor, events.NewPayload(topic,
-		events.String("call_id", string(id)),
-		events.String("channel_id", string(conversationID)),
-		events.String("user_id", string(actor)),
-	), at)
 }
 
 func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, participants []domain.CallParticipant) (domain.Call, error) {

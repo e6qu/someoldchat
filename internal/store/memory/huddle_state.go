@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"maps"
 	"slices"
 	"time"
 
@@ -46,4 +47,35 @@ func (s *Store) refreshHuddleStateLocked(userID domain.UserID, preferred domain.
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+// releaseFromHuddlesLocked takes a deactivated member out of every running
+// huddle they are in, as leaving would: each records huddle.left, a huddle
+// left empty ends and records huddle.ended, and their huddle_state is cleared.
+// A deactivated member cannot be talking in a huddle; leaving them in it would
+// list them there, and report them in it, until it ended.
+func (s *Store) releaseFromHuddlesLocked(user domain.User, actor domain.UserID, at time.Time) error {
+	for _, id := range slices.Sorted(maps.Keys(s.calls)) {
+		call := s.calls[id]
+		if call.WorkspaceID != user.WorkspaceID || call.Kind != domain.CallKindHuddle || !call.Active() || !slices.Contains(call.Participants, user.ID) {
+			continue
+		}
+		left, err := events.HuddleEvent(user.WorkspaceID, user.ID, "huddle.left", call.ID, call.ConversationID, at)
+		if err != nil {
+			return err
+		}
+		call.Participants = slices.DeleteFunc(append([]domain.UserID(nil), call.Participants...), func(candidate domain.UserID) bool { return candidate == user.ID })
+		s.outbox = append(s.outbox, left)
+		if len(call.Participants) == 0 {
+			ended, err := events.HuddleEvent(user.WorkspaceID, user.ID, "huddle.ended", call.ID, call.ConversationID, at)
+			if err != nil {
+				return err
+			}
+			call.EndedAt = at.UTC()
+			call.DurationSeconds = max(int64(call.EndedAt.Sub(call.StartedAt).Seconds()), 0)
+			s.outbox = append(s.outbox, ended)
+		}
+		s.calls[id] = call
+	}
+	return s.refreshHuddleStateLocked(user.ID, "", actor, at)
 }

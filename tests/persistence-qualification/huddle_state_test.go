@@ -169,3 +169,122 @@ func huddleStateFollowsTheMember(t *testing.T, open opener) {
 		in(f.userID, other.ID), in(f.userID, first.ID),
 		out(second), out(f.userID))
 }
+
+// Deactivating a member takes them out of every running huddle they are in, in
+// the deactivation's transaction, as leaving would: a huddle others are still
+// in keeps running without them, one they were alone in ends, each records
+// huddle.left (and huddle.ended for the one that ended), and their
+// huddle_state is cleared with one user.huddle_changed.
+func deactivationReleasesHuddles(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	second := f.secondMember(t, ctx)
+	alone := domain.ConversationID("C-huddle-alone-" + f.suffix)
+	if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: alone, WorkspaceID: f.workspaceID, Name: "alone-" + f.suffix}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.SeedConversationMember(ctx, alone, second); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(1_700_000_900, 0).UTC()
+	start := func(name string, conversation domain.ConversationID, actor domain.UserID) domain.Call {
+		t.Helper()
+		call := domain.Call{
+			ID: domain.CallID(name + "-" + f.suffix), WorkspaceID: f.workspaceID, Kind: domain.CallKindHuddle,
+			ConversationID: conversation, CreatedBy: actor, StartedAt: at,
+		}
+		value, _, err := f.repository.StartHuddle(ctx, call,
+			f.event(name+"-started", "huddle.started", string(call.ID)),
+			f.event(name+"-joined", "huddle.joined", string(call.ID)),
+			domain.Message{
+				ID: domain.MessageID("M-" + name + "-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: conversation,
+				AuthorID: actor, Subtype: domain.MessageSubtypeHuddleThread, CreatedAt: at, Attachments: "[]",
+			})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return value
+	}
+	shared := start("release-shared", f.channelID, f.userID)
+	start("release-shared-again", f.channelID, second)
+	solo := start("release-solo", alone, second)
+
+	removed := f.event("release-removed", "user.removed", string(second))
+	removed.ActorID = f.userID
+	removed.CreatedAt = at.Add(time.Minute)
+	if err := f.repository.SetUserDeleted(ctx, f.workspaceID, second, true, removed); err != nil {
+		t.Fatal(err)
+	}
+
+	stillRunning, err := f.repository.GetCall(ctx, f.workspaceID, shared.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stillRunning.Active() || len(stillRunning.Participants) != 1 || stillRunning.Participants[0] != f.userID {
+		t.Fatalf("shared huddle after deactivation: active=%v participants=%v, want running with %s alone", stillRunning.Active(), stillRunning.Participants, f.userID)
+	}
+	ended, err := f.repository.GetCall(ctx, f.workspaceID, solo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ended.Active() || len(ended.Participants) != 0 || !ended.EndedAt.Equal(removed.CreatedAt) {
+		t.Fatalf("solo huddle after deactivation: active=%v participants=%v ended=%v", ended.Active(), ended.Participants, ended.EndedAt)
+	}
+	user, err := f.repository.GetUser(ctx, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.HuddleCallID != "" {
+		t.Fatalf("a deactivated member is still in huddle %q", user.HuddleCallID)
+	}
+
+	records, err := f.repository.ListEventsAfter(ctx, f.workspaceID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type huddleRecord struct {
+		topic string
+		call  string
+	}
+	var recorded []huddleRecord
+	cleared := 0
+	for _, record := range records {
+		if !record.Event.CreatedAt.Equal(removed.CreatedAt) {
+			continue
+		}
+		switch record.Event.Topic {
+		case "huddle.left", "huddle.ended":
+			var payload struct {
+				CallID string `json:"call_id"`
+				UserID string `json:"user_id"`
+			}
+			if err := json.Unmarshal([]byte(record.Event.Payload), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.UserID != string(second) || record.Event.ActorID != second {
+				t.Fatalf("%s names %q (actor %q), want the deactivated member", record.Event.Topic, payload.UserID, record.Event.ActorID)
+			}
+			recorded = append(recorded, huddleRecord{record.Event.Topic, payload.CallID})
+		case events.UserHuddleChangedTopic:
+			cleared++
+		}
+	}
+	want := map[huddleRecord]bool{
+		{"huddle.left", string(shared.ID)}: true,
+		{"huddle.left", string(solo.ID)}:   true,
+		{"huddle.ended", string(solo.ID)}:  true,
+	}
+	if len(recorded) != len(want) {
+		t.Fatalf("records=%+v, want %v", recorded, want)
+	}
+	for _, record := range recorded {
+		if !want[record] {
+			t.Fatalf("records=%+v, want %v", recorded, want)
+		}
+	}
+	if cleared != 1 {
+		t.Fatalf("user.huddle_changed recorded %d times, want once", cleared)
+	}
+}

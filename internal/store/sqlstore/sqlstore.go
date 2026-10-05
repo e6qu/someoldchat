@@ -7109,6 +7109,11 @@ func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.Workspace
 			return err
 		}
 	}
+	if deleted {
+		if err := releaseFromHuddlesTx(ctx, tx, workspaceID, userID, event.ActorID, event.CreatedAt); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 

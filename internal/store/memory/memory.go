@@ -3406,6 +3406,9 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 	}
 	s.outbox = append(s.outbox, event)
 	s.outbox = append(s.outbox, guestEvent...)
+	if deleted {
+		return s.releaseFromHuddlesLocked(user, event.ActorID, event.CreatedAt)
+	}
 	return nil
 }
 

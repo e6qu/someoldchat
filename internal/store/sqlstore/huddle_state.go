@@ -70,3 +70,64 @@ func refreshHuddleStateTx(ctx context.Context, tx txRunner, workspace domain.Wor
 	}
 	return insertOutbox(ctx, tx, event)
 }
+
+// releaseFromHuddlesTx takes a deactivated member out of every running huddle
+// they are in, inside the deactivation's transaction, as leaving would: each
+// records huddle.left, a huddle left empty ends and records huddle.ended, and
+// their huddle_state is cleared. The memory repository's
+// releaseFromHuddlesLocked is the same rule.
+func releaseFromHuddlesTx(ctx context.Context, tx txRunner, workspace domain.WorkspaceID, userID domain.UserID, actor domain.UserID, at time.Time) error {
+	rows, err := tx.QueryContext(ctx, `SELECT c.id, c.conversation_id, c.started_at FROM call_participants cp JOIN calls c ON c.id = cp.call_id WHERE cp.user_id = ? AND c.workspace_id = ? AND c.kind = ? AND c.ended_at = 0 ORDER BY c.id`, userID, workspace, domain.CallKindHuddle)
+	if err != nil {
+		return err
+	}
+	var huddles []domain.Call
+	for rows.Next() {
+		var call domain.Call
+		var started int64
+		if err := rows.Scan(&call.ID, &call.ConversationID, &started); err != nil {
+			rows.Close()
+			return err
+		}
+		call.StartedAt = time.Unix(started, 0).UTC()
+		huddles = append(huddles, call)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, call := range huddles {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM call_participants WHERE call_id = ? AND user_id = ?`, call.ID, userID); err != nil {
+			return err
+		}
+		left, err := events.HuddleEvent(workspace, userID, "huddle.left", call.ID, call.ConversationID, at)
+		if err != nil {
+			return err
+		}
+		if err := insertOutbox(ctx, tx, left); err != nil {
+			return err
+		}
+		var remaining int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM call_participants WHERE call_id = ?`, call.ID).Scan(&remaining); err != nil {
+			return err
+		}
+		if remaining > 0 {
+			continue
+		}
+		endedAt := at.UTC()
+		duration := max(int64(endedAt.Sub(call.StartedAt).Seconds()), 0)
+		if _, err := tx.ExecContext(ctx, `UPDATE calls SET ended_at = ?, duration_seconds = ? WHERE workspace_id = ? AND id = ?`, endedAt.Unix(), duration, workspace, call.ID); err != nil {
+			return err
+		}
+		ended, err := events.HuddleEvent(workspace, userID, "huddle.ended", call.ID, call.ConversationID, at)
+		if err != nil {
+			return err
+		}
+		if err := insertOutbox(ctx, tx, ended); err != nil {
+			return err
+		}
+	}
+	return refreshHuddleStateTx(ctx, tx, workspace, userID, "", actor, at)
+}

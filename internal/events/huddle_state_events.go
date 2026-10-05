@@ -53,3 +53,21 @@ func userHuddleChanged(delivered Delivered, _ Surface) ([]Inner, error) {
 	}
 	return []Inner{huddle, change}, nil
 }
+
+// HuddleEvent builds one huddle.started, huddle.joined, huddle.left or
+// huddle.ended record: the huddle, its conversation and the member it is
+// about, who is also its actor. The huddle service mints them for what a member
+// does; the repositories mint them for what deactivating a member does to the
+// huddles they were in, inside that transaction, for the reason
+// UserHuddleChangedEvent is minted there.
+func HuddleEvent(workspaceID domain.WorkspaceID, userID domain.UserID, topic string, callID domain.CallID, conversationID domain.ConversationID, at time.Time) (Event, error) {
+	id, err := domain.NewEventID()
+	if err != nil {
+		return Event{}, err
+	}
+	return New(id, workspaceID, userID, NewPayload(topic,
+		String("call_id", string(callID)),
+		String("channel_id", string(conversationID)),
+		String("user_id", string(userID)),
+	), at)
+}

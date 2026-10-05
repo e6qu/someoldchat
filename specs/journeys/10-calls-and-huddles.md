@@ -167,6 +167,9 @@ the member, with `user_change` beside it; joining a huddle one is already in
 changes nothing. Apps receive both over the Events API, Socket Mode and RTM,
 subscribed by name and gated by `users:read` like every `user_*` event. A
 member in two huddles at once who leaves one stays `in_a_huddle` in the other.
+Deactivating a member takes them out of every huddle they are in, in the same
+transaction, as leaving would: `huddle.left` for each, `huddle.ended` for one
+they were alone in, and their state cleared.
 The calls API (`calls.end`, `calls.update`, `calls.participants.*`) does not
 reach a huddle — its ID is `call_not_found` there — because those methods would
 move members, or end the huddle, without the membership and ownership checks
@@ -212,7 +215,8 @@ and its own presence broadcast returning to badge its tile.
   (`UserHuddleChangedEvent` in Node `@slack/types` and Java
   `slack-api-model`). The persistence qualification holds every storage profile
   to one sequence of state changes and records across start, join, a second
-  huddle, leave and end; a service test reads the state back through
+  huddle, leave and end, and to the release that deactivating a member in two
+  huddles makes; a service test reads the state back through
   `users.info`, counts one record per change, and delivers it only to an app
   holding `users:read`; the Web API test reads it from `users.info`,
   `users.list` and `users.profile.get`; the seam parity suite carries it across
