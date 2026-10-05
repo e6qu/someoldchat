@@ -267,45 +267,49 @@ one document to write in, as Slack's canvas is, rather than a form per block.
 - **Mentions.** Typing @ offers people from the workspace directory and inserts
   an atomic mention pill. It saves as `<@U…>` and renders as the member's name.
 - **Checklists.** A checklist item's box is ticked off in place.
-- **Saving.** The whole document saves at once as markdown, against the
-  revision the editor opened. A save from a page someone else has changed since
-  is refused, and the page comes back with the writer's text and the reason, so
-  nothing is overwritten and nothing typed is lost.
-- **Section identity.** The save rewrites only the sections that changed: a
-  section the writer did not touch, or only moved, keeps its identity, so a
-  comment anchored to it stays attached. The editor sends an untouched section
-  back exactly as it was stored, so a round trip through the browser cannot
-  reword it.
+- **Saving.** The document is one collaborative text (`internal/crdt`, a
+  replicated sequence the canvas page runs as well): every character carries
+  its writer and a clock, so edits from any number of writers merge into the
+  same text whatever order they arrive in. The editor sends what was typed as
+  ops on that text, under a writer name of its own (the member's ID and a
+  per-page suffix); the server refuses an op under another member's name, or
+  one naming an edit the canvas never had, and the page asks for a reload.
+  Two writers editing at once both keep their words; nothing is refused as
+  stale.
+- **Section identity.** The text projects to sections: only the sections whose
+  text changed are rewritten, so a section the writer did not touch, or only
+  moved, keeps its identity and a comment anchored to it stays attached. The
+  editor writes an untouched section exactly as it was stored, so a round trip
+  through the browser cannot reword it.
+- **Other writers.** canvases.edit, a restored revision and the markdown form
+  write sections; the text follows them by the smallest edit, and only when it
+  no longer reads as those sections, so an editor's ops still land after them.
+  A canvas nobody has edited as text starts from the text its sections write.
 - **App sections.** A section of a kind markdown cannot spell (an app wrote it
   through canvases.create) is edited like any other and keeps its kind.
 - **Autosave.** The document saves itself a moment after the writer stops
-  typing, and when the tab is hidden. It uses the same save against the same
-  version, and the status line says when it is saved.
-  - A save never overlaps another, and Save canvas waits for one in flight.
-  - If someone else has changed the canvas since, autosave stops and says so.
-    The writer's text stays in place, and Save canvas brings it back with the
-    reason.
-  - A network or server failure retries with backoff.
+  typing, and when the tab is hidden; the status line says when it is saved.
+  Sends never overlap, and a network or server failure resends with backoff,
+  which changes nothing twice because an op applied twice is applied once.
+  Save canvas sends what is left and reloads the canvas.
 - **History.** A writer's run of edits keeps one revision, as Slack's version
   history does: the state before the run. A later edit by the same writer
   within five minutes of that revision keeps none of its own, so autosave does
   not push meaningful revisions out of the fifty kept. Another writer's edit,
   a restore, or the run outlasting the window keeps one.
-- **Without script.** The document is a markdown field with the same save and
-  the same conflict rule.
+- **Without script.** The document is a markdown field saved whole against the
+  version the page showed; a save from a page someone else has changed since
+  is refused, and the page comes back with the writer's text and the reason.
 
 The read-only fallback remains only for a document whose JSON cannot be parsed
 at all. Comments, revision history, and sharing review are built: the sharing
 surface names everyone who may open a canvas, and only its owner is offered the
 controls that change that. A conversation reaches its own canvas from the
 conversation itself, and creating one is a deliberate act rather than a side
-effect of following the link. Real-time co-editing (collaborative cursors and
-merging two writers' concurrent changes) and offline recovery remain gaps: a
-second writer's save is refused rather than merged. The merge itself is built
-but not yet wired in: `internal/crdt` is a replicated text that converges
-whatever order edits arrive in, and the canvas page ships its browser twin;
-the two replay shared conformance vectors, in Go and in the browser suite, so
-an edit either makes integrates the same way in the other.
+effect of following the link. Live co-editing remains a gap: writers' edits
+merge when saved, but an open page does not yet show another writer's edits
+or cursor until it is reloaded. Deleted characters stay in the stored text as
+compact tombstones and are not yet collected.
 
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,

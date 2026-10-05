@@ -3,15 +3,16 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/crdt"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
@@ -116,7 +117,7 @@ func TestAStaleCanvasSaveKeepsTheWritersText(t *testing.T) {
 
 	for _, invalid := range []url.Values{
 		{"_csrf": {auth.CSRFToken("session")}, "version": {"not-a-number"}, "markdown": {"x"}},
-		{"_csrf": {auth.CSRFToken("session")}, "version": {"1"}, "markdown": {strings.Repeat("x", maxCanvasMarkdownBytes+1)}},
+		{"_csrf": {auth.CSRFToken("session")}, "version": {"1"}, "markdown": {strings.Repeat("x", domain.CanvasMarkdownLimit+1)}},
 	} {
 		if refused := postForm(t, mux, target+"/document", invalid.Encode(), false); refused.Code != http.StatusBadRequest && refused.Code != http.StatusRequestEntityTooLarge {
 			t.Fatalf("invalid save = %d", refused.Code)
@@ -199,60 +200,108 @@ func storedCanvasSections(t *testing.T, s *memory.Store, id domain.CanvasID) []d
 	return document.Sections
 }
 
-// The editor's autosave is the same save answered in JSON: the version to
-// save against next, or a fixed reason it was refused, never a page or a
-// redirect it could not act on.
-func TestCanvasAutosaveAnswersInJSON(t *testing.T) {
+// The editor writes ops on the canvas's collaborative text, answered in JSON.
+// Two editors opened on the same page and typing at once both keep their
+// words: nothing is refused as stale, an op sent twice changes nothing, and
+// an op the canvas cannot place is refused with a reason the editor acts on.
+func TestCanvasTextEditsMergeAndAnswerInJSON(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	value, err := service.Messages{Store: s}.CreateCanvas(context.Background(), "T1", "U1", "Notes", `{"type":"markdown","markdown":"First thought"}`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := "/app/canvases/" + string(value.ID) + "/document"
-	version := pageVersion(t, get(t, mux, "/app/canvases/"+string(value.ID)).Body.String())
-	autosave := func(version, markdown string) *httptest.ResponseRecorder {
+	page := get(t, mux, "/app/canvases/"+string(value.ID)).Body.String()
+	state, replica := pageAttribute(t, page, "data-canvas-text"), pageAttribute(t, page, "data-canvas-replica")
+	if !strings.HasPrefix(replica, "U1.") {
+		t.Fatalf("replica = %q", replica)
+	}
+	open := func() *crdt.Sequence {
 		t.Helper()
-		request := httptest.NewRequest(http.MethodPost, target, strings.NewReader(url.Values{"_csrf": {auth.CSRFToken("session")}, "version": {version}, "markdown": {markdown}}.Encode()))
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		request.Header.Set("X-SameOldChat-Autosave", "true")
-		addBrowserCookies(request)
-		response := httptest.NewRecorder()
-		mux.ServeHTTP(response, request)
-		return response
+		var runs []crdt.Run
+		if err := json.Unmarshal([]byte(state), &runs); err != nil {
+			t.Fatal(err)
+		}
+		text, err := crdt.Load(runs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return text
+	}
+	send := func(ops ...crdt.Op) *httptest.ResponseRecorder {
+		t.Helper()
+		encoded, _ := json.Marshal(ops)
+		return postForm(t, mux, "/app/canvases/"+string(value.ID)+"/text", url.Values{"_csrf": {auth.CSRFToken("session")}, "ops": {string(encoded)}}.Encode(), false)
+	}
+	version := func(response *httptest.ResponseRecorder) int64 {
+		t.Helper()
+		var answer struct {
+			OK      bool  `json:"ok"`
+			Version int64 `json:"version"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil || !answer.OK {
+			t.Fatalf("edit = %d %s", response.Code, response.Body)
+		}
+		return answer.Version
 	}
 
-	first := autosave(version, "First thought\n\nSecond thought")
-	var saved struct {
-		OK      bool  `json:"ok"`
-		Version int64 `json:"version"`
-		Changed int   `json:"changed"`
+	left, right := open(), open()
+	leftOps, err := left.Replace(replica, "First thought, sharpened")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if first.Code != http.StatusOK || json.Unmarshal(first.Body.Bytes(), &saved) != nil || !saved.OK || saved.Changed != 1 {
-		t.Fatalf("autosave = %d %s", first.Code, first.Body)
+	rightOps, err := right.Replace("U1.othertab", "## Plan\n\nFirst thought")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if stored, _ := s.GetCanvas(context.Background(), "T1", value.ID); stored.Version != saved.Version {
-		t.Fatalf("answered version %d, stored %d", saved.Version, stored.Version)
+	first := version(send(leftOps...))
+	second := version(send(rightOps...))
+	if second <= first {
+		t.Fatalf("versions %d then %d", first, second)
 	}
-	// The next save goes against the answered version.
-	next := autosave(strconv.FormatInt(saved.Version, 10), "First thought\n\nSecond thought, refined")
-	if next.Code != http.StatusOK {
-		t.Fatalf("second autosave = %d %s", next.Code, next.Body)
+	stored, err := s.GetCanvas(context.Background(), "T1", value.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// A version someone else has moved past is refused with a reason the editor
-	// can act on, and nothing is written.
-	stale := autosave(version, "Overwrite everything")
-	if stale.Code != http.StatusConflict || !strings.Contains(stale.Body.String(), `"error":"conflict"`) {
-		t.Fatalf("stale autosave = %d %s", stale.Code, stale.Body)
+	markdown, _ := domain.CanvasDocumentMarkdown(stored.DocumentContent)
+	if markdown != "## Plan\n\nFirst thought, sharpened\n" {
+		t.Fatalf("merged canvas = %q", markdown)
 	}
-	if large := autosave(strconv.FormatInt(saved.Version+1, 10), strings.Repeat("x", maxCanvasMarkdownBytes+1)); large.Code != http.StatusRequestEntityTooLarge || !strings.Contains(large.Body.String(), `"too_large"`) {
-		t.Fatalf("oversize autosave = %d %s", large.Code, large.Body)
+	if again := version(send(leftOps...)); again != second {
+		t.Fatalf("resent ops moved the canvas to %d", again)
 	}
-	if bad := autosave("soon", "x"); bad.Code != http.StatusBadRequest {
-		t.Fatalf("invalid version autosave = %d", bad.Code)
+
+	for name, ops := range map[string][]crdt.Op{
+		"someone else's replica": {{ID: crdt.ID{Replica: "U2.tab", Clock: 99}, Text: "x"}},
+		"an unknown character":   {{ID: crdt.ID{Replica: replica, Clock: 6}, After: crdt.ID{Replica: "U1.gone", Clock: 5}, Text: "x"}},
+		"nothing":                {},
+	} {
+		if refused := send(ops...); refused.Code != http.StatusBadRequest || !strings.Contains(refused.Body.String(), `"invalid_ops"`) {
+			t.Fatalf("%s = %d %s", name, refused.Code, refused.Body)
+		}
 	}
-	// One writer's run of saves keeps one revision: the state before it.
+	// Past the limit with what the canvas already says.
+	huge, err := open().Insert("U1.big", 0, strings.Repeat("x", domain.CanvasMarkdownLimit))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refused := send(huge); refused.Code != http.StatusRequestEntityTooLarge || !strings.Contains(refused.Body.String(), `"too_large"`) {
+		t.Fatalf("oversize edit = %d %s", refused.Code, refused.Body)
+	}
+	if missing := postForm(t, mux, "/app/canvases/F0MISSING/text", url.Values{"_csrf": {auth.CSRFToken("session")}, "ops": {"[]"}}.Encode(), false); missing.Code != http.StatusNotFound {
+		t.Fatalf("edit of a missing canvas = %d", missing.Code)
+	}
+	// One writer's run of edits keeps one revision: the state before it.
 	history, err := service.Messages{Store: s}.CanvasRevisions(context.Background(), "T1", "U1", value.ID, domain.PageRequest{Limit: 10})
-	if err != nil || len(history.Revisions) != 1 || !strings.Contains(history.Revisions[0].DocumentContent, "First thought") || strings.Contains(history.Revisions[0].DocumentContent, "Second") {
-		t.Fatalf("history after a run of autosaves = %+v err=%v", history.Revisions, err)
+	if err != nil || len(history.Revisions) != 1 || strings.Contains(history.Revisions[0].DocumentContent, "Plan") {
+		t.Fatalf("history after a run of edits = %+v err=%v", history.Revisions, err)
 	}
+}
+
+func pageAttribute(t *testing.T, page, name string) string {
+	t.Helper()
+	match := regexp.MustCompile(name + `="([^"]*)"`).FindStringSubmatch(page)
+	if match == nil {
+		t.Fatalf("page has no %s", name)
+	}
+	return html.UnescapeString(match[1])
 }

@@ -24,7 +24,10 @@ test('[CANVAS-02] the canvas page edits text the way the server does', async ({ 
         const doc = text.create();
         for (const index of order) doc.apply(c.ops[index]);
         if (doc.text() !== c.text || doc.pendingCount() !== 0) failures.push(`${c.name}: read ${JSON.stringify(doc.text())}`);
+        if (JSON.stringify(doc.snapshot()) !== JSON.stringify(c.snapshot)) failures.push(`${c.name}: stored ${JSON.stringify(doc.snapshot())}`);
       }
+      const loaded = text.load(c.snapshot);
+      if (loaded.text() !== c.text || JSON.stringify(loaded.snapshot()) !== JSON.stringify(c.snapshot)) failures.push(`${c.name}: loaded ${JSON.stringify(loaded.text())}`);
     }
     for (const e of vectors.edits) {
       const doc = text.create();

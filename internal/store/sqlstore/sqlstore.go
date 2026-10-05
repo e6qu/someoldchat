@@ -614,7 +614,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 213
+const schemaVersion = 214
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3597,6 +3597,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 214: canvas collaborative text ---
+	if version < 214 {
+		// The text editors write in, kept beside the sections it projects to.
+		// An existing canvas starts without one and is seeded from its
+		// sections on its first edit (domain.Canvas.TextState).
+		columns, err := s.tableColumns(ctx, db, "canvases")
+		if err != nil {
+			return err
+		}
+		if !columns["text_state"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE canvases ADD COLUMN text_state TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate canvas text: %w", err)
+			}
+		}
+	}
+	// --- end schema 214 ---
 	// --- schema 213: huddle invitations in Activity ---
 	if version < 213 {
 		// A huddle invitation was filed as a bare conversation invitation and
@@ -17311,7 +17327,7 @@ func (s *Store) CreateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 	if canvas.Version == 0 {
 		canvas.Version = 1
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, search_folded, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvasSearchFolded(canvas), canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix())
+	_, err = tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, text_state, search_folded, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.TextState, canvasSearchFolded(canvas), canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix())
 	if err != nil {
 		return classify(err)
 	}
@@ -17333,7 +17349,7 @@ func (s *Store) CreateCanvasWithAccess(ctx context.Context, canvas domain.Canvas
 	if canvas.Version == 0 {
 		canvas.Version = 1
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, search_folded, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvasSearchFolded(canvas), canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, text_state, search_folded, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.TextState, canvasSearchFolded(canvas), canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_access(canvas_id, entity_type, entity_id, access_level) VALUES (?, ?, ?, ?)`, access.CanvasID, access.EntityType, access.EntityID, access.Access); err != nil {
@@ -17374,7 +17390,7 @@ func (s *Store) CreateChannelCanvas(ctx context.Context, canvas domain.Canvas, e
 	if canvas.Version == 0 {
 		canvas.Version = 1
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, search_folded, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvasSearchFolded(canvas), canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, text_state, search_folded, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.TextState, canvasSearchFolded(canvas), canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_access(canvas_id, entity_type, entity_id, access_level) VALUES (?, 'channel_canvas', ?, ?)`, canvas.ID, channel, domain.AccessWrite); err != nil {
@@ -17392,11 +17408,11 @@ func (s *Store) CreateChannelCanvas(ctx context.Context, canvas domain.Canvas, e
 func (s *Store) GetChannelCanvas(ctx context.Context, workspace domain.WorkspaceID, channel domain.ConversationID) (domain.Canvas, error) {
 	var canvas domain.Canvas
 	var createdAt, updatedAt int64
-	err := s.db.QueryRowContext(ctx, `SELECT c.id, c.workspace_id, c.owner_id, c.title, c.document_content, c.version, c.created_at, c.updated_at
+	err := s.db.QueryRowContext(ctx, `SELECT c.id, c.workspace_id, c.owner_id, c.title, c.document_content, c.text_state, c.version, c.created_at, c.updated_at
 		FROM canvases c JOIN canvas_access a ON a.canvas_id = c.id
 		JOIN conversations ch ON ch.id = a.entity_id
 		WHERE a.entity_type = 'channel_canvas' AND a.entity_id = ? AND c.workspace_id = ? AND ch.workspace_id = c.workspace_id
-		LIMIT 1`, channel, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &canvas.Version, &createdAt, &updatedAt)
+		LIMIT 1`, channel, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &canvas.TextState, &canvas.Version, &createdAt, &updatedAt)
 	if err != nil {
 		return domain.Canvas{}, translateNotFound(err)
 	}
@@ -17408,7 +17424,7 @@ func (s *Store) GetChannelCanvas(ctx context.Context, workspace domain.Workspace
 func (s *Store) GetCanvas(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasID) (domain.Canvas, error) {
 	var canvas domain.Canvas
 	var created, updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, title, document_content, version, created_at, updated_at FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &canvas.Version, &created, &updated)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, title, document_content, text_state, version, created_at, updated_at FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &canvas.TextState, &canvas.Version, &created, &updated)
 	if err := translateNotFound(err); err != nil {
 		return domain.Canvas{}, err
 	}
@@ -17631,7 +17647,7 @@ func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 	if previousErr != nil && !errors.Is(previousErr, sql.ErrNoRows) {
 		return previousErr
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE canvases SET title = ?, document_content = ?, search_folded = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`, canvas.Title, canvas.DocumentContent, canvasSearchFolded(canvas), canvas.Version, canvas.UpdatedAt.UTC().Unix(), canvas.ID, canvas.WorkspaceID, canvas.Version-1)
+	result, err := tx.ExecContext(ctx, `UPDATE canvases SET title = ?, document_content = ?, text_state = ?, search_folded = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`, canvas.Title, canvas.DocumentContent, canvas.TextState, canvasSearchFolded(canvas), canvas.Version, canvas.UpdatedAt.UTC().Unix(), canvas.ID, canvas.WorkspaceID, canvas.Version-1)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -24,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/crdt"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/huddlesfu"
@@ -892,6 +894,11 @@ type canvasData struct {
 	// save from a page someone else has since changed is refused instead of
 	// silently overwriting their work.
 	Version int64
+	// TextState is the canvas's collaborative text (domain.Canvas.TextState),
+	// which the editor loads and edits by ops; Replica is this page's own
+	// writer name in it, the member's ID and a suffix no other page shares.
+	TextState string
+	Replica   string
 	// Markdown is the whole document as markdown: what the editor's markdown
 	// field holds, and after a refused save the text the writer sent, so it is
 	// never lost. Problem says why the save was refused.
@@ -3153,7 +3160,7 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 </style>{{end}}
 {{define "scripts"}}` + localTimeScript + rowLinkScript + profilePanelScript + canvasTextScript + canvasEditorScript + `{{end}}
 {{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="v-page canvas-page">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas"><div class="canvas-top"><h2>{{.Title}}</h2><div class="canvas-top-actions"><a class="v-btn primary" href="#sharing-heading">Share</a></div></div><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}{{if .CanWrite}}<details class="rename"><summary>Rename canvas</summary><form class="editor" method="post" action="/app/canvases/{{.ID}}/rename"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><div class="actions"><button type="submit">Rename</button></div></form></details>
-<form class="canvas-editor" method="post" action="/app/canvases/{{.ID}}/document" data-canvas-document{{if .Problem}} data-draft{{end}}><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}">
+<form class="canvas-editor" method="post" action="/app/canvases/{{.ID}}/document" data-canvas-document data-canvas-text-url="/app/canvases/{{.ID}}/text" data-canvas-text="{{.TextState}}" data-canvas-replica="{{.Replica}}"{{if .Problem}} data-draft{{end}}><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}">
 {{if .Problem}}<p class="notice" role="alert">{{.Problem}}</p>{{end}}
 <div class="format-bar" role="toolbar" aria-label="Formatting" aria-controls="canvas-document" data-canvas-toolbar hidden><button type="button" data-command="bold" aria-label="Bold" title="Bold (Ctrl+B)"><b>B</b></button><button type="button" data-command="italic" aria-label="Italic" title="Italic (Ctrl+I)"><i>I</i></button><button type="button" data-command="strike" aria-label="Strikethrough" title="Strikethrough"><s>S</s></button><button type="button" data-command="code" aria-label="Code" title="Code">&lt;/&gt;</button><button type="button" data-command="link" aria-label="Link" title="Link">🔗</button><span class="sep" aria-hidden="true"></span><button type="button" data-command="h1" aria-label="Heading 1" title="Heading 1">H1</button><button type="button" data-command="h2" aria-label="Heading 2" title="Heading 2">H2</button><button type="button" data-command="h3" aria-label="Heading 3" title="Heading 3">H3</button><button type="button" data-command="paragraph" aria-label="Paragraph" title="Paragraph">¶</button><span class="sep" aria-hidden="true"></span><button type="button" data-command="bullet" aria-label="Bulleted list" title="Bulleted list">•</button><button type="button" data-command="number" aria-label="Numbered list" title="Numbered list">1.</button><button type="button" data-command="check" aria-label="Checklist, or mark the item done" title="Checklist; in a checklist, marks the item done">☑</button><button type="button" data-command="quote" aria-label="Quote" title="Quote">❝</button><button type="button" data-command="mention" aria-label="Mention someone" title="Mention someone (@)">@</button></div>
 <div class="canvas-body canvas-document" id="canvas-document" aria-label="Canvas content" data-canvas-editor>{{range .Sections}}<div class="canvas-block{{if .App}} app-block{{end}}" id="block-{{.Position}}" data-canvas-block data-markdown="{{.Source}}"{{if .App}} title="{{.Type}} content from an app; it keeps its kind as you edit it"{{end}}>{{if eq .Heading 1}}<h3>{{.Text}}</h3>{{else if eq .Heading 2}}<h4>{{.Text}}</h4>{{else if eq .Heading 3}}<h5>{{.Text}}</h5>{{else}}{{.EditorHTML}}{{end}}</div>{{end}}</div>
@@ -3181,23 +3188,23 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 // form per block. The server renders the document; the script makes it
 // editable, adds the formatting toolbar, offers people to mention when @ is
 // typed (from /app/mentions, inserting an atomic pill that saves as <@U…>),
-// and on save writes the whole document into the form's markdown field. A
-// block nobody changed is sent back as the markdown it was stored as, so a
-// save never rewrites it and its comments stay attached.
+// and reads the document back as markdown. A block nobody changed reads as
+// the markdown it was stored as, so an edit elsewhere never rewrites it and
+// its comments stay attached.
 //
 // The document also saves itself, as Slack's canvas does: a moment after the
-// writer stops typing, and when the tab is hidden. An autosave is the same save
-// against the same version, answered in JSON (X-SameOldChat-Autosave) with the
-// version to save against next; saves never overlap, and Save canvas waits for
-// one in flight so it cannot race it into a false conflict. A version someone
-// else has moved past stops autosaving and says so, leaving the text in place
-// for Save canvas to bring back with the reason; a network or server failure
-// retries with backoff. Without script, or after a refused save, the markdown
-// field is the editor.
+// writer stops typing, and when the tab is hidden. It is written as ops on the
+// canvas's collaborative text (canvasTextScript, loaded from the page's
+// data-canvas-text under this page's own replica), so writers editing at once
+// merge rather than refuse each other, and an op resent after a failure
+// changes nothing twice. Sends never overlap; a failed one is resent with
+// backoff; one the server cannot place stops saving and asks for a reload.
+// Save canvas sends what is left and reloads the canvas. Without script, or
+// after a refused form save, the markdown field is the editor.
 const canvasEditorScript = `<script>(function(){
 var form=document.querySelector('[data-canvas-document]');if(!form)return;
 var editor=form.querySelector('[data-canvas-editor]');var source=form.querySelector('textarea[name=markdown]');var toolbar=form.querySelector('[data-canvas-toolbar]');var list=form.querySelector('#canvas-mention-list');var status=form.querySelector('[data-canvas-status]');
-if(!editor||!source||!toolbar||!list||form.hasAttribute('data-draft'))return;
+if(!editor||!source||!toolbar||!list||form.hasAttribute('data-draft')||!form.getAttribute('data-canvas-replica')||!window.sameoldchatCanvasText)return;
 var tick=String.fromCharCode(96);var fence=tick+tick+tick;var initial=new WeakMap();
 function isBlock(node){return node.nodeType===1&&/^(P|DIV|H[1-6]|UL|OL|BLOCKQUOTE|PRE)$/.test(node.nodeName)}
 function around(inner,marker){var match=inner.match(/^(\s*)([\s\S]*?)(\s*)$/);return match[2]?match[1]+marker+match[2]+marker+match[3]:inner}
@@ -3234,24 +3241,26 @@ try{document.execCommand('defaultParagraphSeparator',false,'p')}catch(error){}
 Array.prototype.forEach.call(editor.querySelectorAll('[data-canvas-block]'),function(part){initial.set(part,{text:block(part),markdown:part.getAttribute('data-markdown')})});
 editor.setAttribute('contenteditable','true');editor.setAttribute('role','textbox');editor.setAttribute('aria-multiline','true');editor.setAttribute('aria-autocomplete','list');editor.setAttribute('aria-controls','canvas-mention-list');editor.setAttribute('spellcheck','true');
 form.classList.add('rich');toolbar.hidden=false;
-var saved=serialize();var pending=false;var submitting=false;
-var versionField=form.querySelector('input[name=version]');var csrfField=form.querySelector('input[name=_csrf]');
-var autosaveTimer=null;var saving=false;var stopped=false;var failures=0;var submitAfterSave=false;
+var replica=form.getAttribute('data-canvas-replica');var textURL=form.getAttribute('data-canvas-text-url');var csrfField=form.querySelector('input[name=_csrf]');
+var doc=window.sameoldchatCanvasText.load(JSON.parse(form.getAttribute('data-canvas-text')));
+var written=serialize();var queue=[];var sending=false;var stopped=false;var failures=0;var sendTimer=null;var afterSend=[];
 function say(message){if(status)status.textContent=message}
-function changed(){var now=serialize()!==saved;if(now!==pending){pending=now;if(now&&!stopped)say('Unsaved changes')}if(now)schedule(1200)}
-function schedule(delay){if(stopped)return;window.clearTimeout(autosaveTimer);autosaveTimer=window.setTimeout(autosave,delay)}
-function autosave(keepalive){if(stopped||submitting)return;if(saving){schedule(400);return}var text=serialize();if(text===saved)return;saving=true;
-var body=new URLSearchParams();body.set('_csrf',csrfField?csrfField.value:'');body.set('version',versionField?versionField.value:'');body.set('markdown',text);
-fetch(form.getAttribute('action'),{method:'POST',body:body,credentials:'same-origin',keepalive:!!keepalive&&text.length<60000,headers:{'X-SameOldChat-Autosave':'true','Accept':'application/json'}}).then(function(response){return response.json().then(function(data){return{status:response.status,data:data}},function(){return{status:response.status,data:{}}})}).then(function(result){
-saving=false;
-if(result.status===200&&result.data&&result.data.ok){failures=0;if(versionField)versionField.value=String(result.data.version);saved=text;pending=serialize()!==saved;say(pending?'Unsaved changes':'Saved');if(pending)schedule(1200);if(submitAfterSave){submitAfterSave=false;submit()}return}
-if(result.status===409){stopped=true;say('Someone else changed this canvas after you opened it, so it is no longer saving automatically. Your text is still here: save to keep a copy, then reload to see theirs.');if(submitAfterSave){submitAfterSave=false;submit()}return}
-if(result.status===404||result.status===400||result.status===413||result.status===403||result.status===401){stopped=true;say(result.status===413?'This canvas is longer than a canvas can be, so it is not saving. Shorten it to save.':'This canvas could not be saved automatically. Your text is still here; save it, or reload the canvas.');if(submitAfterSave){submitAfterSave=false;submit()}return}
-throw new Error('unavailable')}).catch(function(){saving=false;failures++;say('Not saved yet. Trying again shortly.');schedule([5000,15000,30000][Math.min(failures,3)-1]);if(submitAfterSave){submitAfterSave=false;submit()}})}
-function submit(){if(form.requestSubmit)form.requestSubmit();else{source.value=serialize();submitting=true;form.submit()}}
-form.addEventListener('submit',function(event){if(saving){event.preventDefault();submitAfterSave=true;return}window.clearTimeout(autosaveTimer);source.value=serialize();submitting=true});
-window.addEventListener('beforeunload',function(event){if(!submitting&&serialize()!==saved){event.preventDefault();event.returnValue=''}});
-document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'&&!saving&&serialize()!==saved){window.clearTimeout(autosaveTimer);autosave(true)}});
+function dirty(){return queue.length>0||serialize()!==written}
+function changed(){if(stopped)return;say('Unsaved changes');schedule(600)}
+function schedule(delay){if(stopped)return;window.clearTimeout(sendTimer);sendTimer=window.setTimeout(send,delay)}
+function capture(){var text=serialize();if(text===written)return;written=text;doc.replace(replica,text).forEach(function(op){queue.push(op)})}
+function settle(){var waiting=afterSend;afterSend=[];waiting.forEach(function(done){done()})}
+function send(keepalive){if(stopped||sending)return;window.clearTimeout(sendTimer);capture();if(!queue.length){if(!dirty())say('Saved');settle();return}
+var batch=queue.slice(0,200);sending=true;var body=new URLSearchParams();body.set('_csrf',csrfField?csrfField.value:'');body.set('ops',JSON.stringify(batch));
+fetch(textURL,{method:'POST',body:body,credentials:'same-origin',keepalive:!!keepalive&&body.toString().length<60000,headers:{'Accept':'application/json'}}).then(function(response){return response.json().then(function(data){return{status:response.status,data:data}},function(){return{status:response.status,data:{}}})}).then(function(result){
+sending=false;
+if(result.status===200&&result.data&&result.data.ok){failures=0;queue.splice(0,batch.length);if(dirty()){send();return}say('Saved');settle();return}
+if(result.status>=400&&result.status<500){stopped=true;say(result.status===413?'This canvas is longer than a canvas can be, so your latest changes are not saved. Shorten it to keep writing.':'Your latest changes could not be saved. Reload the canvas to keep writing.');settle();return}
+throw new Error('unavailable')}).catch(function(){sending=false;failures++;say('Not saved yet. Trying again shortly.');schedule([2000,5000,15000,30000][Math.min(failures,4)-1])})}
+function flush(done){afterSend.push(done);send()}
+form.addEventListener('submit',function(event){event.preventDefault();window.clearTimeout(sendTimer);flush(function(){if(!stopped&&!dirty())window.location.assign(window.location.pathname+'?notice=Canvas+saved')})});
+window.addEventListener('beforeunload',function(event){if(!stopped&&dirty()){event.preventDefault();event.returnValue=''}});
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'&&!sending&&dirty())send(true)});
 var lastRange=null;
 document.addEventListener('selectionchange',function(){var selection=window.getSelection();if(selection.rangeCount&&editor.contains(selection.anchorNode))lastRange=selection.getRangeAt(0).cloneRange()});
 function restore(){editor.focus();if(lastRange&&editor.contains(lastRange.startContainer)){var selection=window.getSelection();selection.removeAllRanges();selection.addRange(lastRange)}}
@@ -4098,6 +4107,7 @@ func (h Handler) Register(serveMux *http.ServeMux) {
 	mux.HandleFunc("GET /app/canvases/{canvasID}", h.canvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/rename", h.renameCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/document", h.saveCanvasDocument)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/text", h.editCanvasText)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/delete", h.deleteCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/restore", h.restoreCanvas)
 	mux.HandleFunc("GET /app/channel-canvas", h.channelCanvas)
@@ -9463,7 +9473,14 @@ func (h Handler) renderCanvas(w http.ResponseWriter, r *http.Request, principal 
 	if draft.Problem == "" {
 		markdown, _ = domain.CanvasDocumentMarkdown(value.DocumentContent)
 	}
-	h.writeHTML(w, canvasTemplate, canvasData{Comments: comments, Revisions: revisions, Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeCanvasesWrite), SharePath: "/app/canvases/" + url.PathEscape(string(value.ID)), ShareNoun: "canvas", ID: string(value.ID), Title: value.Title, Sections: sections, Version: value.Version, Markdown: markdown, Problem: draft.Problem, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, status, "canvas rendering unavailable")
+	replica := ""
+	if canEdit && readable && value.TextState != "" {
+		replica = string(principal.UserID) + "." + strings.ToLower(rand.Text()[:12])
+		if !crdt.ValidReplica(replica) {
+			replica = ""
+		}
+	}
+	h.writeHTML(w, canvasTemplate, canvasData{TextState: value.TextState, Replica: replica, Comments: comments, Revisions: revisions, Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeCanvasesWrite), SharePath: "/app/canvases/" + url.PathEscape(string(value.ID)), ShareNoun: "canvas", ID: string(value.ID), Title: value.Title, Sections: sections, Version: value.Version, Markdown: markdown, Problem: draft.Problem, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, status, "canvas rendering unavailable")
 }
 
 // documentSharing builds the sharing list and, for the owner, the people and
@@ -9865,10 +9882,12 @@ func (h Handler) renameCanvas(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id))+"?notice=Canvas+renamed")
 }
 
-// saveCanvasDocument is the editor's one write path: the whole document, as
-// markdown, saved against the version the page showed. A save refused because
-// someone else changed the canvas first re-renders the page with the writer's
-// text and the reason, rather than overwriting their work or losing this.
+// saveCanvasDocument saves the whole document, as markdown, against the
+// version the page showed: the editor's form without script, where the
+// markdown field is the editor. A save refused because someone else changed
+// the canvas first re-renders the page with the writer's text and the reason,
+// rather than overwriting their work or losing this. With script the editor
+// writes ops instead (editCanvasText), which merge rather than conflict.
 func (h Handler) saveCanvasDocument(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
 	if err != nil {
@@ -9879,46 +9898,18 @@ func (h Handler) saveCanvasDocument(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The editor's autosave asks for an answer it can act on in place: the
-	// version to save against next, or why not. Everything else about the
-	// save, including the refusal of a stale version, is the same.
-	autosave := r.Header.Get("X-SameOldChat-Autosave") == "true"
 	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
 	version, err := strconv.ParseInt(strings.TrimSpace(fields["version"]), 10, 64)
 	if err != nil || version < 0 {
-		if autosave {
-			writeJSONRefusal(w, http.StatusBadRequest, "invalid_version")
-			return
-		}
 		h.writeMutationError(w, r, http.StatusBadRequest, "The canvas was not saved", "Reload the canvas and try again.")
 		return
 	}
 	markdown := strings.ReplaceAll(fields["markdown"], "\r\n", "\n")
-	if len(markdown) > maxCanvasMarkdownBytes {
-		if autosave {
-			writeJSONRefusal(w, http.StatusRequestEntityTooLarge, "too_large")
-			return
-		}
+	if len(markdown) > domain.CanvasMarkdownLimit {
 		h.renderCanvas(w, r, principal, id, canvasDraft{Markdown: markdown, Problem: "The canvas was not saved: it is longer than a canvas can be. Shorten it and save again."}, http.StatusRequestEntityTooLarge)
 		return
 	}
-	changed, saved, err := h.Messages.SaveCanvasMarkdown(r.Context(), principal.WorkspaceID, principal.UserID, id, version, markdown)
-	if autosave {
-		switch {
-		case err == nil:
-			w.Header().Set("Cache-Control", "no-store")
-			writeJSON(w, map[string]any{"ok": true, "version": saved, "changed": changed})
-		case errors.Is(err, store.ErrConflict):
-			writeJSONRefusal(w, http.StatusConflict, "conflict")
-		case errors.Is(err, store.ErrNotFound):
-			writeJSONRefusal(w, http.StatusNotFound, "not_found")
-		case errors.Is(err, domain.ErrInvalidCanvas):
-			writeJSONRefusal(w, http.StatusBadRequest, "invalid_canvas")
-		default:
-			writeJSONRefusal(w, http.StatusServiceUnavailable, "unavailable")
-		}
-		return
-	}
+	_, _, err = h.Messages.SaveCanvasMarkdown(r.Context(), principal.WorkspaceID, principal.UserID, id, version, markdown)
 	if errors.Is(err, store.ErrConflict) {
 		h.renderCanvas(w, r, principal, id, canvasDraft{Markdown: markdown, Problem: "The canvas was not saved: someone else changed it after you opened it. Your text is below; copy what you need, then reload the canvas to see theirs."}, http.StatusConflict)
 		return
@@ -9927,14 +9918,47 @@ func (h Handler) saveCanvasDocument(w http.ResponseWriter, r *http.Request) {
 		h.writeCanvasWriteError(w, r, err, "The canvas was not saved")
 		return
 	}
-	// Autosave usually got there first, so a save that changed nothing is
-	// still the document saved, and says so.
 	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id))+"?notice=Canvas+saved")
 }
 
-// maxCanvasMarkdownBytes bounds one save. It is the markdown field's own
-// maxlength, enforced again here because a form is only a suggestion.
-const maxCanvasMarkdownBytes = 400000
+// editCanvasText is the editor's write: the ops typed since its last one,
+// applied to the canvas's collaborative text. They merge with every other
+// editor's, so nothing is refused as stale and an op sent twice changes
+// nothing, which is what lets the editor resend after a failure without
+// asking. The answer is JSON the editor acts on in place: the canvas's version,
+// or why not — invalid_ops when the canvas cannot place them (the page is out
+// of step and reloads), too_large, not_found.
+func (h Handler) editCanvasText(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the canvas and try again.")
+	if !ok {
+		return
+	}
+	var ops []crdt.Op
+	if err := json.Unmarshal([]byte(fields["ops"]), &ops); err != nil {
+		writeJSONRefusal(w, http.StatusBadRequest, "invalid_ops")
+		return
+	}
+	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
+	version, err := h.Messages.EditCanvasText(r.Context(), principal.WorkspaceID, principal.UserID, id, ops)
+	switch {
+	case err == nil:
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, map[string]any{"ok": true, "version": version})
+	case errors.Is(err, store.ErrNotFound):
+		writeJSONRefusal(w, http.StatusNotFound, "not_found")
+	case errors.Is(err, domain.ErrCanvasTooLarge):
+		writeJSONRefusal(w, http.StatusRequestEntityTooLarge, "too_large")
+	case errors.Is(err, domain.ErrInvalidCanvas):
+		writeJSONRefusal(w, http.StatusBadRequest, "invalid_ops")
+	default:
+		writeJSONRefusal(w, http.StatusServiceUnavailable, "unavailable")
+	}
+}
 
 // writeCanvasWriteError answers a refused canvas write by what refused it.
 func (h Handler) writeCanvasWriteError(w http.ResponseWriter, r *http.Request, err error, heading string) {
@@ -9943,6 +9967,8 @@ func (h Handler) writeCanvasWriteError(w http.ResponseWriter, r *http.Request, e
 		h.writeMutationError(w, r, http.StatusNotFound, heading, "It no longer exists or you no longer have access.")
 	case errors.Is(err, domain.ErrInvalidCanvas):
 		h.writeMutationError(w, r, http.StatusBadRequest, heading, "The change could not be applied to this canvas. Reload it and try again.")
+	case errors.Is(err, domain.ErrCanvasTooLarge):
+		h.writeMutationError(w, r, http.StatusRequestEntityTooLarge, heading, "It would make the canvas longer than a canvas can be. Shorten it and try again.")
 	case errors.Is(err, store.ErrConflict):
 		h.writeMutationError(w, r, http.StatusConflict, heading, "It changed elsewhere. Reload it and try again.")
 	default:

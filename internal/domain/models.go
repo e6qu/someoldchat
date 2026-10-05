@@ -2464,6 +2464,13 @@ type Canvas struct {
 	OwnerID         UserID
 	Title           string
 	DocumentContent string
+	// TextState is the collaborative text editors write in (package crdt): the
+	// document as markdown, with every character's identity and the deleted
+	// ones it still has to place edits against, stored as crdt.Run JSON.
+	// DocumentContent's sections are what it projects to. Empty means no
+	// writer has edited the canvas since it gained one, and its text is the
+	// seed its sections write (see service.canvasText).
+	TextState string
 	// Version is a monotonic compare-and-swap revision. Writers submit the
 	// revision they read plus one; stores reject stale writes with ErrConflict.
 	Version   int64

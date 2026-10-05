@@ -596,6 +596,9 @@ func (s *Store) ListCanvases(_ context.Context, workspace domain.WorkspaceID, us
 			}
 		})
 		if allowed {
+			// A listing is a directory, not an editor: like the SQL profile it
+			// leaves out the collaborative text.
+			canvas.TextState = ""
 			values = append(values, canvas)
 		}
 	}
@@ -665,6 +668,9 @@ func (s *Store) SearchCanvases(_ context.Context, workspace domain.WorkspaceID, 
 			}
 		})
 		if allowed {
+			// A listing is a directory, not an editor: like the SQL profile it
+			// leaves out the collaborative text.
+			canvas.TextState = ""
 			values = append(values, canvas)
 		}
 	}

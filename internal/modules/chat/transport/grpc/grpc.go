@@ -12,6 +12,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/crdt"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
@@ -1748,6 +1749,18 @@ func (r Remote) SearchCanvases(ctx context.Context, workspaceID domain.Workspace
 		return domain.CanvasPage{}, err
 	}
 	return decodeProtoCanvasPage(out)
+}
+
+func (r Remote) EditCanvasText(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, ops []crdt.Op) (int64, error) {
+	encoded, err := json.Marshal(ops)
+	if err != nil {
+		return 0, err
+	}
+	out, err := r.canvases.EditCanvasText(ctx, &chatv1.EditCanvasTextRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), Ops: string(encoded)})
+	if err != nil {
+		return 0, err
+	}
+	return out.GetVersion(), nil
 }
 
 func (r Remote) SaveCanvasMarkdown(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64, markdown string) (int, int64, error) {
@@ -6457,6 +6470,18 @@ func (s *Server) SaveCanvasMarkdown(ctx context.Context, input *chatv1.SaveCanva
 		return nil, mapError(err)
 	}
 	return &chatv1.SaveCanvasMarkdownResponse{SectionsChangedCount: int32(changed), Version: version}, nil
+}
+
+func (s *Server) EditCanvasText(ctx context.Context, input *chatv1.EditCanvasTextRequest) (*chatv1.EditCanvasTextResponse, error) {
+	var ops []crdt.Op
+	if err := json.Unmarshal([]byte(input.GetOps()), &ops); err != nil {
+		return nil, mapError(domain.ErrInvalidCanvas)
+	}
+	version, err := s.implementation.EditCanvasText(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), ops)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.EditCanvasTextResponse{Version: version}, nil
 }
 
 func (s *Server) DeleteCanvas(ctx context.Context, input *chatv1.CanvasRequest) (*chatv1.MutationResponse, error) {
@@ -12481,14 +12506,14 @@ func decodeProtoMessagePage(value *chatv1.MessagePage) (domain.MessagePage, erro
 }
 
 func encodeProtoCanvas(value domain.Canvas) *chatv1.Canvas {
-	return &chatv1.Canvas{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), OwnerId: string(value.OwnerID), Title: value.Title, DocumentContent: value.DocumentContent, CreatedAt: value.CreatedAt.UTC().Unix(), UpdatedAt: value.UpdatedAt.UTC().Unix(), Version: value.Version}
+	return &chatv1.Canvas{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), OwnerId: string(value.OwnerID), Title: value.Title, DocumentContent: value.DocumentContent, TextState: value.TextState, CreatedAt: value.CreatedAt.UTC().Unix(), UpdatedAt: value.UpdatedAt.UTC().Unix(), Version: value.Version}
 }
 
 func decodeProtoCanvas(value *chatv1.Canvas) (domain.Canvas, error) {
 	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetOwnerId() == "" {
 		return domain.Canvas{}, errors.New("invalid canvas response")
 	}
-	return domain.Canvas{ID: domain.CanvasID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Title: value.GetTitle(), DocumentContent: value.GetDocumentContent(), Version: value.GetVersion(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), UpdatedAt: time.Unix(value.GetUpdatedAt(), 0).UTC()}, nil
+	return domain.Canvas{ID: domain.CanvasID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Title: value.GetTitle(), DocumentContent: value.GetDocumentContent(), TextState: value.GetTextState(), Version: value.GetVersion(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), UpdatedAt: time.Unix(value.GetUpdatedAt(), 0).UTC()}, nil
 }
 
 func encodeProtoCanvasPage(value domain.CanvasPage) *chatv1.CanvasPage {

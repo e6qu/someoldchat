@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -164,6 +165,9 @@ type vectorCase struct {
 	Ops    []Op    `json:"ops"`
 	Orders [][]int `json:"orders"`
 	Text   string  `json:"text"`
+	// Snapshot is the converged replica as stored, which every order of
+	// delivery reaches and which both implementations load and write alike.
+	Snapshot []Run `json:"snapshot"`
 }
 
 type vectorEdit struct {
@@ -298,7 +302,9 @@ func buildVectors(t *testing.T) vectors {
 		log, text, edits := simulate(t, seed, 2+int(seed%3), 60)
 		random := rand.New(rand.NewPCG(seed, 2))
 		orders := [][]int{random.Perm(len(log)), random.Perm(len(log)), random.Perm(len(log))}
-		out.Cases = append(out.Cases, vectorCase{Name: fmt.Sprintf("seed %d", seed), Ops: log, Orders: orders, Text: text})
+		converged := New()
+		mustApply(t, converged, log...)
+		out.Cases = append(out.Cases, vectorCase{Name: fmt.Sprintf("seed %d", seed), Ops: log, Orders: orders, Text: text, Snapshot: converged.Snapshot()})
 		out.Edits = append(out.Edits, edits...)
 	}
 	return out
@@ -339,6 +345,57 @@ func TestConformanceVectors(t *testing.T) {
 			if s.Text() != c.Text {
 				t.Fatalf("%s: %q, want %q", c.Name, s.Text(), c.Text)
 			}
+			if !reflect.DeepEqual(s.Snapshot(), c.Snapshot) {
+				t.Fatalf("%s: a delivery order stores a different replica", c.Name)
+			}
+		}
+	}
+}
+
+func TestSnapshotLoadsTheSameReplica(t *testing.T) {
+	for seed := range uint64(50) {
+		log, text, _ := simulate(t, seed, 3, 80)
+		original := New()
+		mustApply(t, original, log...)
+		encoded, err := json.Marshal(original.Snapshot())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var runs []Run
+		if err := json.Unmarshal(encoded, &runs); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(runs)
+		if err != nil {
+			t.Fatalf("seed %d: %v", seed, err)
+		}
+		if loaded.Text() != text || loaded.Len() != original.Len() || loaded.Clock() != original.Clock() {
+			t.Fatalf("seed %d: loaded %q (clock %d), want %q (clock %d)", seed, loaded.Text(), loaded.Clock(), text, original.Clock())
+		}
+		// The loaded replica goes on editing exactly as the original does.
+		next, err := original.Insert("later", original.Len()/2, "ẞ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustApply(t, loaded, next)
+		if loaded.Text() != original.Text() {
+			t.Fatalf("seed %d: after an edit, loaded reads %q, original %q", seed, loaded.Text(), original.Text())
+		}
+	}
+}
+
+func TestLoadRefusesSnapshotsNoDocumentHolds(t *testing.T) {
+	for name, runs := range map[string][]Run{
+		"text and deleted": {{Replica: "a", Clock: 1, Text: "x", Deleted: 1}},
+		"empty run":        {{Replica: "a", Clock: 1}},
+		"no clock":         {{Replica: "a", Text: "x"}},
+		"bad writer":       {{Replica: "a b", Clock: 1, Text: "x"}},
+		"repeated":         {{Replica: "a", Clock: 1, Text: "xy"}, {Replica: "a", Clock: 2, Deleted: 1}},
+		"invalid text":     {{Replica: "a", Clock: 1, Text: "\xff"}},
+		"past the clock":   {{Replica: "a", Clock: maxClock, Text: "xy"}},
+	} {
+		if _, err := Load(runs); err == nil {
+			t.Errorf("%s: loaded", name)
 		}
 	}
 }

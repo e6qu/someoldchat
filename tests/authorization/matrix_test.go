@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/crdt"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
@@ -444,6 +445,10 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(domain.ThreadRequest{Page: domain.PageRequest{Limit: 10}})
 	case reflect.TypeOf([]domain.MessageID(nil)):
 		return reflect.ValueOf([]domain.MessageID{fixtureMessageID})
+	case reflect.TypeOf([]crdt.Op(nil)):
+		// One insert at the start under the caller's own editor name, which
+		// EditCanvasText admits for whoever may write the canvas.
+		return reflect.ValueOf([]crdt.Op{{ID: crdt.ID{Replica: string(caller) + ".matrix", Clock: 1}, Text: "fixture"}})
 	case reflect.TypeOf(domain.ListColumnType("")):
 		// A real column type, so AddListColumn passes schema validation and the
 		// holder's write grant carries it to success.

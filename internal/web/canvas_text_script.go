@@ -3,9 +3,9 @@ package web
 // canvasTextScript is the canvas's collaborative text in the browser: the same
 // replicated sequence as package crdt, so an op made here integrates on the
 // server and on every other editor exactly as it does here. It defines
-// window.sameoldchatCanvasText.create(), which returns an empty document with
-// apply, insert, remove, replace and text, speaking the ops crdt.Op encodes as
-// JSON.
+// window.sameoldchatCanvasText: create() returns an empty document and
+// load(runs) the one a crdt.Run snapshot describes, each with apply, insert,
+// remove, replace, text and snapshot, speaking the ops crdt.Op encodes as JSON.
 //
 // The two implementations are held together by internal/crdt's conformance
 // vectors, which the browser suite replays against this script as the canvas
@@ -81,5 +81,16 @@ while(suffix<current.length-prefix&&suffix<next.length-prefix&&current[current.l
 var ops=[];var removed=current.length-prefix-suffix;if(removed>0)ops.push(this.remove(prefix,removed));
 var inserted=next.slice(prefix,next.length-suffix).join('');if(inserted!=='')ops.push(this.insert(replica,prefix,inserted));
 return ops};
-window.sameoldchatCanvasText={create:function(){return new Sequence()}};
+Sequence.prototype.snapshot=function(){var runs=[];var previous=null;var run=null;
+for(var current=this.head.next;current;current=current.next){
+if(!(previous&&previous.id.r===current.id.r&&previous.id.c+1===current.id.c&&previous.deleted===current.deleted)){run={r:current.id.r,c:current.id.c};if(current.deleted)run.n=0;else run.t='';runs.push(run)}
+if(current.deleted)run.n++;else run.t+=current.value;previous=current}
+return runs};
+function load(runs){var doc=new Sequence();var tail=doc.head;
+(runs||[]).forEach(function(run){var text=typeof run.t==='string'?run.t:'';var deleted=text==='';var values=points(text);var count=deleted?run.n:values.length;
+if(!replicaName.test(run.r)||!isClock(run.c)||!Number.isSafeInteger(count)||count<=0||(!deleted&&run.n)||run.c+count-1>maxClock||values.some(isLone))throw new Error('a stored run names characters no document holds');
+for(var i=0;i<count;i++){var id={r:run.r,c:run.c+i};if(doc.nodes.has(key(id)))throw new Error('a stored document names a character twice');
+var current={id:id,value:deleted?'':values[i],deleted:deleted,next:null};tail.next=current;tail=current;doc.nodes.set(key(id),current);if(!deleted)doc.visible++;doc.clock=Math.max(doc.clock,id.c)}});
+return doc}
+window.sameoldchatCanvasText={create:function(){return new Sequence()},load:load};
 })();</script>`

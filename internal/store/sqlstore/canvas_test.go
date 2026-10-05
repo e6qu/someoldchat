@@ -44,3 +44,46 @@ func TestCanvasPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The collaborative text is stored beside the document: written by every
+// update, read back by GetCanvas, and never copied into a revision, which
+// records what the document said rather than how editors named its characters.
+func TestCanvasTextStatePersists(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	workspace := domain.Workspace{ID: "T-text", Name: "Text"}
+	user := domain.User{ID: "U-text", WorkspaceID: workspace.ID, Email: "text@example.com", Name: "text"}
+	if err := store.SeedWorkspace(ctx, workspace); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SeedUser(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1700000000, 0).UTC()
+	canvas := domain.Canvas{ID: "F-text", WorkspaceID: workspace.ID, OwnerID: user.ID, Title: "Text", DocumentContent: `{"sections":[]}`, Version: 1, CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateCanvas(ctx, canvas, events.Event{ID: "E-text", WorkspaceID: workspace.ID, Topic: "canvas.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if loaded, err := store.GetCanvas(ctx, workspace.ID, canvas.ID); err != nil || loaded.TextState != "" {
+		t.Fatalf("new canvas text = %q, %v", loaded.TextState, err)
+	}
+	canvas.TextState = `[{"r":"U-text.tab","c":1,"t":"Hello"}]`
+	canvas.DocumentContent = `{"sections":[{"id":"s1","type":"markdown","text":"Hello"}]}`
+	canvas.Version = 2
+	canvas.UpdatedAt = now.Add(time.Hour)
+	if err := store.UpdateCanvas(ctx, canvas, events.Event{ID: "E-text-2", WorkspaceID: workspace.ID, ActorID: user.ID, Topic: "canvas.updated", CreatedAt: canvas.UpdatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.GetCanvas(ctx, workspace.ID, canvas.ID)
+	if err != nil || loaded.TextState != canvas.TextState || loaded.DocumentContent != canvas.DocumentContent {
+		t.Fatalf("updated canvas = %+v, %v", loaded, err)
+	}
+	page, err := store.ListCanvasRevisions(ctx, workspace.ID, user.ID, canvas.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Revisions) != 1 || page.Revisions[0].DocumentContent != `{"sections":[]}` {
+		t.Fatalf("revisions = %+v, %v", page.Revisions, err)
+	}
+}
