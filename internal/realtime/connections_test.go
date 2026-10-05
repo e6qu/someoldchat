@@ -64,7 +64,7 @@ func TestAStreamIsAClientConnectionWhileItIsOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	tracker := &testConnectionTracker{}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{}, tracker)
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, tracker, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestAStreamThatCannotOpenItsConnectionIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(emptyEventSource{}, authenticator, &testTypingSource{}, &testConnectionTracker{openErr: errors.New("store unavailable")})
+	handler, err := NewHandler(emptyEventSource{}, authenticator, &testTypingSource{}, &testConnectionTracker{openErr: errors.New("store unavailable")}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestAStreamThatCannotOpenItsConnectionIsRefused(t *testing.T) {
 	if _, frame, err := client.ReadMessage(); err != nil || string(frame) != `{"type":"goodbye"}` {
 		t.Fatalf("first frame=%s err=%v, want goodbye", frame, err)
 	}
-	if _, err := NewHandler(emptyEventSource{}, authenticator, &testTypingSource{}, nil); err == nil {
+	if _, err := NewHandler(emptyEventSource{}, authenticator, &testTypingSource{}, nil, noCanvasPresence{}); err == nil {
 		t.Fatal("an SSE handler was built without a connection tracker")
 	}
 }

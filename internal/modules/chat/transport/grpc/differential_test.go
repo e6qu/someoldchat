@@ -6751,6 +6751,39 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// Presence crosses the seam whole — session, cursor, name — and
+			// stops at the canvas's readers in both compositions. U1 owns the
+			// canvas; U2 has no grant on it.
+			name: "canvas presence names who is on a canvas and stops at its readers",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				canvas, err := chat.CreateCanvas(ctx, "T1", "U1", "Plan", `{"type":"markdown","markdown":"Here"}`, "")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetCanvasPresence(ctx, "T1", "U1", canvas.ID, "first-page", domain.CanvasCursor{Caret: crdt.ID{Replica: "seed", Clock: 3}, Anchor: crdt.ID{Replica: "seed", Clock: 1}}, false); err != nil {
+					return nil, err
+				}
+				if err := chat.SetCanvasPresence(ctx, "T1", "U1", canvas.ID, "second-page", domain.CanvasCursor{}, false); err != nil {
+					return nil, err
+				}
+				if err := chat.SetCanvasPresence(ctx, "T1", "U1", canvas.ID, "second-page", domain.CanvasCursor{}, true); err != nil {
+					return nil, err
+				}
+				present, err := chat.CanvasPresence(ctx, "T1", "U1", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				shown := make([]any, 0, len(present))
+				for _, value := range present {
+					shown = append(shown, []any{value.UserID, value.Name, value.Session, value.Caret, value.Anchor, value.ExpiresAt.After(time.Now())})
+				}
+				outsiderErr := chat.SetCanvasPresence(ctx, "T1", "U2", canvas.ID, "outside-page", domain.CanvasCursor{}, false)
+				_, outsiderReadErr := chat.CanvasPresence(ctx, "T1", "U2", canvas.ID)
+				badSession := chat.SetCanvasPresence(ctx, "T1", "U1", canvas.ID, "x", domain.CanvasCursor{}, false)
+				return []any{shown, errors.Is(outsiderErr, storepkg.ErrNotFound), errors.Is(outsiderReadErr, storepkg.ErrNotFound), errors.Is(badSession, domain.ErrInvalidCanvas)}, nil
+			},
+		},
+		{
 			// A search that matched more than the directory would disclose the
 			// title of a canvas the reader cannot open, so the two compositions
 			// have to agree on the visibility rule as well as on the matching.

@@ -589,6 +589,13 @@ type Service interface {
 	// canvas cannot place is domain.ErrInvalidCanvas. It answers the version
 	// the canvas is at.
 	EditCanvasText(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, []crdt.Op) (int64, error)
+	// SetCanvasPresence says one page (its session) has the canvas open, with
+	// its cursor (and selection) at characters of the text or nowhere;
+	// leaving removes it.
+	// CanvasPresence reports the pages open on a canvas, named for the
+	// reader. Both take read access; see domain.CanvasPresence.
+	SetCanvasPresence(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string, domain.CanvasCursor, bool) error
+	CanvasPresence(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) ([]domain.CanvasPresence, error)
 	DeleteCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) error
 	SetCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.AccessLevel, []domain.ConversationID, []domain.UserID) error
 	DeleteCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, []domain.ConversationID, []domain.UserID) error

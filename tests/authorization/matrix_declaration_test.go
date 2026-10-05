@@ -338,6 +338,8 @@ func authorityMatrix() map[string]authority {
 		"EditCanvas":                              authorityAnyMember,
 		"SaveCanvasMarkdown":                      authorityAnyMember,
 		"EditCanvasText":                          authorityAnyMember,
+		"SetCanvasPresence":                       authorityAnyMember,
+		"CanvasPresence":                          authorityAnyMember,
 		"Emojis":                                  authorityAnyMember,
 		"SlackbotResponses":                       authorityAnyMember,
 		"EmojiRevision":                           authorityAnyMember,

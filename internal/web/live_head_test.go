@@ -73,7 +73,7 @@ func TestLivePagesOpenTheirStreamAtTheRenderedHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	streams, err := realtime.NewHandler(messages, authenticator, messages, messages)
+	streams, err := realtime.NewHandler(messages, authenticator, messages, messages, messages)
 	if err != nil {
 		t.Fatal(err)
 	}

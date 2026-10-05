@@ -372,3 +372,55 @@ func TestCanvasTextAndBlocksAnswerTheEditorInJSON(t *testing.T) {
 		t.Fatalf("an over-long render answered %d", tooLong.Code)
 	}
 }
+
+// A page says it is on a canvas, and where its cursor is, in JSON. A canvas
+// the member cannot open, a session no page would make and a cursor that is
+// not a character all answer as refusals rather than 500s, and leaving takes
+// the page off at once.
+func TestCanvasPresenceAnswersThePageInJSON(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "other"})
+	messages := service.Messages{Store: s}
+	mine, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Mine", `{"type":"markdown","markdown":"Here"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := messages.CreateCanvas(context.Background(), "T1", "U2", "Theirs", `{"type":"markdown","markdown":"Private"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(id domain.CanvasID, fields url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		fields.Set("_csrf", auth.CSRFToken("session"))
+		return postForm(t, mux, "/app/canvases/"+string(id)+"/presence", fields.Encode(), false)
+	}
+	if response := post(mine.ID, url.Values{"session": {"page-one-abc"}, "caret_r": {"seed"}, "caret_c": {"2"}}); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+		t.Fatalf("presence = %d %s", response.Code, response.Body)
+	}
+	present, err := messages.CanvasPresence(context.Background(), "T1", "U1", mine.ID)
+	if err != nil || len(present) != 1 || present[0].Session != "page-one-abc" || present[0].Caret.Replica != "seed" || present[0].Caret.Clock != 2 || present[0].Name != "Ada Developer" {
+		t.Fatalf("present = %+v err=%v", present, err)
+	}
+	for name, refused := range map[string]struct {
+		response *httptest.ResponseRecorder
+		status   int
+		code     string
+	}{
+		"someone else's canvas":  {post(theirs.ID, url.Values{"session": {"page-one-abc"}}), http.StatusNotFound, "not_found"},
+		"a short session":        {post(mine.ID, url.Values{"session": {"x"}}), http.StatusBadRequest, "invalid_presence"},
+		"a cursor with no clock": {post(mine.ID, url.Values{"session": {"page-one-abc"}, "caret_r": {"seed"}, "caret_c": {"soon"}}), http.StatusBadRequest, "invalid_presence"},
+	} {
+		if refused.response.Code != refused.status || !strings.Contains(refused.response.Body.String(), `"`+refused.code+`"`) {
+			t.Fatalf("%s answered %d %s", name, refused.response.Code, refused.response.Body)
+		}
+	}
+	if response := post(mine.ID, url.Values{"session": {"page-one-abc"}, "leave": {"1"}}); response.Code != http.StatusOK {
+		t.Fatalf("leaving = %d %s", response.Code, response.Body)
+	}
+	if present, err := messages.CanvasPresence(context.Background(), "T1", "U1", mine.ID); err != nil || len(present) != 0 {
+		t.Fatalf("after leaving present = %+v err=%v", present, err)
+	}
+	if page := get(t, mux, "/app/canvases/"+string(mine.ID)).Body.String(); !strings.Contains(page, `data-event-canvas="`+string(mine.ID)+`"`) || !strings.Contains(page, "data-canvas-present") {
+		t.Fatal("the canvas page does not name its canvas to its stream")
+	}
+}

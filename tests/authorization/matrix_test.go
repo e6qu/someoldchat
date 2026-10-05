@@ -579,6 +579,9 @@ func fixtureStringArgument(method string) reflect.Value {
 	case "LookupCanvasSections":
 		// An empty criteria object matches every section, so the read succeeds.
 		return reflect.ValueOf("{}")
+	case "SetCanvasPresence":
+		// A page's session name, so the holder's read grant records it.
+		return reflect.ValueOf("matrix-page")
 	case "AdminUploadUserGroupUsers":
 		// A one-row CSV naming a member the holder can add to the fixture group.
 		return reflect.ValueOf("U-member")

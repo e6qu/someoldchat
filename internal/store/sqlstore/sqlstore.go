@@ -223,6 +223,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
 ` + codeChannelViewSchema + `
 ` + slackbotResponseSchema + `
 ` + clientConnectionSchema + `
+` + canvasPresenceSchema + `
 ` + memberPreferenceSchema + `
 ` + rateLimitSchema + `
 CREATE TABLE IF NOT EXISTS conversation_typing (
@@ -614,7 +615,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 214
+const schemaVersion = 215
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3597,6 +3598,13 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 215: canvas presence ---
+	if version < 215 {
+		if _, err := db.ExecContext(ctx, canvasPresenceSchema); err != nil {
+			return fmt.Errorf("migrate canvas presence: %w", err)
+		}
+	}
+	// --- end schema 215 ---
 	// --- schema 214: canvas collaborative text ---
 	if version < 214 {
 		// The text editors write in, kept beside the sections it projects to.

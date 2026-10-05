@@ -996,6 +996,14 @@ type Store interface {
 	// never a conversation they cannot see. Expired signals are omitted rather
 	// than returned for the caller to filter, so no caller can forget to.
 	ListTypingSignals(context.Context, domain.WorkspaceID, domain.UserID, time.Time) ([]domain.TypingSignal, error)
+	// RecordCanvasPresence replaces one open canvas page's row, and
+	// ClearCanvasPresence removes it; ListCanvasPresence reports the pages
+	// open on a canvas at the given instant, lapsed ones omitted. Like typing
+	// signals they take no events.Event: presence is state that expires, not
+	// news. Whether a member may read or write it is the service's to decide.
+	RecordCanvasPresence(context.Context, domain.CanvasPresence, time.Time) error
+	ClearCanvasPresence(context.Context, domain.WorkspaceID, domain.CanvasID, domain.UserID, string) error
+	ListCanvasPresence(context.Context, domain.WorkspaceID, domain.CanvasID, time.Time) ([]domain.CanvasPresence, error)
 	// RecordListAssignment tells a member that work is theirs. It is separate
 	// from the item write rather than folded into it because only some writes
 	// are assignments — a due date moved on an item someone already holds is

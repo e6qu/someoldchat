@@ -73,3 +73,7 @@ func TestSQLiteMigrationAddsShortTokenRotations(t *testing.T) {
 		t.Fatalf("begin after the migration: %v", err)
 	}
 }
+
+func TestSQLiteCanvasPresence(t *testing.T) {
+	storetest.CheckCanvasPresence(t, openFamilyCheckStore(t))
+}

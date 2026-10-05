@@ -285,6 +285,15 @@ one document to write in, as Slack's canvas is, rather than a form per block.
   but not yet sent is kept. An edit too big to carry, or one the page cannot
   place, makes it fetch the text and replay its own unsent edits onto it. A
   member who can only read the canvas sees its document refresh in place.
+- **Presence.** Everyone with the canvas open is listed above the document
+  ("Also here: …"), readers included, and a writer sees each other writer's
+  cursor, with their name, at the character it is at, and shaded over what
+  they have selected. A page renews its presence every few
+  seconds and says when it closes; one that vanishes drops off when its
+  presence lapses. The cursor is named by a character of the collaborative
+  text, so the mark stays on the same words while edits above it move them.
+  Presence is state that expires rather than a journal record, so it is never
+  replayed or delivered to apps.
 - **Who is told.** A canvas's or a list's records reach only the people who
   can read it, on the event stream and in the audit view; they no longer go
   to every member of the workspace.
@@ -318,10 +327,8 @@ at all. Comments, revision history, and sharing review are built: the sharing
 surface names everyone who may open a canvas, and only its owner is offered the
 controls that change that. A conversation reaches its own canvas from the
 conversation itself, and creating one is a deliberate act rather than a side
-effect of following the link. Presence remains a gap: an open page shows
-another writer's edits as they are made but not who else is on the canvas or
-where their cursor is. Deleted characters stay in the stored text as compact
-tombstones and are not yet collected.
+effect of following the link. Deleted characters
+stay in the stored text as compact tombstones and are not yet collected.
 
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,

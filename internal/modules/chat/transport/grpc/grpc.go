@@ -1763,6 +1763,26 @@ func (r Remote) EditCanvasText(ctx context.Context, workspaceID domain.Workspace
 	return out.GetVersion(), nil
 }
 
+func (r Remote) SetCanvasPresence(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, session string, cursor domain.CanvasCursor, leaving bool) error {
+	_, err := r.canvases.SetCanvasPresence(ctx, &chatv1.SetCanvasPresenceRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), Session: session, CaretReplica: cursor.Caret.Replica, CaretClock: cursor.Caret.Clock, AnchorReplica: cursor.Anchor.Replica, AnchorClock: cursor.Anchor.Clock, Leaving: leaving})
+	return err
+}
+
+func (r Remote) CanvasPresence(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) ([]domain.CanvasPresence, error) {
+	out, err := r.canvases.CanvasPresence(ctx, &chatv1.CanvasRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id)})
+	if err != nil {
+		return nil, err
+	}
+	present := make([]domain.CanvasPresence, 0, len(out.GetPresent()))
+	for _, entry := range out.GetPresent() {
+		present = append(present, domain.CanvasPresence{
+			WorkspaceID: workspaceID, CanvasID: id, UserID: domain.UserID(entry.GetUserId()), Name: entry.GetName(), Session: entry.GetSession(),
+			Caret: crdt.ID{Replica: entry.GetCaretReplica(), Clock: entry.GetCaretClock()}, Anchor: crdt.ID{Replica: entry.GetAnchorReplica(), Clock: entry.GetAnchorClock()}, ExpiresAt: time.Unix(0, entry.GetExpiresAtUnixNano()).UTC(),
+		})
+	}
+	return present, nil
+}
+
 func (r Remote) SaveCanvasMarkdown(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64, markdown string) (int, int64, error) {
 	out, err := r.canvases.SaveCanvasMarkdown(ctx, &chatv1.SaveCanvasMarkdownRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), Version: version, Markdown: markdown})
 	if err != nil {
@@ -6482,6 +6502,26 @@ func (s *Server) EditCanvasText(ctx context.Context, input *chatv1.EditCanvasTex
 		return nil, mapError(err)
 	}
 	return &chatv1.EditCanvasTextResponse{Version: version}, nil
+}
+
+func (s *Server) SetCanvasPresence(ctx context.Context, input *chatv1.SetCanvasPresenceRequest) (*chatv1.MutationResponse, error) {
+	cursor := domain.CanvasCursor{Caret: crdt.ID{Replica: input.GetCaretReplica(), Clock: input.GetCaretClock()}, Anchor: crdt.ID{Replica: input.GetAnchorReplica(), Clock: input.GetAnchorClock()}}
+	if err := s.implementation.SetCanvasPresence(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetSession(), cursor, input.GetLeaving()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) CanvasPresence(ctx context.Context, input *chatv1.CanvasRequest) (*chatv1.CanvasPresenceResponse, error) {
+	present, err := s.implementation.CanvasPresence(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.CanvasPresenceResponse{Present: make([]*chatv1.CanvasPresenceEntry, 0, len(present))}
+	for _, value := range present {
+		out.Present = append(out.Present, &chatv1.CanvasPresenceEntry{UserId: string(value.UserID), Name: value.Name, Session: value.Session, CaretReplica: value.Caret.Replica, CaretClock: value.Caret.Clock, AnchorReplica: value.Anchor.Replica, AnchorClock: value.Anchor.Clock, ExpiresAtUnixNano: value.ExpiresAt.UTC().UnixNano()})
+	}
+	return out, nil
 }
 
 func (s *Server) DeleteCanvas(ctx context.Context, input *chatv1.CanvasRequest) (*chatv1.MutationResponse, error) {

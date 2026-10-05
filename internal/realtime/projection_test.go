@@ -25,7 +25,7 @@ func streamAs(t *testing.T, source UserEventSource, user domain.UserID, lastEven
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}

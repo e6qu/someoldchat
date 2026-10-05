@@ -176,6 +176,37 @@ message EditCanvasTextResponse {
   int64 version = 1;
 }
 
+message SetCanvasPresenceRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  // The page's own session name (domain.CanvasPresence.Session).
+  string session = 4;
+  // The character the page's cursor is at; empty for none.
+  string caret_replica = 5;
+  uint64 caret_clock = 6;
+  // The page is closing: remove it rather than renew it.
+  bool leaving = 7;
+  // The other end of a selection; empty when nothing is selected.
+  string anchor_replica = 8;
+  uint64 anchor_clock = 9;
+}
+
+message CanvasPresenceEntry {
+  string user_id = 1;
+  string name = 2;
+  string session = 3;
+  string caret_replica = 4;
+  uint64 caret_clock = 5;
+  int64 expires_at_unix_nano = 6;
+  string anchor_replica = 7;
+  uint64 anchor_clock = 8;
+}
+
+message CanvasPresenceResponse {
+  repeated CanvasPresenceEntry present = 1;
+}
+
 message CanvasAccessRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -234,6 +265,8 @@ service CanvasesService {
   rpc EditCanvas(EditCanvasRequest) returns (MutationResponse);
   rpc SaveCanvasMarkdown(SaveCanvasMarkdownRequest) returns (SaveCanvasMarkdownResponse);
   rpc EditCanvasText(EditCanvasTextRequest) returns (EditCanvasTextResponse);
+  rpc SetCanvasPresence(SetCanvasPresenceRequest) returns (MutationResponse);
+  rpc CanvasPresence(CanvasRequest) returns (CanvasPresenceResponse);
   rpc DeleteCanvas(CanvasRequest) returns (MutationResponse);
   rpc SetCanvasAccess(CanvasAccessRequest) returns (MutationResponse);
   rpc DeleteCanvasAccess(CanvasAccessDeleteRequest) returns (MutationResponse);

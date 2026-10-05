@@ -96,7 +96,7 @@ func TestSSEReplaysFromDurableSequence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestSSEResumesAfterTheReportedCursor(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+		handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -166,7 +166,7 @@ func TestSSESkipsUndeliverableRecordsAndKeepsStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestSSESendsHeartbeatWhileIdle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestSSEEndsWhenTheSessionIsRevoked(t *testing.T) {
 	} {
 		source := &countingSource{}
 		authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: withdrawal}
-		handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+		handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -268,7 +268,7 @@ func TestSSESurvivesASessionStoreThatCannotAnswer(t *testing.T) {
 		failures:     2,
 		recoverAfter: true,
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestSSESurvivesASessionStoreThatCannotAnswer(t *testing.T) {
 func TestSSEEndsPromptlyWhenTheStoreSaysTheSessionIsGone(t *testing.T) {
 	source := &countingSource{}
 	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrInvalidToken}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestSSEEndsPromptlyWhenTheStoreSaysTheSessionIsGone(t *testing.T) {
 func TestSSEEndsAfterRepeatedInconclusiveReauthorization(t *testing.T) {
 	source := &countingSource{}
 	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrCredentialStoreUnavailable}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestSSEBoundsEveryWriteAndDropsAConsumerThatStopsReading(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestSSEReturnsPromptlyWhenItsRequestContextEnds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{})
+	handler, err := NewHandler(source, authenticator, &testTypingSource{}, &testConnectionTracker{}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1027,4 +1027,11 @@ func TestEventStreamWithNoCursorOpensAtTheJournalHead(t *testing.T) {
 	if got := resumed.firstCursor(); got != 0 {
 		t.Fatalf("an explicit cursor 0 started after %d", got)
 	}
+}
+
+// noCanvasPresence is the presence source of a stream no canvas page opened.
+type noCanvasPresence struct{}
+
+func (noCanvasPresence) CanvasPresence(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) ([]domain.CanvasPresence, error) {
+	return nil, nil
 }
