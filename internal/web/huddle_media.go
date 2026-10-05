@@ -23,13 +23,26 @@ package web
 // screen suffix opens a separate presenter tile, so a screen share plays beside
 // the sharer's camera.
 //
+// A joined huddle lives as long as its window does, not as long as the page.
+// The window is a live fragment (#huddle), so a refresh re-renders it while
+// the call goes on: the running window is put back in place of the fresh
+// one, with only its "who is here" header copied over, rather than a second
+// microphone and connection being started for the same call beside the first.
+// When the window goes for good — Leave huddle, or the huddle ended — or the
+// reader leaves the page (pageLifecycleScript), stop() closes the connection,
+// stops every track, detaches every tile and closes the audio context, and a
+// device that opens after that is closed at once rather than started.
+//
 // The script carries no comments: html/template elides them inside a script
 // element, so the served bytes would stop matching the Content-Security-Policy
 // hash computed from this source.
 const huddleMediaScript = `<script>(function(){
+var current=null;
 var start=function(session){
 if(!session||session.getAttribute('data-huddle-started')==='true')return;
 session.setAttribute('data-huddle-started','true');
+var ended=false;var frame=0;var stop=function(){};
+current={session:session,callID:session.getAttribute('data-huddle-call'),stop:function(){stop()}};
 var status=document.querySelector('[data-huddle-status]');
 var tiles=session.querySelector('[data-huddle-tiles]');
 var announce=function(text){if(status)status.textContent=text};
@@ -93,6 +106,7 @@ meters[id]={analyser:analyser,data:new Uint8Array(analyser.frequencyBinCount)};
 }catch(error){}
 };
 var speakingLoop=function(){
+if(ended)return;
 var loudest=null;
 var loudestLevel=0.05;
 Object.keys(meters).forEach(function(id){
@@ -107,7 +121,7 @@ if(level>loudestLevel){loudestLevel=level;loudest=id}
 Array.prototype.forEach.call(tiles.querySelectorAll('[data-huddle-tile]:not([data-huddle-screen])'),function(tile){
 tile.setAttribute('data-huddle-speaking',tile.getAttribute('data-huddle-tile')===loudest?'true':'false');
 });
-if(window.requestAnimationFrame){window.requestAnimationFrame(speakingLoop)}else{window.setTimeout(speakingLoop,120)}
+if(window.requestAnimationFrame){frame=window.requestAnimationFrame(speakingLoop)}else{window.setTimeout(speakingLoop,120)}
 };
 var nameOf=function(id){return id===selfID?'You':(names[id]||id)};
 var tileFor=function(id){
@@ -211,11 +225,12 @@ try{decoded=JSON.parse(detail.data)}catch(error){return}
 if(!decoded||decoded.call_id!==callID||decoded.from_user_id!=='sfu')return;
 var signal=null;
 try{signal=JSON.parse(decoded.payload)}catch(error){return}
-if(!signal||!pc)return;
+if(!signal||!pc||ended)return;
 if(signal.kind==='offer'){handleServerOffer(signal.sdp);return}
 if(signal.kind==='candidate'){var init=null;try{init=JSON.parse(signal.candidate)}catch(error){return}addCandidate(init)}
 });
 var connect=function(){
+if(ended)return;
 pc=new RTCPeerConnection({iceServers:iceServers});
 pc.onicecandidate=function(event){if(event.candidate)toServer('candidate',{candidate:JSON.stringify(event.candidate)})};
 pc.ontrack=function(event){
@@ -323,6 +338,7 @@ broadcastPresence();
 return;
 }
 openDevice('video','huddle-camera').then(function(stream){
+if(ended){stream.getTracks().forEach(function(track){track.stop()});return}
 cameraTrack=stream.getVideoTracks()[0];
 if(!cameraTrack)return;
 videoSender.replaceTrack(cameraTrack);
@@ -354,6 +370,7 @@ return;
 }
 if(!navigator.mediaDevices.getDisplayMedia){announce('This browser cannot share a screen.');return}
 navigator.mediaDevices.getDisplayMedia({video:true}).then(function(stream){
+if(ended){stream.getTracks().forEach(function(track){track.stop()});return}
 screenStream=stream;
 var track=stream.getVideoTracks()[0];
 if(!track)return;
@@ -370,6 +387,7 @@ broadcastPresence();
 }).catch(function(){announce('The screen was not shared.')});
 });
 openDevice('audio','huddle-microphone').then(function(stream){
+if(ended){stream.getTracks().forEach(function(track){track.stop()});return}
 local=stream;
 session.setAttribute('data-huddle-microphone','on');
 tileFor(selfID).querySelector('video').srcObject=local;
@@ -384,12 +402,31 @@ report();
 announce('Your microphone was not available, so this huddle has no sound for you. Everything else still works.');
 session.setAttribute('data-huddle-microphone','denied');
 });
-window.addEventListener('pagehide',function(){
+var drop=null;
+stop=function(){
+if(ended)return;
+ended=true;
+if(frame&&window.cancelAnimationFrame)window.cancelAnimationFrame(frame);
 if(pc){try{pc.close()}catch(error){}}
-if(local)local.getTracks().forEach(function(track){track.stop()});
-if(screenStream)screenStream.getTracks().forEach(function(track){track.stop()});
-if(audioContext){try{audioContext.close()}catch(error){}}
-});
+[local,screenStream].forEach(function(stream){if(stream)stream.getTracks().forEach(function(track){track.stop()})});
+if(cameraTrack)cameraTrack.stop();
+if(tiles)Array.prototype.forEach.call(tiles.querySelectorAll('video'),function(media){media.srcObject=null});
+if(audioContext){try{var closing=audioContext.close();if(closing&&closing.catch)closing.catch(function(){})}catch(error){}}
+meters={};
+if(drop)drop();
+};
+drop=window.sameoldchatLifecycle?window.sameoldchatLifecycle.hold(stop):null;
+};
+var follow=function(){
+var fresh=document.querySelector('[data-huddle-call]');
+if(current&&fresh&&fresh!==current.session&&fresh.getAttribute('data-huddle-call')===current.callID){
+var name=fresh.querySelector('.huddle-window-name');var kept=current.session.querySelector('.huddle-window-name');
+if(name&&kept)kept.innerHTML=name.innerHTML;
+fresh.replaceWith(current.session);
+return;
+}
+if(current&&!document.contains(current.session)){current.stop();current=null}
+start(fresh);
 };
 var windowView=function(panel,name,on){
 panel.setAttribute('data-huddle-'+name,on?'true':'false');
@@ -416,9 +453,9 @@ var on=toggle.getAttribute('aria-pressed')!=='true';
 windowView(panel,name,on);
 try{window.sessionStorage.setItem('sameoldchat-huddle-'+name,on?'true':'false')}catch(error){}
 });
-start(document.querySelector('[data-huddle-call]'));
+follow();
 restoreWindow();
 if(window.MutationObserver){
-new MutationObserver(function(){start(document.querySelector('[data-huddle-call]'));restoreWindow()}).observe(document.body,{childList:true,subtree:true});
+new MutationObserver(function(){follow();restoreWindow()}).observe(document.body,{childList:true,subtree:true});
 }
 })();</script>`

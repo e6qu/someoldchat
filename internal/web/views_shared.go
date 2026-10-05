@@ -244,6 +244,7 @@ event.preventDefault();event.stopPropagation();var who=trigger.getAttribute('dat
 },true);
 document.addEventListener('keydown',function(event){if(event.key==='Escape'&&host&&!host.hidden&&(host.contains(document.activeElement)||document.activeElement===document.body)){var menu=host.querySelector('details[open]');if(menu){menu.open=false;menu.querySelector('summary').focus();return}event.preventDefault();close()}});
 var initial=document.getElementById('profile-panel');if(initial&&!initial.hidden){host=initial;tick();clock=window.setInterval(tick,30000)}
+window.sameoldchatLifecycle.hold(function(){window.clearInterval(clock)});
 })();</script>`
 
 // faviconSVG is SameOldChat's own mark: a speech bubble on its purple.
