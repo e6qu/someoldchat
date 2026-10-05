@@ -251,13 +251,15 @@ func TestThreadsViewListsThreadsWithTheirLatestReplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := get(t, mux, "/app/threads?channel=Cdev").Body.String()
-	requireContains(t, "threads view", body, "<strong>ship</strong> it?", "yes, <code>today</code>", "1 reply", "Last reply", "data-thread-reply-slot", `placeholder="Reply…"`, "#general")
+	requireContains(t, "threads view", body, "<strong>ship</strong> it?", "yes, <code>today</code>", "1 reply", "Last reply", "data-thread-reply-slot", `placeholder="Reply…"`, "#general", "Reply to the thread in #general")
 	requireMissing(t, "threads view", body, "a lonely message", "0 replies", "Jan 1", "1 replies")
 }
 
-// NAV-07: a Threads card hosts its own reply form, as Slack's Threads view
-// does. The reply lands in the thread and the post answers with the Threads
-// view at that card; a return outside this application is not followed.
+// NAV-07: a Threads card hosts the thread composer, as Slack's Threads view
+// does: its own saved draft, mention suggestions from the card's conversation,
+// and attachments. The reply lands in the thread and the post answers with
+// the Threads view at that card, with script and without; a return outside
+// this application is not followed.
 func TestThreadsCardRepliesInPlace(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	messages := service.Messages{Store: s}
@@ -270,16 +272,36 @@ func TestThreadsCardRepliesInPlace(t *testing.T) {
 	if _, err := messages.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{Conversation: "Cdev", Text: "first", ThreadTimestamp: thread}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := messages.SaveDraft(ctx, "T1", "U1", "Cdev", thread, "half a thought"); err != nil {
+		t.Fatal(err)
+	}
 	anchor := "thread-Cdev-" + string(thread)
 	body := get(t, mux, "/app/threads?channel=Cdev").Body.String()
-	form := body[strings.Index(body, `id="`+anchor+`"`):]
-	form = form[strings.Index(form, "<form"):]
+	form := body[strings.Index(body, `id="`+anchor+`-composer"`):]
 	form = form[:strings.Index(form, "</form>")]
 	action := "/app/message?channel=Cdev&amp;thread=" + url.QueryEscape(string(thread))
 	returnTo := "/app/threads?channel=Cdev#" + anchor
-	requireContains(t, "card reply form", form, `method="post"`, `action="`+action+`"`, `name="thread_ts" value="`+string(thread)+`"`, `name="return" value="`+returnTo+`"`, `name="text"`, `for="`+anchor+`-reply"`)
+	requireContains(t, "card composer", form, `method="post"`, `action="`+action+`"`, `data-composer="thread"`, `data-directory="composer-directory-Cdev"`, "data-composer-quiet",
+		`name="thread_ts" value="`+string(thread)+`"`, `name="return" value="`+returnTo+`"`, `name="text"`, `for="`+anchor+`-text"`, "Reply to the thread in #general",
+		">half a thought</textarea>", `data-draft-url="/app/draft?channel=Cdev&amp;thread=`, `data-composer-action="upload"`)
+	requireMissing(t, "card composer", form, "autofocus", `aria-controls="emoji-picker"`, `aria-controls="shortcut-browser"`)
+	// The card's mention suggestions are its conversation's, rendered once.
+	requireContains(t, "threads page", body, `<template id="composer-directory-Cdev"`, `id="composer-link-dialog"`, `id="live-status"`)
+	if strings.Count(body, `<template id="composer-directory-Cdev"`) != 1 {
+		t.Fatal("a conversation's suggestions were rendered more than once")
+	}
 
+	// With script, the composer posts as htmx does and is sent back to the
+	// card rather than handed a timeline fragment for a page with no timeline.
 	target := "/app/message?channel=Cdev&thread=" + url.QueryEscape(string(thread))
+	viaScript := postForm(t, mux, target, url.Values{"_csrf": {auth.CSRFToken("session")}, "thread_ts": {string(thread)}, "return": {returnTo}, "text": {"from the card's composer"}}.Encode(), true)
+	if viaScript.Code != http.StatusNoContent || viaScript.Header().Get("HX-Redirect") != returnTo {
+		t.Fatalf("scripted reply = %d to %q: %s", viaScript.Code, viaScript.Header().Get("HX-Redirect"), viaScript.Body)
+	}
+	if _, err := messages.Draft(ctx, "T1", "U1", "Cdev", thread); err == nil {
+		t.Fatal("the card's draft outlived the reply it became")
+	}
+
 	sent := postForm(t, mux, target, url.Values{"_csrf": {auth.CSRFToken("session")}, "thread_ts": {string(thread)}, "return": {returnTo}, "text": {"from the card"}}.Encode(), false)
 	if sent.Code != http.StatusSeeOther || sent.Header().Get("Location") != returnTo {
 		t.Fatalf("reply = %d to %q: %s", sent.Code, sent.Header().Get("Location"), sent.Body)

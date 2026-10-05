@@ -43,6 +43,12 @@ type threadsData struct {
 	Threads   []followedThreadView
 	Notice    string
 	Empty     bool
+	// Directories are the mention suggestions, one per conversation the
+	// cards come from, so a card suggests that conversation's members; Dialogs
+	// are the composer's page-level dialogs, rendered once for every card.
+	Directories []composerDirectory
+	Dialogs     composerDialogsView
+	Composers   bool
 }
 
 // followedThreadView is one card of the Threads view as Slack draws it: the
@@ -70,6 +76,12 @@ type followedThreadView struct {
 	// Threads view the post answers with.
 	ReplyURL    string
 	ReplyReturn string
+	// Composer is the card's reply composer: the thread composer, with
+	// mention suggestions from the card's conversation, formatting, its own
+	// saved draft and attachments. HasComposer is false where the member
+	// cannot post there, and the card links into the thread instead.
+	Composer    composerView
+	HasComposer bool
 }
 
 // threadCardMessage is a message as a Threads card shows it: author, time and
@@ -179,8 +191,70 @@ func (h Handler) threadsPage(w http.ResponseWriter, r *http.Request) {
 		data.Threads = append(data.Threads, view)
 	}
 	data.Empty = len(data.Threads) == 0
+	if principal.HasScope(auth.ScopeChatWrite) && !data.Empty {
+		h.threadCardComposers(r.Context(), principal, &data)
+	}
 	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationHome})
 	h.writeHTML(w, threadsTemplate, data, http.StatusOK, "Threads rendering unavailable")
+}
+
+// threadCardComposers gives each card the thread composer, as Slack's Threads
+// view does. Cards come from many conversations, so each conversation gets its
+// own suggestion directory, read once however many of its threads are listed:
+// a card suggests that conversation's members and labels everyone else as
+// outside it. A card whose conversation cannot be read, or is archived, keeps
+// no composer and links into the thread instead.
+func (h Handler) threadCardComposers(ctx context.Context, principal auth.Principal, data *threadsData) {
+	conversations := map[string]*domain.Conversation{}
+	canUpload := principal.HasScope(auth.ScopeFilesWrite)
+	for index := range data.Threads {
+		card := &data.Threads[index]
+		conversation, seen := conversations[card.Conversation]
+		if !seen {
+			conversations[card.Conversation] = nil
+			info, err := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, domain.ConversationID(card.Conversation))
+			if err != nil || info.Archived {
+				continue
+			}
+			conversation = &info
+			conversations[card.Conversation] = conversation
+			directory, notices := h.composerDirectoryFor(ctx, principal, info)
+			directory.ID = "composer-directory-" + card.Conversation
+			data.Directories = append(data.Directories, directory)
+			if len(notices) > 0 && data.Notice == "" {
+				data.Notice = "Some reply suggestions are temporarily unavailable."
+			}
+		}
+		if conversation == nil {
+			continue
+		}
+		prefix := "#"
+		if conversation.IsDirectOrGroup() {
+			prefix = ""
+		}
+		_, composer, notices := h.composerViews(ctx, composerPageRequest{
+			Principal: principal, Conversation: *conversation, ThreadTimestamp: card.Root,
+			CSRFToken: data.CSRFToken, ChannelName: card.ChannelName, ChannelPrefix: prefix,
+			CanUpload: canUpload, Member: true, AtLatest: true,
+		})
+		if len(notices) > 0 && data.Notice == "" {
+			data.Notice = "Some saved drafts are temporarily unavailable."
+		}
+		composer.IDPrefix = card.Anchor + "-"
+		composer.ReturnTo = card.ReplyReturn
+		composer.DirectoryID = "composer-directory-" + card.Conversation
+		composer.AccessibleLabel = "Reply to the thread in " + prefix + card.ChannelName
+		composer.Quiet, composer.Autofocus = true, false
+		composer.NoEmojiPicker = true
+		// The shortcut browser and recent files are page-level and name one
+		// conversation; a page of cards from several has no single one to
+		// name. Typing / still offers the conversation's commands.
+		composer.HasShortcuts, composer.RecentFiles = false, nil
+		composer.HXTarget = ""
+		card.Composer, card.HasComposer = composer, true
+		data.Composers = true
+	}
+	data.Dialogs = composerDialogsView{CSRFToken: data.CSRFToken, CanUpload: canUpload}
 }
 
 // followedThreadCard reads a thread's root and latest replies for its card.
@@ -429,26 +503,29 @@ func unreadPrefix(conversation domain.Conversation) string {
 
 var threadsTemplate = mustPage(threadsMarkup)
 
-const threadsMarkup = `{{define "title"}}Threads · SameOldChat{{end}}
-{{define "styles"}}` + shellStyle + shellPageStyle + `<style>
+var threadsMarkup = `{{define "title"}}Threads · SameOldChat{{end}}
+{{define "styles"}}` + shellStyle + shellPageStyle + composerStyle + `<style>
 .bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(900px,calc(100% - 32px));margin:28px auto 48px}.heading{display:grid;gap:5px;margin-bottom:17px}.heading h2,.heading p{margin:0}.heading p{color:var(--muted)}
 ` + threadsViewStyle + `
 @media(max-width:600px){.layout{width:min(100% - 20px,900px);margin-top:18px}}
 </style>{{end}}
-{{define "scripts"}}` + shellScript + searchSuggestionsScript + localTimeScript + threadReplyScript + `{{end}}
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + localTimeScript + composerScript + `{{end}}
 {{define "content"}}{{template "shell-open" .Shell}}<main class="layout">
 <div class="heading"><h1>Threads</h1><p>Threads you follow, most recently replied first.</p></div>
 {{template "threads-list" .}}
+{{if .Composers}}{{range .Directories}}{{template "composer-directory" .}}{{end}}{{template "composer-dialogs" .Dialogs}}{{end}}
+<p class="visually-hidden" id="live-status" role="status" aria-live="polite"></p>
 </main>{{template "shell-close" .Shell}}{{end}}
-` + threadsListPartial
+` + threadsListPartial + composerPartial + typingPartial
 
-// threadsListPartial is the Threads view's content, kept apart from its page
-// chrome so the workspace shell can render the same list inside itself.
+// threadsListPartial is the Threads view's list of cards.
 //
-// Each card ends in a reply form, [data-thread-reply-slot], as Slack's Threads
-// view does: it posts the reply into the thread and comes back to the card.
-// A refused reply opens the thread with the draft kept and the reason shown.
+// Each card ends in the thread composer, as Slack's Threads view does: mention
+// suggestions from the card's conversation, formatting, its own saved draft
+// and attachments. A reply posts into the thread and the page comes back to
+// the card. Refused, it is shown next to the composer with the draft kept;
+// without script, the thread opens with the draft kept and the reason shown.
 const threadsListPartial = `{{define "threads-list"}}
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 {{if .Empty}}<p class="empty">No threads yet. When you reply to a message, or are mentioned in a thread, it shows up here.</p>
@@ -469,31 +546,12 @@ const threadsListPartial = `{{define "threads-list"}}
       <div class="thread-card-body"><p class="thread-card-meta"><span class="author">{{.AuthorName}}</span> <a class="time" href="{{.URL}}"><time datetime="{{.MachineTime}}" title="{{.FullTime}}" data-format="time">{{.ClockTime}}</time></a></p><div class="message-text">{{.Text}}{{if .Edited}}<span class="edited-label"> (edited)</span>{{end}}</div></div>
     </article>{{end}}
     <footer class="thread-card-foot">
-      <form class="thread-card-reply" method="post" action="{{.ReplyURL}}" data-thread-reply-slot data-channel="{{.Conversation}}" data-thread-ts="{{.Root}}">
-        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="thread_ts" value="{{.Root}}"><input type="hidden" name="return" value="{{.ReplyReturn}}"><input type="hidden" name="client_msg_id" value="">
-        <label class="visually-hidden" for="{{.Anchor}}-reply">Reply to the thread in #{{.ChannelName}}</label>
-        <textarea id="{{.Anchor}}-reply" name="text" rows="1" required placeholder="Reply…" aria-keyshortcuts="Enter"></textarea>
-        <button class="thread-card-send" type="submit">Send<span class="visually-hidden"> reply</span></button>
-      </form>
+      {{if .HasComposer}}<div class="thread-card-composer" data-thread-reply-slot data-channel="{{.Conversation}}" data-thread-ts="{{.Root}}">{{template "composer" .Composer}}</div>{{else}}<a class="thread-card-open" href="{{.URL}}">Open the thread to reply</a>{{end}}
       <span class="thread-card-summary">{{.ReplyCountLabel}}{{if .LastReplyRelative}} · Last reply <time datetime="{{.LastReplyMachine}}" data-format="relative">{{.LastReplyRelative}}</time>{{end}}</span>
     </footer>
   </li>{{end}}
 </ul>{{end}}
 {{end}}`
-
-// threadReplyScript makes a Threads card's reply form behave like the thread
-// composer: Enter sends or starts a new line as the member's composer
-// preference says, each send carries a client_msg_id so a retried post cannot
-// post twice, and the form cannot be sent again while a send is in flight.
-const threadReplyScript = `<script>(function(){
-var doc=document;
-function enterSends(){try{return localStorage.getItem('sameoldchat-composer-enter')!=='newline'}catch(error){return true}}
-function primary(event){return /Mac|iPhone|iPad/.test(navigator.platform||'')?event.metaKey:event.ctrlKey}
-function send(form){var field=form.querySelector('textarea[name=text]');if(!field||!field.value.trim())return;if(form.requestSubmit)form.requestSubmit();else form.submit()}
-doc.addEventListener('keydown',function(event){var field=event.target;if(!field||field.tagName!=='TEXTAREA'||event.key!=='Enter'||event.altKey||event.isComposing)return;var form=field.closest('[data-thread-reply-slot]');if(!form)return;var chord=enterSends()?(!event.shiftKey&&!event.ctrlKey&&!event.metaKey):(primary(event)&&!event.shiftKey);if(!chord)return;event.preventDefault();send(form)});
-doc.addEventListener('submit',function(event){var form=event.target;if(!form||!form.matches||!form.matches('[data-thread-reply-slot]'))return;if(form.getAttribute('data-sending')){event.preventDefault();return}form.setAttribute('data-sending','true');var id=form.querySelector('input[name=client_msg_id]');if(id&&!id.value&&window.crypto&&crypto.randomUUID)id.value=crypto.randomUUID();var button=form.querySelector('button[type=submit]');if(button)button.setAttribute('aria-disabled','true')});
-window.addEventListener('pageshow',function(){Array.prototype.forEach.call(doc.querySelectorAll('[data-thread-reply-slot][data-sending]'),function(form){form.removeAttribute('data-sending');var button=form.querySelector('button[type=submit]');if(button)button.removeAttribute('aria-disabled')})});
-})();</script>`
 
 // threadsViewStyle styles the Threads cards, including the formatted message
 // text they share with the timeline.
@@ -523,10 +581,9 @@ html[data-theme=dark]{` + messageDarkTokens + `}
 .thread-card-more:hover{text-decoration:underline}
 .thread-card-message.reply{padding-left:16px}
 .thread-card-foot{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;padding:8px 16px 14px}
-.thread-card-reply{flex:1 1 260px;display:flex;align-items:flex-end;gap:8px;margin:0;padding:6px 6px 6px 12px;border:1px solid var(--field-line);border-radius:8px;background:var(--panel-strong)}
-.thread-card-reply:focus-within{border-color:var(--focus)}
-.thread-card-reply textarea{flex:1 1 auto;min-width:0;min-height:24px;max-height:180px;padding:3px 0;border:0;outline:0;background:transparent;color:var(--text);font:inherit;resize:vertical}
-.thread-card-send{flex:0 0 auto;padding:5px 12px;border:0;border-radius:6px;background:var(--action);color:var(--on-strong);font-weight:700;cursor:pointer}
+.thread-card-composer{flex:1 1 100%;min-width:0}
+.thread-card-composer .composer{margin:0}
+.thread-card-open{color:var(--mention-link);font-weight:700;font-size:13px}
 .thread-card-summary{color:var(--muted);font-size:12px}
 .empty{padding:30px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}`
 

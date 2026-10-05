@@ -35,7 +35,25 @@ import (
 // rest of the page and the browser suite already name (#composer, #text), and
 // "thread-" for the thread pane's.
 type composerView struct {
-	IDPrefix        string
+	IDPrefix string
+	// ReturnTo is set for a composer that is not on its conversation's page,
+	// a Threads card's: the send comes back to that page rather than
+	// appending to a timeline that is not there.
+	ReturnTo string
+	// DirectoryID names the suggestion directory this composer draws on, for
+	// a page holding composers from more than one conversation; empty means
+	// the page's one composer-directory.
+	DirectoryID string
+	// AccessibleLabel names the field when Label, the placeholder, is not
+	// enough on its own: "Reply…" says nothing about which thread on a page of
+	// threads.
+	AccessibleLabel string
+	// Quiet composers never take focus when the page loads: a page of them
+	// would otherwise put the caret in whichever happens to be first.
+	Quiet bool
+	// NoEmojiPicker leaves out the emoji button on a page that has no picker
+	// for it to open.
+	NoEmojiPicker   bool
 	Thread          bool
 	ThreadTimestamp string
 	// Label is the accessible name and the placeholder: "Message #general",
@@ -118,6 +136,10 @@ type composerSpecial struct {
 }
 
 type composerDirectory struct {
+	// ID is the template's id: empty for a page's one directory, and one per
+	// conversation on a page of composers from several (composerView's
+	// DirectoryID names it).
+	ID        string
 	People    []composerPerson
 	Groups    []userGroupView
 	Channels  []composerChannelOption
