@@ -70,7 +70,9 @@ The product MUST support:
 
 Each published operation MUST be labeled with one of the evidence levels
 defined in the [compatibility specification](api-compatibility.md#implementation-tracking-and-ratchet),
-from `unimplemented` to `verified-against-slack`.
+from `unimplemented` to `conforms-to-published-source`. Compatibility is
+judged against Slack's published documentation, specifications, and official
+SDKs; no level requires connecting to Slack.
 
 No operation MAY be advertised above the level demonstrated by automated tests
 and retained evidence.

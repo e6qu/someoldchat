@@ -108,8 +108,11 @@ and message projections.
   protocol against real HTTP transfer, plus remote-file methods where exposed.
 - Persistence qualification verifies metadata/blob atomicity and
   reconciliation across SQLite, PostgreSQL, and dqlite.
-- Differential tests compare count/size limits, message projection, errors,
-  and file events in a dedicated Slack workspace.
+- Count and size limits, message projection, errors, and file events are
+  judged against [Add files to Slack](https://slack.com/help/articles/201330736-Add-files-to-Slack)
+  and the `files.*` method and file event references. The ten-file staging
+  limit follows that article; Slack's 1 GB per-file limit is not met, because
+  this deployment caps a request at 100 MiB (see the product gap audit).
 - Memory and shared SQL persistence apply viewer visibility before file-list
   and file-search pagination; SQL persists folded file name/title columns for
   Unicode-insensitive matching after reopen. Generated gRPC parity tests carry

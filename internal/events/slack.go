@@ -421,9 +421,9 @@ func membersJoinedChannel(delivered Delivered, _ Surface) ([]Inner, error) {
 // A payload produced here always describes itself as its own topic, because
 // NewPayload derives the type from the topic. A payload that describes itself
 // as something else was written already translated — today that is the
-// qualification fixture, which stores real Slack payloads for the message
-// topics no producer can translate until message content can be resolved
-// safely. Shipping those verbatim is the transitional path, and it lives here,
+// qualification fixture, which stores payloads already in Slack's published
+// event shape for the message topics no producer can translate until message
+// content can be resolved safely. Shipping those verbatim is the transitional path, and it lives here,
 // in one place, so no transport decides for itself what an untranslated record
 // looks like.
 //

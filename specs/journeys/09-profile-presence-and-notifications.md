@@ -184,8 +184,11 @@ that does nothing:
   a fictional Slack Web API method.
 - Official SDK tests exercise `users.profile.*`, `users.setPresence`, and
   `dnd.*` with user tokens and permission/error variants.
-- Controlled live-Slack comparison for advance status scheduling remains
-  required. Notification schedules and VIP routing into Activity (a marked
+- Advance status scheduling follows
+  [Set your Slack status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability):
+  up to five scheduled statuses, each with a start and end, editable or
+  cancellable before it starts; `make external-contract-qualification` asserts
+  that text. Notification schedules and VIP routing into Activity (a marked
   person's messages reach you even in a muted channel) are implemented; the
   member's VIPs are listed on the notification preferences page, each with its
   own Remove, and Preferences has a VIP section that leads there.

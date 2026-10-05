@@ -236,9 +236,10 @@ Absent, and named on the page rather than rendered as an inert control:
   administration, queries persisted items with Slack's expression semantics,
   replaces and merges one item, deletes it, and inspects the payload-redacted
   durable Socket Mode cursor before cleaning up the app.
-- Opt-in Slack Enterprise/sandbox evidence is required before claiming plan-
-  restricted administration equivalence; unavailable live evidence remains a
-  named gap.
+- Plan-restricted administration is judged against each method's reference.
+  This deployment has no plan tiers and no Enterprise Grid organization above
+  its workspace, so plan and organization restrictions are recorded per method
+  as ledger deviations rather than claimed.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

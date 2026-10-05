@@ -39,7 +39,7 @@ Normative, testable requirements and pinned upstream contract sources live in
   the official SDK sources used by the compatibility checks;
 - the [Slack user-journey catalog](../specs/journeys/README.md) defines the
   first-party UI target independently of implementation coverage, and
-  browser, accessibility, API, SDK, and live-differential tests cite its
+  browser, accessibility, API, SDK, and external-contract tests cite its
   stable journey identifiers; and
 - the [Slack app platform compatibility matrix](../specs/slack-app-platform.md)
   tracks complete app journeys (registration, installation, token types,

@@ -48,10 +48,11 @@ The compatibility ledger is generated from Slack's current method catalog and
 ratcheted in CI. `make compatibility-report` prints the current figures, and
 the [project status](../PLAN.md#status) records them; every current Web API
 method is implemented and names method-level evidence. Implemented is a
-coverage statement, not a claim of live-Slack equivalence.
+coverage statement, not a claim that every published detail of the method is
+asserted.
 
-The next app-runtime priorities are controlled HTTP/Socket differential
-coverage, then the manifest sections that are parsed and stored but not
+The next app-runtime priorities are the published per-method rate-limit tiers
+(the `rate-limit-tiers` decision in the ledger), then the manifest sections that are parsed and stored but not
 executed (for example agent/assistant views), then cross-app and connector
 workflow functions, before Enterprise-only breadth.
 
@@ -96,8 +97,9 @@ It needs:
 2. local-versus-gRPC composition parity;
 3. an end-to-end request through an applicable current official SDK;
 4. a browser test for any user-visible configuration or consent step; and
-5. a live Slack differential observation before
-   `verified-against-slack` is recorded.
+5. before `conforms-to-published-source` is recorded, tests that assert every
+   request and response field, header, signature, retry, and error that the
+   journey's published references and official SDK fixtures specify.
 
 Fixture-planted event envelopes qualify only the transport that carried them.
 They do not qualify event production, subscription filtering, or the app UI.

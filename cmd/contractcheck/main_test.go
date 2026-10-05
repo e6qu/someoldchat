@@ -12,14 +12,14 @@ func TestCumulativeEvidenceCountsTreatHigherEvidenceAsLowerEvidence(t *testing.T
 		{Method: "api.test", Status: "behavior-compatible"},
 		{Method: "chat.postMessage", Status: "schema-compatible"},
 		{Method: "files.list", Status: "unimplemented"},
-		{Method: "auth.test", Status: "verified-against-slack"},
+		{Method: "auth.test", Status: "conforms-to-published-source"},
 	})
 	want := map[string]int{
-		"unimplemented":          4,
-		"schema-compatible":      3,
-		"sdk-compatible":         2,
-		"behavior-compatible":    2,
-		"verified-against-slack": 1,
+		"unimplemented":                4,
+		"schema-compatible":            3,
+		"sdk-compatible":               2,
+		"behavior-compatible":          2,
+		"conforms-to-published-source": 1,
 	}
 	for status, expected := range want {
 		if counts[status] != expected {
@@ -99,7 +99,7 @@ func TestAuditedDowngradeRequiresTheExactPriorClaimAndReviewableEvidence(t *test
 			Audit: &downgradeAudit{DowngradedFrom: "behavior-compatible", Reason: "reason"},
 		},
 		"not a downgrade": {
-			Method: "chat.postMessage", Status: "verified-against-slack",
+			Method: "chat.postMessage", Status: "conforms-to-published-source",
 			Audit: &downgradeAudit{DowngradedFrom: "behavior-compatible", Reason: "reason", Evidence: []string{"test"}},
 		},
 	} {

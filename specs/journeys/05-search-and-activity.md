@@ -168,11 +168,11 @@ Implemented evidence:
   totals and pagination in memory, SQLite, dqlite, and PostgreSQL through the
   shared store contract;
 - The local and generated gRPC compositions carry typed query, ordering,
-  pagination, file totals, and viewer identity, with differential coverage for
-  message and file results. Slack Web API `search.messages`, `search.files`,
-  and legacy combined `search.all` require user tokens, enforce documented
-  count/page/order inputs, and are invoked and decoded by the pinned official
-  Node, Python, and Java SDKs.
+  pagination, file totals, and viewer identity, with local-versus-gRPC parity
+  coverage for message and file results. Slack Web API `search.messages`,
+  `search.files`, and legacy combined `search.all` require user tokens,
+  enforce documented count/page/order inputs, and are invoked and decoded by
+  the pinned official Node, Python, and Java SDKs.
 - A decision on a Slack Connect invitation reaches the member who asked for
   it. Asking is not being told, so nothing lands until somebody decides; the
   decider is told nothing, because they already know; and the row keys on the
@@ -246,8 +246,12 @@ Implemented evidence:
   and reaching the present makes the window live again;
 - the Slack APIs retain documented compatibility deviations for relevance
   scoring, highlight markers outside message text, cursor pagination on file/combined legacy
-  results, match projection detail, and full tier rate limiting;
-- controlled live-Slack comparison and visual baselines remain required.
+  results, match projection detail, and full tier rate limiting. Slack
+  publishes the `highlight` argument and its U+E000/U+E001 markers but not
+  which file fields carry them, so file results are returned unmarked, a
+  product choice;
+- visual baselines of this client's desktop and narrow result layouts are not
+  yet captured.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

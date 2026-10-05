@@ -254,8 +254,9 @@ for later steps and conditions to read.
   message, reaction, join, and list triggers from a durable event cursor;
   wall-clock recurrence is qualified by injected poll instants rather than by
   sleeping in CI.
-- Differential fixtures compare live Slack object schemas, supported controls,
-  and run-state transitions.
+- Object schemas, supported controls, and run-state transitions are judged
+  against the `canvases.*`, `slackLists.*`, `workflows.*`, and `functions.*`
+  method references and the help articles in the source map below.
 ## Current SameOldChat boundary
 
 CANVAS-01 and the basic persistence portion of CANVAS-02 now have a real
@@ -413,8 +414,8 @@ This is not full Slack Workflow Builder parity. find/use/copy
 permissions, plan/admin policy, Slack built-in and connector functions,
 templates and AI creation, asynchronous CSV export at scale,
 enforcement of typed workflow/function input and output schemas, multi-org
-permissions, exact rate limits, and controlled live-Slack outcomes remain
-verified gaps.
+permissions, and the published per-method rate-limit tiers remain verified
+gaps.
 
 ## Journey-source map
 

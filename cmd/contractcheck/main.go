@@ -62,11 +62,11 @@ type downgradeAudit struct {
 }
 
 var statusRank = map[string]int{
-	"unimplemented":          0,
-	"schema-compatible":      1,
-	"sdk-compatible":         2,
-	"behavior-compatible":    3,
-	"verified-against-slack": 4,
+	"unimplemented":                0,
+	"schema-compatible":            1,
+	"sdk-compatible":               2,
+	"behavior-compatible":          3,
+	"conforms-to-published-source": 4,
 }
 
 var sources = []source{
@@ -159,7 +159,7 @@ func verify() error {
 			return fmt.Errorf("compatibility ledger contains duplicate operation %q", operation.Method)
 		}
 		switch operation.Status {
-		case "unimplemented", "schema-compatible", "sdk-compatible", "behavior-compatible", "verified-against-slack":
+		case "unimplemented", "schema-compatible", "sdk-compatible", "behavior-compatible", "conforms-to-published-source":
 		default:
 			return fmt.Errorf("compatibility ledger operation %q has invalid status %q", operation.Method, operation.Status)
 		}
@@ -363,13 +363,13 @@ func printOperationReport(prefix string, operations []operation) {
 	counts := cumulativeEvidenceCounts(operations)
 	metadata := operationMetadataCounts(operations)
 	total := len(operations)
-	fmt.Printf("%s.operations=%d %s.implemented=%d/%d %s.verified-against-slack=%d/%d\n", prefix, total, prefix, metadata.Implemented, total, prefix, counts["verified-against-slack"], total)
+	fmt.Printf("%s.operations=%d %s.implemented=%d/%d %s.conforms-to-published-source=%d/%d\n", prefix, total, prefix, metadata.Implemented, total, prefix, counts["conforms-to-published-source"], total)
 	fmt.Printf("%s.unimplemented=%d %s.method-evidence=%d/%d %s.known-deviations=%d\n", prefix, metadata.Unimplemented, prefix, metadata.Evidenced, total, prefix, metadata.Deviating)
 	fmt.Printf("%s.sdk-compatible-claims-with-method-evidence=%d/%d %s.sdk-compatible-claims-without-method-evidence=%d\n", prefix, metadata.EvidencedSDKClaims, metadata.SDKClaims, prefix, metadata.SDKClaims-metadata.EvidencedSDKClaims)
 	for _, namespace := range unimplementedNamespaces(operations) {
 		fmt.Printf("%s.unimplemented.%s=%d\n", prefix, namespace.Name, namespace.Count)
 	}
-	for _, status := range []string{"schema-compatible", "sdk-compatible", "behavior-compatible", "verified-against-slack"} {
+	for _, status := range []string{"schema-compatible", "sdk-compatible", "behavior-compatible", "conforms-to-published-source"} {
 		fmt.Printf("%s.%s-or-better=%d/%d\n", prefix, status, counts[status], total)
 	}
 }

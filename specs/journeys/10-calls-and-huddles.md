@@ -185,9 +185,12 @@ and its own presence broadcast returning to badge its tile.
   test reads the invitation back through the invitee's Activity and confirms
   nobody else is told.
 - Official SDKs exercise `calls.*` with app ownership and error variants.
-- A live Slack sandbox records conversation events and metadata behavior;
-  media quality comparison is separately bounded and MUST not be inferred from
-  API success.
+- Slack publishes a member's huddle participation to apps as the profile's
+  `huddle_state` fields and the
+  [`user_huddle_changed`](https://docs.slack.dev/reference/events/user_huddle_changed/)
+  event, sent alongside `user_change`. Neither is implemented yet; the huddle
+  thread is the only huddle record apps can read. Media quality is not inferred
+  from API success.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

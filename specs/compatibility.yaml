@@ -166,10 +166,11 @@ operations:
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
     deviations:
       - >-
-        The full current payload is validated and persisted, but link-name
-        expansion and external media unfurl fetching have not been qualified
-        against live Slack outcomes.
-      - The Web API now enforces the documented posting allowance — one message per second per channel with a short burst — and a per-method budget, answering 429 with Retry-After. A method is held to the stricter tier its Slack reference names where one is cited (Tiers 1 to 3 for twenty-three methods) and to Tier 4's floor otherwise. A method budget answers Slack's ratelimited and the per-channel posting allowance answers the pinned rate_limited (provenance under rate-limit-codes). Every web replica of a deployment draws from one budget, held in the chat module's store wherever more than one replica can run, and a method whose stricter tier is not yet cited is held to Tier 4.
+        The full current payload is validated and persisted. link_names,
+        unfurl_links and unfurl_media are stored with the message but not acted
+        on: the reference's user-group linking for link_names and its link and
+        media unfurling are not implemented.
+      - The Web API now enforces the documented posting allowance — one message per second per channel with a short burst — and a per-method budget, answering 429 with Retry-After. A method is held to the stricter tier its Slack reference names where one is cited (Tiers 1 to 3 for thirty-two methods) and to Tier 4's floor otherwise. A method budget answers Slack's ratelimited and the per-channel posting allowance answers the pinned rate_limited (provenance under rate-limit-codes). Every web replica of a deployment draws from one budget, held in the chat module's store wherever more than one replica can run, and a method whose stricter published tier is not yet in the table is held to Tier 4 (rate-limit-tiers decision).
     audit:
       downgraded_from: behavior-compatible
       reason: >-
@@ -402,7 +403,7 @@ operations:
       - journey:specs/journeys/03-composer-drafts-and-scheduled.md
       - journey:specs/journeys/04-messages-threads-and-actions.md
     deviations:
-      - Live-Slack differential verification and recent/custom category ordering remain unqualified.
+      - Slack publishes the categories include_categories returns but not how a client orders recent or custom emoji; the first-party Frequently used order (the member's last 24 distinct emoji, most recent first) is this product's choice.
   - method: users.identity
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -635,7 +636,7 @@ operations:
     deviations:
       - Presence follows Slack's rule - active only while at least one of the member's clients is connected and they are not away by choice or after ten minutes without activity; a bot user is active while connected. The clients are the web client's event stream and RTM sockets, each a lease its server renews every 20 seconds and that lapses 60 seconds after a server vanishes without closing it.
       - The caller's own presence carries online, auto_away, manual_away, connection_count (their open clients) and last_activity. presence_change is sent to RTM when a member's first client connects or last disconnects and when they choose away or automatic; a lease that lapses, and the ten-minute inactivity, change presence without announcing it.
-      - Current rate-limit behavior has not been qualified against Slack.
+      - The method is held to Tier 4's floor rather than the Tier 3 Slack publishes for it (rate-limit-tiers decision).
     audit:
       downgraded_from: behavior-compatible
       reason: The previous claim proved response decoding but treated automatic mode as effective active presence without live activity evidence.
@@ -654,7 +655,7 @@ operations:
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
       - The documented `auto` and `away` values persist and round-trip; automatic presence is active while one of the member's clients is connected and they were active in the last ten minutes. The presence_change it announces carries active or away, never the setting `auto`.
-      - Current Slack rate-limit and token-type behavior has not been differentially qualified.
+      - Bot and user tokens with users:write are accepted, as the reference publishes. The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
     audit:
       downgraded_from: behavior-compatible
       reason: Local mode persistence and official SDK calls do not establish Slack's effective-presence lifecycle.
@@ -673,10 +674,10 @@ operations:
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
       - Core identity, name parts, phone, image, status, expiration, and workspace-defined custom fields are returned, with each field's label under include_labels; a hidden field is filtered from a reader who is neither its owner nor an administrator.
-      - Current rate limits and every user-token/bot-token visibility variation have not been differentially qualified.
+      - The method is enforced at Tier 4, the tier Slack publishes for it. Tests do not yet assert each bot-token and user-token visibility rule the reference gives.
     audit:
       downgraded_from: behavior-compatible
-      reason: Custom fields are implemented and covered by tests, but rate limits and the full user-token/bot-token visibility contract are not differentially qualified.
+      reason: Custom fields are implemented and covered by tests, but the bot-token and user-token visibility rules the reference gives are not yet asserted.
       evidence:
         - source:internal/api/slack/handler.go
         - go-test:internal/api/slack:TestCustomProfileFieldsThroughTeamAndUserProfile
@@ -693,7 +694,7 @@ operations:
       - journey:specs/journeys/09-profile-presence-and-notifications.md
     deviations:
       - Display name, full name (real_name, first_name, last_name), phone, title, pronouns, status, expiration, image URL, and workspace-defined custom fields are settable through both the profile object and the single-field name/value form. real_name sets both parts, split at its first space, and a full name cannot be cleared. Standard Slack profile fields this deployment does not store (skype, start date) and email, which only an administrator may change in Slack, are refused rather than silently dropped.
-      - Admin editing of another user, paid-plan restrictions, method-specific rate limits, and all token-type rules remain unqualified.
+      - Admin editing of another user (the reference's user argument) and the reference's token-type rules are not yet asserted; this deployment has no plan tiers, so the paid-team restriction on user is not applied. The method is held to Tier 4's floor rather than the Tier 3 Slack publishes for it (rate-limit-tiers decision).
     audit:
       downgraded_from: behavior-compatible
       reason: The editable profile including custom fields and the name/value form is implemented and tested, but admin editing of another user, rate limits, and token-type rules are not qualified.
@@ -1288,7 +1289,7 @@ operations:
       - go-test:internal/api/slack:TestOAuthV2ExchangeReportsTheInstaller
       - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
     deviations:
-      - Enterprise organization installs, GovSlack hosts, Slack's production rate limits, and controlled live-Slack rotation outcomes remain unqualified.
+      - This deployment has no Enterprise organization installs and serves no GovSlack host. The method is held to Tier 4's floor rather than the Tier 3 Slack publishes for it (rate-limit-tiers decision).
   - method: oauth.v2.user.access
     status: sdk-compatible
     provenance: slack-reference
@@ -1298,7 +1299,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - go-test:internal/api/slack:TestOAuthV2UserAccessReturnsUserGrantOnly
     deviations:
-      - Enterprise organization installs, GovSlack hosts, Slack's production rate limits, and controlled live-Slack user-only grant outcomes remain unqualified.
+      - This deployment has no Enterprise organization installs and serves no GovSlack host. The method is held to Tier 4's floor rather than the tier its reference names (rate-limit-tiers decision).
   - method: reminders.add
     status: sdk-compatible
     provenance: slack-api-specs-openapi
@@ -1316,7 +1317,7 @@ operations:
     deviations:
       - Natural-language times cover the phrases the first-party /remind command reads (in N minutes/hours/days/weeks/months/years, tomorrow, on a date, weekday or month and day, at a time, every day/week/month/year or weekday) in the zone of the member's notification schedule (UTC otherwise); other phrasings answer cannot_parse. The recurrence argument (frequency, and weekdays for weekly) sets how the reminder repeats, with time giving its first occurrence; a recurrence it cannot read is cannot_parse, the method's pinned code for an unreadable time.
       - At the due instant Slackbot (USLACKBOT, as in every Slack workspace) posts Reminder followed by the reminder's text into the member's Slackbot direct message, and into the channel for a channel reminder. The direct message carries Slack's controls - Mark as complete (for a one-time reminder) and Remind me about this (in 20 minutes, 1 hour or 3 hours, or at 9:00 in the member's zone tomorrow or next Monday) - which Slackbot answers itself, completing the reminder or setting a new one-time reminder of the same text, and replacing the controls with what was done. A channel reminder carries no controls.
-      - The current token-type-dependent rules for setting another user's reminder have not been differentially qualified.
+      - The user argument follows the reference and the 2023 Later changelog. A user token naming another member answers cannot_add_others, and a bot token may set a one-time reminder for another member (a recurring one answers cannot_add_others_recurring). The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
     audit:
       downgraded_from: behavior-compatible
       reason: The prior level inferred Slack behavior from local CRUD tests even though current documented parsing, recurrence, targeting, retirement, and delivery contracts were not implemented or observed.
@@ -1350,7 +1351,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
-      - Retirement behavior and deletion racing reminder delivery have not been differentially qualified.
+      - Slack describes the reminders.* methods as degraded since 2023 without specifying what they answer; they keep working against this deployment's reminders, a product choice. Slack publishes no ordering between deletion and delivery; here delivery claims a due reminder and posts it in one step, so a reminder deleted before the claim is never delivered and one already claimed is delivered once. The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
     audit:
       downgraded_from: behavior-compatible
       reason: The local CRUD path has no delivery worker, so it cannot establish Slack's deletion outcome at the delivery boundary.
@@ -1366,7 +1367,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
     deviations:
-      - Current retirement behavior is not represented.
+      - Slack describes the reminders.* methods as degraded since 2023 without specifying what they answer; they keep working against this deployment's reminders, a product choice. As the reference states, only a non-recurring reminder carries time and complete_ts.
     audit:
       downgraded_from: behavior-compatible
       reason: The response is SDK-decodable but the only locally creatable reminder shape is non-recurring and has not been compared with Slack.
@@ -1383,7 +1384,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/service:TestCompleteReminderDistinguishesOthersAndRecurring
     deviations:
-      - Recurring reminder projection, retirement behavior, and live list inclusion rules have not been differentially qualified.
+      - The list holds the reminders created by or for the caller, as the reference states, and only a non-recurring reminder carries time and complete_ts. Slack describes the reminders.* methods as degraded since 2023 without specifying what they answer; they keep working against this deployment's reminders, a product choice. The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
     audit:
       downgraded_from: behavior-compatible
       reason: Pagination and SDK decoding pass locally, but the returned set and recurring shape have not been established against current Slack behavior.
@@ -1860,7 +1861,7 @@ operations:
     deviations:
       - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
       - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: admin.conversations.linkObjects
     status: behavior-compatible
     provenance: slack-reference
@@ -1888,7 +1889,7 @@ operations:
     deviations:
       - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
       - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: admin.conversations.setCustomRetention
     status: behavior-compatible
     provenance: slack-reference
@@ -1900,7 +1901,7 @@ operations:
     deviations:
       - Slack restricts these methods to Enterprise plans. SameOldChat has no plan tiers, so it applies the workspace administrator role it applies to every other administrative operation rather than inventing a tier to refuse against.
       - Deletion is applied by a sweep on Slack's documented daily cadence, so content past the horizon stays readable until the sweep reaches it, exactly as Slack describes. Reads are not filtered by the horizon.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: admin.conversations.unlinkObjects
     status: behavior-compatible
     provenance: slack-reference
@@ -2118,7 +2119,7 @@ operations:
       - go-test:internal/modules/chat/transport/grpc:TestEveryChatMethodHasAParityCaseOrADocumentedGap
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
-      - Rate limits, paid-plan enforcement, and controlled live-Slack outcomes remain unqualified.
+      - Slack offers app datastores on paid plans; this deployment has no plan tiers, so none is refused. The method is held to Tier 4's floor rather than the tier its reference names (rate-limit-tiers decision).
   - method: apps.datastore.delete
     status: behavior-compatible
     provenance: slack-reference
@@ -2147,7 +2148,7 @@ operations:
       - go-test:internal/modules/chat/transport/grpc:TestEveryChatMethodHasAParityCaseOrADocumentedGap
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
-      - Rate limits, paid-plan enforcement, and controlled live-Slack outcomes remain unqualified.
+      - Slack offers app datastores on paid plans; this deployment has no plan tiers, so none is refused. The method is held to Tier 4's floor rather than the tier its reference names (rate-limit-tiers decision).
   - method: apps.datastore.update
     status: behavior-compatible
     provenance: slack-reference
@@ -2239,7 +2240,7 @@ operations:
       - go-test:internal/api/slack:TestBlocksValidateMatchesCurrentSlackResponseShapes
       - go-test:internal/blockkit:TestValidateBlocksCoversSlackFileImagesCallsAndSectionFields
     deviations:
-      - SameOldChat validates the current catalog it renders, but exact Slack validation messages, production rate limits, and controlled live-Slack outcomes remain unqualified.
+      - SameOldChat validates the current catalog it renders; its validation messages are not asserted against the reference's wording. The method is held to Tier 4's floor rather than the tier its reference names (rate-limit-tiers decision).
   - method: chat.appendStream
     status: behavior-compatible
     provenance: slack-reference
@@ -2269,7 +2270,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 1 Slack publishes for it (rate-limit-tiers decision).
   - method: conversations.approveSharedInvite
     status: behavior-compatible
     provenance: slack-reference
@@ -2281,7 +2282,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 1 Slack publishes for it (rate-limit-tiers decision).
   - method: conversations.canvases.create
     status: sdk-compatible
     provenance: slack-reference
@@ -2291,7 +2292,7 @@ operations:
       - go-test:internal/service:TestConversationCanvasIsSingularAndInheritsChannelAccess
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: conversations.declineSharedInvite
     status: behavior-compatible
     provenance: slack-reference
@@ -2303,7 +2304,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 1 Slack publishes for it (rate-limit-tiers decision).
   - method: conversations.externalInvitePermissions.set
     status: behavior-compatible
     provenance: slack-reference
@@ -2314,7 +2315,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: conversations.inviteShared
     status: behavior-compatible
     provenance: slack-reference
@@ -2326,7 +2327,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: conversations.listConnectInvites
     status: behavior-compatible
     provenance: slack-reference
@@ -2337,7 +2338,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 1 Slack publishes for it (rate-limit-tiers decision).
   - method: conversations.requestSharedInvite.approve
     status: behavior-compatible
     provenance: slack-reference
@@ -2349,7 +2350,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: conversations.requestSharedInvite.deny
     status: behavior-compatible
     provenance: slack-reference
@@ -2361,7 +2362,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: conversations.requestSharedInvite.list
     status: behavior-compatible
     provenance: slack-reference
@@ -2372,7 +2373,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
-      - Rate limits and controlled live-Slack outcomes remain unqualified.
+      - The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: functions.distributions.permissions.add
     status: sdk-compatible
     provenance: slack-reference
@@ -2388,7 +2389,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
-      - Enterprise organization and multi-workspace permission resolution has not been live-Slack qualified.
+      - This deployment has no Enterprise Grid organization above its workspace, so permissions resolve within the caller's workspace.
   - method: functions.distributions.permissions.remove
     status: sdk-compatible
     provenance: slack-reference
@@ -2411,7 +2412,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
-      - Historical function-step occurrences are durable, but removed-step is_deleted projection has not been live-Slack qualified.
+      - Historical function-step occurrences are durable, but every occurrence is answered with is_deleted false, including a step a later workflow revision removed; the reference's is_deleted is not yet projected.
   - method: functions.workflows.steps.responses.export
     status: behavior-compatible
     provenance: slack-reference
@@ -2442,7 +2443,7 @@ operations:
     deviations:
       - Slack's private relevance ranking is not represented.
       - An app's remote file (files.remote.add) is found by its title and the indexable_file_contents its app gave, once it is shared into a channel the searcher can read, and is answered as an external file object (mode external, is_external, external_id, url_private its external_url). It has no uploader, so from- never matches it. Remote and hosted files are ordered together by when they were added.
-      - Highlight-marker behavior has not been differentially qualified.
+      - With highlight=true, message matches carry the U+E000/U+E001 markers the reference publishes. The reference does not say which file fields carry them, so file matches are returned unmarked, a product choice. The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: search.files
     status: sdk-compatible
     provenance: slack-reference
@@ -2456,7 +2457,7 @@ operations:
     deviations:
       - Slack's private relevance ranking is not represented.
       - An app's remote file (files.remote.add) is found by its title and the indexable_file_contents its app gave, once it is shared into a channel the searcher can read, and is answered as an external file object (mode external, is_external, external_id, url_private its external_url). It has no uploader, so from- never matches it. Remote and hosted files are ordered together by when they were added.
-      - Highlight-marker behavior has not been differentially qualified.
+      - The reference publishes the highlight argument and its U+E000/U+E001 markers but not which file fields carry them, so file matches are returned unmarked, a product choice. The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
   - method: team.billing.info
     status: behavior-compatible
     provenance: slack-reference
@@ -2554,7 +2555,7 @@ operations:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
     deviations:
-      - Enterprise organization and multi-workspace named-entity resolution has not been live-Slack qualified.
+      - This deployment has no Enterprise Grid organization above its workspace, so named entities resolve within the caller's workspace.
   - method: admin.apps.mcp.servers.list
     status: schema-compatible
     provenance: slack-reference
@@ -2691,7 +2692,7 @@ operations:
     deviations:
       - The reference names exclude_from_slack_ai only as its example and lists no other property, so that is the one property accepted (the flag admin.conversations.bulkSetExcludeFromSlackAi writes); every other key answers property_not_allowed, and a value that is not a JSON boolean answers invalid_arguments.
       - The reference documents no response body and reserves no_valid_channels for a request whose channels are all invalid, so the channels of the workspace are set, the others are skipped in the same transaction, and a successful request answers only {"ok":true}; which channels were skipped is not reported. An invalid channel is one that is not a conversation of the caller's workspace; the property applies to every conversation type here, so disallowed_action is never returned.
-      - The change is applied synchronously in one transaction, so action_already_in_progress is never returned; feature_not_enabled and restricted_plan_level are never returned because this deployment has no plan tiers. A non-administrator answers restricted_action and a bot token not_allowed_token_type. Enterprise organization behavior and live-Slack outcomes remain unqualified.
+      - The change is applied synchronously in one transaction, so action_already_in_progress is never returned; feature_not_enabled and restricted_plan_level are never returned because this deployment has no plan tiers. A non-administrator answers restricted_action and a bot token not_allowed_token_type. This deployment has no Enterprise Grid organization above its workspace.
   - method: admin.usergroups.addUsers
     status: schema-compatible
     provenance: slack-reference
@@ -3000,7 +3001,7 @@ operations:
       - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
     deviations:
       - This deployment did not exist before August 19, 2016 and keeps no token creation time, so eligibility is the test the reference gives for tokens of unknown age, a secret (the section after the final "-") shorter than 32 characters, and a token whose secret is 32 or longer answers token_too_long. The xoxp- tokens this deployment issues carry a 20-character hexadecimal secret, which that test calls short, so each of them may be rotated once to a 32-character secret; a token in Slack's pre-2016 sectioned form (xoxp-111-222-333-d6bc76) keeps its sections exactly as the reference describes.
-      - Only a non-expiring user token beginning xoxp- is rotated; a bot, execution-scoped or expiring rotating (xoxe.xoxp-) token answers not_allowed_token_type. The token authenticates the request like any other (not_authed, invalid_auth, token_revoked, token_expired, account_inactive) before client_id and client_secret are checked; a token issued to another app answers invalid_client_id. Beginning again replaces the pending replacement. Live-Slack outcomes remain unqualified.
+      - Only a non-expiring user token beginning xoxp- is rotated; a bot, execution-scoped or expiring rotating (xoxe.xoxp-) token answers not_allowed_token_type. The token authenticates the request like any other (not_authed, invalid_auth, token_revoked, token_expired, account_inactive) before client_id and client_secret are checked; a token issued to another app answers invalid_client_id. Beginning again replaces the pending replacement.
   - method: oauth.v2.completeShortTokenRotation
     status: schema-compatible
     provenance: slack-reference
@@ -3012,15 +3013,15 @@ operations:
       - go-test:internal/store/memory:TestShortTokenRotation
       - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
     deviations:
-      - The pending rotation is durable (schema 196) and completable for ten minutes; after that, or with nothing begun, the answer is rotation_not_found. A new_token other than the one begin issued answers invalid_token and a missing one invalid_arguments. Completion moves the original credential to the replacement's hash in one transaction, so the original answers invalid_auth afterwards rather than token_revoked, and no tokens_revoked event is sent for it. Eligibility and authentication follow oauth.v2.beginShortTokenRotation's recorded deviation. Live-Slack outcomes remain unqualified.
+      - The pending rotation is durable (schema 196) and completable for ten minutes; after that, or with nothing begun, the answer is rotation_not_found. A new_token other than the one begin issued answers invalid_token and a missing one invalid_arguments. Completion moves the original credential to the replacement's hash in one transaction, so the original answers invalid_auth afterwards rather than token_revoked, and no tokens_revoked event is sent for it. Eligibility and authentication follow oauth.v2.beginShortTokenRotation's recorded deviation.
 
 decisions:
   # The two Events-API sources above are pinned and hashed, and until this entry
   # existed no operation and no decision referenced either of them: every one of
   # the 205 operations carries provenance slack-api-specs-openapi or
   # slack-reference, all Web API methods. internal/events/payload.go says the
-  # question of whether a topic's payload matches the event JSON real Slack
-  # emits "is decided separately" and points here, so this is where it is
+  # question of whether a topic's payload matches the event JSON Slack
+  # publishes "is decided separately" and points here, so this is where it is
   # decided. It is decided against the claim.
   - method: events-api
     evidence: specs/upstream/slack-api-specs/events-api/slack_common_event_wrapper_schema.json
@@ -3072,8 +3073,9 @@ decisions:
       event name per recipient), Bolt callback qualifications still submit
       independently constructed signed callbacks (the Node Bolt link_shared
       round trip excepted: a real post produces it), and no callback shape is
-      live-Slack verified. The evidence therefore still does not promote the
-      whole Events API surface.
+      yet asserted field by field against its published event reference and
+      the pinned AsyncAPI schema. The evidence therefore still does not promote
+      the whole Events API surface.
   - method: rtm.connect
     evidence: https://docs.slack.dev/reference/methods/rtm.connect/
     decision: >-
@@ -3120,6 +3122,28 @@ decisions:
   - method: openid
     evidence: https://docs.slack.dev/reference/methods/openid.connect.token/
     decision: The current official method reference defines the Sign in with Slack OpenID Connect token and user-info methods, while the pinned Web API OpenAPI snapshot predates them. Track the methods against the official references and SDK qualifications until the vendored snapshot is refreshed.
+  - method: rate-limit-tiers
+    evidence: https://docs.slack.dev/apis/web-api/rate-limits/
+    decision: >-
+      Every Web API method's rate-limit tier is published: its reference page
+      names it, and the pinned official Java SDK (slack-api-client 1.49.0,
+      com.slack.api.methods.MethodsRateLimits) carries the same table, which
+      that client uses to pace its own calls. The tier is therefore decided by
+      the published sources; no observation of Slack is needed or planned.
+      internal/api/slack/ratelimit.go enforces a stricter tier for 32 methods
+      and Tier 4's floor for every other. Compared with the pinned table, 245
+      methods of this ledger are held to Tier 4 although Slack publishes Tier 1,
+      2 or 3 for them (for example apps.connections.open and rtm.connect at
+      Tier 1, conversations.list, users.list and search.messages at Tier 2,
+      conversations.history and chat.update at Tier 3), and
+      workflows.featured.set is enforced at Tier 3 where the table lists Tier
+      2. That is a recorded code gap: closing it extends methodTiers from the
+      published table. Methods the pinned table does not list (apps.datastore.*,
+      blocks.validate, oauth.v2.user.access, the short-token rotation methods
+      and other recent additions) take the tier their reference page names.
+      auth.test, chat.getPermalink, chat.postMessage and
+      assistant.threads.setStatus have special tiers the table names; the
+      chat.postMessage posting allowance is the one enforced.
   - method: rate-limit-codes
     evidence: specs/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json
     decision: >-

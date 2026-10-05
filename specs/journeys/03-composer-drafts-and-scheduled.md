@@ -44,8 +44,10 @@
 9. Mentioning a workspace member who is not in the channel is allowed; after
    the message is sent Slack says the person is not in the channel and offers
    to add them or do nothing. `@channel`, `@here` and `@everyone` are offered
-   with their descriptions, and using one in a large channel asks for
-   confirmation before notifying everyone.
+   with their descriptions, and using one in a channel of at least six members
+   asks for confirmation before notifying everyone, the default Slack's
+   [Manage who can notify a channel or workspace](https://slack.com/help/articles/115004855143-Manage-who-can-notify-a-channel-or-workspace)
+   publishes.
 
 A channel may restrict who posts. Slack's manage-posting-permissions surface
 offers everyone, everyone except guests, admins only, and a named allowlist, and
@@ -70,7 +72,7 @@ the clip, or send it through the same exactly-once file-share transaction as
 other staged attachments. Cancelling or closing the recorder stops every media
 track and adds no file. Slack's video source selection, camera/microphone
 controls, thumbnail selection, and optional transcript are part of this journey
-and remain explicit differential requirements until implemented and captured.
+and remain gaps until implemented.
 
 ## COMP-02 — Format with keyboard and controls
 
@@ -137,10 +139,14 @@ the composer. Literal trigger characters remain possible.
    `emoji.list`; unknown codes remain literal message text and cannot be added
    as a reaction.
 
-Recent emoji ordering, skin-tone preference, and Slack's exact ranking algorithm
-remain differential requirements until captured against a dedicated Slack
-workspace. They MUST NOT be inferred from the alphabetical or upstream dataset
-order.
+Slack publishes a default skin-tone preference
+([Manage your emoji preferences](https://slack.com/help/articles/4406393601683-Manage-your-emoji-preferences)),
+kept for the member's account with the other preferences. Slack does not
+publish how recent emoji are ordered or how suggestions are ranked, so both are
+product choices: Frequently used lists the member's last 24 distinct emoji in
+this browser, most recent first, and suggestions rank an exact name, then an
+exact alias, then a name prefix, an alias prefix, a name substring, an alias
+substring, and finally the description, shorter names first within a rank.
 
 ## COMP-04 — See who is composing
 
@@ -276,10 +282,10 @@ outcomes are not HTTP 500 responses.
   same form field the no-JavaScript textarea is, so the server contract did
   not change; both composers on a thread page, the broadcast checkbox,
   suggestion anchoring, Up-to-edit, the not-sent outbox with an idempotent
-  retry, the non-member prompt and the broadcast confirmation are covered by
-  the browser suite. Slack's exact confirmation threshold for `@channel` and
-  `@here` is not published; this product asks when a channel has more than
-  six members and records the threshold as a live differential.
+  retry and the non-member prompt are covered by the browser suite. The
+  broadcast confirmation asks in a channel of at least six members, the
+  threshold Slack publishes; no browser test drives it yet, and the
+  owner/admin setting that turns it off is not implemented.
 - Browser: rich/plain composition, all suggestion types, keyboard formatting,
   pasted/dropped/selected file staging, permission-denied/cancelled/completed
   audio and video clip recording, draft switching/reload, all Drafts & sent
@@ -313,8 +319,11 @@ outcomes are not HTTP 500 responses.
   file schedules, Drafts & sent projection, ticket expiry, draft cleanup, blob
   retention, reschedule, cancellation, send now, due delivery, and retry after
   the file/message commit.
-- Differential: capture exact suggestion, draft, schedule-window, quota,
-  thread, and failure behavior in a dedicated Slack workspace.
+- Published source: the schedule window (120 days, `time_too_far`) and quota
+  (30 messages per channel in five minutes, `restricted_too_many`) follow
+  [`chat.scheduleMessage`](https://docs.slack.dev/reference/methods/chat.scheduleMessage/);
+  suggestion, draft, thread, and failure behavior follow the help articles in
+  the source map below.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |
@@ -323,7 +332,7 @@ outcomes are not HTTP 500 responses.
 | COMP-02 | [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages) | Slack publishes formatting controls, markup, and keyboard behavior. |
 | COMP-03 | [Create and edit user groups](https://slack.com/help/articles/212906697-Create-and-edit-user-groups) | A user group's unique handle notifies its members; the emoji and developer transport sources checked below establish the other completion representations. |
 | COMP-04 | [user_typing](https://docs.slack.dev/reference/events/user_typing/) | Slack publishes composition as an ephemeral RTM event addressed to channel members, with no Events API delivery and no retraction. |
-| DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack automatically saves unfinished composer work and the same composer accepts attachments; the separately checked file journey establishes the ten-file staging limit. Exact cross-client retention remains a controlled live-workspace differential even though local reload/restart persistence is executable. |
+| DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack automatically saves unfinished composer work and the same composer accepts attachments; the separately checked file journey establishes the ten-file staging limit. Drafts are durable server state, so every client of the member reads the same draft; reload and restart persistence is executable. |
 | DRAFT-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Drafts and sent contains Drafts, Scheduled, and Sent tabs with item actions. |
 | SCHED-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages-in-Slack-Send-and-read-messages-in-Slack) | Slack's current first-party sequence says to add attachments, emoji, mentions, or formatting and then choose the send-arrow schedule action; the separately checked dedicated schedule guide establishes suggested/custom local times. |
 | SCHED-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | First-party scheduled items can be edited, rescheduled, sent, cancelled, or deleted; Slack's developer scheduling guide separately establishes the app-facing delete-plus-schedule update boundary below. |

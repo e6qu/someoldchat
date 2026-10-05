@@ -45,10 +45,13 @@ import (
 //     workspace: Tier 1 "1+ per minute", Tier 2 "20+", Tier 3 "50+" and
 //     Tier 4 "100+". A method whose stricter tier its reference page names is
 //     enforced at that tier (methodTiers); every other method gets the
-//     uniform budget at Tier 4's floor. Enforcing a laxer limit than real
-//     Slack can never break a conforming client, while a tier written from
-//     memory could refuse one, so the table holds only cited tiers and the
-//     rest remain a recorded deviation.
+//     uniform budget at Tier 4's floor. Enforcing a laxer limit than Slack's
+//     can never break a conforming client, while a tier written from memory
+//     could refuse one, so the table holds only cited tiers. Every method's
+//     tier is published — on its reference page, and as one table in the
+//     pinned Java SDK's MethodsRateLimits — so the methods held to Tier 4
+//     although that table names a stricter tier are a recorded gap (the
+//     rate-limit-tiers decision in specs/compatibility.yaml), not an unknown.
 //   - chat.postMessage's special allowance IS documented method-level
 //     behavior — one message per second per channel with short bursts
 //     tolerated — and is enforced per credential and channel. The burst

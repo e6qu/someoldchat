@@ -170,8 +170,9 @@ copy-text contains the message content Slack exposes rather than hidden HTML.
   and focus return after menus/dialogs.
 - API/event/SDK tests prove edit/delete/reply/reaction/pin/share projections
   and permission failures.
-- Differential fixtures record Slack's shortcut context, confirmation,
-  tombstone, broadcast, and cursor behavior.
+- Shortcut context, confirmation, tombstone, broadcast, and cursor behavior
+  are judged against the help articles in the source map below and the
+  `chat.*`, `conversations.history`, and `conversations.replies` references.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |
