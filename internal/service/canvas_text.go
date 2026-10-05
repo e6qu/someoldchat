@@ -9,6 +9,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/crdt"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -31,7 +32,39 @@ const (
 	// another write overtook. Ops commute, so redoing one against the newer
 	// canvas is exactly as correct as the first try.
 	canvasTextAttempts = 5
+	// canvasTextChangeLimit bounds the edits one journal record carries. A
+	// write bigger than this — a restore, a whole-document API edit — tells
+	// open editors to fetch the text instead, so no reader's stream carries a
+	// canvas-sized record.
+	canvasTextChangeLimit = 64 << 10
 )
+
+// canvasTextChange is what a canvas.updated or canvas.restored record tells
+// an open editor about the text: the version the write made and the ops that
+// made it, or that the change is too big to carry and the editor fetches the
+// text instead. It travels in the record's PrivatePayload and is filled in
+// only for a reader who can read the canvas (see prepareDocumentEvent).
+type canvasTextChange struct {
+	Version int64     `json:"version"`
+	Ops     []crdt.Op `json:"ops,omitempty"`
+	Resync  bool      `json:"resync,omitempty"`
+}
+
+// withCanvasTextChange records on event the ops a write applied to reach
+// version.
+func withCanvasTextChange(event events.Event, version int64, ops []crdt.Op) (events.Event, error) {
+	encoded, err := json.Marshal(canvasTextChange{Version: version, Ops: ops})
+	if err != nil {
+		return events.Event{}, err
+	}
+	if len(encoded) > canvasTextChangeLimit {
+		if encoded, err = json.Marshal(canvasTextChange{Version: version, Resync: true}); err != nil {
+			return events.Event{}, err
+		}
+	}
+	event.PrivatePayload = string(encoded)
+	return event, nil
+}
 
 // CanvasTextReplica reports whether replica may carry user's edits: their user
 // ID, a dot, and the suffix that tells one of their editors from another.
@@ -104,26 +137,28 @@ func withCanvasText(canvas domain.Canvas) (domain.Canvas, error) {
 // sections without ops. The text changes only when it no longer reads as
 // those sections, and then by the smallest edit, so an editor's text survives
 // a write that did not touch it — a rename, or an API edit to another part —
-// and an editor's ops still find every character they name.
-func syncCanvasText(previous domain.Canvas, next *domain.Canvas) error {
+// and an editor's ops still find every character they name. It answers the
+// ops it applied, which open editors apply in turn.
+func syncCanvasText(previous domain.Canvas, next *domain.Canvas) ([]crdt.Op, error) {
 	text, err := canvasText(previous)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sections, err := domain.CanvasDocumentSections(next.DocumentContent)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	markdown := domain.CanvasSectionsMarkdown(sections)
 	if domain.CanvasSectionsMarkdown(domain.CanvasMarkdownBlocks(text.Text())) == markdown {
 		next.TextState = previous.TextState
-		return nil
+		return nil, nil
 	}
-	if _, err := text.Replace(canvasServerReplica, strings.TrimSuffix(markdown, "\n")); err != nil {
-		return err
+	ops, err := text.Replace(canvasServerReplica, strings.TrimSuffix(markdown, "\n"))
+	if err != nil {
+		return nil, err
 	}
 	next.TextState, err = encodeCanvasText(text)
-	return err
+	return ops, err
 }
 
 // EditCanvasText applies an editor's ops to the canvas's text and makes its
@@ -209,6 +244,9 @@ func (m Messages) editCanvasText(ctx context.Context, workspaceID domain.Workspa
 	canvas.UpdatedAt = time.Now().UTC()
 	event, err := canvasEvent(workspaceID, userID, "canvas.updated", id, canvas.UpdatedAt)
 	if err != nil {
+		return 0, err
+	}
+	if event, err = withCanvasTextChange(event, canvas.Version, ops); err != nil {
 		return 0, err
 	}
 	if err := m.Store.UpdateCanvas(ctx, canvas, event); err != nil {

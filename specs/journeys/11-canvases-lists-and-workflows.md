@@ -276,6 +276,18 @@ one document to write in, as Slack's canvas is, rather than a form per block.
   one naming an edit the canvas never had, and the page asks for a reload.
   Two writers editing at once both keep their words; nothing is refused as
   stale.
+- **Live.** An open canvas shows other writers' edits as they are made. Every
+  edit's journal record carries the ops that made it, and the page applies
+  them from the event stream it opens at the position it was rendered at.
+  The blocks around the change are left alone, so a caret in them stays put,
+  and the changed part shows as plain text at once and then as the server
+  renders it, unless the writer is already typing in it. What was typed here
+  but not yet sent is kept. An edit too big to carry, or one the page cannot
+  place, makes it fetch the text and replay its own unsent edits onto it. A
+  member who can only read the canvas sees its document refresh in place.
+- **Who is told.** A canvas's or a list's records reach only the people who
+  can read it, on the event stream and in the audit view; they no longer go
+  to every member of the workspace.
 - **Section identity.** The text projects to sections: only the sections whose
   text changed are rewritten, so a section the writer did not touch, or only
   moved, keeps its identity and a comment anchored to it stays attached. The
@@ -306,10 +318,10 @@ at all. Comments, revision history, and sharing review are built: the sharing
 surface names everyone who may open a canvas, and only its owner is offered the
 controls that change that. A conversation reaches its own canvas from the
 conversation itself, and creating one is a deliberate act rather than a side
-effect of following the link. Live co-editing remains a gap: writers' edits
-merge when saved, but an open page does not yet show another writer's edits
-or cursor until it is reloaded. Deleted characters stay in the stored text as
-compact tombstones and are not yet collected.
+effect of following the link. Presence remains a gap: an open page shows
+another writer's edits as they are made but not who else is on the canvas or
+where their cursor is. Deleted characters stay in the stored text as compact
+tombstones and are not yet collected.
 
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,

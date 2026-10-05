@@ -187,13 +187,17 @@ func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 		return err
 	}
 	canvas.DocumentContent = string(encoded)
-	if err := syncCanvasText(previous, &canvas); err != nil {
+	ops, err := syncCanvasText(previous, &canvas)
+	if err != nil {
 		return err
 	}
 	canvas.Version++
 	canvas.UpdatedAt = time.Now().UTC()
 	event, err := canvasEvent(workspaceID, userID, "canvas.updated", id, canvas.UpdatedAt)
 	if err != nil {
+		return err
+	}
+	if event, err = withCanvasTextChange(event, canvas.Version, ops); err != nil {
 		return err
 	}
 	return m.Store.UpdateCanvas(ctx, canvas, event)
@@ -244,13 +248,17 @@ func (m Messages) rewriteCanvasMarkdown(ctx context.Context, workspaceID domain.
 		return 0, err
 	}
 	canvas.DocumentContent = string(encoded)
-	if err := syncCanvasText(previous, &canvas); err != nil {
+	ops, err := syncCanvasText(previous, &canvas)
+	if err != nil {
 		return 0, err
 	}
 	canvas.Version++
 	canvas.UpdatedAt = time.Now().UTC()
 	event, err := canvasEvent(workspaceID, actor, "canvas.updated", canvas.ID, canvas.UpdatedAt)
 	if err != nil {
+		return 0, err
+	}
+	if event, err = withCanvasTextChange(event, canvas.Version, ops); err != nil {
 		return 0, err
 	}
 	if err := m.Store.UpdateCanvas(ctx, canvas, event); err != nil {
@@ -528,13 +536,17 @@ func (m Messages) RestoreCanvasRevision(ctx context.Context, workspaceID domain.
 	previous := canvas
 	canvas.Title = wanted.Title
 	canvas.DocumentContent = wanted.DocumentContent
-	if err := syncCanvasText(previous, &canvas); err != nil {
+	ops, err := syncCanvasText(previous, &canvas)
+	if err != nil {
 		return domain.Canvas{}, err
 	}
 	canvas.Version++
 	canvas.UpdatedAt = time.Now().UTC()
 	event, err := canvasEvent(workspaceID, userID, "canvas.restored", id, canvas.UpdatedAt, events.String("restored_version", strconv.FormatInt(version, 10)))
 	if err != nil {
+		return domain.Canvas{}, err
+	}
+	if event, err = withCanvasTextChange(event, canvas.Version, ops); err != nil {
 		return domain.Canvas{}, err
 	}
 	if err := m.Store.UpdateCanvas(ctx, canvas, event); err != nil {

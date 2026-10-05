@@ -305,3 +305,70 @@ func pageAttribute(t *testing.T, page, name string) string {
 	}
 	return html.UnescapeString(match[1])
 }
+
+// An open editor that falls out of step reads the canvas's text back as JSON,
+// and renders blocks another writer added the way the page renders a stored
+// section. Neither answers for a canvas the reader cannot open, and neither
+// turns a refusal into a 500.
+func TestCanvasTextAndBlocksAnswerTheEditorInJSON(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "other"})
+	messages := service.Messages{Store: s}
+	mine, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Mine", `{"type":"markdown","markdown":"## Plan\n\nAsk <@U1> first"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := messages.CreateCanvas(context.Background(), "T1", "U2", "Theirs", `{"type":"markdown","markdown":"Private"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := get(t, mux, "/app/canvases/"+string(mine.ID)).Body.String()
+
+	var text struct {
+		OK        bool   `json:"ok"`
+		Version   int64  `json:"version"`
+		TextState string `json:"text_state"`
+	}
+	response := get(t, mux, "/app/canvases/"+string(mine.ID)+"/text")
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &text) != nil || !text.OK {
+		t.Fatalf("text = %d %s", response.Code, response.Body)
+	}
+	if text.TextState != pageAttribute(t, page, "data-canvas-text") || text.Version != mine.Version {
+		t.Fatalf("text = %+v, page holds %q at version %d", text, pageAttribute(t, page, "data-canvas-text"), mine.Version)
+	}
+
+	markdown := "## Plan\n\nAsk <@U1> first"
+	response = postForm(t, mux, "/app/canvases/"+string(mine.ID)+"/blocks", url.Values{"_csrf": {auth.CSRFToken("session")}, "markdown": {markdown}}.Encode(), false)
+	var rendered struct {
+		OK     bool `json:"ok"`
+		Blocks []struct {
+			Markdown string `json:"markdown"`
+			Heading  int    `json:"heading"`
+			Text     string `json:"text"`
+			HTML     string `json:"html"`
+		} `json:"blocks"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &rendered) != nil || !rendered.OK || len(rendered.Blocks) != 2 {
+		t.Fatalf("blocks = %d %s", response.Code, response.Body)
+	}
+	if rendered.Blocks[0].Markdown+"\n\n"+rendered.Blocks[1].Markdown != markdown || rendered.Blocks[0].Heading != 2 || rendered.Blocks[0].Text != "Plan" {
+		t.Fatalf("blocks do not read back as the markdown: %+v", rendered.Blocks)
+	}
+	// The body is the page's own rendering of the same section, mention and all.
+	if !strings.Contains(page, rendered.Blocks[1].HTML) || !strings.Contains(rendered.Blocks[1].HTML, "data-entity") {
+		t.Fatalf("block html %q is not the page's rendering", rendered.Blocks[1].HTML)
+	}
+
+	for _, refused := range []*httptest.ResponseRecorder{
+		get(t, mux, "/app/canvases/"+string(theirs.ID)+"/text"),
+		postForm(t, mux, "/app/canvases/"+string(theirs.ID)+"/blocks", url.Values{"_csrf": {auth.CSRFToken("session")}, "markdown": {"x"}}.Encode(), false),
+	} {
+		if refused.Code != http.StatusNotFound || !strings.Contains(refused.Body.String(), `"not_found"`) || strings.Contains(refused.Body.String(), "Private") {
+			t.Fatalf("a canvas the reader cannot open answered %d %s", refused.Code, refused.Body)
+		}
+	}
+	tooLong := postForm(t, mux, "/app/canvases/"+string(mine.ID)+"/blocks", url.Values{"_csrf": {auth.CSRFToken("session")}, "markdown": {strings.Repeat("x", domain.CanvasMarkdownLimit+1)}}.Encode(), false)
+	if tooLong.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("an over-long render answered %d", tooLong.Code)
+	}
+}
