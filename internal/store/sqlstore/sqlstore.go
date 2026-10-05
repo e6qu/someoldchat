@@ -17650,6 +17650,19 @@ func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 		return store.ErrNotFound
 	}
 	if previousErr == nil {
+		// A writer's run of edits keeps one revision
+		// (domain.CanvasRevisionGroupWindow).
+		var newestEditor string
+		var newestAt int64
+		newestErr := tx.QueryRowContext(ctx, `SELECT edited_by, created_at FROM canvas_revisions WHERE canvas_id = ? ORDER BY version DESC LIMIT 1`, canvas.ID).Scan(&newestEditor, &newestAt)
+		if newestErr != nil && !errors.Is(newestErr, sql.ErrNoRows) {
+			return newestErr
+		}
+		if newestErr == nil && domain.CanvasRevisionGrouped(event.Topic, event.ActorID, canvas.UpdatedAt, domain.UserID(newestEditor), time.Unix(newestAt, 0)) {
+			previousErr = sql.ErrNoRows
+		}
+	}
+	if previousErr == nil {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_revisions(canvas_id, workspace_id, version, title, document_content, edited_by, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(canvas_id, version) DO NOTHING`,
 			canvas.ID, canvas.WorkspaceID, canvas.Version-1, previousTitle, previousContent, event.ActorID, canvas.UpdatedAt.UTC().Unix()); err != nil {

@@ -410,8 +410,8 @@ func TestSavingACanvasAsMarkdownKeepsWhatDidNotChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	changed, err := messages.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Keep me\n\nChanged, with <@U2>\n\n## Next\n\nAn app wrote this")
-	if err != nil || changed != 2 {
+	changed, savedVersion, err := messages.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Keep me\n\nChanged, with <@U2>\n\n## Next\n\nAn app wrote this")
+	if err != nil || changed != 2 || savedVersion != opened.Version+1 {
 		t.Fatalf("changed=%d err=%v, want 2 (the rewritten paragraph and the new heading)", changed, err)
 	}
 	saved, err := repository.GetCanvas(ctx, "T1", canvas.ID)
@@ -447,16 +447,16 @@ func TestSavingACanvasAsMarkdownKeepsWhatDidNotChange(t *testing.T) {
 		t.Fatalf("comments=%+v err=%v, want the comment still on the kept section", comments, err)
 	}
 
-	if _, err := messages.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Overwrite"); !errors.Is(err, store.ErrConflict) {
+	if _, _, err := messages.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Overwrite"); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("stale save err=%v, want ErrConflict", err)
 	}
-	if unchanged, err := messages.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, saved.Version, "Keep me\n\nChanged, with <@U2>\n\n## Next\n\nAn app wrote this"); err != nil || unchanged != 0 {
-		t.Fatalf("no-op save changed=%d err=%v", unchanged, err)
+	if unchanged, version, err := messages.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, saved.Version, "Keep me\n\nChanged, with <@U2>\n\n## Next\n\nAn app wrote this"); err != nil || unchanged != 0 || version != saved.Version {
+		t.Fatalf("no-op save changed=%d version=%d err=%v", unchanged, version, err)
 	}
 	if again, _ := repository.GetCanvas(ctx, "T1", canvas.ID); again.Version != saved.Version {
 		t.Fatalf("a save that changed nothing wrote a revision: version %d", again.Version)
 	}
-	if _, err := messages.SaveCanvasMarkdown(ctx, "T1", "U2", canvas.ID, saved.Version, "Not mine"); !errors.Is(err, store.ErrNotFound) {
+	if _, _, err := messages.SaveCanvasMarkdown(ctx, "T1", "U2", canvas.ID, saved.Version, "Not mine"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a member without access saved: %v", err)
 	}
 }

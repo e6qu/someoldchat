@@ -3183,8 +3183,17 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 // typed (from /app/mentions, inserting an atomic pill that saves as <@U…>),
 // and on save writes the whole document into the form's markdown field. A
 // block nobody changed is sent back as the markdown it was stored as, so a
-// save never rewrites it and its comments stay attached. Without script, or
-// after a refused save, the markdown field is the editor.
+// save never rewrites it and its comments stay attached.
+//
+// The document also saves itself, as Slack's canvas does: a moment after the
+// writer stops typing, and when the tab is hidden. An autosave is the same save
+// against the same version, answered in JSON (X-SameOldChat-Autosave) with the
+// version to save against next; saves never overlap, and Save canvas waits for
+// one in flight so it cannot race it into a false conflict. A version someone
+// else has moved past stops autosaving and says so, leaving the text in place
+// for Save canvas to bring back with the reason; a network or server failure
+// retries with backoff. Without script, or after a refused save, the markdown
+// field is the editor.
 const canvasEditorScript = `<script>(function(){
 var form=document.querySelector('[data-canvas-document]');if(!form)return;
 var editor=form.querySelector('[data-canvas-editor]');var source=form.querySelector('textarea[name=markdown]');var toolbar=form.querySelector('[data-canvas-toolbar]');var list=form.querySelector('#canvas-mention-list');var status=form.querySelector('[data-canvas-status]');
@@ -3226,10 +3235,23 @@ Array.prototype.forEach.call(editor.querySelectorAll('[data-canvas-block]'),func
 editor.setAttribute('contenteditable','true');editor.setAttribute('role','textbox');editor.setAttribute('aria-multiline','true');editor.setAttribute('aria-autocomplete','list');editor.setAttribute('aria-controls','canvas-mention-list');editor.setAttribute('spellcheck','true');
 form.classList.add('rich');toolbar.hidden=false;
 var saved=serialize();var pending=false;var submitting=false;
-function changed(){var now=serialize()!==saved;if(now!==pending){pending=now;if(status)status.textContent=now?'Unsaved changes':''}}
+var versionField=form.querySelector('input[name=version]');var csrfField=form.querySelector('input[name=_csrf]');
+var autosaveTimer=null;var saving=false;var stopped=false;var failures=0;var submitAfterSave=false;
+function say(message){if(status)status.textContent=message}
+function changed(){var now=serialize()!==saved;if(now!==pending){pending=now;if(now&&!stopped)say('Unsaved changes')}if(now)schedule(1200)}
+function schedule(delay){if(stopped)return;window.clearTimeout(autosaveTimer);autosaveTimer=window.setTimeout(autosave,delay)}
+function autosave(keepalive){if(stopped||submitting)return;if(saving){schedule(400);return}var text=serialize();if(text===saved)return;saving=true;
+var body=new URLSearchParams();body.set('_csrf',csrfField?csrfField.value:'');body.set('version',versionField?versionField.value:'');body.set('markdown',text);
+fetch(form.getAttribute('action'),{method:'POST',body:body,credentials:'same-origin',keepalive:!!keepalive&&text.length<60000,headers:{'X-SameOldChat-Autosave':'true','Accept':'application/json'}}).then(function(response){return response.json().then(function(data){return{status:response.status,data:data}},function(){return{status:response.status,data:{}}})}).then(function(result){
+saving=false;
+if(result.status===200&&result.data&&result.data.ok){failures=0;if(versionField)versionField.value=String(result.data.version);saved=text;pending=serialize()!==saved;say(pending?'Unsaved changes':'Saved');if(pending)schedule(1200);if(submitAfterSave){submitAfterSave=false;submit()}return}
+if(result.status===409){stopped=true;say('Someone else changed this canvas after you opened it, so it is no longer saving automatically. Your text is still here: save to keep a copy, then reload to see theirs.');if(submitAfterSave){submitAfterSave=false;submit()}return}
+if(result.status===404||result.status===400||result.status===413||result.status===403||result.status===401){stopped=true;say(result.status===413?'This canvas is longer than a canvas can be, so it is not saving. Shorten it to save.':'This canvas could not be saved automatically. Your text is still here; save it, or reload the canvas.');if(submitAfterSave){submitAfterSave=false;submit()}return}
+throw new Error('unavailable')}).catch(function(){saving=false;failures++;say('Not saved yet. Trying again shortly.');schedule([5000,15000,30000][Math.min(failures,3)-1]);if(submitAfterSave){submitAfterSave=false;submit()}})}
 function submit(){if(form.requestSubmit)form.requestSubmit();else{source.value=serialize();submitting=true;form.submit()}}
-form.addEventListener('submit',function(){source.value=serialize();submitting=true});
+form.addEventListener('submit',function(event){if(saving){event.preventDefault();submitAfterSave=true;return}window.clearTimeout(autosaveTimer);source.value=serialize();submitting=true});
 window.addEventListener('beforeunload',function(event){if(!submitting&&serialize()!==saved){event.preventDefault();event.returnValue=''}});
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'&&!saving&&serialize()!==saved){window.clearTimeout(autosaveTimer);autosave(true)}});
 var lastRange=null;
 document.addEventListener('selectionchange',function(){var selection=window.getSelection();if(selection.rangeCount&&editor.contains(selection.anchorNode))lastRange=selection.getRangeAt(0).cloneRange()});
 function restore(){editor.focus();if(lastRange&&editor.contains(lastRange.startContainer)){var selection=window.getSelection();selection.removeAllRanges();selection.addRange(lastRange)}}
@@ -9857,18 +9879,46 @@ func (h Handler) saveCanvasDocument(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The editor's autosave asks for an answer it can act on in place: the
+	// version to save against next, or why not. Everything else about the
+	// save, including the refusal of a stale version, is the same.
+	autosave := r.Header.Get("X-SameOldChat-Autosave") == "true"
 	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
 	version, err := strconv.ParseInt(strings.TrimSpace(fields["version"]), 10, 64)
 	if err != nil || version < 0 {
+		if autosave {
+			writeJSONRefusal(w, http.StatusBadRequest, "invalid_version")
+			return
+		}
 		h.writeMutationError(w, r, http.StatusBadRequest, "The canvas was not saved", "Reload the canvas and try again.")
 		return
 	}
 	markdown := strings.ReplaceAll(fields["markdown"], "\r\n", "\n")
 	if len(markdown) > maxCanvasMarkdownBytes {
+		if autosave {
+			writeJSONRefusal(w, http.StatusRequestEntityTooLarge, "too_large")
+			return
+		}
 		h.renderCanvas(w, r, principal, id, canvasDraft{Markdown: markdown, Problem: "The canvas was not saved: it is longer than a canvas can be. Shorten it and save again."}, http.StatusRequestEntityTooLarge)
 		return
 	}
-	changed, err := h.Messages.SaveCanvasMarkdown(r.Context(), principal.WorkspaceID, principal.UserID, id, version, markdown)
+	changed, saved, err := h.Messages.SaveCanvasMarkdown(r.Context(), principal.WorkspaceID, principal.UserID, id, version, markdown)
+	if autosave {
+		switch {
+		case err == nil:
+			w.Header().Set("Cache-Control", "no-store")
+			writeJSON(w, map[string]any{"ok": true, "version": saved, "changed": changed})
+		case errors.Is(err, store.ErrConflict):
+			writeJSONRefusal(w, http.StatusConflict, "conflict")
+		case errors.Is(err, store.ErrNotFound):
+			writeJSONRefusal(w, http.StatusNotFound, "not_found")
+		case errors.Is(err, domain.ErrInvalidCanvas):
+			writeJSONRefusal(w, http.StatusBadRequest, "invalid_canvas")
+		default:
+			writeJSONRefusal(w, http.StatusServiceUnavailable, "unavailable")
+		}
+		return
+	}
 	if errors.Is(err, store.ErrConflict) {
 		h.renderCanvas(w, r, principal, id, canvasDraft{Markdown: markdown, Problem: "The canvas was not saved: someone else changed it after you opened it. Your text is below; copy what you need, then reload the canvas to see theirs."}, http.StatusConflict)
 		return
@@ -9877,11 +9927,9 @@ func (h Handler) saveCanvasDocument(w http.ResponseWriter, r *http.Request) {
 		h.writeCanvasWriteError(w, r, err, "The canvas was not saved")
 		return
 	}
-	notice := "Canvas saved"
-	if changed == 0 {
-		notice = "Nothing to save"
-	}
-	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id))+"?notice="+url.QueryEscape(notice))
+	// Autosave usually got there first, so a save that changed nothing is
+	// still the document saved, and says so.
+	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id))+"?notice=Canvas+saved")
 }
 
 // maxCanvasMarkdownBytes bounds one save. It is the markdown field's own

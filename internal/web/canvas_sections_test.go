@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -62,13 +64,18 @@ func TestTheCanvasIsOneDocumentSavedAsAWhole(t *testing.T) {
 		`class="canvas-mention" contenteditable="false" data-entity="&lt;@U2&gt;">@`, `role="checkbox" aria-checked="false"`,
 		"<h4>Next steps</h4>", "on Section 1")
 
-	// Saving the same document again changes nothing and writes nothing.
+	// Saving the same document again writes nothing, and still says the
+	// canvas is saved: autosave usually got there first.
+	before, _ := s.GetCanvas(ctx, "T1", value.ID)
 	again := postForm(t, mux, target+"/document", url.Values{
 		"_csrf": {auth.CSRFToken("session")}, "version": {pageVersion(t, after)},
 		"markdown": {"First paragraph\n\nSecond paragraph, revised for <@U2>\n\n## Next steps\n\n- [ ] Ship it"},
 	}.Encode(), false)
-	if again.Code != http.StatusSeeOther || !strings.Contains(again.Header().Get("Location"), "notice=Nothing+to+save") {
+	if again.Code != http.StatusSeeOther || !strings.Contains(again.Header().Get("Location"), "notice=Canvas+saved") {
 		t.Fatalf("unchanged save = %d %q", again.Code, again.Header().Get("Location"))
+	}
+	if unchanged, _ := s.GetCanvas(ctx, "T1", value.ID); unchanged.Version != before.Version {
+		t.Fatalf("a save that changed nothing wrote version %d over %d", unchanged.Version, before.Version)
 	}
 }
 
@@ -190,4 +197,62 @@ func storedCanvasSections(t *testing.T, s *memory.Store, id domain.CanvasID) []d
 		t.Fatal(err)
 	}
 	return document.Sections
+}
+
+// The editor's autosave is the same save answered in JSON: the version to
+// save against next, or a fixed reason it was refused, never a page or a
+// redirect it could not act on.
+func TestCanvasAutosaveAnswersInJSON(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	value, err := service.Messages{Store: s}.CreateCanvas(context.Background(), "T1", "U1", "Notes", `{"type":"markdown","markdown":"First thought"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/canvases/" + string(value.ID) + "/document"
+	version := pageVersion(t, get(t, mux, "/app/canvases/"+string(value.ID)).Body.String())
+	autosave := func(version, markdown string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, target, strings.NewReader(url.Values{"_csrf": {auth.CSRFToken("session")}, "version": {version}, "markdown": {markdown}}.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("X-SameOldChat-Autosave", "true")
+		addBrowserCookies(request)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response
+	}
+
+	first := autosave(version, "First thought\n\nSecond thought")
+	var saved struct {
+		OK      bool  `json:"ok"`
+		Version int64 `json:"version"`
+		Changed int   `json:"changed"`
+	}
+	if first.Code != http.StatusOK || json.Unmarshal(first.Body.Bytes(), &saved) != nil || !saved.OK || saved.Changed != 1 {
+		t.Fatalf("autosave = %d %s", first.Code, first.Body)
+	}
+	if stored, _ := s.GetCanvas(context.Background(), "T1", value.ID); stored.Version != saved.Version {
+		t.Fatalf("answered version %d, stored %d", saved.Version, stored.Version)
+	}
+	// The next save goes against the answered version.
+	next := autosave(strconv.FormatInt(saved.Version, 10), "First thought\n\nSecond thought, refined")
+	if next.Code != http.StatusOK {
+		t.Fatalf("second autosave = %d %s", next.Code, next.Body)
+	}
+	// A version someone else has moved past is refused with a reason the editor
+	// can act on, and nothing is written.
+	stale := autosave(version, "Overwrite everything")
+	if stale.Code != http.StatusConflict || !strings.Contains(stale.Body.String(), `"error":"conflict"`) {
+		t.Fatalf("stale autosave = %d %s", stale.Code, stale.Body)
+	}
+	if large := autosave(strconv.FormatInt(saved.Version+1, 10), strings.Repeat("x", maxCanvasMarkdownBytes+1)); large.Code != http.StatusRequestEntityTooLarge || !strings.Contains(large.Body.String(), `"too_large"`) {
+		t.Fatalf("oversize autosave = %d %s", large.Code, large.Body)
+	}
+	if bad := autosave("soon", "x"); bad.Code != http.StatusBadRequest {
+		t.Fatalf("invalid version autosave = %d", bad.Code)
+	}
+	// One writer's run of saves keeps one revision: the state before it.
+	history, err := service.Messages{Store: s}.CanvasRevisions(context.Background(), "T1", "U1", value.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Revisions) != 1 || !strings.Contains(history.Revisions[0].DocumentContent, "First thought") || strings.Contains(history.Revisions[0].DocumentContent, "Second") {
+		t.Fatalf("history after a run of autosaves = %+v err=%v", history.Revisions, err)
+	}
 }

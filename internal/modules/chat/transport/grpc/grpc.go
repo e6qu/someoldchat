@@ -1750,12 +1750,12 @@ func (r Remote) SearchCanvases(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoCanvasPage(out)
 }
 
-func (r Remote) SaveCanvasMarkdown(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64, markdown string) (int, error) {
+func (r Remote) SaveCanvasMarkdown(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64, markdown string) (int, int64, error) {
 	out, err := r.canvases.SaveCanvasMarkdown(ctx, &chatv1.SaveCanvasMarkdownRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), Version: version, Markdown: markdown})
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return int(out.GetSectionsChangedCount()), nil
+	return int(out.GetSectionsChangedCount()), out.GetVersion(), nil
 }
 
 func (r Remote) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, changes string) error {
@@ -6452,11 +6452,11 @@ func (s *Server) EditCanvas(ctx context.Context, input *chatv1.EditCanvasRequest
 }
 
 func (s *Server) SaveCanvasMarkdown(ctx context.Context, input *chatv1.SaveCanvasMarkdownRequest) (*chatv1.SaveCanvasMarkdownResponse, error) {
-	changed, err := s.implementation.SaveCanvasMarkdown(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetVersion(), input.GetMarkdown())
+	changed, version, err := s.implementation.SaveCanvasMarkdown(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetVersion(), input.GetMarkdown())
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &chatv1.SaveCanvasMarkdownResponse{SectionsChangedCount: int32(changed)}, nil
+	return &chatv1.SaveCanvasMarkdownResponse{SectionsChangedCount: int32(changed), Version: version}, nil
 }
 
 func (s *Server) DeleteCanvas(ctx context.Context, input *chatv1.CanvasRequest) (*chatv1.MutationResponse, error) {

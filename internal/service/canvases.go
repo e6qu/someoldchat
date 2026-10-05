@@ -198,18 +198,25 @@ func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 // sections that differ are rewritten, so an unchanged section keeps its ID and
 // the comments anchored to it. It answers how many sections changed and writes
 // nothing when none did.
-func (m Messages) SaveCanvasMarkdown(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64, markdown string) (int, error) {
+func (m Messages) SaveCanvasMarkdown(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64, markdown string) (int, int64, error) {
 	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessWrite); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	canvas, err := m.Store.GetCanvas(ctx, workspaceID, id)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if canvas.Version != version {
-		return 0, store.ErrConflict
+		return 0, 0, store.ErrConflict
 	}
-	return m.rewriteCanvasMarkdown(ctx, workspaceID, userID, canvas, markdown)
+	changed, err := m.rewriteCanvasMarkdown(ctx, workspaceID, userID, canvas, markdown)
+	if err != nil {
+		return 0, 0, err
+	}
+	if changed > 0 {
+		version++
+	}
+	return changed, version, nil
 }
 
 // rewriteCanvasMarkdown makes the canvas the markdown given, keeping every

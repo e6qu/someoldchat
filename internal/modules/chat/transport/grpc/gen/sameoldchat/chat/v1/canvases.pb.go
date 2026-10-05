@@ -1472,6 +1472,7 @@ func (x *SaveCanvasMarkdownRequest) GetMarkdown() string {
 type SaveCanvasMarkdownResponse struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
 	SectionsChangedCount int32                  `protobuf:"varint,1,opt,name=sections_changed_count,json=sectionsChangedCount,proto3" json:"sections_changed_count,omitempty"`
+	Version              int64                  `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -1509,6 +1510,13 @@ func (*SaveCanvasMarkdownResponse) Descriptor() ([]byte, []int) {
 func (x *SaveCanvasMarkdownResponse) GetSectionsChangedCount() int32 {
 	if x != nil {
 		return x.SectionsChangedCount
+	}
+	return 0
+}
+
+func (x *SaveCanvasMarkdownResponse) GetVersion() int64 {
+	if x != nil {
+		return x.Version
 	}
 	return 0
 }
@@ -2041,9 +2049,10 @@ const file_sameoldchat_chat_v1_canvases_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1b\n" +
 	"\tcanvas_id\x18\x03 \x01(\tR\bcanvasId\x12\x18\n" +
 	"\aversion\x18\x04 \x01(\x03R\aversion\x12\x1a\n" +
-	"\bmarkdown\x18\x05 \x01(\tR\bmarkdown\"R\n" +
+	"\bmarkdown\x18\x05 \x01(\tR\bmarkdown\"l\n" +
 	"\x1aSaveCanvasMarkdownResponse\x124\n" +
-	"\x16sections_changed_count\x18\x01 \x01(\x05R\x14sectionsChangedCount\"\xcd\x01\n" +
+	"\x16sections_changed_count\x18\x01 \x01(\x05R\x14sectionsChangedCount\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\x03R\aversion\"\xcd\x01\n" +
 	"\x13CanvasAccessRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1b\n" +

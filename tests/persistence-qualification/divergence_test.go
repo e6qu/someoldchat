@@ -4147,16 +4147,27 @@ func canvasRevisionsRecordWhatWasReplaced(t *testing.T, open opener) {
 		t.Fatalf("history before any edit = %+v err = %v, want none", empty.Revisions, err)
 	}
 
-	for index, edit := range []struct{ title, body string }{
-		{"Second", "second body"},
-		{"Third", "third body"},
+	// A writer's run of edits keeps one revision, as Slack's version history
+	// groups them (domain.CanvasRevisionGroupWindow): the fix made a minute
+	// after "Second" keeps none of its own, an edit past the window starts a
+	// new one, and another writer's edit always keeps one.
+	other := domain.UserID("U-coeditor-" + f.suffix)
+	for index, edit := range []struct {
+		title, body string
+		after       time.Duration
+		actor       domain.UserID
+	}{
+		{"Second", "second body", time.Minute, f.userID},
+		{"Second, fixed", "second body, fixed", 2 * time.Minute, f.userID},
+		{"Third", "third body", 8 * time.Minute, f.userID},
+		{"Fourth", "fourth body", 9 * time.Minute, other},
 	} {
 		canvas.Title = edit.title
 		canvas.DocumentContent = `{"sections":[{"id":"s1","type":"markdown","text":"` + edit.body + `"}]}`
 		canvas.Version = int64(index) + 2
-		canvas.UpdatedAt = now.Add(time.Duration(index+1) * time.Minute)
+		canvas.UpdatedAt = now.Add(edit.after)
 		edited := f.event("edit-"+edit.title, "canvas.updated", string(canvas.ID))
-		edited.ActorID = f.userID
+		edited.ActorID = edit.actor
 		if err := f.repository.UpdateCanvas(ctx, canvas, edited); err != nil {
 			t.Fatal(err)
 		}
@@ -4166,18 +4177,20 @@ func canvasRevisionsRecordWhatWasReplaced(t *testing.T, open opener) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history.Revisions) != 2 {
-		t.Fatalf("history = %+v, want two revisions after two edits", history.Revisions)
-	}
 	// Newest first, and each row is what the canvas said before that edit.
-	if history.Revisions[0].Version != 2 || history.Revisions[0].Title != "Second" {
-		t.Fatalf("newest revision = %+v, want version 2 titled Second", history.Revisions[0])
+	want := []struct {
+		version int64
+		title   string
+		editor  domain.UserID
+	}{{4, "Third", other}, {3, "Second, fixed", f.userID}, {1, "First", f.userID}}
+	if len(history.Revisions) != len(want) {
+		t.Fatalf("history = %+v, want %d revisions", history.Revisions, len(want))
 	}
-	if history.Revisions[1].Version != 1 || history.Revisions[1].Title != "First" {
-		t.Fatalf("oldest revision = %+v, want version 1 titled First", history.Revisions[1])
-	}
-	if history.Revisions[0].EditedBy != f.userID {
-		t.Fatalf("revision editor = %q, want the member who replaced it", history.Revisions[0].EditedBy)
+	for index, expected := range want {
+		got := history.Revisions[index]
+		if got.Version != expected.version || got.Title != expected.title || got.EditedBy != expected.editor {
+			t.Fatalf("revision %d = %+v, want version %d titled %q replaced by %s", index, got, expected.version, expected.title, expected.editor)
+		}
 	}
 
 	// A member with no grant cannot read the history, for the same reason they

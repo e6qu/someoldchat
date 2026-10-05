@@ -278,6 +278,19 @@ one document to write in, as Slack's canvas is, rather than a form per block.
   reword it.
 - **App sections.** A section of a kind markdown cannot spell (an app wrote it
   through canvases.create) is edited like any other and keeps its kind.
+- **Autosave.** The document saves itself a moment after the writer stops
+  typing, and when the tab is hidden. It uses the same save against the same
+  version, and the status line says when it is saved.
+  - A save never overlaps another, and Save canvas waits for one in flight.
+  - If someone else has changed the canvas since, autosave stops and says so.
+    The writer's text stays in place, and Save canvas brings it back with the
+    reason.
+  - A network or server failure retries with backoff.
+- **History.** A writer's run of edits keeps one revision, as Slack's version
+  history does: the state before the run. A later edit by the same writer
+  within five minutes of that revision keeps none of its own, so autosave does
+  not push meaningful revisions out of the fifty kept. Another writer's edit,
+  a restore, or the run outlasting the window keeps one.
 - **Without script.** The document is a markdown field with the same save and
   the same conflict rule.
 
@@ -287,8 +300,8 @@ surface names everyone who may open a canvas, and only its owner is offered the
 controls that change that. A conversation reaches its own canvas from the
 conversation itself, and creating one is a deliberate act rather than a side
 effect of following the link. Real-time co-editing (collaborative cursors and
-merging two writers' concurrent changes), autosave, and offline recovery remain
-gaps: a second writer's save is refused rather than merged.
+merging two writers' concurrent changes) and offline recovery remain gaps: a
+second writer's save is refused rather than merged.
 
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,
