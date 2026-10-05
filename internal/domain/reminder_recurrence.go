@@ -53,6 +53,20 @@ func AdvanceReminder(recurrence ReminderRecurrence, weekdays []time.Weekday, anc
 	}
 }
 
+// AddCalendarMonths moves value months calendar months on at the same
+// wall-clock time, clamping a day the target month does not have to its last
+// day: January 31st plus one month is February 28th (29th in a leap year), not
+// time.AddDate's March 3rd.
+func AddCalendarMonths(value time.Time, months int) time.Time {
+	total := int(value.Month()) - 1 + months
+	year := value.Year() + total/12
+	if total%12 < 0 {
+		year--
+	}
+	month := time.Month((total%12+12)%12 + 1)
+	return time.Date(year, month, clampReminderDay(value.Day(), year, month), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), value.Location())
+}
+
 // clampReminderDay bounds a day-of-month to the number of days the given
 // month has, so the 31st becomes the 28th, 29th or 30th where the month is
 // shorter.

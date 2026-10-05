@@ -52,15 +52,15 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		unit := strings.ToLower(match[3])
 		// A month and a year are calendar steps, not fixed spans: "in 2 months"
 		// keeps the wall-clock time of day and lands on the same day-of-month two
-		// months on, the way AddDate resolves a short month (Jan 31 + 1 month is
-		// early March). This is a one-time reminder, so there is no series to
-		// keep on its day; "every month" clamps instead (AdvanceReminder). The
-		// fixed units stay an absolute duration, as they were.
+		// months on, or on the target month's last day when it is shorter, so
+		// "in a month" on January 31st is February 28th (29th in a leap year)
+		// rather than AddDate's March 3rd, as "every month" clamps
+		// (AdvanceReminder). The fixed units stay an absolute duration.
 		switch {
 		case strings.HasPrefix(unit, "month"):
-			return strings.TrimSpace(match[1]), once(localNow.AddDate(0, count, 0)), nil
+			return strings.TrimSpace(match[1]), once(AddCalendarMonths(localNow, count)), nil
 		case strings.HasPrefix(unit, "year"):
-			return strings.TrimSpace(match[1]), once(localNow.AddDate(count, 0, 0)), nil
+			return strings.TrimSpace(match[1]), once(AddCalendarMonths(localNow, 12*count)), nil
 		}
 		duration := time.Duration(count) * time.Minute
 		switch {

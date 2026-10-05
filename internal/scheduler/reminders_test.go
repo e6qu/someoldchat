@@ -427,3 +427,36 @@ func TestNextRecurrenceStepsThroughTheNamedWeekdays(t *testing.T) {
 		t.Fatalf("weekly without weekdays = %v err=%v", next, err)
 	}
 }
+
+// "in a month" and "in a year" are one-time calendar steps that keep the time
+// of day and clamp a day the target month lacks to its last day: January 31st
+// plus a month is February 28th (29th in a leap year), not AddDate's March
+// 3rd, and February 29th plus a year is February 28th.
+func TestInMonthsPhraseClampsToTheTargetMonth(t *testing.T) {
+	at := func(year int, month time.Month, day int) time.Time {
+		return time.Date(year, month, day, 10, 30, 0, 0, time.UTC)
+	}
+	for _, testCase := range []struct {
+		phrase string
+		now    time.Time
+		want   time.Time
+	}{
+		{"pay rent in a month", at(2097, time.January, 31), at(2097, time.February, 28)},
+		{"pay rent in 1 month", at(2096, time.January, 31), at(2096, time.February, 29)},
+		{"pay rent in 3 months", at(2097, time.November, 30), at(2098, time.February, 28)},
+		{"pay rent in 13 months", at(2097, time.January, 31), at(2098, time.February, 28)},
+		{"pay rent in 2 months", at(2097, time.January, 15), at(2097, time.March, 15)},
+		{"file taxes in a year", at(2096, time.February, 29), at(2097, time.February, 28)},
+		{"file taxes in 4 years", at(2096, time.February, 29), at(2100, time.February, 28)},
+	} {
+		t.Run(testCase.phrase+" from "+testCase.now.Format("2006-01-02"), func(t *testing.T) {
+			_, occurrence, err := domain.ParseReminderExpression(testCase.phrase, testCase.now, time.UTC)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !occurrence.Due.Equal(testCase.want) || occurrence.Recurrence != domain.ReminderOnce {
+				t.Fatalf("due = %s (%s), want %s once", occurrence.Due, occurrence.Recurrence, testCase.want)
+			}
+		})
+	}
+}
