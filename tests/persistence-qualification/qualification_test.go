@@ -126,6 +126,7 @@ func runQualification(t *testing.T, open opener) {
 		{"accepting an invitation commits the whole membership", acceptingAnInvitationCommitsTheWholeMembership},
 		{"workspace analytics count the same on every profile", workspaceAnalyticsCountTheSameOnEveryProfile},
 		{"huddles converge and end with their last participant", huddlesConvergeAndEndWithTheirLastParticipant},
+		{"huddle state follows the member", huddleStateFollowsTheMember},
 		{"workspaces for an address agree on every profile", workspacesForAnAddressAgreeOnEveryProfile},
 		{"Slack Connect capacity is claimed transactionally", slackConnectCapacityIsClaimedTransactionally},
 		{"retention deletes the same content on every profile", retentionDeletesTheSameContentOnEveryProfile},

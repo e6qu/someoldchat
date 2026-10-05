@@ -1373,6 +1373,9 @@ func secondsInstant(value time.Time) time.Time {
 func (s *Store) SeedUser(user domain.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Only the huddle mutations put a member in a huddle, as on the SQL
+	// repositories, whose user insert has no such column to write.
+	user.HuddleCallID = ""
 	if user.Presence == "" {
 		user.Presence = domain.PresenceAuto
 	}
@@ -2100,6 +2103,9 @@ func (s *Store) createUserLocked(user domain.User, membership domain.WorkspaceMe
 			return store.ErrAlreadyExists
 		}
 	}
+	// Only the huddle mutations put a member in a huddle, as on the SQL
+	// repositories, whose user insert has no such column to write.
+	user.HuddleCallID = ""
 	if user.Presence == "" {
 		user.Presence = domain.PresenceAuto
 	}
@@ -10885,6 +10891,9 @@ func (s *Store) StartHuddle(_ context.Context, value domain.Call, started, joine
 			existing.Participants = append(existing.Participants, value.CreatedBy)
 			s.calls[id] = existing
 			s.outbox = append(s.outbox, joined)
+			if err := s.refreshHuddleStateLocked(value.CreatedBy, id, value.CreatedBy, joined.CreatedAt); err != nil {
+				return domain.Call{}, false, err
+			}
 		}
 		return cloneCall(existing), false, nil
 	}
@@ -10895,6 +10904,9 @@ func (s *Store) StartHuddle(_ context.Context, value domain.Call, started, joine
 	value.ThreadTimestamp = domain.NewMessageTimestamp(s.appendConversationNotice(thread))
 	s.calls[value.ID] = cloneCall(value)
 	s.outbox = append(s.outbox, started)
+	if err := s.refreshHuddleStateLocked(value.CreatedBy, value.ID, value.CreatedBy, started.CreatedAt); err != nil {
+		return domain.Call{}, false, err
+	}
 	return cloneCall(value), true, nil
 }
 
@@ -10956,6 +10968,11 @@ func (s *Store) JoinCall(_ context.Context, workspace domain.WorkspaceID, id dom
 	value.Participants = append(value.Participants, user)
 	s.calls[id] = value
 	s.outbox = append(s.outbox, event)
+	if value.Kind == domain.CallKindHuddle {
+		if err := s.refreshHuddleStateLocked(user, id, user, event.CreatedAt); err != nil {
+			return domain.Call{}, err
+		}
+	}
 	return cloneCall(value), nil
 }
 
@@ -10983,6 +11000,11 @@ func (s *Store) LeaveCall(_ context.Context, workspace domain.WorkspaceID, id do
 		s.outbox = append(s.outbox, ended)
 	}
 	s.calls[id] = value
+	if value.Kind == domain.CallKindHuddle {
+		if err := s.refreshHuddleStateLocked(user, "", user, left.CreatedAt); err != nil {
+			return domain.Call{}, err
+		}
+	}
 	return cloneCall(value), nil
 }
 
@@ -11031,6 +11053,14 @@ func (s *Store) EndCall(_ context.Context, workspace domain.WorkspaceID, id doma
 	value.DurationSeconds = duration
 	s.calls[id] = value
 	s.outbox = append(s.outbox, event)
+	if value.Kind == domain.CallKindHuddle {
+		// Ending a huddle takes everyone still in it out of it.
+		for _, participant := range value.Participants {
+			if err := s.refreshHuddleStateLocked(participant, "", event.ActorID, event.CreatedAt); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -11038,7 +11068,10 @@ func (s *Store) SetCallParticipants(_ context.Context, workspace domain.Workspac
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.calls[id]
-	if !ok || value.WorkspaceID != workspace {
+	// A huddle's participants move one at a time through StartHuddle,
+	// JoinCall and LeaveCall, which keep each member's huddle state with
+	// them; it is not an app-registered call whose list an app replaces.
+	if !ok || value.WorkspaceID != workspace || value.Kind == domain.CallKindHuddle {
 		return store.ErrNotFound
 	}
 	value.Participants = append([]domain.UserID(nil), users...)

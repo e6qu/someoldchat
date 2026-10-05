@@ -2179,6 +2179,12 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// A member's huddle state crosses the boundary on the user
+				// object users.info reads.
+				inHuddle, err := chat.UserInfo(ctx, "T1", "U3", "U2")
+				if err != nil {
+					return nil, err
+				}
 				offered := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0\r\no=- 0 0 IN IP4 0.0.0.0")
 				answered := chat.SendCallSignal(ctx, "T1", "U2", started.ID, "U1", domain.CallSignalAnswer, "v=0")
 				candidate := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalCandidate, "candidate:0 1 UDP 1 127.0.0.1 1 typ host")
@@ -2223,6 +2229,10 @@ func parityCases() []parityCase {
 				if _, err := chat.LeaveHuddle(ctx, "T1", "U2", "C1"); err != nil {
 					return nil, err
 				}
+				leftHuddle, err := chat.UserInfo(ctx, "T1", "U3", "U2")
+				if err != nil {
+					return nil, err
+				}
 				// U1 is still in it, but once it ends a reaction is refused too.
 				// U2 has gone, so U1 can no longer reach them through the call.
 				afterLeaving := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
@@ -2233,7 +2243,13 @@ func parityCases() []parityCase {
 				afterEnding := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
 				reactAfterEnding := chat.SendHuddleReaction(ctx, "T1", "U1", started.ID, "tada")
 				_, gone := chat.ActiveHuddle(ctx, "T1", "U1", "C1")
+				endedHuddle, err := chat.UserInfo(ctx, "T1", "U3", "U1")
+				if err != nil {
+					return nil, err
+				}
 				return []any{
+					inHuddle.HuddleCallID == started.ID, inHuddle.HuddleState(),
+					leftHuddle.HuddleCallID == "", endedHuddle.HuddleState(),
 					invitationNamesTheHuddle,
 					started.Title, len(started.Participants), len(joined.Participants), len(active.Participants),
 					ended.EndedAt.IsZero(), gone != nil,

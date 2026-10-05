@@ -235,6 +235,12 @@ type User struct {
 	// activation — last changed. It is zero for a record last written before
 	// schema 181, which kept no such instant.
 	Updated time.Time
+	// HuddleCallID is the huddle the member is in right now, empty when they
+	// are in none. Only the huddle mutations write it, in the transaction that
+	// moves the member in or out, so it never names a huddle the member has
+	// left or one that has ended. Slack's profile reports it as huddle_state
+	// and huddle_state_call_id (see HuddleState).
+	HuddleCallID CallID
 
 	// The fields below are not stored with the user. The service derives them
 	// from the member's workspace membership and from the bot, if any, the
@@ -288,6 +294,23 @@ func (u User) NameParts() (string, string) {
 // JoinRealName is the full name a first and last name make.
 func JoinRealName(first, last string) string {
 	return strings.TrimSpace(strings.TrimSpace(first) + " " + strings.TrimSpace(last))
+}
+
+// The values Slack's profile carries in huddle_state. Slack publishes them in
+// the user_huddle_changed reference's example (in a huddle) and in every
+// users.info profile of a member who is not in one.
+const (
+	HuddleStateInAHuddle    = "in_a_huddle"
+	HuddleStateDefaultUnset = "default_unset"
+)
+
+// HuddleState is the member's huddle_state: in_a_huddle while HuddleCallID
+// names a huddle, default_unset otherwise.
+func (u User) HuddleState() string {
+	if u.HuddleCallID != "" {
+		return HuddleStateInAHuddle
+	}
+	return HuddleStateDefaultUnset
 }
 
 // IsBot reports whether the account is an app's bot user rather than a person.
@@ -381,6 +404,41 @@ const (
 
 func (kind CallKind) Valid() bool {
 	return kind == CallKindExternal || kind == CallKindHuddle
+}
+
+// CurrentHuddle chooses the huddle a member is in from the running huddles
+// they participate in: preferred when they are in it (the one they have just
+// joined), else recorded (their state before the change) while they are still
+// in it, else the most recently started (the lowest ID among equals), else
+// none. Both repositories settle User.HuddleCallID with it, so a member who
+// leaves one of two huddles stays in the other on every storage profile.
+func CurrentHuddle(in []Call, preferred, recorded CallID) CallID {
+	contains := func(id CallID) bool {
+		if id == "" {
+			return false
+		}
+		for _, call := range in {
+			if call.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case contains(preferred):
+		return preferred
+	case contains(recorded):
+		return recorded
+	case len(in) == 0:
+		return ""
+	}
+	latest := in[0]
+	for _, call := range in[1:] {
+		if call.StartedAt.After(latest.StartedAt) || (call.StartedAt.Equal(latest.StartedAt) && call.ID < latest.ID) {
+			latest = call
+		}
+	}
+	return latest.ID
 }
 
 // CallSignalKind is one step of the WebRTC handshake. The three are the whole

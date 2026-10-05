@@ -44,23 +44,30 @@ func GuestStatusChangedEvent(user domain.User, actorID domain.UserID, at time.Ti
 // userGuestStatusChanged renders user_guest_status_changed: the user object
 // and cache_ts, beside the type and event_ts every inner event carries.
 func userGuestStatusChanged(delivered Delivered, _ Surface) ([]Inner, error) {
-	user, exists := delivered.Object["user"]
-	if !exists || len(user) == 0 {
-		return nil, fmt.Errorf("%w: %s payload has no user", ErrSlackEventIncomplete, delivered.Type)
-	}
-	var object map[string]json.RawMessage
-	if json.Unmarshal(user, &object) != nil || object == nil {
-		return nil, fmt.Errorf("%w: %s payload has an invalid user", ErrSlackEventIncomplete, delivered.Type)
-	}
-	cacheTS, ok := delivered.Int("cache_ts")
-	if !ok {
-		return nil, fmt.Errorf("%w: %s payload has no cache_ts", ErrSlackEventIncomplete, delivered.Type)
-	}
-	inner, err := newInner("user_guest_status_changed", delivered,
-		Field{name: "user", value: append(json.RawMessage(nil), user...)},
-		Int("cache_ts", cacheTS))
+	inner, err := userInnerWithCacheTS("user_guest_status_changed", delivered)
 	if err != nil {
 		return nil, err
 	}
 	return []Inner{inner}, nil
+}
+
+// userInnerWithCacheTS is userInner for the user events whose reference adds
+// cache_ts beside the user object: user_guest_status_changed and
+// user_huddle_changed.
+func userInnerWithCacheTS(eventType string, delivered Delivered) (Inner, error) {
+	user, exists := delivered.Object["user"]
+	if !exists || len(user) == 0 {
+		return Inner{}, fmt.Errorf("%w: %s payload has no user", ErrSlackEventIncomplete, delivered.Type)
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(user, &object) != nil || object == nil {
+		return Inner{}, fmt.Errorf("%w: %s payload has an invalid user", ErrSlackEventIncomplete, delivered.Type)
+	}
+	cacheTS, ok := delivered.Int("cache_ts")
+	if !ok {
+		return Inner{}, fmt.Errorf("%w: %s payload has no cache_ts", ErrSlackEventIncomplete, delivered.Type)
+	}
+	return newInner(eventType, delivered,
+		Field{name: "user", value: append(json.RawMessage(nil), user...)},
+		Int("cache_ts", cacheTS))
 }

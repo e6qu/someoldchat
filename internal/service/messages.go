@@ -9182,7 +9182,7 @@ func (m Messages) UpdateCall(ctx context.Context, workspaceID domain.WorkspaceID
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.Call{}, err
 	}
-	value, err := m.Store.GetCall(ctx, workspaceID, id)
+	value, err := m.appCall(ctx, workspaceID, id)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -9207,6 +9207,9 @@ func (m Messages) EndCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	if duration < 0 {
 		return domain.ErrInvalidCall
 	}
+	if _, err := m.appCall(ctx, workspaceID, id); err != nil {
+		return err
+	}
 	event, err := newEvent(workspaceID, actor, events.NewPayload("call.ended", events.String("call_id", string(id)), events.Int("duration", duration)), time.Now().UTC())
 	if err != nil {
 		return err
@@ -9214,11 +9217,28 @@ func (m Messages) EndCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	return m.Store.EndCall(ctx, workspaceID, id, duration, event)
 }
 
+// appCall reads a call the calls API may change. A huddle is not one: it is
+// joined, left and ended through the huddle operations, which check
+// conversation membership and who may end it, and which keep each member's
+// huddle_state with them. calls.end, calls.update and calls.participants.*
+// reached a huddle by its ID and bypassed all three, so to them a huddle is a
+// call that does not exist (call_not_found), as it is to Slack's calls API.
+func (m Messages) appCall(ctx context.Context, workspaceID domain.WorkspaceID, id domain.CallID) (domain.Call, error) {
+	value, err := m.Store.GetCall(ctx, workspaceID, id)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if value.Kind == domain.CallKindHuddle {
+		return domain.Call{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
 func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, participants []domain.CallParticipant, add bool) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
 	}
-	value, err := m.Store.GetCall(ctx, workspaceID, id)
+	value, err := m.appCall(ctx, workspaceID, id)
 	if err != nil {
 		return err
 	}

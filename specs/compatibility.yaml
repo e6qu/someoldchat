@@ -377,6 +377,7 @@ operations:
       - go-test:internal/api/slack:TestAdminUsersRoleMutationsKeepOnePrimaryOwner
       - go-test:internal/api/slack:TestConversationAndUserInfo
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
+      - go-test:internal/api/slack:TestHuddleStateIsInTheProfileEveryUserMethodReports
       - go-test:internal/api/slack:TestAdminUsersRemoveDeactivatesUser
       - go-test:internal/api/slack:TestSlackbotIsInEveryWorkspaceAsUSLACKBOT
     deviations:
@@ -636,6 +637,7 @@ operations:
       - go-test:internal/api/slack:TestUsersAndConversationsList
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
       - go-test:internal/api/slack:TestUserObjectCarriesRolesBotIdentityAndFetchableImages
+      - go-test:internal/api/slack:TestHuddleStateIsInTheProfileEveryUserMethodReports
       - go-test:internal/api/slack:TestSlackbotIsInEveryWorkspaceAsUSLACKBOT
       - go-test:internal/scheduler:TestSlackbotAnswersCustomResponsesAndItsDirectMessages
       - go-test:internal/web:TestSlackbotResponsesAreManagedFromCustomizeWorkspace
@@ -706,8 +708,9 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
+      - go-test:internal/api/slack:TestHuddleStateIsInTheProfileEveryUserMethodReports
     deviations:
-      - Core identity, name parts, phone, image, status, expiration, and workspace-defined custom fields are returned, with each field's label under include_labels; a hidden field is filtered from a reader who is neither its owner nor an administrator.
+      - Core identity, name parts, phone, image, status, expiration, huddle state, and workspace-defined custom fields are returned, with each field's label under include_labels; a hidden field is filtered from a reader who is neither its owner nor an administrator.
       - The method is enforced at Tier 4, the tier Slack publishes for it. Tests do not yet assert each bot-token and user-token visibility rule the reference gives.
     audit:
       downgraded_from: behavior-compatible
@@ -1081,6 +1084,7 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCallsLifecycle
+      - go-test:internal/service:TestHuddleParticipationIsTheMembersHuddleState
   - method: calls.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1095,6 +1099,7 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestCallsLifecycle
       - go-test:internal/service:TestCallLifecycleNormalizesParticipants
+      - go-test:internal/service:TestHuddleParticipationIsTheMembersHuddleState
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
   - method: calls.participants.remove
@@ -1102,11 +1107,13 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCallsLifecycle
+      - go-test:internal/service:TestHuddleParticipationIsTheMembersHuddleState
   - method: calls.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestCallsLifecycle
+      - go-test:internal/service:TestHuddleParticipationIsTheMembersHuddleState
   - method: chat.deleteScheduledMessage
     status: behavior-compatible
     provenance: slack-reference
@@ -3069,7 +3076,18 @@ decisions:
       inside the mutation that ends a guest tier (admin.users.setRegular,
       setAdmin, setOwner and the admin page's role control) or deactivates
       an active guest (admin.users.remove, the admin page's Disable, guest
-      expiry), with the user object as the change leaves it and cache_ts. The user object team_join and user_change carry
+      expiry), with the user object as the change leaves it and cache_ts.
+      user_huddle_changed (current catalog, users:read) is minted by the
+      store inside the huddle mutation that moves a member in or out of a
+      huddle (start, join, leave, and a huddle ending around them), once per
+      change and never for a join that finds the member already in, with
+      the user object whose profile carries huddle_state (in_a_huddle or
+      default_unset), huddle_state_expiration_ts (0: the state lasts until
+      the member leaves) and huddle_state_call_id, plus cache_ts, as the
+      Node and Java SDKs model UserHuddleChangedEvent; user_change with the
+      same user object accompanies it, and both reach Events API, Socket
+      Mode and RTM. users.info, users.list and users.profile.get report the
+      same profile fields. The user object team_join and user_change carry
       is users.info's own (internal/slackobject), and every URL an event
       carries — a file's url_private, a user's image_* — is built on
       -auth-public-url at delivery, origin-relative when none is configured. user_typing is delivered on RTM and on the

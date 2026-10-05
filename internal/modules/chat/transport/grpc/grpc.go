@@ -11622,6 +11622,7 @@ func encodeProtoUser(value domain.User) *chatv1.User {
 		UltraRestricted:        value.UltraRestricted,
 		PrimaryOwner:           value.PrimaryOwner,
 		ConnectedUntilUnixNano: optionalUnixNano(value.ConnectedUntil),
+		HuddleCallId:           string(value.HuddleCallID),
 	}
 }
 
@@ -13467,6 +13468,7 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 		Restricted:      value.GetRestricted(),
 		UltraRestricted: value.GetUltraRestricted(),
 		PrimaryOwner:    value.GetPrimaryOwner(),
+		HuddleCallID:    domain.CallID(value.GetHuddleCallId()),
 	}
 	if profile.GetStatusExpiration() != 0 {
 		result.Profile.StatusExpiration = time.Unix(profile.GetStatusExpiration(), 0).UTC()

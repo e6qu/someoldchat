@@ -153,6 +153,25 @@ A posted message cannot claim the subtype: system subtypes are written only by
 the store call that makes the change they report. Slack's reference does not
 document the subtype's `room` object, so it is not projected.
 
+A member's huddle participation is part of their profile, as Slack publishes it
+to apps. While a member is in a running huddle, the profile in `users.info`,
+`users.list` and `users.profile.get` (and in every event's user object) carries
+`huddle_state: "in_a_huddle"` and `huddle_state_call_id` naming the huddle;
+otherwise `huddle_state` is `"default_unset"` and there is no call id.
+`huddle_state_expiration_ts` is `0`: the state lasts until the member leaves or
+the huddle ends, and Slack publishes no rule for an expiry, so none is invented.
+Each change — starting or joining a huddle, leaving it, or the huddle ending
+around the member — journals one `user_huddle_changed` (the user object as the
+change leaves it, with `cache_ts` and `event_ts`) in the transaction that moves
+the member, with `user_change` beside it; joining a huddle one is already in
+changes nothing. Apps receive both over the Events API, Socket Mode and RTM,
+subscribed by name and gated by `users:read` like every `user_*` event. A
+member in two huddles at once who leaves one stays `in_a_huddle` in the other.
+The calls API (`calls.end`, `calls.update`, `calls.participants.*`) does not
+reach a huddle — its ID is `call_not_found` there — because those methods would
+move members, or end the huddle, without the membership and ownership checks
+and without the state change.
+
 The forwarding path is covered by in-process loopback tests — two real pion peer
 connections stand in for browsers over the actual offer/answer/candidate
 exchange. One proves a published track is forwarded to the other with real RTP
@@ -185,12 +204,19 @@ and its own presence broadcast returning to badge its tile.
   test reads the invitation back through the invitee's Activity and confirms
   nobody else is told.
 - Official SDKs exercise `calls.*` with app ownership and error variants.
-- Slack publishes a member's huddle participation to apps as the profile's
-  `huddle_state` fields and the
+- A member's huddle participation reaches apps as Slack publishes it: the
+  profile's `huddle_state`, `huddle_state_expiration_ts` and
+  `huddle_state_call_id`, and the
   [`user_huddle_changed`](https://docs.slack.dev/reference/events/user_huddle_changed/)
-  event, sent alongside `user_change`. Neither is implemented yet; the huddle
-  thread is the only huddle record apps can read. Media quality is not inferred
-  from API success.
+  event sent alongside `user_change`, in the shape the official SDKs model
+  (`UserHuddleChangedEvent` in Node `@slack/types` and Java
+  `slack-api-model`). The persistence qualification holds every storage profile
+  to one sequence of state changes and records across start, join, a second
+  huddle, leave and end; a service test reads the state back through
+  `users.info`, counts one record per change, and delivers it only to an app
+  holding `users:read`; the Web API test reads it from `users.info`,
+  `users.list` and `users.profile.get`; the seam parity suite carries it across
+  both compositions. Media quality is not inferred from API success.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |
