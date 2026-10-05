@@ -336,6 +336,7 @@ func authorityMatrix() map[string]authority {
 		"DuplicateWorkflow":                       authorityAnyMember,
 		"EditBookmark":                            authorityAnyMember,
 		"EditCanvas":                              authorityAnyMember,
+		"SaveCanvasMarkdown":                      authorityAnyMember,
 		"Emojis":                                  authorityAnyMember,
 		"SlackbotResponses":                       authorityAnyMember,
 		"EmojiRevision":                           authorityAnyMember,

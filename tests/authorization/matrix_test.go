@@ -514,6 +514,12 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		if method == "RestoreCanvasRevision" {
 			return reflect.ValueOf(int64(1))
 		}
+		// The version the fixture canvas is at after its one seeded edit, so
+		// SaveCanvasMarkdown's stale-page check passes for the holder and the
+		// refusals below it are about standing.
+		if method == "SaveCanvasMarkdown" {
+			return reflect.ValueOf(int64(2))
+		}
 		return reflect.Zero(argument)
 	case reflect.TypeOf(domain.AutomationPermission{}):
 		// A valid permission, so SetTriggerPermission — whose trigger and app the

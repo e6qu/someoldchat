@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -113,35 +112,5 @@ func (m Messages) SetCodeChannelCanvasContent(ctx context.Context, workspaceID d
 	if err != nil {
 		return 0, err
 	}
-	document, err := decodeCanvasDocument(canvas.DocumentContent)
-	if err != nil {
-		return 0, err
-	}
-	merged, changed := domain.MergeCanvasSections(document.Sections, domain.CanvasMarkdownBlocks(markdown))
-	if changed == 0 {
-		return 0, nil
-	}
-	for index := range merged {
-		if merged[index].ID == "" {
-			if merged[index].ID, err = newCanvasSectionID(); err != nil {
-				return 0, err
-			}
-		}
-	}
-	document.Sections = merged
-	encoded, err := json.Marshal(document)
-	if err != nil {
-		return 0, err
-	}
-	canvas.DocumentContent = string(encoded)
-	canvas.Version++
-	canvas.UpdatedAt = time.Now().UTC()
-	event, err := canvasEvent(workspaceID, actor, "canvas.updated", id, canvas.UpdatedAt)
-	if err != nil {
-		return 0, err
-	}
-	if err := m.Store.UpdateCanvas(ctx, canvas, event); err != nil {
-		return 0, err
-	}
-	return changed, nil
+	return m.rewriteCanvasMarkdown(ctx, workspaceID, actor, canvas, markdown)
 }

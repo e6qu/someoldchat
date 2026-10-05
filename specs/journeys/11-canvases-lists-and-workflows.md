@@ -259,24 +259,36 @@ for later steps and conditions to read.
 ## Current SameOldChat boundary
 
 CANVAS-01 and the basic persistence portion of CANVAS-02 now have a real
-workspace surface and access-filtered memory/SQL/gRPC reads. The web client is a
-block editor over the whole document: every block renders as its own block with
-its own editor, and a member with write access edits any block's text and kind
-(paragraph or heading), adds a block, reorders one up or down, deletes one, and
-renames the canvas — each committed as a canvases.edit change that bumps the
-compare-and-swap revision. A block whose structure moved under the editor is a
-conflict, not a silent overwrite. Reordering preserves a block's identity, so a
-comment anchored to it stays attached; a block carrying a kind this client does
-not name (an app authored it through canvases.create) is still editable and
-keeps that kind through an edit of its text rather than being flattened to a
-paragraph. Structured, multi-section canvases are therefore fully editable in
-app — the read-only fallback remains only for a document whose JSON cannot be
-parsed at all. Comments, revision history, and sharing review are built: the
-sharing surface names everyone who may open a canvas, and only its owner is
-offered the controls that change that. A conversation reaches its own canvas
-from the conversation itself, and creating one is a deliberate act rather than a
-side effect of following the link. Collaborative cursors and autosave/offline
-recovery remain gaps.
+workspace surface and access-filtered memory/SQL/gRPC reads. The web client is
+one document to write in, as Slack's canvas is, rather than a form per block.
+- **Editing.** A member with write access types straight into the rendered
+  document. The toolbar gives bold, italic, strikethrough, code, links, three
+  heading levels, bulleted, numbered and checklist items, and quotes.
+- **Mentions.** Typing @ offers people from the workspace directory and inserts
+  an atomic mention pill. It saves as `<@U…>` and renders as the member's name.
+- **Checklists.** A checklist item's box is ticked off in place.
+- **Saving.** The whole document saves at once as markdown, against the
+  revision the editor opened. A save from a page someone else has changed since
+  is refused, and the page comes back with the writer's text and the reason, so
+  nothing is overwritten and nothing typed is lost.
+- **Section identity.** The save rewrites only the sections that changed: a
+  section the writer did not touch, or only moved, keeps its identity, so a
+  comment anchored to it stays attached. The editor sends an untouched section
+  back exactly as it was stored, so a round trip through the browser cannot
+  reword it.
+- **App sections.** A section of a kind markdown cannot spell (an app wrote it
+  through canvases.create) is edited like any other and keeps its kind.
+- **Without script.** The document is a markdown field with the same save and
+  the same conflict rule.
+
+The read-only fallback remains only for a document whose JSON cannot be parsed
+at all. Comments, revision history, and sharing review are built: the sharing
+surface names everyone who may open a canvas, and only its owner is offered the
+controls that change that. A conversation reaches its own canvas from the
+conversation itself, and creating one is a deliberate act rather than a side
+effect of following the link. Real-time co-editing (collaborative cursors and
+merging two writers' concurrent changes), autosave, and offline recovery remain
+gaps: a second writer's save is refused rather than merged.
 
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,

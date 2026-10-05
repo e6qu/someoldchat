@@ -576,6 +576,11 @@ type Service interface {
 	SearchPeople(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.UserPage, error)
 	SearchChannels(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.ConversationPage, error)
 	EditCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string) error
+	// SaveCanvasMarkdown makes the canvas the markdown given, as the web
+	// editor writes it: the whole document at once, refused with
+	// store.ErrConflict when the canvas is no longer at the version the
+	// editor opened. It answers how many sections changed.
+	SaveCanvasMarkdown(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, int64, string) (int, error)
 	DeleteCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) error
 	SetCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.AccessLevel, []domain.ConversationID, []domain.UserID) error
 	DeleteCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, []domain.ConversationID, []domain.UserID) error

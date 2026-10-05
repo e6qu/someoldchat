@@ -2,81 +2,128 @@ package web
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
-// A canvas with more than one section used to be flattened into one blob of
-// joined text and marked read-only in its entirety, so a document an app had
-// created through canvases.create — which has taken structured sections since
-// it was built — could be read here but never edited, and its structure was
-// invisible. Every block now renders as its own block with its own editor, and
-// editing one leaves the others alone.
-func TestMultiSectionCanvasIsEditableBlockByBlock(t *testing.T) {
+// The canvas is one document to write in (CANVAS-02): every section renders
+// inside one editor, carrying the markdown it was stored as, and the whole
+// document saves at once through /document. A section the writer did not
+// change keeps its identity, so the comment anchored to it stays with it.
+func TestTheCanvasIsOneDocumentSavedAsAWhole(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	messages := service.Messages{Store: s}
-	// canvases.create takes a single section, so a multi-section document is
-	// built the way an app builds one: by editing.
-	value, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Two parts", `{"type":"markdown","markdown":"First paragraph"}`, "")
+	ctx := context.Background()
+	value, err := messages.CreateCanvas(ctx, "T1", "U1", "Two parts", `{"type":"markdown","markdown":"First paragraph\n\nSecond paragraph"}`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.EditCanvas(context.Background(), "T1", "U1", value.ID,
-		`[{"operation":"insert_at_end","document_content":{"type":"markdown","markdown":"Second paragraph"}}]`); err != nil {
+	first := storedCanvasSections(t, s, value.ID)[0]
+	if _, err := messages.CommentOnCanvas(ctx, "T1", "U1", value.ID, first.ID, "Agreed"); err != nil {
 		t.Fatal(err)
 	}
 	target := "/app/canvases/" + string(value.ID)
 
-	page := get(t, mux, target)
-	body := page.Body.String()
-	requireContains(t, "multi-section canvas", body, "First paragraph", "Second paragraph", "Save block 1", "Save block 2")
-	requireMissing(t, "multi-section canvas", body, "could not be read as a document")
-
-	sections := regexp.MustCompile(`name="section_id" value="([^"]+)"`).FindAllStringSubmatch(body, -1)
-	// One id per block editor plus one per delete form.
-	ids := map[string]bool{}
-	for _, match := range sections {
-		ids[match[1]] = true
-	}
-	if len(ids) != 2 {
-		t.Fatalf("distinct block ids = %d, want two", len(ids))
+	body := get(t, mux, target).Body.String()
+	requireContains(t, "canvas editor", body,
+		`data-canvas-editor`, `data-markdown="First paragraph"`, `data-markdown="Second paragraph"`,
+		`name="markdown"`, "First paragraph\n\nSecond paragraph\n</textarea>", "Save canvas", "Rename canvas")
+	requireMissing(t, "canvas editor", body, "Save block", `name="section_id" value="temp`, "Move up", "Delete block")
+	if strings.Count(body, "data-canvas-block data-markdown") != 2 {
+		t.Fatalf("blocks in the document = %d, want 2", strings.Count(body, "data-canvas-block data-markdown"))
 	}
 
-	// Editing the second block leaves the first alone. A whole-document save
-	// would have replaced both, which is exactly the flattening the old
-	// read-only rule was protecting against — by refusing to edit at all.
-	second := sections[len(sections)-1][1]
-	saved := postForm(t, mux, target+"/sections", url.Values{
-		"_csrf": {auth.CSRFToken("session")}, "op": {"save"}, "section_id": {second},
-		"type": {"markdown"}, "body": {"Second paragraph, revised"},
+	saved := postForm(t, mux, target+"/document", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "version": {pageVersion(t, body)},
+		"markdown": {"First paragraph\r\n\r\nSecond paragraph, revised for <@U2>\r\n\r\n## Next steps\r\n\r\n- [ ] Ship it"},
 	}.Encode(), false)
-	if saved.Code != 303 {
-		t.Fatalf("save second block = %d: %s", saved.Code, saved.Body)
+	if saved.Code != http.StatusSeeOther || !strings.Contains(saved.Header().Get("Location"), "notice=Canvas+saved") {
+		t.Fatalf("save = %d %q: %s", saved.Code, saved.Header().Get("Location"), saved.Body)
 	}
+	sections := storedCanvasSections(t, s, value.ID)
+	if len(sections) != 4 || sections[0].ID != first.ID || sections[1].Text != "Second paragraph, revised for <@U2>" ||
+		sections[2].Type != domain.CanvasSectionHeading2 || sections[3].Text != "- [ ] Ship it" {
+		t.Fatalf("stored sections = %+v", sections)
+	}
+
 	after := get(t, mux, target).Body.String()
-	requireContains(t, "after the save", after, "First paragraph", "Second paragraph, revised")
-	// Scoped to the document rather than the page: the history panel below it
-	// shows what the canvas said before, and that is the point of the history —
-	// the replaced text appearing there is correct, and appearing twice in the
-	// document is the duplication this guards against.
-	document := after
-	if history := strings.Index(after, `class="canvas-history"`); history >= 0 {
-		document = after[:history]
-	}
-	if strings.Count(document, "Second paragraph<") > 0 {
-		t.Error("the original second block survived alongside its replacement")
+	// The mention is an atomic pill in the editor, carrying what it saves as,
+	// and the checklist box is a control; the comment still names its section.
+	requireContains(t, "after the save", after,
+		`class="canvas-mention" contenteditable="false" data-entity="&lt;@U2&gt;">@`, `role="checkbox" aria-checked="false"`,
+		"<h4>Next steps</h4>", "on Section 1")
+
+	// Saving the same document again changes nothing and writes nothing.
+	again := postForm(t, mux, target+"/document", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "version": {pageVersion(t, after)},
+		"markdown": {"First paragraph\n\nSecond paragraph, revised for <@U2>\n\n## Next steps\n\n- [ ] Ship it"},
+	}.Encode(), false)
+	if again.Code != http.StatusSeeOther || !strings.Contains(again.Header().Get("Location"), "notice=Nothing+to+save") {
+		t.Fatalf("unchanged save = %d %q", again.Code, again.Header().Get("Location"))
 	}
 }
 
-// A block carrying a kind this client does not name — an app wrote it through
-// canvases.create — is still editable, and editing its text keeps its kind
-// rather than flattening it to a paragraph. The heading below is such a block.
-func TestBlockWithAnUnnamedKindKeepsItsKindWhenEdited(t *testing.T) {
+// A save from a page someone else has since changed is refused rather than
+// overwriting their work, and the writer's text comes back on the page with
+// the reason, in the markdown field, so nothing they typed is lost.
+func TestAStaleCanvasSaveKeepsTheWritersText(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Shared plan", `{"type":"markdown","markdown":"Keep this body"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/canvases/" + string(value.ID)
+	opened := pageVersion(t, get(t, mux, target).Body.String())
+	if err := messages.EditCanvas(context.Background(), "T1", "U1", value.ID, `[{"operation":"insert_at_end","document_content":{"type":"markdown","markdown":"Someone else's line"}}]`); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.GetCanvas(context.Background(), "T1", value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := postForm(t, mux, target+"/document", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "version": {opened}, "markdown": {"My unsaved paragraph"},
+	}.Encode(), false)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("stale save = %d: %s", response.Code, response.Body)
+	}
+	requireContains(t, "refused save", response.Body.String(), "someone else changed it after you opened it", "My unsaved paragraph</textarea>", "data-draft", `<details class="canvas-source" open>`)
+	stored, err := s.GetCanvas(context.Background(), "T1", value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.DocumentContent != before.DocumentContent || stored.Version != before.Version {
+		t.Fatalf("refused save changed the canvas: got %#v want %#v", stored, before)
+	}
+
+	for _, invalid := range []url.Values{
+		{"_csrf": {auth.CSRFToken("session")}, "version": {"not-a-number"}, "markdown": {"x"}},
+		{"_csrf": {auth.CSRFToken("session")}, "version": {"1"}, "markdown": {strings.Repeat("x", maxCanvasMarkdownBytes+1)}},
+	} {
+		if refused := postForm(t, mux, target+"/document", invalid.Encode(), false); refused.Code != http.StatusBadRequest && refused.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("invalid save = %d", refused.Code)
+		}
+	}
+	if missing := postForm(t, mux, "/app/canvases/F0MISSING/document", url.Values{"_csrf": {auth.CSRFToken("session")}, "version": {"1"}, "markdown": {"x"}}.Encode(), false); missing.Code != http.StatusNotFound {
+		t.Fatalf("save of a missing canvas = %d", missing.Code)
+	}
+}
+
+// A section of a kind markdown cannot spell (an app wrote it through
+// canvases.create) is edited like any other part of the document and keeps
+// its kind through the save, whether its text changed or not.
+func TestAnAppSectionKeepsItsKindThroughTheDocumentEditor(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	messages := service.Messages{Store: s}
 	value, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Mixed", `{"type":"heading","text":"Plan"}`, "")
@@ -84,84 +131,63 @@ func TestBlockWithAnUnnamedKindKeepsItsKindWhenEdited(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := messages.EditCanvas(context.Background(), "T1", "U1", value.ID,
-		`[{"operation":"insert_at_end","document_content":{"type":"markdown","markdown":"Editable body"}}]`); err != nil {
+		`[{"operation":"insert_at_end","document_content":{"type":"rich_text","markdown":"App summary"}}]`); err != nil {
 		t.Fatal(err)
 	}
 	target := "/app/canvases/" + string(value.ID)
 	body := get(t, mux, target).Body.String()
-	// Both blocks are editable; the heading names its kept kind rather than
-	// being shut out.
-	requireContains(t, "mixed canvas", body, "Plan", "Editable body", "Save block 1", "Save block 2", "its kind is kept as you edit")
-	requireMissing(t, "mixed canvas", body, "editing it here would flatten it")
+	requireContains(t, "mixed canvas", body, `class="canvas-block app-block"`, "heading content from an app; it keeps its kind as you edit it", `data-markdown="Plan"`)
 
-	// Edit the heading's text. Its "heading" kind is carried through the hidden
-	// field, so the stored block stays a heading.
-	sections := regexp.MustCompile(`name="section_id" value="([^"]+)"`).FindAllStringSubmatch(body, -1)
-	heading := sections[0][1]
-	saved := postForm(t, mux, target+"/sections", url.Values{
-		"_csrf": {auth.CSRFToken("session")}, "op": {"save"}, "section_id": {heading},
-		"type": {"heading"}, "body": {"Revised plan"},
+	saved := postForm(t, mux, target+"/document", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "version": {pageVersion(t, body)}, "markdown": {"Revised plan\n\nApp summary"},
 	}.Encode(), false)
-	if saved.Code != 303 {
-		t.Fatalf("save heading = %d: %s", saved.Code, saved.Body)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("save = %d: %s", saved.Code, saved.Body)
 	}
-	stored, err := messages.LookupCanvasSections(context.Background(), "T1", "U1", value.ID, `{"section_types":["heading"]}`)
-	if err != nil || len(stored) != 1 || stored[0].Text != "Revised plan" {
-		t.Fatalf("heading after edit = %+v err=%v (kind must stay 'heading')", stored, err)
+	sections := storedCanvasSections(t, s, value.ID)
+	if len(sections) != 2 || sections[0].Type != "heading" || sections[0].Text != "Revised plan" || sections[1].Type != "rich_text" {
+		t.Fatalf("stored sections = %+v, want both app kinds kept", sections)
 	}
 }
 
-// The block editor reorders and deletes blocks and adds new ones, all through
-// the one /sections write path.
-func TestCanvasBlocksReorderAddAndDeleteFromTheBrowser(t *testing.T) {
+// Renaming has its own route now that the document has one write path.
+func TestRenamingACanvas(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
-	messages := service.Messages{Store: s}
-	csrf := auth.CSRFToken("session")
-	value, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Ordered", `{"type":"markdown","markdown":"Alpha"}`, "")
+	value, err := service.Messages{Store: s}.CreateCanvas(context.Background(), "T1", "U1", "Draft", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	target := "/app/canvases/" + string(value.ID)
+	if blank := postForm(t, mux, target+"/rename", url.Values{"_csrf": {auth.CSRFToken("session")}, "title": {"  "}}.Encode(), false); blank.Code != http.StatusBadRequest {
+		t.Fatalf("blank title = %d", blank.Code)
+	}
+	renamed := postForm(t, mux, target+"/rename", url.Values{"_csrf": {auth.CSRFToken("session")}, "title": {"Launch plan"}}.Encode(), false)
+	if renamed.Code != http.StatusSeeOther {
+		t.Fatalf("rename = %d: %s", renamed.Code, renamed.Body)
+	}
+	if stored, _ := s.GetCanvas(context.Background(), "T1", value.ID); stored.Title != "Launch plan" {
+		t.Fatalf("title = %q", stored.Title)
+	}
+}
 
-	// Add a heading at the end.
-	if added := postForm(t, mux, target+"/sections", url.Values{
-		"_csrf": {csrf}, "op": {"add"}, "type": {"h2"}, "body": {"Omega"},
-	}.Encode(), false); added.Code != 303 {
-		t.Fatalf("add block = %d: %s", added.Code, added.Body)
+func pageVersion(t *testing.T, body string) string {
+	t.Helper()
+	match := regexp.MustCompile(`name="version" value="(\d+)"`).FindStringSubmatch(body)
+	if len(match) != 2 {
+		t.Fatalf("the editor carries no version: %s", body)
 	}
+	return match[1]
+}
 
-	// The new block is last; move it up so it leads. Read the ids in order.
-	orderIDs := func() []string {
-		body := get(t, mux, target).Body.String()
-		editors := regexp.MustCompile(`class="editor block"[\s\S]*?name="section_id" value="([^"]+)"`).FindAllStringSubmatch(body, -1)
-		ids := make([]string, 0, len(editors))
-		for _, match := range editors {
-			ids = append(ids, match[1])
-		}
-		return ids
+func storedCanvasSections(t *testing.T, s *memory.Store, id domain.CanvasID) []domain.CanvasSection {
+	t.Helper()
+	value, err := s.GetCanvas(context.Background(), "T1", id)
+	if err != nil {
+		t.Fatal(err)
 	}
-	ids := orderIDs()
-	if len(ids) != 2 {
-		t.Fatalf("blocks = %d, want 2", len(ids))
+	var document domain.CanvasDocument
+	if err := json.Unmarshal([]byte(value.DocumentContent), &document); err != nil {
+		t.Fatal(err)
 	}
-	if moved := postForm(t, mux, target+"/sections", url.Values{
-		"_csrf": {csrf}, "op": {"move_up"}, "section_id": {ids[1]},
-	}.Encode(), false); moved.Code != 303 {
-		t.Fatalf("move up = %d: %s", moved.Code, moved.Body)
-	}
-	stored, err := messages.LookupCanvasSections(context.Background(), "T1", "U1", value.ID, `{}`)
-	if err != nil || len(stored) != 2 || stored[0].Text != "Omega" || stored[1].Text != "Alpha" {
-		t.Fatalf("after move up = %+v err=%v", stored, err)
-	}
-
-	// Delete the now-second block (Alpha).
-	if deleted := postForm(t, mux, target+"/sections", url.Values{
-		"_csrf": {csrf}, "op": {"delete"}, "section_id": {stored[1].ID},
-	}.Encode(), false); deleted.Code != 303 {
-		t.Fatalf("delete = %d: %s", deleted.Code, deleted.Body)
-	}
-	remaining, err := messages.LookupCanvasSections(context.Background(), "T1", "U1", value.ID, `{}`)
-	if err != nil || len(remaining) != 1 || remaining[0].Text != "Omega" {
-		t.Fatalf("after delete = %+v err=%v", remaining, err)
-	}
+	return document.Sections
 }

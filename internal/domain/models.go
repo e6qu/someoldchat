@@ -2679,6 +2679,17 @@ func (kind CanvasSectionType) Editable() bool {
 	return kind == CanvasSectionMarkdown || kind == ""
 }
 
+// Markdown reports whether markdown can write this kind: prose and the three
+// heading levels. Any other kind is an app's own (canvases.create takes any),
+// and a document rewritten through markdown has to keep it some other way.
+func (kind CanvasSectionType) Markdown() bool {
+	switch kind {
+	case CanvasSectionMarkdown, "", CanvasSectionHeading1, CanvasSectionHeading2, CanvasSectionHeading3:
+		return true
+	}
+	return false
+}
+
 type CanvasSection struct {
 	ID   string
 	Type CanvasSectionType

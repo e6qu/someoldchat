@@ -1750,6 +1750,14 @@ func (r Remote) SearchCanvases(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoCanvasPage(out)
 }
 
+func (r Remote) SaveCanvasMarkdown(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, version int64, markdown string) (int, error) {
+	out, err := r.canvases.SaveCanvasMarkdown(ctx, &chatv1.SaveCanvasMarkdownRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), Version: version, Markdown: markdown})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetSectionsChangedCount()), nil
+}
+
 func (r Remote) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, changes string) error {
 	out, err := r.canvases.EditCanvas(ctx, &chatv1.EditCanvasRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), Changes: changes})
 	if err != nil {
@@ -6441,6 +6449,14 @@ func (s *Server) ListCanvases(ctx context.Context, input *chatv1.CanvasesRequest
 
 func (s *Server) EditCanvas(ctx context.Context, input *chatv1.EditCanvasRequest) (*chatv1.MutationResponse, error) {
 	return s.editCanvasProto(ctx, input)
+}
+
+func (s *Server) SaveCanvasMarkdown(ctx context.Context, input *chatv1.SaveCanvasMarkdownRequest) (*chatv1.SaveCanvasMarkdownResponse, error) {
+	changed, err := s.implementation.SaveCanvasMarkdown(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetVersion(), input.GetMarkdown())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SaveCanvasMarkdownResponse{SectionsChangedCount: int32(changed)}, nil
 }
 
 func (s *Server) DeleteCanvas(ctx context.Context, input *chatv1.CanvasRequest) (*chatv1.MutationResponse, error) {

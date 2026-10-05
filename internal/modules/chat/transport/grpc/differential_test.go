@@ -6630,6 +6630,62 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The web editor saves the whole document as markdown against the
+			// version it opened. Both compositions must keep an unchanged
+			// section's identity (its comments hang on it), keep an app's
+			// section kind through markdown, refuse a stale version, and write
+			// nothing when nothing changed.
+			name: "a whole-document canvas save keeps what it did not change",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				canvas, err := chat.CreateCanvas(ctx, "T1", "U1", "Plan", `{"type":"markdown","markdown":"Keep me\n\nChange me"}`, "")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.EditCanvas(ctx, "T1", "U1", canvas.ID, `[{"operation":"insert_at_end","document_content":{"type":"rich_text","markdown":"An app wrote this"}}]`); err != nil {
+					return nil, err
+				}
+				before, err := chat.LookupCanvasSections(ctx, "T1", "U1", canvas.ID, `{"contains_text":"Keep me"}`)
+				if err != nil {
+					return nil, err
+				}
+				opened, err := chat.Canvas(ctx, "T1", "U1", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				changed, err := chat.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Keep me\n\nChanged, with <@U2>\n\nAn app wrote this")
+				if err != nil {
+					return nil, err
+				}
+				_, staleErr := chat.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, opened.Version, "Overwrite")
+				saved, err := chat.Canvas(ctx, "T1", "U1", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				unchanged, err := chat.SaveCanvasMarkdown(ctx, "T1", "U1", canvas.ID, saved.Version, "Keep me\n\nChanged, with <@U2>\n\nAn app wrote this")
+				if err != nil {
+					return nil, err
+				}
+				after, err := chat.LookupCanvasSections(ctx, "T1", "U1", canvas.ID, `{"contains_text":"Keep me"}`)
+				if err != nil {
+					return nil, err
+				}
+				var document domain.CanvasDocument
+				if err := json.Unmarshal([]byte(saved.DocumentContent), &document); err != nil {
+					return nil, err
+				}
+				kinds := make([]string, 0, len(document.Sections))
+				for _, section := range document.Sections {
+					kinds = append(kinds, string(section.Type)+":"+section.Text)
+				}
+				_, outsiderErr := chat.SaveCanvasMarkdown(ctx, "T1", "U2", canvas.ID, saved.Version, "Not mine")
+				return []any{
+					changed, errors.Is(staleErr, storepkg.ErrConflict), unchanged, saved.Version - opened.Version,
+					len(before) == 1 && len(after) == 1 && before[0].ID == after[0].ID, kinds,
+					errors.Is(outsiderErr, storepkg.ErrNotFound),
+				}, nil
+			},
+		},
+		{
 			// A search that matched more than the directory would disclose the
 			// title of a canvas the reader cannot open, so the two compositions
 			// have to agree on the visibility rule as well as on the matching.
