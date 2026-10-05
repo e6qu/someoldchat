@@ -17,6 +17,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 type Handler struct {
@@ -31,6 +32,9 @@ type Handler struct {
 	// Typing reports who is composing. It is read on its own timer rather than
 	// from the journal, because a typing signal is never journalled.
 	Typing TypingSource
+	// CanvasPresence reports who has a canvas open, for a stream a canvas
+	// page opened. Like typing it is read on its own timer.
+	CanvasPresence CanvasPresenceSource
 	// Connections records each open stream as a client connection of its
 	// member, which is what makes them online.
 	Connections ConnectionTracker
@@ -134,7 +138,7 @@ var errUnsupportedRTMCommand = errors.New("unsupported RTM command")
 // reader may switch into. A construction-time workspace both decided nothing
 // once the streams followed their credentials and, while it did decide, made a
 // switch unserviceable from the same process.
-func NewHandler(source UserEventSource, authenticator auth.Authenticator, typing TypingSource, connections ConnectionTracker) (Handler, error) {
+func NewHandler(source UserEventSource, authenticator auth.Authenticator, typing TypingSource, connections ConnectionTracker, presence CanvasPresenceSource) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("SSE requires an event source")
 	}
@@ -152,7 +156,12 @@ func NewHandler(source UserEventSource, authenticator auth.Authenticator, typing
 	if connections == nil {
 		return Handler{}, errors.New("SSE requires a connection tracker")
 	}
-	return Handler{Source: source, Authenticator: authenticator, Typing: typing, Connections: connections}, nil
+	// Required for the same reason as typing: a canvas page whose stream
+	// cannot read presence shows nobody else, which reads as being alone.
+	if presence == nil {
+		return Handler{}, errors.New("SSE requires a canvas presence source")
+	}
+	return Handler{Source: source, Authenticator: authenticator, Typing: typing, Connections: connections, CanvasPresence: presence}, nil
 }
 
 func NewRTMHandler(source UserEventSource, connections RTMConnectionSource, messages RTMMessageService, typing TypingSource, tracker ConnectionTracker) (Handler, error) {
@@ -637,6 +646,12 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	// the page should be visible at once rather than up to a poll later.
 	var lastTypingPoll time.Time
 	announcer := newTypingAnnouncer()
+	// A canvas page names its canvas, and its stream also says who is on
+	// it. A canvas this reader cannot see answers nothing: the stream stops
+	// asking rather than ending, since the journal it carries is still theirs.
+	canvas := domain.CanvasID(strings.TrimSpace(r.URL.Query().Get("canvas")))
+	var lastPresencePoll time.Time
+	presence := &canvasPresenceAnnouncer{}
 	unresolved := 0
 	for {
 		lease.renewIfDue(r.Context())
@@ -703,6 +718,30 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 						return
 					}
 					if err := writeUnsequencedEvent(w, "typing", string(frame)); err != nil {
+						h.reportWriteFailure(r, workspace, principal.UserID, err)
+						return
+					}
+					wrote = true
+				}
+			}
+		}
+		if canvas != "" && time.Since(lastPresencePoll) >= canvasPresencePollInterval {
+			lastPresencePoll = time.Now()
+			present, presenceErr := h.CanvasPresence.CanvasPresence(r.Context(), workspace, principal.UserID, canvas)
+			switch {
+			case errors.Is(presenceErr, store.ErrNotFound):
+				canvas = ""
+			case presenceErr != nil:
+				if r.Context().Err() == nil {
+					h.logger().Warn("event stream could not read canvas presence", "workspace", workspace, "user", principal.UserID, "canvas", canvas, "error", presenceErr)
+				}
+			default:
+				frame, due, frameErr := presence.due(canvas, present)
+				if frameErr == nil && due {
+					if err := h.armWrite(control); err != nil {
+						return
+					}
+					if err := writeUnsequencedEvent(w, "canvas.presence", frame); err != nil {
 						h.reportWriteFailure(r, workspace, principal.UserID, err)
 						return
 					}

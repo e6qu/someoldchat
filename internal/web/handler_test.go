@@ -2265,7 +2265,7 @@ func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {
 	requireContains(t, "Activity keyboard contract", activityMarkup,
 		"event.key==='ArrowDown'", "event.key==='ArrowUp'", "event.key==='Enter'",
 		"event.key==='x'", "event.key==='c'", "event.key==='r'",
-		"new EventSource('/events'",
+		liveStreamOpen,
 		"data-activity-id",
 		"focusedID",
 		"focus({preventScroll:true})",

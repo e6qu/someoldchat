@@ -116,6 +116,7 @@ type Store struct {
 	codeChannels                  map[domain.ConversationID]domain.CodeChannel
 	codeChannelViews              map[domain.CodeChannelViewID]domain.CodeChannelView
 	typing                        map[string]domain.TypingSignal
+	canvasPresence                map[string]domain.CanvasPresence
 	activityItems                 map[domain.ActivityID]domain.ActivityItem
 	activityPreferences           map[string]domain.ActivityPreferences
 	activitySavedViews            map[domain.ActivitySavedViewID]domain.ActivitySavedView
@@ -402,6 +403,7 @@ func New() *Store {
 		codeChannels:                  make(map[domain.ConversationID]domain.CodeChannel),
 		codeChannelViews:              make(map[domain.CodeChannelViewID]domain.CodeChannelView),
 		typing:                        make(map[string]domain.TypingSignal),
+		canvasPresence:                make(map[string]domain.CanvasPresence),
 		activityItems:                 make(map[domain.ActivityID]domain.ActivityItem),
 		activityPreferences:           make(map[string]domain.ActivityPreferences),
 		activitySavedViews:            make(map[domain.ActivitySavedViewID]domain.ActivitySavedView),

@@ -37,3 +37,7 @@ func TestShortTokenRotation(t *testing.T) {
 func TestExistingConversationsExcludedFromAI(t *testing.T) {
 	storetest.CheckExistingConversationsExcludedFromAI(t, newFamilyCheckStore(t))
 }
+
+func TestMemoryCanvasPresence(t *testing.T) {
+	storetest.CheckCanvasPresence(t, newFamilyCheckStore(t))
+}

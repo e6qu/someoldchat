@@ -160,7 +160,7 @@ func TestSSETypingFrameCarriesNoCursor(t *testing.T) {
 	}
 	typing := &testTypingSource{}
 	typing.stage(domain.TypingSignal{WorkspaceID: "T1", Conversation: "C1", UserID: "U2", ExpiresAt: time.Now().Add(time.Minute)})
-	handler, err := NewHandler(source, authenticator, typing, &testConnectionTracker{})
+	handler, err := NewHandler(source, authenticator, typing, &testConnectionTracker{}, noCanvasPresence{})
 	if err != nil {
 		t.Fatal(err)
 	}

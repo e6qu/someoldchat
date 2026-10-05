@@ -138,3 +138,83 @@ test('[CANVAS-02] a reader sees the canvas change as it is written', async ({ br
     await peer.context.close();
   }
 });
+
+// Each person on a canvas sees who else is there, and a writer sees which
+// block another writer's cursor is in, following it as it moves. Someone who
+// closes the canvas drops off the list.
+test('[CANVAS-02] people on a canvas see who else is there and where they are writing', async ({ browser, baseURL }) => {
+  const owner = await signedIn(browser, baseURL, SESSION);
+  const peer = await signedIn(browser, baseURL, PEER_SESSION);
+  try {
+    const name = `presence-${Date.now()}`;
+    await createCanvas(owner.page, name, 'Agenda\n\nNotes\n\nActions');
+    await shareWithPeer(owner.page, 'write');
+    const ownerHere = owner.page.locator('[data-canvas-present]');
+    await expect(ownerHere).toBeHidden();
+
+    await peer.page.goto(owner.page.url());
+    await expect(ownerHere).toHaveText('Also here: Peer');
+    await expect(peer.page.locator('[data-canvas-present]')).toContainText('Also here: ');
+
+    // The peer's cursor is drawn where it is in the owner's page: in the
+    // block it is in, and after the words it follows.
+    const theirs = peer.page.getByRole('textbox', { name: 'Canvas content' });
+    const mine = owner.page.getByRole('textbox', { name: 'Canvas content' });
+    const caret = owner.page.locator('[data-canvas-caret="Peer"]');
+    async function caretIsIn(block, edge) {
+      await expect(async () => {
+        const at = await caret.boundingBox();
+        const box = await block.boundingBox();
+        expect(at).not.toBeNull();
+        expect(at.y + at.height / 2).toBeGreaterThan(box.y);
+        expect(at.y + at.height / 2).toBeLessThan(box.y + box.height);
+        if (edge === 'end') expect(at.x).toBeGreaterThan(box.x + 20);
+        if (edge === 'start') expect(at.x).toBeLessThan(box.x + 12);
+      }).toPass({ timeout: 10_000 });
+    }
+    await theirs.locator('[data-canvas-block]').nth(1).click();
+    await peer.page.keyboard.press('End');
+    await caretIsIn(mine.locator('[data-canvas-block]').nth(1), 'end');
+    await peer.page.keyboard.press('Home');
+    await caretIsIn(mine.locator('[data-canvas-block]').nth(1), 'start');
+    await theirs.locator('[data-canvas-block]').nth(2).click();
+    await peer.page.keyboard.press('End');
+    await caretIsIn(mine.locator('[data-canvas-block]').nth(2), 'end');
+    await expect(owner.page.locator('[data-canvas-caret]')).toHaveCount(1);
+
+    // What the peer selects is shaded on the owner's page, over the words
+    // selected, and the shading goes when the selection does.
+    await peer.page.keyboard.press('Shift+Home');
+    const shade = owner.page.locator('[data-canvas-selection="Peer"]');
+    await expect(shade).toHaveCount(1);
+    await expect(async () => {
+      const shaded = await shade.boundingBox();
+      const block = await mine.locator('[data-canvas-block]').nth(2).boundingBox();
+      expect(shaded.width).toBeGreaterThan(20);
+      expect(shaded.y + shaded.height / 2).toBeGreaterThan(block.y);
+      expect(shaded.y + shaded.height / 2).toBeLessThan(block.y + block.height);
+    }).toPass({ timeout: 10_000 });
+    await peer.page.keyboard.press('End');
+    await expect(shade).toHaveCount(0);
+
+    // The mark never becomes part of the text: the owner's page still reads
+    // back as it was, and nothing is waiting to be saved.
+    await expect(owner.page.locator('[data-canvas-status]')).not.toHaveText('Unsaved changes');
+
+    // The mark follows the words, not the position: a block added above the
+    // peer's moves it down, and the mark moves with it.
+    await mine.locator('[data-canvas-block]').first().click();
+    await owner.page.keyboard.press('Home');
+    await owner.page.keyboard.type('Intro');
+    await owner.page.keyboard.press('Enter');
+    await expect(owner.page.locator('[data-canvas-status]')).toHaveText('Saved');
+    await caretIsIn(mine.locator('[data-canvas-block]', { hasText: 'Actions' }), 'end');
+
+    await peer.page.close();
+    await expect(ownerHere).toBeHidden();
+    await expect(owner.page.locator('[data-canvas-caret]')).toHaveCount(0);
+  } finally {
+    await owner.context.close();
+    await peer.context.close();
+  }
+});

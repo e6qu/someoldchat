@@ -6,6 +6,9 @@ package web
 // window.sameoldchatCanvasText: create() returns an empty document and
 // load(runs) the one a crdt.Run snapshot describes, each with apply, insert,
 // remove, replace, text and snapshot, speaking the ops crdt.Op encodes as JSON.
+// idAt(position) names the character at a position and positionOf(id) finds
+// one again (the nearest character before it, once deleted), which is how
+// canvas presence points at the same words while the text changes around them.
 //
 // The two implementations are held together by internal/crdt's conformance
 // vectors, which the browser suite replays against this script as the canvas
@@ -86,6 +89,9 @@ for(var current=this.head.next;current;current=current.next){
 if(!(previous&&previous.id.r===current.id.r&&previous.id.c+1===current.id.c&&previous.deleted===current.deleted)){run={r:current.id.r,c:current.id.c};if(current.deleted)run.n=0;else run.t='';runs.push(run)}
 if(current.deleted)run.n++;else run.t+=current.value;previous=current}
 return runs};
+Sequence.prototype.idAt=function(position){var id=Number.isInteger(position)&&position>=0?this.visibleBefore(position+1):null;return id?{r:id.r,c:id.c}:null};
+Sequence.prototype.positionOf=function(value){var target=this.nodes.get(key(idOf(value)));if(!target)return -1;var index=0;
+for(var current=this.head.next;current;current=current.next){if(current===target)return current.deleted?Math.max(0,index-1):index;if(!current.deleted)index++}return -1};
 function load(runs){var doc=new Sequence();var tail=doc.head;
 (runs||[]).forEach(function(run){var text=typeof run.t==='string'?run.t:'';var deleted=text==='';var values=points(text);var count=deleted?run.n:values.length;
 if(!replicaName.test(run.r)||!isClock(run.c)||!Number.isSafeInteger(count)||count<=0||(!deleted&&run.n)||run.c+count-1>maxClock||values.some(isLone))throw new Error('a stored run names characters no document holds');

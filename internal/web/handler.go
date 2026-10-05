@@ -3112,6 +3112,11 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 .canvas-top h2{margin:0 auto 4px 0;font-size:28px;line-height:1.2;overflow-wrap:anywhere}
 .canvas-top-actions{display:flex;align-items:center;gap:6px}
 .canvas .meta{margin:0 0 18px;color:var(--muted);font-size:12px}
+.canvas-present{margin:0 0 6px;color:var(--muted);font-size:13px;font-weight:700}
+.canvas-carets{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.canvas-caret{position:absolute;width:2px;margin-left:-1px;background:var(--action)}
+.canvas-selection{position:absolute;background:color-mix(in srgb,var(--action) 22%,transparent)}
+.canvas-caret-name{position:absolute;bottom:100%;left:-1px;padding:0 5px;border-radius:4px 4px 4px 0;background:var(--action);color:var(--on-strong);font-size:11px;font-weight:700;line-height:16px;white-space:nowrap}
 .canvas-body{line-height:1.6;overflow-wrap:anywhere}
 .canvas-body p{margin:0 0 8px}.canvas-body p:last-child{margin-bottom:0}
 .canvas-body ul,.canvas-body ol{margin:0 0 8px;padding-left:24px}
@@ -3158,8 +3163,8 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 .read-only{color:var(--muted);font-size:13px}
 @media(max-width:640px){.canvas{padding:18px 16px}.canvas-top h2{font-size:22px}.bar{padding:0 12px}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + rowLinkScript + profilePanelScript + canvasTextScript + canvasEditorScript + canvasViewerLiveScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="v-page canvas-page">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas"><div class="canvas-top"><h2>{{.Title}}</h2><div class="canvas-top-actions"><a class="v-btn primary" href="#sharing-heading">Share</a></div></div><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}{{if .CanWrite}}<details class="rename"><summary>Rename canvas</summary><form class="editor" method="post" action="/app/canvases/{{.ID}}/rename"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><div class="actions"><button type="submit">Rename</button></div></form></details>
+{{define "scripts"}}` + localTimeScript + rowLinkScript + profilePanelScript + canvasTextScript + canvasStreamScript + canvasEditorScript + canvasViewerLiveScript + canvasPresenceScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="v-page canvas-page">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas" data-event-canvas="{{.ID}}"><div class="canvas-top"><h2>{{.Title}}</h2><div class="canvas-top-actions"><a class="v-btn primary" href="#sharing-heading">Share</a></div></div><p class="canvas-present" data-canvas-present role="status" hidden></p><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}{{if .CanWrite}}<details class="rename"><summary>Rename canvas</summary><form class="editor" method="post" action="/app/canvases/{{.ID}}/rename"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><div class="actions"><button type="submit">Rename</button></div></form></details>
 <form class="canvas-editor" method="post" action="/app/canvases/{{.ID}}/document" data-canvas-document data-canvas-id="{{.ID}}" data-canvas-blocks-url="/app/canvases/{{.ID}}/blocks" data-canvas-text-url="/app/canvases/{{.ID}}/text" data-canvas-text="{{.TextState}}" data-canvas-replica="{{.Replica}}"{{if .Problem}} data-draft{{end}}><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}">
 {{if .Problem}}<p class="notice" role="alert">{{.Problem}}</p>{{end}}
 <div class="format-bar" role="toolbar" aria-label="Formatting" aria-controls="canvas-document" data-canvas-toolbar hidden><button type="button" data-command="bold" aria-label="Bold" title="Bold (Ctrl+B)"><b>B</b></button><button type="button" data-command="italic" aria-label="Italic" title="Italic (Ctrl+I)"><i>I</i></button><button type="button" data-command="strike" aria-label="Strikethrough" title="Strikethrough"><s>S</s></button><button type="button" data-command="code" aria-label="Code" title="Code">&lt;/&gt;</button><button type="button" data-command="link" aria-label="Link" title="Link">🔗</button><span class="sep" aria-hidden="true"></span><button type="button" data-command="h1" aria-label="Heading 1" title="Heading 1">H1</button><button type="button" data-command="h2" aria-label="Heading 2" title="Heading 2">H2</button><button type="button" data-command="h3" aria-label="Heading 3" title="Heading 3">H3</button><button type="button" data-command="paragraph" aria-label="Paragraph" title="Paragraph">¶</button><span class="sep" aria-hidden="true"></span><button type="button" data-command="bullet" aria-label="Bulleted list" title="Bulleted list">•</button><button type="button" data-command="number" aria-label="Numbered list" title="Numbered list">1.</button><button type="button" data-command="check" aria-label="Checklist, or mark the item done" title="Checklist; in a checklist, marks the item done">☑</button><button type="button" data-command="quote" aria-label="Quote" title="Quote">❝</button><button type="button" data-command="mention" aria-label="Mention someone" title="Mention someone (@)">@</button></div>
@@ -3346,13 +3351,13 @@ var caret=caretOffset(removed);var made=middle?plainBlock(middle):null;
 if(made)editor.insertBefore(made,stop);removed.forEach(function(node){node.remove()});if(made&&caret>=0)placeCaret(made,caret);
 written=serialize();
 if(written!==target){editor.textContent='';if(target){made=plainBlock(target);editor.appendChild(made)}written=serialize()}
-if(made)upgrade(made)}
+if(made)upgrade(made);redrawn()}
 function upgrade(part){var markdown=part.getAttribute('data-markdown');var body=new URLSearchParams();body.set('_csrf',csrfField?csrfField.value:'');body.set('markdown',markdown);
 fetch(blocksURL,{method:'POST',body:body,credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){return response.ok?response.json():null}).then(function(data){if(!data||!Array.isArray(data.blocks))return;if(data.blocks.map(function(view){return view.markdown}).join('\n\n')!==markdown)return;part.liveBlocks=data.blocks;swap(part)}).catch(function(){})}
 function swap(part){if(!part.isConnected||!part.liveBlocks)return;var known=initial.get(part);if(!known||block(part)!==known.text)return;
 if(holdsSelection([part])){if(liveDeferred.indexOf(part)<0)liveDeferred.push(part);return}
 var before=serialize();var made=part.liveBlocks.map(renderedBlock);made.forEach(function(view){editor.insertBefore(view,part)});part.remove();
-if(serialize()!==before){editor.insertBefore(part,made[0]);made.forEach(function(view){view.remove()})}}
+if(serialize()!==before){editor.insertBefore(part,made[0]);made.forEach(function(view){view.remove()})}redrawn()}
 document.addEventListener('selectionchange',function(){if(!liveDeferred.length)return;var waiting=liveDeferred;liveDeferred=[];waiting.forEach(swap)});
 function resync(){if(liveSyncing||stopped)return;liveSyncing=true;var again=false;capture();
 fetch(textURL,{credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){if(!response.ok)throw new Error('unavailable');return response.json()}).then(function(data){capture();var fresh=window.sameoldchatCanvasText.load(JSON.parse(data.text_state||'[]'));queue.forEach(function(op){fresh.apply(op)});
@@ -3362,8 +3367,74 @@ if(fresh.pendingCount()>0)again=true;doc=fresh;reconcile();liveAttempts=again?li
 function receive(change){if(stopped||!change)return;if(liveSyncing){liveBuffer.push(change);return}if(change.resync||!Array.isArray(change.ops)){resync();return}
 capture();try{change.ops.forEach(function(op){doc.apply(op)})}catch(error){resync();return}
 if(doc.pendingCount()>0){resync();return}reconcile();if(queue.length&&!sending)schedule(600)}
-if(window.EventSource&&canvasID){var liveStream=` + liveStreamOpen + `;['canvas.updated','canvas.restored'].forEach(function(topic){liveStream.addEventListener(topic,function(event){var data=null;try{data=JSON.parse(event.data||'null')}catch(error){return}if(data&&data.canvas_id===canvasID)receive(data.canvas_text)})})}
+function visibleText(node){return Array.from(node.textContent.replace(/ /g,' ').replace(/​/g,''))}
+function alignment(markdown,visible){var source=Array.from(markdown);var map=[];var index=0;for(var position=0;position<visible.length;position++){var at=index;while(at<source.length&&source[at]!==visible[position])at++;if(at<source.length){map.push(at);index=at+1}else map.push(Math.min(index,source.length))}map.push(source.length);return map}
+function idFor(node,at){var parts=topParts();var offset=0;
+for(var index=0;index<parts.length;index++){var part=parts[index];if(part.nodes.some(function(candidate){return candidate.contains(node)})){var block=part.nodes[0];var inBlock=0;
+if(block.nodeType===1){var range=document.createRange();range.setStart(block,0);try{range.setEnd(node,at)}catch(error){return null}var shown=Array.from(range.toString().replace(/ /g,' ').replace(/​/g,'')).length;var visible=visibleText(block);inBlock=alignment(part.text,visible)[Math.min(shown,visible.length)]}
+var position=offset+inBlock;return position>0?doc.idAt(position-1):doc.idAt(0)}offset+=Array.from(part.text).length+2}return null}
+function caretID(){var selection=window.getSelection();if(!selection.rangeCount||!editor.contains(selection.focusNode))return null;capture();var caret=idFor(selection.focusNode,selection.focusOffset);if(!caret)return null;
+var anchor=selection.isCollapsed||!editor.contains(selection.anchorNode)?null:idFor(selection.anchorNode,selection.anchorOffset);if(anchor&&anchor.r===caret.r&&anchor.c===caret.c)anchor=null;return{caret:caret,anchor:anchor}}
+function spot(id){var position=doc.positionOf(id);if(position<0)return null;var caret=position+1;var parts=topParts();var offset=0;
+for(var index=0;index<parts.length;index++){var part=parts[index];var length=Array.from(part.text).length;if(caret<=offset+length){var block=part.nodes[0];if(block.nodeType!==1)return null;var inBlock=Math.max(0,caret-offset);
+var map=alignment(part.text,visibleText(block));var shown=0;while(shown<map.length-1&&map[shown]<inBlock)shown++;
+var walker=document.createTreeWalker(block,NodeFilter.SHOW_TEXT);var text=null;var last=null;var left=shown;while((text=walker.nextNode())){last=text;if(left<=text.nodeValue.length)break;left-=text.nodeValue.length}
+if(text)return{block:block,node:text,offset:left};if(last)return{block:block,node:last,offset:last.nodeValue.length};return{block:block,node:block,offset:0}}offset+=length+2}return null}
+function frameOf(rect){var frame=form.getBoundingClientRect();var zoom=pageZoom();return{left:(rect.left-frame.left)/zoom,top:(rect.top-frame.top)/zoom,width:rect.width/zoom,height:rect.height/zoom}}
+function point(id){var at=spot(id);if(!at)return null;var range=document.createRange();range.setStart(at.node,at.offset);range.collapse(true);
+var rect=range.getClientRects()[0]||range.getBoundingClientRect();if(!rect||(!rect.height&&!rect.left))rect=at.block.getBoundingClientRect();var placed=frameOf(rect);placed.height=Math.max(placed.height,16/pageZoom());placed.block=at.block;return placed}
+function stretch(anchor,caret){var from=spot(anchor);var to=spot(caret);if(!from||!to)return [];var range=document.createRange();range.setStart(from.node,from.offset);range.setEnd(from.node,from.offset);
+var end=document.createRange();end.setStart(to.node,to.offset);if(range.compareBoundaryPoints(Range.START_TO_START,end)<=0)range.setEnd(to.node,to.offset);else{range.setStart(to.node,to.offset);range.setEnd(from.node,from.offset)}
+return Array.prototype.filter.call(range.getClientRects(),function(rect){return rect.width>0&&rect.height>0}).map(frameOf)}
+var caretLayer=document.createElement('div');caretLayer.className='canvas-carets';caretLayer.setAttribute('aria-hidden','true');form.appendChild(caretLayer);
+var redrawPending=false;editor.addEventListener('input',function(){if(redrawPending)return;redrawPending=true;window.requestAnimationFrame(function(){redrawPending=false;redrawn()})});
+window.addEventListener('resize',function(){redrawn()});
+window.sameoldchatCanvasEditor={cursor:caretID,point:point,stretch:stretch,layer:caretLayer};
+document.addEventListener('selectionchange',function(){var selection=window.getSelection();if(selection.rangeCount&&editor.contains(selection.focusNode))document.dispatchEvent(new Event('sameoldchat-canvas-caret'))});
+var liveStream=window.sameoldchatCanvasStream;if(liveStream&&canvasID){['canvas.updated','canvas.restored'].forEach(function(topic){liveStream.addEventListener(topic,function(event){var data=null;try{data=JSON.parse(event.data||'null')}catch(error){return}if(data&&data.canvas_id===canvasID)receive(data.canvas_text)})})}
 var target=window.location.hash?document.querySelector(window.location.hash):null;if(target&&target.classList&&target.classList.contains('canvas-block'))target.scrollIntoView({block:'center'});
+})();</script>`
+
+// canvasStreamScript opens the canvas page's one live stream, which the
+// editor, the read-only view and presence all listen on. The stream names the
+// canvas, so it also carries canvas.presence frames.
+const canvasStreamScript = `<script>(function(){
+if(window.EventSource&&document.querySelector('[data-event-canvas]'))window.sameoldchatCanvasStream=` + liveStreamOpen + `;
+})();</script>`
+
+// canvasPresenceScript says this page is on the canvas and shows who else
+// is. The page names itself with a random session, renews every five seconds
+// (inside domain.CanvasPresenceTTL), sends its cursor a moment after it moves
+// to another character (the editor's sameoldchatCanvasEditor.caret, a
+// character of the collaborative text), and says it is leaving when the page
+// is hidden for good, coming back if the browser restores it. Everyone else
+// on the canvas is listed by name in the status line above the document, and
+// a writer sees each other writer's cursor, with their name, at the character
+// it is at (the editor's point), and what they have selected (stretch). The cursors are drawn in a layer beside the
+// document rather than in it, so they never become part of the text the
+// editor reads back, and are redrawn whenever the text or the window changes.
+const canvasPresenceScript = `<script>(function(){
+var article=document.querySelector('[data-event-canvas]');var stream=window.sameoldchatCanvasStream;if(!article||!stream||!window.crypto||!window.fetch)return;
+var canvasID=article.getAttribute('data-event-canvas');var url='/app/canvases/'+encodeURIComponent(canvasID)+'/presence';
+var csrf=document.querySelector('input[name=_csrf]');var line=article.querySelector('[data-canvas-present]');var editor=window.sameoldchatCanvasEditor||null;
+var bytes=new Uint8Array(12);window.crypto.getRandomValues(bytes);var session=Array.prototype.map.call(bytes,function(value){return ('0'+value.toString(16)).slice(-2)}).join('');
+var sent='';var timer=0;var renewal=0;var others=[];
+function cursor(){try{return editor?editor.cursor():null}catch(error){return null}}
+function keyOf(at){return at?at.caret.r+':'+at.caret.c+(at.anchor?'/'+at.anchor.r+':'+at.anchor.c:''):''}
+function form(leaving){var body=new URLSearchParams();body.set('_csrf',csrf?csrf.value:'');body.set('session',session);if(leaving){body.set('leave','1');return body}var at=cursor();if(at){body.set('caret_r',at.caret.r);body.set('caret_c',String(at.caret.c));if(at.anchor){body.set('anchor_r',at.anchor.r);body.set('anchor_c',String(at.anchor.c))}}sent=keyOf(at);return body}
+function send(){window.clearTimeout(timer);timer=0;fetch(url,{method:'POST',body:form(false),credentials:'same-origin',headers:{'Accept':'application/json'}}).catch(function(){})}
+function moved(){if(timer||keyOf(cursor())===sent)return;timer=window.setTimeout(send,300)}
+function start(){send();window.clearInterval(renewal);renewal=window.setInterval(send,5000)}
+start();
+document.addEventListener('sameoldchat-canvas-caret',moved);
+window.addEventListener('pagehide',function(){window.clearInterval(renewal);window.clearTimeout(timer);timer=0;if(navigator.sendBeacon)navigator.sendBeacon(url,form(true))});
+window.addEventListener('pageshow',function(event){if(event.persisted)start()});
+function render(){var names=[];others.forEach(function(page){if(names.indexOf(page.name)<0)names.push(page.name)});
+if(line){line.hidden=!names.length;line.textContent=names.length?'Also here: '+names.join(', '):''}
+if(!editor)return;editor.layer.textContent='';
+others.forEach(function(page){if(!page.caret)return;if(page.anchor){var spans=[];try{spans=editor.stretch(page.anchor,page.caret)}catch(error){}spans.forEach(function(span){var shade=document.createElement('span');shade.className='canvas-selection';shade.setAttribute('data-canvas-selection',page.name);shade.style.left=span.left+'px';shade.style.top=span.top+'px';shade.style.width=span.width+'px';shade.style.height=span.height+'px';editor.layer.appendChild(shade)})}var at=null;try{at=editor.point(page.caret)}catch(error){}if(!at)return;var mark=document.createElement('span');mark.className='canvas-caret';mark.setAttribute('data-canvas-caret',page.name);mark.style.left=at.left+'px';mark.style.top=at.top+'px';mark.style.height=at.height+'px';var label=document.createElement('span');label.className='canvas-caret-name';label.textContent=page.name;mark.appendChild(label);editor.layer.appendChild(mark)})}
+stream.addEventListener('canvas.presence',function(event){var data=null;try{data=JSON.parse(event.data||'null')}catch(error){return}if(!data||data.canvas_id!==canvasID||!Array.isArray(data.present))return;others=data.present.filter(function(page){return page.session!==session});render()});
+document.addEventListener('sameoldchat-canvas-redrawn',render);
 })();</script>`
 
 // canvasViewerLiveScript keeps a read-only canvas current: when the canvas
@@ -3372,12 +3443,11 @@ var target=window.location.hash?document.querySelector(window.location.hash):nul
 // that land together are read once; one that arrives during a read is read
 // after it.
 const canvasViewerLiveScript = `<script>(function(){
-var view=document.querySelector('[data-canvas-view]');if(!view||!window.EventSource)return;
+var view=document.querySelector('[data-canvas-view]');var stream=window.sameoldchatCanvasStream;if(!view||!stream)return;
 var canvasID=view.getAttribute('data-canvas-view');var busy=false;var queued=false;var timer=0;
 function refresh(){if(busy){queued=true;return}busy=true;
 fetch(window.location.pathname,{credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('unavailable');return response.text()}).then(function(html){var replacement=new DOMParser().parseFromString(html,'text/html').querySelector('[data-canvas-view]');if(replacement){view.replaceWith(replacement);view=replacement}}).catch(function(){}).finally(function(){busy=false;if(queued){queued=false;schedule()}})}
 function schedule(){window.clearTimeout(timer);timer=window.setTimeout(refresh,300)}
-var stream=` + liveStreamOpen + `;
 ['canvas.updated','canvas.restored'].forEach(function(topic){stream.addEventListener(topic,function(event){var data=null;try{data=JSON.parse(event.data||'null')}catch(error){return}if(data&&data.canvas_id===canvasID)schedule()})});
 })();</script>`
 
@@ -4183,6 +4253,7 @@ func (h Handler) Register(serveMux *http.ServeMux) {
 	mux.HandleFunc("GET /app/canvases/{canvasID}/text", h.canvasText)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/text", h.editCanvasText)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/blocks", h.canvasBlocks)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/presence", h.canvasPresence)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/delete", h.deleteCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/restore", h.restoreCanvas)
 	mux.HandleFunc("GET /app/channel-canvas", h.channelCanvas)
@@ -10118,6 +10189,48 @@ func (h Handler) canvasBlocks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "blocks": blocks})
 }
 
+// canvasPresence records that one page has the canvas open, and where its
+// cursor is (see canvasPresenceScript), or that it is leaving. It answers in
+// JSON; who else is on the canvas arrives on the page's stream.
+func (h Handler) canvasPresence(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the canvas and try again.")
+	if !ok {
+		return
+	}
+	character := func(prefix string) (crdt.ID, bool) {
+		replica := strings.TrimSpace(fields[prefix+"_r"])
+		if replica == "" {
+			return crdt.ID{}, true
+		}
+		clock, parseErr := strconv.ParseUint(strings.TrimSpace(fields[prefix+"_c"]), 10, 64)
+		return crdt.ID{Replica: replica, Clock: clock}, parseErr == nil
+	}
+	caret, caretOK := character("caret")
+	anchor, anchorOK := character("anchor")
+	if !caretOK || !anchorOK {
+		writeJSONRefusal(w, http.StatusBadRequest, "invalid_presence")
+		return
+	}
+	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
+	err = h.Messages.SetCanvasPresence(r.Context(), principal.WorkspaceID, principal.UserID, id, strings.TrimSpace(fields["session"]), domain.CanvasCursor{Caret: caret, Anchor: anchor}, fields["leave"] == "1")
+	switch {
+	case err == nil:
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, map[string]any{"ok": true})
+	case errors.Is(err, store.ErrNotFound):
+		writeJSONRefusal(w, http.StatusNotFound, "not_found")
+	case errors.Is(err, domain.ErrInvalidCanvas), errors.Is(err, store.ErrInvalidArgument):
+		writeJSONRefusal(w, http.StatusBadRequest, "invalid_presence")
+	default:
+		writeJSONRefusal(w, http.StatusServiceUnavailable, "unavailable")
+	}
+}
+
 // writeCanvasWriteError answers a refused canvas write by what refused it.
 func (h Handler) writeCanvasWriteError(w http.ResponseWriter, r *http.Request, err error, heading string) {
 	switch {
@@ -13828,7 +13941,10 @@ func (h Handler) readLiveHead(ctx context.Context, principal auth.Principal) (li
 // liveStreamOpen is the one expression every live page script opens its
 // stream with. EventSource itself resends the last id it received when it
 // reconnects, so the rendered head is only needed for the first connection.
-const liveStreamOpen = `new EventSource('/events'+(/^[0-9]+$/.test(document.body.getAttribute('data-event-head')||'')?'?last_event_id='+document.body.getAttribute('data-event-head'):''))`
+//
+// A canvas page also names its canvas (data-event-canvas), and its stream then
+// carries who is on that canvas as well (realtime.CanvasPresenceSource).
+const liveStreamOpen = `new EventSource((function(){var query=[];var head=document.body.getAttribute('data-event-head')||'';if(/^[0-9]+$/.test(head))query.push('last_event_id='+head);var canvas=document.querySelector('[data-event-canvas]');if(canvas)query.push('canvas='+encodeURIComponent(canvas.getAttribute('data-event-canvas')));return '/events'+(query.length?'?'+query.join('&'):'')})())`
 
 func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data any, status int, unavailable string) {
 	h.writeHTMLWithPolicy(w, page, data, status, unavailable, workspaceContentSecurityPolicy())
@@ -14275,12 +14391,7 @@ func resolveSlackReferenceJSON(raw string, names *userNames) string {
 }
 
 func displayName(user domain.User) string {
-	for _, candidate := range []string{user.Profile.DisplayName, user.RealName, user.Name} {
-		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
-			return trimmed
-		}
-	}
-	return string(user.ID)
+	return user.ShownName()
 }
 
 // profileImageURL chooses the best single image for a human-facing profile

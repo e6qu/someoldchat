@@ -266,6 +266,17 @@ func (w Workspace) SlackDomain() string {
 // NameParts is the member's first and last name as Slack's profile reports
 // them: the stored parts, or, for a member whose name was never written through
 // the profile, RealName split at its first space.
+// ShownName is how a member is named to other people: their display name,
+// else their full name, else their handle, else their ID.
+func (u User) ShownName() string {
+	for _, candidate := range []string{u.Profile.DisplayName, u.RealName, u.Name} {
+		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
+			return trimmed
+		}
+	}
+	return string(u.ID)
+}
+
 func (u User) NameParts() (string, string) {
 	if u.Profile.FirstName != "" || u.Profile.LastName != "" {
 		return u.Profile.FirstName, u.Profile.LastName
