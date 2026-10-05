@@ -522,7 +522,7 @@ assert_contains "$work/keyboard-navigation.html" 'Ctrl Shift 3' \
 # the Later it replaces (see the LATER-02 row of specs/product-gap-audit.md).
 # These hold the gap to Slack's current wording, so the row is revisited when
 # Slack's articles change again.
-assert_contains "$work/later.html" 'Saved items have moved out of Later (which is now To-dos)' \
+assert_contains "$work/later.html" 'Saved items have moved out of Later (which is now To-dos' \
 	'[LATER-02] Slack is replacing Later with To-dos and Saved' "$later_help_url"
 assert_contains "$work/later.html" 'access them from the Saved section of Home' \
 	'[LATER-01] saved items live in the Saved section of Home' "$later_help_url"
