@@ -3385,19 +3385,24 @@ var before=serialize();var made=part.liveBlocks.map(renderedBlock);made.forEach(
 if(serialize()!==before){editor.insertBefore(part,made[0]);made.forEach(function(view){view.remove()})}redrawn()}
 document.addEventListener('selectionchange',function(){if(!liveDeferred.length)return;var waiting=liveDeferred;liveDeferred=[];waiting.forEach(swap)});
 function resync(){if(liveSyncing||stopped)return;liveSyncing=true;var again=false;capture();
-fetch(textURL,{credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){if(!response.ok)throw new Error('unavailable');return response.json()}).then(function(data){capture();var fresh=window.sameoldchatCanvasText.load(JSON.parse(data.text_state||'[]'));queue.forEach(function(op){fresh.apply(op)});
+fetch(textURL,{credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){if(!response.ok)throw new Error('unavailable');return response.json()}).then(function(data){capture();var held=holdCaret();var fresh=window.sameoldchatCanvasText.load(JSON.parse(data.text_state||'[]'));queue.forEach(function(op){fresh.apply(op)});
 if(fresh.pendingCount()>0)throw new Error('out of step');
 var buffered=liveBuffer;liveBuffer=[];buffered.forEach(function(change){if(change.resync||!Array.isArray(change.ops)){again=true;return}change.ops.forEach(function(op){fresh.apply(op)})});
-if(fresh.pendingCount()>0)again=true;doc=fresh;reconcile();liveAttempts=again?liveAttempts+1:0;if(liveAttempts>3)throw new Error('out of step')}).catch(function(){stopped=true;again=false;say('This canvas changed in a way this page cannot follow. Reload the canvas to keep writing.')}).finally(function(){liveSyncing=false;if(again)resync()})}
+if(fresh.pendingCount()>0)again=true;doc=fresh;reconcile();putCaret(held);liveAttempts=again?liveAttempts+1:0;if(liveAttempts>3)throw new Error('out of step')}).catch(function(){stopped=true;again=false;say('This canvas changed in a way this page cannot follow. Reload the canvas to keep writing.')}).finally(function(){liveSyncing=false;if(again)resync()})}
 function receive(change){if(stopped||!change)return;if(liveSyncing){liveBuffer.push(change);return}if(change.resync||!Array.isArray(change.ops)){resync();return}
-capture();try{change.ops.forEach(function(op){doc.apply(op)})}catch(error){resync();return}
-if(doc.pendingCount()>0){resync();return}reconcile();if(queue.length&&!sending)schedule(600)}
+capture();var held=holdCaret();try{change.ops.forEach(function(op){doc.apply(op)})}catch(error){resync();return}
+if(doc.pendingCount()>0){resync();return}reconcile();putCaret(held);if(queue.length&&!sending)schedule(600)}
 function visibleText(node){return Array.from(node.textContent.replace(/ /g,' ').replace(/​/g,''))}
 function alignment(markdown,visible){var source=Array.from(markdown);var map=[];var index=0;for(var position=0;position<visible.length;position++){var at=index;while(at<source.length&&source[at]!==visible[position])at++;if(at<source.length){map.push(at);index=at+1}else map.push(Math.min(index,source.length))}map.push(source.length);return map}
-function idFor(node,at){var parts=topParts();var offset=0;
+function positionFor(node,at){var parts=topParts();var offset=0;
 for(var index=0;index<parts.length;index++){var part=parts[index];if(part.nodes.some(function(candidate){return candidate.contains(node)})){var block=part.nodes[0];var inBlock=0;
-if(block.nodeType===1){var range=document.createRange();range.setStart(block,0);try{range.setEnd(node,at)}catch(error){return null}var shown=Array.from(range.toString().replace(/ /g,' ').replace(/​/g,'')).length;var visible=visibleText(block);inBlock=alignment(part.text,visible)[Math.min(shown,visible.length)]}
-var position=offset+inBlock;return position>0?doc.idAt(position-1):doc.idAt(0)}offset+=Array.from(part.text).length+2}return null}
+if(block.nodeType===1){var range=document.createRange();range.setStart(block,0);try{range.setEnd(node,at)}catch(error){return -1}var shown=Array.from(range.toString().replace(/ /g,' ').replace(/​/g,'')).length;var visible=visibleText(block);inBlock=alignment(part.text,visible)[Math.min(shown,visible.length)]}
+return offset+inBlock}offset+=Array.from(part.text).length+2}return -1}
+function idFor(node,at){var position=positionFor(node,at);if(position<0)return null;return position>0?doc.idAt(position-1):doc.idAt(0)}
+function holdEnd(node,at){if(!editor.contains(node))return null;var position=positionFor(node,at);if(position<0)return null;return position>0?{id:doc.idAt(position-1)}:{start:true}}
+function holdCaret(){var selection=window.getSelection();if(!selection.rangeCount||!editor.contains(selection.focusNode))return null;var focus=holdEnd(selection.focusNode,selection.focusOffset);if(!focus)return null;return{focus:focus,anchor:selection.isCollapsed?focus:holdEnd(selection.anchorNode,selection.anchorOffset)||focus}}
+function endAt(held){if(held.start){var first=topParts()[0];if(!first||first.nodes[0].nodeType!==1)return null;var walker=document.createTreeWalker(first.nodes[0],NodeFilter.SHOW_TEXT);var text=walker.nextNode();return text?{node:text,offset:0}:{node:first.nodes[0],offset:0}}return held.id?spot(held.id):null}
+function putCaret(held){if(!held)return;var focus=endAt(held.focus);var anchor=held.anchor===held.focus?focus:endAt(held.anchor);if(!focus||!anchor)return;window.getSelection().setBaseAndExtent(anchor.node,anchor.offset,focus.node,focus.offset)}
 function caretID(){var selection=window.getSelection();if(!selection.rangeCount||!editor.contains(selection.focusNode))return null;capture();var caret=idFor(selection.focusNode,selection.focusOffset);if(!caret)return null;
 var anchor=selection.isCollapsed||!editor.contains(selection.anchorNode)?null:idFor(selection.anchorNode,selection.anchorOffset);if(anchor&&anchor.r===caret.r&&anchor.c===caret.c)anchor=null;return{caret:caret,anchor:anchor}}
 function spot(id){var position=doc.positionOf(id);if(position<0)return null;var caret=position+1;var parts=topParts();var offset=0;
@@ -3412,6 +3417,7 @@ function stretch(anchor,caret){var from=spot(anchor);var to=spot(caret);if(!from
 var end=document.createRange();end.setStart(to.node,to.offset);if(range.compareBoundaryPoints(Range.START_TO_START,end)<=0)range.setEnd(to.node,to.offset);else{range.setStart(to.node,to.offset);range.setEnd(from.node,from.offset)}
 return Array.prototype.filter.call(range.getClientRects(),function(rect){return rect.width>0&&rect.height>0}).map(frameOf)}
 var caretLayer=document.createElement('div');caretLayer.className='canvas-carets';caretLayer.setAttribute('aria-hidden','true');form.appendChild(caretLayer);
+function redrawn(){document.dispatchEvent(new Event('sameoldchat-canvas-redrawn'))}
 var redrawPending=false;editor.addEventListener('input',function(){if(redrawPending)return;redrawPending=true;window.requestAnimationFrame(function(){redrawPending=false;redrawn()})});
 window.addEventListener('resize',function(){redrawn()});
 window.sameoldchatCanvasEditor={cursor:caretID,point:point,stretch:stretch,layer:caretLayer};
