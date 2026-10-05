@@ -80,4 +80,11 @@ package mutation
 // 71 to 69: measured after calls.* began refusing a huddle's ID and the
 // workspace policy began governing private channels; their service tests
 // catch two more operations whose guard used to run on unnoticed.
-const survivingGuardCeiling = 69
+//
+// 69 to 68: a removed guard now stands in as a block over its arguments, so
+// every mutant builds and changes only its guards; the judged mutants include
+// three a service test now refuses (an administrator appointing an owner, a
+// non-manager reading a step's responses, an outsider listing a private
+// channel's featured workflows) and runWorkflow, refused for a private channel
+// its runner is not in.
+const survivingGuardCeiling = 68
