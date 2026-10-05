@@ -17,8 +17,8 @@ import (
 // resolves a member id to the name this reader is allowed to see.
 //
 // The line is deliberately not part of the timeline fragment. The timeline is
-// refreshed by a shared generation-and-abort machine that exists to keep
-// message history consistent, and folding a signal that changes every couple of
+// refreshed by a per-region refresh machine (progressiveEnhancementScript) that
+// exists to keep message history consistent, and folding a signal that changes every couple of
 // seconds into it would mean re-fetching the whole conversation to render six
 // words, and would give the indicator the timeline's failure modes as well.
 
