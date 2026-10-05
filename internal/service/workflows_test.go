@@ -721,6 +721,15 @@ func TestWorkflowExportsReturnRunsAndFormResponses(t *testing.T) {
 	if _, err := messages.WorkflowFormResponseExport(ctx, "T1", "U2", workflow.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("member form export error=%v, want ErrNotFound", err)
 	}
+	// One step's responses are the manager's too: the member who answered the
+	// form cannot read everyone's answers to it.
+	stepResponses, err := messages.WorkflowStepResponses(ctx, "T1", "U1", workflow.ID, "intake")
+	if err != nil || len(stepResponses) != 1 {
+		t.Fatalf("step responses=%+v err=%v", stepResponses, err)
+	}
+	if _, err := messages.WorkflowStepResponses(ctx, "T1", "U2", workflow.ID, "intake"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("member step responses error=%v, want ErrNotFound", err)
+	}
 }
 
 func TestWorkflowFormAndButtonStepsPauseForHumanInput(t *testing.T) {

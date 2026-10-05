@@ -684,3 +684,37 @@ func TestCreatingAConversationMakesTheCreatorAMemberOfIt(t *testing.T) {
 		})
 	}
 }
+
+// An administrator may appoint administrators but not owners: granting a role
+// above one's own is refused before anything is written.
+func TestAnAdministratorCannotAppointAnOwner(t *testing.T) {
+	ctx := context.Background()
+	s, messages := twoMemberWorkspace(t)
+	if err := messages.SetUserRole(ctx, "T1", "U1", "U2", domain.WorkspaceRoleOwner); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
+		t.Fatalf("admin appointing an owner: err=%v, want ErrNotWorkspaceAdmin", err)
+	}
+	membership, err := s.GetWorkspaceMembership(ctx, "T1", "U2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if membership.Role != domain.WorkspaceRoleMember {
+		t.Fatalf("refused appointment left role %q", membership.Role)
+	}
+	if err := messages.SetUserRole(ctx, "T1", "U1", "U2", domain.WorkspaceRoleAdmin); err != nil {
+		t.Fatalf("admin appointing an admin: %v", err)
+	}
+}
+
+// The workflows featured in a private channel are part of that channel: a
+// member outside it cannot list them, and the refusal is the same not-found a
+// channel that does not exist gets.
+func TestFeaturedWorkflowsOfAPrivateChannelAreItsMembersOnly(t *testing.T) {
+	ctx := context.Background()
+	_, messages := twoMemberWorkspace(t)
+	if _, err := messages.ListFeaturedWorkflows(ctx, "T1", "U2", []domain.ConversationID{"CPRIV"}); err != nil {
+		t.Fatalf("member listing their channel's featured workflows: %v", err)
+	}
+	if _, err := messages.ListFeaturedWorkflows(ctx, "T1", "U3", []domain.ConversationID{"C1", "CPRIV"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("outsider listing a private channel's featured workflows: err=%v, want ErrNotFound", err)
+	}
+}
