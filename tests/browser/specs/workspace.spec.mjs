@@ -4950,15 +4950,11 @@ test('[COMP-01 THREAD-02 FILE-01] a reply with a file is also sent to the channe
   }).toBe('thread_broadcast');
 });
 
-// A canvas keeps what it said before, and a member can put it back. Restoring
-// is an ordinary edit rather than a rewind, so the content it replaced becomes
-// a revision of its own — which is what makes restoring the wrong one
-// recoverable rather than a second mistake.
 // A canvas saves itself as it is written, as Slack's does: no Save press, and
-// what was written is there after a reload. A second tab that changes it
-// first stops the first tab's autosave rather than being overwritten, and the
-// first tab's text is kept and brought back with the reason.
-test('[CANVAS-02 A11Y-01] a canvas saves itself and stops when someone else changes it', async ({ page, context }) => {
+// what was written is there after a reload. Two tabs writing at once both keep
+// their words: each sends its edits as ops on the canvas's collaborative text,
+// which merge rather than overwrite or refuse each other.
+test('[CANVAS-02 A11Y-01] a canvas saves itself and two writers at once both keep their words', async ({ page, context }) => {
   await signIn(context);
   const name = `autosave-${Date.now()}`;
   await page.goto('/app/canvases');
@@ -4977,27 +4973,31 @@ test('[CANVAS-02 A11Y-01] a canvas saves itself and stops when someone else chan
   await page.reload();
   await expect(editor).toHaveText('the first line, and what followed it');
 
-  // Another tab writes first.
+  // Another tab opens the same text and writes at the start while this one
+  // writes at the end, neither having seen the other's words.
   const other = await context.newPage();
   await other.goto(page.url());
   const otherEditor = other.getByRole('textbox', { name: 'Canvas content' });
   await otherEditor.click();
-  await other.keyboard.press('Control+End');
-  await other.keyboard.type(' (edited elsewhere)');
+  await other.keyboard.press('Control+Home');
+  await other.keyboard.type('Intro: ');
   await expect(other.locator('[data-canvas-status]')).toHaveText('Saved');
   await other.close();
 
   await editor.click();
   await page.keyboard.press('Control+End');
   await page.keyboard.type(' plus my own ending');
-  await expect(state).toContainText('Someone else changed this canvas after you opened it');
-  await expect(editor).toContainText('plus my own ending');
+  await expect(state).toHaveText('Saved');
   await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole('button', { name: 'Save canvas' }).click();
-  await expect(page.getByRole('alert')).toContainText('someone else changed it after you opened it');
-  await expect(page.locator('textarea[name="markdown"]')).toHaveValue(/plus my own ending/);
+  await expect(page.getByRole('status').filter({ hasText: 'Canvas saved' })).toBeVisible();
+  await expect(editor).toHaveText('Intro: the first line, and what followed it plus my own ending');
 });
 
+// A canvas keeps what it said before, and a member can put it back. Restoring
+// is an ordinary edit rather than a rewind, so the content it replaced becomes
+// a revision of its own — which is what makes restoring the wrong one
+// recoverable rather than a second mistake.
 test('[CANVAS-01 A11Y-01] a canvas keeps its history and an earlier revision can be restored', async ({ page, context }) => {
   await signIn(context);
   const first = `canvas-past-${Date.now()}`;

@@ -250,11 +250,15 @@ var (
 	// ErrBadOAuthClientSecret is a known client presenting the wrong secret.
 	// Slack reports it as bad_client_secret, distinct from an unknown
 	// client's invalid_client_id.
-	ErrBadOAuthClientSecret        = errors.New("oauth client secret is wrong")
-	ErrOAuthAppMismatch            = errors.New("oauth client and token app do not match")
-	ErrInvalidIntegrationLogs      = errors.New("integration log arguments are invalid")
-	ErrInvalidBookmark             = errors.New("bookmark title, type, and link are invalid")
-	ErrInvalidCanvas               = errors.New("canvas content or access arguments are invalid")
+	ErrBadOAuthClientSecret   = errors.New("oauth client secret is wrong")
+	ErrOAuthAppMismatch       = errors.New("oauth client and token app do not match")
+	ErrInvalidIntegrationLogs = errors.New("integration log arguments are invalid")
+	ErrInvalidBookmark        = errors.New("bookmark title, type, and link are invalid")
+	ErrInvalidCanvas          = errors.New("canvas content or access arguments are invalid")
+	// ErrCanvasTooLarge is an edit that would make a canvas longer than
+	// CanvasMarkdownLimit, or its collaborative text larger than
+	// CanvasTextStateLimit.
+	ErrCanvasTooLarge              = errors.New("canvas is larger than a canvas can be")
 	ErrInvalidExternalUpload       = errors.New("external upload is invalid")
 	ErrConversationAlreadyArchived = errors.New("conversation is already archived")
 	ErrConversationNotArchived     = errors.New("conversation is not archived")

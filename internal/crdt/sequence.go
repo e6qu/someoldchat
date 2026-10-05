@@ -362,3 +362,84 @@ func (s *Sequence) Replace(replica string, text string) ([]Op, error) {
 	}
 	return ops, nil
 }
+
+// Run is a stretch of the document as stored: consecutive characters of one
+// writer with consecutive clocks, either the text they read as or, once
+// deleted, only how many there were. A tombstone needs its place and its name
+// for edits that refer to it, never its text.
+type Run struct {
+	Replica string `json:"r"`
+	Clock   uint64 `json:"c"`
+	Text    string `json:"t,omitempty"`
+	Deleted int    `json:"n,omitempty"`
+}
+
+// Snapshot is the document as stored: every character in order, tombstones
+// included, as runs. Load reads it back to the same replica state.
+func (s *Sequence) Snapshot() []Run {
+	runs := []Run{}
+	var text strings.Builder
+	flush := func() {
+		if last := len(runs) - 1; last >= 0 && runs[last].Deleted == 0 {
+			runs[last].Text = text.String()
+		}
+		text.Reset()
+	}
+	var previous *node
+	for current := s.head.next; current != nil; current = current.next {
+		continues := previous != nil && previous.id.Replica == current.id.Replica &&
+			previous.id.Clock+1 == current.id.Clock && previous.deleted == current.deleted
+		if !continues {
+			flush()
+			runs = append(runs, Run{Replica: current.id.Replica, Clock: current.id.Clock})
+		}
+		if current.deleted {
+			runs[len(runs)-1].Deleted++
+		} else {
+			text.WriteRune(current.value)
+		}
+		previous = current
+	}
+	flush()
+	return runs
+}
+
+// Load is the replica a snapshot describes. It refuses a snapshot that names
+// a character twice or that no document could hold, rather than building a
+// replica that would disagree with the others.
+func Load(runs []Run) (*Sequence, error) {
+	s := New()
+	tail := &s.head
+	for _, run := range runs {
+		count := run.Deleted
+		if run.Text != "" {
+			if run.Deleted != 0 || !utf8.ValidString(run.Text) {
+				return nil, errors.New("a stored run is either text or deleted characters")
+			}
+			count = utf8.RuneCountInString(run.Text)
+		}
+		if !replicaName.MatchString(run.Replica) || run.Clock == 0 || count <= 0 || run.Clock+uint64(count)-1 > maxClock {
+			return nil, errors.New("a stored run names characters no document holds")
+		}
+		deleted, values := run.Text == "", []rune(run.Text)
+		for index := range count {
+			id := ID{Replica: run.Replica, Clock: run.Clock + uint64(index)}
+			if _, repeated := s.nodes[id]; repeated {
+				return nil, errors.New("a stored document names a character twice")
+			}
+			current := &node{id: id, deleted: deleted}
+			if !deleted {
+				current.value = values[index]
+				s.visible++
+			}
+			tail.next = current
+			tail = current
+			s.nodes[id] = current
+			s.clock = max(s.clock, id.Clock)
+		}
+	}
+	return s, nil
+}
+
+// ValidReplica reports whether name may name a writer.
+func ValidReplica(name string) bool { return replicaName.MatchString(name) }

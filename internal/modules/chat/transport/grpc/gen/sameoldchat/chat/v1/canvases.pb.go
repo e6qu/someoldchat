@@ -31,8 +31,10 @@ type Canvas struct {
 	CreatedAt       int64                  `protobuf:"varint,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt       int64                  `protobuf:"varint,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	Version         int64                  `protobuf:"varint,8,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The collaborative text as crdt.Run JSON (domain.Canvas.TextState).
+	TextState     string `protobuf:"bytes,9,opt,name=text_state,json=textState,proto3" json:"text_state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Canvas) Reset() {
@@ -119,6 +121,13 @@ func (x *Canvas) GetVersion() int64 {
 		return x.Version
 	}
 	return 0
+}
+
+func (x *Canvas) GetTextState() string {
+	if x != nil {
+		return x.TextState
+	}
+	return ""
 }
 
 type CreateCanvasRequest struct {
@@ -1521,6 +1530,119 @@ func (x *SaveCanvasMarkdownResponse) GetVersion() int64 {
 	return 0
 }
 
+type EditCanvasTextRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	CanvasId    string                 `protobuf:"bytes,3,opt,name=canvas_id,json=canvasId,proto3" json:"canvas_id,omitempty"`
+	// The editor's ops as the JSON array package crdt encodes.
+	Ops           string `protobuf:"bytes,4,opt,name=ops,proto3" json:"ops,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EditCanvasTextRequest) Reset() {
+	*x = EditCanvasTextRequest{}
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EditCanvasTextRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EditCanvasTextRequest) ProtoMessage() {}
+
+func (x *EditCanvasTextRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EditCanvasTextRequest.ProtoReflect.Descriptor instead.
+func (*EditCanvasTextRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *EditCanvasTextRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *EditCanvasTextRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *EditCanvasTextRequest) GetCanvasId() string {
+	if x != nil {
+		return x.CanvasId
+	}
+	return ""
+}
+
+func (x *EditCanvasTextRequest) GetOps() string {
+	if x != nil {
+		return x.Ops
+	}
+	return ""
+}
+
+type EditCanvasTextResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       int64                  `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EditCanvasTextResponse) Reset() {
+	*x = EditCanvasTextResponse{}
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EditCanvasTextResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EditCanvasTextResponse) ProtoMessage() {}
+
+func (x *EditCanvasTextResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EditCanvasTextResponse.ProtoReflect.Descriptor instead.
+func (*EditCanvasTextResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *EditCanvasTextResponse) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
 type CanvasAccessRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -1535,7 +1657,7 @@ type CanvasAccessRequest struct {
 
 func (x *CanvasAccessRequest) Reset() {
 	*x = CanvasAccessRequest{}
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[21]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1547,7 +1669,7 @@ func (x *CanvasAccessRequest) String() string {
 func (*CanvasAccessRequest) ProtoMessage() {}
 
 func (x *CanvasAccessRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[21]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1560,7 +1682,7 @@ func (x *CanvasAccessRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CanvasAccessRequest.ProtoReflect.Descriptor instead.
 func (*CanvasAccessRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{21}
+	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CanvasAccessRequest) GetWorkspaceId() string {
@@ -1618,7 +1740,7 @@ type CanvasAccessDeleteRequest struct {
 
 func (x *CanvasAccessDeleteRequest) Reset() {
 	*x = CanvasAccessDeleteRequest{}
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[22]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1630,7 +1752,7 @@ func (x *CanvasAccessDeleteRequest) String() string {
 func (*CanvasAccessDeleteRequest) ProtoMessage() {}
 
 func (x *CanvasAccessDeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[22]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1643,7 +1765,7 @@ func (x *CanvasAccessDeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CanvasAccessDeleteRequest.ProtoReflect.Descriptor instead.
 func (*CanvasAccessDeleteRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{22}
+	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *CanvasAccessDeleteRequest) GetWorkspaceId() string {
@@ -1693,7 +1815,7 @@ type CanvasAccessResponse struct {
 
 func (x *CanvasAccessResponse) Reset() {
 	*x = CanvasAccessResponse{}
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[23]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1705,7 +1827,7 @@ func (x *CanvasAccessResponse) String() string {
 func (*CanvasAccessResponse) ProtoMessage() {}
 
 func (x *CanvasAccessResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[23]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1718,7 +1840,7 @@ func (x *CanvasAccessResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CanvasAccessResponse.ProtoReflect.Descriptor instead.
 func (*CanvasAccessResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{23}
+	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *CanvasAccessResponse) GetCanvasId() string {
@@ -1760,7 +1882,7 @@ type CanvasSection struct {
 
 func (x *CanvasSection) Reset() {
 	*x = CanvasSection{}
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[24]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1772,7 +1894,7 @@ func (x *CanvasSection) String() string {
 func (*CanvasSection) ProtoMessage() {}
 
 func (x *CanvasSection) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[24]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1785,7 +1907,7 @@ func (x *CanvasSection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CanvasSection.ProtoReflect.Descriptor instead.
 func (*CanvasSection) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{24}
+	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CanvasSection) GetId() string {
@@ -1821,7 +1943,7 @@ type CanvasSectionsLookupRequest struct {
 
 func (x *CanvasSectionsLookupRequest) Reset() {
 	*x = CanvasSectionsLookupRequest{}
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[25]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1833,7 +1955,7 @@ func (x *CanvasSectionsLookupRequest) String() string {
 func (*CanvasSectionsLookupRequest) ProtoMessage() {}
 
 func (x *CanvasSectionsLookupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[25]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1846,7 +1968,7 @@ func (x *CanvasSectionsLookupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CanvasSectionsLookupRequest.ProtoReflect.Descriptor instead.
 func (*CanvasSectionsLookupRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{25}
+	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CanvasSectionsLookupRequest) GetWorkspaceId() string {
@@ -1886,7 +2008,7 @@ type CanvasSectionsResponse struct {
 
 func (x *CanvasSectionsResponse) Reset() {
 	*x = CanvasSectionsResponse{}
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[26]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1898,7 +2020,7 @@ func (x *CanvasSectionsResponse) String() string {
 func (*CanvasSectionsResponse) ProtoMessage() {}
 
 func (x *CanvasSectionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[26]
+	mi := &file_sameoldchat_chat_v1_canvases_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1911,7 +2033,7 @@ func (x *CanvasSectionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CanvasSectionsResponse.ProtoReflect.Descriptor instead.
 func (*CanvasSectionsResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{26}
+	return file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CanvasSectionsResponse) GetSections() []*CanvasSection {
@@ -1925,7 +2047,7 @@ var File_sameoldchat_chat_v1_canvases_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_canvases_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/canvases.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xef\x01\n" +
+	"\"sameoldchat/chat/v1/canvases.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\x8e\x02\n" +
 	"\x06Canvas\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x19\n" +
@@ -1936,7 +2058,9 @@ const file_sameoldchat_chat_v1_canvases_proto_rawDesc = "" +
 	"created_at\x18\x06 \x01(\x03R\tcreatedAt\x12\x1d\n" +
 	"\n" +
 	"updated_at\x18\a \x01(\x03R\tupdatedAt\x12\x18\n" +
-	"\aversion\x18\b \x01(\x03R\aversion\"\xb1\x01\n" +
+	"\aversion\x18\b \x01(\x03R\aversion\x12\x1d\n" +
+	"\n" +
+	"text_state\x18\t \x01(\tR\ttextState\"\xb1\x01\n" +
 	"\x13CreateCanvasRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
@@ -2052,7 +2176,14 @@ const file_sameoldchat_chat_v1_canvases_proto_rawDesc = "" +
 	"\bmarkdown\x18\x05 \x01(\tR\bmarkdown\"l\n" +
 	"\x1aSaveCanvasMarkdownResponse\x124\n" +
 	"\x16sections_changed_count\x18\x01 \x01(\x05R\x14sectionsChangedCount\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\x03R\aversion\"\xcd\x01\n" +
+	"\aversion\x18\x02 \x01(\x03R\aversion\"\x82\x01\n" +
+	"\x15EditCanvasTextRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1b\n" +
+	"\tcanvas_id\x18\x03 \x01(\tR\bcanvasId\x12\x10\n" +
+	"\x03ops\x18\x04 \x01(\tR\x03ops\"2\n" +
+	"\x16EditCanvasTextResponse\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\x03R\aversion\"\xcd\x01\n" +
 	"\x13CanvasAccessRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1b\n" +
@@ -2084,7 +2215,7 @@ const file_sameoldchat_chat_v1_canvases_proto_rawDesc = "" +
 	"\tcanvas_id\x18\x03 \x01(\tR\bcanvasId\x12\x1a\n" +
 	"\bcriteria\x18\x04 \x01(\tR\bcriteria\"X\n" +
 	"\x16CanvasSectionsResponse\x12>\n" +
-	"\bsections\x18\x01 \x03(\v2\".sameoldchat.chat.v1.CanvasSectionR\bsections2\xf5\x0e\n" +
+	"\bsections\x18\x01 \x03(\v2\".sameoldchat.chat.v1.CanvasSectionR\bsections2\xe0\x0f\n" +
 	"\x0fCanvasesService\x12U\n" +
 	"\fCreateCanvas\x12(.sameoldchat.chat.v1.CreateCanvasRequest\x1a\x1b.sameoldchat.chat.v1.Canvas\x12a\n" +
 	"\x18CreateConversationCanvas\x12(.sameoldchat.chat.v1.CreateCanvasRequest\x1a\x1b.sameoldchat.chat.v1.Canvas\x12[\n" +
@@ -2101,7 +2232,8 @@ const file_sameoldchat_chat_v1_canvases_proto_rawDesc = "" +
 	"\x15RestoreCanvasRevision\x121.sameoldchat.chat.v1.RestoreCanvasRevisionRequest\x1a\x1b.sameoldchat.chat.v1.Canvas\x12[\n" +
 	"\n" +
 	"EditCanvas\x12&.sameoldchat.chat.v1.EditCanvasRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12u\n" +
-	"\x12SaveCanvasMarkdown\x12..sameoldchat.chat.v1.SaveCanvasMarkdownRequest\x1a/.sameoldchat.chat.v1.SaveCanvasMarkdownResponse\x12Y\n" +
+	"\x12SaveCanvasMarkdown\x12..sameoldchat.chat.v1.SaveCanvasMarkdownRequest\x1a/.sameoldchat.chat.v1.SaveCanvasMarkdownResponse\x12i\n" +
+	"\x0eEditCanvasText\x12*.sameoldchat.chat.v1.EditCanvasTextRequest\x1a+.sameoldchat.chat.v1.EditCanvasTextResponse\x12Y\n" +
 	"\fDeleteCanvas\x12\".sameoldchat.chat.v1.CanvasRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12b\n" +
 	"\x0fSetCanvasAccess\x12(.sameoldchat.chat.v1.CanvasAccessRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12k\n" +
 	"\x12DeleteCanvasAccess\x12..sameoldchat.chat.v1.CanvasAccessDeleteRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12u\n" +
@@ -2119,7 +2251,7 @@ func file_sameoldchat_chat_v1_canvases_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_canvases_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_canvases_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_sameoldchat_chat_v1_canvases_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_sameoldchat_chat_v1_canvases_proto_goTypes = []any{
 	(*Canvas)(nil),                       // 0: sameoldchat.chat.v1.Canvas
 	(*CreateCanvasRequest)(nil),          // 1: sameoldchat.chat.v1.CreateCanvasRequest
@@ -2142,20 +2274,22 @@ var file_sameoldchat_chat_v1_canvases_proto_goTypes = []any{
 	(*EditCanvasRequest)(nil),            // 18: sameoldchat.chat.v1.EditCanvasRequest
 	(*SaveCanvasMarkdownRequest)(nil),    // 19: sameoldchat.chat.v1.SaveCanvasMarkdownRequest
 	(*SaveCanvasMarkdownResponse)(nil),   // 20: sameoldchat.chat.v1.SaveCanvasMarkdownResponse
-	(*CanvasAccessRequest)(nil),          // 21: sameoldchat.chat.v1.CanvasAccessRequest
-	(*CanvasAccessDeleteRequest)(nil),    // 22: sameoldchat.chat.v1.CanvasAccessDeleteRequest
-	(*CanvasAccessResponse)(nil),         // 23: sameoldchat.chat.v1.CanvasAccessResponse
-	(*CanvasSection)(nil),                // 24: sameoldchat.chat.v1.CanvasSection
-	(*CanvasSectionsLookupRequest)(nil),  // 25: sameoldchat.chat.v1.CanvasSectionsLookupRequest
-	(*CanvasSectionsResponse)(nil),       // 26: sameoldchat.chat.v1.CanvasSectionsResponse
-	(*MutationResponse)(nil),             // 27: sameoldchat.chat.v1.MutationResponse
+	(*EditCanvasTextRequest)(nil),        // 21: sameoldchat.chat.v1.EditCanvasTextRequest
+	(*EditCanvasTextResponse)(nil),       // 22: sameoldchat.chat.v1.EditCanvasTextResponse
+	(*CanvasAccessRequest)(nil),          // 23: sameoldchat.chat.v1.CanvasAccessRequest
+	(*CanvasAccessDeleteRequest)(nil),    // 24: sameoldchat.chat.v1.CanvasAccessDeleteRequest
+	(*CanvasAccessResponse)(nil),         // 25: sameoldchat.chat.v1.CanvasAccessResponse
+	(*CanvasSection)(nil),                // 26: sameoldchat.chat.v1.CanvasSection
+	(*CanvasSectionsLookupRequest)(nil),  // 27: sameoldchat.chat.v1.CanvasSectionsLookupRequest
+	(*CanvasSectionsResponse)(nil),       // 28: sameoldchat.chat.v1.CanvasSectionsResponse
+	(*MutationResponse)(nil),             // 29: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_canvases_proto_depIdxs = []int32{
 	4,  // 0: sameoldchat.chat.v1.CanvasCommentPage.comments:type_name -> sameoldchat.chat.v1.CanvasComment
 	9,  // 1: sameoldchat.chat.v1.CanvasRevisionPage.revisions:type_name -> sameoldchat.chat.v1.CanvasRevision
 	11, // 2: sameoldchat.chat.v1.CanvasGrantsResponse.grants:type_name -> sameoldchat.chat.v1.CanvasGrant
 	0,  // 3: sameoldchat.chat.v1.CanvasPage.canvases:type_name -> sameoldchat.chat.v1.Canvas
-	24, // 4: sameoldchat.chat.v1.CanvasSectionsResponse.sections:type_name -> sameoldchat.chat.v1.CanvasSection
+	26, // 4: sameoldchat.chat.v1.CanvasSectionsResponse.sections:type_name -> sameoldchat.chat.v1.CanvasSection
 	1,  // 5: sameoldchat.chat.v1.CanvasesService.CreateCanvas:input_type -> sameoldchat.chat.v1.CreateCanvasRequest
 	1,  // 6: sameoldchat.chat.v1.CanvasesService.CreateConversationCanvas:input_type -> sameoldchat.chat.v1.CreateCanvasRequest
 	1,  // 7: sameoldchat.chat.v1.CanvasesService.ConversationCanvas:input_type -> sameoldchat.chat.v1.CreateCanvasRequest
@@ -2171,31 +2305,33 @@ var file_sameoldchat_chat_v1_canvases_proto_depIdxs = []int32{
 	15, // 17: sameoldchat.chat.v1.CanvasesService.RestoreCanvasRevision:input_type -> sameoldchat.chat.v1.RestoreCanvasRevisionRequest
 	18, // 18: sameoldchat.chat.v1.CanvasesService.EditCanvas:input_type -> sameoldchat.chat.v1.EditCanvasRequest
 	19, // 19: sameoldchat.chat.v1.CanvasesService.SaveCanvasMarkdown:input_type -> sameoldchat.chat.v1.SaveCanvasMarkdownRequest
-	2,  // 20: sameoldchat.chat.v1.CanvasesService.DeleteCanvas:input_type -> sameoldchat.chat.v1.CanvasRequest
-	21, // 21: sameoldchat.chat.v1.CanvasesService.SetCanvasAccess:input_type -> sameoldchat.chat.v1.CanvasAccessRequest
-	22, // 22: sameoldchat.chat.v1.CanvasesService.DeleteCanvasAccess:input_type -> sameoldchat.chat.v1.CanvasAccessDeleteRequest
-	25, // 23: sameoldchat.chat.v1.CanvasesService.LookupCanvasSections:input_type -> sameoldchat.chat.v1.CanvasSectionsLookupRequest
-	0,  // 24: sameoldchat.chat.v1.CanvasesService.CreateCanvas:output_type -> sameoldchat.chat.v1.Canvas
-	0,  // 25: sameoldchat.chat.v1.CanvasesService.CreateConversationCanvas:output_type -> sameoldchat.chat.v1.Canvas
-	0,  // 26: sameoldchat.chat.v1.CanvasesService.ConversationCanvas:output_type -> sameoldchat.chat.v1.Canvas
-	0,  // 27: sameoldchat.chat.v1.CanvasesService.GetCanvas:output_type -> sameoldchat.chat.v1.Canvas
-	23, // 28: sameoldchat.chat.v1.CanvasesService.GetCanvasAccess:output_type -> sameoldchat.chat.v1.CanvasAccessResponse
-	17, // 29: sameoldchat.chat.v1.CanvasesService.ListCanvases:output_type -> sameoldchat.chat.v1.CanvasPage
-	17, // 30: sameoldchat.chat.v1.CanvasesService.SearchCanvases:output_type -> sameoldchat.chat.v1.CanvasPage
-	10, // 31: sameoldchat.chat.v1.CanvasesService.CanvasRevisions:output_type -> sameoldchat.chat.v1.CanvasRevisionPage
-	12, // 32: sameoldchat.chat.v1.CanvasesService.CanvasGrants:output_type -> sameoldchat.chat.v1.CanvasGrantsResponse
-	4,  // 33: sameoldchat.chat.v1.CanvasesService.CommentOnCanvas:output_type -> sameoldchat.chat.v1.CanvasComment
-	5,  // 34: sameoldchat.chat.v1.CanvasesService.CanvasComments:output_type -> sameoldchat.chat.v1.CanvasCommentPage
-	27, // 35: sameoldchat.chat.v1.CanvasesService.DeleteCanvasComment:output_type -> sameoldchat.chat.v1.MutationResponse
-	0,  // 36: sameoldchat.chat.v1.CanvasesService.RestoreCanvasRevision:output_type -> sameoldchat.chat.v1.Canvas
-	27, // 37: sameoldchat.chat.v1.CanvasesService.EditCanvas:output_type -> sameoldchat.chat.v1.MutationResponse
-	20, // 38: sameoldchat.chat.v1.CanvasesService.SaveCanvasMarkdown:output_type -> sameoldchat.chat.v1.SaveCanvasMarkdownResponse
-	27, // 39: sameoldchat.chat.v1.CanvasesService.DeleteCanvas:output_type -> sameoldchat.chat.v1.MutationResponse
-	27, // 40: sameoldchat.chat.v1.CanvasesService.SetCanvasAccess:output_type -> sameoldchat.chat.v1.MutationResponse
-	27, // 41: sameoldchat.chat.v1.CanvasesService.DeleteCanvasAccess:output_type -> sameoldchat.chat.v1.MutationResponse
-	26, // 42: sameoldchat.chat.v1.CanvasesService.LookupCanvasSections:output_type -> sameoldchat.chat.v1.CanvasSectionsResponse
-	24, // [24:43] is the sub-list for method output_type
-	5,  // [5:24] is the sub-list for method input_type
+	21, // 20: sameoldchat.chat.v1.CanvasesService.EditCanvasText:input_type -> sameoldchat.chat.v1.EditCanvasTextRequest
+	2,  // 21: sameoldchat.chat.v1.CanvasesService.DeleteCanvas:input_type -> sameoldchat.chat.v1.CanvasRequest
+	23, // 22: sameoldchat.chat.v1.CanvasesService.SetCanvasAccess:input_type -> sameoldchat.chat.v1.CanvasAccessRequest
+	24, // 23: sameoldchat.chat.v1.CanvasesService.DeleteCanvasAccess:input_type -> sameoldchat.chat.v1.CanvasAccessDeleteRequest
+	27, // 24: sameoldchat.chat.v1.CanvasesService.LookupCanvasSections:input_type -> sameoldchat.chat.v1.CanvasSectionsLookupRequest
+	0,  // 25: sameoldchat.chat.v1.CanvasesService.CreateCanvas:output_type -> sameoldchat.chat.v1.Canvas
+	0,  // 26: sameoldchat.chat.v1.CanvasesService.CreateConversationCanvas:output_type -> sameoldchat.chat.v1.Canvas
+	0,  // 27: sameoldchat.chat.v1.CanvasesService.ConversationCanvas:output_type -> sameoldchat.chat.v1.Canvas
+	0,  // 28: sameoldchat.chat.v1.CanvasesService.GetCanvas:output_type -> sameoldchat.chat.v1.Canvas
+	25, // 29: sameoldchat.chat.v1.CanvasesService.GetCanvasAccess:output_type -> sameoldchat.chat.v1.CanvasAccessResponse
+	17, // 30: sameoldchat.chat.v1.CanvasesService.ListCanvases:output_type -> sameoldchat.chat.v1.CanvasPage
+	17, // 31: sameoldchat.chat.v1.CanvasesService.SearchCanvases:output_type -> sameoldchat.chat.v1.CanvasPage
+	10, // 32: sameoldchat.chat.v1.CanvasesService.CanvasRevisions:output_type -> sameoldchat.chat.v1.CanvasRevisionPage
+	12, // 33: sameoldchat.chat.v1.CanvasesService.CanvasGrants:output_type -> sameoldchat.chat.v1.CanvasGrantsResponse
+	4,  // 34: sameoldchat.chat.v1.CanvasesService.CommentOnCanvas:output_type -> sameoldchat.chat.v1.CanvasComment
+	5,  // 35: sameoldchat.chat.v1.CanvasesService.CanvasComments:output_type -> sameoldchat.chat.v1.CanvasCommentPage
+	29, // 36: sameoldchat.chat.v1.CanvasesService.DeleteCanvasComment:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 37: sameoldchat.chat.v1.CanvasesService.RestoreCanvasRevision:output_type -> sameoldchat.chat.v1.Canvas
+	29, // 38: sameoldchat.chat.v1.CanvasesService.EditCanvas:output_type -> sameoldchat.chat.v1.MutationResponse
+	20, // 39: sameoldchat.chat.v1.CanvasesService.SaveCanvasMarkdown:output_type -> sameoldchat.chat.v1.SaveCanvasMarkdownResponse
+	22, // 40: sameoldchat.chat.v1.CanvasesService.EditCanvasText:output_type -> sameoldchat.chat.v1.EditCanvasTextResponse
+	29, // 41: sameoldchat.chat.v1.CanvasesService.DeleteCanvas:output_type -> sameoldchat.chat.v1.MutationResponse
+	29, // 42: sameoldchat.chat.v1.CanvasesService.SetCanvasAccess:output_type -> sameoldchat.chat.v1.MutationResponse
+	29, // 43: sameoldchat.chat.v1.CanvasesService.DeleteCanvasAccess:output_type -> sameoldchat.chat.v1.MutationResponse
+	28, // 44: sameoldchat.chat.v1.CanvasesService.LookupCanvasSections:output_type -> sameoldchat.chat.v1.CanvasSectionsResponse
+	25, // [25:45] is the sub-list for method output_type
+	5,  // [5:25] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -2213,7 +2349,7 @@ func file_sameoldchat_chat_v1_canvases_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_canvases_proto_rawDesc), len(file_sameoldchat_chat_v1_canvases_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

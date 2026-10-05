@@ -15,6 +15,8 @@ message Canvas {
   int64 created_at = 6;
   int64 updated_at = 7;
   int64 version = 8;
+  // The collaborative text as crdt.Run JSON (domain.Canvas.TextState).
+  string text_state = 9;
 }
 
 message CreateCanvasRequest {
@@ -162,6 +164,18 @@ message SaveCanvasMarkdownResponse {
   int64 version = 2;
 }
 
+message EditCanvasTextRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  // The editor's ops as the JSON array package crdt encodes.
+  string ops = 4;
+}
+
+message EditCanvasTextResponse {
+  int64 version = 1;
+}
+
 message CanvasAccessRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -219,6 +233,7 @@ service CanvasesService {
   rpc RestoreCanvasRevision(RestoreCanvasRevisionRequest) returns (Canvas);
   rpc EditCanvas(EditCanvasRequest) returns (MutationResponse);
   rpc SaveCanvasMarkdown(SaveCanvasMarkdownRequest) returns (SaveCanvasMarkdownResponse);
+  rpc EditCanvasText(EditCanvasTextRequest) returns (EditCanvasTextResponse);
   rpc DeleteCanvas(CanvasRequest) returns (MutationResponse);
   rpc SetCanvasAccess(CanvasAccessRequest) returns (MutationResponse);
   rpc DeleteCanvasAccess(CanvasAccessDeleteRequest) returns (MutationResponse);

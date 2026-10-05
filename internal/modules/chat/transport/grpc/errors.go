@@ -197,6 +197,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_entity", code: codes.InvalidArgument, sentinel: domain.ErrInvalidEntity},
 	{key: "service.invalid_bookmark", code: codes.InvalidArgument, sentinel: domain.ErrInvalidBookmark},
 	{key: "service.invalid_canvas", code: codes.InvalidArgument, sentinel: domain.ErrInvalidCanvas},
+	{key: "service.canvas_too_large", code: codes.InvalidArgument, sentinel: domain.ErrCanvasTooLarge},
 	{key: "service.invalid_external_upload", code: codes.InvalidArgument, sentinel: domain.ErrInvalidExternalUpload},
 	{key: "service.invalid_app_manifest", code: codes.InvalidArgument, sentinel: domain.ErrInvalidAppManifest},
 	{key: "service.app_not_distributable", code: codes.InvalidArgument, sentinel: domain.ErrAppNotDistributable},

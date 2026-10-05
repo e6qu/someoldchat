@@ -27,6 +27,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/blob"
+	"github.com/sameoldchat/sameoldchat/internal/crdt"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
@@ -6683,6 +6684,69 @@ func parityCases() []parityCase {
 					savedVersion == saved.Version, unchangedVersion == saved.Version,
 					len(before) == 1 && len(after) == 1 && before[0].ID == after[0].ID, kinds,
 					errors.Is(outsiderErr, storepkg.ErrNotFound),
+				}, nil
+			},
+		},
+		{
+			// The editor's ops cross the boundary as JSON and land the same way:
+			// the merged text, the sections it projects to, an op resent
+			// changing nothing, and the refusals of an op from another writer's
+			// name or for a canvas the caller cannot reach.
+			name: "canvas text ops merge, resend idempotently, and refuse other names",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				canvas, err := chat.CreateCanvas(ctx, "T1", "U1", "Plan", `{"type":"markdown","markdown":"Keep me"}`, "")
+				if err != nil {
+					return nil, err
+				}
+				opened, err := chat.Canvas(ctx, "T1", "U1", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				var runs []crdt.Run
+				if err := json.Unmarshal([]byte(opened.TextState), &runs); err != nil {
+					return nil, err
+				}
+				left, err := crdt.Load(runs)
+				if err != nil {
+					return nil, err
+				}
+				right, err := crdt.Load(runs)
+				if err != nil {
+					return nil, err
+				}
+				leftOps, err := left.Replace("U1.left", "Keep me, please")
+				if err != nil {
+					return nil, err
+				}
+				rightOps, err := right.Replace("U1.right", "# Plan\n\nKeep me")
+				if err != nil {
+					return nil, err
+				}
+				first, err := chat.EditCanvasText(ctx, "T1", "U1", canvas.ID, leftOps)
+				if err != nil {
+					return nil, err
+				}
+				second, err := chat.EditCanvasText(ctx, "T1", "U1", canvas.ID, rightOps)
+				if err != nil {
+					return nil, err
+				}
+				resent, err := chat.EditCanvasText(ctx, "T1", "U1", canvas.ID, leftOps)
+				if err != nil {
+					return nil, err
+				}
+				saved, err := chat.Canvas(ctx, "T1", "U1", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				markdown, err := domain.CanvasDocumentMarkdown(saved.DocumentContent)
+				if err != nil {
+					return nil, err
+				}
+				_, foreignErr := chat.EditCanvasText(ctx, "T1", "U1", canvas.ID, []crdt.Op{{ID: crdt.ID{Replica: "U2.tab", Clock: 99}, Text: "x"}})
+				_, outsiderErr := chat.EditCanvasText(ctx, "T1", "U2", canvas.ID, []crdt.Op{{ID: crdt.ID{Replica: "U2.tab", Clock: 99}, Text: "x"}})
+				return []any{
+					first - opened.Version, second - first, resent == second, markdown,
+					errors.Is(foreignErr, domain.ErrInvalidCanvas), errors.Is(outsiderErr, storepkg.ErrNotFound),
 				}, nil
 			},
 		},

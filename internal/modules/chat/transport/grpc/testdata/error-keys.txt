@@ -47,6 +47,7 @@ service.cannot_kick_from_default
 service.cannot_kick_self
 service.cannot_leave_default
 service.cannot_unfurl_url
+service.canvas_too_large
 service.channel_restriction_ids_required
 service.channel_restriction_mode
 service.channel_restriction_requires_app_access

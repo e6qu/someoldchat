@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
+	"github.com/sameoldchat/sameoldchat/internal/crdt"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 )
@@ -582,6 +583,12 @@ type Service interface {
 	// editor opened. It answers how many sections changed and the version the
 	// canvas is now at, which the editor saves against next.
 	SaveCanvasMarkdown(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, int64, string) (int, int64, error)
+	// EditCanvasText applies an editor's ops (package crdt) to the canvas's
+	// collaborative text and makes its sections what the text says. Ops from
+	// any number of editors merge, so nothing is refused as stale; an op the
+	// canvas cannot place is domain.ErrInvalidCanvas. It answers the version
+	// the canvas is at.
+	EditCanvasText(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, []crdt.Op) (int64, error)
 	DeleteCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) error
 	SetCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, domain.AccessLevel, []domain.ConversationID, []domain.UserID) error
 	DeleteCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, []domain.ConversationID, []domain.UserID) error

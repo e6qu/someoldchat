@@ -127,7 +127,11 @@ func (m Messages) Canvas(ctx context.Context, workspaceID domain.WorkspaceID, us
 	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, domain.AccessRead); err != nil {
 		return domain.Canvas{}, err
 	}
-	return m.Store.GetCanvas(ctx, workspaceID, id)
+	canvas, err := m.Store.GetCanvas(ctx, workspaceID, id)
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	return withCanvasText(canvas)
 }
 
 func (m Messages) CanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) (domain.CanvasAccess, error) {
@@ -164,6 +168,7 @@ func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return err
 	}
+	previous := canvas
 	var input []canvasChange
 	if err := json.Unmarshal([]byte(changes), &input); err != nil || len(input) == 0 || len(input) > 100 {
 		return domain.ErrInvalidCanvas
@@ -182,6 +187,9 @@ func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 		return err
 	}
 	canvas.DocumentContent = string(encoded)
+	if err := syncCanvasText(previous, &canvas); err != nil {
+		return err
+	}
 	canvas.Version++
 	canvas.UpdatedAt = time.Now().UTC()
 	event, err := canvasEvent(workspaceID, userID, "canvas.updated", id, canvas.UpdatedAt)
@@ -220,15 +228,44 @@ func (m Messages) SaveCanvasMarkdown(ctx context.Context, workspaceID domain.Wor
 }
 
 // rewriteCanvasMarkdown makes the canvas the markdown given, keeping every
-// section that did not change. A section of a kind the markdown cannot spell —
-// an app's own — comes back from markdown as prose with its text intact; it
-// keeps its kind when its text is unchanged, so writing the document through
-// markdown does not turn an app's section into a paragraph.
+// section that did not change, and its collaborative text with it.
 func (m Messages) rewriteCanvasMarkdown(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, canvas domain.Canvas, markdown string) (int, error) {
+	previous := canvas
 	document, err := decodeCanvasDocument(canvas.DocumentContent)
 	if err != nil {
 		return 0, err
 	}
+	changed, err := projectCanvasMarkdown(&document, markdown)
+	if err != nil || changed == 0 {
+		return 0, err
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return 0, err
+	}
+	canvas.DocumentContent = string(encoded)
+	if err := syncCanvasText(previous, &canvas); err != nil {
+		return 0, err
+	}
+	canvas.Version++
+	canvas.UpdatedAt = time.Now().UTC()
+	event, err := canvasEvent(workspaceID, actor, "canvas.updated", canvas.ID, canvas.UpdatedAt)
+	if err != nil {
+		return 0, err
+	}
+	if err := m.Store.UpdateCanvas(ctx, canvas, event); err != nil {
+		return 0, err
+	}
+	return changed, nil
+}
+
+// projectCanvasMarkdown makes document's sections the markdown given, keeping
+// every section that did not change, and reports how many did. A section of a
+// kind the markdown cannot spell — an app's own — comes back from markdown as
+// prose with its text intact; it keeps its kind when its text is unchanged,
+// so writing the document through markdown does not turn an app's section
+// into a paragraph.
+func projectCanvasMarkdown(document *canvasDocument, markdown string) (int, error) {
 	next := domain.CanvasMarkdownBlocks(markdown)
 	kinds := make(map[string]domain.CanvasSectionType)
 	for _, section := range document.Sections {
@@ -247,26 +284,13 @@ func (m Messages) rewriteCanvasMarkdown(ctx context.Context, workspaceID domain.
 	}
 	for index := range merged {
 		if merged[index].ID == "" {
+			var err error
 			if merged[index].ID, err = newCanvasSectionID(); err != nil {
 				return 0, err
 			}
 		}
 	}
 	document.Sections = merged
-	encoded, err := json.Marshal(document)
-	if err != nil {
-		return 0, err
-	}
-	canvas.DocumentContent = string(encoded)
-	canvas.Version++
-	canvas.UpdatedAt = time.Now().UTC()
-	event, err := canvasEvent(workspaceID, actor, "canvas.updated", canvas.ID, canvas.UpdatedAt)
-	if err != nil {
-		return 0, err
-	}
-	if err := m.Store.UpdateCanvas(ctx, canvas, event); err != nil {
-		return 0, err
-	}
 	return changed, nil
 }
 
@@ -501,8 +525,12 @@ func (m Messages) RestoreCanvasRevision(ctx context.Context, workspaceID domain.
 	if err != nil {
 		return domain.Canvas{}, err
 	}
+	previous := canvas
 	canvas.Title = wanted.Title
 	canvas.DocumentContent = wanted.DocumentContent
+	if err := syncCanvasText(previous, &canvas); err != nil {
+		return domain.Canvas{}, err
+	}
 	canvas.Version++
 	canvas.UpdatedAt = time.Now().UTC()
 	event, err := canvasEvent(workspaceID, userID, "canvas.restored", id, canvas.UpdatedAt, events.String("restored_version", strconv.FormatInt(version, 10)))

@@ -68,8 +68,21 @@ func CanvasDocumentMarkdown(content string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	parts := make([]string, 0, len(document.Sections))
-	for _, section := range document.Sections {
+	return CanvasSectionsMarkdown(document.Sections), nil
+}
+
+// CanvasMarkdownLimit is the longest a canvas's markdown may be, in bytes.
+const CanvasMarkdownLimit = 400000
+
+// CanvasTextStateLimit bounds a canvas's stored collaborative text
+// (Canvas.TextState), which besides the markdown names every deleted
+// character still holding a place.
+const CanvasTextStateLimit = 8 << 20
+
+// CanvasSectionsMarkdown is CanvasDocumentMarkdown for sections in hand.
+func CanvasSectionsMarkdown(sections []CanvasSection) string {
+	parts := make([]string, 0, len(sections))
+	for _, section := range sections {
 		text := strings.Trim(strings.ReplaceAll(section.Text, "\r\n", "\n"), "\n")
 		if strings.TrimSpace(text) == "" {
 			continue
@@ -80,9 +93,9 @@ func CanvasDocumentMarkdown(content string) (string, error) {
 		parts = append(parts, text)
 	}
 	if len(parts) == 0 {
-		return "", nil
+		return ""
 	}
-	return strings.Join(parts, "\n\n") + "\n", nil
+	return strings.Join(parts, "\n\n") + "\n"
 }
 
 // CanvasDocumentHTML renders a stored canvas body as one HTML fragment: a
