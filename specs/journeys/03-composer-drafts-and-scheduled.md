@@ -24,7 +24,10 @@
    over-limit message shows how far over it is and cannot be sent until it is
    shortened; it is never silently truncated. A send that fails in transit or
    on a transient server failure stays in the conversation marked as not sent
-   with Retry and Delete, and a retry cannot post a second copy.
+   with Retry and Delete, and a retry cannot post a second copy. A send that
+   committed is never reported as not sent: when the server cannot render the
+   stored message back (the conversation read after the commit fails), it
+   still answers the composer's success and the view refreshes to show it.
 6. The composer draws Slack's controls in Slack's order: a formatting bar above
    the text (Bold, Italic, Strikethrough, Link, Ordered list, Bulleted list,
    Blockquote, Code, Code block) that the "Aa" control shows and hides, and a
@@ -286,6 +289,12 @@ outcomes are not HTTP 500 responses.
   broadcast confirmation asks in a channel of at least six members, the
   threshold Slack publishes; no browser test drives it yet, and the
   owner/admin setting that turns it off is not implemented.
+- A committed send whose conversation cannot be read back answers 204 with
+  `X-SameOldChat-Sent-View: pending`, which the composer treats as sent
+  before its catch-up refresh draws the message
+  (`TestPostMessageReportsACommittedSendAsSentWhenTheReadBackFails`). It used
+  to answer an error, so the composer filed a delivered message under "Not
+  sent".
 - Browser: rich/plain composition, all suggestion types, keyboard formatting,
   pasted/dropped/selected file staging, permission-denied/cancelled/completed
   audio and video clip recording, draft switching/reload, all Drafts & sent

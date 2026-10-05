@@ -8740,6 +8740,9 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 	// recurrence says how the reminder repeats, in place of a phrase in time
 	// such as "every Thursday"; time then gives the first occurrence.
 	if raw := strings.TrimSpace(fields["recurrence"]); raw != "" {
+		// The object replaces any recurrence the phrase named, and with it the
+		// anchor that phrase positioned its series by.
+		schedule.Anchor = time.Time{}
 		schedule.Recurrence, schedule.Weekdays, err = reminderRecurrence(raw)
 		if err != nil {
 			writeDecodeError(w, err)
@@ -13790,11 +13793,11 @@ func (h Handler) memberLocation(ctx context.Context, principal auth.Principal) *
 func reminderSchedule(raw string, now time.Time, location *time.Location) (domain.ReminderSchedule, error) {
 	raw = strings.TrimSpace(raw)
 	if _, err := strconv.ParseInt(raw, 10, 64); err != nil {
-		due, recurrence, parseErr := domain.ParseReminderTime(raw, now, location)
-		if parseErr != nil || !due.After(now) || due.After(now.AddDate(5, 0, 0)) {
+		occurrence, parseErr := domain.ParseReminderTime(raw, now, location)
+		if parseErr != nil || !occurrence.Due.After(now) || occurrence.Due.After(now.AddDate(5, 0, 0)) {
 			return domain.ReminderSchedule{}, decodeFailure("cannot_parse", "time is not a timestamp, a number of seconds, or a reminder phrase")
 		}
-		return domain.ReminderSchedule{Due: due, Recurrence: recurrence, TimeZone: location.String()}, nil
+		return domain.ReminderSchedule{Due: occurrence.Due, Recurrence: occurrence.Recurrence, TimeZone: location.String(), Anchor: occurrence.Anchor}, nil
 	}
 	due, err := reminderTime(raw, now)
 	if err != nil {

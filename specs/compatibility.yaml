@@ -1314,8 +1314,9 @@ operations:
       - go-test:internal/api/slack:TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse
       - go-test:internal/api/slack:TestReminderRecurrenceObjectSetsHowItRepeats
       - go-test:internal/scheduler:TestReminderDeliveryFiresEachReminderOnce
+      - go-test:internal/scheduler:TestEveryMonthPhraseClampsFirstOccurrenceAndKeepsItsDay
     deviations:
-      - Natural-language times cover the phrases the first-party /remind command reads (in N minutes/hours/days/weeks/months/years, tomorrow, on a date, weekday or month and day, at a time, every day/week/month/year or weekday) in the zone of the member's notification schedule (UTC otherwise); other phrasings answer cannot_parse. The recurrence argument (frequency, and weekdays for weekly) sets how the reminder repeats, with time giving its first occurrence; a recurrence it cannot read is cannot_parse, the method's pinned code for an unreadable time.
+      - Natural-language times cover the phrases the first-party /remind command reads (in N minutes/hours/days/weeks/months/years, tomorrow, on a date, weekday or month and day, at a time, every day/week/month/year or weekday) in the zone of the member's notification schedule (UTC otherwise); other phrasings answer cannot_parse. Slack publishes nothing for a monthly or yearly reminder on a day some months lack; such a series falls on the shorter month's last day and keeps its own day afterwards, from its first occurrence on (every month set on October 31 after its time has passed falls on November 30, then December 31). The recurrence argument (frequency, and weekdays for weekly) sets how the reminder repeats, with time giving its first occurrence; a recurrence it cannot read is cannot_parse, the method's pinned code for an unreadable time.
       - At the due instant Slackbot (USLACKBOT, as in every Slack workspace) posts Reminder followed by the reminder's text into the member's Slackbot direct message, and into the channel for a channel reminder. The direct message carries Slack's controls - Mark as complete (for a one-time reminder) and Remind me about this (in 20 minutes, 1 hour or 3 hours, or at 9:00 in the member's zone tomorrow or next Monday) - which Slackbot answers itself, completing the reminder or setting a new one-time reminder of the same text, and replacing the controls with what was done. A channel reminder carries no controls.
       - The user argument follows the reference and the 2023 Later changelog. A user token naming another member answers cannot_add_others, and a bot token may set a one-time reminder for another member (a recurring one answers cannot_add_others_recurring). The method is held to Tier 4's floor rather than the Tier 2 Slack publishes for it (rate-limit-tiers decision).
     audit:
@@ -2409,10 +2410,9 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.workflows.steps.list/
     evidence:
+      - go-test:internal/api/slack:TestCurrentWorkflowPermissionFeaturedAndStepMethodsAreDurable
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
-    deviations:
-      - Historical function-step occurrences are durable, but every occurrence is answered with is_deleted false, including a step a later workflow revision removed; the reference's is_deleted is not yet projected.
   - method: functions.workflows.steps.responses.export
     status: behavior-compatible
     provenance: slack-reference

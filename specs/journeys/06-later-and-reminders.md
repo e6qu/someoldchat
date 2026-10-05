@@ -150,7 +150,15 @@ being marked done as if it were a one-off.
   `reminders.add` ledger entry lists the phrasings it reads.
 - Product choices where Slack publishes nothing: a monthly reminder anchored
   on the 29th–31st fires on the last day of a shorter month and returns to its
-  anchored day afterwards (`TestNextReminderDueMonthlyClampsToMonthEndWithoutDrifting`);
+  anchored day afterwards (`TestNextReminderDueMonthlyClampsToMonthEndWithoutDrifting`).
+  This holds from the first occurrence: `/remind … every month` (or
+  `reminders.add` with that phrase) set on such a day after its time has
+  passed first falls on the next month's last day, and the series keeps the
+  day it was set on, so October 31st recurs on November 30th and then
+  December 31st, and "every year" set on February 29th falls on the 28th in
+  common years (`TestEveryMonthPhraseClampsFirstOccurrenceAndKeepsItsDay`).
+  The anchor travels beside the due instant through the service and the gRPC
+  seam;
   deleting a Later reminder while delivery holds its lease answers not found,
   so delivery and deletion have one outcome
   (`TestLaterReminderCannotBeDeletedWhileDeliveryOwnsTheLease`); and a

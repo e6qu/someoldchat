@@ -1992,6 +1992,52 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// "every month" set on the 31st after its time has passed first
+			// falls on the next month's last day while the series keeps the
+			// 31st, so the anchor travels apart from the due instant. Each
+			// mutation that takes one must carry it across the seam, and a
+			// series that does not contain its own first occurrence is refused
+			// in both compositions.
+			name: "a clamped monthly reminder keeps its anchor across the seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				anchor := time.Date(2099, time.January, 31, 9, 0, 0, 0, time.UTC)
+				due := time.Date(2099, time.February, 28, 9, 0, 0, 0, time.UTC)
+				added, err := chat.AddReminder(ctx, "T1", "U1", "U1", "pay rent", domain.ReminderSchedule{
+					Due: due, Recurrence: domain.ReminderMonthly, TimeZone: "UTC", Anchor: anchor,
+				})
+				if err != nil {
+					return nil, err
+				}
+				addedInfo, err := chat.ReminderInfo(ctx, "T1", "U1", added.ID)
+				if err != nil {
+					return nil, err
+				}
+				created, err := chat.CreateLaterReminder(ctx, "T1", "U1", domain.LaterReminderRequest{
+					Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: due, TimeZone: "UTC",
+					Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor,
+				})
+				if err != nil {
+					return nil, err
+				}
+				updated, err := chat.UpdateLaterReminder(ctx, "T1", "U1", created.ID, domain.LaterReminderRequest{
+					Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: due.AddDate(0, 2, 2), TimeZone: "UTC",
+					Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor.AddDate(0, 2, 0),
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, unrelated := chat.CreateLaterReminder(ctx, "T1", "U1", domain.LaterReminderRequest{
+					Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: due, TimeZone: "UTC",
+					Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor.AddDate(0, -1, 0),
+				})
+				return []any{
+					addedInfo.Time.Equal(due), addedInfo.RecurrenceAnchor.Equal(anchor),
+					created.DueAt.Equal(due), created.RecurrenceAnchor.Equal(anchor),
+					updated.RecurrenceAnchor.Equal(anchor.AddDate(0, 2, 0)), errors.Is(unrelated, domain.ErrInvalidLaterReminder),
+				}, nil
+			},
+		},
+		{
 			// Custom profile fields end to end: an administrator defines one, a
 			// member sets and reads a value, a non-administrator is refused the
 			// definition, and deleting the field takes its values with it. Both

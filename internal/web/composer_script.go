@@ -42,7 +42,9 @@ package web
 //     only afterwards is the view caught up with a forced refresh. A refresh
 //     that fails is the view being behind, announced as such; it used to be
 //     reported as the send failing, putting a committed message in the outbox
-//     as "Not sent".
+//     as "Not sent". A committed send the server could not render answers 204
+//     with X-SameOldChat-Sent-View: pending, the same success, and the
+//     refresh draws the message.
 //   - Suggestions are one listbox per composer, anchored above that composer,
 //     for @ (people, including workspace members outside the conversation
 //     labelled "Not in channel", apps, user groups and @here/@channel/
@@ -671,7 +673,7 @@ if(retrying)retrying.remove();
 if(response.headers.get('X-SameOldChat-Draft-Cleanup')==='failed')announce('Your message was sent, but its old draft could not be cleared. Delete it from Drafts & sent.');
 var redirect=response.headers.get('HX-Redirect');
 if(redirect){clearSent(text);if(ownPath(redirect)){var next=new URL(redirect,window.location.href);if(next.pathname+next.search===window.location.pathname+window.location.search){window.location.hash=next.hash;window.location.reload()}else window.location.assign(redirect)}return null}
-if(response.status===204){clearSent(text);committed=true;return null}
+if(response.status===204){clearSent(text);committed=true;if(response.headers.get('X-SameOldChat-Sent-View')==='pending')announce('Sent. The conversation is refreshing to show it.');return null}
 return response.text().then(function(html){
 clearSent(text);
 var newest=form.getAttribute('data-newest');if(!api.thread&&newest&&ownPath(newest)){window.location.assign(newest);return null}

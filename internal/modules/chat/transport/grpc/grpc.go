@@ -5382,7 +5382,7 @@ func (r Remote) RemoveBookmark(ctx context.Context, workspaceID domain.Workspace
 }
 
 func (r Remote) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, schedule domain.ReminderSchedule) (domain.Reminder, error) {
-	out, err := r.reminders.AddReminder(ctx, &chatv1.AddReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Text: text, Time: schedule.Due.Unix(), Recurrence: string(schedule.Recurrence), TimeZone: schedule.TimeZone, Weekdays: reminderWeekdayNames(schedule.Weekdays)})
+	out, err := r.reminders.AddReminder(ctx, &chatv1.AddReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Text: text, Time: schedule.Due.Unix(), Recurrence: string(schedule.Recurrence), TimeZone: schedule.TimeZone, Weekdays: reminderWeekdayNames(schedule.Weekdays), RecurrenceAnchor: unixOrZero(schedule.Anchor)})
 	if err != nil {
 		return domain.Reminder{}, err
 	}
@@ -5440,7 +5440,7 @@ func (r Remote) CreateLaterReminder(ctx context.Context, workspaceID domain.Work
 		WorkspaceId: string(workspaceID), UserId: string(userID), Target: string(request.Target),
 		ChannelId: string(request.Channel), SourceChannelId: string(request.SourceChannel),
 		SourceTimestamp: string(request.SourceTimestamp), Text: request.Text, DueAt: request.DueAt.Unix(),
-		Timezone: request.TimeZone, Recurrence: string(request.Recurrence),
+		Timezone: request.TimeZone, Recurrence: string(request.Recurrence), RecurrenceAnchor: unixOrZero(request.RecurrenceAnchor),
 	})
 	if err != nil {
 		return domain.LaterReminder{}, err
@@ -5480,6 +5480,7 @@ func (r Remote) UpdateLaterReminder(ctx context.Context, workspaceID domain.Work
 		WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID),
 		Target: string(request.Target), ChannelId: string(request.Channel), Text: request.Text,
 		DueAt: request.DueAt.Unix(), Timezone: request.TimeZone, Recurrence: string(request.Recurrence),
+		RecurrenceAnchor: unixOrZero(request.RecurrenceAnchor),
 	})
 	if err != nil {
 		return domain.LaterReminder{}, err
@@ -11409,7 +11410,8 @@ func (s *Server) removeBookmarkProto(ctx context.Context, input *chatv1.Bookmark
 
 func (s *Server) addReminderProto(ctx context.Context, input *chatv1.AddReminderRequest) (*chatv1.Reminder, error) {
 	reminder, err := s.implementation.AddReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), input.GetText(),
-		domain.ReminderSchedule{Due: time.Unix(input.GetTime(), 0).UTC(), Recurrence: domain.ReminderRecurrence(input.GetRecurrence()), TimeZone: input.GetTimeZone(), Weekdays: reminderWeekdaysFromNames(input.GetWeekdays())})
+		domain.ReminderSchedule{Due: time.Unix(input.GetTime(), 0).UTC(), Recurrence: domain.ReminderRecurrence(input.GetRecurrence()), TimeZone: input.GetTimeZone(), Weekdays: reminderWeekdaysFromNames(input.GetWeekdays()),
+			Anchor: timeFromUnix(input.GetRecurrenceAnchor())})
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -11456,7 +11458,7 @@ func (s *Server) createLaterReminderProto(ctx context.Context, input *chatv1.Cre
 		Target: domain.LaterReminderTarget(input.GetTarget()), Channel: domain.ConversationID(input.GetChannelId()),
 		SourceChannel: domain.ConversationID(input.GetSourceChannelId()), SourceTimestamp: domain.MessageTimestamp(input.GetSourceTimestamp()),
 		Text: input.GetText(), DueAt: timeFromUnix(input.GetDueAt()), TimeZone: input.GetTimezone(),
-		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()),
+		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()), RecurrenceAnchor: timeFromUnix(input.GetRecurrenceAnchor()),
 	})
 	if err != nil {
 		return nil, mapError(err)
@@ -11488,7 +11490,7 @@ func (s *Server) updateLaterReminderProto(ctx context.Context, input *chatv1.Upd
 	reminder, err := s.implementation.UpdateLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId()), domain.LaterReminderRequest{
 		Target: domain.LaterReminderTarget(input.GetTarget()), Channel: domain.ConversationID(input.GetChannelId()),
 		Text: input.GetText(), DueAt: timeFromUnix(input.GetDueAt()), TimeZone: input.GetTimezone(),
-		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()),
+		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()), RecurrenceAnchor: timeFromUnix(input.GetRecurrenceAnchor()),
 	})
 	if err != nil {
 		return nil, mapError(err)

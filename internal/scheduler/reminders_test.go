@@ -182,6 +182,81 @@ func TestNextReminderDueMonthlyClampsToMonthEndWithoutDrifting(t *testing.T) {
 	}
 }
 
+// "every month" and "every year" set on a day some months lack, after today's
+// time has passed, used to step the first occurrence with AddDate: October
+// 31st became December 1st, and that date became the anchor, so the series
+// lived on the 1st. The first occurrence now clamps to the next month's last
+// day, the series keeps the day it was set on, and every later occurrence -
+// computed by the delivery worker from what the service stored - follows it.
+func TestEveryMonthPhraseClampsFirstOccurrenceAndKeepsItsDay(t *testing.T) {
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := func(location *time.Location, year int, month time.Month, day int) time.Time {
+		return time.Date(year, month, day, 9, 0, 0, 0, location)
+	}
+	// The years are far ahead so the service's due-in-the-future rule holds
+	// on any test clock; 2096 is a leap year and 2100 is not.
+	for _, testCase := range []struct {
+		name     string
+		now      time.Time
+		phrase   string
+		location *time.Location
+		want     []time.Time
+	}{
+		{"Jan 31 to Feb 28 to Mar 31", time.Date(2097, time.January, 31, 10, 0, 0, 0, time.UTC), "pay rent every month at 9am", time.UTC,
+			[]time.Time{day(time.UTC, 2097, time.February, 28), day(time.UTC, 2097, time.March, 31), day(time.UTC, 2097, time.April, 30), day(time.UTC, 2097, time.May, 31)}},
+		{"Jan 31 to Feb 29 in a leap year", time.Date(2096, time.January, 31, 10, 0, 0, 0, time.UTC), "pay rent every month at 9am", time.UTC,
+			[]time.Time{day(time.UTC, 2096, time.February, 29), day(time.UTC, 2096, time.March, 31)}},
+		{"Oct 31 to Nov 30 to Dec 31", time.Date(2097, time.October, 31, 10, 0, 0, 0, time.UTC), "pay rent every month at 9am", time.UTC,
+			[]time.Time{day(time.UTC, 2097, time.November, 30), day(time.UTC, 2097, time.December, 31), day(time.UTC, 2098, time.January, 31), day(time.UTC, 2098, time.February, 28)}},
+		{"Oct 31 in a member's zone", time.Date(2097, time.October, 31, 10, 0, 0, 0, newYork), "pay rent every month at 9am", newYork,
+			[]time.Time{day(newYork, 2097, time.November, 30), day(newYork, 2097, time.December, 31)}},
+		{"Jan 30 to Feb 28 to Mar 30", time.Date(2097, time.January, 30, 10, 0, 0, 0, time.UTC), "pay rent every month at 9am", time.UTC,
+			[]time.Time{day(time.UTC, 2097, time.February, 28), day(time.UTC, 2097, time.March, 30)}},
+		{"Jan 29 to Feb 28 to Mar 29", time.Date(2097, time.January, 29, 10, 0, 0, 0, time.UTC), "pay rent every month at 9am", time.UTC,
+			[]time.Time{day(time.UTC, 2097, time.February, 28), day(time.UTC, 2097, time.March, 29)}},
+		{"Jan 29 to Feb 29 in a leap year", time.Date(2096, time.January, 29, 10, 0, 0, 0, time.UTC), "pay rent every month at 9am", time.UTC,
+			[]time.Time{day(time.UTC, 2096, time.February, 29), day(time.UTC, 2096, time.March, 29)}},
+		{"Jan 31 before its time is today", time.Date(2097, time.January, 31, 8, 0, 0, 0, time.UTC), "pay rent every month at 9am", time.UTC,
+			[]time.Time{day(time.UTC, 2097, time.January, 31), day(time.UTC, 2097, time.February, 28), day(time.UTC, 2097, time.March, 31)}},
+		{"Feb 29 every year", time.Date(2096, time.February, 29, 10, 0, 0, 0, time.UTC), "file taxes every year at 9am", time.UTC,
+			[]time.Time{day(time.UTC, 2097, time.February, 28), day(time.UTC, 2098, time.February, 28), day(time.UTC, 2099, time.February, 28),
+				day(time.UTC, 2100, time.February, 28), day(time.UTC, 2101, time.February, 28), day(time.UTC, 2102, time.February, 28),
+				day(time.UTC, 2103, time.February, 28), day(time.UTC, 2104, time.February, 29)}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, occurrence, err := domain.ParseReminderExpression(testCase.phrase, testCase.now, testCase.location)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !occurrence.Due.Equal(testCase.want[0]) {
+				t.Fatalf("first occurrence = %s, want %s", occurrence.Due.In(testCase.location), testCase.want[0])
+			}
+			// What the service stores is what delivery steps from.
+			chat := service.Messages{Store: reminderStore(t)}
+			stored, err := chat.CreateLaterReminder(context.Background(), "T1", "U1", domain.LaterReminderRequest{
+				Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: occurrence.Due,
+				TimeZone: testCase.location.String(), Recurrence: occurrence.Recurrence, RecurrenceAnchor: occurrence.Anchor,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, expected := range testCase.want[1:] {
+				next, err := NextReminderDue(stored, stored.DueAt)
+				if err != nil {
+					t.Fatalf("step %d: %v", i+1, err)
+				}
+				if !next.Equal(expected) {
+					t.Fatalf("step %d: next = %s, want %s", i+1, next.In(testCase.location), expected)
+				}
+				stored.DueAt = next
+			}
+		})
+	}
+}
+
 func TestNextReminderDueYearlyKeepsLeapDayAnchor(t *testing.T) {
 	anchor := time.Date(2024, time.February, 29, 9, 0, 0, 0, time.UTC)
 	want := []time.Time{

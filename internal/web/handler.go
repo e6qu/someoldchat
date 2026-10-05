@@ -11790,6 +11790,12 @@ func (h Handler) redirectMutation(w http.ResponseWriter, r *http.Request, target
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
+// sentViewRefreshHeader marks a send that committed but whose message could
+// not be rendered for the response. The answer is still the composer's
+// success (204), and the composer's catch-up refresh draws the message; the
+// header lets it say so rather than leave the member wondering.
+const sentViewRefreshHeader = "X-SameOldChat-Sent-View"
+
 func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
@@ -11990,14 +11996,24 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Header.Get("HX-Request") == "true" {
+		// The message is stored. Everything below only renders it, so a
+		// failure here must not be reported as the send failing: the
+		// composer would file a delivered message under "Not sent". Answer
+		// the success it treats as sent instead; its catch-up refresh draws
+		// the message from the conversation.
+		sentButNotRendered := func() {
+			w.Header().Set(sentViewRefreshHeader, "pending")
+			w.WriteHeader(http.StatusNoContent)
+		}
 		sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName)
 		if cookieErr != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-			h.writeAuthError(w, r, auth.ErrNotAuthenticated)
+			// No session means no CSRF token for the fragment's controls.
+			sentButNotRendered()
 			return
 		}
 		conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
 		if conversationErr != nil {
-			h.writeFragmentError(w, conversationErr, "the conversation is temporarily unavailable")
+			sentButNotRendered()
 			return
 		}
 		thread := strings.TrimSpace(fields["thread_ts"])
@@ -12633,13 +12649,14 @@ func (h Handler) channelReminderRequest(ctx context.Context, principal auth.Prin
 	if err != nil {
 		return domain.LaterReminderRequest{}, domain.ErrInvalidLaterReminder
 	}
-	text, due, recurrence, err := domain.ParseReminderExpression(expression, now, location)
+	text, occurrence, err := domain.ParseReminderExpression(expression, now, location)
 	if err != nil {
 		return domain.LaterReminderRequest{}, err
 	}
 	return domain.LaterReminderRequest{
 		Target: domain.LaterReminderChannel, Channel: target.ID, Text: text,
-		DueAt: due.UTC(), TimeZone: location.String(), Recurrence: recurrence,
+		DueAt: occurrence.Due.UTC(), TimeZone: location.String(), Recurrence: occurrence.Recurrence,
+		RecurrenceAnchor: occurrence.Anchor.UTC(),
 	}, nil
 }
 

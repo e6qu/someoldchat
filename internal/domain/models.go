@@ -2849,6 +2849,9 @@ type ReminderSchedule struct {
 	Due        time.Time
 	Recurrence ReminderRecurrence
 	TimeZone   string
+	// Anchor positions a recurring series when it differs from Due (see
+	// ReminderOccurrence); zero means the series starts at Due.
+	Anchor time.Time
 	// Weekdays are a weekly recurrence's days; see Reminder.Weekdays.
 	Weekdays []time.Weekday
 }
@@ -2910,8 +2913,11 @@ type LaterReminder struct {
 	DueAt              time.Time
 	TimeZone           string
 	Recurrence         ReminderRecurrence
-	// RecurrenceAnchor is the reminder's original due instant, fixed at creation
-	// and never advanced. Recurrence is computed from it rather than from the
+	// RecurrenceAnchor positions the series, fixed at creation (or edit) and
+	// never advanced. It is the first due instant, or, when that first
+	// occurrence was already clamped ("every month" set on the 31st after its
+	// time had passed, first due on the 30th), the passed occurrence whose day
+	// the series keeps. Recurrence is computed from it rather than from the
 	// last DueAt so a monthly reminder on the 31st clamps to each short month's
 	// last day and returns to the 31st afterwards, instead of drifting earlier
 	// every time it meets a February. For one-time reminders it equals DueAt.
@@ -2940,6 +2946,9 @@ type LaterReminderRequest struct {
 	DueAt           time.Time
 	TimeZone        string
 	Recurrence      ReminderRecurrence
+	// RecurrenceAnchor positions a recurring series when it differs from
+	// DueAt (see ReminderOccurrence); zero means the series starts at DueAt.
+	RecurrenceAnchor time.Time
 }
 
 type ScheduledMessage struct {

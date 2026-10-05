@@ -155,17 +155,20 @@ func (x *Reminder) GetWeekdays() []string {
 }
 
 type AddReminderRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	TargetUserId  string                 `protobuf:"bytes,3,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
-	Text          string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
-	Time          int64                  `protobuf:"varint,5,opt,name=time,proto3" json:"time,omitempty"`
-	Recurrence    string                 `protobuf:"bytes,6,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
-	TimeZone      string                 `protobuf:"bytes,7,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
-	Weekdays      []string               `protobuf:"bytes,8,rep,name=weekdays,proto3" json:"weekdays,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId  string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId       string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	TargetUserId string                 `protobuf:"bytes,3,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
+	Text         string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
+	Time         int64                  `protobuf:"varint,5,opt,name=time,proto3" json:"time,omitempty"`
+	Recurrence   string                 `protobuf:"bytes,6,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
+	TimeZone     string                 `protobuf:"bytes,7,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
+	Weekdays     []string               `protobuf:"bytes,8,rep,name=weekdays,proto3" json:"weekdays,omitempty"`
+	// recurrence_anchor positions a recurring series when it differs from
+	// time; zero means the series starts at time.
+	RecurrenceAnchor int64 `protobuf:"varint,9,opt,name=recurrence_anchor,json=recurrenceAnchor,proto3" json:"recurrence_anchor,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *AddReminderRequest) Reset() {
@@ -252,6 +255,13 @@ func (x *AddReminderRequest) GetWeekdays() []string {
 		return x.Weekdays
 	}
 	return nil
+}
+
+func (x *AddReminderRequest) GetRecurrenceAnchor() int64 {
+	if x != nil {
+		return x.RecurrenceAnchor
+	}
+	return 0
 }
 
 type ReminderRequest struct {
@@ -658,8 +668,11 @@ type CreateLaterReminderRequest struct {
 	DueAt           int64                  `protobuf:"varint,8,opt,name=due_at,json=dueAt,proto3" json:"due_at,omitempty"`
 	Timezone        string                 `protobuf:"bytes,9,opt,name=timezone,proto3" json:"timezone,omitempty"`
 	Recurrence      string                 `protobuf:"bytes,10,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// recurrence_anchor positions a recurring series when it differs from
+	// due_at; zero means the series starts at due_at.
+	RecurrenceAnchor int64 `protobuf:"varint,11,opt,name=recurrence_anchor,json=recurrenceAnchor,proto3" json:"recurrence_anchor,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *CreateLaterReminderRequest) Reset() {
@@ -760,6 +773,13 @@ func (x *CreateLaterReminderRequest) GetRecurrence() string {
 		return x.Recurrence
 	}
 	return ""
+}
+
+func (x *CreateLaterReminderRequest) GetRecurrenceAnchor() int64 {
+	if x != nil {
+		return x.RecurrenceAnchor
+	}
+	return 0
 }
 
 type LaterReminderRequest struct {
@@ -959,18 +979,21 @@ func (x *AcknowledgeLaterRemindersRequest) GetUserId() string {
 }
 
 type UpdateLaterReminderRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	ReminderId    string                 `protobuf:"bytes,3,opt,name=reminder_id,json=reminderId,proto3" json:"reminder_id,omitempty"`
-	Target        string                 `protobuf:"bytes,4,opt,name=target,proto3" json:"target,omitempty"`
-	ChannelId     string                 `protobuf:"bytes,5,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	Text          string                 `protobuf:"bytes,6,opt,name=text,proto3" json:"text,omitempty"`
-	DueAt         int64                  `protobuf:"varint,7,opt,name=due_at,json=dueAt,proto3" json:"due_at,omitempty"`
-	Timezone      string                 `protobuf:"bytes,8,opt,name=timezone,proto3" json:"timezone,omitempty"`
-	Recurrence    string                 `protobuf:"bytes,9,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ReminderId  string                 `protobuf:"bytes,3,opt,name=reminder_id,json=reminderId,proto3" json:"reminder_id,omitempty"`
+	Target      string                 `protobuf:"bytes,4,opt,name=target,proto3" json:"target,omitempty"`
+	ChannelId   string                 `protobuf:"bytes,5,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Text        string                 `protobuf:"bytes,6,opt,name=text,proto3" json:"text,omitempty"`
+	DueAt       int64                  `protobuf:"varint,7,opt,name=due_at,json=dueAt,proto3" json:"due_at,omitempty"`
+	Timezone    string                 `protobuf:"bytes,8,opt,name=timezone,proto3" json:"timezone,omitempty"`
+	Recurrence  string                 `protobuf:"bytes,9,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
+	// recurrence_anchor positions a recurring series when it differs from
+	// due_at; zero means the series starts at due_at.
+	RecurrenceAnchor int64 `protobuf:"varint,10,opt,name=recurrence_anchor,json=recurrenceAnchor,proto3" json:"recurrence_anchor,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *UpdateLaterReminderRequest) Reset() {
@@ -1066,6 +1089,13 @@ func (x *UpdateLaterReminderRequest) GetRecurrence() string {
 	return ""
 }
 
+func (x *UpdateLaterReminderRequest) GetRecurrenceAnchor() int64 {
+	if x != nil {
+		return x.RecurrenceAnchor
+	}
+	return 0
+}
+
 type LaterReminderPage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Reminders     []*LaterReminder       `protobuf:"bytes,1,rep,name=reminders,proto3" json:"reminders,omitempty"`
@@ -1148,7 +1178,7 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\ttime_zone\x18\n" +
 	" \x01(\tR\btimeZone\x12+\n" +
 	"\x11recurrence_anchor\x18\v \x01(\x03R\x10recurrenceAnchor\x12\x1a\n" +
-	"\bweekdays\x18\f \x03(\tR\bweekdays\"\xf7\x01\n" +
+	"\bweekdays\x18\f \x03(\tR\bweekdays\"\xa4\x02\n" +
 	"\x12AddReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12$\n" +
@@ -1159,7 +1189,8 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"recurrence\x18\x06 \x01(\tR\n" +
 	"recurrence\x12\x1b\n" +
 	"\ttime_zone\x18\a \x01(\tR\btimeZone\x12\x1a\n" +
-	"\bweekdays\x18\b \x03(\tR\bweekdays\"n\n" +
+	"\bweekdays\x18\b \x03(\tR\bweekdays\x12+\n" +
+	"\x11recurrence_anchor\x18\t \x01(\x03R\x10recurrenceAnchor\"n\n" +
 	"\x0fReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
@@ -1203,7 +1234,7 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\ffailure_code\x18\x12 \x01(\tR\vfailureCode\x12)\n" +
 	"\x10source_timestamp\x18\x13 \x01(\tR\x0fsourceTimestamp\x12'\n" +
 	"\x0facknowledged_at\x18\x14 \x01(\x03R\x0eacknowledgedAt\x12+\n" +
-	"\x11recurrence_anchor\x18\x15 \x01(\x03R\x10recurrenceAnchor\"\xcd\x02\n" +
+	"\x11recurrence_anchor\x18\x15 \x01(\x03R\x10recurrenceAnchor\"\xfa\x02\n" +
 	"\x1aCreateLaterReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
@@ -1218,7 +1249,8 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\n" +
 	"recurrence\x18\n" +
 	" \x01(\tR\n" +
-	"recurrence\"s\n" +
+	"recurrence\x12+\n" +
+	"\x11recurrence_anchor\x18\v \x01(\x03R\x10recurrenceAnchor\"s\n" +
 	"\x14LaterReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
@@ -1235,7 +1267,7 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"descending\"^\n" +
 	" AcknowledgeLaterRemindersRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\"\x97\x02\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"\xc4\x02\n" +
 	"\x1aUpdateLaterReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
@@ -1249,7 +1281,9 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\btimezone\x18\b \x01(\tR\btimezone\x12\x1e\n" +
 	"\n" +
 	"recurrence\x18\t \x01(\tR\n" +
-	"recurrence\"\x91\x01\n" +
+	"recurrence\x12+\n" +
+	"\x11recurrence_anchor\x18\n" +
+	" \x01(\x03R\x10recurrenceAnchor\"\x91\x01\n" +
 	"\x11LaterReminderPage\x12@\n" +
 	"\treminders\x18\x01 \x03(\v2\".sameoldchat.chat.v1.LaterReminderR\treminders\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
