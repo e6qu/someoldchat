@@ -206,7 +206,8 @@ internal/
   modules/        stable module APIs and transport implementations
   generated/      generated composition bindings
   ...             leaf helpers (blockkit, slackobject, slackemoji, secretbox,
-                  lease, thumbnail, huddlesfu, clientaddr, appmanifest, slackapp)
+                  lease, thumbnail, huddlesfu, clientaddr, appmanifest, slackapp,
+                  crdt)
 proto/            gRPC service schemas
 specs/            project requirements and pinned contract sources
 deploy/           request-triggered activation infrastructure modules
