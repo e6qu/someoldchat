@@ -4212,6 +4212,38 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The workspace policy decides who may create a private channel,
+			// so both compositions have to agree on what was stored, on who may
+			// read and change it, and on the refusal it produces.
+			name: "workspace policy and its enforcement agree across the seam",
+			seed: seedBaseline,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				initial, err := chat.WorkspacePolicy(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				_, memberSetErr := chat.SetWorkspacePolicy(ctx, "T1", "U1", domain.WorkspacePolicy{PrivateChannelCreators: domain.PolicyAudienceEveryone})
+				_, invalidErr := chat.SetWorkspacePolicy(ctx, "T1", "UA", domain.WorkspacePolicy{PrivateChannelCreators: "guests"})
+				saved, err := chat.SetWorkspacePolicy(ctx, "T1", "UA", domain.WorkspacePolicy{BroadcastWarningOff: true, PrivateChannelCreators: domain.PolicyAudienceAdmins})
+				if err != nil {
+					return nil, err
+				}
+				readBack, err := chat.WorkspacePolicy(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				_, restrictedErr := chat.CreateConversation(ctx, "T1", "U1", "member-private", true)
+				admitted, err := chat.CreateConversation(ctx, "T1", "UA", "admin-private", true)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					initial, errors.Is(memberSetErr, domain.ErrNotWorkspaceAdmin), errors.Is(invalidErr, domain.ErrInvalidWorkspacePolicy), saved, readBack,
+					errors.Is(restrictedErr, domain.ErrPrivateChannelCreationRestricted), admitted.Name, admitted.PrivateFlag(),
+				}, nil
+			},
+		},
+		{
 			// Retention is the one policy in the product whose mistakes are
 			// irreversible: the sweep deletes, it does not tombstone. The seam
 			// therefore has to agree not only on what was stored but on which of

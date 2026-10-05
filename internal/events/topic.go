@@ -343,6 +343,7 @@ var topicRules = []topicRule{
 	{topic: "retention.swept", note: "not pinned: Slack emits no event for retention deletion"},
 	{topic: "retention.documents_swept", note: "not pinned: Slack emits no event for retention deletion"},
 	{topic: "retention.policy_changed", note: "not pinned: Slack emits no event for a retention policy change"},
+	{topic: "workspace.policy_changed", note: "not pinned: Slack emits no event for a workspace permission change"},
 	// Slack Connect invitations have no documented event either: the snapshot
 	// predates Slack Connect and the current reference documents no event for
 	// the invitation lifecycle, so these are this product's own facts.

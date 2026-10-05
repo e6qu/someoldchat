@@ -2656,6 +2656,39 @@ func conversationRetentionOverridesTheWorkspaceDefault(t *testing.T, open opener
 	}
 }
 
+// A workspace nobody configured reads Slack's defaults; a saved policy reads
+// back field for field; an audience no profile applies is refused rather than
+// stored, so no engine can hand back a policy the others would reject.
+func workspacePolicyRoundTripsAndDefaults(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	if policy, err := f.repository.GetWorkspacePolicy(ctx, f.workspaceID); err != nil || policy != domain.DefaultWorkspacePolicy() {
+		t.Fatalf("an unconfigured workspace reads %+v err=%v, want Slack's defaults", policy, err)
+	}
+	saved := domain.WorkspacePolicy{BroadcastWarningOff: true, PrivateChannelCreators: domain.PolicyAudienceOwners}
+	if err := f.repository.SetWorkspacePolicy(ctx, f.workspaceID, saved, f.event("workspace-policy", "workspace.policy_changed", string(f.workspaceID))); err != nil {
+		t.Fatal(err)
+	}
+	if policy, err := f.repository.GetWorkspacePolicy(ctx, f.workspaceID); err != nil || policy != saved {
+		t.Fatalf("policy=%+v err=%v, want %+v", policy, err, saved)
+	}
+	restored := domain.WorkspacePolicy{PrivateChannelCreators: domain.PolicyAudienceEveryone}
+	if err := f.repository.SetWorkspacePolicy(ctx, f.workspaceID, restored, f.event("workspace-policy-restored", "workspace.policy_changed", string(f.workspaceID))); err != nil {
+		t.Fatal(err)
+	}
+	if policy, err := f.repository.GetWorkspacePolicy(ctx, f.workspaceID); err != nil || policy != restored {
+		t.Fatalf("an updated policy reads %+v err=%v, want %+v", policy, err, restored)
+	}
+	if err := f.repository.SetWorkspacePolicy(ctx, f.workspaceID, domain.WorkspacePolicy{PrivateChannelCreators: "guests"}, f.event("workspace-policy-invalid", "workspace.policy_changed", string(f.workspaceID))); err == nil {
+		t.Fatal("an unknown audience was stored")
+	}
+	if _, err := f.repository.GetWorkspacePolicy(ctx, domain.WorkspaceID("T-missing-"+f.suffix)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a missing workspace: err=%v, want not found", err)
+	}
+}
+
 // A timeline renders many parents at once, so thread summaries are read in
 // one batched call rather than one read per parent. Every profile must return
 // the same counts, the same participant list in the same order, and the same

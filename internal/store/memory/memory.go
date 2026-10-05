@@ -103,6 +103,7 @@ type Store struct {
 	delivered                     map[uint64]bool
 	idempotency                   map[string]domain.MessageID
 	retentionPolicies             map[domain.WorkspaceID]domain.RetentionPolicy
+	workspacePolicies             map[domain.WorkspaceID]domain.WorkspacePolicy
 	conversationRetention         map[domain.ConversationID]domain.ConversationRetention
 	retentionSweptAt              map[domain.ConversationID]time.Time
 	documentsSweptAt              map[domain.WorkspaceID]time.Time
@@ -390,6 +391,7 @@ func New() *Store {
 		delivered:                     make(map[uint64]bool),
 		idempotency:                   make(map[string]domain.MessageID),
 		retentionPolicies:             make(map[domain.WorkspaceID]domain.RetentionPolicy),
+		workspacePolicies:             make(map[domain.WorkspaceID]domain.WorkspacePolicy),
 		conversationRetention:         make(map[domain.ConversationID]domain.ConversationRetention),
 		retentionSweptAt:              make(map[domain.ConversationID]time.Time),
 		documentsSweptAt:              make(map[domain.WorkspaceID]time.Time),
@@ -6973,6 +6975,32 @@ func (s *Store) SetRetentionPolicy(_ context.Context, workspace domain.Workspace
 		return store.ErrNotFound
 	}
 	s.retentionPolicies[workspace] = policy
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetWorkspacePolicy(_ context.Context, workspace domain.WorkspaceID) (domain.WorkspacePolicy, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, exists := s.workspaces[workspace]; !exists {
+		return domain.WorkspacePolicy{}, store.ErrNotFound
+	}
+	if policy, configured := s.workspacePolicies[workspace]; configured {
+		return policy, nil
+	}
+	return domain.DefaultWorkspacePolicy(), nil
+}
+
+func (s *Store) SetWorkspacePolicy(_ context.Context, workspace domain.WorkspaceID, policy domain.WorkspacePolicy, event events.Event) error {
+	if !policy.Valid() {
+		return store.InvalidArgument("invalid workspace policy")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[workspace]; !exists {
+		return store.ErrNotFound
+	}
+	s.workspacePolicies[workspace] = policy
 	s.outbox = append(s.outbox, event)
 	return nil
 }

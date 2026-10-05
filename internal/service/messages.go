@@ -5617,7 +5617,10 @@ func (m Messages) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID d
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if !conversation.IsDirectOrGroup() {
+	// Only a group DM becomes a private channel; a one-to-one DM never does.
+	// The store refuses it too, but asking here first keeps a one-to-one DM
+	// from being reported as a permission refusal.
+	if conversation.Kind != domain.ConversationTypeMPIM {
 		return domain.Conversation{}, domain.ErrInvalidConversation
 	}
 	membership, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
@@ -5628,6 +5631,11 @@ func (m Messages) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID d
 	// single-channel guests.
 	if membership.UltraRestricted {
 		return domain.Conversation{}, domain.ErrNotWorkspaceAdmin
+	}
+	// The result is a private channel, so whoever the workspace lets create
+	// one is who may convert.
+	if err := m.requirePrivateChannelCreator(ctx, workspaceID, membership); err != nil {
+		return domain.Conversation{}, err
 	}
 	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
 	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
@@ -5667,6 +5675,15 @@ func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.Wor
 	}
 	if err := m.refuseGuest(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
+	}
+	if private {
+		membership, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
+		if err != nil {
+			return domain.Conversation{}, err
+		}
+		if err := m.requirePrivateChannelCreator(ctx, workspaceID, membership); err != nil {
+			return domain.Conversation{}, err
+		}
 	}
 	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
 	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {

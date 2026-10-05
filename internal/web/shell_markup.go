@@ -267,8 +267,9 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
   <section class="dialog-body" data-step="2" aria-label="Step 2 of 3: Visibility">
     <fieldset class="choice-list"><legend>Visibility</legend>
       <label><input type="radio" name="is_private" value="false" checked> <span><strong>Public</strong><small>Anyone in {{.WorkspaceName}}</small></span></label>
-      <label><input type="radio" name="is_private" value="true"> <span><strong>Private</strong><small>Only specific people · Can only be viewed or joined by invitation</small></span></label>
+      <label><input type="radio" name="is_private" value="true"{{if not .CanCreatePrivate}} disabled aria-describedby="new-channel-private-restricted"{{end}}> <span><strong>Private</strong><small>Only specific people · Can only be viewed or joined by invitation</small></span></label>
     </fieldset>
+    {{if not .CanCreatePrivate}}<p class="dialog-note" id="new-channel-private-restricted">Your workspace limits who can create private channels. Ask a workspace administrator if you need one.</p>{{end}}
     <p class="dialog-step" aria-hidden="true">Step 2 of 3</p>
   </section>
   <section class="dialog-body" data-step="3" aria-label="Step 3 of 3: Add people">

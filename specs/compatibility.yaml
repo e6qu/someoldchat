@@ -460,6 +460,16 @@ operations:
       - go-test:internal/api/slack:TestCreatePrivateConversation
       - go-test:internal/api/slack:TestConversationWritesRequireTheScopeOfTheConversationsType
       - go-test:internal/api/slack:TestConversationObjectReportsProvenanceAndTheGeneralChannel
+      - go-test:internal/api/slack:TestPrivateChannelCreationAnswersRestrictedActionUnderTheWorkspacePolicy
+      - go-test:internal/service:TestPrivateChannelCreationFollowsTheWorkspacePolicy
+    deviations:
+      - >-
+        restricted_action ("a team preference prevents") is answered for is_private=true when the
+        workspace's "who can create private channels" policy, set on the administration page,
+        does not admit the caller's role (everyone, workspace admins and owners, or owners only);
+        a public channel is not governed by it. The policy follows Slack's help article "Manage
+        settings and permissions for Slack Connect direct messages"; a bot token is judged by
+        its bot user's role, a member's.
   - method: conversations.join
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -782,6 +792,12 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminConversationCreateUsesDurableConversationBoundary
+      - go-test:internal/api/slack:TestPrivateChannelCreationAnswersRestrictedActionUnderTheWorkspacePolicy
+    deviations:
+      - >-
+        A private channel follows the workspace's "who can create private channels" policy as
+        conversations.create does, so an administrator under an owners-only policy is answered
+        restricted_action, the code this method declares.
   - method: admin.conversations.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -2513,8 +2529,14 @@ operations:
     reference: https://docs.slack.dev/reference/methods/team.preferences.list/
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestTeamPreferencesListReportsTheWorkspacePolicy
     deviations:
-      - SameOldChat returns its enforced workspace-wide product policies; it does not yet model administrator-configurable variants of those policies.
+      - >-
+        SameOldChat returns the workspace-wide policies it enforces. Two are administrator
+        settings: warn_before_at_channel ("always", or "never" when the @channel confirmation is
+        turned off) and who_can_create_private_channel ("regular", "admin" or "owner", in the
+        vocabulary of who_can_create_channel). The reference documents neither key, so their
+        names are this product's; the others are fixed product policies.
   - method: tooling.tokens.rotate
     status: behavior-compatible
     provenance: slack-reference
@@ -2900,6 +2922,7 @@ operations:
       - The creating agent's bot and the origin message's author are its members. An origin channel the bot cannot read is channel_not_found, one shared with another organization invalid_arguments, and a missing origin message message_not_found. team_id may name only the token's own workspace.
       - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
+      - A private code channel is a private channel, so the workspace's "who can create private channels" policy governs it as it governs conversations.create, and a refusal is the general restricted_action.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.create/
   - method: agents.conversations.getCanvas

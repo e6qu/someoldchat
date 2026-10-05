@@ -132,6 +132,7 @@ func runQualification(t *testing.T, open opener) {
 		{"retention deletes the same content on every profile", retentionDeletesTheSameContentOnEveryProfile},
 		{"retention sweeps are claimed exactly once", retentionSweepsAreClaimedExactlyOnce},
 		{"conversation retention overrides the workspace default", conversationRetentionOverridesTheWorkspaceDefault},
+		{"a workspace policy round-trips and defaults to Slack's", workspacePolicyRoundTripsAndDefaults},
 		{"typing signals expire without being retracted", typingSignalsExpireWithoutBeingRetracted},
 		{"canvas search folds text and stops at the reader's access", canvasSearchFoldsTextAndStopsAtAccess},
 		{"list search folds text and stops at the reader's access", listSearchFoldsTextAndStopsAtAccess},

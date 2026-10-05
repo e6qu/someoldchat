@@ -3090,10 +3090,12 @@ func (h Handler) teamInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // teamPreferencesList exposes the workspace policies SameOldChat actually
-// enforces. These are product invariants rather than configurable-looking
+// enforces. Most are product invariants rather than configurable-looking
 // placeholders: files are allowed subject to the caller's scopes, profiles use
-// display names, message editing has no workspace time limit, and the general
-// channel is not role-restricted.
+// display names, message editing has no workspace time limit, the general
+// channel is not role-restricted, and any member may create a public channel.
+// The last two are the administrator's workspace policy (domain.WorkspacePolicy),
+// read as it is applied.
 func (h Handler) teamPreferencesList(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeTeamPreferencesRead)
 	if err != nil {
@@ -3104,14 +3106,38 @@ func (h Handler) teamPreferencesList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "invalid_team"))
 		return
 	}
+	policy, err := h.Messages.WorkspacePolicy(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "invalid_team"))
+		return
+	}
+	warnBeforeAtChannel := "always"
+	if policy.BroadcastWarningOff {
+		warnBeforeAtChannel = "never"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":                     true,
-		"display_real_names":     false,
-		"disable_file_uploads":   "allow_all",
-		"msg_edit_window_mins":   0,
-		"who_can_post_general":   "everyone",
-		"who_can_create_channel": "regular",
+		"ok":                             true,
+		"display_real_names":             false,
+		"disable_file_uploads":           "allow_all",
+		"msg_edit_window_mins":           0,
+		"who_can_post_general":           "everyone",
+		"who_can_create_channel":         "regular",
+		"who_can_create_private_channel": policyAudiencePreference(policy.PrivateChannelCreators),
+		"warn_before_at_channel":         warnBeforeAtChannel,
 	})
+}
+
+// policyAudiencePreference spells an audience in the vocabulary this method
+// already uses for who_can_create_channel: "regular" is every member.
+func policyAudiencePreference(audience domain.PolicyAudience) string {
+	switch audience {
+	case domain.PolicyAudienceAdmins:
+		return "admin"
+	case domain.PolicyAudienceOwners:
+		return "owner"
+	default:
+		return "regular"
+	}
 }
 
 // team.externalTeams.list reports the organizations this workspace shares
@@ -12477,6 +12503,12 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, domain.ErrTriggerTypeRestricted) {
 		return "restricted_action"
 	}
+	// The workspace's "who can create private channels" policy refused the
+	// member. conversations.create and admin.conversations.create both declare
+	// restricted_action for "a team preference prevents" this.
+	if errors.Is(err, domain.ErrPrivateChannelCreationRestricted) {
+		return "restricted_action"
+	}
 	// An app whose access control list does not admit the member, or not in
 	// this channel, is refused the same way.
 	if errors.Is(err, domain.ErrAppUseRestricted) {
@@ -12502,6 +12534,11 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 		return "too_many_bookmarks"
 	}
 	if errors.Is(err, store.ErrInvalidInviteRequest) {
+		return invalidReason
+	}
+	// No Web API method sets the workspace policy, but the seam can carry the
+	// refusal, and it is the caller's argument at fault, not the server.
+	if errors.Is(err, domain.ErrInvalidWorkspacePolicy) {
 		return invalidReason
 	}
 	// An expired invitation is not a malformed request: nothing the caller can

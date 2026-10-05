@@ -657,6 +657,23 @@ message MemberAuthPolicyResponse {
   bool must_use_password_sign_in = 1;
 }
 
+// WorkspacePolicy is domain.WorkspacePolicy: the workspace permissions an
+// administrator sets.
+message WorkspacePolicy {
+  // Whether the composer skips its confirmation before @channel, @here and
+  // @everyone in a channel of at least six members.
+  bool broadcast_warning_off = 1;
+  // Who may create a private channel, or convert a group DM into one:
+  // everyone, admins, or owners.
+  string private_channel_creators = 2;
+}
+
+message SetWorkspacePolicyRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  WorkspacePolicy policy = 3;
+}
+
 service DirectoryService {
   rpc Users(UsersRequest) returns (UserPage);
   rpc ConversationMembers(ConversationMembersRequest) returns (UserPage);
@@ -718,6 +735,10 @@ service DirectoryService {
   rpc SetWorkspaceDiscoverability(SetWorkspaceDiscoverabilityRequest) returns (Workspace);
   rpc SetWorkspaceIcon(SetWorkspaceIconRequest) returns (Workspace);
   rpc SetWorkspaceDefaultChannels(SetWorkspaceDefaultChannelsRequest) returns (Workspace);
+  // Named GetWorkspacePolicy because an rpc named WorkspacePolicy would
+  // shadow the WorkspacePolicy message type for every later return here.
+  rpc GetWorkspacePolicy(WorkspaceRequest) returns (WorkspacePolicy);
+  rpc SetWorkspacePolicy(SetWorkspacePolicyRequest) returns (WorkspacePolicy);
   rpc GetConversationPrefs(ConversationPrefsRequest) returns (ConversationPrefs);
   rpc SetConversationPrefs(SetConversationPrefsRequest) returns (ConversationPrefs);
   rpc GetPostingPermissions(ConversationPrefsRequest) returns (PostingPermissions);

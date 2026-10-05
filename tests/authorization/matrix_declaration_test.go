@@ -192,6 +192,7 @@ func authorityMatrix() map[string]authority {
 		"SetUserGroupEnabled":                 authorityAdmin,
 		"SetUserGroupUsers":                   authorityAdmin,
 		"SetWorkspaceRetention":               authorityAdmin,
+		"SetWorkspacePolicy":                  authorityAdmin,
 		"TeamBillableInfo":                    authorityAdmin,
 		"UpdateUserGroup":                     authorityAdmin,
 		"UserExpiration":                      authorityAdmin,
@@ -591,6 +592,7 @@ func authorityMatrix() map[string]authority {
 		"WorkflowUpdateStep":                  authorityAnyMember,
 		"WorkspaceInfo":                       authorityAnyMember,
 		"WorkspaceNotificationPreferences":    authorityAnyMember,
+		"WorkspacePolicy":                     authorityAnyMember,
 
 		// Agent sessions act in a conversation as one of its members — the
 		// app's bot for the two Web API methods, the member for the stop and

@@ -50,7 +50,9 @@
    with their descriptions, and using one in a channel of at least six members
    asks for confirmation before notifying everyone, the default Slack's
    [Manage who can notify a channel or workspace](https://slack.com/help/articles/115004855143-Manage-who-can-notify-a-channel-or-workspace)
-   publishes.
+   publishes. Workspace owners and admins may turn the confirmation off from
+   the workspace settings, as that article describes; the composer then sends
+   the mention without asking.
 
 A channel may restrict who posts. Slack's manage-posting-permissions surface
 offers everyone, everyone except guests, admins only, and a named allowlist, and
@@ -287,8 +289,13 @@ outcomes are not HTTP 500 responses.
   suggestion anchoring, Up-to-edit, the not-sent outbox with an idempotent
   retry and the non-member prompt are covered by the browser suite. The
   broadcast confirmation asks in a channel of at least six members, the
-  threshold Slack publishes; no browser test drives it yet, and the
-  owner/admin setting that turns it off is not implemented.
+  threshold Slack publishes. The administrator's setting that turns it off is
+  stored with the workspace policy and reaches the composer as its form's
+  `data-broadcast-warning-off`; a web test asserts the server sets it exactly
+  when the workspace turned the warning off, and the `[ADMIN-02 COMP-01 DM-05]`
+  browser journey changes the setting and finds it on the composer. No browser
+  test drives the dialog itself, because the browser servers' channels have
+  fewer than six members.
 - A committed send whose conversation cannot be read back answers 204 with
   `X-SameOldChat-Sent-View: pending`, which the composer treats as sent
   before its catch-up refresh draws the message

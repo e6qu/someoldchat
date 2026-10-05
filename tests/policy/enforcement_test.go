@@ -45,6 +45,7 @@ func enforced() map[string]enforcement {
 		"GetAutomationPermission":                {at: "internal/service/workflows.go", why: "who may run a workflow, a trigger and a function"},
 		"GetConversationRetention":               {at: "internal/scheduler/retention.go", why: "the sweep deletes against the conversation's own horizon"},
 		"GetRetentionPolicy":                     {at: "internal/scheduler/retention.go", why: "the sweep deletes against the workspace horizon where no override governs"},
+		"GetWorkspacePolicy":                     {at: "internal/service/workspace_policy.go", why: "requirePrivateChannelCreator refuses a private channel, created or converted from a group DM, to a member the workspace's audience leaves out"},
 		"GetUserExpiration":                      {at: "internal/scheduler/user_expirations.go", why: "a lapsed account is deactivated, and its credentials are refused at lookup"},
 		"GetWorkspaceNotificationPreferences":    {at: "internal/service/messages.go", why: "whether a message notifies, and the schedule it may notify within"},
 		"GetConversationNotificationPreferences": {at: "internal/store/sqlstore/sqlstore.go", why: "the store joins on the member's level when it decides what to raise"},

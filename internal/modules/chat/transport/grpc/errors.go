@@ -135,6 +135,7 @@ var errorClasses = []errorClass{
 	{key: "service.shared_invite_settled", code: codes.FailedPrecondition, sentinel: domain.ErrSharedInviteSettled},
 	{key: "service.slack_connect_full", code: codes.FailedPrecondition, sentinel: domain.ErrSlackConnectFull},
 	{key: "service.invalid_retention_duration", code: codes.InvalidArgument, sentinel: domain.ErrInvalidRetentionDuration},
+	{key: "service.invalid_workspace_policy", code: codes.InvalidArgument, sentinel: domain.ErrInvalidWorkspacePolicy},
 	// FailedPrecondition: the request is well formed and the conversation is
 	// real; it is the conversation's type that carries no retention policy.
 	{key: "service.retention_not_supported", code: codes.FailedPrecondition, sentinel: domain.ErrRetentionNotSupported},
@@ -311,6 +312,7 @@ var errorClasses = []errorClass{
 	{key: "service.conversation_posting_restricted", code: codes.FailedPrecondition, sentinel: domain.ErrConversationPostingRestricted},
 	{key: "service.function_use_restricted", code: codes.FailedPrecondition, sentinel: domain.ErrFunctionUseRestricted},
 	{key: "service.trigger_type_restricted", code: codes.FailedPrecondition, sentinel: domain.ErrTriggerTypeRestricted},
+	{key: "service.private_channel_creation_restricted", code: codes.FailedPrecondition, sentinel: domain.ErrPrivateChannelCreationRestricted},
 	{key: "service.cannot_invite_self", code: codes.FailedPrecondition, sentinel: domain.ErrCannotInviteSelf},
 	{key: "service.app_interaction_unavailable", code: codes.FailedPrecondition, sentinel: domain.ErrAppInteractionUnavailable},
 	{key: "service.app_home_not_enabled", code: codes.FailedPrecondition, sentinel: domain.ErrAppHomeNotEnabled},

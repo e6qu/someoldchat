@@ -226,6 +226,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
 ` + clientConnectionSchema + `
 ` + canvasPresenceSchema + `
 ` + memberPreferenceSchema + `
+` + workspacePolicySchema + `
 ` + rateLimitSchema + `
 CREATE TABLE IF NOT EXISTS conversation_typing (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
@@ -618,7 +619,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 216
+const schemaVersion = 217
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3601,6 +3602,15 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 217: workspace policies ---
+	if version < 217 {
+		// Workspace permissions an administrator sets. A workspace without a
+		// row follows Slack's defaults, which is what every workspace did.
+		if _, err := db.ExecContext(ctx, workspacePolicySchema); err != nil {
+			return fmt.Errorf("migrate workspace policies: %w", err)
+		}
+	}
+	// --- end schema 217 ---
 	// --- schema 216: huddle state ---
 	if version < 216 {
 		// A member's profile carries the huddle they are in. Members already

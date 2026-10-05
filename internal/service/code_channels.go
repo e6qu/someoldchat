@@ -32,6 +32,17 @@ func (m Messages) CreateCodeChannel(ctx context.Context, workspaceID domain.Work
 	if app == "" {
 		return domain.CodeChannel{}, domain.ErrAgentSessionNotAgent
 	}
+	// A private code channel is a private channel like any other, so the
+	// workspace's "who can create private channels" policy governs it too.
+	if request.Private {
+		membership, err := m.activeWorkspaceMembership(ctx, workspaceID, actor)
+		if err != nil {
+			return domain.CodeChannel{}, err
+		}
+		if err := m.requirePrivateChannelCreator(ctx, workspaceID, membership); err != nil {
+			return domain.CodeChannel{}, err
+		}
+	}
 	request.SessionID = strings.TrimSpace(request.SessionID)
 	if !domain.ValidCodeChannelSessionID(request.SessionID) || (request.Origin.Channel == "") != (request.Origin.Timestamp == "") {
 		return domain.CodeChannel{}, domain.ErrInvalidCodeChannel

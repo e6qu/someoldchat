@@ -88,9 +88,12 @@ type composerView struct {
 	// who is not in the channel. Both are zero/false in a DM, where neither
 	// applies.
 	MemberCount int
-	CanInvite   bool
-	InviteURL   string
-	IsDirect    bool
+	// BroadcastWarningOff is the workspace's choice to send those mentions
+	// without the confirmation, which an administrator may make.
+	BroadcastWarningOff bool
+	CanInvite           bool
+	InviteURL           string
+	IsDirect            bool
 	// RecipientName and RecipientZone are, in a one-to-one DM, the other
 	// person and the IANA zone their client reported, so scheduling can say
 	// what the chosen time is for them, as Slack does. Empty when they never

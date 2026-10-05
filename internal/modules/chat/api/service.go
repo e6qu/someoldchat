@@ -128,6 +128,10 @@ type Service interface {
 	ConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationRetention, int, error)
 	SetConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) error
 	RemoveConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error
+	// Workspace permissions. Any member reads them, because the composer and
+	// the create-channel dialog follow them; only an administrator sets them.
+	WorkspacePolicy(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspacePolicy, error)
+	SetWorkspacePolicy(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspacePolicy) (domain.WorkspacePolicy, error)
 	InviteShared(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, string) (domain.SharedInvite, error)
 	ApproveSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
 	DenySharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)

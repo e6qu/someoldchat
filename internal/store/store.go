@@ -862,13 +862,18 @@ type Store interface {
 	SetConversationPublic(context.Context, domain.ConversationID, events.Event) (domain.Conversation, error)
 	GetConversationPrefs(context.Context, domain.ConversationID) (domain.ConversationPrefs, error)
 	SetConversationPrefs(context.Context, domain.ConversationID, domain.ConversationPrefs, events.Event) (domain.ConversationPrefs, error)
+	GetRetentionPolicy(context.Context, domain.WorkspaceID) (domain.RetentionPolicy, error)
+	SetRetentionPolicy(context.Context, domain.WorkspaceID, domain.RetentionPolicy, events.Event) error
+	// GetWorkspacePolicy returns the workspace's permissions policy, or
+	// domain.DefaultWorkspacePolicy when nobody has configured one: an
+	// unconfigured workspace follows Slack's defaults rather than failing.
+	GetWorkspacePolicy(context.Context, domain.WorkspaceID) (domain.WorkspacePolicy, error)
+	SetWorkspacePolicy(context.Context, domain.WorkspaceID, domain.WorkspacePolicy, events.Event) error
 	// GetConversationRetention returns a channel's message-retention override,
 	// or a zero value when it has none. An absent override is not an error:
 	// most channels follow the workspace default, and making that the error
 	// path would force every caller to distinguish "no override" from "could
 	// not read".
-	GetRetentionPolicy(context.Context, domain.WorkspaceID) (domain.RetentionPolicy, error)
-	SetRetentionPolicy(context.Context, domain.WorkspaceID, domain.RetentionPolicy, events.Event) error
 	GetConversationRetention(context.Context, domain.WorkspaceID, domain.ConversationID) (domain.ConversationRetention, error)
 	SetConversationRetention(context.Context, domain.WorkspaceID, domain.ConversationID, int, time.Time, events.Event) error
 	RemoveConversationRetention(context.Context, domain.WorkspaceID, domain.ConversationID, events.Event) error

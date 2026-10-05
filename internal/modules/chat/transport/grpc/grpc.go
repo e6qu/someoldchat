@@ -2608,6 +2608,37 @@ func (r Remote) AdminSetWorkspaceDiscoverability(ctx context.Context, workspaceI
 	return decodeProtoWorkspace(out)
 }
 
+func encodeProtoWorkspacePolicy(value domain.WorkspacePolicy) *chatv1.WorkspacePolicy {
+	return &chatv1.WorkspacePolicy{BroadcastWarningOff: value.BroadcastWarningOff, PrivateChannelCreators: string(value.PrivateChannelCreators)}
+}
+
+// decodeProtoWorkspacePolicy refuses a policy naming an audience this build
+// does not apply, rather than reading it as the default: a mixed-version
+// rollout must not quietly widen who may create a private channel.
+func decodeProtoWorkspacePolicy(value *chatv1.WorkspacePolicy) (domain.WorkspacePolicy, error) {
+	policy := domain.WorkspacePolicy{BroadcastWarningOff: value.GetBroadcastWarningOff(), PrivateChannelCreators: domain.PolicyAudience(value.GetPrivateChannelCreators())}
+	if !policy.Valid() {
+		return domain.WorkspacePolicy{}, errors.New("typed workspace policy names an unknown audience")
+	}
+	return policy, nil
+}
+
+func (r Remote) WorkspacePolicy(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspacePolicy, error) {
+	out, err := r.directory.GetWorkspacePolicy(ctx, &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.WorkspacePolicy{}, err
+	}
+	return decodeProtoWorkspacePolicy(out)
+}
+
+func (r Remote) SetWorkspacePolicy(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.WorkspacePolicy) (domain.WorkspacePolicy, error) {
+	out, err := r.directory.SetWorkspacePolicy(ctx, &chatv1.SetWorkspacePolicyRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Policy: encodeProtoWorkspacePolicy(policy)})
+	if err != nil {
+		return domain.WorkspacePolicy{}, err
+	}
+	return decodeProtoWorkspacePolicy(out)
+}
+
 func (r Remote) AdminSetWorkspaceIcon(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, iconURL string) (domain.Workspace, error) {
 	out, err := r.directory.SetWorkspaceIcon(ctx, &chatv1.SetWorkspaceIconRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ImageUrl: iconURL})
 	if err != nil {
@@ -7368,6 +7399,28 @@ func (s *Server) SetWorkspaceDiscoverability(ctx context.Context, input *chatv1.
 		return nil, mapError(err)
 	}
 	return encodeProtoWorkspace(value), nil
+}
+
+// GetWorkspacePolicy is the transport name; see the comment on the rpc.
+func (s *Server) GetWorkspacePolicy(ctx context.Context, input *chatv1.WorkspaceRequest) (*chatv1.WorkspacePolicy, error) {
+	policy, err := s.implementation.WorkspacePolicy(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoWorkspacePolicy(policy), nil
+}
+
+// SetWorkspacePolicy passes an unknown audience through to the service, which
+// refuses it as ErrInvalidWorkspacePolicy, so a remote caller is answered with
+// the same refusal a local one is.
+func (s *Server) SetWorkspacePolicy(ctx context.Context, input *chatv1.SetWorkspacePolicyRequest) (*chatv1.WorkspacePolicy, error) {
+	requested := input.GetPolicy()
+	policy := domain.WorkspacePolicy{BroadcastWarningOff: requested.GetBroadcastWarningOff(), PrivateChannelCreators: domain.PolicyAudience(requested.GetPrivateChannelCreators())}
+	saved, err := s.implementation.SetWorkspacePolicy(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), policy)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoWorkspacePolicy(saved), nil
 }
 
 func (s *Server) SetWorkspaceIcon(ctx context.Context, input *chatv1.SetWorkspaceIconRequest) (*chatv1.Workspace, error) {

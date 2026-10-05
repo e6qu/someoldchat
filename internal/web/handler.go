@@ -4303,6 +4303,7 @@ func (h Handler) Register(serveMux *http.ServeMux) {
 	mux.HandleFunc("POST /app/admin/settings/discoverability", h.workspaceDiscoverabilitySet)
 	mux.HandleFunc("POST /app/admin/settings/disconnect", h.workspaceDisconnectTeam)
 	mux.HandleFunc("POST /app/admin/settings/retention", h.workspaceRetentionSet)
+	mux.HandleFunc("POST /app/admin/settings/permissions", h.workspacePermissionsSet)
 	mux.HandleFunc("POST /app/admin/settings/profile-fields", h.workspaceProfileFieldSet)
 	mux.HandleFunc("POST /app/admin/settings/profile-fields/delete", h.workspaceProfileFieldDelete)
 	mux.HandleFunc("POST /app/admin/settings/default-channels", h.workspaceDefaultChannelsSet)
@@ -6860,7 +6861,13 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		if err != nil {
 			return nil, err
 		}
-		canConvert = !membership.UltraRestricted
+		// Converting makes a private channel, so a member the workspace's
+		// private-channel policy leaves out is not offered it.
+		policy, err := h.Messages.WorkspacePolicy(ctx, principal.WorkspaceID, principal.UserID)
+		if err != nil {
+			return nil, err
+		}
+		canConvert = !membership.UltraRestricted && policy.PrivateChannelCreators.Admits(membership.Role)
 	}
 	// Changing a channel's visibility belongs to a workspace administrator, not
 	// to whoever can manage the channel: it decides who in the whole workspace
@@ -13561,6 +13568,8 @@ func (h Handler) convertGroupDirectToPrivate(w http.ResponseWriter, r *http.Requ
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this group DM", "Nothing was converted.")
 		case errors.Is(err, domain.ErrNotWorkspaceAdmin):
 			h.writeMutationError(w, r, http.StatusForbidden, "Your guest role cannot create this private channel", "Ask a full member or multi-channel guest in the group DM to convert it.")
+		case errors.Is(err, domain.ErrPrivateChannelCreationRestricted):
+			h.writeMutationError(w, r, http.StatusForbidden, "Your workspace limits who can create private channels", "Ask a workspace administrator, or someone in this group DM who may create private channels, to convert it. The group DM was not changed.")
 		case errors.Is(err, domain.ErrInvalidConversation), errors.Is(err, store.ErrInvalidConversationType):
 			h.writeMutationError(w, r, http.StatusBadRequest, "That group DM cannot be converted", "Only a group direct message can become a private channel, and it needs a valid channel name.")
 		case errors.Is(err, store.ErrAlreadyExists):
@@ -13598,6 +13607,14 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, store.ErrAlreadyExists):
 			status = http.StatusConflict
 			reason = "A channel with that name already exists."
+		case errors.Is(err, domain.ErrPrivateChannelCreationRestricted):
+			status = http.StatusForbidden
+			reason = "Your workspace limits who can create private channels. Create a public channel, or ask a workspace administrator."
+		case errors.Is(err, domain.ErrUserIsRestricted), errors.Is(err, domain.ErrUserIsUltraRestricted):
+			// A guest was told the store was unavailable, which sent them to
+			// retry something their account type never allows.
+			status = http.StatusForbidden
+			reason = "Guests cannot create channels. Ask a member of the workspace to create it."
 		}
 		h.writeMutationError(w, r, status, heading, reason)
 		return
