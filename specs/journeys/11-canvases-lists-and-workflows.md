@@ -301,7 +301,11 @@ controls that change that. A conversation reaches its own canvas from the
 conversation itself, and creating one is a deliberate act rather than a side
 effect of following the link. Real-time co-editing (collaborative cursors and
 merging two writers' concurrent changes) and offline recovery remain gaps: a
-second writer's save is refused rather than merged.
+second writer's save is refused rather than merged. The merge itself is built
+but not yet wired in: `internal/crdt` is a replicated text that converges
+whatever order edits arrive in, and the canvas page ships its browser twin;
+the two replay shared conformance vectors, in Go and in the browser suite, so
+an edit either makes integrates the same way in the other.
 
 LIST-01 and the basic completion portion of LIST-02 now have a persisted
 directory, to-do creation, item creation, and complete/restore flow. Typed columns,
