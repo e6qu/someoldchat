@@ -3736,29 +3736,88 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 //
 // Load-bearing properties, each of which replaced a defect:
 //
-//   - bursts collapse into one refresh; a refresh aborts the one before it and
-//     drops any response that lands after a newer one started. Ten events used
-//     to issue ten concurrent scans whose responses could land out of order and
-//     visibly revert the timeline.
+//   - every message region converges on the newest state anyone asked for.
+//     The refresh machinery is described in full below, under "The region
+//     refresh".
 //   - a submit takes a lock and disables its button, and success clears only
 //     the exact text that was sent. Holding Enter used to post twice.
 //   - the stream reports its own failure: a 401 closes an EventSource for good,
 //     and the page used to keep looking live forever.
 //   - every URL the client fetches must be a path on this origin. These fetches
 //     carry credentials.
-//   - a refresh the reader caused is not cancelled by one nobody asked for.
-//     While a forced refresh is in flight a background one yields, because the
-//     event that provoked it will be in the response already being fetched.
-//   - a region is not re-rendered from markup identical to what it was last
-//     given: that cannot add information and can destroy focus, caret, scroll
-//     anchor and open disclosures. The remembered markup is cleared wherever
-//     something other than refresh() writes to a region.
 //
-// refresh(force) is forced only for a change the reader made: it re-renders
-// every message region and does not step aside for focus, because the reader is
-// waiting. Somebody else's event leaves a focused region alone. A post from a
-// window that is not the newest navigates to the newest instead of appending,
-// because the stored message cannot appear in the window on screen.
+// The region refresh. Each [data-fragment] region has one state record: the
+// clock value of the newest refresh wanted for it, the value its applied
+// markup satisfies, the value of the newest forced want, the markup it was
+// last given, its one request in flight, its retry timer, whether it is
+// deferred, and the promises waiting on it. One monotonic clock orders every
+// want on the page. The invariant is:
+//
+//	while applied < wanted, the region has a request in flight, a retry
+//	timer pending, or a recorded deferral with a wake-up hook.
+//
+// pump(region) is the only thing that starts a request, and it runs again
+// after every outcome — applied, failed, timed out, superseded — so a want
+// recorded at any moment is eventually fetched. The machine it replaced kept
+// one generation counter and one shared AbortController for the whole page and
+// broke that invariant in several ways, each a way for the timeline to go
+// stale with nothing left to fix it (the "refresh can be discarded" row of
+// specs/product-gap-audit.md):
+//
+//   - a background refresh aborted a forced one and re-fetched only the live
+//     regions it covered, skipping a focused #timeline, so the forced response
+//     was discarded and never re-requested. A background want now never
+//     aborts; it is recorded and served when the region's flight ends.
+//   - while a forced refresh was in flight a background one was dropped, on
+//     the theory that the forced response would carry the event. It does not
+//     when the event commits after that request was rendered. Now the want is
+//     recorded, and applying the older response leaves applied < wanted, so
+//     pump fetches again.
+//   - Promise.all ended the forced protection when the first region failed,
+//     while the others were still in flight. Protection is now per region.
+//   - a fetch had no deadline. A refresh that was never answered held the
+//     forced gate for good, silencing every later live update, and the
+//     composer's in-flight flag waited on it. Every request now has a
+//     deadline (refreshTimingLiteral); a failure or timeout rejects that
+//     region's waiters with a real error, is counted in
+//     data-refresh-timeouts when it was a timeout, and retries with backoff.
+//   - a region skipped because it held focus was never asked again. A
+//     background pump now records a deferral, and a document focusout
+//     (one tick later, when the new focus is known) pumps deferred regions
+//     again. A hidden region defers the same way and is woken by a
+//     ResizeObserver when it is shown; without one it is simply fetched.
+//   - every response raced every other on the page, so under a sustained burst
+//     each refresh aborted the last and nothing applied until the burst ended.
+//     Now each region has a single flight: a response is applied, recording
+//     the want it was started for, and the next want is served after it.
+//   - a response could land in a thread region the thread pane had already
+//     replaced. A detached region resolves its waiters and is forgotten, and
+//     the sameoldchat:thread-pane listener wants and pumps the new region, so
+//     an event that arrived during the pane's own fetch is not lost.
+//
+// A forced want — a change the reader made — supersedes the region's flight
+// (which started before the change and may not show it), cancels any backoff,
+// and does not step aside for focus, because the reader is waiting. The
+// superseded request's waiters are not rejected; they are served by the new
+// request. A background want never aborts anything. Somebody else's event
+// leaves a focused region alone. refresh(force) always settles: it resolves
+// when every region it targeted has applied a response at least as new as
+// the call (or, for a background refresh, deferred or detached), and rejects
+// only on a real failure or timeout. Its callers treat the rejection as the
+// view being behind, never as their mutation having failed.
+//
+// A region is not re-rendered from markup identical to what it was last
+// given: that cannot add information and can destroy focus, caret, scroll
+// anchor and open disclosures. Anything other than the refresh that writes to
+// a region goes through window.sameoldchatPage.append, which forgets the
+// remembered markup. The composer used to insert its post's markup directly:
+// when the live stream had already drawn the message, the insert made a
+// second copy, and the forced refresh that should have repaired it was
+// skipped as identical.
+//
+// A post from a window that is not the newest navigates to the newest instead
+// of appending, because the stored message cannot appear in the window on
+// screen.
 //
 // Arriving from a permalink lands on the message the link names. The link
 // carries a window cursor ending just after it and a fragment naming it; the
@@ -3784,10 +3843,14 @@ for(var index=0;index<inputs.length;index++)bind(inputs[index]);
 // click did nothing at all — no request, no error, no feedback. A CI failure
 // showed exactly that, with one POST /app/conversation/create in the network
 // trace where the test made two, and data-discarded-refreshes at 0 ruling out
-// the refresh-discard defect recorded separately in the product gap audit. The
-// composer's sending flag still waits for the end, because it guards against
-// sending the same text twice and the text is not cleared until the view
-// updates.
+// the refresh-discard defect. The refresh that never settled was the missing
+// deadline described under "The region refresh". The composer's sending flag
+// is released on the same rule: it guards against sending the same text twice,
+// and the text is cleared as soon as the post answers. A refresh that fails
+// after a mutation succeeded is announced as the view being behind ("The
+// change was saved…", "Sent…"); it never reaches showError, whose fallback
+// says nothing was changed, nor the composer's outbox, whose Retry would post
+// the message again.
 //
 // A view.* or dialog.* record reloads the page so an app's views.open/update/
 // push or dialog.open shows at once, except a view.updated marked state_only: that record only saves
@@ -3819,15 +3882,16 @@ var status=document.getElementById('live-status');
 var browserTimezone='UTC';
 try{browserTimezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(error){}
 Array.prototype.forEach.call(document.querySelectorAll('[data-browser-timezone]'),function(input){input.value=browserTimezone});
-var generation=0;
+var refreshTiming=` + refreshTimingLiteral() + `;
+var refreshClock=0;
 var refreshResponses=0;
 var discardedRefreshes=0;
+var refreshTimeouts=0;
 document.documentElement.setAttribute('data-refresh-responses','0');
 document.documentElement.setAttribute('data-discarded-refreshes','0');
-var inFlight=null;
+document.documentElement.setAttribute('data-refresh-timeouts','0');
+var regionStates=new WeakMap();
 var scheduled=null;
-var appliedHTML=new WeakMap();
-var forcing=0;
 var streamState='';
 var applePlatform=/Mac|iPhone|iPad/.test(navigator.platform||'');
 function primaryShortcut(event){return applePlatform?event.metaKey&&!event.ctrlKey:event.ctrlKey&&!event.metaKey}
@@ -3866,54 +3930,94 @@ var line=author&&said?author.textContent.trim()+': '+said:'';
 if(arrived===1)return line?'New message from '+line:'1 new message.';
 return arrived+' new messages.'+(line?' Latest from '+line:'');
 }
-function refresh(force){
-if(!force&&forcing>0)return Promise.resolve([]);
-var candidates=[];
-var live=regions(force);
-for(var candidateIndex=0;candidateIndex<live.length;candidateIndex++){
-var candidate=live[candidateIndex];
-var candidateTarget=candidate.getAttribute('data-fragment');
-if(!ownPath(candidateTarget)||!shown(candidate))continue;
-var candidateFocused=!!(document.activeElement&&candidate.contains(document.activeElement));
-if(candidateFocused&&!force)continue;
-candidates.push({region:candidate,target:candidateTarget,focused:candidateFocused});
+function counted(name,value){document.documentElement.setAttribute('data-'+name,String(value))}
+function regionState(region){var state=regionStates.get(region);if(!state){state={wanted:0,applied:0,forced:0,html:null,flight:null,retry:null,attempt:0,deferred:false,waiters:[]};regionStates.set(region,state)}return state}
+function settleWaiters(state,all){state.waiters=state.waiters.filter(function(waiter){if(all||state.applied>=waiter.at||(state.deferred&&!waiter.force)){waiter.resolve();return false}return true})}
+function rejectWaiters(state,error){var waiters=state.waiters;state.waiters=[];waiters.forEach(function(waiter){waiter.reject(error)})}
+var revealed=window.ResizeObserver?new ResizeObserver(function(entries){entries.forEach(function(entry){if(!shown(entry.target))return;revealed.unobserve(entry.target);pump(entry.target)})}):null;
+function want(region,force){
+var state=regionState(region);
+state.wanted=++refreshClock;
+if(force){
+state.forced=state.wanted;
+var superseded=state.flight;
+if(superseded){superseded.done=true;window.clearTimeout(superseded.timer);state.flight=null;if(superseded.controller)superseded.controller.abort()}
+if(state.retry){window.clearTimeout(state.retry);state.retry=null}
 }
-if(!candidates.length)return Promise.resolve([]);
-if(force)forcing++;
-var settle=function(){if(force&&forcing>0)forcing--};
-generation++;
-var token=generation;
-if(inFlight){inFlight.abort();inFlight=null}
-var controller=window.AbortController?new AbortController():null;
-inFlight=controller;
-var pending=[];
-for(var index=0;index<candidates.length;index++){(function(candidate){
-var region=candidate.region;
-var target=candidate.target;
-var focused=candidate.focused;
-var stick=atBottom(region);
-var options={headers:{'HX-Request':'true'},credentials:'same-origin'};
-if(controller)options.signal=controller.signal;
-var activeMessage=focused?document.activeElement.closest('.message'):null;
+return state.wanted;
+}
+function failed(region,state,flight,error){
+flight.done=true;
+window.clearTimeout(flight.timer);
+if(state.flight===flight)state.flight=null;
+rejectWaiters(state,error);
+var delays=refreshTiming.retry;
+var delay=delays[Math.min(state.attempt,delays.length-1)];
+state.attempt++;
+state.retry=window.setTimeout(function(){state.retry=null;pump(region)},delay);
+}
+function apply(region,state,html){
+if(state.html===html)return;
+state.html=html;
+var active=document.activeElement&&region.contains(document.activeElement)?document.activeElement:null;
+var activeMessage=active&&active.closest?active.closest('.message'):null;
 var activeMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):'';
-pending.push(fetch(target,options).then(function(response){if(!response.ok)throw new Error('The conversation could not be refreshed.');return response.text()}).then(function(html){
-refreshResponses++;
-document.documentElement.setAttribute('data-refresh-responses',String(refreshResponses));
-if(token!==generation){discardedRefreshes++;document.documentElement.setAttribute('data-discarded-refreshes',String(discardedRefreshes));return}
-if(!force&&document.activeElement&&region.contains(document.activeElement))return;
-if(appliedHTML.get(region)===html)return;
-appliedHTML.set(region,html);
-var liveActive=document.activeElement&&region.contains(document.activeElement)?document.activeElement:null;
-if(liveActive){focused=true;var liveMessage=liveActive.closest('.message');if(liveMessage)activeMessageID=liveMessage.getAttribute('data-message-id')}
+var stick=atBottom(region);
 region.innerHTML=html;
 localize(region);
 if(stick)toBottom(region);
-if(activeMessageID){var items=messageItems(region);var restored=items.find(function(item){return item.getAttribute('data-message-id')===activeMessageID});if(focusMessage(restored))return}
-if(focused&&region.hasAttribute('tabindex'))region.focus();
-}));
-})(candidates[index])}
-return Promise.all(pending).then(function(value){settle();if(inFlight===controller)inFlight=null;return value},function(error){settle();throw error});
+if(activeMessageID){var restored=messageItems(region).find(function(item){return item.getAttribute('data-message-id')===activeMessageID});if(focusMessage(restored))return}
+if(active&&region.hasAttribute('tabindex'))region.focus();
 }
+function pump(region){
+var state=regionState(region);
+if(state.flight||state.retry)return;
+if(!document.contains(region)){settleWaiters(state,true);return}
+if(state.applied>=state.wanted){settleWaiters(state,false);return}
+var target=region.getAttribute('data-fragment');
+if(!ownPath(target)){state.applied=state.wanted;settleWaiters(state,true);return}
+var forced=state.forced>state.applied;
+if(revealed&&!shown(region)){state.deferred=true;revealed.observe(region);settleWaiters(state,true);return}
+if(!forced&&document.activeElement&&region.contains(document.activeElement)){state.deferred=true;settleWaiters(state,false);return}
+state.deferred=false;
+var flight={started:state.wanted,forced:forced,done:false,timer:null,controller:window.AbortController?new AbortController():null};
+var options={headers:{'HX-Request':'true'},credentials:'same-origin'};
+if(flight.controller)options.signal=flight.controller.signal;
+state.flight=flight;
+flight.timer=window.setTimeout(function(){
+if(flight.done)return;
+refreshTimeouts++;
+counted('refresh-timeouts',refreshTimeouts);
+if(flight.controller)flight.controller.abort();
+failed(region,state,flight,new Error('The conversation took too long to answer.'));
+},refreshTiming.timeout);
+fetch(target,options).then(function(response){if(!response.ok)throw new Error('The conversation could not be refreshed.');return response.text()}).then(function(html){
+if(flight.done)return;
+flight.done=true;
+window.clearTimeout(flight.timer);
+state.flight=null;
+refreshResponses++;
+counted('refresh-responses',refreshResponses);
+if(!document.contains(region)){pump(region);return}
+if(!flight.forced&&document.activeElement&&region.contains(document.activeElement)){discardedRefreshes++;counted('discarded-refreshes',discardedRefreshes);pump(region);return}
+state.applied=Math.max(state.applied,flight.started);
+state.attempt=0;
+apply(region,state,html);
+pump(region);
+}).catch(function(){if(flight.done)pump(region);else failed(region,state,flight,new Error('The conversation could not be refreshed.'))});
+}
+function refresh(force){
+var waits=[];
+Array.prototype.forEach.call(regions(force),function(region){
+var at=want(region,force);
+waits.push(new Promise(function(resolve,reject){regionState(region).waiters.push({at:at,force:!!force,resolve:resolve,reject:reject})}));
+pump(region);
+});
+return Promise.all(waits);
+}
+function append(region,html){if(!region)return;region.insertAdjacentHTML('beforeend',html);regionState(region).html=null;localize(region)}
+document.addEventListener('focusout',function(){window.setTimeout(function(){Array.prototype.forEach.call(document.querySelectorAll('[data-fragment]'),function(region){var state=regionStates.get(region);if(state&&state.deferred)pump(region)})},0)});
+document.addEventListener('sameoldchat:thread-pane',function(event){var pane=event.detail&&event.detail.pane;if(!pane)return;Array.prototype.forEach.call(pane.querySelectorAll('[data-fragment]'),function(region){want(region,false);pump(region)})});
 function scheduleRefresh(){
 if(scheduled)return;
 scheduled=window.setTimeout(function(){
@@ -3924,7 +4028,7 @@ refresh(false).then(function(){
 var arrived=arrivalsSince(before);
 if(arrived>0){if(preference('announce-messages','true')!=='false')announce(arrivalSentence(arrived));notify(arrived);return}
 if(behind)announce('New activity is available in this conversation.');
-}).catch(function(error){if(error&&error.name==='AbortError')return;announce('New activity could not be loaded. Reload the page.')});
+}).catch(function(){announce('New activity could not be loaded. Retrying…')});
 },250);
 }
 function submitQuietly(form){
@@ -3952,6 +4056,7 @@ var button=submitter||form.querySelector('button[type=submit]');
 if(button)button.disabled=true;
 var releaseButton=function(){if(button)button.disabled=false};
 var release=releaseButton;
+var viewBehind=function(){announce('The change was saved. The conversation will update when the connection recovers.')};
 clearError();
 fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){
 if(!response.ok)return response.text().then(function(body){throw new Error(body)});
@@ -3967,16 +4072,14 @@ if(quiet){form.hidden=true;return null}
 if(html===''){return refresh(true).then(function(){
 if(restoreMessageID){var restored=Array.prototype.slice.call(document.querySelectorAll('.message')).find(function(item){return item.getAttribute('data-message-id')===restoreMessageID});focusMessage(restored)}
 announce('The conversation was updated.');
-})}
+},viewBehind)}
 var target=document.querySelector(form.getAttribute('hx-target'));
 if(!target)throw new Error('The page could not be updated. Reload to see the message.');
-target.insertAdjacentHTML('beforeend',html);
-appliedHTML.delete(target);
-localize(target);
+append(target,html);
 form.reset();
 toBottom(target);
 toBottom(document.getElementById('timeline'));
-return refresh(true);
+return refresh(true).catch(viewBehind);
 }).catch(function(error){showError(failure(error))}).then(release,release);
 });
 document.addEventListener('keydown',function(event){
@@ -4099,7 +4202,7 @@ beat();
 ['pointerdown','keydown','visibilitychange'].forEach(function(name){document.addEventListener(name,beat,{passive:true})});
 var beating=window.setInterval(beat,300000);window.sameoldchatLifecycle.hold(function(){window.clearInterval(beating)});
 }
-window.sameoldchatPage={refresh:refresh,localize:localize,announce:announce,focusMessage:focusMessage,messageItems:messageItems};
+window.sameoldchatPage={refresh:refresh,append:append,localize:localize,announce:announce,focusMessage:focusMessage,messageItems:messageItems};
 var markRead=document.getElementById('mark-read');
 if(markRead&&preference('mark-read','newest')!=='newest-unread')submitQuietly(markRead);
 var arrivedAt=null;
@@ -4120,6 +4223,27 @@ else if(landing){landing.style.scrollBehavior='auto';toBottom(landing);window.re
 var activeModal=document.querySelector('[aria-modal="true"]');
 if(activeModal){var modalFocus=activeModal.querySelector('input:not([type=hidden]),textarea,select,button');if(modalFocus)modalFocus.focus()}
 })();</script>`
+
+// The region refresh's deadline and retry backoff. A fragment render takes
+// well under a second; the deadline is generous so a loaded server is not
+// mistaken for a dead one, and short enough that a request that will never be
+// answered stops holding the reader's view within a glance at the clock. The
+// backoff stops at its last step and repeats it, so a server that is down is
+// asked twice a minute rather than hammered.
+const refreshTimeout = 10 * time.Second
+
+var refreshRetryDelays = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second}
+
+// refreshTimingLiteral hands the client those durations as a JavaScript object
+// literal, in the manner of typingTimingLiteral, so the script holds no second
+// hand-written copy of them.
+func refreshTimingLiteral() string {
+	delays := make([]string, 0, len(refreshRetryDelays))
+	for _, delay := range refreshRetryDelays {
+		delays = append(delays, strconv.FormatInt(delay.Milliseconds(), 10))
+	}
+	return fmt.Sprintf("{timeout:%d,retry:[%s]}", refreshTimeout.Milliseconds(), strings.Join(delays, ","))
+}
 
 func liveEventTopicsLiteral() string {
 	quoted := make([]string, 0, len(liveEventTopics))

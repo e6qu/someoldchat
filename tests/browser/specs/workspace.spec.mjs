@@ -5426,12 +5426,12 @@ test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it
   await page.goto('/app');
   await expect(page.locator('.channel-name-text')).toHaveText('general');
 
-  // The client cancels an in-flight refresh when a newer one starts, and drops
-  // any response that arrives after its generation has moved on. That guard is
-  // correct and it is also a cost: every discarded response is a round trip the
-  // browser paid for and threw away, and a wide enough race would let stale
-  // content paint before being replaced. The counter makes the guard
-  // observable, and this journey holds it at zero through ordinary use.
+  // Each region has one refresh in flight, and a background refresh never
+  // cancels it; the one response the client still drops is one for a region
+  // that took focus while it was in flight, and that region is fetched again
+  // when focus leaves. Every discarded response is a round trip the browser
+  // paid for and threw away. The counter makes that observable, and this
+  // journey holds it at zero through ordinary use.
   const counter = async (name) => Number(await page.locator('html').getAttribute(`data-${name}`));
   expect(await counter('discarded-refreshes'), 'the counter is not exposed').toBe(0);
 
@@ -5460,9 +5460,237 @@ test('[MSG-01 RESILIENCE-01] the conversation refresh throws away no response it
     })
     .toBeGreaterThan(0);
   expect(await counter('discarded-refreshes'), 'the client paid for a response it discarded').toBe(0);
+  // Every refresh has a deadline, and ordinary use never comes near it. The
+  // raw attribute is compared, so a client that stopped exposing the counter
+  // cannot pass as one that never timed out.
+  expect(await page.locator('html').getAttribute('data-refresh-timeouts'), 'a refresh in ordinary use ran out of time').toBe('0');
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+// The conversation fragment requests these tests intercept: the channel's own
+// timeline, not a thread pane's.
+function isTimelineFragment(url) {
+  return url.pathname === '/app/timeline' && !url.searchParams.has('thread');
+}
+
+function isMessagePost(url) {
+  return url.pathname === '/app/message';
+}
+
+// Counts the message.created events the live stream delivers to the page, so a
+// test knows the background refresh such an event provokes was asked for. The
+// listener is in place before the function returns, so an event caused after
+// that cannot be missed.
+async function messageEventCounter(page) {
+  await page.evaluate(() => {
+    if (typeof window.messageEventsSeen === 'number') return;
+    window.messageEventsSeen = 0;
+    document.addEventListener('sameoldchat:event', (event) => {
+      if (event.detail && event.detail.type === 'message.created') window.messageEventsSeen += 1;
+    });
+  });
+  return () => page.evaluate(() => window.messageEventsSeen);
+}
+
+async function postAndAwaitDelivery(page, request, text) {
+  const delivered = await messageEventCounter(page);
+  const before = await delivered();
+  await postThroughTheAPI(request, text);
+  await expect.poll(delivered, { message: 'the live stream never delivered the post' }).toBeGreaterThan(before);
+}
+
+// A background refresh used to be dropped outright while a forced one was in
+// flight, on the theory that the forced response would already contain the
+// event. It does not when the event commits after the forced request was
+// rendered, and nothing asked again, so the timeline stayed stale until the
+// next unrelated event.
+test('[MSG-01 RESILIENCE-01] an event that lands while the reader\'s own refresh is held is not lost', async ({ page, context, request }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await expect(page.locator('.channel-name-text')).toHaveText('general');
+
+  // Every timeline response requested while the gate is closed is rendered by
+  // the server at once, so it reflects the conversation as it was then, and is
+  // handed to the page only when the gate opens.
+  let holding = false;
+  let openGate;
+  const gate = new Promise((resolve) => {
+    openGate = resolve;
+  });
+  let held = 0;
+  await page.route(isTimelineFragment, async (route) => {
+    if (!holding) {
+      await route.continue();
+      return;
+    }
+    held += 1;
+    const response = await route.fetch();
+    await gate;
+    await route.fulfill({ response }).catch(() => {});
+  });
+  await page.route(isMessagePost, async (route) => {
+    const response = await route.fetch();
+    holding = true;
+    await route.fulfill({ response });
+  });
+
+  const mine = `held forced refresh ${Date.now()}`;
+  await composerEditor(page).fill(mine);
+  await composerEditor(page).press('Enter');
+  await expect.poll(() => held, { message: 'the forced refresh never reached the timeline fragment' }).toBeGreaterThan(0);
+
+  const theirs = `arrived during the held refresh ${Date.now()}`;
+  await postAndAwaitDelivery(page, request, theirs);
+  // Past the 250 ms coalescing window, so the background refresh the event
+  // provoked has been asked of the client.
+  await page.waitForTimeout(1000);
+  openGate();
+
+  await expect(page.locator('#timeline .message-text', { hasText: theirs })).toHaveCount(1, { timeout: 10000 });
+  await expect(page.locator('#timeline .message-text', { hasText: mine })).toHaveCount(1);
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
+// A refresh had no deadline. One that was never answered kept the forced
+// counter raised for good, which silenced every later live update, and the
+// composer's in-flight flag waited on it, so the next send did nothing at all.
+test('[MSG-01 RESILIENCE-01] a refresh that is never answered stops neither live updates nor the composer', async ({ page, context, request }) => {
+  // The client's refresh deadline is ten seconds (refreshTimingLiteral), and
+  // this journey has to outlast it once.
+  test.setTimeout(90_000);
+  await signIn(context);
+  await page.goto('/app');
+  await expect(page.locator('.channel-name-text')).toHaveText('general');
+
+  // Every timeline request made while the window is open is left unanswered,
+  // so whichever refresh is in flight when it closes is one that never ends.
+  let hang = false;
+  let hung = 0;
+  await page.route(isTimelineFragment, async (route) => {
+    if (hang) {
+      hung += 1;
+      return; // never answered
+    }
+    await route.continue();
+  });
+  await page.route(isMessagePost, async (route) => {
+    const response = await route.fetch();
+    hang = true;
+    await route.fulfill({ response });
+  });
+
+  const first = `before the hang ${Date.now()}`;
+  await composerEditor(page).fill(first);
+  await composerEditor(page).press('Enter');
+  await expect.poll(() => hung, { message: 'no refresh was left unanswered' }).toBeGreaterThan(0);
+  await page.unroute(isMessagePost);
+
+  const theirs = `after the hang ${Date.now()}`;
+  await postAndAwaitDelivery(page, request, theirs);
+  await page.waitForTimeout(1000);
+  hang = false;
+  await expect(page.locator('#timeline .message-text', { hasText: theirs })).toHaveCount(1, { timeout: 30000 });
+  expect(Number(await page.locator('html').getAttribute('data-refresh-timeouts')), 'the unanswered refresh was not timed out').toBeGreaterThan(0);
+
+  const second = `the composer still sends ${Date.now()}`;
+  await composerEditor(page).fill(second);
+  await composerEditor(page).press('Enter');
+  await expect(composerField(page)).toHaveValue('');
+  await expect(page.locator('#timeline .message-text', { hasText: second })).toHaveCount(1);
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
+// Somebody else's event leaves a focused region alone, so as not to move the
+// reader's focus or caret. Nothing asked again once focus left, so the region
+// kept showing the conversation as it was when the reader started reading it.
+test('[MSG-01 RESILIENCE-01] a region left alone while focused catches up when focus leaves', async ({ page, context, request }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await expect(page.locator('.channel-name-text')).toHaveText('general');
+  const responses = async () => Number(await page.locator('html').getAttribute('data-refresh-responses'));
+
+  await page.locator('#timeline').focus();
+  const theirs = `arrived while reading ${Date.now()}`;
+  await postAndAwaitDelivery(page, request, theirs);
+  // Past the 250 ms coalescing window, so the refresh was asked for and
+  // stepped aside.
+  await page.waitForTimeout(1000);
+  await expect(page.locator('#timeline .message-text', { hasText: theirs }), 'a focused region was re-rendered under the reader').toHaveCount(0);
+
+  const before = await responses();
+  await composerEditor(page).focus();
+  await expect(page.locator('#timeline .message-text', { hasText: theirs })).toHaveCount(1, { timeout: 10000 });
+  expect(await responses(), 'the catch-up did not come from a refresh').toBeGreaterThan(before);
+});
+
+// The composer appends its own message the moment the post answers. When the
+// live stream's refresh had already drawn that message, the append made a
+// second copy, and the forced refresh that should have repaired it was skipped
+// because its markup matched what the region was last given.
+test('[MSG-01 RESILIENCE-01] a slow send never leaves its message on screen twice', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await expect(page.locator('.channel-name-text')).toHaveText('general');
+  const responses = async () => Number(await page.locator('html').getAttribute('data-refresh-responses'));
+
+  const text = `answered slowly ${Date.now()}`;
+  const copies = page.locator('#timeline .message-text', { hasText: text });
+  let drawn = -1;
+  await page.route(isMessagePost, async (route) => {
+    const response = await route.fetch();
+    // The message is committed; the live stream draws it before the post's
+    // own answer reaches the composer.
+    await expect(copies).toHaveCount(1, { timeout: 15000 });
+    drawn = await responses();
+    await route.fulfill({ response });
+  });
+  await composerEditor(page).fill(text);
+  await composerEditor(page).press('Enter');
+  await expect.poll(() => drawn, { message: 'the live stream never drew the message' }).toBeGreaterThan(-1);
+  await expect.poll(responses, { message: 'the send was not followed by a refresh' }).toBeGreaterThan(drawn);
+  await expect(copies).toHaveCount(1);
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
+// A send and the view catching up are separate facts. A refresh that failed
+// after the post committed used to be reported as the send failing: the
+// message went to the outbox as "Not sent", and Retry offered to post it again.
+test('[MSG-01 RESILIENCE-01 COMP-01] a failed refresh after a send is not reported as an unsent message', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await expect(page.locator('.channel-name-text')).toHaveText('general');
+  const responses = async () => Number(await page.locator('html').getAttribute('data-refresh-responses'));
+
+  let failing = false;
+  await page.route(isTimelineFragment, async (route) => {
+    if (failing) {
+      await route.fulfill({ status: 503, contentType: 'text/plain', body: 'unavailable' });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route(isMessagePost, async (route) => {
+    const response = await route.fetch();
+    failing = true;
+    await route.fulfill({ response });
+  });
+
+  const text = `sent despite the refresh ${Date.now()}`;
+  await composerEditor(page).fill(text);
+  await composerEditor(page).press('Enter');
+  await expect(page.locator('#live-status')).toHaveText('Sent. The conversation will update when the connection recovers.');
+  await expect(page.getByRole('group', { name: 'Message not sent' })).toHaveCount(0);
+  await expect(page.locator('#timeline .message-text', { hasText: text })).toHaveCount(1);
+  await expect(composerField(page)).toHaveValue('');
+
+  // The client keeps asking, so the timeline recovers without a reload.
+  const before = await responses();
+  failing = false;
+  await page.unroute(isMessagePost);
+  await expect.poll(responses, { timeout: 15000, message: 'the failed refresh was never retried' }).toBeGreaterThan(before);
+  await expect(page.locator('#timeline .message-text', { hasText: text })).toHaveCount(1);
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
 test('[HUDDLE-01 HUDDLE-02 A11Y-01] joining a huddle opens the microphone and offers real controls', async ({ page, context, browserName }) => {
   // WebKit has no synthetic capture device in Playwright, so the media half of
   // this journey cannot run there. Recording that is the point: a skip that

@@ -3207,6 +3207,75 @@ func TestTheInlineScriptParserRefusesWhatItCannotHash(t *testing.T) {
 	}
 }
 
+// TestTheRegionRefreshKeepsEveryWantUntilItIsServed pins the shape of the
+// region refresh described above progressiveEnhancementScript. The machine it
+// replaced shared one generation counter and one AbortController across every
+// region, dropped a background refresh while a forced one was in flight, and
+// had no deadline, and each of those let the timeline go stale with nothing
+// left to repair it. The browser journeys beside "[MSG-01 RESILIENCE-01] the
+// conversation refresh throws away no response it asked for" prove the
+// behaviour; this keeps the old mechanisms from coming back unnoticed.
+func TestTheRegionRefreshKeepsEveryWantUntilItIsServed(t *testing.T) {
+	requireMissing(t, "region refresh", progressiveEnhancementScript,
+		"generation++",
+		"token!==generation",
+		"inFlight.abort()",
+		"forcing>0",
+		"forcing++",
+		"appliedHTML",
+		"Reload the page.')});",
+	)
+	requireContains(t, "region refresh", progressiveEnhancementScript,
+		"var refreshTiming="+refreshTimingLiteral()+";",
+		// Every request has a deadline, counted when it is reached.
+		"},refreshTiming.timeout);",
+		"counted('refresh-timeouts',refreshTimeouts);",
+		"document.documentElement.setAttribute('data-refresh-timeouts','0');",
+		// A failure is retried on the server's backoff.
+		"state.retry=window.setTimeout(function(){state.retry=null;pump(region)},delay);",
+		// Only a forced want supersedes a flight; a background one waits.
+		"if(force){\nstate.forced=state.wanted;",
+		// A region deferred for focus is pumped again once focus has moved.
+		"document.addEventListener('focusout',function(){window.setTimeout(function(){",
+		"if(state&&state.deferred)pump(region)",
+		// A thread pane swapped in place is caught up.
+		"document.addEventListener('sameoldchat:thread-pane',function(event){",
+		// Outside writes forget the remembered markup.
+		"function append(region,html){if(!region)return;region.insertAdjacentHTML('beforeend',html);regionState(region).html=null;",
+		"window.sameoldchatPage={refresh:refresh,append:append,",
+		"if(state.html===html)return;",
+		// A failed refresh after a successful submit is the view being
+		// behind, not the mutation failing.
+		"return refresh(true).catch(viewBehind);",
+		"announce('New activity could not be loaded. Retrying…')",
+	)
+	// The composer writes through the page's append and does not chain the
+	// refresh into the send: sending is released when the post answers.
+	requireMissing(t, "composer", composerScript,
+		"insertAdjacentHTML",
+		"return page().refresh?page().refresh(true):null",
+	)
+	requireContains(t, "composer", composerScript,
+		"page().append(target,html)",
+		"}).then(release,release).then(catchUp);",
+		"announce('Sent. The conversation will update when the connection recovers.')",
+	)
+
+	timing := refreshTimingLiteral()
+	match := regexp.MustCompile(`^\{timeout:(\d+),retry:\[(\d+(?:,\d+)*)\]\}$`).FindStringSubmatch(timing)
+	if match == nil {
+		t.Fatalf("refreshTimingLiteral() = %q, want {timeout:N,retry:[N,...]}", timing)
+	}
+	if timeout, _ := strconv.Atoi(match[1]); timeout <= 0 {
+		t.Fatalf("refresh timeout %d ms would fail every refresh", timeout)
+	}
+	for _, delay := range strings.Split(match[2], ",") {
+		if value, _ := strconv.Atoi(delay); value <= 0 {
+			t.Fatalf("retry delay %d ms would retry in a tight loop: %s", value, timing)
+		}
+	}
+}
+
 // TestNewActivityIsAnnouncedForTheRegionItLandedIn covers two defects in the
 // live-status announcement. The arrival count read `#timeline .message` while
 // refresh() re-renders every live region, so a reply arriving in an open thread

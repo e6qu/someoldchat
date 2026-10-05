@@ -35,6 +35,14 @@ package web
 //     can act on (too long, not permitted, archived) keeps the text in the
 //     composer and says why. An empty composer does nothing on Enter, as in
 //     Slack, instead of raising the browser's "Please fill out this field".
+//     A send is finished when the post answers: the composer is released
+//     then, its message goes into the conversation through the page's
+//     sameoldchatPage.append (never written to a region directly, which used
+//     to leave a second copy when the live stream had already drawn it), and
+//     only afterwards is the view caught up with a forced refresh. A refresh
+//     that fails is the view being behind, announced as such; it used to be
+//     reported as the send failing, putting a committed message in the outbox
+//     as "Not sent".
 //   - Suggestions are one listbox per composer, anchored above that composer,
 //     for @ (people, including workspace members outside the conversation
 //     labelled "Not in channel", apps, user groups and @here/@channel/
@@ -655,20 +663,22 @@ function post(body,text,retrying){
 sending=true;if(sendButton)sendButton.disabled=true;clearError();
 var targetSelector=form.getAttribute('hx-target');var target=targetSelector?doc.querySelector(targetSelector):null;
 var release=function(){sending=false;if(sendButton)sendButton.disabled=false};
+var committed=false;
+var catchUp=function(){if(!committed||!page().refresh)return;page().refresh(true).catch(function(){announce('Sent. The conversation will update when the connection recovers.')})};
 return fetch(form.getAttribute('hx-post'),{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){
 if(!response.ok)return response.text().then(function(message){var error=new Error(clip(message));error.status=response.status;throw error});
 if(retrying)retrying.remove();
 if(response.headers.get('X-SameOldChat-Draft-Cleanup')==='failed')announce('Your message was sent, but its old draft could not be cleared. Delete it from Drafts & sent.');
 var redirect=response.headers.get('HX-Redirect');
 if(redirect){clearSent(text);if(ownPath(redirect)){var next=new URL(redirect,window.location.href);if(next.pathname+next.search===window.location.pathname+window.location.search){window.location.hash=next.hash;window.location.reload()}else window.location.assign(redirect)}return null}
-if(response.status===204){clearSent(text);return page().refresh?page().refresh(true):null}
+if(response.status===204){clearSent(text);committed=true;return null}
 return response.text().then(function(html){
 clearSent(text);
 var newest=form.getAttribute('data-newest');if(!api.thread&&newest&&ownPath(newest)){window.location.assign(newest);return null}
-if(target){target.insertAdjacentHTML('beforeend',html);if(page().localize)page().localize(target);target.scrollTop=target.scrollHeight}
+if(target&&page().append){page().append(target,html);target.scrollTop=target.scrollHeight}
 var timeline=doc.getElementById('timeline');if(timeline&&!api.thread)timeline.scrollTop=timeline.scrollHeight;
 mentionPrompt(text);
-return page().refresh?page().refresh(true):null;
+committed=true;
 });
 }).catch(function(error){
 if(error&&error.name==='AbortError')return;
@@ -677,7 +687,7 @@ if(error&&!error.status)error=new Error('Check your connection and try again.');
 if(transient){if(!retrying){failedSend(body,text,error&&error.message||'Check your connection and try again.');clearSent(text)}else{var state=retrying.querySelector('.composer-outbox-state');if(state)state.textContent='Not sent. '+(error&&error.message||'Check your connection and try again.')}return}
 if(retrying){var stateNode=retrying.querySelector('.composer-outbox-state');if(stateNode)stateNode.textContent='Not sent. '+(error.message||'The message was refused.');return}
 showError(error.message||'Your message was not sent. It is still in the composer.');
-}).then(release,release);
+}).then(release,release).then(catchUp);
 }
 function submitMessage(confirmed){
 if(sending)return;
