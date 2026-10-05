@@ -7,6 +7,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 // WORKFLOW-02: a member builds a workflow of their own with no developer app,
@@ -44,6 +45,18 @@ func TestAMemberBuildsAndRunsAWorkflowWithNoApp(t *testing.T) {
 	permission, err := messages.GetTriggerPermission(ctx, "T1", "U2", "", trigger.ID)
 	if err != nil || permission.PermissionType != domain.PermissionAppCollaborators || len(permission.UserIDs) != 1 || permission.UserIDs[0] != "U2" {
 		t.Fatalf("permission=%+v err=%v, want app collaborators naming the owner", permission, err)
+	}
+	// Running it in a conversation runs it as the runner there: a private
+	// channel the owner is not in is refused as if it did not exist, though
+	// the trigger admits them.
+	if err := repository.SeedConversation(domain.Conversation{ID: "CSECRET", WorkspaceID: "T1", Name: "secret", Kind: domain.ConversationTypePrivate}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedConversationMember("CSECRET", "U1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.RunWorkflow(ctx, "T1", "U2", trigger.ID, "CSECRET", `{}`, "member-owned-elsewhere"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("running in a private channel the runner is not in: err=%v, want ErrNotFound", err)
 	}
 	run, err := messages.RunWorkflow(ctx, "T1", "U2", trigger.ID, "C1", `{}`, "member-owned")
 	if err != nil {

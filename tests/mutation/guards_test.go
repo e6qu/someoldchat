@@ -194,10 +194,13 @@ func findGuardSites(t *testing.T, root string) (sites []site, unmutatable int) {
 	return sites, unmutatable
 }
 
-// keptArguments renders the statement that stands in for a removed guard:
-// "_, _ = a, b" over the guard call's arguments, leaving out an untyped nil,
-// which cannot be assigned to the blank identifier. A guard without such
-// arguments leaves an empty statement.
+// keptArguments renders the statement that stands in for a removed guard: a
+// block "{ _, _ = a, b }" over the guard call's arguments, leaving out an
+// untyped nil, which cannot be assigned to the blank identifier. It is a block
+// because a guard can be an else-if, where only a block or an if may follow
+// else; deleting such a guard outright left "else" to capture the statement
+// after it, so the mutant changed more than the guard. A guard without
+// arguments leaves an empty block.
 func keptArguments(fset *token.FileSet, source []byte, assign *ast.AssignStmt) string {
 	call := assign.Rhs[0].(*ast.CallExpr)
 	var kept []string
@@ -208,9 +211,9 @@ func keptArguments(fset *token.FileSet, source []byte, assign *ast.AssignStmt) s
 		kept = append(kept, string(source[fset.Position(argument.Pos()).Offset:fset.Position(argument.End()).Offset]))
 	}
 	if len(kept) == 0 {
-		return ""
+		return "{}"
 	}
-	return strings.Repeat("_, ", len(kept)-1) + "_ = " + strings.Join(kept, ", ")
+	return "{ " + strings.Repeat("_, ", len(kept)-1) + "_ = " + strings.Join(kept, ", ") + " }"
 }
 
 func guardCallName(assign *ast.AssignStmt) (string, bool) {
