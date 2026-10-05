@@ -42,6 +42,10 @@ type AppEventProjectionStore interface {
 type UserEventProjectionStore interface {
 	GetMessage(context.Context, domain.MessageID) (domain.Message, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
+	// GetCanvasAccess and GetListAccess decide who sees a canvas's or a
+	// list's records: the people who can read it, and nobody else.
+	GetCanvasAccess(context.Context, domain.CanvasID, domain.UserID) (domain.CanvasAccess, error)
+	GetListAccess(context.Context, domain.ListID, domain.UserID) (domain.ListAccess, error)
 }
 
 // messageEventSnapshot freezes the state an app callback describes. App
@@ -163,6 +167,9 @@ func prepareUserEvent(ctx context.Context, state UserEventProjectionStore, origi
 	}
 	if record.Event.WorkspaceID != workspaceID {
 		return record, false, nil
+	}
+	if documentEventTopic(record.Event.Topic) {
+		return prepareDocumentEvent(ctx, state, userID, record)
 	}
 	if !messageEventTopic(record.Event.Topic) {
 		visible, err := userCanSeeChannelEvent(ctx, state, userID, record.Event)
@@ -511,6 +518,65 @@ func appEventRequiredScopes(ctx context.Context, state AppEventProjectionStore, 
 	default:
 		return nil, nil
 	}
+}
+
+func documentEventTopic(topic string) bool {
+	return strings.HasPrefix(topic, "canvas.") || strings.HasPrefix(topic, "list.")
+}
+
+// prepareDocumentEvent delivers a canvas's or a list's record only to someone
+// who can read it. These records name the document rather than a channel, so
+// the channel rule admitted every one of them to every member of the
+// workspace: who shared a private canvas with whom, and when anyone edited
+// it. A record that names no document (a comment removed by its ID alone) or
+// one that no longer exists reaches nobody: it cannot be shown to be
+// readable. A canvas edit also carries the ops that made it, which an open
+// editor applies so it shows the edit as it happens.
+func prepareDocumentEvent(ctx context.Context, state UserEventProjectionStore, userID domain.UserID, record events.Record) (events.Record, bool, error) {
+	delivered, err := events.Deliverable(record.Event)
+	if err != nil {
+		return record, false, nil
+	}
+	var access domain.AccessLevel
+	if strings.HasPrefix(record.Event.Topic, "canvas.") {
+		canvasID, idErr := deliveredString(delivered, "canvas_id")
+		if idErr != nil {
+			return record, false, nil
+		}
+		grant, accessErr := state.GetCanvasAccess(ctx, domain.CanvasID(canvasID), userID)
+		access, err = grant.Access, accessErr
+	} else {
+		listID, idErr := deliveredString(delivered, "list_id")
+		if idErr != nil {
+			return record, false, nil
+		}
+		grant, accessErr := state.GetListAccess(ctx, domain.ListID(listID), userID)
+		access, err = grant.Access, accessErr
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		return record, false, nil
+	}
+	if err != nil {
+		return events.Record{}, false, err
+	}
+	if access.Rank() < domain.AccessRead.Rank() {
+		return record, false, nil
+	}
+	if record.Event.PrivatePayload == "" {
+		return record, true, nil
+	}
+	var change canvasTextChange
+	if err := json.Unmarshal([]byte(record.Event.PrivatePayload), &change); err != nil {
+		// The text is a convenience for an open editor, which fetches it
+		// when a record does not carry it; the record itself still goes.
+		change = canvasTextChange{Resync: true}
+	}
+	body := make(map[string]any, len(delivered.Object)+1)
+	for name, value := range delivered.Object {
+		body[name] = value
+	}
+	body["canvas_text"] = change
+	return encodeProjectedEvent(record, body)
 }
 
 func userCanSeeChannelEvent(ctx context.Context, state UserEventProjectionStore, userID domain.UserID, event events.Event) (bool, error) {

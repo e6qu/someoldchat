@@ -376,10 +376,10 @@ var topicRules = []topicRule{
 	// reaction it is for all participants and names no addressee.
 	{topic: "huddle.presence", note: "not pinned: Slack documents no huddle presence event"},
 	{topic: "canvas.created", note: "not pinned: canvases postdate the snapshot"},
-	{topic: "canvas.updated", note: "not pinned: canvases postdate the snapshot"},
+	{topic: "canvas.updated", note: "not pinned: canvases postdate the snapshot; the ops that made a text edit ride in PrivatePayload and are filled in only for a reader of the canvas"},
 	{topic: "canvas.commented", note: "first-party: canvases postdate the snapshot and Slack publishes no canvas comment event"},
 	{topic: "canvas.comment_deleted", note: "first-party: canvases postdate the snapshot and Slack publishes no canvas comment event"},
-	{topic: "canvas.restored", note: "first-party: restoring a revision is an ordinary edit with its own name, so a reader can tell a rewind from a rewrite; canvases postdate the snapshot and Slack publishes no event for either"},
+	{topic: "canvas.restored", note: "first-party: restoring a revision is an ordinary edit with its own name, so a reader can tell a rewind from a rewrite; canvases postdate the snapshot and Slack publishes no event for either; carries its text ops like canvas.updated"},
 	{topic: "canvas.deleted", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.create_reverted", note: "not pinned: canvases postdate the snapshot"},
 	{topic: "canvas.access_set", note: "not pinned: canvases postdate the snapshot"},

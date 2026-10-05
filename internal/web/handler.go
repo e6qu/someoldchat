@@ -3158,9 +3158,9 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 .read-only{color:var(--muted);font-size:13px}
 @media(max-width:640px){.canvas{padding:18px 16px}.canvas-top h2{font-size:22px}.bar{padding:0 12px}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + rowLinkScript + profilePanelScript + canvasTextScript + canvasEditorScript + `{{end}}
+{{define "scripts"}}` + localTimeScript + rowLinkScript + profilePanelScript + canvasTextScript + canvasEditorScript + canvasViewerLiveScript + `{{end}}
 {{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="v-page canvas-page">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas"><div class="canvas-top"><h2>{{.Title}}</h2><div class="canvas-top-actions"><a class="v-btn primary" href="#sharing-heading">Share</a></div></div><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}{{if .CanWrite}}<details class="rename"><summary>Rename canvas</summary><form class="editor" method="post" action="/app/canvases/{{.ID}}/rename"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><div class="actions"><button type="submit">Rename</button></div></form></details>
-<form class="canvas-editor" method="post" action="/app/canvases/{{.ID}}/document" data-canvas-document data-canvas-text-url="/app/canvases/{{.ID}}/text" data-canvas-text="{{.TextState}}" data-canvas-replica="{{.Replica}}"{{if .Problem}} data-draft{{end}}><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}">
+<form class="canvas-editor" method="post" action="/app/canvases/{{.ID}}/document" data-canvas-document data-canvas-id="{{.ID}}" data-canvas-blocks-url="/app/canvases/{{.ID}}/blocks" data-canvas-text-url="/app/canvases/{{.ID}}/text" data-canvas-text="{{.TextState}}" data-canvas-replica="{{.Replica}}"{{if .Problem}} data-draft{{end}}><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}">
 {{if .Problem}}<p class="notice" role="alert">{{.Problem}}</p>{{end}}
 <div class="format-bar" role="toolbar" aria-label="Formatting" aria-controls="canvas-document" data-canvas-toolbar hidden><button type="button" data-command="bold" aria-label="Bold" title="Bold (Ctrl+B)"><b>B</b></button><button type="button" data-command="italic" aria-label="Italic" title="Italic (Ctrl+I)"><i>I</i></button><button type="button" data-command="strike" aria-label="Strikethrough" title="Strikethrough"><s>S</s></button><button type="button" data-command="code" aria-label="Code" title="Code">&lt;/&gt;</button><button type="button" data-command="link" aria-label="Link" title="Link">🔗</button><span class="sep" aria-hidden="true"></span><button type="button" data-command="h1" aria-label="Heading 1" title="Heading 1">H1</button><button type="button" data-command="h2" aria-label="Heading 2" title="Heading 2">H2</button><button type="button" data-command="h3" aria-label="Heading 3" title="Heading 3">H3</button><button type="button" data-command="paragraph" aria-label="Paragraph" title="Paragraph">¶</button><span class="sep" aria-hidden="true"></span><button type="button" data-command="bullet" aria-label="Bulleted list" title="Bulleted list">•</button><button type="button" data-command="number" aria-label="Numbered list" title="Numbered list">1.</button><button type="button" data-command="check" aria-label="Checklist, or mark the item done" title="Checklist; in a checklist, marks the item done">☑</button><button type="button" data-command="quote" aria-label="Quote" title="Quote">❝</button><button type="button" data-command="mention" aria-label="Mention someone" title="Mention someone (@)">@</button></div>
 <div class="canvas-body canvas-document" id="canvas-document" aria-label="Canvas content" data-canvas-editor>{{range .Sections}}<div class="canvas-block{{if .App}} app-block{{end}}" id="block-{{.Position}}" data-canvas-block data-markdown="{{.Source}}"{{if .App}} title="{{.Type}} content from an app; it keeps its kind as you edit it"{{end}}>{{if eq .Heading 1}}<h3>{{.Text}}</h3>{{else if eq .Heading 2}}<h4>{{.Text}}</h4>{{else if eq .Heading 3}}<h5>{{.Text}}</h5>{{else}}{{.EditorHTML}}{{end}}</div>{{end}}</div>
@@ -3168,7 +3168,7 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 <details class="canvas-source"{{if .Problem}} open{{end}}><summary>Edit as markdown</summary><label for="canvas-markdown">Canvas content as markdown</label><textarea id="canvas-markdown" name="markdown" maxlength="400000">{{.Markdown}}</textarea><p class="read-only">Headings start with #, ## or ###; a blank line starts a new paragraph; mention someone as &lt;@U…&gt;.</p></details>
 <div class="actions"><button type="submit">Save canvas</button><span class="read-only" data-canvas-status role="status"></span></div>
 </form>
-{{else}}<div class="canvas-body canvas-document-view">{{range .Sections}}<div class="canvas-block" id="block-{{.Position}}">{{if eq .Heading 1}}<h3>{{.Text}}</h3>{{else if eq .Heading 2}}<h4>{{.Text}}</h4>{{else if eq .Heading 3}}<h5>{{.Text}}</h5>{{else}}{{.HTML}}{{end}}</div>{{end}}</div>{{end}}
+{{else}}<div class="canvas-body canvas-document-view" data-canvas-view="{{.ID}}" aria-live="polite">{{range .Sections}}<div class="canvas-block" id="block-{{.Position}}">{{if eq .Heading 1}}<h3>{{.Text}}</h3>{{else if eq .Heading 2}}<h4>{{.Text}}</h4>{{else if eq .Heading 3}}<h5>{{.Text}}</h5>{{else}}{{.HTML}}{{end}}</div>{{end}}</div>{{end}}
 <section class="canvas-comments" aria-labelledby="canvas-comments-heading"><h3 id="canvas-comments-heading">Comments</h3>
 {{if .Comments}}<ul class="comments">{{range .Comments}}<li class="comment"><span class="comment-head"><span class="comment-author">{{.AuthorName}}</span>{{if .SectionName}}<span class="comment-anchor">on {{.SectionName}}</span>{{end}}<time class="comment-time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span><p class="comment-text">{{.Text}}</p>{{if .DeleteURL}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Delete comment</button></form>{{end}}</li>{{end}}</ul>{{else}}<p class="empty">No comments yet.</p>{{end}}
 <form class="new-comment" method="post" action="/app/canvases/{{.ID}}/comments"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
@@ -3201,6 +3201,21 @@ const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end
 // backoff; one the server cannot place stops saving and asks for a reload.
 // Save canvas sends what is left and reloads the canvas. Without script, or
 // after a refused form save, the markdown field is the editor.
+//
+// Other writers' edits arrive live. The page opens the event stream from the
+// head it was rendered at, and every canvas.updated or canvas.restored record
+// for this canvas carries the ops that made it (service.prepareDocumentEvent).
+// The editor first captures what was typed here, so nothing local is lost,
+// then applies the ops and patches the document: the blocks before and after
+// the change are left alone, so a caret there stays where it is, and the
+// changed blocks are replaced by one plain-text block that reads back as
+// exactly the new text, with the caret kept at its offset. That block is then
+// swapped for the server's rendering of it (/blocks), unless the writer has
+// started editing it or the caret is in it, in which case the swap waits for
+// the caret to leave. The document always reads back as the text the ops
+// made, so no editor's view of the formatting ever rewrites another's. An
+// edit too big to carry, an op this page cannot place, or a gap in the stream
+// makes it fetch the text (/text) and replay its own unsent ops onto it.
 const canvasEditorScript = `<script>(function(){
 var form=document.querySelector('[data-canvas-document]');if(!form)return;
 var editor=form.querySelector('[data-canvas-editor]');var source=form.querySelector('textarea[name=markdown]');var toolbar=form.querySelector('[data-canvas-toolbar]');var list=form.querySelector('#canvas-mention-list');var status=form.querySelector('[data-canvas-status]');
@@ -3236,7 +3251,10 @@ return tidy(inline(node))}
 function blocks(node){var parts=[];var run='';function flush(){var text=tidy(run);if(text)parts.push(text);run=''}
 Array.prototype.forEach.call(node.childNodes,function(child){if(!isBlock(child)){run+=inlineNode(child);return}flush();var text=block(child);var known=initial.get(child);if(known&&known.markdown!==null&&text===known.text)text=known.markdown;if(text.trim())parts.push(text)});
 flush();return parts.join('\n\n')}
-function serialize(){return blocks(editor)}
+function topParts(){var parts=[];var run='';var runNodes=[];function flush(){var text=tidy(run);if(text)parts.push({nodes:runNodes,text:text});run='';runNodes=[]}
+Array.prototype.forEach.call(editor.childNodes,function(child){if(!isBlock(child)){run+=inlineNode(child);runNodes.push(child);return}flush();var text=block(child);var known=initial.get(child);if(known&&known.markdown!==null&&text===known.text)text=known.markdown;if(text.trim())parts.push({nodes:[child],text:text})});
+flush();return parts}
+function serialize(){return topParts().map(function(part){return part.text}).join('\n\n')}
 try{document.execCommand('defaultParagraphSeparator',false,'p')}catch(error){}
 Array.prototype.forEach.call(editor.querySelectorAll('[data-canvas-block]'),function(part){initial.set(part,{text:block(part),markdown:part.getAttribute('data-markdown')})});
 editor.setAttribute('contenteditable','true');editor.setAttribute('role','textbox');editor.setAttribute('aria-multiline','true');editor.setAttribute('aria-autocomplete','list');editor.setAttribute('aria-controls','canvas-mention-list');editor.setAttribute('spellcheck','true');
@@ -3302,10 +3320,65 @@ function choose(index){var person=options[index];var found=mentionAtCaret();if(!
 editor.addEventListener('keydown',function(event){
 if(!list.hidden){if(event.key==='ArrowDown'){event.preventDefault();move(1);return}if(event.key==='ArrowUp'){event.preventDefault();move(-1);return}if(event.key==='Enter'||event.key==='Tab'){event.preventDefault();choose(active);return}if(event.key==='Escape'){event.preventDefault();hide();return}}
 var primary=event.ctrlKey||event.metaKey;
-if(primary&&(event.key==='Enter'||event.key==='s'||event.key==='S')){event.preventDefault();submit()}});
+if(primary&&(event.key==='Enter'||event.key==='s'||event.key==='S')){event.preventDefault();form.requestSubmit()}});
 editor.addEventListener('input',function(){normalize();look();changed()});
 editor.addEventListener('blur',function(){window.setTimeout(function(){if(document.activeElement!==editor)hide()},150)});
+var canvasID=form.getAttribute('data-canvas-id');var blocksURL=form.getAttribute('data-canvas-blocks-url');var liveSyncing=false;var liveDeferred=[];var liveBuffer=[];var liveAttempts=0;
+function plainBlock(markdown){var part=document.createElement('div');part.className='canvas-block';part.setAttribute('data-canvas-block','');part.setAttribute('data-markdown',markdown);var body=document.createElement('p');markdown.split('\n').forEach(function(line,index){if(index)body.appendChild(document.createElement('br'));if(line)body.appendChild(document.createTextNode(line))});part.appendChild(body);initial.set(part,{text:block(part),markdown:markdown});return part}
+function renderedBlock(view){var part=document.createElement('div');part.className='canvas-block';part.setAttribute('data-canvas-block','');part.setAttribute('data-markdown',view.markdown);if(view.heading>0){var heading=document.createElement('h'+(view.heading+2));heading.textContent=view.text;part.appendChild(heading)}else{part.innerHTML=view.html}initial.set(part,{text:block(part),markdown:view.markdown});return part}
+function holdsSelection(nodes){var selection=window.getSelection();if(!selection.rangeCount)return false;var anchor=selection.anchorNode;var focus=selection.focusNode;return nodes.some(function(node){return node.contains(anchor)||node.contains(focus)})}
+function caretOffset(nodes){var selection=window.getSelection();if(!nodes.length||!holdsSelection(nodes))return -1;var range=document.createRange();range.setStartBefore(nodes[0]);try{range.setEnd(selection.focusNode,selection.focusOffset)}catch(error){return -1}return range.toString().length}
+function placeCaret(node,offset){var walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);var text=null;var last=null;while((text=walker.nextNode())){last=text;if(offset<=text.nodeValue.length)break;offset-=text.nodeValue.length}var range=document.createRange();if(text)range.setStart(text,offset);else if(last)range.setStart(last,last.nodeValue.length);else range.setStart(node,0);range.collapse(true);var selection=window.getSelection();selection.removeAllRanges();selection.addRange(range)}
+function middleOf(target,start,end,before,after){if(end<start)return null;var between=target.slice(start,end);var gap='\n\n';
+if(before&&after){if(between===gap)return '';return between.length>=4&&between.slice(0,2)===gap&&between.slice(-2)===gap?between.slice(2,-2):null}
+if(before)return between===''?'':between.slice(0,2)===gap?between.slice(2):null;
+if(after)return between===''?'':between.slice(-2)===gap?between.slice(0,-2):null;
+return between}
+function reconcile(){var target=doc.text();var parts=topParts();var texts=parts.map(function(part){return part.text});
+if(texts.join('\n\n')===target){written=target;return}
+var kept=0;var prefix='';
+while(kept<parts.length){var next=kept?prefix+'\n\n'+texts[kept]:texts[kept];if(target===next||target.indexOf(next+'\n\n')===0){prefix=next;kept++}else break}
+var middle=middleOf(target,kept?prefix.length:0,target.length,kept>0,false);var tail=0;var suffix='';
+for(var count=1;count<=parts.length-kept;count++){var candidate=count===1?texts[parts.length-1]:texts[parts.length-count]+'\n\n'+suffix;if(target.slice(target.length-candidate.length)!==candidate)break;var found=middleOf(target,kept?prefix.length:0,target.length-candidate.length,kept>0,true);if(found===null)break;middle=found;tail=count;suffix=candidate}
+var first=kept?parts[kept-1].nodes[parts[kept-1].nodes.length-1].nextSibling:editor.firstChild;var stop=tail?parts[parts.length-tail].nodes[0]:null;
+var removed=[];for(var node=first;node&&node!==stop;node=node.nextSibling)removed.push(node);
+var caret=caretOffset(removed);var made=middle?plainBlock(middle):null;
+if(made)editor.insertBefore(made,stop);removed.forEach(function(node){node.remove()});if(made&&caret>=0)placeCaret(made,caret);
+written=serialize();
+if(written!==target){editor.textContent='';if(target){made=plainBlock(target);editor.appendChild(made)}written=serialize()}
+if(made)upgrade(made)}
+function upgrade(part){var markdown=part.getAttribute('data-markdown');var body=new URLSearchParams();body.set('_csrf',csrfField?csrfField.value:'');body.set('markdown',markdown);
+fetch(blocksURL,{method:'POST',body:body,credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){return response.ok?response.json():null}).then(function(data){if(!data||!Array.isArray(data.blocks))return;if(data.blocks.map(function(view){return view.markdown}).join('\n\n')!==markdown)return;part.liveBlocks=data.blocks;swap(part)}).catch(function(){})}
+function swap(part){if(!part.isConnected||!part.liveBlocks)return;var known=initial.get(part);if(!known||block(part)!==known.text)return;
+if(holdsSelection([part])){if(liveDeferred.indexOf(part)<0)liveDeferred.push(part);return}
+var before=serialize();var made=part.liveBlocks.map(renderedBlock);made.forEach(function(view){editor.insertBefore(view,part)});part.remove();
+if(serialize()!==before){editor.insertBefore(part,made[0]);made.forEach(function(view){view.remove()})}}
+document.addEventListener('selectionchange',function(){if(!liveDeferred.length)return;var waiting=liveDeferred;liveDeferred=[];waiting.forEach(swap)});
+function resync(){if(liveSyncing||stopped)return;liveSyncing=true;var again=false;capture();
+fetch(textURL,{credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){if(!response.ok)throw new Error('unavailable');return response.json()}).then(function(data){capture();var fresh=window.sameoldchatCanvasText.load(JSON.parse(data.text_state||'[]'));queue.forEach(function(op){fresh.apply(op)});
+if(fresh.pendingCount()>0)throw new Error('out of step');
+var buffered=liveBuffer;liveBuffer=[];buffered.forEach(function(change){if(change.resync||!Array.isArray(change.ops)){again=true;return}change.ops.forEach(function(op){fresh.apply(op)})});
+if(fresh.pendingCount()>0)again=true;doc=fresh;reconcile();liveAttempts=again?liveAttempts+1:0;if(liveAttempts>3)throw new Error('out of step')}).catch(function(){stopped=true;again=false;say('This canvas changed in a way this page cannot follow. Reload the canvas to keep writing.')}).finally(function(){liveSyncing=false;if(again)resync()})}
+function receive(change){if(stopped||!change)return;if(liveSyncing){liveBuffer.push(change);return}if(change.resync||!Array.isArray(change.ops)){resync();return}
+capture();try{change.ops.forEach(function(op){doc.apply(op)})}catch(error){resync();return}
+if(doc.pendingCount()>0){resync();return}reconcile();if(queue.length&&!sending)schedule(600)}
+if(window.EventSource&&canvasID){var liveStream=` + liveStreamOpen + `;['canvas.updated','canvas.restored'].forEach(function(topic){liveStream.addEventListener(topic,function(event){var data=null;try{data=JSON.parse(event.data||'null')}catch(error){return}if(data&&data.canvas_id===canvasID)receive(data.canvas_text)})})}
 var target=window.location.hash?document.querySelector(window.location.hash):null;if(target&&target.classList&&target.classList.contains('canvas-block'))target.scrollIntoView({block:'center'});
+})();</script>`
+
+// canvasViewerLiveScript keeps a read-only canvas current: when the canvas
+// changes it re-reads the page and swaps in the document, as App Home does,
+// so a reader sees an edit as it happens without the page jumping. Changes
+// that land together are read once; one that arrives during a read is read
+// after it.
+const canvasViewerLiveScript = `<script>(function(){
+var view=document.querySelector('[data-canvas-view]');if(!view||!window.EventSource)return;
+var canvasID=view.getAttribute('data-canvas-view');var busy=false;var queued=false;var timer=0;
+function refresh(){if(busy){queued=true;return}busy=true;
+fetch(window.location.pathname,{credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('unavailable');return response.text()}).then(function(html){var replacement=new DOMParser().parseFromString(html,'text/html').querySelector('[data-canvas-view]');if(replacement){view.replaceWith(replacement);view=replacement}}).catch(function(){}).finally(function(){busy=false;if(queued){queued=false;schedule()}})}
+function schedule(){window.clearTimeout(timer);timer=window.setTimeout(refresh,300)}
+var stream=` + liveStreamOpen + `;
+['canvas.updated','canvas.restored'].forEach(function(topic){stream.addEventListener(topic,function(event){var data=null;try{data=JSON.parse(event.data||'null')}catch(error){return}if(data&&data.canvas_id===canvasID)schedule()})});
 })();</script>`
 
 var canvasTemplate = mustPage(canvasMarkup)
@@ -4107,7 +4180,9 @@ func (h Handler) Register(serveMux *http.ServeMux) {
 	mux.HandleFunc("GET /app/canvases/{canvasID}", h.canvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/rename", h.renameCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/document", h.saveCanvasDocument)
+	mux.HandleFunc("GET /app/canvases/{canvasID}/text", h.canvasText)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/text", h.editCanvasText)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/blocks", h.canvasBlocks)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/delete", h.deleteCanvas)
 	mux.HandleFunc("POST /app/canvases/{canvasID}/restore", h.restoreCanvas)
 	mux.HandleFunc("GET /app/channel-canvas", h.channelCanvas)
@@ -9401,6 +9476,14 @@ type canvasDraft struct {
 }
 
 func (h Handler) renderCanvas(w http.ResponseWriter, r *http.Request, principal auth.Principal, id domain.CanvasID, draft canvasDraft, status int) {
+	// The head is read before the canvas, so the stream the page opens from
+	// it carries every edit the page does not already show. An edit between
+	// the two reads arrives twice, which applying ops shrugs off.
+	head, err := h.readLiveHead(r.Context(), principal)
+	if err != nil {
+		h.writeStoreError(w, err, "Live updates are temporarily unavailable.")
+		return
+	}
 	value, err := h.Messages.Canvas(r.Context(), principal.WorkspaceID, principal.UserID, id)
 	if err != nil {
 		h.writeStoreError(w, err, "That canvas is not available.")
@@ -9480,7 +9563,7 @@ func (h Handler) renderCanvas(w http.ResponseWriter, r *http.Request, principal 
 			replica = ""
 		}
 	}
-	h.writeHTML(w, canvasTemplate, canvasData{TextState: value.TextState, Replica: replica, Comments: comments, Revisions: revisions, Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeCanvasesWrite), SharePath: "/app/canvases/" + url.PathEscape(string(value.ID)), ShareNoun: "canvas", ID: string(value.ID), Title: value.Title, Sections: sections, Version: value.Version, Markdown: markdown, Problem: draft.Problem, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, status, "canvas rendering unavailable")
+	h.writeLivePage(w, head, canvasTemplate, canvasData{TextState: value.TextState, Replica: replica, Comments: comments, Revisions: revisions, Grants: grants, ShareTargets: shareTargets, CanShare: owner && principal.HasScope(auth.ScopeCanvasesWrite), SharePath: "/app/canvases/" + url.PathEscape(string(value.ID)), ShareNoun: "canvas", ID: string(value.ID), Title: value.Title, Sections: sections, Version: value.Version, Markdown: markdown, Problem: draft.Problem, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && readable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, status, "canvas rendering unavailable")
 }
 
 // documentSharing builds the sharing list and, for the owner, the people and
@@ -9958,6 +10041,81 @@ func (h Handler) editCanvasText(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSONRefusal(w, http.StatusServiceUnavailable, "unavailable")
 	}
+}
+
+// canvasText answers the canvas's collaborative text as it stands, for an open
+// editor that fell out of step with the live stream: it reloads the text,
+// replays the ops it has not had acknowledged, and carries on.
+func (h Handler) canvasText(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	value, err := h.Messages.Canvas(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID"))))
+	switch {
+	case err == nil:
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, map[string]any{"ok": true, "version": value.Version, "text_state": value.TextState})
+	case errors.Is(err, store.ErrNotFound):
+		writeJSONRefusal(w, http.StatusNotFound, "not_found")
+	default:
+		writeJSONRefusal(w, http.StatusServiceUnavailable, "unavailable")
+	}
+}
+
+// canvasBlockView is one block of markdown as the editor shows it: the
+// markdown it saves as, its heading level, and its body rendered the way the
+// canvas page renders a stored section.
+type canvasBlockView struct {
+	Markdown string        `json:"markdown"`
+	Heading  int           `json:"heading"`
+	Text     string        `json:"text"`
+	HTML     template.HTML `json:"html"`
+}
+
+// canvasBlocks renders markdown as the canvas editor's blocks. An open editor
+// that applies another writer's edit shows the changed part as plain text at
+// once and asks for it here, so the page has one renderer — the server's —
+// and mentions show the names this reader sees. It writes nothing; it takes
+// read access to the canvas so it renders only for someone who could open it.
+func (h Handler) canvasBlocks(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
+	if err != nil {
+		h.writeAuthError(w, r, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the canvas and try again.")
+	if !ok {
+		return
+	}
+	markdown := fields["markdown"]
+	if len(markdown) > domain.CanvasMarkdownLimit {
+		writeJSONRefusal(w, http.StatusRequestEntityTooLarge, "too_large")
+		return
+	}
+	_, err = h.Messages.CanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID"))))
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeJSONRefusal(w, http.StatusNotFound, "not_found")
+		return
+	case err != nil:
+		writeJSONRefusal(w, http.StatusServiceUnavailable, "unavailable")
+		return
+	}
+	names := h.newUserNames(r.Context(), principal)
+	sections := domain.CanvasMarkdownBlocks(markdown)
+	blocks := make([]canvasBlockView, 0, len(sections))
+	for _, section := range sections {
+		heading := canvasHeadingLevel(section.Type)
+		source := section.Text
+		if heading > 0 {
+			source = strings.Repeat("#", heading) + " " + section.Text
+		}
+		blocks = append(blocks, canvasBlockView{Markdown: source, Heading: heading, Text: section.Text, HTML: renderCanvasEditorMarkdown(section.Text, names)})
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]any{"ok": true, "blocks": blocks})
 }
 
 // writeCanvasWriteError answers a refused canvas write by what refused it.
