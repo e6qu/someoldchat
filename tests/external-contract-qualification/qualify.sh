@@ -84,6 +84,7 @@ close_dm_api_url='https://docs.slack.dev/reference/methods/conversations.close/'
 message_url='https://slack.com/help/articles/201457107-Send-and-read-messages'
 clip_url='https://slack.com/help/articles/4406235165587-Record-audio-and-video-clips-in-Slack'
 mention_url='https://slack.com/help/articles/205240127-Use-mentions-in-Slack'
+notify_permissions_url='https://slack.com/help/articles/115004855143-Manage-who-can-notify-a-channel-or-workspace'
 user_group_url='https://slack.com/help/articles/212906697-Create-and-edit-user-groups'
 user_group_object_url='https://docs.slack.dev/reference/objects/usergroup-object'
 emoji_help_url='https://slack.com/help/articles/202931348-Use-emoji-and-reactions'
@@ -124,6 +125,7 @@ later_help_url='https://slack.com/help/articles/360042650274-Save-messages-and-f
 activity_help_url='https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack'
 activity_work_url='https://slack.com/help/articles/19693583638803-Get-your-work-done-from-the-Activity-view'
 reminder_api_url='https://docs.slack.dev/reference/methods/reminders.add/'
+reminder_list_api_url='https://docs.slack.dev/reference/methods/reminders.list/'
 later_api_url='https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/'
 conversation_join_url='https://docs.slack.dev/reference/methods/conversations.join/'
 conversation_invite_url='https://docs.slack.dev/reference/methods/conversations.invite/'
@@ -142,6 +144,7 @@ fetch "$close_dm_api_url" "$work/conversations-close.html"
 fetch "$message_url" "$work/messages.html"
 fetch "$clip_url" "$work/clips.html"
 fetch "$mention_url" "$work/mentions.html"
+fetch "$notify_permissions_url" "$work/notify-permissions.html"
 fetch "$user_group_url" "$work/user-groups.html"
 fetch "$user_group_object_url" "$work/user-group-object.html"
 fetch "$emoji_help_url" "$work/emoji-help.html"
@@ -182,6 +185,7 @@ fetch "$later_help_url" "$work/later.html"
 fetch "$activity_help_url" "$work/activity.html"
 fetch "$activity_work_url" "$work/activity-work.html"
 fetch "$reminder_api_url" "$work/reminders-add.html"
+fetch "$reminder_list_api_url" "$work/reminders-list.html"
 fetch "$later_api_url" "$work/later-api.html"
 fetch "$conversation_join_url" "$work/conversations-join.html"
 fetch "$conversation_invite_url" "$work/conversations-invite.html"
@@ -260,6 +264,8 @@ assert_contains "$work/message-formatting.html" '!subteam^' \
 	'[COMP-03] app-published user-group mentions use Slack subteam transport syntax' "$message_formatting_url"
 assert_contains "$work/mentions.html" 'receive a notification in their Activity feed' \
 	'[COMP-03 ACTIVITY-01] public-channel mentions can notify members before they join' "$mention_url"
+assert_contains "$work/notify-permissions.html" 'at least six members' \
+	'[COMP-01] @channel, @here and @everyone ask for confirmation in a channel of at least six members' "$notify_permissions_url"
 assert_contains "$work/user-group-object.html" 'value used to notify group members via a mention' \
 	'[COMP-03] the usergroup handle is the mentionable value' "$user_group_object_url"
 assert_contains "$work/user-group-object.html" 'is_subteam' \
@@ -512,6 +518,8 @@ assert_contains "$work/reminders-add.html" 'Available options: daily , weekly , 
 	'[REMIND-API-01] reminders.add recurrence object' "$reminder_api_url"
 assert_contains "$work/reminders-add.html" 'have become degraded or useless' \
 	'[REMIND-API-01] reminders API retirement state' "$reminder_api_url"
+assert_contains "$work/reminders-list.html" 'non-recurring reminders' \
+	'[REMIND-API-01] only non-recurring reminders carry time and complete_ts' "$reminder_list_api_url"
 assert_contains "$work/later-api.html" 'There are no direct APIs for Save it for Later to integrate with.' \
 	'[LATER-01 REMIND-API-01] current Later has no direct app API' "$later_api_url"
 

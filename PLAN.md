@@ -65,11 +65,11 @@ The figures below come from `make compatibility-report` and
 | Current Slack Web API methods implemented | 331 of 331 |
 | …with method-level evidence | 331 of 331 |
 | …`behavior-compatible` or better | 270 of 331 |
-| …`verified-against-slack` | 0 of 331 |
-| Recorded known deviations | 92 |
+| …`conforms-to-published-source` | 0 of 331 |
+| Recorded known deviations | 93 |
 | Retained legacy methods implemented | 10 of 10 |
 | User journeys in the normative catalog | 108 |
-| …cited by a browser scenario | 100 of 108 |
+| …cited by a browser scenario | 102 of 108 |
 | …cited by a current official Slack source assertion | 53 of 108 |
 
 Delivered and gated in CI: the pinned contract catalog and compatibility
@@ -82,8 +82,11 @@ WebKit with automated accessibility checks (Phase 3); and the activator,
 lifecycle state machine, verified snapshots, and Amazon ECS scale-to-zero
 modules (Phase 4).
 
-No compatibility claim is live Slack equivalence: a passing route, local
-test, or SDK parse is evidence for its own layer only. The per-method record
+Compatibility is judged against Slack's published sources (method and event
+references, the pinned OpenAPI and AsyncAPI documents, official SDKs and their
+fixtures, help articles, and Block Kit references), never against a live Slack
+workspace. A passing route, local test, or SDK parse is evidence for its own
+layer only. The per-method record
 lives in [specs/compatibility.yaml](specs/compatibility.yaml), product gaps in
 [specs/product-gap-audit.md](specs/product-gap-audit.md), and journey gaps in
 the `make journey-check` report.
@@ -111,23 +114,24 @@ Exit criteria for every supported profile:
 The surface is implemented; what remains is evidence and the recorded
 deviations.
 
-- Work down the 92 known deviations in the ledger, and keep each claim at the
+- Work down the 93 known deviations in the ledger, and keep each claim at the
   level its evidence supports; the contract ratchet permits an audited
   downgrade when a claim is found to be overstated.
 - Close the journey gaps `make journey-check` prints: six journeys without a
   browser scenario and 55 without a current official-source assertion.
 - Add visual baselines and manual assistive-technology evidence to the
   browser qualification.
+- Enforce each method's published rate-limit tier: 245 ledger methods are
+  held to Tier 4's floor although Slack publishes a stricter tier for them
+  (see the `rate-limit-tiers` decision in the ledger).
 - Phase 5 exits only when each method names its current official sources,
-  executable evidence, known deviations, and live-comparison state; an
-  aggregate green suite supports that record but does not replace it.
+  executable evidence, and known deviations; an aggregate green suite supports
+  that record but does not replace it. A method reaches
+  `conforms-to-published-source` when tests assert everything its published
+  sources specify.
 
-### Phase 6: Differential verification and production hardening
+### Phase 6: Production hardening
 
-- Run controlled differential requests against a disposable Slack developer
-  workspace, normalizing volatile fields, so claims can reach
-  `verified-against-slack`. No live-Slack runner exists yet; the existing
-  differential suites compare local and gRPC composition only.
 - Exercise node loss, quorum loss, failed snapshot upload, corrupt snapshot,
   interrupted restoration, and rollback against a deployed profile; the
   lifecycle and dqlite qualification suites cover them in process today.

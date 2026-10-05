@@ -1310,13 +1310,20 @@ func TestReminderRecurrenceObjectSetsHowItRepeats(t *testing.T) {
 	if form["ok"] != true || reminder["recurring"] != true {
 		t.Fatalf("weekly recurrence = %v", form)
 	}
-	// Monday is neither day, so the first occurrence is that Wednesday.
-	if wednesday := monday.AddDate(0, 0, 2); int64(reminder["time"].(float64)) != wednesday.Unix() {
-		t.Fatalf("first occurrence = %v, want %d", reminder["time"], wednesday.Unix())
+	// The reminders.list and reminders.info references give time and
+	// complete_ts only for a non-recurring reminder.
+	for _, field := range []string{"time", "complete_ts"} {
+		if _, present := reminder[field]; present {
+			t.Fatalf("recurring reminder carries %s: %v", field, reminder)
+		}
 	}
 	stored, err := repository.GetReminder(context.Background(), "T1", "U1", domain.ReminderID(reminder["id"].(string)))
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Monday is neither day, so the first occurrence is that Wednesday.
+	if wednesday := monday.AddDate(0, 0, 2); !stored.Time.Equal(wednesday) {
+		t.Fatalf("first occurrence = %s, want %s", stored.Time, wednesday)
 	}
 	if stored.Recurrence != domain.ReminderWeekly || fmt.Sprint(stored.Weekdays) != "[Wednesday Friday]" {
 		t.Fatalf("stored recurrence = %q %v", stored.Recurrence, stored.Weekdays)

@@ -24,11 +24,11 @@ type ledgerOperation struct {
 }
 
 var evidenceRank = map[string]int{
-	"unimplemented":          0,
-	"schema-compatible":      1,
-	"sdk-compatible":         2,
-	"behavior-compatible":    3,
-	"verified-against-slack": 4,
+	"unimplemented":                0,
+	"schema-compatible":            1,
+	"sdk-compatible":               2,
+	"behavior-compatible":          3,
+	"conforms-to-published-source": 4,
 }
 
 func main() {

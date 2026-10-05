@@ -36,7 +36,7 @@ import (
 //
 // Scope boundary: this type guarantees a well-formed, self-describing payload.
 // It deliberately does not claim that a topic's payload is byte-identical to
-// the event JSON real Slack emits for the corresponding event type; that is a
+// the event JSON Slack publishes for the corresponding event type; that is a
 // compatibility question against the pinned specifications in specs/ and is
 // decided separately.
 type Payload struct {

@@ -42,7 +42,8 @@ package web
 //     commands at the start of an empty composer).
 //   - After a message mentioning someone outside the channel commits, the
 //     outbox offers Slack's "Add them" / "Do nothing". A broadcast mention in
-//     a conversation of more than six members asks first.
+//     a channel of at least six members asks first, the threshold Slack's
+//     "Manage who can notify a channel or workspace" help article publishes.
 //   - Up in an empty composer edits the member's own last message in that
 //     composer's conversation or thread, in place, through the message
 //     layer's window.sameoldchatEditLastMessage; when there is no message of
@@ -623,7 +624,7 @@ if(uploadForm)uploadForm.addEventListener('submit',function(event){event.prevent
 form.addEventListener('dragover',function(event){if(uploadFile&&event.dataTransfer&&event.dataTransfer.types&&Array.prototype.indexOf.call(event.dataTransfer.types,'Files')!==-1){event.preventDefault();form.classList.add('is-dragging')}});
 form.addEventListener('dragleave',function(){form.classList.remove('is-dragging')});
 form.addEventListener('drop',function(event){form.classList.remove('is-dragging');var files=event.dataTransfer&&event.dataTransfer.files;if(files&&files.length&&stageFiles(files))event.preventDefault()});
-function needsConfirmation(text){var match=/<!(channel|here|everyone)>/.exec(text);if(!match||direct||memberCount<=6)return null;return match[1]}
+function needsConfirmation(text){var match=/<!(channel|here|everyone)>/.exec(text);if(!match||direct||memberCount<6)return null;return match[1]}
 function outboxItem(className,state,text){var item=doc.createElement('div');item.className='composer-outbox-item '+className;item.setAttribute('role','group');var copy=doc.createElement('p');copy.className='composer-outbox-text';copy.textContent=text;var label=doc.createElement('p');label.className='composer-outbox-state';label.textContent=state;var actions=doc.createElement('div');actions.className='composer-outbox-actions';item.appendChild(copy);item.appendChild(label);item.appendChild(actions);return{item:item,copy:copy,state:label,actions:actions}}
 function actionButton(actions,label,handler){var button=doc.createElement('button');button.type='button';button.textContent=label;button.addEventListener('click',handler);actions.appendChild(button);return button}
 function previewText(text){var holder=doc.createElement('div');renderMarkup(holder,text);return cleanText(holder.textContent)||'(files)'}

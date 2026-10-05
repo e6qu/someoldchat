@@ -87,8 +87,8 @@ conversation switcher, Browse channels, the status dialog, bookmarks and Pins,
 and the workflow builder and run views, and fail on serious or critical
 violations. The suite also checks that the shell reflows without sideways
 scrolling at 320 CSS pixels and at 200% zoom. These automated checks
-complement, but do not replace, manual screen-reader, keyboard, zoom, and
-live-Slack comparison evidence.
+complement, but do not replace, manual screen-reader, keyboard, and zoom
+evidence.
 
 The [`probes/`](probes/README.md) directory holds standalone reproductions
 that the suite never runs.

@@ -27,8 +27,7 @@ retrieved_at: 2026-10-02T00:00:00Z
 # Node and Python Bolt custom-function round trip, whose function_executed and
 # block_actions come from a real workflow run and a real click. Immutable producer snapshots and bot/user perspective
 # filtering now cover message create/change/delete and file create/share;
-# file-unshare production and live-Slack differential outcomes remain outside
-# the qualified slice. See the events-api decision in specs/compatibility.yaml.
+# file-unshare production remains outside the qualified slice. See the events-api decision in specs/compatibility.yaml.
 status: qualified
 
 sdks:

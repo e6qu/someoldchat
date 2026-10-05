@@ -43,7 +43,17 @@ evidence:
    handler;
 3. `sdk-compatible`: the applicable pinned official SDK suites pass;
 4. `behavior-compatible`: local behavior matches the selected contract tests;
-5. `verified-against-slack`: controlled comparison with Slack has passed.
+5. `conforms-to-published-source`: every argument, response field, error,
+   scope, and rate-limit tier that Slack's published sources give for the
+   operation (its method reference, the pinned OpenAPI document, and the pinned
+   official SDKs and their fixtures) is asserted by a test that cites that
+   source.
+
+Compatibility is judged against those published sources. A live Slack
+workspace, sandbox, or recorded comparison with one is never required, never a
+gap, and never an evidence level. Where Slack publishes nothing for a
+behavior, the behavior is a product choice of this project: the ledger names
+the choice and its reason instead of recording it as unqualified.
 
 The repository must not remove an operation or silently lower its status.
 CI runs `make contract-ratchet` against the base revision (the pull request
@@ -83,8 +93,8 @@ so compatibility aliases cannot inflate the current denominator, and reports
 how many methods name method-level executable evidence, how many
 `sdk-compatible`-or-better claims lack it, and how many carry known deviations.
 The [project status](../PLAN.md#status) records its current figures. The
-target is `verified-against-slack` for every operation; a schema-compatible handler is
-not behavior verification.
+target is `conforms-to-published-source` for every operation; a schema-compatible
+handler is not behavior verification.
 
 `make sdk-qualification` records the exact Web API paths emitted by the pinned
 official clients and runs `cmd/sdkcoverage -require-claimed`. Every method at
@@ -100,12 +110,14 @@ official source merely because their behavior differs.
 
 When sources conflict, the chosen behavior SHOULD follow:
 
-1. Repeatable observation from a controlled Slack developer workspace.
-2. Current official Slack documentation.
-3. Consensus across current official SDK releases.
-4. A single current official SDK release.
-5. The archived published OpenAPI/AsyncAPI source.
-6. An explicit local compatibility decision.
+1. Current official Slack documentation: the method, event, and object
+   references, the developer guides and changelog, Block Kit references, and
+   slack.com help articles.
+2. Consensus across current official SDK releases and their test fixtures.
+3. A single current official SDK release.
+4. The archived published OpenAPI/AsyncAPI source.
+5. An explicit local compatibility decision, used only where Slack publishes
+   nothing.
 
 The ledger MUST record every conflict, all evidence, the selected behavior, and
 the reason. Upstream files MUST remain byte-for-byte copies; corrections belong
@@ -198,8 +210,11 @@ return HTTP 503 with `Retry-After`. The Slack-shaped response and its documented
 compatibility deviation MUST be recorded in the ledger; the system MUST NOT
 pretend that unspecified cold-start behavior came from Slack.
 
-## Differential verification
+## Published-source conformance
 
-Tests MAY submit equivalent calls to a disposable Slack workspace. Comparison
-MUST normalize tokens, IDs, timestamps, request IDs, hostnames, and other
-volatile fields. Captured private content and credentials MUST NOT be committed.
+Conformance is established without connecting to Slack. A test cites the
+published source it asserts: a method or event reference URL, a path in the
+pinned OpenAPI/AsyncAPI documents, or a file in a pinned official SDK release
+(for example the Java SDK's `MethodsRateLimits` tier table or an SDK's JSON
+response fixtures). `make external-contract-qualification` re-reads the cited
+pages so a reworded or retracted source is noticed.

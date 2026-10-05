@@ -187,8 +187,15 @@ without deleting user-owned workspace history Slack retains.
   by local and generated-gRPC workers. SQL restart tests preserve queued retry
   time/count/reason, while the console labels unevaluated journal work
   separately from acknowledged callbacks.
-- Live differential tests compare exact form/JSON envelopes after normalizing
-  secrets, IDs, and timestamps.
+- Envelopes follow the published formats: interaction payloads are POSTed as
+  `application/x-www-form-urlencoded` with the JSON in a `payload` field
+  ([Handling user interaction](https://docs.slack.dev/interactivity/handling-user-interaction/)),
+  slash commands as form fields
+  ([Implementing slash commands](https://docs.slack.dev/interactivity/implementing-slash-commands/)),
+  and Events API callbacks as JSON
+  ([Events API](https://docs.slack.dev/apis/events-api/)), each signed as
+  [Verifying requests from Slack](https://docs.slack.dev/authentication/verifying-requests-from-slack/)
+  describes. The official Bolt suites parse and verify them.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

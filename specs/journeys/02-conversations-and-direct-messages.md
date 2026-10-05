@@ -155,11 +155,11 @@ Acceptance sequence:
    receive Slack's participant notification.
 
 The public Slack help source requires a selectable history choice but does not
-enumerate every option label or range. Those exact choices MUST be captured by
-a controlled live-Slack differential fixture before SameOldChat claims its
-two current choices—no history and all history—are the complete Slack option
-set. The absence of a public `conversations.*` method for this client journey
-MUST NOT be filled by inventing one.
+enumerate its option labels or ranges. Offering two choices, no history and all
+history, is therefore SameOldChat's product choice rather than a gap; it is not
+a claim that Slack offers exactly these two. The absence of a public
+`conversations.*` method for this client journey MUST NOT be filled by
+inventing one.
 
 ## DM-04 — Close and reopen a DM
 
@@ -225,9 +225,13 @@ a private channel, and cannot be converted a second time.
   emitted events agree with the UI.
 - Current official Node, Python, and Java SDKs prove canonical exact-member
   group-DM opening. Add-history and conversion are first-party Slack journeys,
-  not invented Web API methods. Controlled live differential fixtures still
-  need to record participant/history presentation because help text does not
-  fully specify every option and transition.
+  not invented Web API methods. Where the help text leaves a history option or
+  transition unspecified, the product choice recorded under DM-03 applies.
+- Workspace owner restrictions on private-channel creation and on converting
+  Slack Connect group DMs are published
+  ([Manage settings and permissions for Slack Connect direct messages](https://slack.com/help/articles/360060326994-Manage-settings-and-permissions-for-Slack-Connect-direct-messages))
+  but not implemented: conversion refuses only Single-Channel Guests. The
+  product gap audit tracks it.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

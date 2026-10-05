@@ -84,8 +84,9 @@ the initial channel visibility matches workspace policy.
 - Backend: durable nonce/replay protection, workspace-bound authorization,
   concurrent identity convergence, and revocation across local and distributed
   composition.
-- Differential: perform equivalent entry, switching, and sign-out observations
-  in a dedicated Slack workspace.
+- Published source: entry, switching, and sign-out follow the help articles
+  in the source map below, which `make external-contract-qualification`
+  re-reads.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

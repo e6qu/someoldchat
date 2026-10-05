@@ -8534,15 +8534,20 @@ func (h Handler) listStars(w http.ResponseWriter, r *http.Request) {
 // maxStarPages bounds stars.list's page walk.
 const maxStarPages = 100
 
+// reminderResponse is Slack's reminder object. The reminders.list and
+// reminders.info references say only non-recurring reminders have time and
+// complete_ts: a recurring reminder has no single due instant to report and
+// cannot be completed (reminders.complete answers cannot_complete_recurring).
+// An active non-recurring reminder carries complete_ts=0, as the references'
+// examples do.
 func reminderResponse(reminder domain.Reminder) map[string]any {
-	response := map[string]any{"id": reminder.ID, "creator": reminder.Creator, "user": reminder.User, "text": reminder.Text, "time": reminder.Time.Unix(), "recurring": reminder.Recurring}
-	if !reminder.CompleteAt.IsZero() {
-		response["complete_ts"] = reminder.CompleteAt.Unix()
-	} else if !reminder.Recurring {
-		// Slack's current reminder object includes complete_ts=0 for an active
-		// non-recurring reminder. Omitting the field happened to decode in the
-		// SDKs, but it was not the documented wire object those SDKs model.
+	response := map[string]any{"id": reminder.ID, "creator": reminder.Creator, "user": reminder.User, "text": reminder.Text, "recurring": reminder.Recurring}
+	if !reminder.Recurring {
+		response["time"] = reminder.Time.Unix()
 		response["complete_ts"] = int64(0)
+		if !reminder.CompleteAt.IsZero() {
+			response["complete_ts"] = reminder.CompleteAt.Unix()
+		}
 	}
 	return response
 }

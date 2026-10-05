@@ -72,7 +72,11 @@ requirement overrides them:
 
 ## Evidence required for compatibility
 
-A journey is compatible only when all applicable layers pass:
+A journey is compatible only when all applicable layers pass. Every layer is
+judged against Slack's published sources; a live Slack workspace is never
+required. Where Slack publishes nothing (an unstated threshold, ordering, or
+edge case), the journey document names the product choice SameOldChat makes,
+and that choice is not a gap.
 
 | Layer | Required evidence |
 | --- | --- |
@@ -83,7 +87,7 @@ A journey is compatible only when all applicable layers pass:
 | Browser | Chromium, Firefox, and WebKit execute the journey at desktop and narrow widths. |
 | Accessibility | Keyboard-only and automated accessibility checks pass; screen-reader-critical journeys have a manual transcript. |
 | Visual | Stable desktop and narrow screenshots are compared for layout-bearing states. |
-| Differential | An opt-in dedicated Slack sandbox records and normalizes the equivalent live behavior. |
+| Published source | Every behavior the journey's official sources specify (help article, method or event reference, Block Kit reference, or official SDK fixture) is asserted by a test that cites the source. |
 
 Each automated test SHOULD include the relevant journey ID in its title or
 metadata. A test that only asserts HTML text, a route status, or a mocked
@@ -104,8 +108,8 @@ For claims whose upstream wording is stable enough to probe,
 checks representative exact behavioral assertions across every journey domain.
 It is deliberately additive to the catalog gate: a reachable link is not
 evidence that the page still describes the behavior our Markdown attributes to
-it, and a documentation assertion is not a live Slack differential result.
-Each assertion cites its stable journey ID; `make journey-check` prints the
+it, and a documentation assertion does not by itself prove the implementation
+behaves that way. Each assertion cites its stable journey ID; `make journey-check` prints the
 IDs that still lack a live upstream-text assertion rather than letting a check
 for one journey lend external evidence to another.
 

@@ -96,18 +96,21 @@ surface, not the backing store for current Later.
 Where retained, each method follows its current official request, response, and
 error contract and is qualified through current official Node, Python, and Java
 SDKs. SDK decoding is only `sdk-compatible` evidence. Natural-language parsing,
-recurrence, token-type-dependent targeting, delivery, and live-Slack outcomes
-require separate behavioral and differential evidence before the ledger can
-claim more.
+recurrence, token-type-dependent targeting, and delivery need behavioral tests
+against those references before the ledger can claim more. The references
+decide the targeting rule: a user token cannot set another member's reminder
+(`cannot_add_others`), while a bot token may set a one-time reminder for one.
+They also decide the reminder object: only a non-recurring reminder carries
+`time` and `complete_ts`
+([`reminders.list`](https://docs.slack.dev/reference/methods/reminders.list/)).
 
 `reminders.complete` implements the error contract Slack documents: a recurring
 reminder answers `cannot_complete_recurring` and another member's reminder
 answers `cannot_complete_others`, each told apart from a reminder that does not
-exist rather than collapsed into `not_found`. Because `reminders.add` reads
-`time` as an absolute epoch and does not parse recurring phrasing, a recurring
-reminder arises only from stored state here; the completion guard nonetheless
-enforces the invariant that such a reminder is never marked done as if it were a
-one-off.
+exist rather than collapsed into `not_found`. `reminders.add` creates a
+recurring reminder from a recurring phrase in `time` ("every Thursday") or from
+the `recurrence` argument, and the completion guard keeps such a reminder from
+being marked done as if it were a one-off.
 
 ## Evidence
 
@@ -135,14 +138,27 @@ one-off.
 - Current official Node, Python, and Java SDK qualification continues to
   exercise deprecated `stars.*` and `reminders.*` as separate app contracts.
   No SDK suite is cited as Later evidence because Slack exposes no current
-  Later Web API. Still required before claiming live Slack equivalence:
-- controlled live-Slack differential observations for Later organization,
-  source loss, live reconciliation, notification presentation, and the broader
-  natural-language `/remind` grammar;
-- browser delivery evidence driven by a deterministic deployed worker clock
-  rather than only the real UI plus deterministic service/web tests; and
-- observed decisions for undocumented recurrence edge cases such as a monthly
-  reminder anchored on the 29th–31st.
+  Later Web API.
+- Later organization (In progress, Archived, and Completed, with reminders
+  and newly saved items in In progress) follows
+  [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later),
+  as do source navigation, removal, and the due-reminder badges asserted by
+  `make external-contract-qualification`. The `/remind` grammar is judged
+  against the examples in
+  [Set a reminder](https://slack.com/help/articles/208423427-Set-a-reminder);
+  a phrasing the parser does not read is refused rather than guessed, and the
+  `reminders.add` ledger entry lists the phrasings it reads.
+- Product choices where Slack publishes nothing: a monthly reminder anchored
+  on the 29th–31st fires on the last day of a shorter month and returns to its
+  anchored day afterwards (`TestNextReminderDueMonthlyClampsToMonthEndWithoutDrifting`);
+  deleting a Later reminder while delivery holds its lease answers not found,
+  so delivery and deletion have one outcome
+  (`TestLaterReminderCannotBeDeletedWhileDeliveryOwnsTheLease`); and a
+  `reminders.add` reminder deleted before delivery claims it is never
+  delivered.
+- Still missing: browser delivery evidence driven by a deterministic deployed
+  worker clock rather than only the real UI plus deterministic service/web
+  tests.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |
