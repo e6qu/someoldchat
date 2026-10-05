@@ -2,9 +2,11 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +119,54 @@ func TestComposerCarriesTheBroadcastWarningPolicy(t *testing.T) {
 
 	restrictWorkspace(t, s, domain.WorkspacePolicy{BroadcastWarningOff: true, PrivateChannelCreators: domain.PolicyAudienceEveryone})
 	requireContains(t, "composer with the warning off", composerTag(), "data-broadcast-warning-off")
+}
+
+// The confirmation before @channel or @here asks from six members up, and the
+// member count it compares is the one the server writes on the composer. The
+// browser journey for the dialog serves a larger count than its servers'
+// channels have, so this holds the server to the channel's real membership as
+// it grows past the threshold.
+func TestComposerCarriesTheChannelsMemberCount(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	count := func() string {
+		t.Helper()
+		body := get(t, mux, "/app?channel=Cdev").Body.String()
+		start := strings.Index(body, `<form class="composer`)
+		if start < 0 {
+			t.Fatalf("no composer form: %s", body)
+		}
+		tag := body[start : start+strings.Index(body[start:], ">")]
+		marker := `data-member-count="`
+		at := strings.Index(tag, marker)
+		if at < 0 {
+			t.Fatalf("composer without a member count: %s", tag)
+		}
+		value := tag[at+len(marker):]
+		return value[:strings.Index(value, `"`)]
+	}
+	members := func() string {
+		t.Helper()
+		page, err := s.ListConversationMembers(context.Background(), "Cdev", domain.PageRequest{Limit: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strconv.Itoa(len(page.Users))
+	}
+	if got, want := count(), members(); got != want {
+		t.Fatalf("member count=%s, want %s", got, want)
+	}
+	for index := range 6 {
+		id := domain.UserID(fmt.Sprintf("UCOUNT%d", index))
+		if err := s.SeedUser(domain.User{ID: id, WorkspaceID: "T1", Name: string(id)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SeedConversationMember("Cdev", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := count(), members(); got != want || got == "0" {
+		t.Fatalf("member count after six joined=%s, want %s", got, want)
+	}
 }
 
 func TestCreateChannelFollowsThePrivateChannelPolicy(t *testing.T) {

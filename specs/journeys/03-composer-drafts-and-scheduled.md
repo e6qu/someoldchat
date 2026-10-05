@@ -293,9 +293,12 @@ outcomes are not HTTP 500 responses.
   stored with the workspace policy and reaches the composer as its form's
   `data-broadcast-warning-off`; a web test asserts the server sets it exactly
   when the workspace turned the warning off, and the `[ADMIN-02 COMP-01 DM-05]`
-  browser journey changes the setting and finds it on the composer. No browser
-  test drives the dialog itself, because the browser servers' channels have
-  fewer than six members.
+  browser journey changes the setting and finds it on the composer. The
+  dialog itself is driven by the `[COMP-01 A11Y-01]` broadcast journey: the
+  browser servers cannot add people, so it serves the page with a twelve-member
+  count, and Cancel keeps the message unsent in the composer while Send now
+  sends it. `TestComposerCarriesTheChannelsMemberCount` holds the server to the
+  channel's real membership as it grows past six.
 - A committed send whose conversation cannot be read back answers 204 with
   `X-SameOldChat-Sent-View: pending`, which the composer treats as sent
   before its catch-up refresh draws the message
