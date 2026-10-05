@@ -210,8 +210,12 @@ test('[CANVAS-02] people on a canvas see who else is there and where they are wr
     await expect(owner.page.locator('[data-canvas-status]')).toHaveText('Saved');
     await caretIsIn(mine.locator('[data-canvas-block]', { hasText: 'Actions' }), 'end');
 
-    await peer.page.close();
-    await expect(ownerHere).toBeHidden();
+    // Leaving says goodbye at once rather than waiting out the fifteen
+    // seconds an unrenewed presence lasts. The peer navigates away, which
+    // fires pagehide in every engine; Playwright's page.close() does not in
+    // Firefox, so closing would only ever test the expiry.
+    await peer.page.goto('/app/canvases');
+    await expect(ownerHere).toBeHidden({ timeout: 8_000 });
     await expect(owner.page.locator('[data-canvas-caret]')).toHaveCount(0);
   } finally {
     await owner.context.close();
