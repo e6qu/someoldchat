@@ -223,7 +223,7 @@ var memberCount=parseInt(form.getAttribute('data-member-count')||'0',10)||0;
 var inviteURL=form.getAttribute('data-invite-url')||'';
 var direct=form.hasAttribute('data-direct');
 var draftKey='sameoldchat-draft:'+(form.getAttribute('data-draft-url')||form.getAttribute('action'));
-var editor=null;var mode='plain';var sending=false;var staging=0;var draftTimer=null;var suggestion=null;var suggestionTimer=null;
+var editor=null;var mode='plain';var sending=false;var staging=0;var draftTimer=null;var draftDirty=false;var suggestion=null;var suggestionTimer=null;
 var attachments=[];try{attachments=JSON.parse(draftInput&&draftInput.value||'[]');if(!Array.isArray(attachments))attachments=[]}catch(error){attachments=[]}
 var pendingUploads=[];var thumbnails={};
 function surface(){return mode==='rich'?editor:field}
@@ -241,7 +241,7 @@ if(mode==='plain'&&field){field.style.height='auto';field.style.height=Math.min(
 }
 function persistDraft(){
 try{if(field.value)localStorage.setItem(draftKey,field.value);else localStorage.removeItem(draftKey)}catch(error){}
-if(draftTimer)window.clearTimeout(draftTimer);
+draftDirty=true;if(draftTimer)window.clearTimeout(draftTimer);
 draftTimer=window.setTimeout(function(){saveDraftRemote(false)},450);
 }
 function saveDraftRemote(keepalive){
@@ -250,7 +250,7 @@ if(!action||!ownPath(action)||runes(field.value)>LIMIT)return Promise.resolve();
 if(draftTimer){window.clearTimeout(draftTimer);draftTimer=null}
 var body=new URLSearchParams();body.set('_csrf',csrf);body.set('text',field.value);body.set('draft_attachments',JSON.stringify(attachments));
 var threadInput=form.querySelector('input[name=thread_ts]');if(threadInput)body.set('thread_ts',threadInput.value);
-return fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin',keepalive:!!keepalive}).then(function(response){if(!response.ok)announce('Your draft has not been saved yet. Keep this tab open and try typing again.')}).catch(function(){announce('Your draft has not been saved yet. Keep this tab open and try typing again.')});
+return fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin',keepalive:!!keepalive&&body.toString().length<60000}).then(function(response){if(response.ok)draftDirty=false;if(!response.ok)announce('Your draft has not been saved yet. Keep this tab open and try typing again.')}).catch(function(){announce('Your draft has not been saved yet. Keep this tab open and try typing again.')});
 }
 api.flushDraft=function(){if(draftTimer)return saveDraftRemote(false);return Promise.resolve()};
 function persistDraftNow(){try{if(field.value)localStorage.setItem(draftKey,field.value);else localStorage.removeItem(draftKey)}catch(error){}return saveDraftRemote(false)}
@@ -722,7 +722,7 @@ scheduleAt(custom);return;
 }
 submitMessage(false);
 },false);
-window.addEventListener('pagehide',function(){saveDraftRemote(true)});
+if(window.sameoldchatLifecycle)window.sameoldchatLifecycle.leaving(function(){if(draftDirty||draftTimer)saveDraftRemote(true)});
 window.addEventListener('beforeunload',function(event){if(staging){event.preventDefault();event.returnValue=''}});
 if(!field.value){try{var saved=localStorage.getItem(draftKey);if(saved)field.value=saved}catch(error){}}
 api.applyPrefs();

@@ -60,7 +60,7 @@ func TestLivePagesOpenTheirStreamAtTheRenderedHead(t *testing.T) {
 			t.Fatalf("%s rendered head %s, want %s", target, got, want)
 		}
 	}
-	if search := get(t, mux, "/app/search?q=hello"); strings.Contains(search.Body.String(), "data-event-head") {
+	if search := get(t, mux, "/app/search?q=hello"); eventHeadAttribute.MatchString(search.Body.String()) {
 		t.Fatal("a page with no live stream carries an event head")
 	}
 

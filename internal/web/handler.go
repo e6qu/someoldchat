@@ -1690,8 +1690,33 @@ const themeBootstrap = `<script>(function(){var root=document.documentElement;va
 
 const themeToggleScript = `<script>(function(){var root=document.documentElement;var toggle=document.getElementById('theme-toggle');function apply(theme){root.setAttribute('data-theme',theme);root.setAttribute('data-theme-explicit','');if(toggle)toggle.setAttribute('aria-pressed',theme==='dark'?'true':'false')}apply(root.getAttribute('data-theme')==='dark'?'dark':'light');if(!toggle)return;toggle.addEventListener('click',function(){var next=root.getAttribute('data-theme')==='dark'?'light':'dark';apply(next);try{localStorage.setItem('sameoldchat-theme',next)}catch(error){}})})();</script>`
 
+// pageLifecycleScript is the one way a page lets go of what it holds when the
+// reader leaves it. Every page script registers what it opens — its live
+// stream, intervals, media — with hold(release), and what must be sent on the
+// way out — a draft, a presence goodbye — with leaving(send). One pagehide
+// handler runs the sends first, then every release, newest first, then aborts
+// the page-wide signal its ordinary fetches carry. A page used to leave all of
+// it to the browser, and WebKit, alone among the engines, has crashed tearing
+// down /app with a stream open, requests in flight and an unconditional
+// keepalive draft save starting at the same instant as the next navigation.
+// A page the browser restores from its back/forward cache has released
+// everything and shows stale content, so it reloads: the same result a browser
+// without that cache gives. liveStream() opens the page's /events stream (see
+// liveStreamOpen) and holds it.
+const pageLifecycleScript = `<script>(function(){
+var releases=[];var leavers=[];var released=false;var controller=new AbortController();
+function hold(release){if(released){try{release()}catch(error){}return function(){}}var entry={release:release};releases.push(entry);return function(){var index=releases.indexOf(entry);if(index>=0)releases.splice(index,1)}}
+function leaving(send){leavers.push(send)}
+function liveStream(){var query=[];var head=document.body.getAttribute('data-event-head')||'';if(/^[0-9]+$/.test(head))query.push('last_event_id='+head);var canvas=document.querySelector('[data-event-canvas]');if(canvas)query.push('canvas='+encodeURIComponent(canvas.getAttribute('data-event-canvas')));
+var stream=new EventSource('/events'+(query.length?'?'+query.join('&'):''));hold(function(){stream.close()});return stream}
+window.addEventListener('pagehide',function(){if(released)return;released=true;leavers.forEach(function(send){try{send()}catch(error){}});leavers=[];
+var waiting=releases.reverse();releases=[];waiting.forEach(function(entry){try{entry.release()}catch(error){}});try{controller.abort()}catch(error){}});
+window.addEventListener('pageshow',function(event){if(event.persisted)window.location.reload()});
+window.sameoldchatLifecycle={hold:hold,leaving:leaving,signal:controller.signal,liveStream:liveStream};
+})();</script>`
+
 const layoutMarkup = `<!doctype html>
-<html lang="{{.Lang}}" data-theme="light" data-l10n="{{.ClientCatalog}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{{template "title" .Page}}</title><style>` + sharedStyle + `</style>{{block "styles" .Page}}{{end}}` + themeBootstrap + `</head><body{{with .EventHead}} data-event-head="{{.}}"{{end}}>{{template "content" .Page}}` + themeToggleScript + `{{block "scripts" .Page}}{{end}}</body></html>`
+<html lang="{{.Lang}}" data-theme="light" data-l10n="{{.ClientCatalog}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{{template "title" .Page}}</title><style>` + sharedStyle + `</style>{{block "styles" .Page}}{{end}}` + themeBootstrap + `</head><body{{with .EventHead}} data-event-head="{{.}}"{{end}}>{{template "content" .Page}}` + themeToggleScript + pageLifecycleScript + `{{block "scripts" .Page}}{{end}}</body></html>`
 
 // templateFunctions is deliberately tiny: it exists so a template cannot write
 // an aria-keyshortcuts value by hand. Every advertised chord is looked up in
@@ -3407,7 +3432,7 @@ if(window.EventSource&&document.querySelector('[data-event-canvas]'))window.same
 // (inside domain.CanvasPresenceTTL), sends its cursor a moment after it moves
 // to another character (the editor's sameoldchatCanvasEditor.caret, a
 // character of the collaborative text), and says it is leaving when the page
-// is hidden for good, coming back if the browser restores it. Everyone else
+// leaves (pageLifecycleScript, which also stops its renewals). Everyone else
 // on the canvas is listed by name in the status line above the document, and
 // a writer sees each other writer's cursor, with their name, at the character
 // it is at (the editor's point), and what they have selected (stretch). The cursors are drawn in a layer beside the
@@ -3424,11 +3449,9 @@ function keyOf(at){return at?at.caret.r+':'+at.caret.c+(at.anchor?'/'+at.anchor.
 function form(leaving){var body=new URLSearchParams();body.set('_csrf',csrf?csrf.value:'');body.set('session',session);if(leaving){body.set('leave','1');return body}var at=cursor();if(at){body.set('caret_r',at.caret.r);body.set('caret_c',String(at.caret.c));if(at.anchor){body.set('anchor_r',at.anchor.r);body.set('anchor_c',String(at.anchor.c))}}sent=keyOf(at);return body}
 function send(){window.clearTimeout(timer);timer=0;fetch(url,{method:'POST',body:form(false),credentials:'same-origin',headers:{'Accept':'application/json'}}).catch(function(){})}
 function moved(){if(timer||keyOf(cursor())===sent)return;timer=window.setTimeout(send,300)}
-function start(){send();window.clearInterval(renewal);renewal=window.setInterval(send,5000)}
-start();
+send();renewal=window.setInterval(send,5000);
 document.addEventListener('sameoldchat-canvas-caret',moved);
-window.addEventListener('pagehide',function(){window.clearInterval(renewal);window.clearTimeout(timer);timer=0;if(navigator.sendBeacon)navigator.sendBeacon(url,form(true))});
-window.addEventListener('pageshow',function(event){if(event.persisted)start()});
+var lifecycle=window.sameoldchatLifecycle;lifecycle.leaving(function(){if(navigator.sendBeacon)navigator.sendBeacon(url,form(true))});lifecycle.hold(function(){window.clearInterval(renewal);window.clearTimeout(timer);timer=0});
 function render(){var names=[];others.forEach(function(page){if(names.indexOf(page.name)<0)names.push(page.name)});
 if(line){line.hidden=!names.length;line.textContent=names.length?'Also here: '+names.join(', '):''}
 if(!editor)return;editor.layer.textContent='';
@@ -4074,7 +4097,7 @@ fetch('/app/active',{method:'POST',credentials:'same-origin',headers:{'content-t
 };
 beat();
 ['pointerdown','keydown','visibilitychange'].forEach(function(name){document.addEventListener(name,beat,{passive:true})});
-window.setInterval(beat,300000);
+var beating=window.setInterval(beat,300000);window.sameoldchatLifecycle.hold(function(){window.clearInterval(beating)});
 }
 window.sameoldchatPage={refresh:refresh,localize:localize,announce:announce,focusMessage:focusMessage,messageItems:messageItems};
 var markRead=document.getElementById('mark-read');
@@ -13939,12 +13962,13 @@ func (h Handler) readLiveHead(ctx context.Context, principal auth.Principal) (li
 }
 
 // liveStreamOpen is the one expression every live page script opens its
-// stream with. EventSource itself resends the last id it received when it
+// stream with; pageLifecycleScript opens it and closes it when the reader
+// leaves the page. EventSource itself resends the last id it received when it
 // reconnects, so the rendered head is only needed for the first connection.
 //
 // A canvas page also names its canvas (data-event-canvas), and its stream then
 // carries who is on that canvas as well (realtime.CanvasPresenceSource).
-const liveStreamOpen = `new EventSource((function(){var query=[];var head=document.body.getAttribute('data-event-head')||'';if(/^[0-9]+$/.test(head))query.push('last_event_id='+head);var canvas=document.querySelector('[data-event-canvas]');if(canvas)query.push('canvas='+encodeURIComponent(canvas.getAttribute('data-event-canvas')));return '/events'+(query.length?'?'+query.join('&'):'')})())`
+const liveStreamOpen = `window.sameoldchatLifecycle.liveStream()`
 
 func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data any, status int, unavailable string) {
 	h.writeHTMLWithPolicy(w, page, data, status, unavailable, workspaceContentSecurityPolicy())
