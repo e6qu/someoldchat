@@ -48,8 +48,13 @@ func (m Messages) SetWorkspacePolicy(ctx context.Context, workspaceID domain.Wor
 
 // requirePrivateChannelCreator refuses a member the "who can create private
 // channels" policy leaves out. Creating a private channel and converting a
-// group DM into one both make a private channel, so both ask this.
-func (m Messages) requirePrivateChannelCreator(ctx context.Context, workspaceID domain.WorkspaceID, membership domain.WorkspaceMembership) error {
+// group DM into one both make a private channel, so both ask this. It reads
+// the actor's membership itself, so every caller is guarded by one call.
+func (m Messages) requirePrivateChannelCreator(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID) error {
+	membership, err := m.activeWorkspaceMembership(ctx, workspaceID, actor)
+	if err != nil {
+		return err
+	}
 	policy, err := m.Store.GetWorkspacePolicy(ctx, workspaceID)
 	if err != nil {
 		return err

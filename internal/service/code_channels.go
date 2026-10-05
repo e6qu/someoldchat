@@ -35,11 +35,7 @@ func (m Messages) CreateCodeChannel(ctx context.Context, workspaceID domain.Work
 	// A private code channel is a private channel like any other, so the
 	// workspace's "who can create private channels" policy governs it too.
 	if request.Private {
-		membership, err := m.activeWorkspaceMembership(ctx, workspaceID, actor)
-		if err != nil {
-			return domain.CodeChannel{}, err
-		}
-		if err := m.requirePrivateChannelCreator(ctx, workspaceID, membership); err != nil {
+		if err := m.requirePrivateChannelCreator(ctx, workspaceID, actor); err != nil {
 			return domain.CodeChannel{}, err
 		}
 	}

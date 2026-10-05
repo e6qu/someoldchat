@@ -76,4 +76,8 @@ package mutation
 // 72 to 71: a service test now refuses a member who does not manage a
 // workflow the trigger they try to add to it, so SetWorkflowTrigger's
 // manager guard is load-bearing.
-const survivingGuardCeiling = 71
+//
+// 71 to 69: measured after calls.* began refusing a huddle's ID and the
+// workspace policy began governing private channels; their service tests
+// catch two more operations whose guard used to run on unnoticed.
+const survivingGuardCeiling = 69

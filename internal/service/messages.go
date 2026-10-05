@@ -5634,7 +5634,7 @@ func (m Messages) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID d
 	}
 	// The result is a private channel, so whoever the workspace lets create
 	// one is who may convert.
-	if err := m.requirePrivateChannelCreator(ctx, workspaceID, membership); err != nil {
+	if err := m.requirePrivateChannelCreator(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
 	}
 	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
@@ -5677,11 +5677,7 @@ func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.Wor
 		return domain.Conversation{}, err
 	}
 	if private {
-		membership, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
-		if err != nil {
-			return domain.Conversation{}, err
-		}
-		if err := m.requirePrivateChannelCreator(ctx, workspaceID, membership); err != nil {
+		if err := m.requirePrivateChannelCreator(ctx, workspaceID, userID); err != nil {
 			return domain.Conversation{}, err
 		}
 	}
