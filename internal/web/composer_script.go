@@ -83,16 +83,19 @@ function setPref(key,value){try{localStorage.setItem('sameoldchat-composer-'+key
 doc.addEventListener('change',function(event){var input=event.target;if(!input||!input.getAttribute)return;var key=input.getAttribute('data-composer-preference');if(!key)return;if(key==='enter'&&input.checked)setPref('enter',input.value==='newline'?'newline':'send');if(key==='markup')setPref('markup',input.checked?'true':'false');announce(key==='enter'?(prefs.enter==='send'?'Enter now sends a message.':'Enter now starts a new line.'):(prefs.markup?'Messages are now written with markup.':'Messages are now formatted as you type.'))});
 window.addEventListener('storage',function(event){if(event.key&&event.key.indexOf('sameoldchat-composer-')===0){readPrefs();composers.forEach(function(composer){composer.applyPrefs()});syncPreferenceControls()}});
 if(!composerForms.length){syncPreferenceControls();return}
-var directory={people:[],groups:[],specials:[],channels:[],commands:[]};
-var directoryNode=doc.getElementById('composer-directory');
-if(directoryNode&&directoryNode.content){Array.prototype.forEach.call(directoryNode.content.querySelectorAll('i'),function(node){
+var directories={};
+function loadDirectory(node){var loaded={people:[],groups:[],specials:[],channels:[],commands:[],search:node?node.getAttribute('data-people-search')||'':'',searched:{}};
+if(node&&node.content){Array.prototype.forEach.call(node.content.querySelectorAll('i'),function(node){
 var entry={kind:node.getAttribute('data-kind'),id:node.getAttribute('data-id')||'',name:node.getAttribute('data-name')||'',real:node.getAttribute('data-real')||'',display:node.getAttribute('data-display')||'',avatar:node.getAttribute('data-avatar')||'',initial:node.getAttribute('data-initial')||'',member:node.hasAttribute('data-member'),bot:node.hasAttribute('data-bot'),self:node.hasAttribute('data-self'),description:node.getAttribute('data-description')||'',count:node.getAttribute('data-count')||'',hint:node.getAttribute('data-hint')||'',app:node.getAttribute('data-app')||'',isPrivate:node.hasAttribute('data-private')};
-var list={person:directory.people,group:directory.groups,special:directory.specials,channel:directory.channels,command:directory.commands}[entry.kind];
+var list={person:loaded.people,group:loaded.groups,special:loaded.specials,channel:loaded.channels,command:loaded.commands}[entry.kind];
 if(list)list.push(entry);
-})}
+})}return loaded}
+function directoryFor(form){var id=form.getAttribute('data-directory')||'composer-directory';if(!directories[id])directories[id]=loadDirectory(doc.getElementById(id));return directories[id]}
+var directory=directoryFor(composerForms[0]);
+function useDirectory(form){directory=directoryFor(form)}
 function findEntry(list,id){for(var index=0;index<list.length;index++)if(list[index].id===id)return list[index];return null}
-var peopleSearch=directoryNode?directoryNode.getAttribute('data-people-search'):'';var searchedPeople={};var peopleTimer=null;
-function searchPeople(query,refresh){if(!peopleSearch||!query||searchedPeople[query])return;if(peopleTimer)window.clearTimeout(peopleTimer);peopleTimer=window.setTimeout(function(){searchedPeople[query]=true;fetch(peopleSearch+'&q='+encodeURIComponent(query),{credentials:'same-origin',headers:{accept:'application/json'}}).then(function(response){return response.ok?response.json():[]}).then(function(found){var added=false;(Array.isArray(found)?found:[]).forEach(function(person){if(!person||!person.id||findEntry(directory.people,person.id))return;directory.people.push({kind:'person',id:person.id,name:person.name||'',real:person.real||'',display:person.display||'',avatar:person.avatar||'',initial:person.initial||'',member:!!person.member||!!person.membership_unknown,bot:!!person.bot,self:!!person.self});added=true});if(added&&refresh)refresh(query)}).catch(function(){searchedPeople[query]=false})},150)}
+var peopleTimer=null;
+function searchPeople(query,refresh){var asked=directory;if(!asked.search||!query||asked.searched[query])return;if(peopleTimer)window.clearTimeout(peopleTimer);peopleTimer=window.setTimeout(function(){asked.searched[query]=true;fetch(asked.search+'&q='+encodeURIComponent(query),{credentials:'same-origin',headers:{accept:'application/json'}}).then(function(response){return response.ok?response.json():[]}).then(function(found){var added=false;(Array.isArray(found)?found:[]).forEach(function(person){if(!person||!person.id||findEntry(asked.people,person.id))return;asked.people.push({kind:'person',id:person.id,name:person.name||'',real:person.real||'',display:person.display||'',avatar:person.avatar||'',initial:person.initial||'',member:!!person.member||!!person.membership_unknown,bot:!!person.bot,self:!!person.self});added=true});if(added&&refresh)refresh(query)}).catch(function(){asked.searched[query]=false})},150)}
 function isBlock(node){return node&&node.nodeType===1&&/^(P|DIV|PRE|BLOCKQUOTE|UL|OL|LI|H[1-6])$/.test(node.nodeName)}
 function wrapMark(mark,inner){var match=/^(\s*)([\s\S]*?)(\s*)$/.exec(inner);if(!match[2])return inner;return match[1]+mark+match[2]+mark+match[3]}
 function preText(node){var value='';Array.prototype.forEach.call(node.childNodes,function(child,index){if(child.nodeType===3)value+=child.data;else if(child.nodeName==='BR'){if(index<node.childNodes.length-1)value+='\n'}else if(isBlock(child)){if(value&&value.charAt(value.length-1)!=='\n')value+='\n';value+=preText(child)}else value+=preText(child)});return value}
@@ -194,6 +197,7 @@ function rememberEmoji(name){try{var recent=recentEmoji().filter(function(value)
 var emojiRequest=null;
 function fetchEmoji(query){if(emojiRequest&&emojiRequest.abort)emojiRequest.abort();emojiRequest=window.AbortController?new AbortController():null;var parameters=new URLSearchParams({q:query});var recent=recentEmoji();if(recent.length)parameters.set('recent',recent.slice(0,24).join(','));var options={credentials:'same-origin'};if(emojiRequest)options.signal=emojiRequest.signal;return fetch('/app/emoji/options?'+parameters.toString(),options).then(function(response){if(!response.ok)throw new Error('emoji');return response.json()}).then(function(payload){return payload&&Array.isArray(payload.options)?payload.options:[]})}
 function createComposer(form){
+useDirectory(form);
 var prefix=form.id==='composer'?'':form.id.slice(0,form.id.length-'composer'.length);
 function byId(id){return doc.getElementById(prefix+id)}
 var api={form:form,thread:form.getAttribute('data-composer')==='thread'};
@@ -554,7 +558,7 @@ if(formatBar)formatBar.addEventListener('mousedown',function(event){if(event.tar
 if(formatBar)formatBar.addEventListener('click',function(event){var button=event.target.closest('[data-format]');if(button)format(button.getAttribute('data-format'))});
 if(formatToggle)formatToggle.addEventListener('click',function(){setPref('formatting',prefs.formatting?'hidden':'shown');focus()});
 if(mentionButton){mentionButton.hidden=false;mentionButton.addEventListener('click',function(){focus();startMention()})}
-form.addEventListener('focusin',function(){active=api});
+form.addEventListener('focusin',function(){active=api;useDirectory(form)});
 form.addEventListener('click',function(event){var action=event.target.closest('[data-composer-action]');if(!action)return;var kind=action.getAttribute('data-composer-action');var menu=action.closest('details');if(menu)menu.open=false;active=api;
 if(kind==='upload'&&uploadFile)uploadFile.click();
 if(kind==='snippet')openSnippet();
@@ -648,14 +652,14 @@ announce(who+' '+plural(outsiders.length,'isn\u2019t','aren\u2019t')+' in this c
 function clearSent(text){if(field.value===text){attachments=[];setValue('');if(mode==='rich')renderMarkup(editor,'');renderPreview();persistDraft()}}
 function post(body,text,retrying){
 sending=true;if(sendButton)sendButton.disabled=true;clearError();
-var target=doc.querySelector(form.getAttribute('hx-target'));
+var targetSelector=form.getAttribute('hx-target');var target=targetSelector?doc.querySelector(targetSelector):null;
 var release=function(){sending=false;if(sendButton)sendButton.disabled=false};
 return fetch(form.getAttribute('hx-post'),{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){
 if(!response.ok)return response.text().then(function(message){var error=new Error(clip(message));error.status=response.status;throw error});
 if(retrying)retrying.remove();
 if(response.headers.get('X-SameOldChat-Draft-Cleanup')==='failed')announce('Your message was sent, but its old draft could not be cleared. Delete it from Drafts & sent.');
 var redirect=response.headers.get('HX-Redirect');
-if(redirect){clearSent(text);if(ownPath(redirect))window.location.assign(redirect);return null}
+if(redirect){clearSent(text);if(ownPath(redirect)){var next=new URL(redirect,window.location.href);if(next.pathname+next.search===window.location.pathname+window.location.search){window.location.hash=next.hash;window.location.reload()}else window.location.assign(redirect)}return null}
 if(response.status===204){clearSent(text);return page().refresh?page().refresh(true):null}
 return response.text().then(function(html){
 clearSent(text);
@@ -816,5 +820,5 @@ syncPreferenceControls();
 window.sameoldchatComposer={focus:function(){var owner=active||composers[0];if(owner)owner.focus()},composers:composers,preferences:function(){return{enter:prefs.enter,markup:prefs.markup,formatting:prefs.formatting}},setPreference:setPref};
 var focused=doc.activeElement;
 var arrival=window.location.hash&&doc.querySelector('.message.is-arrival');
-if(!arrival&&!doc.querySelector('dialog[open],[aria-modal="true"]')&&(!focused||focused===doc.body||focused.classList.contains('composer-input'))&&!doc.querySelector('.composer .form-error:not([hidden])')){var initial=composers.filter(function(composer){return composer.thread})[0]||composers[0];initial.focus()}
+if(!arrival&&!doc.querySelector('dialog[open],[aria-modal="true"]')&&(!focused||focused===doc.body||focused.classList.contains('composer-input'))&&!doc.querySelector('.composer .form-error:not([hidden])')){var eager=composers.filter(function(composer){return !composer.form.hasAttribute('data-composer-quiet')});var initial=eager.filter(function(composer){return composer.thread})[0]||eager[0];if(initial)initial.focus()}
 })();</script>`

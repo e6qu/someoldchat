@@ -11468,8 +11468,12 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	if returnThread == "" {
 		returnThread = strings.TrimSpace(fields["view_thread"])
 	}
+	// A composer outside the conversation, such as a Threads card's, names
+	// the page it was sent from in return; the conversation's own composers
+	// name none and come back to the conversation.
+	back := returnTarget(fields, h.viewURL(r, returnThread))
 	if len(draftAttachments) > 0 {
-		h.redirectMutation(w, r, h.viewURL(r, returnThread))
+		h.redirectMutation(w, r, back)
 		return
 	}
 	if isSlashCommand && message.ID == "" {
@@ -11486,6 +11490,13 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Vary", "HX-Request")
+	if r.Header.Get("HX-Request") == "true" && strings.TrimSpace(fields["return"]) != "" {
+		// The composer is not on the conversation's page, so there is no
+		// timeline to append the reply to: the page it came from reloads with
+		// the reply in it.
+		h.redirectMutation(w, r, back)
+		return
+	}
 	if r.Header.Get("HX-Request") == "true" {
 		sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName)
 		if cookieErr != nil || strings.TrimSpace(sessionCookie.Value) == "" {
@@ -11502,9 +11513,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		h.writeFragment(w, list)
 		return
 	}
-	// A form outside the conversation, such as a Threads card's reply,
-	// names the page it was sent from.
-	http.Redirect(w, r, returnTarget(fields, h.viewURL(r, returnThread)), http.StatusSeeOther)
+	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 func (h Handler) saveDraft(w http.ResponseWriter, r *http.Request) {

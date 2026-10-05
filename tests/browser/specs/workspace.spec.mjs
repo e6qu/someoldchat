@@ -4007,19 +4007,44 @@ test('[NAV-07 NAV-08] the Threads view lists followed threads and Unreads groups
   await expect(page.getByText(rootText)).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 
-  // Each card replies in place, as Slack's does: Enter sends into that thread
-  // and the view comes back at the same card.
+  // Each card ends in the thread composer, as Slack's does: its draft is
+  // kept, @ suggests the card's conversation's members, and Enter sends into
+  // that thread and comes back to the same card.
   const card = page.locator('.thread-card').filter({ hasText: rootText });
   const replyText = `replied from threads ${Date.now()}`;
-  const field = card.getByRole('textbox', { name: 'Reply to the thread in #general' });
-  await field.fill(replyText);
+  const field = card.getByRole('combobox', { name: 'Reply to the thread in #general' });
+  await expect(field).toHaveAttribute('data-placeholder', 'Reply…');
+  await field.click();
+  await page.keyboard.type('a draft to keep');
+  await page.waitForTimeout(700);
+  await page.reload();
+  await expect(field).toHaveText('a draft to keep');
+  await field.click();
+  await page.keyboard.press(`${primary}+A`);
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type(`${replyText} for @pe`);
+  const suggestions = card.getByRole('listbox', { name: 'Suggestions' });
+  await expect(suggestions.getByRole('option', { name: /Peer/ })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.keyboard.press('Enter');
+  await expect(suggestions).toBeHidden();
+  await expect(field.locator('.composer-pill')).toHaveAttribute('data-entity', '<@Upeer>');
   await field.press('Shift+Enter');
   await expect(page).toHaveURL(/\/app\/threads/);
   await field.press('Enter');
   await expect(page).toHaveURL(new RegExp(`/app/threads.*#thread-Cdev-${rootPayload.ts.replace('.', '\\.')}$`));
   await expect(card.getByText(replyText)).toBeVisible();
+  await expect(card.locator('.thread-card-message.reply').last()).toContainText('@');
   await expect(card.getByText('2 replies')).toBeVisible();
-  await expect(card.getByRole('textbox', { name: 'Reply to the thread in #general' })).toHaveValue('');
+  await expect(card.getByRole('combobox', { name: 'Reply to the thread in #general' })).toHaveText('');
+  // A second reply from the same card comes back to it too, though the page
+  // is already at that card's address.
+  const followUp = `followed up from threads ${Date.now()}`;
+  await field.click();
+  await page.keyboard.type(followUp);
+  await field.press('Enter');
+  await expect(card.getByText(followUp)).toBeVisible();
+  await expect(card.getByText('3 replies')).toBeVisible();
 
   await page.goto('/app/unreads');
   await expect(page.getByRole('heading', { name: 'Unreads', exact: true, level: 1 })).toBeVisible();

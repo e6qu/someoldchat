@@ -192,10 +192,23 @@ first, with the containing conversation, the root message, the reply count and
 how many replies the member has not read. A thread whose root has been deleted
 MUST leave the view rather than appear as a row that opens onto nothing.
 
-Each card ends in a reply field, as in Slack. A reply sent from it MUST land in
-that thread and return the member to the same card; Enter follows the
-member's composer preference. A refused reply MUST open the thread with the
-draft kept and the reason shown, rather than lose the text.
+Each card ends in the thread composer, as in Slack.
+- **Composer.** The card has the composer's formatting, attachments, and its own
+  saved draft.
+- **Mentions.** Mention suggestions are drawn from the card's own conversation,
+  so its members are offered as members and others as outside it, however many
+  conversations the page's cards come from.
+- **Sending.** A reply sent from it MUST land in that thread and return the
+  member to the same card, including a second reply from a card the page is
+  already showing. Enter follows the member's composer preference.
+- **Refusals.** A refused reply MUST keep the text and show the reason: next to
+  the card's composer, or without script by opening the thread with the draft
+  kept.
+
+The page-level parts of the composer that name a single conversation — the
+shortcut browser, recent files, and the emoji picker — are not on the cards,
+because a page of threads has no one conversation for them to name; typing `/`
+still offers the card's conversation's commands.
 
 Unread MUST be derived from the member's read position in the containing
 conversation. A second, thread-only read position would let the Threads view
