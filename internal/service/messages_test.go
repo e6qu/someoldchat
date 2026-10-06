@@ -510,7 +510,7 @@ func TestAdminCreateUserNormalizesAndPersistsMembership(t *testing.T) {
 	if _, err := (Messages{Store: s}).AdminCreateUser(ctx, "T1", "U1", "alice@example.com", "Duplicate", domain.WorkspaceRoleMember); !errors.Is(err, store.ErrAlreadyExists) {
 		t.Fatalf("duplicate error=%v", err)
 	}
-	page, err := (Messages{Store: s}).AdminListUsers(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+	page, err := (Messages{Store: s}).AdminListUsers(ctx, "T1", "U1", domain.MemberActivityAny, domain.PageRequest{Limit: 10})
 	foundAdmin := false
 	for _, item := range page.Users {
 		if item.User.Email == "alice@example.com" && item.Membership.Role == domain.WorkspaceRoleAdmin && item.Membership.Active {
@@ -537,7 +537,7 @@ func TestListsLifecycleNormalizesCellsAndStreamsCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 101; i++ {
-		if _, err := messages.CreateListItem(ctx, "T1", "U1", source.ID, "", fmt.Sprintf(`[{"column_id":"title","value":"row-%03d"}]`, i)); err != nil {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", source.ID, "", fmt.Sprintf(`[{"column_id":"title","value":"row-%03d"}]`, i), ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -923,7 +923,7 @@ func TestResetUserSessionsRevokesEveryTargetSession(t *testing.T) {
 	if err := s.SeedSession(ctx, "other", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := (Messages{Store: s}).ResetUserSessions(ctx, "T1", "U1", "U2"); err != nil {
+	if err := (Messages{Store: s}).ResetUserSessions(ctx, "T1", "U1", "U2", domain.SessionClientsAll); err != nil {
 		t.Fatal(err)
 	}
 	for _, token := range []string{"target-one", "target-two"} {
@@ -1064,7 +1064,7 @@ func TestRemoteFileLifecycleIsDurableAndBounded(t *testing.T) {
 	if err != nil || value.Title != "Remote document" || value.ID == "" {
 		t.Fatalf("value=%+v err=%v", value, err)
 	}
-	page, err := messages.RemoteFiles(context.Background(), "T1", "U1", domain.PageRequest{Limit: 10})
+	page, err := messages.RemoteFiles(context.Background(), "T1", "U1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Files) != 1 || page.Files[0].ExternalID != "external-1" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
@@ -1086,7 +1086,7 @@ func TestRemoteFileLifecycleIsDurableAndBounded(t *testing.T) {
 	if err := messages.RemoveRemoteFile(context.Background(), "T1", "U1", domain.RemoteFileLookup{ID: value.ID}); err != nil {
 		t.Fatal(err)
 	}
-	page, err = messages.RemoteFiles(context.Background(), "T1", "U1", domain.PageRequest{Limit: 10})
+	page, err = messages.RemoteFiles(context.Background(), "T1", "U1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Files) != 0 {
 		t.Fatalf("after remove page=%+v err=%v", page, err)
 	}
@@ -1172,7 +1172,7 @@ func TestAdminAssignUserReactivatesAtomicallyWithChannels(t *testing.T) {
 	if err := s.SetUserDeleted(context.Background(), "T1", "U2", true, events.Event{ID: "EDEL", WorkspaceID: "T1", Topic: "user.removed", Payload: "U2", CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := (Messages{Store: s}).AdminAssignUser(context.Background(), "T1", "U1", "U2", []domain.ConversationID{"C1", "C1"}); err != nil {
+	if err := (Messages{Store: s}).AdminAssignUser(context.Background(), "T1", "U1", "U2", domain.GuestTierUnchanged, []domain.ConversationID{"C1", "C1"}); err != nil {
 		t.Fatal(err)
 	}
 	user, err := s.GetUser(context.Background(), "U2")
@@ -1362,7 +1362,7 @@ func TestAdminConversationSearchIsBoundedAndWorkspaceScoped(t *testing.T) {
 	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "engineering"})
-	page, err := (Messages{Store: s}).AdminSearchConversations(context.Background(), "T1", "U1", "gene", domain.PageRequest{Limit: 1})
+	page, err := (Messages{Store: s}).AdminSearchConversations(context.Background(), "T1", "U1", domain.ConversationSearch{Query: "gene", Sort: domain.ConversationSortName}, domain.PageRequest{Limit: 1})
 	if err != nil || len(page.Conversations) != 1 || page.Conversations[0].ID != "C1" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
@@ -1503,7 +1503,7 @@ func TestCallLifecycleNormalizesParticipants(t *testing.T) {
 	messages := Messages{Store: s}
 	guest := domain.ExternalCallParticipant{ExternalID: "guest-1", DisplayName: "Guest", AvatarURL: "https://call.example/guest.png"}
 	value, err := messages.AddCall(context.Background(), "T1", "U1", "external", "", "https://call.example", "", "demo", time.Time{},
-		[]domain.CallParticipant{{SlackID: "U2"}, {SlackID: "U1"}, {SlackID: "U2"}, {External: guest}, {External: guest}})
+		[]domain.CallParticipant{{SlackID: "U2"}, {SlackID: "U1"}, {SlackID: "U2"}, {External: guest}, {External: guest}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2112,7 +2112,7 @@ func TestSetUserProfileNormalizesAndPersists(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	messages := Messages{Store: s}
-	user, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{DisplayName: " alice ", StatusText: " Available ", StatusEmoji: " :wave: "})
+	user, err := messages.SetUserProfile(context.Background(), "T1", "U1", "U1", domain.UserProfile{DisplayName: " alice ", StatusText: " Available ", StatusEmoji: " :wave: "})
 	if err != nil || user.Profile.DisplayName != "alice" || user.Profile.StatusText != "Available" || user.Profile.StatusEmoji != ":wave:" {
 		t.Fatalf("user=%+v err=%v", user, err)
 	}
@@ -2120,10 +2120,10 @@ func TestSetUserProfileNormalizesAndPersists(t *testing.T) {
 	if err != nil || stored.Profile.DisplayName != "alice" {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
-	if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusText: string(make([]byte, 101))}); err != domain.ErrInvalidProfile {
+	if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", "U1", domain.UserProfile{StatusText: string(make([]byte, 101))}); err != domain.ErrInvalidProfile {
 		t.Fatalf("oversized profile err=%v", err)
 	}
-	if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusText: "Unknown emoji", StatusEmoji: ":not_a_workspace_emoji:"}); !errors.Is(err, domain.ErrInvalidProfile) {
+	if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", "U1", domain.UserProfile{StatusText: "Unknown emoji", StatusEmoji: ":not_a_workspace_emoji:"}); !errors.Is(err, domain.ErrInvalidProfile) {
 		t.Fatalf("unknown status emoji err=%v", err)
 	}
 }
@@ -2634,7 +2634,7 @@ func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
 	if err != nil || updated.Attachments != `[{"text":"updated"}]` {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
-	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "", "", false)
+	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "", "", domain.EphemeralPresentation{})
 	if err != nil || ephemeral.Attachments != `[{"text":"attachment"}]` {
 		t.Fatalf("ephemeral=%+v err=%v", ephemeral, err)
 	}
@@ -2754,7 +2754,7 @@ func TestEveryMessageWriteUsesOneStructuredBodyLimit(t *testing.T) {
 	if _, err := messages.ScheduleMessageWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, domain.ErrInvalidMessage) {
 		t.Fatalf("schedule oversized body err=%v", err)
 	}
-	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", "", false); !errors.Is(err, domain.ErrInvalidEphemeral) {
+	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", "", domain.EphemeralPresentation{}); !errors.Is(err, domain.ErrInvalidEphemeral) {
 		t.Fatalf("ephemeral oversized body err=%v", err)
 	}
 	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{
@@ -2786,7 +2786,7 @@ func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 	}
 	messages := Messages{Store: s, Blob: objects}
 	ctx := context.Background()
-	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "notes.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2848,7 +2848,7 @@ func TestDeletingTheSharingMessageEndsTheShareAndAnnouncesIt(t *testing.T) {
 	}
 	messages := Messages{Store: s, Blob: objects}
 	ctx := context.Background()
-	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "notes.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2903,7 +2903,7 @@ func TestExternalUploadUsesTicketSizeForMultipartParts(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := Messages{Store: s, Blob: objects}
-	upload, err := messages.CreateExternalUpload(context.Background(), "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	upload, err := messages.CreateExternalUpload(context.Background(), "T1", "U1", domain.ExternalUploadRequest{Name: "notes.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2929,11 +2929,11 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	}
 	messages := Messages{Store: s, Blob: objects}
 	ctx := context.Background()
-	first, err := messages.CreateExternalUpload(ctx, "T1", "U1", "first.txt", "text/plain", 5, time.Minute)
+	first, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "first.txt", MIMEType: "text/plain", Size: 5, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := messages.CreateExternalUpload(ctx, "T1", "U1", "second.txt", "text/plain", 6, time.Minute)
+	second, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "second.txt", MIMEType: "text/plain", Size: 6, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3020,7 +3020,7 @@ func TestExternalUploadKeepsItsIdentifierThroughCompletion(t *testing.T) {
 	messages := Messages{Store: s, Blob: objects}
 	ctx := context.Background()
 
-	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "notes.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3063,7 +3063,7 @@ func TestExternalUploadBatchKeepsEveryIdentifier(t *testing.T) {
 
 	completions := make([]domain.ExternalUploadCompletion, 0, 3)
 	for index := 0; index < 3; index++ {
-		upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "batch.txt", "text/plain", 7, time.Minute)
+		upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "batch.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3256,7 +3256,7 @@ func TestAGuestCannotReachAChannelNobodyAddedThemTo(t *testing.T) {
 			if _, err := messages.JoinConversation(ctx, "T1", user.ID, "C-elsewhere"); !errors.Is(err, guest.refusal) {
 				t.Fatalf("joining err=%v, want %v", err, guest.refusal)
 			}
-			if _, err := messages.CreateConversation(ctx, "T1", user.ID, "guest-made", false); !errors.Is(err, guest.refusal) {
+			if _, err := messages.CreateConversation(ctx, "T1", user.ID, "guest-made", false, ""); !errors.Is(err, guest.refusal) {
 				t.Fatalf("creating err=%v, want %v", err, guest.refusal)
 			}
 			// The refusal is about reaching, not about being there: the channel
@@ -3294,7 +3294,7 @@ func TestAnOrdinaryMemberStillJoinsAndCreatesChannels(t *testing.T) {
 	if _, err := messages.JoinConversation(ctx, "T1", "U1", "C1"); err != nil {
 		t.Fatalf("a member could not join a public channel: %v", err)
 	}
-	if _, err := messages.CreateConversation(ctx, "T1", "U1", "member-made", false); err != nil {
+	if _, err := messages.CreateConversation(ctx, "T1", "U1", "member-made", false, ""); err != nil {
 		t.Fatalf("a member could not create a channel: %v", err)
 	}
 }
@@ -3321,15 +3321,15 @@ func TestResettingSessionsSucceedsWhenThereAreNone(t *testing.T) {
 	}
 	messages := Messages{Store: s}
 
-	if err := messages.ResetUserSessions(ctx, "T1", "U1", "U2"); err != nil {
+	if err := messages.ResetUserSessions(ctx, "T1", "U1", "U2", domain.SessionClientsAll); err != nil {
 		t.Fatalf("resetting the sessions of a member who has none: %v", err)
 	}
-	if err := messages.ResetUserSessionsBulk(ctx, "T1", "U1", []domain.UserID{"U2"}); err != nil {
+	if err := messages.ResetUserSessionsBulk(ctx, "T1", "U1", []domain.UserID{"U2"}, domain.SessionClientsAll); err != nil {
 		t.Fatalf("the bulk path disagreed with the single one: %v", err)
 	}
 	// A member who really is not there is still not found, so the fix did not
 	// swallow the answer that matters.
-	if err := messages.ResetUserSessions(ctx, "T1", "U1", "U-absent"); !errors.Is(err, store.ErrNotFound) {
+	if err := messages.ResetUserSessions(ctx, "T1", "U1", "U-absent", domain.SessionClientsAll); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("resetting sessions for a missing member err=%v, want ErrNotFound", err)
 	}
 }
@@ -3370,12 +3370,12 @@ func TestSetUserProfileStoresTitlePronounsAndAKnownTimezone(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	messages := Messages{Store: s}
-	user, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{Title: " Staff Engineer ", Pronouns: " they/them ", Timezone: "America/New_York"})
+	user, err := messages.SetUserProfile(context.Background(), "T1", "U1", "U1", domain.UserProfile{Title: " Staff Engineer ", Pronouns: " they/them ", Timezone: "America/New_York"})
 	if err != nil || user.Profile.Title != "Staff Engineer" || user.Profile.Pronouns != "they/them" || user.Profile.Timezone != "America/New_York" {
 		t.Fatalf("user=%+v err=%v", user.Profile, err)
 	}
 	for _, zone := range []string{"Mars/Olympus_Mons", "Local"} {
-		if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{Timezone: zone}); !errors.Is(err, domain.ErrInvalidProfile) {
+		if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", "U1", domain.UserProfile{Timezone: zone}); !errors.Is(err, domain.ErrInvalidProfile) {
 			t.Fatalf("zone %q err=%v, want ErrInvalidProfile", zone, err)
 		}
 	}

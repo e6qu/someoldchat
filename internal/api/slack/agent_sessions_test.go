@@ -16,7 +16,8 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
-// agentSessionAPI serves the Web API over a workspace with:
+// agentSessionAPI serves the Web API, and returns the store behind it, over a
+// workspace with:
 //
 //   - xoxb-agent: app A1's bot UB1, a member of C1, chat:write, subscribed to
 //     agent_session_stopped;
@@ -24,7 +25,7 @@ import (
 //   - xoxb-quiet: app A2's bot UB2, a member of C1, not subscribed;
 //   - xoxb-outside: app A3's bot UB3, not a member of C1;
 //   - xoxp-user: U1's user token, chat:write.
-func agentSessionAPI(t *testing.T) (*http.ServeMux, domain.MessageTimestamp) {
+func agentSessionAPI(t *testing.T) (*http.ServeMux, domain.MessageTimestamp, *memory.Store) {
 	t.Helper()
 	ctx := context.Background()
 	repository := memory.New()
@@ -90,7 +91,7 @@ func agentSessionAPI(t *testing.T) (*http.ServeMux, domain.MessageTimestamp) {
 	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	return mux, domain.NewMessageTimestamp(root.CreatedAt)
+	return mux, domain.NewMessageTimestamp(root.CreatedAt), repository
 }
 
 // callAgentSessionMethod posts a JSON body, or a form body when form is set,
@@ -123,7 +124,7 @@ func callAgentSessionMethod(t *testing.T, mux *http.ServeMux, token, method, bod
 // the JSON null that leaves an identity override alone, and each listed error
 // the reference names for what this deployment can produce.
 func TestAgentsSessionsSetStatusAnswersTheReferenceShapes(t *testing.T) {
-	mux, thread := agentSessionAPI(t)
+	mux, thread, _ := agentSessionAPI(t)
 	key := `"channel_id":"C1","thread_ts":"` + string(thread) + `"`
 
 	created := callAgentSessionMethod(t, mux, "xoxb-agent", "agents.sessions.setStatus", `{`+key+`,"status":"processing","title":"Scuba diving research","initiator_user_id":"U1"}`, false)
@@ -205,7 +206,7 @@ func TestAgentsSessionsSetStatusAnswersTheReferenceShapes(t *testing.T) {
 // no_permission for an app outside the channel, thread_ts_required and
 // invalid_arguments for a title outside 1-200 characters.
 func TestAgentsSessionsRenameAnswersTheReferenceShapes(t *testing.T) {
-	mux, thread := agentSessionAPI(t)
+	mux, thread, _ := agentSessionAPI(t)
 	key := `"channel_id":"C1","thread_ts":"` + string(thread) + `"`
 	missing := callAgentSessionMethod(t, mux, "xoxb-agent", "agents.sessions.rename", `{`+key+`,"title":"Bora Bora trip prep"}`, false)
 	if missing["ok"] != false || missing["error"] != "session_not_found" {

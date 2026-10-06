@@ -4503,6 +4503,9 @@ test('[CALL-01] an app-registered call renders as a joinable card and loses the 
 });
 
 test('[APP-07 A11Y-01] an assistant app names a thread, shows its status, and offers prompts', async ({ page, context, request }) => {
+  // The status is set with the identity override python-slack-sdk and
+  // slack-bolt send (the browser token holds chat:write.customize), so it shows
+  // under that name with its icon as decoration beside it.
   await signIn(context);
 
   const question = `assistant question ${Date.now()}`;
@@ -4514,7 +4517,10 @@ test('[APP-07 A11Y-01] an assistant app names a thread, shows its status, and of
 
   for (const [method, body] of [
     ['assistant.threads.setTitle', { channel_id: CHANNEL, thread_ts: thread, title: 'Deploy help' }],
-    ['assistant.threads.setStatus', { channel_id: CHANNEL, thread_ts: thread, status: 'is thinking…' }],
+    ['assistant.threads.setStatus', {
+      channel_id: CHANNEL, thread_ts: thread, status: 'is thinking…',
+      username: 'Deploy bot', icon_url: 'https://example.com/deploy-bot.png',
+    }],
     ['assistant.threads.setSuggestedPrompts', {
       channel_id: CHANNEL, thread_ts: thread, title: 'Try one',
       prompts: JSON.stringify([{ title: 'Roll back', message: 'How do I roll back?' }]),
@@ -4529,7 +4535,8 @@ test('[APP-07 A11Y-01] an assistant app names a thread, shows its status, and of
 
   await page.goto(`/app?channel=${CHANNEL}&thread=${thread}`);
   await expect(page.locator('.assistant-title')).toHaveText('Deploy help');
-  await expect(page.locator('.assistant-status')).toHaveText('is thinking…');
+  await expect(page.locator('.assistant-status')).toHaveText('Deploy bot is thinking…');
+  await expect(page.locator('.assistant-status img')).toHaveAttribute('alt', '');
   await expect(page.getByRole('button', { name: 'Roll back' })).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 
@@ -4537,14 +4544,13 @@ test('[APP-07 A11Y-01] an assistant app names a thread, shows its status, and of
   await page.getByRole('button', { name: 'Roll back' }).click();
   await expect(page.locator('.message-text').filter({ hasText: 'How do I roll back?' }).first()).toBeVisible();
 
-  // Clearing the status removes it and leaves the title alone, which is how an
-  // assistant says it has stopped working.
+  // Clearing the status removes it, live and with its identity, and leaves the
+  // title alone, which is how an assistant says it has stopped working.
   const cleared = await request.post('/api/assistant.threads.setStatus', {
     headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/x-www-form-urlencoded' },
     form: { channel_id: CHANNEL, thread_ts: thread, status: '' },
   });
   expect((await cleared.json()).ok).toBe(true);
-  await page.goto(`/app?channel=${CHANNEL}&thread=${thread}`);
   await expect(page.locator('.assistant-status')).toHaveCount(0);
   await expect(page.locator('.assistant-title')).toHaveText('Deploy help');
 });

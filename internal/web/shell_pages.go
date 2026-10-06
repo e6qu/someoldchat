@@ -119,7 +119,7 @@ func (h Handler) setStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		profile.StatusExpiration = expiration
 	}
-	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
+	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, profile); err != nil {
 		if errors.Is(err, domain.ErrInvalidProfile) {
 			h.writeMutationError(w, r, http.StatusBadRequest, "Your status was not saved", "A status is at most 100 characters, and its emoji must be an emoji this workspace knows, written like :palm_tree:.")
 			return

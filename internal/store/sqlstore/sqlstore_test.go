@@ -317,7 +317,7 @@ func TestSQLiteCreateUserIsTransactionalAndWorkspaceScoped(t *testing.T) {
 	if err != nil || role.Role != domain.WorkspaceRoleAdmin {
 		t.Fatalf("membership=%+v err=%v", role, err)
 	}
-	adminUsers, err := s.ListAdminUsers(ctx, "T1", domain.PageRequest{Limit: 1})
+	adminUsers, err := s.ListAdminUsers(ctx, "T1", domain.MemberActivityAny, domain.PageRequest{Limit: 1})
 	if err != nil || len(adminUsers.Users) != 1 || adminUsers.Users[0].User.ID != "U2" || adminUsers.Users[0].Membership.Role != domain.WorkspaceRoleAdmin || !adminUsers.Users[0].Membership.Active {
 		t.Fatalf("administrator users=%+v err=%v", adminUsers, err)
 	}
@@ -363,7 +363,7 @@ func TestGuestMembershipPersistsAndCannotBePromoted(t *testing.T) {
 	if err != nil || !stored.Restricted || stored.UltraRestricted || !stored.Guest() {
 		t.Fatalf("stored membership=%+v err=%v", stored, err)
 	}
-	page, err := s.ListAdminUsers(ctx, "T1", domain.PageRequest{Limit: 10})
+	page, err := s.ListAdminUsers(ctx, "T1", domain.MemberActivityAny, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Users) != 1 || !page.Users[0].Membership.Restricted {
 		t.Fatalf("admin page=%+v err=%v", page, err)
 	}
@@ -731,7 +731,7 @@ func TestSQLiteRemoteFileLifecycle(t *testing.T) {
 	if err != nil || loaded.ID != value.ID {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
-	page, err := s.ListRemoteFiles(ctx, "T1", domain.PageRequest{Limit: 10})
+	page, err := s.ListRemoteFiles(ctx, "T1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Files) != 1 {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
@@ -742,7 +742,7 @@ func TestSQLiteRemoteFileLifecycle(t *testing.T) {
 	if err := s.RemoveRemoteFile(ctx, "T1", domain.RemoteFileLookup{ID: value.ID}, events.Event{ID: "evt_remote_2", WorkspaceID: "T1", Topic: "remote_file.removed", Payload: string(value.ID), CreatedAt: created}); err != nil {
 		t.Fatal(err)
 	}
-	page, err = s.ListRemoteFiles(ctx, "T1", domain.PageRequest{Limit: 10})
+	page, err = s.ListRemoteFiles(ctx, "T1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Files) != 0 {
 		t.Fatalf("after remove page=%+v err=%v", page, err)
 	}

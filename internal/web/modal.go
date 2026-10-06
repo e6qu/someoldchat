@@ -922,7 +922,7 @@ func (h Handler) uploadModalFiles(r *http.Request, principal auth.Principal, mod
 			if mimeType == "" {
 				mimeType = "application/octet-stream"
 			}
-			upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, header.Size, draftAttachmentTTL)
+			upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalUploadRequest{Name: name, MIMEType: mimeType, Size: header.Size, TTL: draftAttachmentTTL})
 			if errors.Is(err, domain.ErrInvalidExternalUpload) {
 				failures[input.BlockID] = "Choose files that are not empty."
 				refused = true

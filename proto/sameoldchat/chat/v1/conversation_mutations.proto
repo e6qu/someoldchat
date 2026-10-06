@@ -32,6 +32,7 @@ message CreateConversationRequest {
   string user_id = 2;
   string name = 3;
   bool private = 4;
+  string purpose = 5;
 }
 
 message ConversationRequest {
@@ -189,6 +190,8 @@ message UnlinkConversationObjectsRequest {
   string workspace_id = 1;
   string user_id = 2;
   repeated string conversation_ids = 3;
+  // new_name is the name the channel takes once its links are removed.
+  string new_name = 4;
 }
 
 message ConversationObjectsRequest {

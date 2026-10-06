@@ -244,7 +244,7 @@ func (h Handler) commandStatus(ctx context.Context, principal auth.Principal, ch
 		notice = "Your status is set."
 	}
 	profile.StatusExpiration = time.Time{}
-	if _, err := h.Messages.SetUserProfile(ctx, principal.WorkspaceID, principal.UserID, profile); err != nil {
+	if _, err := h.Messages.SetUserProfile(ctx, principal.WorkspaceID, principal.UserID, principal.UserID, profile); err != nil {
 		if errors.Is(err, domain.ErrInvalidProfile) {
 			return "", refuse(http.StatusBadRequest, "Use /status with a known emoji and up to 100 characters, for example /status :palm_tree: On holiday, or /status clear.")
 		}

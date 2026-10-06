@@ -286,13 +286,14 @@ const expiration = await adminClient.apiCall("admin.users.getExpiration", { user
 assert.equal(expiration.ok, true);
 assert.equal(typeof expiration.expiration_ts, "number");
 
-const contacts = await client.apiCall("users.discoverableContacts.lookup", { emails: "alice@example.com" });
+const contacts = await client.users.discoverableContacts.lookup({ email: "alice@example.com" });
 assert.equal(contacts.ok, true);
-assert.equal(Array.isArray(contacts.contacts), true);
+assert.equal(typeof contacts.is_discoverable, "boolean");
 
-const adminFunctions = await adminClient.apiCall("admin.functions.list", {});
+// app_ids is required; A3's manifest declares the triage function.
+const adminFunctions = await adminClient.admin.functions.list({ app_ids: ["A3"] });
 assert.equal(adminFunctions.ok, true);
-assert.equal(Array.isArray(adminFunctions.functions), true);
+assert.deepEqual(adminFunctions.functions.map((fn) => fn.callback_id), ["triage"]);
 
 const cancelled = await adminClient.apiCall("admin.apps.requests.cancel", { request_id: "Rq-sdk" });
 assert.equal(cancelled.ok, true);
@@ -313,7 +314,7 @@ await assert.rejects(
 // pins the refusal for an app nobody has heard of; uninstalling the fixture's
 // own app would take the rest of the walk's app calls with it.
 await assert.rejects(
-  () => adminClient.admin.apps.uninstall({ app_ids: ["A-not-here"] }),
+  () => adminClient.admin.apps.uninstall({ app_id: "A-not-here", team_ids: ["T1"] }),
   (error) => String(error).includes("app_not_found"),
 );
 
@@ -333,7 +334,7 @@ const sessions = await adminClient.admin.users.session.list({ user_id: "U1" });
 assert.equal(sessions.ok, true);
 assert.equal(Array.isArray(sessions.active_sessions), true);
 assert.equal(JSON.stringify(sessions).includes("token-"), false);
-const bulkReset = await adminClient.admin.users.session.resetBulk({ user_ids: "U1" });
+const bulkReset = await adminClient.admin.users.session.resetBulk({ user_ids: ["U1"], mobile_only: true });
 assert.equal(bulkReset.ok, true);
 
 // team.externalTeams.* is the whole-organization half of Slack Connect. The
@@ -474,9 +475,10 @@ const authorizations = await appClient.apps.event.authorizations.list({ event_co
 assert.equal(authorizations.ok, true);
 assert.equal(authorizations.authorizations[0].team_id, "T1");
 assert.equal(authorizations.authorizations[0].is_bot, true);
-const adminUsers = await adminClient.admin.users.list({ team_id: "T1", limit: 10 });
+const adminUsers = await adminClient.admin.users.list({ team_id: "T1", is_active: true, limit: 10 });
 assert.equal(adminUsers.ok, true);
 assert.equal(adminUsers.users.some((user) => user.id === "U1"), true);
+assert.equal(adminUsers.users.every((user) => user.is_active === true), true);
 const adminEmoji = await adminClient.admin.emoji.list();
 assert.equal(adminEmoji.ok, true);
 const adminTeams = await adminClient.admin.teams.list({ limit: 10 });
@@ -738,6 +740,8 @@ const addedCall = await client.calls.add({
   desktop_app_join_url: "https://example.com/call-desktop",
   title: "Qualification call",
   date_start: Math.floor(Date.now() / 1000),
+  // A bot token must name who started the call.
+  created_by: "U1",
 });
 assert.equal(addedCall.ok, true);
 const callId = addedCall.call.id;
@@ -894,7 +898,9 @@ assert.equal((await adminClient.admin.conversations.getCustomRetention({ channel
 // approves; the invited organization accepts, through its own credential —
 // doing it all with one token would prove the opposite of what CONNECT-02
 // asks for.
-const sharedInvite = await client.conversations.inviteShared({ channel: "C1", external_limited: "T2" });
+// The invitation names a person in the other organization; external_limited
+// is the boolean restriction the SDK types declare, not an organization.
+const sharedInvite = await client.conversations.inviteShared({ channel: "C1", user_ids: ["U-external"], external_limited: false });
 assert.equal(sharedInvite.ok, true);
 assert.equal(typeof sharedInvite.invite.id, "string");
 assert.equal(sharedInvite.invite.status, "pending");
@@ -908,7 +914,8 @@ const issued = await client.conversations.listConnectInvites({});
 assert.equal(issued.ok, true);
 assert.equal(issued.invites.some((invite) => invite.id === sharedInvite.invite.id), true);
 
-const accepted = await externalClient.conversations.acceptSharedInvite({ invite_id: sharedInvite.invite.id });
+const accepted = await externalClient.conversations.acceptSharedInvite({ invite_id: sharedInvite.invite.id, channel_name: "sdk-shared" });
+assert.equal(accepted.channel_id, "C1");
 assert.equal(accepted.ok, true);
 assert.equal(accepted.is_ext_shared, true);
 
@@ -924,13 +931,21 @@ assert.equal((await client.conversations.externalInvitePermissions.set({
 })).ok, true);
 
 // Denying and declining are different outcomes, so both are exercised.
-const denied = await client.conversations.inviteShared({ channel: "C1", external_limited: "T3" });
-assert.equal((await client.conversations.requestSharedInvite.deny({ invite_id: denied.invite.id })).ok, true);
+const denied = await client.conversations.inviteShared({ channel: "C1", user_ids: ["U-third"] });
+assert.equal(denied.invite_id, denied.invite.id);
+assert.equal(denied.invite.is_external_limited, true);
+assert.equal((await client.conversations.requestSharedInvite.deny({ invite_id: denied.invite.id, message: "Not this quarter" })).ok, true);
+const deniedRequests = await client.conversations.requestSharedInvite.list({ include_denied: true, invite_ids: [denied.invite.id] });
+assert.equal(deniedRequests.invite_requests.length, 1);
 
-const toDecline = await client.conversations.inviteShared({ channel: "C1", external_limited: "T3" });
+const toDecline = await client.conversations.inviteShared({ channel: "C1", user_ids: ["U-third"] });
 // Slack publishes the same host approval under a request-oriented name too, so
 // both reach the same decision here.
-assert.equal((await client.conversations.requestSharedInvite.approve({ invite_id: toDecline.invite.id })).ok, true);
+assert.equal((await client.conversations.requestSharedInvite.approve({
+	invite_id: toDecline.invite.id,
+	is_external_limited: true,
+	message: { is_override: false, text: "Welcome" },
+})).ok, true);
 // Declined by the organization it was actually sent to: an invitation names
 // one organization, and only that one may answer it.
 assert.equal((await thirdOrgClient.conversations.declineSharedInvite({ invite_id: toDecline.invite.id })).ok, true);
@@ -1333,6 +1348,12 @@ assert.equal(team.ok, true);
 assert.equal(team.team.id, "T1");
 assert.notEqual(team.team.domain, "");
 assert.ok(team.team.icon.image_34.startsWith("http"));
+assert.equal((await client.team.info({ team: "T1" })).team.id, "T1");
+assert.equal((await client.team.info({ domain: team.team.domain })).team.id, "T1");
+await assert.rejects(
+  () => client.team.info({ team: "T-not-here" }),
+  (error) => String(error).includes("team_not_found"),
+);
 const teamProfile = await client.team.profile.get();
 assert.equal(teamProfile.ok, true);
 assert.deepEqual(teamProfile.profile.fields, []);
@@ -1468,7 +1489,7 @@ assert.equal((await adminClient.apiCall("admin.users.session.invalidate", {
 	team_id: "T1",
 	session_id: "qualification-session",
 })).ok, true);
-assert.equal((await adminClient.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
+assert.equal((await adminClient.admin.users.session.reset({ user_id: "U2", web_only: true })).ok, true);
 const externalCredential = await client.apiCall("apps.auth.external.get", {
 	external_token_id: "Et-qualification",
 });
@@ -1484,7 +1505,7 @@ assert.equal((await adminClient.apiCall("apps.icon.set", {
 	app_id: "A1",
 	image_url: "https://example.invalid/icon.png",
 })).ok, true);
-assert.equal((await client.apiCall("apps.user.connection.update", { app_id: "A1" })).ok, true);
+assert.equal((await client.apps.user.connection.update({ user_id: "U1", status: "connected" })).ok, true);
 const assistantInfo = await client.apiCall("assistant.search.info");
 assert.equal(assistantInfo.ok, true);
 assert.equal(assistantInfo.enabled, true);
@@ -1530,11 +1551,14 @@ assert.equal((await adminClient.apiCall("admin.conversations.linkObjects", {
 	salesforce_org_id: "00D000",
 	record_id: "a01",
 })).ok, true);
-assert.equal((await adminClient.apiCall("admin.conversations.unlinkObjects", { channels: "C1" })).ok, true);
+// The pinned client has no typed method for these two; the arguments are the
+// ones slack_sdk 3.45.0 sends. new_name is the channel's own name, so the walk
+// keeps the general channel it relies on.
+assert.equal((await adminClient.apiCall("admin.conversations.unlinkObjects", { channel: "C1", new_name: "general" })).ok, true);
 const recordChannel = await adminClient.apiCall("admin.conversations.createForObjects", {
-	channel_name: "sdk-record-channel",
 	salesforce_org_id: "00D000",
 	object_id: "a02",
+	invite_object_team: false,
 });
 assert.equal(recordChannel.ok, true);
 assert.equal(typeof recordChannel.channel_id, "string");
@@ -1623,7 +1647,7 @@ assert.equal((await adminClient.apiCall("admin.roles.addAssignments", {
 	entity_ids: "C1,C2",
 	user_ids: "U2",
 })).ok, true);
-const roleAssignments = await adminClient.apiCall("admin.roles.listAssignments", { role_id: "Rl0A" });
+const roleAssignments = await adminClient.admin.roles.listAssignments({ role_ids: ["Rl0A"], sort_dir: "asc", limit: 10 });
 assert.equal(roleAssignments.ok, true);
 assert.equal(roleAssignments.role_assignments.length, 2);
 assert.equal(roleAssignments.role_assignments[0].user_id, "U2");
@@ -1632,7 +1656,7 @@ assert.equal((await adminClient.apiCall("admin.roles.removeAssignments", {
 	entity_ids: "C1,C2",
 	user_ids: "U2",
 })).ok, true);
-assert.equal((await adminClient.apiCall("admin.roles.listAssignments", { role_id: "Rl0A" })).role_assignments.length, 0);
+assert.equal((await adminClient.admin.roles.listAssignments({ role_ids: ["Rl0A"] })).role_assignments.length, 0);
 
 assert.equal((await adminClient.admin.users.remove({ team_id: "T1", user_id: "U2" })).ok, true);
 

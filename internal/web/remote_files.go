@@ -109,7 +109,7 @@ func (h Handler) remoteFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("before")))
-	page, err := h.Messages.RemoteFiles(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 50, Cursor: cursor})
+	page, err := h.Messages.RemoteFiles(r.Context(), principal.WorkspaceID, principal.UserID, domain.RemoteFileFilter{}, domain.PageRequest{Limit: 50, Cursor: cursor})
 	if err != nil {
 		h.writeStoreError(w, err, "Remote files are temporarily unavailable.")
 		return

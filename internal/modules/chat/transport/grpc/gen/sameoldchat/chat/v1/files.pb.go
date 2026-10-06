@@ -380,19 +380,23 @@ func (x *FilePage) GetTotal() int32 {
 }
 
 type ExternalUpload struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	Uploader      string                 `protobuf:"bytes,3,opt,name=uploader,proto3" json:"uploader,omitempty"`
-	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
-	Title         string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
-	MimeType      string                 `protobuf:"bytes,6,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
-	Size          int64                  `protobuf:"varint,7,opt,name=size,proto3" json:"size,omitempty"`
-	Status        string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`
-	CreatedAt     string                 `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	ExpiresAt     string                 `protobuf:"bytes,10,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	UploadedAt    string                 `protobuf:"bytes,11,opt,name=uploaded_at,json=uploadedAt,proto3" json:"uploaded_at,omitempty"`
-	CompletedAt   string                 `protobuf:"bytes,12,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Uploader    string                 `protobuf:"bytes,3,opt,name=uploader,proto3" json:"uploader,omitempty"`
+	Name        string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	Title       string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
+	MimeType    string                 `protobuf:"bytes,6,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
+	Size        int64                  `protobuf:"varint,7,opt,name=size,proto3" json:"size,omitempty"`
+	Status      string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`
+	CreatedAt   string                 `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ExpiresAt   string                 `protobuf:"bytes,10,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	UploadedAt  string                 `protobuf:"bytes,11,opt,name=uploaded_at,json=uploadedAt,proto3" json:"uploaded_at,omitempty"`
+	CompletedAt string                 `protobuf:"bytes,12,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	// description and file_type are the alt_txt and snippet_type the ticket
+	// was issued with.
+	Description   string `protobuf:"bytes,13,opt,name=description,proto3" json:"description,omitempty"`
+	FileType      string `protobuf:"bytes,14,opt,name=file_type,json=fileType,proto3" json:"file_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -511,15 +515,33 @@ func (x *ExternalUpload) GetCompletedAt() string {
 	return ""
 }
 
+func (x *ExternalUpload) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetFileType() string {
+	if x != nil {
+		return x.FileType
+	}
+	return ""
+}
+
 type ExternalUploadRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	MimeType      string                 `protobuf:"bytes,4,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
-	Size          int64                  `protobuf:"varint,5,opt,name=size,proto3" json:"size,omitempty"`
-	TtlSeconds    int64                  `protobuf:"varint,6,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
-	UploadId      string                 `protobuf:"bytes,7,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Name        string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	MimeType    string                 `protobuf:"bytes,4,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
+	Size        int64                  `protobuf:"varint,5,opt,name=size,proto3" json:"size,omitempty"`
+	TtlSeconds  int64                  `protobuf:"varint,6,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
+	UploadId    string                 `protobuf:"bytes,7,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
+	// description and file_type are files.getUploadURLExternal's alt_txt and
+	// snippet_type.
+	Description   string `protobuf:"bytes,8,opt,name=description,proto3" json:"description,omitempty"`
+	FileType      string `protobuf:"bytes,9,opt,name=file_type,json=fileType,proto3" json:"file_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -599,6 +621,20 @@ func (x *ExternalUploadRequest) GetTtlSeconds() int64 {
 func (x *ExternalUploadRequest) GetUploadId() string {
 	if x != nil {
 		return x.UploadId
+	}
+	return ""
+}
+
+func (x *ExternalUploadRequest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *ExternalUploadRequest) GetFileType() string {
+	if x != nil {
+		return x.FileType
 	}
 	return ""
 }
@@ -1291,11 +1327,17 @@ func (x *AddRemoteFileRequest) GetIndexableContents() string {
 }
 
 type RemoteFilesRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
-	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit       int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor      string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	// channel, created_from and created_to are files.remote.list's channel,
+	// ts_from and ts_to. The bounds are stored-time instants and inclusive; an
+	// empty value does not narrow the list.
+	Channel       string `protobuf:"bytes,5,opt,name=channel,proto3" json:"channel,omitempty"`
+	CreatedFrom   string `protobuf:"bytes,6,opt,name=created_from,json=createdFrom,proto3" json:"created_from,omitempty"`
+	CreatedTo     string `protobuf:"bytes,7,opt,name=created_to,json=createdTo,proto3" json:"created_to,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1354,6 +1396,27 @@ func (x *RemoteFilesRequest) GetLimit() int32 {
 func (x *RemoteFilesRequest) GetCursor() string {
 	if x != nil {
 		return x.Cursor
+	}
+	return ""
+}
+
+func (x *RemoteFilesRequest) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+func (x *RemoteFilesRequest) GetCreatedFrom() string {
+	if x != nil {
+		return x.CreatedFrom
+	}
+	return ""
+}
+
+func (x *RemoteFilesRequest) GetCreatedTo() string {
+	if x != nil {
+		return x.CreatedTo
 	}
 	return ""
 }
@@ -2848,7 +2911,7 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
 	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12\x14\n" +
-	"\x05total\x18\x04 \x01(\x05R\x05total\"\xd4\x02\n" +
+	"\x05total\x18\x04 \x01(\x05R\x05total\"\x93\x03\n" +
 	"\x0eExternalUpload\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1a\n" +
@@ -2865,7 +2928,9 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	" \x01(\tR\texpiresAt\x12\x1f\n" +
 	"\vuploaded_at\x18\v \x01(\tR\n" +
 	"uploadedAt\x12!\n" +
-	"\fcompleted_at\x18\f \x01(\tR\vcompletedAt\"\xd6\x01\n" +
+	"\fcompleted_at\x18\f \x01(\tR\vcompletedAt\x12 \n" +
+	"\vdescription\x18\r \x01(\tR\vdescription\x12\x1b\n" +
+	"\tfile_type\x18\x0e \x01(\tR\bfileType\"\x95\x02\n" +
 	"\x15ExternalUploadRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
@@ -2874,7 +2939,9 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\x04size\x18\x05 \x01(\x03R\x04size\x12\x1f\n" +
 	"\vttl_seconds\x18\x06 \x01(\x03R\n" +
 	"ttlSeconds\x12\x1b\n" +
-	"\tupload_id\x18\a \x01(\tR\buploadId\"~\n" +
+	"\tupload_id\x18\a \x01(\tR\buploadId\x12 \n" +
+	"\vdescription\x18\b \x01(\tR\vdescription\x12\x1b\n" +
+	"\tfile_type\x18\t \x01(\tR\bfileType\"~\n" +
 	"\x12ExternalUploadPart\x12H\n" +
 	"\bmetadata\x18\x01 \x01(\v2*.sameoldchat.chat.v1.ExternalUploadRequestH\x00R\bmetadata\x12\x16\n" +
 	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
@@ -2938,12 +3005,16 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\tfile_type\x18\x05 \x01(\tR\bfileType\x12!\n" +
 	"\fexternal_url\x18\x06 \x01(\tR\vexternalUrl\x12#\n" +
 	"\rpreview_image\x18\a \x01(\tR\fpreviewImage\x12-\n" +
-	"\x12indexable_contents\x18\b \x01(\tR\x11indexableContents\"~\n" +
+	"\x12indexable_contents\x18\b \x01(\tR\x11indexableContents\"\xda\x01\n" +
 	"\x12RemoteFilesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"\xaa\x01\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x18\n" +
+	"\achannel\x18\x05 \x01(\tR\achannel\x12!\n" +
+	"\fcreated_from\x18\x06 \x01(\tR\vcreatedFrom\x12\x1d\n" +
+	"\n" +
+	"created_to\x18\a \x01(\tR\tcreatedTo\"\xaa\x01\n" +
 	"\x16ShareRemoteFileRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +

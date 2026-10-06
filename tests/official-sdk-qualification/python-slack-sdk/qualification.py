@@ -243,9 +243,10 @@ authorizations = app_client.apps_event_authorizations_list(event_context=event_c
 assert authorizations["ok"] is True
 assert authorizations["authorizations"][0]["team_id"] == "T1"
 assert authorizations["authorizations"][0]["is_bot"] is True
-admin_users = admin_client.admin_users_list(team_id="T1", limit=10)
+admin_users = admin_client.admin_users_list(team_id="T1", is_active=True, limit=10)
 assert admin_users["ok"] is True
 assert any(user["id"] == "U1" for user in admin_users["users"])
+assert all(user["is_active"] is True for user in admin_users["users"])
 admin_emoji = admin_client.admin_emoji_list()
 assert admin_emoji["ok"] is True
 admin_teams = admin_client.admin_teams_list(limit=10)
@@ -333,6 +334,29 @@ assert admin_client.admin_conversations_invite(channel_id="C2", user_ids="U2")["
 searched_conversations = admin_client.admin_conversations_search(query="general", limit=10)
 assert searched_conversations["ok"] is True
 assert any(conversation["id"] == "C1" for conversation in searched_conversations["conversations"])
+# No query is every channel; sort, sort_dir and search_channel_types apply.
+every_channel = admin_client.admin_conversations_search(
+    sort="name", sort_dir="desc", search_channel_types=["exclude_archived"], limit=20
+)
+assert every_channel["ok"] is True
+channel_names = [conversation["name"] for conversation in every_channel["conversations"]]
+assert channel_names and channel_names == sorted(channel_names, reverse=True)
+assert all(conversation["is_archived"] is False for conversation in every_channel["conversations"])
+# The arguments each typed method sends are the ones the handlers read.
+contacts = client.users_discoverableContacts_lookup(email="alice@example.com")
+assert contacts["ok"] is True
+assert isinstance(contacts["is_discoverable"], bool)
+try:
+    admin_client.admin_apps_uninstall(app_id="A-not-here", team_ids=["T1"])
+    raise AssertionError("an app nobody installed was uninstalled")
+except SlackApiError as error:
+    assert error.response["error"] == "app_not_found"
+assert admin_client.admin_conversations_linkObjects(channel="C1", record_id="a01", salesforce_org_id="00D000")["ok"] is True
+# new_name is the channel's own name, so the walk keeps the channel it relies on.
+assert admin_client.admin_conversations_unlinkObjects(channel="C1", new_name="general")["ok"] is True
+record_channel = admin_client.admin_conversations_createForObjects(object_id="a02", salesforce_org_id="00D000", invite_object_team=False)
+assert record_channel["ok"] is True
+assert isinstance(record_channel["channel_id"], str)
 assert admin_client.admin_conversations_setConversationPrefs(
     channel_id="C1", prefs={"can_thread": {"type": ["everyone"]}, "who_can_post": {"type": ["everyone"]}}
 )["ok"] is True
@@ -477,6 +501,7 @@ added_call = client.calls_add(
     desktop_app_join_url="https://example.com/call-desktop",
     title="Qualification call",
     date_start=int(time.time()),
+    created_by="U1",
     users=[
         {"slack_id": "U1"},
         {"external_id": "qualification-guest", "display_name": "Qualification Guest", "avatar_url": "https://example.com/guest.png"},
@@ -841,6 +866,33 @@ try:
 except SlackApiError as error:
     assert error.response["error"] == "thread_ts_required", error.response
 
+# assistant.threads.setStatus with the identity override this SDK sends since
+# 3.45 (icon_emoji, icon_url, username). The fixture bot holds
+# chat:write.customize; a bot with chat:write alone may set a bare status but
+# is answered missing_scope for the override, as on agents.sessions.setStatus.
+assistant_status = client.assistant_threads_setStatus(
+    channel_id="C1",
+    thread_ts=root["ts"],
+    status="is thinking...",
+    loading_messages=["Reading the thread"],
+    icon_emoji=":robot_face:",
+    icon_url="https://example.com/assistant.png",
+    username="SDK assistant",
+)
+assert assistant_status["ok"] is True
+chat_write_only = WebClient(
+    token="xoxb-qualification-legacy",
+    base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
+)
+try:
+    chat_write_only.assistant_threads_setStatus(channel_id="C1", thread_ts=root["ts"], status="is thinking...", username="Uncustomized")
+    raise AssertionError("assistant.threads.setStatus customized without chat:write.customize")
+except SlackApiError as error:
+    assert error.response["error"] == "missing_scope", error.response
+    assert error.response["needed"] == "chat:write.customize", error.response
+cleared_status = chat_write_only.assistant_threads_setStatus(channel_id="C1", thread_ts=root["ts"], status="")
+assert cleared_status["ok"] is True
+
 reaction = client.reactions_add(channel="C1", timestamp=root["ts"], name="thumbsup")
 assert reaction["ok"] is True
 reactions = client.reactions_get(channel="C1", timestamp=root["ts"])
@@ -901,6 +953,13 @@ assert team["ok"] is True
 assert team["team"]["id"] == "T1"
 assert team["team"]["domain"] != ""
 assert team["team"]["icon"]["image_34"].startswith("http")
+assert client.team_info(team="T1")["team"]["id"] == "T1"
+try:
+    client.team_info(team="T-not-here")
+    raise AssertionError("team.info answered for a workspace it does not hold")
+except SlackApiError as error:
+    assert error.response["error"] == "team_not_found"
+
 team_profile = client.team_profile_get()
 assert team_profile["ok"] is True
 assert team_profile["profile"]["fields"] == []
@@ -988,7 +1047,17 @@ assert admin_client.admin_users_setExpiration(
 assert admin_client.api_call(
     "admin.users.session.invalidate", params={"team_id": "T1", "session_id": "qualification-session"}
 )["ok"] is True
-assert admin_client.api_call("admin.users.session.reset", params={"user_id": "U2"})["ok"] is True
+assert admin_client.admin_users_session_reset(user_id="U2", web_only=True)["ok"] is True
+assert admin_client.admin_users_session_resetBulk(user_ids=["U2"], mobile_only=True)["ok"] is True
+# An administrator edits another member's profile through user.
+edited_profile = admin_client.users_profile_set(user="U2", name="title", value="Qualified")
+assert edited_profile["ok"] is True
+assert edited_profile["profile"]["title"] == "Qualified"
+assert admin_client.admin_roles_addAssignments(role_id="Rl0A", entity_ids=["C1", "C2"], user_ids=["U2"])["ok"] is True
+role_assignments = admin_client.admin_roles_listAssignments(role_ids=["Rl0A"], entity_ids=["C1"], sort_dir="desc", limit=10)
+assert role_assignments["ok"] is True
+assert [(value["user_id"], value["entity_id"]) for value in role_assignments["role_assignments"]] == [("U2", "C1")]
+assert admin_client.admin_roles_removeAssignments(role_id="Rl0A", entity_ids=["C1", "C2"], user_ids=["U2"])["ok"] is True
 assert admin_client.admin_users_remove(team_id="T1", user_id="U2")["ok"] is True
 
 # The message object as history, replies, pins and reactions return it,

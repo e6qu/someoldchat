@@ -359,7 +359,7 @@ func (h Handler) workspaceSettingsPage(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	if connections, connectErr := h.Messages.ExternalTeams(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: searchFilterOptionLimit}); connectErr == nil {
+	if connections, connectErr := h.Messages.ExternalTeams(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalTeamFilter{}, domain.PageRequest{Limit: searchFilterOptionLimit}); connectErr == nil {
 		for _, team := range connections.Teams {
 			name := strings.TrimSpace(team.Name)
 			if name == "" {

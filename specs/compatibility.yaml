@@ -55,16 +55,16 @@ sources:
     retrieved_at: 2026-07-12T19:00:00Z
   - id: java-slack-sdk-methods-rate-limits
     kind: sdk-table
-    upstream: https://github.com/slackapi/java-slack-sdk/blob/v1.49.0/slack-api-client/src/main/java/com/slack/api/methods/MethodsRateLimits.java
-    revision: 06f512b9d2741ed38573915528c9f66cee90df48
+    upstream: https://github.com/slackapi/java-slack-sdk/blob/v1.52.0/slack-api-client/src/main/java/com/slack/api/methods/MethodsRateLimits.java
+    revision: b2f13ecbfe63a198f9fbea4beaf34624693a5cf6
     path: specs/upstream/java-slack-sdk/methods-rate-limits.json
-    sha256: 372aaf0dca1e59f5f8e8e2e6c375f7789f515d93362aac0bd466c794ac8bc242
+    sha256: 1d64a058b736b8f2603f5757bb1aeffbcf55d6835dc9da308bdb6db5afb7153f
     license: MIT
-    retrieved_at: 2026-10-05T00:00:00Z
+    retrieved_at: 2026-10-06T00:00:00Z
     note: >-
       com.slack.api.methods.MethodsRateLimits.toMap() of the pinned
-      slack-api-client-1.49.0.jar (sha256
-      eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f),
+      slack-api-client-1.52.0.jar (sha256
+      a146a48e823e95932c828d6f455d5b269bd0d4ba8f9d3648474d3b8611a7764f),
       printed by tests/official-sdk-qualification/java-slack-api RateLimitTable,
       which make sdk-qualification re-runs and compares with this file.
   - id: slack-current-method-reference
@@ -204,6 +204,11 @@ operations:
         no link or media previews of its own, so unfurl_media is validated and
         recorded but has no media unfurl to suppress, and chat.unfurl called
         directly still attaches previews to any message.
+      - >-
+        container_id is sent by python slack_sdk 3.45.0 alone (neither the Java
+        client 1.52.0's RequestFormBuilder nor @slack/web-api 8.2.0 carries
+        it, and the pinned OpenAPI does not declare it), with no description
+        of what it names or does. It is accepted and has no effect.
       - The Web API now enforces the documented posting allowance — one message per second per channel with a short burst — and a per-method budget, answering 429 with Retry-After. Every method is held to the tier Slack publishes for it (rate-limit-tiers decision); chat.postMessage's method budget is the special tier's several hundred a minute, enforced as the pinned SDK's 600. A method budget answers Slack's ratelimited and the per-channel posting allowance answers the pinned rate_limited (provenance under rate-limit-codes). Every web replica of a deployment draws from one budget, held in the chat module's store wherever more than one replica can run.
     audit:
       downgraded_from: behavior-compatible
@@ -228,6 +233,36 @@ operations:
       - go-test:internal/api/slack:TestEditingSomebodyElsesMessageUsesSlacksCodes
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
       - go-test:internal/api/slack:TestChatUpdateLinkNamesDescribesTheEdit
+      - go-test:internal/api/slack:TestChatUpdateTakesEverySDKArgument
+      - go-test:tests/persistence-qualification:sdkMessageArgumentsAreDurable
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - >-
+        markdown_text, metadata, parse, reply_broadcast and file_ids (sent by
+        python slack_sdk 3.45.0, the Java client 1.52.0 and @slack/web-api
+        8.2.0; absent from the pinned OpenAPI) are read as chat.postMessage
+        reads them. An edit carrying only metadata, reply_broadcast or file_ids
+        is an edit; the message keeps the content it already had.
+        markdown_text may not be combined with text or blocks
+        (markdown_text_conflict), and a text edit replaces the markdown
+        presentation. parse, like link_names, describes the edit: an omitted
+        parse is overwritten with the default. A malformed metadata object is
+        refused with no_text, as chat.postMessage refuses it.
+      - >-
+        reply_broadcast ("Broadcast an existing thread reply to make it visible
+        to everyone in the channel", @slack/web-api 8.2.0) cannot be
+        withdrawn: reply_broadcast=false leaves a broadcast reply broadcast,
+        and on a message outside a thread, which is already in its channel, it
+        changes nothing. The SDK sources define neither case.
+      - >-
+        file_ids ("Array of new file ids that will be sent with this message")
+        replaces the files the message carries, in order. Each must be a live,
+        hosted file the editing member uploaded, and at most ten, the bound the
+        composer holds a message to; anything else is invalid_arg_name. A file
+        the edit adds is shared into the conversation (file_shared when the
+        share is new) and a file it drops is unshared when no other message
+        still carries it there. An empty file_ids is an absent one, so an edit
+        cannot remove every file.
   - method: chat.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -290,7 +325,18 @@ operations:
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
       - go-test:internal/api/slack:TestChannelNoticesCarryTheirSlackFieldsInHistory
       - go-test:internal/api/slack:TestHuddleMessageCarriesTheHuddleChat
+      - go-test:internal/api/slack:TestConversationReadsReturnOtherAppsMetadataOnlyOnRequest
     deviations:
+      - >-
+        include_all_metadata is absent from the pinned OpenAPI; python
+        slack_sdk 3.45.0, the Java client 1.52.0 and @slack/web-api 8.2.0
+        send it, and the last describes it only as "Return all metadata
+        associated with messages. Defaults to false." No source says what
+        "not all" is, so it is read as the metadata the calling app attached:
+        without the flag a message carries its metadata only when the calling
+        token's app posted it (a token with no app sees none), and with it every
+        message carries its metadata. Metadata used to be returned to every
+        reader whatever it asked.
       - >-
         A huddle posts a huddle_thread message, as Slack's do, whose thread is
         the huddle's chat. Slack's current reference does not document that
@@ -307,39 +353,64 @@ operations:
       - go-test:internal/api/slack:TestThreadParentsCarryTheirSummary
       - go-test:internal/api/slack:TestHistoryWindowIsPartOfTheRead
       - go-test:internal/api/slack:TestHuddleMessageCarriesTheHuddleChat
+      - go-test:internal/api/slack:TestConversationReadsReturnOtherAppsMetadataOnlyOnRequest
+    deviations:
+      - >-
+        include_all_metadata is read as conversations.history reads it: without
+        it a message carries its metadata only when the calling token's app
+        posted it; with it every message carries its metadata.
   - method: reactions.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddGetAndRemoveReaction
       - go-test:internal/api/slack:TestTimestampArgumentsUseTheirOperationsCodes
+      - go-test:internal/api/slack:TestReactionsAndPinsAnswerForAFileItem
+    deviations:
+      - Reactions are kept on messages only. The Java slack-api-client sends file and file_comment here; the pinned arguments are channel, timestamp and name, so either answers invalid_arg_name.
   - method: reactions.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddGetAndRemoveReaction
+      - go-test:internal/api/slack:TestReactionsAndPinsAnswerForAFileItem
+    deviations:
+      - "Reactions are kept on messages only: a file the caller can see has no reaction to remove (no_reaction), and file_comment answers file_comment_not_found."
   - method: reactions.get
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddGetAndRemoveReaction
       - go-test:internal/api/slack:TestReactionsGetAndListReturnWholeItems
+      - go-test:internal/api/slack:TestReactionsAndPinsAnswerForAFileItem
+    deviations:
+      - Reactions are kept on messages only. A file named by file is answered as a file item with no reactions (file_not_found when the caller cannot see it); file comments were retired by Slack and none exists here, so file_comment answers file_comment_not_found.
   - method: reactions.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddGetAndRemoveReaction
       - go-test:internal/api/slack:TestReactionsGetAndListReturnWholeItems
+      - go-test:internal/api/slack:TestReactionsListPagesByCountAndPage
+      - go-test:tests/persistence-qualification:userReactionsCountTheirTotal
+    deviations:
+      - count and page select legacy paging, with a paging object (count, page, pages, total), when neither cursor nor limit is given; a page past the first is reached by walking the keyset from the start, bounded at 100 pages. team_id may name only the token's own workspace.
   - method: pins.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddListAndRemovePin
+      - go-test:internal/api/slack:TestReactionsAndPinsAnswerForAFileItem
+    deviations:
+      - "Pins are kept on messages only: a file or file comment named by the Java slack-api-client's file and file_comment answers not_pinnable."
   - method: pins.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAddListAndRemovePin
+      - go-test:internal/api/slack:TestReactionsAndPinsAnswerForAFileItem
+    deviations:
+      - "Pins are kept on messages only: a file the caller can see is not pinned (not_pinned), one they cannot is file_not_found, and file_comment answers file_comment_not_found."
   - method: pins.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -380,9 +451,11 @@ operations:
       - go-test:internal/api/slack:TestHuddleStateIsInTheProfileEveryUserMethodReports
       - go-test:internal/api/slack:TestAdminUsersRemoveDeactivatesUser
       - go-test:internal/api/slack:TestSlackbotIsInEveryWorkspaceAsUSLACKBOT
+      - go-test:internal/api/slack:TestUsersReportTheirLocaleWhenAsked
     deviations:
       - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's long name in force at the time (for example Eastern Daylight Time), from ICU's names; a zone or offset newer than the generated table keeps its abbreviation.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
+      - include_locale reports the language the member chose in Language & region, as the catalog it resolves to, and en-US for a member who chose none or chose the source language.
   - method: conversations.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -400,6 +473,9 @@ operations:
       - go-test:internal/api/slack:TestConversationListingNarrowsToTheTypesTheTokenMayRead
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
       - go-test:internal/api/slack:TestUsersConversationsListsOnlyTheMembersConversations
+      - go-test:internal/api/slack:TestTeamIDNamesOnlyTheTokensOwnWorkspace
+    deviations:
+      - team_id may name only the token's own workspace; any other answers invalid_arg_name.
   - method: users.conversations
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -407,6 +483,9 @@ operations:
       - go-test:internal/api/slack:TestUsersAndConversationsList
       - go-test:internal/api/slack:TestConversationListingNarrowsToTheTypesTheTokenMayRead
       - go-test:internal/api/slack:TestUsersConversationsListsOnlyTheMembersConversations
+      - go-test:internal/api/slack:TestTeamIDNamesOnlyTheTokensOwnWorkspace
+    deviations:
+      - team_id may name only the token's own workspace; any other answers invalid_arg_name.
   - method: conversations.members
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -420,6 +499,18 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestTeamInfo
       - go-test:internal/api/slack:TestTeamInfoReportsDomainAndFetchableIcons
+      - go-test:internal/api/slack:TestTeamInfoAnswersOnlyTheTeamItNames
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        team or domain naming this workspace answers it; naming any other
+        answers team_not_found (recorded as a per-operation exemption, since
+        the pinned enum declares no not-found code). Slack also answers teams
+        the token sees through externally shared channels; this deployment does
+        not serve another organization's details. The handler used to ignore
+        both arguments and answer the caller's own workspace for any team.
   - method: team.profile.get
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -632,6 +723,17 @@ operations:
       - go-test:internal/api/slack:TestExternalUploadURLRefusesWithHTTPStatus
       - go-test:internal/api/slack:TestUploadsInferTheirMediaTypeFromTheName
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/api/slack:TestUploadURLExternalCarriesAltTextAndSnippetType
+      - go-test:tests/persistence-qualification:sdkMessageArgumentsAreDurable
+    deviations:
+      - >-
+        alt_txt (python slack_sdk 3.45.0, the Java client 1.52.0) or alt_text
+        (@slack/web-api 8.2.0) becomes the file's description, the file
+        object's alt_txt and the first-party image's alt text, held to the
+        1,000 characters a member's own description is. snippet_type uploads
+        the bytes as a snippet in that syntax (the file's filetype, editable),
+        held to 100 bytes as a remote file's filetype is. Either over its bound
+        is invalid_arg_name.
   - method: files.completeUploadExternal
     status: behavior-compatible
     provenance: slack-reference
@@ -651,10 +753,12 @@ operations:
       - go-test:internal/api/slack:TestSlackbotIsInEveryWorkspaceAsUSLACKBOT
       - go-test:internal/scheduler:TestSlackbotAnswersCustomResponsesAndItsDirectMessages
       - go-test:internal/web:TestSlackbotResponsesAreManagedFromCustomizeWorkspace
+      - go-test:internal/api/slack:TestUsersReportTheirLocaleWhenAsked
     deviations:
       - Slackbot (USLACKBOT) ends the list, as in every Slack workspace. It answers a member's message that says one of the workspace's custom response phrases (kept under Customize workspace › Slackbot, which any full member may change) with one of the response's replies, in the same place; a direct message to it that no response matches gets help. The worker answers each message once, after it is posted, from the journal onward from when it first read it; messages from apps, bots and Slackbot itself are never answered.
       - tz is the zone the member's own browser last reported to the web client (Slack's automatic time zone); a member who has never used the web client reports tz UTC with a zero offset. tz_label is the zone's long name in force at the time (for example Eastern Daylight Time), from ICU's names; a zone or offset newer than the generated table keeps its abbreviation.
       - updated is recorded from schema 181 onward; a member whose record has not changed since reports 0.
+      - include_locale reports each member's chosen language as users.info does.
   - method: users.lookupByEmail
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -739,12 +843,13 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
+      - go-test:internal/api/slack:TestUsersProfileSetEditsTheMemberItNames
     deviations:
       - Display name, full name (real_name, first_name, last_name), phone, title, pronouns, status, expiration, image URL, and workspace-defined custom fields are settable through both the profile object and the single-field name/value form. real_name sets both parts, split at its first space, and a full name cannot be cleared. Standard Slack profile fields this deployment does not store (skype, start date) and email, which only an administrator may change in Slack, are refused rather than silently dropped.
-      - Admin editing of another user (the reference's user argument) and the reference's token-type rules are not yet asserted; this deployment has no plan tiers, so the paid-team restriction on user is not applied.
+      - user names whose profile changes. An administrator or owner may name another member; a member naming someone else is refused with not_admin, and an administrator naming an administrator or owner is refused with cannot_update_admin_user unless they are the primary owner (both codes are in the pinned enum). This deployment has no plan tiers, so the paid-team restriction on user is not applied, and the reference's token-type rules are not asserted.
     audit:
       downgraded_from: behavior-compatible
-      reason: The editable profile including custom fields and the name/value form is implemented and tested, but admin editing of another user, rate limits, and token-type rules are not qualified.
+      reason: The editable profile including custom fields, the name/value form and administrator editing through user are implemented and tested, but rate limits and token-type rules are not qualified.
       evidence:
         - source:internal/api/slack/handler.go
         - go-test:internal/api/slack:TestUserProfileSetSingleFieldNameValueForm
@@ -793,11 +898,21 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestAdminConversationCreateUsesDurableConversationBoundary
       - go-test:internal/api/slack:TestPrivateChannelCreationAnswersRestrictedActionUnderTheWorkspacePolicy
+      - go-test:internal/api/slack:TestAdminConversationsCreateHonoursDescriptionAndWorkspace
+      - go-test:tests/persistence-qualification:aCreatedChannelKeepsItsDescription
     deviations:
       - >-
         A private channel follows the workspace's "who can create private channels" policy as
         conversations.create does, so an administrator under an owners-only policy is answered
         restricted_action, the code this method declares.
+      - >-
+        description is written with the channel as its purpose, atomically.
+        team_id is required unless org_wide=true (team_id_or_org_required) and
+        must name this workspace (team_not_found). org_wide=true creates the
+        channel in this deployment's one workspace; it is not marked as an
+        org-wide channel, so admin.conversations.getTeams reports it as an
+        ordinary channel. A malformed name answers invalid_name and an
+        over-long description invalid_arg_name.
   - method: admin.conversations.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -833,6 +948,12 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminConversationRenameArchiveAndUnarchiveTakeEffect
+      - go-test:internal/api/slack:TestAdminConversationsRenameNormalizesTheName
+    deviations:
+      - >-
+        The name is normalized by the rule every channel name follows (lower
+        case, whitespace runs to one hyphen, at most 80 characters); it used to
+        be stored exactly as sent. A direct conversation is not renamed.
   - method: admin.conversations.restrictAccess.addGroup
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -853,6 +974,25 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminConversationSearchIsRegistered
+      - go-test:internal/api/slack:TestAdminConversationsSearchHonoursQueryTypesAndSort
+      - go-test:tests/persistence-qualification:administratorChannelSearchAgreesOnEveryProfile
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - >-
+        query is optional (every channel when absent; the handler used to
+        answer invalid_form_data) and direct conversations are never results.
+        sort is relevant, name, member_count (the default, per @slack/web-api
+        8.2.0) or created, and sort_dir asc (the default; no source names one)
+        or desc; relevant ranks an exact name, then a name prefix, then a name
+        containing the query, then a topic or purpose match.
+        search_channel_types applies private, private_exclude, archived and
+        exclude_archived; the Enterprise Grid and Slack Connect types
+        (multi_workspace, org_wide, external_shared*, exclude_org_shared,
+        private_exclude_archived) are refused with invalid_search_channel_type
+        rather than ignored. team_ids may name only this workspace
+        (team_not_found otherwise). limit is 1-20, default 10, as the pinned
+        schema states. total_count is the size of the page, not of the whole
+        result.
   - method: admin.conversations.setConversationPrefs
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -997,6 +1137,19 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminUsersAssignReactivatesAndJoinsChannels
+      - go-test:internal/api/slack:TestAdminUsersAssignAddsTheGuestTierItNames
+      - go-test:tests/persistence-qualification:assigningAMemberSetsTheGuestTierItNames
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        is_restricted and is_ultra_restricted set the guest tier the member is
+        assigned with (both false is a full member; both true is refused with
+        invalid_arg_name). A request that sends neither keeps the tier the
+        membership already has rather than promoting a deactivated guest to a
+        full member. An administrator or owner cannot be made a guest and is
+        refused with invalid_arg_name.
   - method: admin.users.invite
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1007,6 +1160,17 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminUsersListReturnsTheAdminProjection
+      - go-test:internal/api/slack:TestAdminUsersListHonoursIsActive
+      - go-test:tests/persistence-qualification:adminUserListingsFilterByActivity
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - >-
+        is_active defaults to true, as @slack/web-api 8.2.0 documents: only
+        active members unless is_active=false asks for the deactivated ones.
+        include_deactivated_user_workspaces is validated and changes nothing,
+        because it chooses which workspaces an org-token listing reports and
+        this deployment has one.
   - method: admin.users.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1022,6 +1186,17 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminUsersSessionResetIsIdempotentButStillFindsTheMember
+      - go-test:internal/api/slack:TestAdminUsersSessionResetHonoursMobileAndWebOnly
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        Sessions here carry no client kind because there is no mobile client:
+        every session is a browser session. web_only therefore ends every
+        session, mobile_only ends none (after confirming the member exists),
+        and both together name no session and are refused with
+        invalid_arg_name.
   - method: admin.users.setAdmin
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1095,6 +1270,10 @@ operations:
       - go-test:internal/service:TestCallLifecycleNormalizesParticipants
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - go-test:internal/api/slack:TestCallsAddAttributesTheCallToCreatedBy
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - "A bot token without created_by is refused with invalid_arguments: the pinned contract makes created_by required for any token but a user token, and names no error code for its absence."
   - method: calls.end
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1154,6 +1333,18 @@ operations:
       - go-test:internal/api/slack:TestPostEphemeralContract
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
       - go-test:internal/api/slack:TestChatPostEphemeralLinkNames
+      - go-test:internal/api/slack:TestChatPostEphemeralTakesEverySDKArgument
+      - go-test:tests/persistence-qualification:sdkMessageArgumentsAreDurable
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - >-
+        markdown_text, parse, username, icon_emoji and icon_url are read as
+        chat.postMessage reads them: markdown_text may not be combined with
+        text or blocks (markdown_text_conflict), and a custom identity needs an
+        app token holding chat:write.customize (missing_scope, which the pinned
+        enum omits). The ephemeral message keeps the presentation and the
+        first-party client shows it; the message.ephemeral record, which no
+        pinned event schema describes, carries the text without it.
   - method: chat.scheduleMessage
     status: behavior-compatible
     provenance: slack-reference
@@ -1205,8 +1396,26 @@ operations:
       - go-test:internal/slackapp:TestEventProcessorDeliversLinkSharedForTheAppsUnfurlDomains
       - go-test:internal/service:TestUnfurlLinksDecidesWhetherAppsAreAskedToUnfurl
       - official-sdk:tests/official-sdk-qualification/node-bolt/qualification.mjs
+      - go-test:internal/api/slack:TestChatUnfurlTakesWorkObjectMetadata
+      - go-test:internal/web:TestWorkObjectUnfurlShowsTheEntity
     deviations:
       - link_shared always carries source=conversations_history; source=composer is answered cannot_unfurl_url because the first-party client previews no unsent draft, so no composer unfurl_id exists.
+      - >-
+        metadata (@slack/web-api 8.2.0 ChatUnfurlMetadata, python slack_sdk
+        EventAndEntityMetadata) is taken in place of or beside unfurls. Each of
+        its Work Object entities must carry the fields @slack/types'
+        EntityMetadata requires (entity_type, url, external_ref.id,
+        entity_payload.attributes.title.text) and app_unfurl_url, a link of the
+        message; it is held as that link's app unfurl, under the same domain
+        and membership rules, and an entity and an unfurls entry for one link
+        are refused with invalid_arg_name. No source defines how an unfurled
+        Work Object reads back, so the message's attachments carry the entity
+        object itself, marked is_app_unfurl with its app_unfurl_url, and the
+        first-party client shows its title, url and product name. The
+        flexpane, entity actions and entity.presentDetails round trip of a
+        unfurled entity are not modelled, and an event_type/event_payload
+        beside the entities is not stored, because no source says what it
+        does on an unfurl.
   - method: dialog.open
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1287,6 +1496,17 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRemoteFileLifecycle
+      - go-test:internal/api/slack:TestRemoteFilesListFiltersByChannelAndTime
+      - go-test:tests/persistence-qualification:publishedWaveOneRepositoryContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - >-
+        channel, ts_from and ts_to filter inside the keyset read, so a page is
+        never emptied by a filter applied after it. A remote file's creation
+        time is whole seconds, as its created field reports it, and both bounds
+        are inclusive. A channel the caller cannot see filters to the files
+        shared there, as the unfiltered list already names every file's
+        channels.
   - method: files.remote.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1486,8 +1706,17 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestAccessLogsRequireAdminAndExposeRecordedAccess
       - go-test:internal/store/sqlstore:TestSchema185FoldsPerRequestAccessLogs
+      - go-test:internal/api/slack:TestTeamAccessLogsPagesByLimitAndCursor
     deviations:
       - country, region and isp are null because no geolocation database is bundled.
+      - >-
+        Besides the pinned count and page, the cursor and limit every current
+        client sends are served: limit is the page size when count is absent,
+        and response_metadata.next_cursor names the next page of that size, so
+        a cursor resumes the same page-numbered walk (and shares its
+        sensitivity to logins recorded between pages). A limit-only call used
+        to be answered with 100 rows and no cursor. team_id may name only this
+        workspace.
   - method: team.billableInfo
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1505,6 +1734,9 @@ operations:
       - go-test:internal/api/slack:TestUserGroupLifecycle
       - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
       - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
+      - go-test:internal/api/slack:TestTeamIDNamesOnlyTheTokensOwnWorkspace
+    deviations:
+      - team_id may name only the token's own workspace; any other answers invalid_arg_name.
   - method: usergroups.disable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1512,18 +1744,27 @@ operations:
       - go-test:internal/api/slack:TestUserGroupLifecycle
       - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
       - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
+      - go-test:internal/api/slack:TestTeamIDNamesOnlyTheTokensOwnWorkspace
+    deviations:
+      - team_id may name only the token's own workspace; any other answers invalid_arg_name.
   - method: usergroups.enable
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupLifecycle
       - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
+      - go-test:internal/api/slack:TestTeamIDNamesOnlyTheTokensOwnWorkspace
+    deviations:
+      - team_id may name only the token's own workspace; any other answers invalid_arg_name.
   - method: usergroups.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupListBooleansAcceptEveryDocumentedForm
       - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
+      - go-test:internal/api/slack:TestTeamIDNamesOnlyTheTokensOwnWorkspace
+    deviations:
+      - team_id may name only the token's own workspace; any other answers invalid_arg_name.
   - method: usergroups.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1531,17 +1772,26 @@ operations:
       - go-test:internal/api/slack:TestUserGroupLifecycle
       - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
       - go-test:internal/api/slack:TestUserGroupObjectReportsDefaultChannelsAndWhoDisabledIt
+      - go-test:internal/api/slack:TestTeamIDNamesOnlyTheTokensOwnWorkspace
+    deviations:
+      - team_id may name only the token's own workspace; any other answers invalid_arg_name.
   - method: usergroups.users.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupUsersUpdateRequiresItsMandatoryArguments
+      - go-test:internal/api/slack:TestUserGroupUsersListHonoursIncludeDisabled
+    deviations:
+      - A disabled group is answered only with include_disabled; without it the group is usergroup_not_found, as no published source names the code Slack uses. team_id may name only the token's own workspace.
   - method: usergroups.users.update
     status: behavior-compatible
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestUserGroupUsersUpdateRequiresItsMandatoryArguments
       - go-test:internal/api/slack:TestUserGroupValidationAndPermissionCodes
+      - go-test:internal/api/slack:TestTeamIDNamesOnlyTheTokensOwnWorkspace
+    deviations:
+      - team_id may name only the token's own workspace; any other answers invalid_arg_name.
   - method: users.setActive
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1628,6 +1878,9 @@ operations:
     reference: https://docs.slack.dev/reference/methods/slackLists.items.create/
     evidence:
       - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
+      - go-test:internal/api/slack:TestListItemsDuplicateAndReportSubscription
+    deviations:
+      - "duplicated_item_id copies an item of the same list: its cells, and its parent unless parent_item_id names another; initial_fields replace the copied cell of the same column."
   - method: slackLists.items.delete
     status: behavior-compatible
     provenance: slack-reference
@@ -1646,6 +1899,9 @@ operations:
     reference: https://docs.slack.dev/reference/methods/slackLists.items.info/
     evidence:
       - go-test:internal/api/slack:TestListUpdateAccessAndItemsTakeEffect
+      - go-test:internal/api/slack:TestListItemsDuplicateAndReportSubscription
+    deviations:
+      - Nothing here lets a member follow a list row, so include_is_subscribed reports is_subscribed false. The row is answered as record, as Slack's response names it, with item kept beside it; subtasks and the list object are not reported.
   - method: slackLists.items.list
     status: behavior-compatible
     provenance: slack-reference
@@ -1782,6 +2038,16 @@ operations:
     reference: https://docs.slack.dev/reference/methods/admin.apps.uninstall/
     evidence:
       - go-test:internal/api/slack:TestAdminAppUninstallAndRequestCancelTakeEffect
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        The published clients send one app as app_id (the handler read only
+        app_ids, so every typed call failed). team_ids and enterprise_id say
+        where to uninstall from; this deployment is one workspace, so team_ids
+        may name only it and is otherwise refused with invalid_arg_name, and
+        enterprise_id is accepted as the whole deployment.
   - method: admin.audit.anomaly.allow.getItem
     status: behavior-compatible
     provenance: slack-reference
@@ -1911,6 +2177,16 @@ operations:
       - go-test:internal/api/slack:TestAdminConversationAdministration
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - >-
+        slack_sdk 3.45.0 sends object_id, salesforce_org_id and
+        invite_object_team, and no channel name or visibility; the handler used
+        to require channel_name, so every typed call failed. Slack names the
+        channel after the Salesforce record, which this deployment cannot read,
+        so the channel is public and named after object_id, and
+        invite_object_team is validated but has no Salesforce record team to
+        invite.
   - method: admin.conversations.getCustomRetention
     status: behavior-compatible
     provenance: slack-reference
@@ -1968,12 +2244,30 @@ operations:
       - go-test:internal/api/slack:TestAdminConversationAdministration
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - >-
+        slack_sdk 3.45.0 is the only pinned client with this method and sends
+        channel and new_name, both required; @slack/web-api 8.2.0 and
+        slack-api-client 1.52.0 do not expose it, so the Node walk issues it
+        through apiCall with those names. new_name is applied with the
+        channel-name rules every rename uses, before the links are removed, so
+        a taken name (name_taken) leaves the links in place. The old plural
+        channels is not accepted.
   - method: admin.functions.list
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.list/
     evidence:
       - go-test:internal/api/slack:TestAdminFunctionsListReadsTheManifest
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - >-
+        app_ids is required, as every published client sends it, and scopes the
+        answer; limit and cursor page the (app, callback) ordered list, and
+        team_id may name only this workspace. The handler used to ignore all of
+        them and answer every installed app's functions with an empty cursor.
   - method: admin.functions.permissions.lookup
     status: behavior-compatible
     provenance: slack-reference
@@ -2005,6 +2299,16 @@ operations:
       - go-test:internal/api/slack:TestAdminRoleAssignments
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:roleAssignmentsAgreeOnEveryProfile
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        role_ids and entity_ids scope the listing in any combination (every
+        assignment when neither is sent), and sort_dir, limit and cursor page
+        it. The published clients name no sort key, so assignments are ordered
+        by member, entity and role; sort_dir reverses that order. The handler
+        used to require a singular role_id no client sends and to check the
+        cursor as a list cursor, which refused every cursor the method minted.
   - method: admin.roles.removeAssignments
     status: behavior-compatible
     provenance: slack-reference
@@ -2047,6 +2351,14 @@ operations:
     reference: https://docs.slack.dev/reference/methods/admin.users.session.resetBulk/
     evidence:
       - go-test:internal/api/slack:TestAdminSessionListShowsSessionsWithoutTheirTokens
+      - go-test:internal/api/slack:TestAdminUsersSessionResetHonoursMobileAndWebOnly
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - >-
+        mobile_only and web_only are read as admin.users.session.reset reads
+        them: every session here is a web session, so web_only ends them all,
+        mobile_only ends none, and both are refused with invalid_arg_name.
   - method: admin.users.session.setSettings
     status: behavior-compatible
     provenance: slack-reference
@@ -2097,11 +2409,20 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestAdminWorkflowSearchAndUnpublishReachWhatMembersCannot
       - go-test:internal/api/slack:TestAdminWorkflowSearchFindsAMembersOwnWorkflow
+      - go-test:internal/api/slack:TestAdminWorkflowsSearchHonoursItsFilters
     deviations:
       - >-
         A member's own workflow, built in Workflow Builder with no developer
         app, reports app_id as an empty string. Slack's reference does not say
         what app a Workflow Builder workflow names, so none is invented.
+      - >-
+        app_id, collaborator_ids (any of them managing the workflow),
+        no_collaborators and source filter the search; source code is a
+        workflow a developer app defines and workflow_builder one with no app.
+        sort accepts its one published value, premium_runs, but this deployment
+        meters no premium runs, so every workflow ties and the order stays the
+        listing's own whatever sort_dir says; num_trigger_ids sizes a
+        trigger_ids list this response does not carry.
   - method: admin.workflows.triggers.types.permissions.lookup
     status: behavior-compatible
     provenance: slack-reference
@@ -2229,6 +2550,8 @@ operations:
       - go-test:internal/api/slack:TestAppCredentialsAndAssistantSearch
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:externalCredentialKeepsItsSecret
+    deviations:
+      - user_id and status (connected or disconnected) are required, as the SDKs declare them. The report is recorded as an app.user_connection_updated event naming the member and the status; nothing else here reads a member's connection to an app.
   - method: assistant.search.context
     status: behavior-compatible
     provenance: slack-reference
@@ -2251,12 +2574,19 @@ operations:
     status: sdk-compatible
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - go-test:internal/service:TestAssistantWritesTouchOneFieldEach
+      - go-test:internal/service:TestAssistantStatusIdentityTravelsWithTheStatus
       - go-test:internal/api/slack:TestAssistantThreadWritesAcceptTheSDKsJSONArrays
+      - go-test:internal/api/slack:TestAssistantThreadsSetStatusTakesAnIdentityOverride
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
       - go-test:internal/web:TestThreadShowsTheAssistantStatusWithItsLoadingMessages
-      - go-test:tests/persistence-qualification:assistantLoadingMessagesTravelWithTheStatus
+      - go-test:internal/web:TestTheAssistantStatusShowsTheIdentityItWasSetWith
+      - go-test:tests/persistence-qualification:assistantStatusStateTravelsWithTheStatus
     deviations:
-      - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
+      - Argument names are taken from the pinned @slack/web-api type definitions and python-slack-sdk 3.45.0's assistant_threads_setStatus; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
+      - icon_emoji, icon_url and username (sent by python-slack-sdk 3.45.0 and slack-bolt 1.30.0's SetStatus) take the contract agents.sessions.setStatus documents for the same three, since this method's page does not describe them; chat:write.customize is required on top of chat:write (missing_scope naming it otherwise), and a JSON null is the same as leaving one out. A username over 200 characters or an icon_url that is not an absolute http(s) URL is invalid_arguments.
+      - The override belongs to the status it was sent with; each call replaces it (a call without it shows the status under the setting app's own name again), and clearing the status clears it. The first-party thread pane shows the status, live, under the override's username, or the app's name, with the icon_emoji drawn or the icon_url as a decorative image beside it; the override does not restyle the app's messages.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.threads.setStatus/
   - method: assistant.threads.setSuggestedPrompts
@@ -2295,10 +2625,12 @@ operations:
     reference: https://docs.slack.dev/reference/methods/blocks.validate/
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestBlocksValidateMatchesCurrentSlackResponseShapes
+      - go-test:internal/api/slack:TestBlocksValidateNeedsNoToken
       - go-test:internal/blockkit:TestValidateBlocksCoversSlackFileImagesCallsAndSectionFields
     deviations:
-      - SameOldChat validates the current catalog it renders; its validation messages are not asserted against the reference's wording. The pinned SDK tier table predates the method and its reference page's tier is not yet cited, so it is held to Tier 4's floor, the laxest published tier (rate-limit-tiers decision).
+      - SameOldChat validates the current catalog it renders; its validation messages are not asserted against the reference's wording. No token is needed, as the official Java SDK calls it without one; it is enforced at that SDK's special tier for the method, 60 a minute, counted per client address when no token is presented (rate-limit-tiers decision).
   - method: chat.appendStream
     status: behavior-compatible
     provenance: slack-reference
@@ -2317,6 +2649,14 @@ operations:
     reference: https://docs.slack.dev/reference/methods/chat.stopStream/
     evidence:
       - go-test:internal/api/slack:TestChatStreamMethodsFollowOfficialBotTokenLifecycle
+    deviations:
+      - >-
+        session_status is sent by python slack_sdk 3.45.0, the Java client
+        1.52.0 and @slack/web-api 8.2.0, which describes it only as "The
+        session status to set after stopping the stream", a free string. No
+        source names its values or the session it sets, so it is accepted and
+        not applied; an agent session's status is set by
+        agents.sessions.setStatus.
   - method: conversations.acceptSharedInvite
     status: behavior-compatible
     provenance: slack-reference
@@ -2326,8 +2666,11 @@ operations:
       - go-test:internal/service:TestSlackConnectCapacityIsEnforcedAtAcceptance
       - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSharedInviteArgumentsTheSDKsSendAreApplied
+      - go-test:tests/persistence-qualification:sharedInvitesKeepTheirReviewAndFilterAlike
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - "The invitation is named by invite_id or by channel_id, as the SDKs require one of the two. The accepting organization joins the host's conversation, under the host's name and visibility: channel_name is not applied, is_private=true is refused (invalid_arg_name) for a public conversation rather than answered by joining one, and free_trial_accepted (free_trial_accept from the Java client) has no billing to start. team_id may name only the token's own workspace."
   - method: conversations.approveSharedInvite
     status: behavior-compatible
     provenance: slack-reference
@@ -2337,8 +2680,10 @@ operations:
       - go-test:internal/service:TestSharedInviteDecisionsBelongToTheirOwnSide
       - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSharedInviteTargetTeamMustNameTheOtherParty
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - target_team, when given, must name the invited organization; naming another answers invite_not_found and decides nothing.
   - method: conversations.canvases.create
     status: sdk-compatible
     provenance: slack-reference
@@ -2356,8 +2701,10 @@ operations:
       - go-test:internal/service:TestSharedInviteDecisionsBelongToTheirOwnSide
       - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSharedInviteTargetTeamMustNameTheOtherParty
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - target_team, when given, must name the host organization; naming another answers invite_not_found and decides nothing.
   - method: conversations.externalInvitePermissions.set
     status: behavior-compatible
     provenance: slack-reference
@@ -2377,8 +2724,14 @@ operations:
       - go-test:internal/service:TestASecondOutstandingInvitationIsRefused
       - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSharedInviteArgumentsTheSDKsSendAreApplied
+      - go-test:internal/service:TestAnApprovalMovesAnInvitationOnlyWhereItCouldHaveBeenRaised
+      - go-test:tests/persistence-qualification:sharedInvitesKeepTheirReviewAndFilterAlike
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - "One invitation names one recipient: exactly one address in emails or one member in user_ids. A member named by user_ids belongs to another workspace on this deployment, and that workspace is the organization invited; several recipients in one call are refused with invalid_arg_name rather than half sent."
+      - external_limited defaults to true, as the SDK types document. An external-limited organization may post in the channel and may not invite further organizations into it, which is the restriction conversations.externalInvitePermissions.set controls; no other external-limited restriction is modelled.
+      - The response carries invite_id, as Slack's does, beside the invite object; conf_code, url and is_legacy_shared_channel are not reported, because an invitation here is not delivered by link or email.
   - method: conversations.listConnectInvites
     status: behavior-compatible
     provenance: slack-reference
@@ -2387,8 +2740,10 @@ operations:
       - go-test:internal/api/slack:TestConnectListingsSeparateIssuedFromRequested
       - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSharedInviteTargetTeamMustNameTheOtherParty
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - The page size is count, as the SDKs send it (limit is still read when count is absent). team_id may name only the token's own workspace.
   - method: conversations.requestSharedInvite.approve
     status: behavior-compatible
     provenance: slack-reference
@@ -2398,8 +2753,13 @@ operations:
       - go-test:internal/service:TestSharedInviteDecisionsBelongToTheirOwnSide
       - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSharedInviteArgumentsTheSDKsSendAreApplied
+      - go-test:internal/service:TestAnApprovalMovesAnInvitationOnlyWhereItCouldHaveBeenRaised
+      - go-test:tests/persistence-qualification:sharedInvitesKeepTheirReviewAndFilterAlike
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - channel_id moves the invitation to another channel of the host's that the approving member is in, refused while that channel has an outstanding invitation for the same organization. is_external_limited overrides the invitation's restriction. message ({is_override, text}) is kept with the approval and shown to the requester with the decision; a request here carries no message of its own, so is_override changes nothing.
+      - The Java slack-api-client 1.52 sends this method's channel_id under the form name team_id (RequestFormBuilder); team_id is not read here, so a Java caller's channel override is not applied.
   - method: conversations.requestSharedInvite.deny
     status: behavior-compatible
     provenance: slack-reference
@@ -2409,8 +2769,12 @@ operations:
       - go-test:internal/service:TestSharedInviteDecisionsBelongToTheirOwnSide
       - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSharedInviteArgumentsTheSDKsSendAreApplied
+      - go-test:internal/service:TestADenialsReasonReachesTheMemberWhoAsked
+      - go-test:tests/persistence-qualification:sharedInvitesKeepTheirReviewAndFilterAlike
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - "message is the reason the member who asked is told: it is kept with the denial and shown with the decision in their Activity."
   - method: conversations.requestSharedInvite.list
     status: behavior-compatible
     provenance: slack-reference
@@ -2419,8 +2783,12 @@ operations:
       - go-test:internal/api/slack:TestConnectListingsSeparateIssuedFromRequested
       - go-test:tests/persistence-qualification:slackConnectCapacityIsClaimedTransactionally
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - go-test:internal/api/slack:TestSharedInviteArgumentsTheSDKsSendAreApplied
+      - go-test:tests/persistence-qualification:sharedInvitesKeepTheirReviewAndFilterAlike
     deviations:
       - An external organization is another workspace on this deployment. Cross-deployment federation, where an invitation leaves this process and is accepted by a Slack workspace elsewhere, is unimplemented and cannot be qualified by a single-deployment mock.
+      - Pending requests are listed by default; include_approved adds those the host approved (whatever the invited organization then did, including an approval later withdrawn), include_denied those refused before they were sent, and include_expired those whose fourteen-day deadline passed unanswered. invite_ids and user_id narrow the list. The undocumented status argument is no longer read.
+      - invite_requests carries id, channel.id, inviting_user.id, is_external_limited, date_created, date_last_updated, expires_at and target_user.recipient_email; the inviting team, channel connections and profile detail Slack nests there are not reported. The invites array is kept beside it.
   - method: functions.distributions.permissions.add
     status: sdk-compatible
     provenance: slack-reference
@@ -2523,6 +2891,10 @@ operations:
     reference: https://docs.slack.dev/reference/methods/team.externalTeams.list/
     evidence:
       - go-test:internal/api/slack:TestExternalTeamsListAndDisconnectSpanEveryChannel
+      - go-test:internal/api/slack:TestExternalTeamsListFiltersAndSorts
+      - go-test:tests/persistence-qualification:externalTeamsPageByNameInBothDirections
+    deviations:
+      - "Every connection here is a channel another organization is in, so it is CONNECTED, carries no Slack Connect preference override, and is made through this workspace: connection_status_filter other than CONNECTED, any slack_connect_pref_filter, and a workspace_filter without this workspace each match nothing. The list is in team_name order (sort_direction asc or desc); no connection records a last-active time or a status other than connected, so sorting by last_active_timestamp or connection_status keeps that order."
   - method: team.preferences.list
     status: sdk-compatible
     provenance: slack-reference
@@ -2550,6 +2922,16 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestDiscoverableContactsLookupFollowsTheWorkspaceSetting
       - go-test:internal/service:TestAMemberCanOptOutOfBeingFoundByEmail
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        Every published client (slack_sdk 3.45.0, slack-api-client 1.52.0,
+        @slack/web-api 8.2.0) sends one address as email and reads
+        is_discoverable; the handler used to read a comma-separated emails and
+        answer a contacts array no client decodes. The old emails argument is
+        not accepted, since no published source names it.
   - method: workflows.featured.add
     status: sdk-compatible
     provenance: slack-reference
@@ -2863,6 +3245,7 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestAgentsSessionsRenameAnswersTheReferenceShapes
       - go-test:internal/service:TestAgentSessionRenameIsTheAgentsOwn
       - go-test:internal/store/memory:TestAgentSessionsKeepTheSharedContract
@@ -2880,6 +3263,7 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestAgentsSessionsSetStatusAnswersTheReferenceShapes
       - go-test:internal/service:TestAgentSessionSetStatusFollowsTheReference
       - go-test:internal/service:TestAgentSessionIdentityOverridesTravelAsOneSet
@@ -2904,10 +3288,11 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
     deviations:
       - With summary_message_ts, the summary message's text and blocks are posted by the agent's bot as a reply on the origin message before the channel is archived; Slack shares the message itself. The bot must be able to post in the origin channel. A channel created without an origin answers invalid_arguments, and an archived one already_archived.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.archive/
@@ -2916,11 +3301,12 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
     deviations:
       - The channel name is the friendly name folded to a channel name (lowercase, hyphens for spaces and punctuation, at most 80 characters), or the start of the origin message when no name is given; a taken name is numbered (-2, -3, ...). A code channel is not re-titled automatically after it is created; agents.sessions.rename renames it.
       - The creating agent's bot and the origin message's author are its members. An origin channel the bot cannot read is channel_not_found, one shared with another organization invalid_arguments, and a missing origin message message_not_found. team_id may name only the token's own workspace.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
       - A private code channel is a private channel, so the workspace's "who can create private channels" policy governs it as it governs conversations.create, and a refusal is the general restricted_action.
     provenance: slack-reference
@@ -2930,11 +3316,12 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelCommandsAndCanvasesBelongToTheirAgents
     deviations:
       - The canvas must be one a canvas view of the channel shows, or the channel's own canvas (canvas_not_found otherwise), and the agent must hold access to it as any member would; a canvas view shares it with the channel, so every agent in the channel can use it.
       - content_format is markdown (the default) or html, rendered as canvases.getContent renders them. Comments are this deployment's canvas comments, oldest first, at most 100 with has_more_comments for the rest; each quotes the text of the section it is anchored to. Canvas comments here have no replies and are never resolved, so replies is always empty, is_resolved always false, and include_resolved changes nothing.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.getCanvas/
@@ -2943,11 +3330,12 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelViewsAreTabsAnAgentKeepsCurrent
       - go-test:internal/web:TestCodeChannelShowsItsAgentsViews
     deviations:
       - Each view reports view_id, view_key, file_id, label, content_version and date_added, oldest first. Any member who can read the channel sees the same tabs in the web client; the method itself answers the agent's token.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.listViews/
@@ -2956,10 +3344,11 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelViewsAreTabsAnAgentKeepsCurrent
     deviations:
       - Exactly one of view_id or view_key names the view (invalid_arguments otherwise), and a view the channel does not have is not_found.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.removeView/
@@ -2968,12 +3357,13 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelCommandsAndCanvasesBelongToTheirAgents
       - go-test:internal/domain:TestMergeCanvasSectionsKeepsUnchangedSectionsAndCountsEdits
     deviations:
       - The canvas must be one a canvas view of the channel shows, or the channel's own canvas (canvas_not_found otherwise), and the agent must hold access to it as any member would; a canvas view shares it with the channel, so every agent in the channel can use it.
       - content is split into sections as canvases.create splits markdown, and laid over the current sections in order. A section whose kind and text are unchanged keeps its identity and its comments; sections_changed_count counts, within each run of edits between unchanged sections, the larger of the sections removed and added. Content that changes nothing writes nothing and answers 0.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setCanvasContent/
@@ -2982,12 +3372,13 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelCommandsAndCanvasesBelongToTheirAgents
       - go-test:internal/service:TestCodeChannelCommandsReachTheirAgentInTheirChannel
     deviations:
       - Names are folded to lowercase; one with a slash or whitespace, one longer than 31 characters, a duplicate within the set, one another agent of the channel holds, one of Slack's own commands (whether or not this deployment implements it), or more than 10 in the channel is invalid_arguments. description and argument_hint are at most 255 characters each.
       - A member typing an agent's command in its channel reaches that agent as a slash command, ahead of a workspace app command of the same name; the web client's command menu lists the channel's commands under each agent's name. It is delivered over Socket Mode, or otherwise to the agent's interactivity request URL, since no manifest names a URL for it; an agent with neither cannot be reached. Outside its channel the name is not a command.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setCommands/
@@ -2996,11 +3387,12 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
     deviations:
       - context_bar_items replaces the calling agent's own items, each stamped with its bot_user_id, and the whole bar holds at most 5 items; keys must be unique within the agent's set. The web client shows the bar under the channel's tabs, with the agent resource first and each item as a link or a label. An item_type of action is stored, reported and shown, but the client does not yet make it a control, so no code_channel_action event is ever sent.
       - summary_message must name a live message of the channel (thread_ts, when given, must be its thread). agent_resource writes each field given and keeps the rest.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setProperties/
@@ -3009,13 +3401,14 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelViewsAreTabsAnAgentKeepsCurrent
       - go-test:internal/web:TestCodeChannelShowsItsAgentsViews
     deviations:
       - view_key names the view, so setting a key again updates the same tab (same view_id and file_id) and advances content_version; a diff view is the channel's one diff whatever key is given. The tab is labelled with name, or the key's last path segment without .html. file_id identifies the view's published content but is not a file that files.* lists or reads.
       - html and diff content is capped at 1,000,000 bytes (content_too_large); block_kit blocks are validated as message blocks (invalid_blocks); a canvas the agent cannot share is canvas_not_found, and access_level comment grants the channel read access, so the agent stays its only author.
       - The web client renders an html view in a frame sandboxed to an opaque origin, under a policy that allows inline script and loads from a curated CDN list (cdnjs, jsDelivr, unpkg and Google Fonts; Slack does not publish its own) plus resource_domains. connect_domains is validated (https only, never a private or internal host) and stored, but, as the SDK documents, not honored, so the view may not connect anywhere. A diff renders with added and removed lines marked, block_kit as read-only blocks, canvas and pull_request as links.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setView/
@@ -3190,7 +3583,7 @@ decisions:
     evidence: https://docs.slack.dev/apis/web-api/rate-limits/
     decision: >-
       Every Web API method's rate-limit tier is published: its reference page
-      names it, and the pinned official Java SDK (slack-api-client 1.49.0,
+      names it, and the pinned official Java SDK (slack-api-client 1.52.0,
       com.slack.api.methods.MethodsRateLimits) carries the same table, which
       that client uses to pace its own calls. The tier is therefore decided by
       the published sources; no observation of Slack is needed or planned.
@@ -3206,10 +3599,13 @@ decisions:
       as the 600 a minute the SDK paces them at, chat.postMessage's
       one-per-second-per-channel allowance on top; assistant.threads.setStatus's
       per-conversation allowance is not enforced separately, which is laxer
-      than Slack and refuses no conforming client. Methods the pinned table
-      predates take the tier their reference page names: 27 are cited
-      (admin.usergroups.*, admin.apps.permissions.*, agents.*, among others).
-      The other 43 (apps.datastore.*, blocks.validate, oauth.v2.user.access,
+      than Slack and refuses no conforming client. blocks.validate's special
+      tier, which the table sets apart because the method "requires no
+      token", is enforced as the 60 a minute the SDK paces it at, per client
+      address when no token is presented. Methods the pinned table
+      predates take the tier their reference page names: 16 are cited
+      (admin.usergroups.*, admin.apps.permissions.*, among others).
+      The other 42 (apps.datastore.*, oauth.v2.user.access,
       the short-token rotation methods, entity.*, and other recent
       additions, listed as uncitedTierMethods) are held to Tier 4's floor,
       the laxest published tier, until their reference tier is cited: the

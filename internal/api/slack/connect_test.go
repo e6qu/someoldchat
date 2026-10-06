@@ -24,7 +24,7 @@ func TestSlackConnectInvitationWalksApprovalAndAcceptance(t *testing.T) {
 	ctx := context.Background()
 
 	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{
-		"channel": {"C1"}, "external_limited": {"T2"},
+		"channel": {"C1"}, "user_ids": {"U-two"},
 	})
 	if !created["ok"].(bool) {
 		t.Fatalf("inviteShared=%v", created)
@@ -82,7 +82,7 @@ func TestConversationInfoReportsTheConnectIdentity(t *testing.T) {
 		t.Fatalf("an unshared channel claims a Connect identity: %v", channel)
 	}
 
-	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "external_limited": {"T2"}})
+	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "user_ids": {"U-two"}})
 	id := created["invite"].(map[string]any)["id"].(string)
 	pending := connectCall(t, mux, "/api/conversations.info", url.Values{"channel": {"C1"}})["channel"].(map[string]any)
 	if pending["is_pending_ext_shared"] != true || pending["is_ext_shared"] == true {
@@ -101,7 +101,7 @@ func TestConversationInfoReportsTheConnectIdentity(t *testing.T) {
 // reports what was issued, the other what is still awaiting a host decision.
 func TestConnectListingsSeparateIssuedFromRequested(t *testing.T) {
 	_, mux := connectWorkspace(t)
-	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "external_limited": {"T2"}})
+	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "user_ids": {"U-two"}})
 	id := created["invite"].(map[string]any)["id"].(string)
 
 	requested := connectCall(t, mux, "/api/conversations.requestSharedInvite.list", url.Values{})
@@ -131,7 +131,7 @@ func TestDecliningAndDenyingAreDifferentOutcomes(t *testing.T) {
 	store, mux := connectWorkspace(t)
 	ctx := context.Background()
 
-	denied := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "external_limited": {"T2"}})
+	denied := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "user_ids": {"U-two"}})
 	deniedID := denied["invite"].(map[string]any)["id"].(string)
 	if result := connectCall(t, mux, "/api/conversations.requestSharedInvite.deny", url.Values{"invite_id": {deniedID}}); !result["ok"].(bool) {
 		t.Fatalf("deny=%v", result)
@@ -141,7 +141,7 @@ func TestDecliningAndDenyingAreDifferentOutcomes(t *testing.T) {
 		t.Fatalf("denied invitation=%+v err=%v, want it revoked by the host", stored, err)
 	}
 
-	sent := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "external_limited": {"T2"}})
+	sent := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "user_ids": {"U-two"}})
 	sentID := sent["invite"].(map[string]any)["id"].(string)
 	connectCall(t, mux, "/api/conversations.approveSharedInvite", url.Values{"invite_id": {sentID}})
 	if result := connectCallAs(t, mux, "/api/conversations.declineSharedInvite", url.Values{"invite_id": {sentID}}, "session-two"); !result["ok"].(bool) {
@@ -209,7 +209,7 @@ func TestRequestSharedInviteApproveDecidesTheSameInvitation(t *testing.T) {
 	_, mux := connectWorkspace(t)
 
 	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{
-		"channel": {"C1"}, "external_limited": {"T2"},
+		"channel": {"C1"}, "user_ids": {"U-two"},
 	})
 	if !created["ok"].(bool) {
 		t.Fatalf("inviteShared=%v", created)
@@ -248,7 +248,7 @@ func TestExternalInvitePermissionsSetUpgradesAndDowngrades(t *testing.T) {
 	_, mux := connectWorkspace(t)
 
 	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{
-		"channel": {"C1"}, "external_limited": {"T2"},
+		"channel": {"C1"}, "user_ids": {"U-two"},
 	})
 	id := created["invite"].(map[string]any)["id"].(string)
 	if !connectCall(t, mux, "/api/conversations.approveSharedInvite", url.Values{"invite_id": {id}})["ok"].(bool) {
@@ -312,4 +312,159 @@ func stringsOf(value any) []string {
 		}
 	}
 	return result
+}
+
+// TestSharedInviteArgumentsTheSDKsSendAreApplied walks every argument the
+// published SDKs send to the Slack Connect methods (python slack_sdk 3.45,
+// Java slack-api-client 1.52, @slack/web-api 8.2). Each used to be dropped
+// while the call answered ok: external_limited was read as the organization to
+// invite, user_ids was ignored, the approval's restriction, channel and message
+// never reached the invitation, and requestSharedInvite.list filtered by a
+// `status` no SDK sends.
+func TestSharedInviteArgumentsTheSDKsSendAreApplied(t *testing.T) {
+	store, mux := connectWorkspace(t)
+	ctx := context.Background()
+	store.SeedConversation(domain.Conversation{ID: "C-public", WorkspaceID: "T1", Name: "public"})
+	store.SeedConversationMember("C-public", "U1")
+	store.SeedWorkspace(domain.Workspace{ID: "T3", Name: "Third"})
+	store.SeedUser(domain.User{ID: "U-three", WorkspaceID: "T3", Name: "third"})
+
+	// external_limited is a boolean; it names no organization, so on its own
+	// the invitation has no recipient.
+	for _, values := range []url.Values{
+		{"channel": {"C1"}, "external_limited": {"T2"}},
+		{"channel": {"C1"}, "user_ids": {"U-two"}, "external_limited": {"T2"}},
+		{"channel": {"C1"}, "user_ids": {"U-two,U-three"}},
+		{"channel": {"C1"}, "user_ids": {"U2"}},
+	} {
+		if refused := connectCall(t, mux, "/api/conversations.inviteShared", values); refused["ok"] == true || refused["error"] != "invalid_arg_name" {
+			t.Fatalf("values=%v answered %v, want invalid_arg_name", values, refused)
+		}
+	}
+	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "user_ids": {"U-two"}})
+	invite := created["invite"].(map[string]any)
+	id := invite["id"].(string)
+	if created["invite_id"] != id || invite["target_team"] != "T2" || invite["is_external_limited"] != true {
+		t.Fatalf("inviteShared=%v, want T2 invited external-limited by default", created)
+	}
+	unlimited := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "user_ids": {"U-three"}, "external_limited": {"false"}})
+	if unlimited["invite"].(map[string]any)["is_external_limited"] != false {
+		t.Fatalf("external_limited=false was not kept: %v", unlimited)
+	}
+	unlimitedID := unlimited["invite_id"].(string)
+
+	// requestSharedInvite.list: pending by default, narrowed by invite_ids and
+	// user_id, reported in Slack's invite_requests shape as well.
+	listed := connectCall(t, mux, "/api/conversations.requestSharedInvite.list", url.Values{"invite_ids": {id}})
+	requests := listed["invite_requests"].([]any)
+	if len(requests) != 1 || requests[0].(map[string]any)["id"] != id || requests[0].(map[string]any)["is_external_limited"] != true {
+		t.Fatalf("invite_ids narrowed to %v", listed)
+	}
+	if mine := connectCall(t, mux, "/api/conversations.requestSharedInvite.list", url.Values{"user_id": {"U1"}}); len(mine["invites"].([]any)) != 2 {
+		t.Fatalf("user_id=U1 listed %v, want both of U1's requests", mine)
+	}
+	if others := connectCall(t, mux, "/api/conversations.requestSharedInvite.list", url.Values{"user_id": {"U2"}}); len(others["invites"].([]any)) != 0 {
+		t.Fatalf("user_id=U2 listed %v, want none", others)
+	}
+	if bad := connectCall(t, mux, "/api/conversations.requestSharedInvite.list", url.Values{"include_denied": {"perhaps"}}); bad["error"] != "invalid_arg_name" {
+		t.Fatalf("a malformed boolean answered %v", bad)
+	}
+
+	// requestSharedInvite.approve moves the invitation to channel_id, sets the
+	// restriction with is_external_limited, and keeps the message.
+	if refused := connectCall(t, mux, "/api/conversations.requestSharedInvite.approve", url.Values{"invite_id": {id}, "message": {"not json"}}); refused["error"] != "invalid_arg_name" {
+		t.Fatalf("a malformed message answered %v", refused)
+	}
+	approved := connectCall(t, mux, "/api/conversations.requestSharedInvite.approve", url.Values{
+		"invite_id": {id}, "channel_id": {"C-public"}, "is_external_limited": {"true"},
+		"message": {`{"is_override":true,"text":"Welcome aboard"}`},
+	})
+	if approved["ok"] != true || approved["invite_id"] != id {
+		t.Fatalf("requestSharedInvite.approve=%v", approved)
+	}
+	stored, err := store.GetSharedInvite(ctx, domain.SharedInviteID(id))
+	if err != nil || stored.ConversationID != "C-public" || !stored.ExternalLimited || stored.ReviewMessage != "Welcome aboard" {
+		t.Fatalf("approved invitation=%+v err=%v", stored, err)
+	}
+	if pending := connectCall(t, mux, "/api/conversations.requestSharedInvite.list", url.Values{}); len(pending["invites"].([]any)) != 1 {
+		t.Fatalf("the approved request is still listed as pending: %v", pending)
+	}
+	if withApproved := connectCall(t, mux, "/api/conversations.requestSharedInvite.list", url.Values{"include_approved": {"true"}}); len(withApproved["invites"].([]any)) != 2 {
+		t.Fatalf("include_approved listed %v", withApproved)
+	}
+
+	// The denial's message is kept for the member who asked.
+	if denied := connectCall(t, mux, "/api/conversations.requestSharedInvite.deny", url.Values{"invite_id": {unlimitedID}, "message": {"Not this quarter"}}); denied["ok"] != true {
+		t.Fatalf("deny=%v", denied)
+	}
+	if deniedInvite, err := store.GetSharedInvite(ctx, domain.SharedInviteID(unlimitedID)); err != nil || deniedInvite.ReviewMessage != "Not this quarter" {
+		t.Fatalf("denied invitation=%+v err=%v", deniedInvite, err)
+	}
+	if withDenied := connectCall(t, mux, "/api/conversations.requestSharedInvite.list", url.Values{"include_denied": {"1"}}); len(withDenied["invites"].([]any)) != 1 {
+		t.Fatalf("include_denied listed %v, want the denial alone", withDenied)
+	}
+
+	// acceptSharedInvite names the invitation by channel_id. A request for a
+	// private channel is refused for a public conversation rather than
+	// answered by joining one the whole organization can read, and a team_id
+	// other than the token's is refused.
+	if foreign := connectCallAs(t, mux, "/api/conversations.acceptSharedInvite", url.Values{"channel_id": {"C-public"}, "team_id": {"T9"}, "channel_name": {"shared"}}, "session-two"); foreign["error"] != "invalid_arg_name" {
+		t.Fatalf("a foreign team_id answered %v", foreign)
+	}
+	if private := connectCallAs(t, mux, "/api/conversations.acceptSharedInvite", url.Values{"channel_id": {"C-public"}, "is_private": {"true"}, "channel_name": {"shared"}}, "session-two"); private["ok"] == true {
+		t.Fatalf("a private acceptance joined a public conversation: %v", private)
+	}
+	if none := connectCallAs(t, mux, "/api/conversations.acceptSharedInvite", url.Values{"channel_id": {"C1"}, "channel_name": {"shared"}}, "session-two"); none["error"] != "invite_not_found" {
+		t.Fatalf("a channel with no invitation answered %v", none)
+	}
+	accepted := connectCallAs(t, mux, "/api/conversations.acceptSharedInvite", url.Values{
+		"channel_id": {"C-public"}, "channel_name": {"shared"}, "free_trial_accepted": {"false"}, "team_id": {"T2"},
+	}, "session-two")
+	if accepted["ok"] != true || accepted["channel_id"] != "C-public" || accepted["invite_id"] != id {
+		t.Fatalf("acceptSharedInvite by channel=%v", accepted)
+	}
+	// The restriction is applied: the external-limited organization may not
+	// invite another organization into the channel it joined.
+	if canInvite, err := store.GetExternalInvitePermission(ctx, "T1", "C-public", "T2"); err != nil || canInvite {
+		t.Fatalf("external-limited T2 may invite=%v err=%v", canInvite, err)
+	}
+	store.SeedConversationMember("C-public", "U-two")
+	if onward := connectCallAs(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C-public"}, "user_ids": {"U-three"}}, "session-two"); onward["error"] != "not_allowed" {
+		t.Fatalf("an external-limited organization invited onward: %v", onward)
+	}
+}
+
+// approveSharedInvite and declineSharedInvite take target_team, the other
+// party to the invitation; naming a different one does not decide this one.
+func TestSharedInviteTargetTeamMustNameTheOtherParty(t *testing.T) {
+	store, mux := connectWorkspace(t)
+	created := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "user_ids": {"U-two"}})
+	id := created["invite_id"].(string)
+	if wrong := connectCall(t, mux, "/api/conversations.approveSharedInvite", url.Values{"invite_id": {id}, "target_team": {"T9"}}); wrong["error"] != "invite_not_found" {
+		t.Fatalf("approval naming another organization answered %v", wrong)
+	}
+	if stored, err := store.GetSharedInvite(context.Background(), domain.SharedInviteID(id)); err != nil || stored.Status != domain.SharedInvitePending {
+		t.Fatalf("the invitation was decided anyway: %+v err=%v", stored, err)
+	}
+	if right := connectCall(t, mux, "/api/conversations.approveSharedInvite", url.Values{"invite_id": {id}, "target_team": {"T2"}}); right["ok"] != true {
+		t.Fatalf("approval naming the invited organization=%v", right)
+	}
+	if wrong := connectCallAs(t, mux, "/api/conversations.declineSharedInvite", url.Values{"invite_id": {id}, "target_team": {"T9"}}, "session-two"); wrong["error"] != "invite_not_found" {
+		t.Fatalf("decline naming another host answered %v", wrong)
+	}
+	if right := connectCallAs(t, mux, "/api/conversations.declineSharedInvite", url.Values{"invite_id": {id}, "target_team": {"T1"}}, "session-two"); right["ok"] != true {
+		t.Fatalf("decline naming the host=%v", right)
+	}
+	// listConnectInvites pages by count, which is what the SDKs send.
+	for _, address := range []string{"one@example.org", "two@example.org"} {
+		next := connectCall(t, mux, "/api/conversations.inviteShared", url.Values{"channel": {"C1"}, "emails": {address}})
+		connectCall(t, mux, "/api/conversations.approveSharedInvite", url.Values{"invite_id": {next["invite_id"].(string)}})
+	}
+	page := connectCall(t, mux, "/api/conversations.listConnectInvites", url.Values{"count": {"1"}})
+	if len(page["invites"].([]any)) != 1 || page["response_metadata"].(map[string]any)["next_cursor"] == "" {
+		t.Fatalf("count=1 answered %v", page)
+	}
+	if foreign := connectCall(t, mux, "/api/conversations.listConnectInvites", url.Values{"team_id": {"T9"}}); foreign["error"] != "invalid_arg_name" {
+		t.Fatalf("a foreign team_id answered %v", foreign)
+	}
 }

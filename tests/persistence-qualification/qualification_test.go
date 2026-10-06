@@ -133,6 +133,9 @@ func runQualification(t *testing.T, open opener) {
 		{"deactivating a member releases them from huddles", deactivationReleasesHuddles},
 		{"workspaces for an address agree on every profile", workspacesForAnAddressAgreeOnEveryProfile},
 		{"Slack Connect capacity is claimed transactionally", slackConnectCapacityIsClaimedTransactionally},
+		{"shared invitations keep their review and filter alike", sharedInvitesKeepTheirReviewAndFilterAlike},
+		{"external teams page by name in both directions", externalTeamsPageByNameInBothDirections},
+		{"user reactions count their total", userReactionsCountTheirTotal},
 		{"retention deletes the same content on every profile", retentionDeletesTheSameContentOnEveryProfile},
 		{"retention sweeps are claimed exactly once", retentionSweepsAreClaimedExactlyOnce},
 		{"conversation retention overrides the workspace default", conversationRetentionOverridesTheWorkspaceDefault},
@@ -168,6 +171,10 @@ func runQualification(t *testing.T, open opener) {
 		{"information barriers keep their groups and subjects", informationBarriersKeepTheirGroupsAndSubjects},
 		{"app configuration and resolution survive on every profile", appConfigurationAndResolutionSurvive},
 		{"administrative channel batches are all or nothing", administrativeChannelBatchesAreAllOrNothing},
+		{"administrator channel search agrees on every profile", administratorChannelSearchAgreesOnEveryProfile},
+		{"assigning a member sets the guest tier it names", assigningAMemberSetsTheGuestTierItNames},
+		{"admin user listings filter by activity", adminUserListingsFilterByActivity},
+		{"a created channel keeps its description", aCreatedChannelKeepsItsDescription},
 		{"app activity filters by rank on every profile", appActivityFiltersByRank},
 		{"analytics count one day and not another", analyticsCountOneDayAndNotAnother},
 		{"an unset anomaly allow list is empty and not missing", anomalyAllowListIsEmptyNotMissing},
@@ -175,7 +182,7 @@ func runQualification(t *testing.T, open opener) {
 		{"the OpenID signing key is one key for every replica", openIDSigningKeyIsSingular},
 		{"a workspace's primary owner is one owner who cannot be removed", primaryOwnerIsOneProtectedOwner},
 		{"never being asked again by an app outlives the prompt", unfurlAuthDeclineIsDurable},
-		{"an assistant's loading messages travel with its status", assistantLoadingMessagesTravelWithTheStatus},
+		{"an assistant's loading messages and identity travel with its status", assistantStatusStateTravelsWithTheStatus},
 		{"a profile's name parts and phone are durable", profileNamePartsAndPhoneAreDurable},
 		{"a weekly reminder's weekdays are durable", reminderWeekdaysAreDurable},
 		{"canvas and list retention deletes what went unedited", documentRetentionDeletesWhatWentUnedited},
@@ -192,6 +199,7 @@ func runQualification(t *testing.T, open opener) {
 		{"member preferences are kept per member", memberPreferencesAreKeptPerMember},
 		{"OAuth installs reuse their bot and redeem every grant shape", oauthInstallsReuseTheirBotAndRedeemEveryGrantShape},
 		{"file shares name their carrying messages", fileSharesNameTheirCarryingMessages},
+		{"what SDKs send to chat.update, chat.postEphemeral and upload tickets is durable", sdkMessageArgumentsAreDurable},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -1125,10 +1133,12 @@ func unfurlAuthDeclineIsDurable(t *testing.T, open opener) {
 	}
 }
 
-// assistantLoadingMessagesTravelWithTheStatus holds assistant.threads.setStatus
-// loading_messages on every profile: written with the status, read back in
-// order, and cleared when the status is.
-func assistantLoadingMessagesTravelWithTheStatus(t *testing.T, open opener) {
+// assistantStatusStateTravelsWithTheStatus holds what assistant.threads.setStatus
+// writes beside the status on every profile — its loading_messages, who set
+// it, and the icon_emoji, icon_url and username override it was set with:
+// written with the status, read back as written, left alone by a title write,
+// and cleared when the status is.
+func assistantStatusStateTravelsWithTheStatus(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	repository, closeRepository := open(t, ctx)
@@ -1142,21 +1152,25 @@ func assistantLoadingMessagesTravelWithTheStatus(t *testing.T, open opener) {
 		t.Fatal(err)
 	}
 	thread := domain.MessageTimestamp("1700000000.000100")
-	write := func(status string, loading []string) {
+	write := func(field domain.AssistantThreadField, value domain.AssistantThread) {
 		t.Helper()
-		value := domain.AssistantThread{WorkspaceID: workspaceID, Conversation: conversationID, ThreadTimestamp: thread, Status: status, LoadingMessages: loading, UpdatedAt: time.Now().UTC()}
-		event := events.Event{ID: domain.EventID("E-assistant-" + suffix + status), WorkspaceID: workspaceID, Topic: "assistant.thread_updated", Payload: "{}", CreatedAt: time.Now().UTC()}
-		if err := repository.SetAssistantThread(ctx, value, domain.AssistantThreadStatus, event); err != nil {
+		value.WorkspaceID, value.Conversation, value.ThreadTimestamp, value.UpdatedAt = workspaceID, conversationID, thread, time.Now().UTC()
+		event := events.Event{ID: domain.EventID("E-assistant-" + suffix + string(field) + value.Status + value.Title), WorkspaceID: workspaceID, Topic: events.AssistantThreadUpdatedTopic, Payload: "{}", CreatedAt: time.Now().UTC()}
+		if err := repository.SetAssistantThread(ctx, value, field, event); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write("is thinking", []string{"Reading", "Writing"})
+	identity := domain.AgentIdentity{Username: "Deploy bot", IconEmoji: ":robot_face:", IconURL: "https://example.test/bot.png"}
+	write(domain.AssistantThreadStatus, domain.AssistantThread{Status: "is thinking", LoadingMessages: []string{"Reading", "Writing"}, StatusUserID: "U-assistant", StatusIdentity: identity})
+	write(domain.AssistantThreadTitle, domain.AssistantThread{Title: "Deploy help"})
 	value, err := repository.GetAssistantThread(ctx, workspaceID, conversationID, thread)
-	if err != nil || value.Status != "is thinking" || fmt.Sprint(value.LoadingMessages) != "[Reading Writing]" {
+	if err != nil || value.Status != "is thinking" || fmt.Sprint(value.LoadingMessages) != "[Reading Writing]" ||
+		value.StatusUserID != "U-assistant" || value.StatusIdentity != identity || value.Title != "Deploy help" {
 		t.Fatalf("assistant thread = %+v err=%v", value, err)
 	}
-	write("", nil)
-	if value, err = repository.GetAssistantThread(ctx, workspaceID, conversationID, thread); err != nil || value.Status != "" || len(value.LoadingMessages) != 0 {
+	write(domain.AssistantThreadStatus, domain.AssistantThread{})
+	if value, err = repository.GetAssistantThread(ctx, workspaceID, conversationID, thread); err != nil || value.Status != "" || len(value.LoadingMessages) != 0 ||
+		value.StatusUserID != "" || !value.StatusIdentity.Empty() || value.Title != "Deploy help" {
 		t.Fatalf("cleared assistant thread = %+v err=%v", value, err)
 	}
 }
@@ -1608,9 +1622,26 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 	if _, err := repository.SetRemoteFileShares(ctx, workspaceID, domain.RemoteFileLookup{ID: remote.ID}, []domain.ConversationID{conversationID}, event("remote-share", "remote_file.shared", string(remote.ID))); err != nil {
 		t.Fatal(err)
 	}
-	remotePage, err := repository.ListRemoteFiles(ctx, workspaceID, domain.PageRequest{Limit: 1})
+	remotePage, err := repository.ListRemoteFiles(ctx, workspaceID, domain.RemoteFileFilter{}, domain.PageRequest{Limit: 1})
 	if err != nil || len(remotePage.Files) != 1 || len(remotePage.Files[0].SharedChannels) != 1 {
 		t.Fatalf("remote files=%+v err=%v", remotePage, err)
+	}
+	// files.remote.list's channel, ts_from and ts_to narrow the read in every
+	// profile alike; both bounds are inclusive.
+	for _, filtered := range []struct {
+		filter domain.RemoteFileFilter
+		want   int
+	}{
+		{domain.RemoteFileFilter{Channel: conversationID}, 1},
+		{domain.RemoteFileFilter{Channel: "C-elsewhere"}, 0},
+		{domain.RemoteFileFilter{From: remote.CreatedAt, To: remote.CreatedAt}, 1},
+		{domain.RemoteFileFilter{From: remote.CreatedAt.Add(time.Second)}, 0},
+		{domain.RemoteFileFilter{To: remote.CreatedAt.Add(-time.Second)}, 0},
+	} {
+		page, err := repository.ListRemoteFiles(ctx, workspaceID, filtered.filter, domain.PageRequest{Limit: 10})
+		if err != nil || len(page.Files) != filtered.want {
+			t.Fatalf("remote files filtered by %+v=%+v err=%v, want %d", filtered.filter, page, err, filtered.want)
+		}
 	}
 	remote.Title = "Updated remote"
 	updatedRemote, err := repository.UpdateRemoteFile(ctx, workspaceID, remote, event("remote-update", "remote_file.updated", string(remote.ID)))
@@ -2335,7 +2366,7 @@ func roleAssignmentsAgreeOnEveryProfile(t *testing.T, open opener) {
 	if err := repository.SetRoleAssignments(ctx, assignments, event("roles-again", "role.assignments_added")); err != nil {
 		t.Fatal(err)
 	}
-	page, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 10})
+	page, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Assignments) != 3 || page.HasMore {
 		t.Fatalf("assignments=%+v err=%v", page, err)
 	}
@@ -2348,22 +2379,61 @@ func roleAssignmentsAgreeOnEveryProfile(t *testing.T, open opener) {
 		t.Fatalf("order=%v want=%v", ordered, want)
 	}
 	// A page boundary must resume without repeating or dropping a row.
-	head, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 2})
+	head, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 2})
 	if err != nil || len(head.Assignments) != 2 || !head.HasMore || head.NextCursor == "" {
 		t.Fatalf("head=%+v err=%v", head, err)
 	}
-	tail, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 2, Cursor: head.NextCursor})
+	tail, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 2, Cursor: head.NextCursor})
 	if err != nil || len(tail.Assignments) != 1 || tail.Assignments[0].UserID != second {
 		t.Fatalf("tail=%+v err=%v", tail, err)
 	}
 	// Another role is a different set entirely.
-	if other, otherErr := repository.ListRoleAssignments(ctx, workspaceID, "Rl0B", domain.PageRequest{Limit: 10}); otherErr != nil || len(other.Assignments) != 0 {
+	if other, otherErr := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0B"}}, domain.PageRequest{Limit: 10}); otherErr != nil || len(other.Assignments) != 0 {
 		t.Fatalf("other role=%+v err=%v", other, otherErr)
+	}
+	// One member can hold two roles over one entity, so the order needs the
+	// role as well; role and entity filters combine; an empty query is every
+	// assignment; and a descending walk resumes from its cursor.
+	extra := []domain.RoleAssignment{{RoleID: "Rl0B", EntityID: "C1", UserID: first, WorkspaceID: workspaceID, CreatedAt: now}}
+	if err := repository.SetRoleAssignments(ctx, extra, event("roles-extra", "role.assignments_added")); err != nil {
+		t.Fatal(err)
+	}
+	keys := func(page domain.RoleAssignmentPage) string {
+		values := make([]string, 0, len(page.Assignments))
+		for _, assignment := range page.Assignments {
+			values = append(values, string(assignment.UserID)+"/"+assignment.EntityID+"/"+assignment.RoleID)
+		}
+		return strings.Join(values, ",")
+	}
+	f, s := string(first), string(second)
+	for _, check := range []struct {
+		query domain.RoleAssignmentQuery
+		want  string
+	}{
+		{domain.RoleAssignmentQuery{}, f + "/C1/Rl0A," + f + "/C1/Rl0B," + f + "/C2/Rl0A," + s + "/C1/Rl0A"},
+		{domain.RoleAssignmentQuery{EntityIDs: []string{"C1"}}, f + "/C1/Rl0A," + f + "/C1/Rl0B," + s + "/C1/Rl0A"},
+		{domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0B", "Rl0Z"}, EntityIDs: []string{"C1", "C2"}}, f + "/C1/Rl0B"},
+	} {
+		got, err := repository.ListRoleAssignments(ctx, workspaceID, check.query, domain.PageRequest{Limit: 10})
+		if err != nil || keys(got) != check.want {
+			t.Fatalf("query=%+v got %q err=%v want %q", check.query, keys(got), err, check.want)
+		}
+	}
+	descending, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{}, domain.PageRequest{Limit: 3, Descending: true})
+	if err != nil || keys(descending) != s+"/C1/Rl0A,"+f+"/C2/Rl0A,"+f+"/C1/Rl0B" || !descending.HasMore {
+		t.Fatalf("descending head=%q err=%v", keys(descending), err)
+	}
+	descendingTail, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{}, domain.PageRequest{Limit: 3, Descending: true, Cursor: descending.NextCursor})
+	if err != nil || keys(descendingTail) != f+"/C1/Rl0A" || descendingTail.HasMore {
+		t.Fatalf("descending tail=%q err=%v", keys(descendingTail), err)
+	}
+	if err := repository.DeleteRoleAssignments(ctx, extra, event("roles-extra-remove", "role.assignments_removed")); err != nil {
+		t.Fatal(err)
 	}
 	if err := repository.DeleteRoleAssignments(ctx, assignments[:1], event("roles-remove", "role.assignments_removed")); err != nil {
 		t.Fatal(err)
 	}
-	remaining, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 10})
+	remaining, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 10})
 	if err != nil || len(remaining.Assignments) != 2 {
 		t.Fatalf("remaining=%+v err=%v", remaining, err)
 	}

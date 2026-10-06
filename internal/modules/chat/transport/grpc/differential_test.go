@@ -1088,7 +1088,7 @@ func parityCases() []parityCase {
 			// exists to catch, and none of these had ever been compared.
 			name: "paged administrative reads agree on their bounds and their refusals",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				invites, err := chat.ListSharedInvites(ctx, "T1", "UA", domain.SharedInvitePending, domain.PageRequest{Limit: 5})
+				invites, err := chat.ListSharedInvites(ctx, "T1", "UA", domain.SharedInviteFilter{Statuses: []domain.SharedInviteStatus{domain.SharedInvitePending}}, domain.PageRequest{Limit: 5})
 				if err != nil {
 					return nil, err
 				}
@@ -1108,13 +1108,13 @@ func parityCases() []parityCase {
 				// A limit neither composition may accept: the refusal has to be
 				// the same class on both, not a 400 on one and a 503 on the
 				// other, which is the divergence the backlog note names.
-				_, badPage := chat.ListSharedInvites(ctx, "T1", "UA", domain.SharedInvitePending, domain.PageRequest{Limit: -1})
+				_, badPage := chat.ListSharedInvites(ctx, "T1", "UA", domain.SharedInviteFilter{Statuses: []domain.SharedInviteStatus{domain.SharedInvitePending}}, domain.PageRequest{Limit: -1})
 				_, badRequests := chat.AdminListInviteRequests(ctx, "T1", "UA", domain.InviteRequestPending, domain.PageRequest{Limit: -1})
 				// A status nobody declares is refused rather than treated as
 				// "any".
-				_, badStatus := chat.ListSharedInvites(ctx, "T1", "UA", domain.SharedInviteStatus("nonsense"), domain.PageRequest{Limit: 5})
+				_, badStatus := chat.ListSharedInvites(ctx, "T1", "UA", domain.SharedInviteFilter{Statuses: []domain.SharedInviteStatus{domain.SharedInviteStatus("nonsense")}}, domain.PageRequest{Limit: 5})
 				// A member cannot read any of them.
-				_, memberInvites := chat.ListSharedInvites(ctx, "T1", "U1", domain.SharedInvitePending, domain.PageRequest{Limit: 5})
+				_, memberInvites := chat.ListSharedInvites(ctx, "T1", "U1", domain.SharedInviteFilter{Statuses: []domain.SharedInviteStatus{domain.SharedInvitePending}}, domain.PageRequest{Limit: 5})
 				_, memberRequests := chat.AdminListInviteRequests(ctx, "T1", "U1", domain.InviteRequestPending, domain.PageRequest{Limit: 5})
 				_, memberLogs := chat.ListAccessLogs(ctx, "T1", "U1", time.Time{}, 5, 1)
 				return []any{
@@ -1140,8 +1140,14 @@ func parityCases() []parityCase {
 				_, missingToken := chat.ExternalAuthToken(ctx, "T1", "A1", "Et-nobody")
 				_, unnamedToken := chat.ExternalAuthToken(ctx, "T1", "A1", "")
 				missingRevocation := chat.DeleteExternalAuthToken(ctx, "T1", "U1", "A1", "Et-nobody")
-				connection := chat.UpdateUserAppConnection(ctx, "T1", "U1", "A1")
-				unknownConnection := chat.UpdateUserAppConnection(ctx, "T1", "U1", "A-nobody")
+				connection := chat.UpdateUserAppConnection(ctx, "T1", "U1", "A1", "U1", domain.AppUserConnected)
+				unknownConnection := chat.UpdateUserAppConnection(ctx, "T1", "U1", "A-nobody", "U1", domain.AppUserConnected)
+				// The member and the status are the app's report, and both
+				// cross the seam: a disconnection reported about somebody
+				// else, an unknown member, and a status that is neither.
+				disconnection := chat.UpdateUserAppConnection(ctx, "T1", "U1", "A1", "U2", domain.AppUserDisconnected)
+				unknownMember := errors.Is(chat.UpdateUserAppConnection(ctx, "T1", "U1", "A1", "U-nobody", domain.AppUserDisconnected), domain.ErrUserNotFound)
+				unknownStatus := chat.UpdateUserAppConnection(ctx, "T1", "U1", "A1", "U2", "paused") != nil
 				availability, err := chat.AssistantSearchAvailability(ctx, "T1", "U1")
 				if err != nil {
 					return nil, err
@@ -1154,7 +1160,7 @@ func parityCases() []parityCase {
 				return []any{
 					availability.Enabled, availability.SearchableSources, len(found.Messages),
 					notAURL != nil, unknownApp != nil, missingToken != nil, unnamedToken != nil,
-					missingRevocation != nil, connection != nil, unknownConnection != nil, emptyQuery != nil,
+					missingRevocation != nil, connection != nil, unknownConnection != nil, disconnection != nil, unknownMember, unknownStatus, emptyQuery != nil,
 				}, nil
 			},
 		},
@@ -1337,7 +1343,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 
-				found, err := chat.AdminSearchConversations(ctx, "T1", "UA", "admin-renamed", domain.PageRequest{Limit: 10})
+				found, err := chat.AdminSearchConversations(ctx, "T1", "UA", domain.ConversationSearch{Query: "admin-renamed", Sort: domain.ConversationSortName}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -1487,11 +1493,11 @@ func parityCases() []parityCase {
 				}
 				_, missingList := chat.UpdateList(ctx, "T1", "U1", "F-nobody", "Nothing", "[]", false, false)
 
-				first, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"one"}]`)
+				first, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"one"}]`, "")
 				if err != nil {
 					return nil, err
 				}
-				second, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"two"}]`)
+				second, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"two"}]`, "")
 				if err != nil {
 					return nil, err
 				}
@@ -1577,7 +1583,24 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				_, sharedNowhere := chat.ShareRemoteFile(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "ext-1"}, []domain.ConversationID{"C-nobody"})
-				listed, err := chat.RemoteFiles(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				listed, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				// files.remote.list's channel, ts_from and ts_to cross the seam.
+				inChannel, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{Channel: "C1"}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				elsewhere, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{Channel: "C2"}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				future, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{From: added.CreatedAt.Add(time.Hour)}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				past, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{To: added.CreatedAt.Add(-time.Hour)}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -1585,7 +1608,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				removedTwice := chat.RemoveRemoteFile(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "ext-1"})
-				after, err := chat.RemoteFiles(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				after, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -1593,6 +1616,7 @@ func parityCases() []parityCase {
 					added.Title, byExternal.ID == added.ID, byID.ExternalID,
 					updated.Title, updated.FileType, updated.ExternalURL,
 					shared.SharedChannels, len(listed.Files), len(after.Files),
+					len(inChannel.Files), len(elsewhere.Files), len(future.Files), len(past.Files),
 					duplicate, missing != nil, unaddressed != nil, sharedNowhere != nil, removedTwice != nil,
 				}, nil
 			},
@@ -1858,7 +1882,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				teams := chat.AdminAddUserGroupTeams(ctx, "T1", "UA", "S1", []domain.WorkspaceID{"T1"})
-				members, err := chat.UserGroupUsers(ctx, "T1", "UA", "S1")
+				members, err := chat.UserGroupUsers(ctx, "T1", "UA", "S1", true)
 				if err != nil {
 					return nil, err
 				}
@@ -2105,7 +2129,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				if _, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"ship it"}]`); err != nil {
+				if _, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"ship it"}]`, ""); err != nil {
 					return nil, err
 				}
 				template, err := chat.SaveListAsTemplate(ctx, "T1", "U1", list.ID, "Launch template", "", true)
@@ -2426,7 +2450,9 @@ func parityCases() []parityCase {
 				for _, object := range linked {
 					records = append(records, object.OrgID+"/"+object.RecordID)
 				}
-				if err := chat.AdminUnlinkConversationObjects(ctx, "T1", "UA", []domain.ConversationID{"C1"}); err != nil {
+				// Unlinking renames the channel to new_name, normalized as every
+				// channel name is.
+				if err := chat.AdminUnlinkConversationObjects(ctx, "T1", "UA", "C1", "Unlinked Records"); err != nil {
 					return nil, err
 				}
 				after, err := chat.AdminConversationObjects(ctx, "T1", "UA", "C1")
@@ -2448,8 +2474,14 @@ func parityCases() []parityCase {
 					madeRecords = append(madeRecords, object.OrgID+"/"+object.RecordID)
 				}
 				_, unnamedRecord := chat.AdminCreateConversationForObjects(ctx, "T1", "UA", "no-record-channel", "00D000", "", false)
+				// A new_name another channel holds is refused before the links go.
+				takenName := chat.AdminUnlinkConversationObjects(ctx, "T1", "UA", made.ID, "unlinked-records")
+				stillLinked, err := chat.AdminConversationObjects(ctx, "T1", "UA", made.ID)
+				if err != nil {
+					return nil, err
+				}
 				return []any{
-					made.Name, madeRecords, unnamedRecord != nil,
+					made.Name, madeRecords, unnamedRecord != nil, takenName != nil, len(stillLinked),
 					len(everything.Conversations) > 0, len(quiet.Conversations) <= len(everything.Conversations),
 					excluded, len(stillExcluded), records, len(after),
 					missingChannel != nil, missingTarget != nil,
@@ -2860,7 +2892,7 @@ func parityCases() []parityCase {
 				}
 				repeat := chat.AdminAddRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U1"})
 				stranger := chat.AdminAddRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U-nobody"})
-				page, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 1})
+				page, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 1})
 				if err != nil {
 					return nil, err
 				}
@@ -2868,7 +2900,7 @@ func parityCases() []parityCase {
 				for _, assignment := range page.Assignments {
 					first = append(first, string(assignment.UserID)+"/"+assignment.EntityID)
 				}
-				rest, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 10, Cursor: page.NextCursor})
+				rest, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 10, Cursor: page.NextCursor})
 				if err != nil {
 					return nil, err
 				}
@@ -2879,7 +2911,7 @@ func parityCases() []parityCase {
 				if err := chat.AdminRemoveRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U1"}); err != nil {
 					return nil, err
 				}
-				left, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 10})
+				left, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -3054,7 +3086,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				// The administrator does not own it and is not a manager.
-				found, _, _, err := chat.AdminWorkflows(ctx, "T1", "UA", "nightly", domain.PageRequest{Limit: 10})
+				found, _, _, err := chat.AdminWorkflows(ctx, "T1", "UA", domain.WorkflowSearch{Query: "nightly"}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -3063,12 +3095,12 @@ func parityCases() []parityCase {
 					titles = append(titles, value.Title+":"+string(value.Status))
 				}
 				// A query nobody matches is an empty answer rather than everything.
-				missing, _, _, err := chat.AdminWorkflows(ctx, "T1", "UA", "nothing-is-called-this", domain.PageRequest{Limit: 10})
+				missing, _, _, err := chat.AdminWorkflows(ctx, "T1", "UA", domain.WorkflowSearch{Query: "nothing-is-called-this"}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
 				// A member cannot search the workspace or stop anything.
-				_, _, _, memberErr := chat.AdminWorkflows(ctx, "T1", "U2", "", domain.PageRequest{Limit: 10})
+				_, _, _, memberErr := chat.AdminWorkflows(ctx, "T1", "U2", domain.WorkflowSearch{Query: ""}, domain.PageRequest{Limit: 10})
 				memberStop := chat.AdminUnpublishWorkflows(ctx, "T1", "U2", []domain.WorkflowID{published.ID}) != nil
 				// A workflow that is not here stops the whole request.
 				strangerStop := chat.AdminUnpublishWorkflows(ctx, "T1", "UA", []domain.WorkflowID{published.ID, "Wf-not-here"}) != nil
@@ -3456,7 +3488,7 @@ func parityCases() []parityCase {
 			name:         "a member cannot list the workspace directory administratively",
 			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.AdminListUsers(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				_, err := chat.AdminListUsers(ctx, "T1", "U1", domain.MemberActivityAny, domain.PageRequest{Limit: 10})
 				return nil, err
 			},
 		},
@@ -3607,10 +3639,16 @@ func parityCases() []parityCase {
 				if _, err := chat.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", "", `[{"type":"divider"}]`); err != nil {
 					return nil, err
 				}
-				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1", "", false); err != nil {
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1", "", domain.EphemeralPresentation{}); err != nil {
 					return nil, err
 				}
-				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "linked for @bob", "", "", "A1", "", true); err != nil {
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "linked for @bob", "", "", "A1", "", domain.EphemeralPresentation{LinkNames: true}); err != nil {
+					return nil, err
+				}
+				// chat.postEphemeral's markdown_text, parse and custom identity
+				// cross the seam and come back on the stored message.
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "**styled**", "", "", "A1", "",
+					domain.EphemeralPresentation{MarkdownText: true, Parse: "full", Username: "Helper", IconEmoji: ":robot_face:"}); err != nil {
 					return nil, err
 				}
 				values, err := chat.ListEphemeralMessages(ctx, "T1", "U2", "C1", 10)
@@ -3619,7 +3657,7 @@ func parityCases() []parityCase {
 				}
 				result := make([]any, 0, len(values))
 				for _, value := range values {
-					result = append(result, []any{value.Text, value.Blocks, value.Attachments, value.AppID, value.ID != "", !value.CreatedAt.IsZero()})
+					result = append(result, []any{value.Text, value.Blocks, value.Attachments, value.AppID, value.ID != "", !value.CreatedAt.IsZero(), value.StreamState})
 				}
 				return result, nil
 			},
@@ -3768,7 +3806,7 @@ func parityCases() []parityCase {
 			name:         "profile rejects an oversized display name",
 			wantSentinel: domain.ErrInvalidProfile,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.SetUserProfile(ctx, "T1", "U1", domain.UserProfile{DisplayName: string(bytes.Repeat([]byte("a"), 81))})
+				_, err := chat.SetUserProfile(ctx, "T1", "U1", "U1", domain.UserProfile{DisplayName: string(bytes.Repeat([]byte("a"), 81))})
 				return nil, err
 			},
 		},
@@ -3776,7 +3814,7 @@ func parityCases() []parityCase {
 			name:         "conversation rejects an empty name",
 			wantSentinel: domain.ErrInvalidConversation,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.CreateConversation(ctx, "T1", "U1", "   ", false)
+				_, err := chat.CreateConversation(ctx, "T1", "U1", "   ", false, "")
 				return nil, err
 			},
 		},
@@ -4186,6 +4224,37 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// chat.update's markdown_text, parse, metadata, reply_broadcast and
+			// file_ids are fields of the patch; a converter that dropped any
+			// of them leaves one composition's message unchanged.
+			name: "every chat.update argument crosses the seam",
+			seed: seedFileParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				root, err := chat.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{Conversation: "C1", Text: "root", AppID: "A1"})
+				if err != nil {
+					return nil, err
+				}
+				reply, err := chat.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{Conversation: "C1", Text: "reply", AppID: "A1", ThreadTimestamp: domain.NewMessageTimestamp(root.CreatedAt)})
+				if err != nil {
+					return nil, err
+				}
+				markdown, metadata := "**edited**", `{"event_type":"edited","event_payload":{"n":1}}`
+				files := []domain.FileID{"Fparity-description"}
+				edited, err := chat.UpdateMessage(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(reply.CreatedAt), domain.MessagePatch{
+					Text: &markdown, MarkdownText: true, Parse: "full", Metadata: &metadata, AppID: "A1", ReplyBroadcast: true, FileIDs: &files,
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, notTheirs := chat.UpdateMessage(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(reply.CreatedAt), domain.MessagePatch{Metadata: &metadata})
+				fileIDs := make([]domain.FileID, 0, len(edited.Files))
+				for _, file := range edited.Files {
+					fileIDs = append(fileIDs, file.ID)
+				}
+				return []any{edited.Text, edited.StreamState, edited.Metadata, edited.ReplyBroadcast, fileIDs, notTheirs != nil}, nil
+			},
+		},
+		{
 			// The scheduled writers store the same content a posted message
 			// carries, one send in the future. They are separate seam methods from
 			// the posting ones and drop fields independently of them.
@@ -4244,8 +4313,8 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				_, restrictedErr := chat.CreateConversation(ctx, "T1", "U1", "member-private", true)
-				admitted, err := chat.CreateConversation(ctx, "T1", "UA", "admin-private", true)
+				_, restrictedErr := chat.CreateConversation(ctx, "T1", "U1", "member-private", true, "")
+				admitted, err := chat.CreateConversation(ctx, "T1", "UA", "admin-private", true, "")
 				if err != nil {
 					return nil, err
 				}
@@ -4320,7 +4389,7 @@ func parityCases() []parityCase {
 				call, err := chat.AddCall(ctx, "T1", "U1", "ext-call-1", "EXT-1",
 					"https://example.com/join", "https://example.com/desktop", "Design review", started,
 					[]domain.CallParticipant{{SlackID: "U1"}, {SlackID: "U2"},
-						{External: domain.ExternalCallParticipant{ExternalID: "ext-9", DisplayName: "Guest", AvatarURL: "https://example.com/g.png"}}})
+						{External: domain.ExternalCallParticipant{ExternalID: "ext-9", DisplayName: "Guest", AvatarURL: "https://example.com/g.png"}}}, "U2")
 				if err != nil {
 					return nil, err
 				}
@@ -4545,36 +4614,36 @@ func parityCases() []parityCase {
 			name: "the Slack Connect invitation lifecycle agrees across the seam",
 			seed: seedConnectParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				accepted, err := chat.InviteShared(ctx, "T1", "U1", "C-accept", "T2", "")
+				accepted, err := chat.InviteShared(ctx, "T1", "U1", "C-accept", domain.SharedInviteRecipient{Workspace: "T2"})
 				if err != nil {
 					return nil, err
 				}
-				approved, err := chat.ApproveSharedInvite(ctx, "T1", "U1", accepted.ID)
+				approved, err := chat.ApproveSharedInvite(ctx, "T1", "U1", accepted.ID, domain.SharedInviteReview{})
 				if err != nil {
 					return nil, err
 				}
 				// Approving twice is refused: the invitation is no longer
 				// pending, and both compositions must say so the same way.
-				_, settledErr := chat.ApproveSharedInvite(ctx, "T1", "U1", accepted.ID)
-				conversation, err := chat.AcceptSharedInvite(ctx, "T2", "U2-second", accepted.ID)
+				_, settledErr := chat.ApproveSharedInvite(ctx, "T1", "U1", accepted.ID, domain.SharedInviteReview{})
+				conversation, err := chat.AcceptSharedInvite(ctx, "T2", "U2-second", accepted.ID, false)
 				if err != nil {
 					return nil, err
 				}
 
-				denied, err := chat.InviteShared(ctx, "T1", "U1", "C-deny", "T2", "")
+				denied, err := chat.InviteShared(ctx, "T1", "U1", "C-deny", domain.SharedInviteRecipient{Workspace: "T2"})
 				if err != nil {
 					return nil, err
 				}
-				refused, err := chat.DenySharedInvite(ctx, "T1", "U1", denied.ID)
+				refused, err := chat.DenySharedInvite(ctx, "T1", "U1", denied.ID, domain.SharedInviteReview{})
 				if err != nil {
 					return nil, err
 				}
 
-				revoked, err := chat.InviteShared(ctx, "T1", "U1", "C-revoke", "T2", "")
+				revoked, err := chat.InviteShared(ctx, "T1", "U1", "C-revoke", domain.SharedInviteRecipient{Workspace: "T2"})
 				if err != nil {
 					return nil, err
 				}
-				if _, err := chat.ApproveSharedInvite(ctx, "T1", "U1", revoked.ID); err != nil {
+				if _, err := chat.ApproveSharedInvite(ctx, "T1", "U1", revoked.ID, domain.SharedInviteReview{}); err != nil {
 					return nil, err
 				}
 				withdrawn, err := chat.RevokeSharedInvite(ctx, "T1", "U1", revoked.ID)
@@ -4583,11 +4652,11 @@ func parityCases() []parityCase {
 				}
 				// Declining is the invited organization's answer, so it is
 				// taken by the other workspace's administrator.
-				declinable, err := chat.InviteShared(ctx, "T1", "U1", "C-revoke", "T2", "")
+				declinable, err := chat.InviteShared(ctx, "T1", "U1", "C-revoke", domain.SharedInviteRecipient{Workspace: "T2"})
 				if err != nil {
 					return nil, err
 				}
-				if _, err := chat.ApproveSharedInvite(ctx, "T1", "U1", declinable.ID); err != nil {
+				if _, err := chat.ApproveSharedInvite(ctx, "T1", "U1", declinable.ID, domain.SharedInviteReview{}); err != nil {
 					return nil, err
 				}
 				declined, err := chat.DeclineSharedInvite(ctx, "T2", "U2-second", declinable.ID)
@@ -4639,7 +4708,7 @@ func parityCases() []parityCase {
 					permissionEvents = append(permissionEvents, strings.Join([]string{payload.Channel, payload.Team, payload.CanInvite}, "|"))
 				}
 				sort.Strings(permissionEvents)
-				listed, err := chat.ListSharedInvites(ctx, "T1", "U1", domain.SharedInviteRevoked, domain.PageRequest{Limit: 10})
+				listed, err := chat.ListSharedInvites(ctx, "T1", "U1", domain.SharedInviteFilter{Statuses: []domain.SharedInviteStatus{domain.SharedInviteRevoked}}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -4661,6 +4730,134 @@ func parityCases() []parityCase {
 					string(refused.Status), string(withdrawn.Status), string(declined.Status),
 					string(permitted.ID), permissionEvents, revokedChannels, listed.HasMore,
 					permittedRead, restrictedRead,
+				}, nil
+			},
+		},
+		{
+			// The Slack Connect arguments the SDKs send reach storage through
+			// the seam: a recipient named as a person, the external-limited
+			// restriction, the host's review (a move, an override and a note),
+			// the decision filter and its deadline, and a private acceptance
+			// refused for a public conversation. A composition that dropped any
+			// of them would answer ok and record something else.
+			name: "Slack Connect review arguments agree across the seam",
+			seed: seedConnectParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				limited, err := chat.InviteShared(ctx, "T1", "U1", "C-accept", domain.SharedInviteRecipient{User: "U2-second", ExternalLimited: true})
+				if err != nil {
+					return nil, err
+				}
+				addressed, err := chat.InviteShared(ctx, "T1", "U1", "C-deny", domain.SharedInviteRecipient{Email: "Someone@Elsewhere.example"})
+				if err != nil {
+					return nil, err
+				}
+				_, ownMember := chat.InviteShared(ctx, "T1", "U1", "C-deny", domain.SharedInviteRecipient{User: "U1"})
+				denied, err := chat.DenySharedInvite(ctx, "T1", "U1", addressed.ID, domain.SharedInviteReview{Message: "Not this quarter"})
+				if err != nil {
+					return nil, err
+				}
+				_, movingDenial := chat.DenySharedInvite(ctx, "T1", "U1", limited.ID, domain.SharedInviteReview{Conversation: "C-revoke"})
+				approved, err := chat.ApproveSharedInvite(ctx, "T1", "U1", limited.ID, domain.SharedInviteReview{Conversation: "C-revoke", SetExternalLimited: true, ExternalLimited: true, Message: "Welcome"})
+				if err != nil {
+					return nil, err
+				}
+				decided, err := chat.ListSharedInvites(ctx, "T1", "U1", domain.SharedInviteFilter{
+					Decisions: []domain.SharedInviteDecision{domain.SharedInviteDecisionApproved, domain.SharedInviteDecisionDenied},
+					IDs:       []domain.SharedInviteID{limited.ID, addressed.ID}, InvitedBy: "U1", ExcludeExpiredAt: time.Now().UTC(),
+				}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				listed := make([]string, 0, len(decided.Invites))
+				for _, invite := range decided.Invites {
+					listed = append(listed, strings.Join([]string{string(invite.ConversationID), string(invite.Decision()), invite.ReviewMessage, strconv.FormatBool(invite.ExternalLimited), invite.TargetEmail}, "|"))
+				}
+				sort.Strings(listed)
+				pending, err := chat.ListSharedInvites(ctx, "T1", "U1", domain.SharedInviteFilter{Decisions: []domain.SharedInviteDecision{domain.SharedInviteDecisionPending}}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				_, privateErr := chat.AcceptSharedInvite(ctx, "T2", "U2-second", limited.ID, true)
+				joined, err := chat.AcceptSharedInvite(ctx, "T2", "U2-second", limited.ID, false)
+				if err != nil {
+					return nil, err
+				}
+				canInvite, err := chat.ExternalInvitePermission(ctx, "T1", "U1", "C-revoke", "T2")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					string(limited.TargetWorkspaceID), limited.ExternalLimited, addressed.TargetEmail,
+					errors.Is(ownMember, domain.ErrInvalidSharedInvite), denied.ReviewMessage, string(denied.Decision()),
+					errors.Is(movingDenial, domain.ErrInvalidSharedInvite),
+					string(approved.ConversationID), approved.ReviewMessage, approved.ExternalLimited, approved.ReviewedAt.IsZero(),
+					listed, len(pending.Invites),
+					errors.Is(privateErr, domain.ErrInvalidSharedInvite), string(joined.ID), canInvite,
+				}, nil
+			},
+		},
+		{
+			// The other arguments this change reads cross the seam as values:
+			// a call's attributed creator, a list item's duplicate, a disabled
+			// group's members only when they are asked for, the total a
+			// legacy reactions page reports, and a member's chosen locale.
+			name: "SDK arguments carried to the service agree across the seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				call, err := chat.AddCall(ctx, "T1", "U1", "seam-call", "", "https://example.com/join", "", "", time.Time{}, nil, "U2")
+				if err != nil {
+					return nil, err
+				}
+				_, unknownCreator := chat.AddCall(ctx, "T1", "U1", "seam-call-2", "", "https://example.com/join", "", "", time.Time{}, nil, "U-nobody")
+				list, err := chat.CreateList(ctx, "T1", "U1", "Seam", "", `[{"key":"title","name":"Title","type":"text","is_primary_column":true}]`, "", false, false)
+				if err != nil {
+					return nil, err
+				}
+				source, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"Original"}]`, "")
+				if err != nil {
+					return nil, err
+				}
+				copied, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", "", source.ID)
+				if err != nil {
+					return nil, err
+				}
+				group, err := chat.CreateUserGroup(ctx, "T1", "UA", "Seam", "seam", "", nil)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetUserGroupUsers(ctx, "T1", "UA", group.ID, []domain.UserID{"U1"}); err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetUserGroupEnabled(ctx, "T1", "UA", group.ID, false); err != nil {
+					return nil, err
+				}
+				_, hidden := chat.UserGroupUsers(ctx, "T1", "U1", group.ID, false)
+				members, err := chat.UserGroupUsers(ctx, "T1", "U1", group.ID, true)
+				if err != nil {
+					return nil, err
+				}
+				posted, err := chat.Post(ctx, "T1", "U1", "C1", "react to me", "", "")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AddReaction(ctx, "T1", "U1", "C1", timestampOf(posted), "eyes"); err != nil {
+					return nil, err
+				}
+				reactions, err := chat.UserReactions(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetMemberPreference(ctx, "T1", "U2", domain.LanguagePreference, "en-XA"); err != nil {
+					return nil, err
+				}
+				member, err := chat.UserInfo(ctx, "T1", "U1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					call.CreatedBy, errors.Is(unknownCreator, domain.ErrUserNotFound),
+					copied.Fields == source.Fields, copied.ID != source.ID,
+					errors.Is(hidden, storepkg.ErrNotFound), members,
+					reactions.Total, member.Locale,
 				}, nil
 			},
 		},
@@ -4738,7 +4935,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.AdminAssignUser(ctx, "T1", "U1", accepted.ID, []domain.ConversationID{"C2"}); err != nil {
+				if err := chat.AdminAssignUser(ctx, "T1", "U1", accepted.ID, domain.GuestTierUnchanged, []domain.ConversationID{"C2"}); err != nil {
 					return nil, err
 				}
 				// Only the two authority roles are listable: the routes that
@@ -4813,7 +5010,7 @@ func parityCases() []parityCase {
 				// Resetting sessions and removing the account are the two ways
 				// an administrator ends someone's access, and they are not the
 				// same: the first leaves the member in the workspace.
-				if err := chat.ResetUserSessions(ctx, "T1", "U1", member.ID); err != nil {
+				if err := chat.ResetUserSessions(ctx, "T1", "U1", member.ID, domain.SessionClientsAll); err != nil {
 					return nil, err
 				}
 				stillHere, err := chat.UserInfo(ctx, "T1", "U1", member.ID)
@@ -4867,14 +5064,14 @@ func parityCases() []parityCase {
 				// The second organization arrives the way Slack Connect puts it
 				// there, by accepting an invitation, which is the only route
 				// that attaches one.
-				invite, err := chat.InviteShared(ctx, "T1", "U1", "C-accept", "T2", "")
+				invite, err := chat.InviteShared(ctx, "T1", "U1", "C-accept", domain.SharedInviteRecipient{Workspace: "T2"})
 				if err != nil {
 					return nil, err
 				}
-				if _, err := chat.ApproveSharedInvite(ctx, "T1", "U1", invite.ID); err != nil {
+				if _, err := chat.ApproveSharedInvite(ctx, "T1", "U1", invite.ID, domain.SharedInviteReview{}); err != nil {
 					return nil, err
 				}
-				if _, err := chat.AcceptSharedInvite(ctx, "T2", "U2-second", invite.ID); err != nil {
+				if _, err := chat.AcceptSharedInvite(ctx, "T2", "U2-second", invite.ID, false); err != nil {
 					return nil, err
 				}
 				teams, hasMore, _, err := chat.AdminConversationTeams(ctx, "T1", "U1", "C-accept", domain.PageRequest{Limit: 10})
@@ -5132,7 +5329,7 @@ func parityCases() []parityCase {
 				// An external upload is a ticket, bytes, then a completion that
 				// turns both into a shared file. The completion is the seam
 				// method under test; the first two set it up.
-				upload, err := chat.CreateExternalUpload(ctx, "T1", "U1", "report.txt", "text/plain", 6, time.Minute)
+				upload, err := chat.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "report.txt", MIMEType: "text/plain", Size: 6, TTL: time.Minute, Description: "The quarterly numbers", FileType: "text"})
 				if err != nil {
 					return nil, err
 				}
@@ -5147,7 +5344,7 @@ func parityCases() []parityCase {
 				}
 				completed := make([]string, 0, len(files))
 				for _, file := range files {
-					completed = append(completed, file.Name+"|"+file.Title+"|"+strconv.FormatInt(file.Size, 10))
+					completed = append(completed, file.Name+"|"+file.Title+"|"+strconv.FormatInt(file.Size, 10)+"|"+file.Description+"|"+file.FileType)
 				}
 				sort.Strings(completed)
 				// A public link is a token that anyone holding it may read, so
@@ -5542,7 +5739,7 @@ func parityCases() []parityCase {
 			name:  "external upload ticket",
 			blobs: true,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				upload, err := chat.CreateExternalUpload(ctx, "T1", "U1", "external.txt", "text/plain", 5, time.Minute)
+				upload, err := chat.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "external.txt", MIMEType: "text/plain", Size: 5, TTL: time.Minute})
 				if err != nil {
 					return nil, err
 				}
@@ -5632,7 +5829,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				updated, err := chat.SetUserProfile(ctx, "T1", "U1", domain.UserProfile{DisplayName: "alice2", StatusText: "Focusing", StatusEmoji: ":dart:"})
+				updated, err := chat.SetUserProfile(ctx, "T1", "U1", "U1", domain.UserProfile{DisplayName: "alice2", StatusText: "Focusing", StatusEmoji: ":dart:"})
 				if err != nil {
 					return nil, err
 				}
@@ -6091,7 +6288,10 @@ func parityCases() []parityCase {
 				if err := chat.SetAssistantThreadTitle(ctx, "T1", "U1", "C1", thread, "Deploy help"); err != nil {
 					return nil, err
 				}
-				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", nil); err != nil {
+				// The status carries its loading messages and identity override
+				// across the seam; both are part of the compared value.
+				identity := domain.AgentIdentity{Username: "Deploy bot", IconEmoji: ":robot_face:", IconURL: "https://example.test/bot.png"}
+				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", []string{"Reading the runbook"}, identity); err != nil {
 					return nil, err
 				}
 				if err := chat.SetAssistantThreadSuggestedPrompts(ctx, "T1", "U1", "C1", thread, "Try", []domain.AssistantPrompt{{Title: "Roll back", Message: "How do I roll back?"}}); err != nil {
@@ -6102,14 +6302,21 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				// Clearing the status must leave the title and prompts alone.
-				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "", nil); err != nil {
+				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "", nil, domain.AgentIdentity{}); err != nil {
 					return nil, err
 				}
 				after, err := chat.AssistantThread(ctx, "T1", "U1", "C1", thread)
 				if err != nil {
 					return nil, err
 				}
-				return []any{value.Title, value.Status, value.PromptsTitle, len(value.Prompts), after.Title, after.Status, len(after.Prompts)}, nil
+				// An icon_url that is not an absolute http(s) address is the
+				// same error class on both compositions.
+				invalid := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", nil, domain.AgentIdentity{IconURL: "javascript:alert(1)"})
+				return []any{
+					value.Title, value.Status, value.PromptsTitle, len(value.Prompts), value.LoadingMessages, value.StatusUserID, value.StatusIdentity,
+					after.Title, after.Status, len(after.Prompts), len(after.LoadingMessages), after.StatusUserID, after.StatusIdentity,
+					errors.Is(invalid, domain.ErrInvalidAssistantThread),
+				}, nil
 			},
 		},
 		{
@@ -6393,13 +6600,13 @@ func parityCases() []parityCase {
 				}
 				// A member cannot read another member's sessions, nor end them.
 				_, memberErr := chat.UserSessions(ctx, "T1", "U1", "U1")
-				memberBulk := chat.ResetUserSessionsBulk(ctx, "T1", "U1", []domain.UserID{"U1"}) != nil
+				memberBulk := chat.ResetUserSessionsBulk(ctx, "T1", "U1", []domain.UserID{"U1"}, domain.SessionClientsAll) != nil
 				// A stranger in the list stops the whole request, so an
 				// administrator acting on a pasted list finds out they were
 				// wrong instead of signing out an arbitrary prefix of it.
-				mixed := chat.ResetUserSessionsBulk(ctx, "T1", "UA", []domain.UserID{"U1", "U-not-here"}) != nil
-				empty := chat.ResetUserSessionsBulk(ctx, "T1", "UA", nil) != nil
-				bulk := chat.ResetUserSessionsBulk(ctx, "T1", "UA", []domain.UserID{"U1", "U2"})
+				mixed := chat.ResetUserSessionsBulk(ctx, "T1", "UA", []domain.UserID{"U1", "U-not-here"}, domain.SessionClientsAll) != nil
+				empty := chat.ResetUserSessionsBulk(ctx, "T1", "UA", nil, domain.SessionClientsAll) != nil
+				bulk := chat.ResetUserSessionsBulk(ctx, "T1", "UA", []domain.UserID{"U1", "U2"}, domain.SessionClientsAll)
 				after, err := chat.UserSessions(ctx, "T1", "UA", "U1")
 				if err != nil {
 					return nil, err
@@ -6415,7 +6622,7 @@ func parityCases() []parityCase {
 			// something false about who can read their messages.
 			name: "external connections are listed for an administrator and ended everywhere at once",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				before, err := chat.ExternalTeams(ctx, "T1", "UA", domain.PageRequest{Limit: 10})
+				before, err := chat.ExternalTeams(ctx, "T1", "UA", domain.ExternalTeamFilter{}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -6423,15 +6630,35 @@ func parityCases() []parityCase {
 				for _, team := range before.Teams {
 					listed = append(listed, string(team.ID)+":"+strconv.Itoa(team.Channels))
 				}
+				// The direction and the filters cross the seam too: a
+				// descending read, and filters that match every connection
+				// and none.
+				reversed, err := chat.ExternalTeams(ctx, "T1", "UA", domain.ExternalTeamFilter{}, domain.PageRequest{Limit: 10, Descending: true})
+				if err != nil {
+					return nil, err
+				}
+				backwards := make([]string, 0, len(reversed.Teams))
+				for _, team := range reversed.Teams {
+					backwards = append(backwards, string(team.ID))
+				}
+				connected, err := chat.ExternalTeams(ctx, "T1", "UA", domain.ExternalTeamFilter{ConnectionStatus: domain.ExternalTeamConnected, Workspaces: []domain.WorkspaceID{"T1"}}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				blocked, err := chat.ExternalTeams(ctx, "T1", "UA", domain.ExternalTeamFilter{ConnectionStatus: domain.ExternalTeamBlocked}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				_, invalidErr := chat.ExternalTeams(ctx, "T1", "UA", domain.ExternalTeamFilter{ConnectionStatus: "SOMETIMES"}, domain.PageRequest{Limit: 10})
 				// A member who is not an administrator cannot ask at all.
-				_, memberErr := chat.ExternalTeams(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				_, memberErr := chat.ExternalTeams(ctx, "T1", "U1", domain.ExternalTeamFilter{}, domain.PageRequest{Limit: 10})
 				// An organization nothing is shared with cannot be
 				// disconnected: saying otherwise would report ending a
 				// connection that never existed. Neither can the workspace
 				// disconnect itself.
 				absent := chat.DisconnectExternalTeam(ctx, "T1", "UA", "T-never-connected") != nil
 				itself := chat.DisconnectExternalTeam(ctx, "T1", "UA", "T1") != nil
-				return []any{listed, memberErr != nil, absent, itself}, nil
+				return []any{listed, backwards, len(connected.Teams), len(blocked.Teams), invalidErr != nil, memberErr != nil, absent, itself}, nil
 			},
 		},
 		{
@@ -6451,7 +6678,7 @@ func parityCases() []parityCase {
 				if _, err := chat.AddListColumn(ctx, "T1", "U1", list.ID, "Status", domain.ListColumnSelect, []string{"open", "done"}); err != nil {
 					return nil, err
 				}
-				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`)
+				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`, "")
 				if err != nil {
 					return nil, err
 				}
@@ -6609,7 +6836,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"the outage"}]`)
+				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"the outage"}]`, "")
 				if err != nil {
 					return nil, err
 				}
@@ -6654,7 +6881,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"the logo"}]`)
+				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"the logo"}]`, "")
 				if err != nil {
 					return nil, err
 				}
@@ -7536,7 +7763,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"milk"}]`)
+				item, err := chat.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"milk"}]`, "")
 				if err != nil {
 					return nil, err
 				}

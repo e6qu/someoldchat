@@ -186,7 +186,9 @@ var liveEventTopics = []string{
 	// nobody, so the WebRTC handshake never reached the peer it addressed.
 	"huddle.signal",
 	"huddle.reaction",
-	// An agent session re-renders its own region in the thread pane.
+	// An assistant's thread state and an agent session each re-render their
+	// own region in the thread pane.
+	events.AssistantThreadUpdatedTopic,
 	events.AgentSessionStatusSetTopic,
 	events.AgentSessionRenamedTopic,
 	events.AgentSessionTitleChangedTopic,
@@ -827,27 +829,6 @@ type documentCardView struct {
 	Preview   string
 	URL       string
 	UpdatedAt string
-}
-
-// assistantThreadView is what a member sees of an assistant's own state: a
-// title for the thread, a transient status, and prompts they can send with one
-// click. Present distinguishes "no assistant has touched this thread" from
-// "an assistant set everything to empty", which render differently.
-type assistantThreadView struct {
-	Present      bool
-	Title        string
-	Status       string
-	PromptsTitle string
-	Prompts      []assistantPromptView
-	// LoadingMessages rotate beneath the status while it shows: the first is
-	// rendered, and LoadingMessagesJSON carries them all to the page script.
-	LoadingMessages     []string
-	LoadingMessagesJSON string
-}
-
-type assistantPromptView struct {
-	Title   string
-	Message string
 }
 
 type canvasCommentView struct {
@@ -1748,7 +1729,7 @@ a.time{display:inline-flex;align-items:center;min-height:24px;padding:0 4px;marg
 .block-table-wrap{max-width:100%;overflow:auto}.block-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:13px}.block-table th,.block-table td{border:1px solid var(--line);padding:6px 9px;vertical-align:top;white-space:pre-wrap}.block-table th{background:var(--hover);font-weight:700;text-align:left}
 .message-block.task-card{max-width:560px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}.message-block.task-card.error{border-color:var(--danger)}.message-block.task-card.plan{border-left:4px solid var(--accent)}.message-block.task-card.dense{padding:6px 10px;font-size:13px}.stream-task-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.stream-task-status{color:var(--muted);font-size:12px;font-weight:700}.stream-task-details,.stream-task-output{margin-top:6px;color:var(--muted)}.stream-task-sources{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 0;padding:0;list-style:none}.streaming-label{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:12px}.streaming-label::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);animation:stream-pulse 1.2s ease-in-out infinite}@keyframes stream-pulse{50%{opacity:.3}}
 .message-block.alert{max-width:620px;padding:10px 12px;border-left:4px solid var(--muted);border-radius:5px;background:var(--hover)}.message-block.alert.info{border-color:#1264a3}.message-block.alert.warning{border-color:#d29b05}.message-block.alert.error{border-color:var(--danger)}.message-block.alert.success{border-color:var(--ok)}
-.message-block.card{max-width:560px;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}.block-card-hero{display:block;width:100%;max-height:280px;object-fit:cover}.block-card-content{padding:12px}.block-card-heading{display:flex;align-items:flex-start;gap:9px}.block-card-heading>div{display:grid;gap:2px}.block-card-icon{width:36px;height:36px;border-radius:6px;object-fit:cover}.block-card-title,.block-card-subtitle{display:block}.block-card-subtitle,.block-card-subtext{color:var(--muted);font-size:13px}.block-card-body{margin-top:10px}.block-card-subtext{margin-top:8px}.message-block.carousel{max-width:min(720px,100%);overflow-x:auto;padding-bottom:6px}.block-carousel-track{display:flex;gap:10px;scroll-snap-type:x mandatory}.block-carousel-card{min-width:min(320px,calc(80vw / var(--zoom, 1)));max-width:360px;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;scroll-snap-align:start}
+.message-block.card{max-width:560px;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}.block-card-hero{display:block;width:100%;max-height:280px;object-fit:cover}.block-card-content{padding:12px}.block-card-heading{display:flex;align-items:flex-start;gap:9px}.block-card-heading>div{display:grid;gap:2px}.block-card-icon{width:36px;height:36px;border-radius:6px;object-fit:cover}.block-card-title,.block-card-subtitle{display:block}.block-card-subtitle,.block-card-subtext{color:var(--muted);font-size:13px}.block-card-body{margin-top:10px}.block-card-subtext{margin-top:8px}.message-block.carousel{max-width:min(720px,100%)}.block-carousel-track{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x mandatory}.block-carousel-card{min-width:min(320px,calc(80vw / var(--zoom, 1)));max-width:360px;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;scroll-snap-align:start}
 .message-block.plan{max-width:620px}.block-plan{border:1px solid var(--line);border-radius:9px;background:var(--panel);overflow:hidden}.block-plan-title{display:block;padding:10px 12px;border-bottom:1px solid var(--line)}.block-plan-tasks{display:grid}.block-plan-task{padding:10px 12px;border-bottom:1px solid var(--line)}.block-plan-task:last-child{border-bottom:0}
 .message-block.container{width:100%}.message-block.container.narrow{max-width:420px}.message-block.container.standard{max-width:620px}.message-block.container.wide{max-width:780px}.message-block.container.full{max-width:none}.block-container-frame{display:block;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}.block-container-frame>summary,.block-container-frame>header{display:flex;align-items:center;gap:9px;padding:11px 13px}.block-container-frame>summary{cursor:pointer}.block-container-frame>summary::marker{color:var(--muted)}.block-container-frame>header.with-divider{border-bottom:1px solid var(--line)}.block-container-icon{width:36px;height:36px;border-radius:6px;object-fit:cover}.block-container-heading{display:grid;gap:2px}.block-container-heading>span{color:var(--muted);font-size:13px}.block-container-children{display:grid;gap:8px;padding:4px 13px 13px}.block-container-child{min-width:0}
 .message-block.data-visualization{max-width:680px}.block-chart{margin:0;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.block-chart>figcaption{margin-bottom:12px;font-weight:800}.block-chart-pie-layout{display:flex;align-items:center;gap:18px}.block-chart-pie-graphic{width:150px;aspect-ratio:1;border-radius:50%;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 12%,transparent);flex:0 0 auto}.block-chart-legend{display:flex;flex-wrap:wrap;gap:7px 14px;margin:10px 0 0;padding:0;list-style:none;font-size:12px}.block-chart-pie-layout>.block-chart-legend{display:grid;margin:0}.block-chart-legend li{display:flex;align-items:center;gap:6px}.block-chart-legend strong{margin-left:auto}.block-chart-swatch{width:9px;height:9px;border-radius:2px;flex:0 0 auto}.block-chart-bars{display:grid;gap:8px}.block-chart-bar-group{display:grid;grid-template-columns:minmax(90px,1fr) 3fr;align-items:center;gap:8px}.block-chart-category{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}.block-chart-bar-series{display:grid;gap:3px}.block-chart-bar{display:block;min-width:2px;height:8px;border-radius:3px}.block-chart-svg{display:block;width:100%;height:auto;max-height:240px;overflow:visible}.block-chart-axis{stroke:var(--line);stroke-width:1}.block-chart-data{margin-top:10px;font-size:12px}.block-chart-data>summary{cursor:pointer;color:var(--muted)}@media(max-width:600px){.block-chart-pie-layout{align-items:flex-start;flex-direction:column}.block-chart-pie-graphic{width:120px}.block-chart-bar-group{grid-template-columns:80px 1fr}}
@@ -1820,6 +1801,7 @@ const workspaceRefinements = `<style>
 .assistant-state{display:grid;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
 .assistant-title{margin:0;font-weight:800}
 .assistant-status{margin:0;color:var(--muted);font-size:13px;font-style:italic}
+.assistant-status-name{color:var(--text);font-style:normal;font-weight:700}
 .assistant-loading{margin:2px 0 0;color:var(--muted);font-size:12px}
 .assistant-prompts{display:grid;gap:6px}.assistant-prompts-title{margin:0;color:var(--muted);font-size:12px;font-weight:700}
 .assistant-prompts form{margin:0}
@@ -2134,18 +2116,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
       {{if .ThreadTimestamp}}
       <aside class="thread" aria-labelledby="thread-heading">
         <div class="thread-heading"><h2 id="thread-heading" tabindex="-1">Thread</h2><span class="thread-channel">{{.ChannelPrefix}}{{.ChannelName}}</span><a class="thread-close" href="/app?channel={{.Channel}}" data-thread-close aria-label="Close thread" title="Close" aria-keyshortcuts="Escape">×</a></div>
-        {{if .Assistant.Present}}<div class="assistant-state">
-          {{if .Assistant.Title}}<p class="assistant-title">{{.Assistant.Title}}</p>{{end}}
-          {{if .Assistant.Status}}<p class="assistant-status" role="status">{{.Assistant.Status}}</p>{{end}}
-          {{if .Assistant.LoadingMessages}}<p class="assistant-loading" aria-hidden="true" data-assistant-loading="{{.Assistant.LoadingMessagesJSON}}">{{index .Assistant.LoadingMessages 0}}</p>{{end}}
-          {{if .Assistant.Prompts}}<div class="assistant-prompts">
-            {{if .Assistant.PromptsTitle}}<p class="assistant-prompts-title">{{.Assistant.PromptsTitle}}</p>{{end}}
-            {{range .Assistant.Prompts}}<form method="post" action="{{$.ThreadComposer.ComposeURL}}" hx-post="{{$.ThreadComposer.ComposeURL}}">
-              <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="thread_ts" value="{{$.ThreadTimestamp}}"><input type="hidden" name="text" value="{{.Message}}">
-              <button class="assistant-prompt" type="submit" title="{{.Message}}">{{.Title}}</button>
-            </form>{{end}}
-          </div>{{end}}
-        </div>{{end}}
+        <div id="assistant-thread" data-fragment="{{.Assistant.FragmentURL}}" data-live="true">{{template "assistant-thread" .Assistant}}</div>
         <div id="agent-session" data-fragment="{{.AgentSession.FragmentURL}}" data-live="true">{{template "agent-session" .AgentSession}}</div>
         <div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true"{{if .MediaCollapsed}} data-media="collapsed"{{end}}>{{template "messages" .Thread}}</div>
         {{if .CanReply}}<div class="composer-wrap thread-composer-wrap">{{template "composer" .ThreadComposer}}</div>{{else if .CanPost}}<p class="posting-restricted" role="note">Only some members can reply to threads in {{.ChannelPrefix}}{{.ChannelName}}.</p>{{end}}
@@ -2241,7 +2212,7 @@ var pageMarkup = attachmentPartial + composerPartial + `{{define "title"}}{{.Cha
 </div>
 {{end}}
 {{end}}
-` + messagesPartial + messageDialogsPartial + huddlePartial + typingPartial + homePanePartial + conversationDetailsPartial + agentSessionPartial
+` + messagesPartial + messageDialogsPartial + huddlePartial + typingPartial + homePanePartial + conversationDetailsPartial + agentSessionPartial + agentIdentityPartial + assistantThreadPartial
 
 var pageTemplate = mustPage(pageMarkup)
 
@@ -4224,6 +4195,7 @@ func (h Handler) Register(serveMux *http.ServeMux) {
 	mux.HandleFunc("POST /app/typing", h.recordTyping)
 	mux.HandleFunc("GET /app/typing", h.typingFragment)
 	mux.HandleFunc("GET /app/agent-session", h.agentSessionFragment)
+	mux.HandleFunc("GET /app/assistant-thread", h.assistantThreadFragment)
 	mux.HandleFunc("POST /app/agent-session/stop", h.stopAgentSession)
 	mux.HandleFunc("POST /app/agent-session/title", h.retitleAgentSession)
 	mux.HandleFunc("GET /app/search", h.search)
@@ -5148,7 +5120,7 @@ func (h Handler) recordTimezone(r *http.Request, principal auth.Principal, zone 
 	}
 	profile := current.Profile
 	profile.Timezone = zone
-	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
+	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, profile); err != nil {
 		log.Printf("web: the time zone of %s was not recorded: %v", principal.UserID, err)
 	}
 }
@@ -5444,7 +5416,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		MemberCount:          memberCount,
 		WorkspaceName:        workspaceName,
 		CSRFToken:            csrfToken,
-		Assistant:            h.assistantThreadView(r.Context(), principal, channel, domain.MessageTimestamp(threadTimestamp)),
+		Assistant:            h.assistantThreadView(r.Context(), principal, channel, domain.MessageTimestamp(threadTimestamp), csrfToken),
 		AgentSession:         h.agentSessionView(r.Context(), principal, channel, domain.MessageTimestamp(threadTimestamp), csrfToken, isMember),
 		CanvasURL:            channelCanvasURL(principal, conversation, isMember),
 		IsMember:             isMember,
@@ -5837,9 +5809,6 @@ func markDaysAndFirstUnread(views []messageView, messages []domain.Message, last
 	}
 }
 
-// newMessageList builds the single type the message partial renders. It also
-// reports a user-facing notice when an adjacent read (reactions, pins) is
-// degraded, instead of failing the whole conversation view.
 // resolveCallBlocks fills in Slack's call blocks from the calls the workspace
 // actually knows about. A message carries only `{"type":"call","call_id":…}`,
 // so before this the block rendered as nothing at all: an app could register a
@@ -5850,29 +5819,6 @@ func markDaysAndFirstUnread(views []messageView, messages []domain.Message, last
 // page carrying more than a handful is not a shape Slack produces; the bound
 // keeps a crafted message from turning one render into an unbounded number of
 // reads.
-// assistantThreadView reads what an assistant app has set on the open thread.
-// A thread nothing has touched is the overwhelmingly common case and answers an
-// empty view rather than an error, so a missing row is not a failed page.
-func (h Handler) assistantThreadView(ctx context.Context, principal auth.Principal, conversation domain.ConversationID, thread domain.MessageTimestamp) assistantThreadView {
-	if thread == "" {
-		return assistantThreadView{}
-	}
-	value, err := h.Messages.AssistantThread(ctx, principal.WorkspaceID, principal.UserID, conversation, thread)
-	if err != nil {
-		return assistantThreadView{}
-	}
-	view := assistantThreadView{Present: true, Title: value.Title, Status: value.Status, PromptsTitle: value.PromptsTitle}
-	if value.Status != "" && len(value.LoadingMessages) > 0 {
-		if encoded, encodeErr := json.Marshal(value.LoadingMessages); encodeErr == nil {
-			view.LoadingMessages, view.LoadingMessagesJSON = value.LoadingMessages, string(encoded)
-		}
-	}
-	for _, prompt := range value.Prompts {
-		view.Prompts = append(view.Prompts, assistantPromptView{Title: prompt.Title, Message: prompt.Message})
-	}
-	return view
-}
-
 func (h Handler) resolveCallBlocks(ctx context.Context, principal auth.Principal, messages []messageView) {
 	const maximumCallsPerPage = 20
 	resolved := map[string]*callBlockView{}
@@ -5925,6 +5871,9 @@ func (h Handler) callParticipantNames(ctx context.Context, principal auth.Princi
 	return values
 }
 
+// newMessageList builds the single type the message partial renders. It also
+// reports a user-facing notice when an adjacent read (reactions, pins) is
+// degraded, instead of failing the whole conversation view.
 func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, request messageListRequest) (messageList, string) {
 	conversation := request.Conversation
 	csrfToken := request.CSRFToken
@@ -5950,6 +5899,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 				ID: value.ID, WorkspaceID: value.WorkspaceID, Conversation: value.Conversation,
 				AuthorID: value.AuthorID, AppID: value.AppID, Text: value.Text, Blocks: value.Blocks,
 				Attachments: value.Attachments, ThreadTimestamp: value.ThreadTimestamp, CreatedAt: value.CreatedAt,
+				StreamState: value.StreamState,
 			})
 		}
 		sort.Slice(messages, func(left, right int) bool {
@@ -6643,15 +6593,15 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		// One instant for the whole list, so two invitations with the same
 		// deadline cannot be rendered on opposite sides of it.
 		now := time.Now().UTC()
-		for _, status := range []domain.SharedInviteStatus{domain.SharedInvitePending, domain.SharedInviteApproved} {
-			page, listErr := h.Messages.ListSharedInvites(ctx, principal.WorkspaceID, principal.UserID, status, domain.PageRequest{Limit: 25})
-			if listErr != nil {
-				continue
-			}
+		// The conversation is part of the query. It used to be filtered from
+		// the first twenty-five of each status across the whole workspace, so
+		// a busy workspace's channel showed none of its own invitations.
+		page, listErr := h.Messages.ListSharedInvites(ctx, principal.WorkspaceID, principal.UserID, domain.SharedInviteFilter{
+			Statuses:     []domain.SharedInviteStatus{domain.SharedInvitePending, domain.SharedInviteApproved},
+			Conversation: conversation.ID,
+		}, domain.PageRequest{Limit: 25})
+		if listErr == nil {
 			for _, invite := range page.Invites {
-				if invite.ConversationID != conversation.ID {
-					continue
-				}
 				view := connectInviteView{
 					ID: string(invite.ID), Status: string(invite.Status),
 					Target:     h.workspaceName(ctx, principal, invite.TargetWorkspaceID),
@@ -7138,7 +7088,13 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 			if decided == "" {
 				decided = "decided"
 			}
-			view.Text = template.HTML("Your Slack Connect invitation for " + template.HTMLEscapeString(name) + " was " + template.HTMLEscapeString(decided) + ".")
+			text := "Your Slack Connect invitation for " + template.HTMLEscapeString(name) + " was " + template.HTMLEscapeString(decided) + "."
+			// The note the host kept with the decision is addressed to this
+			// member; it was accepted by the API and never shown to them.
+			if note := strings.TrimSpace(item.SharedInviteMessage); note != "" {
+				text += " “" + template.HTMLEscapeString(note) + "”"
+			}
+			view.Text = template.HTML(text)
 		}
 		if item.ListItemID != "" && item.SourceAvailable {
 			name := strings.TrimSpace(item.ListName)
@@ -10537,7 +10493,7 @@ func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
 	if value, listErr := h.Messages.List(r.Context(), principal.WorkspaceID, principal.UserID, id); listErr == nil {
 		primaryKey = listPrimaryColumnKey(value.Schema)
 	}
-	if _, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, id, "", listTitleFields(fields["title"], primaryKey)); err != nil {
+	if _, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, id, "", listTitleFields(fields["title"], primaryKey), ""); err != nil {
 		h.writeMutationError(w, r, http.StatusBadRequest, "The item was not added", "Enter a title and try again.")
 		return
 	}
@@ -11066,7 +11022,7 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 		profile.Image512 = avatarURL
 		profile.Image1024 = avatarURL
 	}
-	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
+	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, profile); err != nil {
 		// A rejected save keeps every submitted value and says which limit it
 		// crossed, instead of answering with a bare status line.
 		if errors.Is(err, domain.ErrInvalidProfile) {
@@ -11955,7 +11911,7 @@ func (h Handler) stageDraftFiles(w http.ResponseWriter, r *http.Request) {
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
 		}
-		upload, createErr := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, header.Size, draftAttachmentTTL)
+		upload, createErr := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalUploadRequest{Name: name, MIMEType: mimeType, Size: header.Size, TTL: draftAttachmentTTL})
 		if createErr != nil {
 			h.writeMutationError(w, r, http.StatusBadRequest, "That file was not staged", "Choose non-empty files with valid names and try again.")
 			return
@@ -12045,7 +12001,7 @@ func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
 		}
-		upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, header.Size, 15*time.Minute)
+		upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalUploadRequest{Name: name, MIMEType: mimeType, Size: header.Size, TTL: 15 * time.Minute})
 		if err != nil {
 			h.writeMutationError(w, r, http.StatusBadRequest, "That file was not staged", "Choose non-empty files with valid names and try again.")
 			return
@@ -12928,7 +12884,7 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	private := strings.EqualFold(strings.TrimSpace(fields["is_private"]), "true")
-	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
+	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private, "")
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		heading := "The channel was not created"

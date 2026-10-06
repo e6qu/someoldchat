@@ -1524,7 +1524,7 @@ func TestTheConnectPanelSeparatesInvitationsFromConnections(t *testing.T) {
 		t.Fatalf("an invitation was rendered as a connection: %s", pending)
 	}
 
-	page, err := store.ListSharedInvites(ctx, "T1", domain.SharedInvitePending, domain.PageRequest{Limit: 10})
+	page, err := store.ListSharedInvites(ctx, "T1", domain.SharedInviteFilter{Statuses: []domain.SharedInviteStatus{domain.SharedInvitePending}}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Invites) != 1 {
 		t.Fatalf("invites=%+v err=%v", page.Invites, err)
 	}
@@ -1540,7 +1540,7 @@ func TestTheConnectPanelSeparatesInvitationsFromConnections(t *testing.T) {
 		t.Fatalf("an approved invitation was rendered as a connection: %s", details())
 	}
 
-	if _, err := (service.Messages{Store: store}).AcceptSharedInvite(ctx, "T2", "U1-second", invite.ID); err != nil {
+	if _, err := (service.Messages{Store: store}).AcceptSharedInvite(ctx, "T2", "U1-second", invite.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	connected := details()
@@ -1563,7 +1563,7 @@ func TestWithdrawingWorksOnPendingAndApprovedInvitations(t *testing.T) {
 	store.SeedWorkspace(domain.Workspace{ID: "T2", Name: "Second"})
 	messages := service.Messages{Store: store}
 
-	pending, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", "")
+	pending, err := messages.InviteShared(ctx, "T1", "U1", "C1", domain.SharedInviteRecipient{Workspace: "T2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1577,11 +1577,11 @@ func TestWithdrawingWorksOnPendingAndApprovedInvitations(t *testing.T) {
 		t.Fatalf("pending invitation=%+v err=%v", stored, err)
 	}
 
-	approved, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", "")
+	approved, err := messages.InviteShared(ctx, "T1", "U1", "C1", domain.SharedInviteRecipient{Workspace: "T2"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", approved.ID); err != nil {
+	if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", approved.ID, domain.SharedInviteReview{}); err != nil {
 		t.Fatal(err)
 	}
 	second := httptest.NewRecorder()

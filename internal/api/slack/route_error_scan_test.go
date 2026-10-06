@@ -357,7 +357,7 @@ func scopeGrants(parsed []*ast.File) map[string][]string {
 // literal they return is a code they can emit.
 var codeReturningFunctions = map[string]struct{}{
 	"mapServiceErrorNamed": {}, "mapAdminError": {}, "postMessageError": {},
-	"decodeErrorCode": {}, "viewMethodError": {},
+	"decodeErrorCode": {}, "viewMethodError": {}, "profileSetError": {},
 }
 
 // handlerFacts reads every function declared in this package's source.

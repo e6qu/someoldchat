@@ -3219,32 +3219,35 @@ func (s *Store) DeleteRoleAssignments(_ context.Context, assignments []domain.Ro
 	return nil
 }
 
-func (s *Store) ListRoleAssignments(_ context.Context, workspace domain.WorkspaceID, roleID string, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+func (s *Store) ListRoleAssignments(_ context.Context, workspace domain.WorkspaceID, query domain.RoleAssignmentQuery, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
+	if err := store.CheckPage(request); err != nil {
 		return domain.RoleAssignmentPage{}, err
 	}
-	after, err := domain.DecodePairCursor(request.Cursor)
+	after, positioned, err := domain.DecodeRoleAssignmentCursor(request.Cursor)
 	if err != nil {
 		return domain.RoleAssignmentPage{}, err
+	}
+	// ahead reports whether left comes first in the requested direction.
+	ahead := func(left, right domain.RoleAssignmentPosition) bool {
+		if request.Descending {
+			return right.Before(left)
+		}
+		return left.Before(right)
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	assignments := make([]domain.RoleAssignment, 0, len(s.roleAssignments))
 	for _, assignment := range s.roleAssignments {
-		if assignment.WorkspaceID != workspace || assignment.RoleID != roleID {
+		if assignment.WorkspaceID != workspace || !query.Includes(assignment) {
 			continue
 		}
-		if after.First != "" && (string(assignment.UserID) < after.First ||
-			(string(assignment.UserID) == after.First && assignment.EntityID <= after.Second)) {
+		if positioned && !ahead(after, assignment.Position()) {
 			continue
 		}
 		assignments = append(assignments, assignment)
 	}
 	sort.Slice(assignments, func(left, right int) bool {
-		if assignments[left].UserID != assignments[right].UserID {
-			return assignments[left].UserID < assignments[right].UserID
-		}
-		return assignments[left].EntityID < assignments[right].EntityID
+		return ahead(assignments[left].Position(), assignments[right].Position())
 	})
 	hasMore := len(assignments) > request.Limit
 	if hasMore {
@@ -3252,8 +3255,7 @@ func (s *Store) ListRoleAssignments(_ context.Context, workspace domain.Workspac
 	}
 	page := domain.RoleAssignmentPage{Assignments: assignments, HasMore: hasMore}
 	if hasMore && len(assignments) > 0 {
-		last := assignments[len(assignments)-1]
-		page.NextCursor, err = domain.NewPairCursor(string(last.UserID), last.EntityID)
+		page.NextCursor, err = domain.NewRoleAssignmentCursor(assignments[len(assignments)-1])
 	}
 	return page, err
 }
@@ -3414,7 +3416,10 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 	return nil
 }
 
-func (s *Store) AssignUser(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channels []domain.ConversationID, event events.Event) error {
+func (s *Store) AssignUser(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, tier domain.GuestTier, channels []domain.ConversationID, event events.Event) error {
+	if !tier.Valid() {
+		return store.InvalidArgument("invalid guest tier")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	user, ok := s.users[userID]
@@ -3426,6 +3431,9 @@ func (s *Store) AssignUser(_ context.Context, workspaceID domain.WorkspaceID, us
 	if !ok {
 		return store.ErrNotFound
 	}
+	if tier.Guest() && membership.Role != domain.WorkspaceRoleMember {
+		return store.InvalidArgument("an administrator or owner cannot be added as a guest")
+	}
 	for _, channelID := range channels {
 		conversation, exists := s.conversations[channelID]
 		if !exists || conversation.WorkspaceID != workspaceID || conversation.Kind == domain.ConversationTypeIM {
@@ -3436,6 +3444,7 @@ func (s *Store) AssignUser(_ context.Context, workspaceID domain.WorkspaceID, us
 	user.Updated = secondsInstant(event.CreatedAt)
 	s.users[userID] = user
 	membership.Active = true
+	membership = tier.Apply(membership)
 	s.members[key] = membership
 	for _, channelID := range channels {
 		members := s.memberships[channelID]
@@ -3565,9 +3574,12 @@ func (s *Store) listUsers(_ context.Context, workspace domain.WorkspaceID, searc
 	return page, nil
 }
 
-func (s *Store) ListAdminUsers(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.AdminUserPage, error) {
+func (s *Store) ListAdminUsers(_ context.Context, workspace domain.WorkspaceID, activity domain.MemberActivity, request domain.PageRequest) (domain.AdminUserPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.AdminUserPage{}, err
+	}
+	if !activity.Valid() {
+		return domain.AdminUserPage{}, store.InvalidArgument("invalid member activity filter")
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -3576,7 +3588,7 @@ func (s *Store) ListAdminUsers(_ context.Context, workspace domain.WorkspaceID, 
 	s.mu.RLock()
 	values := make([]domain.AdminUser, 0, request.Limit+1)
 	for _, membership := range s.members {
-		if membership.WorkspaceID != workspace || (after != "" && string(membership.UserID) <= after) {
+		if membership.WorkspaceID != workspace || !activity.Includes(membership) || (after != "" && string(membership.UserID) <= after) {
 			continue
 		}
 		user, ok := s.users[membership.UserID]
@@ -5844,7 +5856,7 @@ func (s *Store) GetSharedInvite(_ context.Context, id domain.SharedInviteID) (do
 	return value, nil
 }
 
-func (s *Store) ListSharedInvites(_ context.Context, workspace domain.WorkspaceID, status domain.SharedInviteStatus, request domain.PageRequest) (domain.SharedInvitePage, error) {
+func (s *Store) ListSharedInvites(_ context.Context, workspace domain.WorkspaceID, filter domain.SharedInviteFilter, request domain.PageRequest) (domain.SharedInvitePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.SharedInvitePage{}, err
 	}
@@ -5855,7 +5867,7 @@ func (s *Store) ListSharedInvites(_ context.Context, workspace domain.WorkspaceI
 	s.mu.RLock()
 	values := make([]domain.SharedInvite, 0, request.Limit+1)
 	for _, value := range s.sharedInvites {
-		if value.Status != status || string(value.ID) <= after {
+		if !filter.Matches(value) || string(value.ID) <= after {
 			continue
 		}
 		if value.WorkspaceID != workspace && value.TargetWorkspaceID != workspace {
@@ -5873,9 +5885,12 @@ func (s *Store) ListSharedInvites(_ context.Context, workspace domain.WorkspaceI
 	return page, err
 }
 
-func (s *Store) SetSharedInviteStatus(_ context.Context, id domain.SharedInviteID, from, to domain.SharedInviteStatus, at time.Time, event events.Event) error {
+func (s *Store) SetSharedInviteStatus(_ context.Context, id domain.SharedInviteID, from, to domain.SharedInviteStatus, at time.Time, review domain.SharedInviteReview, event events.Event) error {
 	if !domain.SharedInviteTransition(from, to) {
 		return store.InvalidArgument("a shared invitation cannot move between those states")
+	}
+	if to != domain.SharedInviteApproved && (review.Conversation != "" || review.SetExternalLimited) {
+		return store.InvalidArgument("only an approval moves or restricts a shared invitation")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -5886,6 +5901,27 @@ func (s *Store) SetSharedInviteStatus(_ context.Context, id domain.SharedInviteI
 	if value.Status != from {
 		return store.ErrConflict
 	}
+	if review.Conversation != "" && review.Conversation != value.ConversationID {
+		conversation, exists := s.conversations[review.Conversation]
+		if !exists || conversation.WorkspaceID != value.WorkspaceID {
+			return store.ErrNotFound
+		}
+		if value.TargetWorkspaceID != "" {
+			for _, existing := range s.sharedInvites {
+				if existing.ID == value.ID || existing.ConversationID != review.Conversation || existing.TargetWorkspaceID != value.TargetWorkspaceID {
+					continue
+				}
+				if existing.Status == domain.SharedInvitePending || existing.Status == domain.SharedInviteApproved || existing.Status == domain.SharedInviteAccepted {
+					return store.ErrAlreadyExists
+				}
+			}
+		}
+		value.ConversationID = review.Conversation
+	}
+	if review.SetExternalLimited {
+		value.ExternalLimited = review.ExternalLimited
+	}
+	value.ReviewMessage = review.Message
 	value.Status = to
 	if to == domain.SharedInviteApproved {
 		value.ReviewedAt = at.UTC()
@@ -5930,6 +5966,12 @@ func (s *Store) AcceptSharedInvite(_ context.Context, id domain.SharedInviteID, 
 		}
 		teams[invite.TargetWorkspaceID] = struct{}{}
 		s.conversationTeams[invite.ConversationID] = teams
+	}
+	if invite.ExternalLimited {
+		if s.externalInvitePermissions[invite.ConversationID] == nil {
+			s.externalInvitePermissions[invite.ConversationID] = map[domain.WorkspaceID]bool{}
+		}
+		s.externalInvitePermissions[invite.ConversationID][invite.TargetWorkspaceID] = false
 	}
 	invite.Status = domain.SharedInviteAccepted
 	invite.SettledAt = at.UTC()
@@ -6005,12 +6047,19 @@ func (s *Store) SetConversationTeams(_ context.Context, workspace domain.Workspa
 // ListExternalTeams mirrors the SQL derivation: the connections are whatever
 // organizations appear in this workspace's channels.
 func (s *Store) ListExternalTeams(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.ExternalTeamPage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+	if err := store.CheckPage(request); err != nil {
 		return domain.ExternalTeamPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
 		return domain.ExternalTeamPage{}, err
+	}
+	afterName, afterID := "", domain.WorkspaceID("")
+	if after != "" {
+		var ok bool
+		if afterName, afterID, ok = domain.ParseExternalTeamCursorKey(after); !ok {
+			return domain.ExternalTeamPage{}, store.InvalidArgument("invalid external team cursor")
+		}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -6029,19 +6078,25 @@ func (s *Store) ListExternalTeams(_ context.Context, workspace domain.WorkspaceI
 	}
 	teams := make([]domain.ExternalTeam, 0, len(counts))
 	for team, channels := range counts {
-		if string(team) <= after {
+		value := domain.ExternalTeam{ID: team, Name: s.workspaces[team].Name, Channels: channels}
+		if after != "" && !request.ExternalTeamAfter(value, afterName, afterID) {
 			continue
 		}
-		teams = append(teams, domain.ExternalTeam{ID: team, Name: s.workspaces[team].Name, Channels: channels})
+		teams = append(teams, value)
 	}
-	sort.Slice(teams, func(i, j int) bool { return teams[i].ID < teams[j].ID })
+	sort.Slice(teams, func(i, j int) bool {
+		if teams[i].Name != teams[j].Name {
+			return (teams[i].Name < teams[j].Name) != request.Descending
+		}
+		return (teams[i].ID < teams[j].ID) != request.Descending
+	})
 	hasMore := len(teams) > request.Limit
 	if hasMore {
 		teams = teams[:request.Limit]
 	}
 	page := domain.ExternalTeamPage{Teams: teams, HasMore: hasMore}
 	if hasMore {
-		page.NextCursor, err = domain.NewListCursor(string(teams[len(teams)-1].ID))
+		page.NextCursor, err = domain.NewListCursor(domain.ExternalTeamCursorKey(teams[len(teams)-1]))
 	}
 	return page, err
 }
@@ -7771,6 +7826,7 @@ func (s *Store) SetAssistantThread(_ context.Context, value domain.AssistantThre
 	case domain.AssistantThreadStatus:
 		current.Status = value.Status
 		current.LoadingMessages = append([]string(nil), value.LoadingMessages...)
+		current.StatusUserID, current.StatusIdentity = value.StatusUserID, value.StatusIdentity
 	case domain.AssistantThreadPrompts:
 		current.PromptsTitle = value.PromptsTitle
 		current.Prompts = append([]domain.AssistantPrompt(nil), value.Prompts...)
@@ -8168,6 +8224,7 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 			// this member made, which remains true either way.
 			if invite, ok := s.sharedInvites[item.SharedInviteID]; ok && invite.WorkspaceID == workspace {
 				item.SharedInviteStatus = invite.Status
+				item.SharedInviteMessage = invite.ReviewMessage
 				item.SourceAvailable = true
 			}
 		}
@@ -8637,37 +8694,53 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 	return page, nil
 }
 
-func (s *Store) SearchConversations(_ context.Context, workspace domain.WorkspaceID, query string, request domain.PageRequest) (domain.ConversationPage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+func (s *Store) SearchConversations(_ context.Context, workspace domain.WorkspaceID, search domain.ConversationSearch, request domain.PageRequest) (domain.ConversationPage, error) {
+	if err := store.CheckPage(request); err != nil {
 		return domain.ConversationPage{}, err
 	}
-	after, err := domain.DecodeListCursor(request.Cursor)
+	if !search.Sort.Valid() {
+		return domain.ConversationPage{}, store.InvalidArgument("invalid conversation search sort")
+	}
+	search.Query = domain.FoldSearchText(strings.TrimSpace(search.Query))
+	after, positioned, err := domain.DecodeConversationSearchCursor(request.Cursor, search.Sort)
 	if err != nil {
 		return domain.ConversationPage{}, err
 	}
-	query = domain.FoldSearchText(strings.TrimSpace(query))
-	if query == "" {
-		return domain.ConversationPage{}, store.InvalidArgument("conversation search query is required")
+	// ahead reports whether left comes first in the requested direction.
+	ahead := func(left, right domain.ConversationSearchPosition) bool {
+		if request.Descending {
+			return right.Before(left)
+		}
+		return left.Before(right)
+	}
+	type ranked struct {
+		conversation domain.Conversation
+		position     domain.ConversationSearchPosition
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	values := make([]domain.Conversation, 0, request.Limit+1)
+	values := make([]ranked, 0, request.Limit+1)
 	for _, conversation := range s.conversations {
-		if conversation.WorkspaceID != workspace || (after != "" && string(conversation.ID) <= after) {
+		if conversation.WorkspaceID != workspace || !search.Matches(conversation) {
 			continue
 		}
-		if !strings.Contains(domain.FoldSearchText(conversation.Name), query) && !strings.Contains(domain.FoldSearchText(conversation.Topic), query) && !strings.Contains(domain.FoldSearchText(conversation.Purpose), query) {
+		position := search.PositionIn(conversation, len(s.memberships[conversation.ID]))
+		if positioned && !ahead(after, position) {
 			continue
 		}
-		values = appendSorted(values, conversation, request.Limit+1, func(left, right domain.Conversation) bool { return left.ID < right.ID })
+		values = appendSorted(values, ranked{conversation: conversation, position: position}, request.Limit+1,
+			func(left, right ranked) bool { return ahead(left.position, right.position) })
 	}
 	page := domain.ConversationPage{HasMore: len(values) > request.Limit}
 	if page.HasMore {
 		values = values[:request.Limit]
 	}
-	page.Conversations = values
+	page.Conversations = make([]domain.Conversation, 0, len(values))
+	for _, value := range values {
+		page.Conversations = append(page.Conversations, value.conversation)
+	}
 	if page.HasMore {
-		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+		page.NextCursor, err = domain.NewConversationSearchCursor(search.Sort, values[len(values)-1].position)
 	}
 	return page, err
 }
@@ -9252,6 +9325,7 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 	}
 	s.mu.RLock()
 	values := make([]domain.UserReaction, 0, request.Limit+1)
+	total := 0
 	for conversationID, messages := range s.messages {
 		// The SQL repositories list a reaction in a private conversation only
 		// while the reactor is still a member. Without the same rule here a
@@ -9264,7 +9338,14 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 			if message.WorkspaceID != workspace {
 				continue
 			}
-			if position != "" && domain.UserReactionCursorKey(message) <= position {
+			reacted := false
+			for _, reaction := range s.reactions[message.ID] {
+				reacted = reacted || reaction.UserID == user
+			}
+			if reacted {
+				total++
+			}
+			if !reacted || (position != "" && domain.UserReactionCursorKey(message) <= position) {
 				continue
 			}
 			for _, reaction := range s.reactions[message.ID] {
@@ -9278,7 +9359,7 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 	s.mu.RUnlock()
 	sort.Slice(values, func(left, right int) bool { return userReactionKey(values[left]) < userReactionKey(values[right]) })
 	// A page is Limit messages with every reaction row of each.
-	page := domain.UserReactionPage{Items: make([]domain.UserReaction, 0, len(values))}
+	page := domain.UserReactionPage{Items: make([]domain.UserReaction, 0, len(values)), Total: total}
 	messages := 0
 	for _, value := range values {
 		if len(page.Items) == 0 || page.Items[len(page.Items)-1].Message.ID != value.Message.ID {
@@ -11135,7 +11216,7 @@ func (s *Store) GetRemoteFile(_ context.Context, workspace domain.WorkspaceID, l
 	return domain.RemoteFile{}, store.ErrNotFound
 }
 
-func (s *Store) ListRemoteFiles(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.RemoteFilePage, error) {
+func (s *Store) ListRemoteFiles(_ context.Context, workspace domain.WorkspaceID, filter domain.RemoteFileFilter, request domain.PageRequest) (domain.RemoteFilePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.RemoteFilePage{}, err
 	}
@@ -11148,6 +11229,9 @@ func (s *Store) ListRemoteFiles(_ context.Context, workspace domain.WorkspaceID,
 	for _, value := range s.remoteFiles {
 		if value.WorkspaceID == workspace && !value.Deleted && (after == "" || string(value.ID) > after) {
 			value.SharedChannels = append([]domain.ConversationID(nil), s.remoteFileShares[value.ID]...)
+			if !filter.Matches(value) {
+				continue
+			}
 			values = appendSorted(values, value, request.Limit+1, func(left, right domain.RemoteFile) bool { return left.ID < right.ID })
 		}
 	}
@@ -11247,6 +11331,60 @@ func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event e
 	return store.ErrNotFound
 }
 
+func (s *Store) UpdateMessageFiles(_ context.Context, message domain.Message, event events.Event, grants []store.FileShareGrant, unshares []store.FileUnshare, companions ...events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values := s.messages[message.Conversation]
+	index := slices.IndexFunc(values, func(value domain.Message) bool { return value.ID == message.ID })
+	if index < 0 {
+		return store.ErrNotFound
+	}
+	seen := make(map[domain.FileID]struct{}, len(message.Files))
+	for _, carried := range message.Files {
+		file, exists := s.files[carried.ID]
+		if _, duplicate := seen[carried.ID]; duplicate || !exists || file.Deleted || file.WorkspaceID != message.WorkspaceID {
+			return store.ErrNotFound
+		}
+		seen[carried.ID] = struct{}{}
+	}
+	message.Unfurls = copyUnfurls(message.Unfurls)
+	message.Files = append([]domain.File(nil), message.Files...)
+	values[index] = message
+	s.messages[message.Conversation] = values
+	s.outbox = append(s.outbox, event)
+	for _, grant := range grants {
+		if slices.Contains(s.fileShares[grant.FileID], message.Conversation) {
+			continue
+		}
+		s.fileShares[grant.FileID] = append(s.fileShares[grant.FileID], message.Conversation)
+		slices.Sort(s.fileShares[grant.FileID])
+		s.outbox = append(s.outbox, grant.Event)
+	}
+	s.endFileSharesLocked(message, unshares)
+	s.outbox = append(s.outbox, companions...)
+	return nil
+}
+
+// endFileSharesLocked ends each candidate file's share into the message's
+// conversation unless another live message still carries the file there, and
+// journals the candidate's event only for a share it ended.
+func (s *Store) endFileSharesLocked(message domain.Message, unshares []store.FileUnshare) {
+	for _, unshare := range unshares {
+		if s.fileIsCarriedElsewhereLocked(unshare.FileID, message.Conversation, message.ID) {
+			continue
+		}
+		channels := s.fileShares[unshare.FileID]
+		retained := slices.DeleteFunc(append([]domain.ConversationID(nil), channels...), func(channel domain.ConversationID) bool {
+			return channel == message.Conversation
+		})
+		if len(retained) == len(channels) {
+			continue
+		}
+		s.fileShares[unshare.FileID] = retained
+		s.outbox = append(s.outbox, unshare.Event)
+	}
+}
+
 func (s *Store) DeleteMessage(_ context.Context, message domain.Message, event events.Event, unshares []store.FileUnshare) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -11259,20 +11397,7 @@ func (s *Store) DeleteMessage(_ context.Context, message domain.Message, event e
 		values[index] = message
 		s.messages[message.Conversation] = values
 		s.outbox = append(s.outbox, event)
-		for _, unshare := range unshares {
-			if s.fileIsCarriedElsewhereLocked(unshare.FileID, message.Conversation, message.ID) {
-				continue
-			}
-			channels := s.fileShares[unshare.FileID]
-			retained := slices.DeleteFunc(append([]domain.ConversationID(nil), channels...), func(channel domain.ConversationID) bool {
-				return channel == message.Conversation
-			})
-			if len(retained) == len(channels) {
-				continue
-			}
-			s.fileShares[unshare.FileID] = retained
-			s.outbox = append(s.outbox, unshare.Event)
-		}
+		s.endFileSharesLocked(message, unshares)
 		return nil
 	}
 	return store.ErrNotFound

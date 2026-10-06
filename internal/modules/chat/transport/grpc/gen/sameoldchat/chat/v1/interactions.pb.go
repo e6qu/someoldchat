@@ -488,8 +488,13 @@ type AssistantThread struct {
 	Prompts           []*AssistantPrompt     `protobuf:"bytes,7,rep,name=prompts,proto3" json:"prompts,omitempty"`
 	UpdatedAtUnixNano int64                  `protobuf:"varint,8,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
 	LoadingMessages   []string               `protobuf:"bytes,9,rep,name=loading_messages,json=loadingMessages,proto3" json:"loading_messages,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Who set the status, and the identity override it was set with.
+	StatusUserId    string `protobuf:"bytes,10,opt,name=status_user_id,json=statusUserId,proto3" json:"status_user_id,omitempty"`
+	StatusUsername  string `protobuf:"bytes,11,opt,name=status_username,json=statusUsername,proto3" json:"status_username,omitempty"`
+	StatusIconEmoji string `protobuf:"bytes,12,opt,name=status_icon_emoji,json=statusIconEmoji,proto3" json:"status_icon_emoji,omitempty"`
+	StatusIconUrl   string `protobuf:"bytes,13,opt,name=status_icon_url,json=statusIconUrl,proto3" json:"status_icon_url,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *AssistantThread) Reset() {
@@ -585,6 +590,34 @@ func (x *AssistantThread) GetLoadingMessages() []string {
 	return nil
 }
 
+func (x *AssistantThread) GetStatusUserId() string {
+	if x != nil {
+		return x.StatusUserId
+	}
+	return ""
+}
+
+func (x *AssistantThread) GetStatusUsername() string {
+	if x != nil {
+		return x.StatusUsername
+	}
+	return ""
+}
+
+func (x *AssistantThread) GetStatusIconEmoji() string {
+	if x != nil {
+		return x.StatusIconEmoji
+	}
+	return ""
+}
+
+func (x *AssistantThread) GetStatusIconUrl() string {
+	if x != nil {
+		return x.StatusIconUrl
+	}
+	return ""
+}
+
 type SetAssistantThreadRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -597,8 +630,13 @@ type SetAssistantThreadRequest struct {
 	PromptsTitle    string                 `protobuf:"bytes,8,opt,name=prompts_title,json=promptsTitle,proto3" json:"prompts_title,omitempty"`
 	Prompts         []*AssistantPrompt     `protobuf:"bytes,9,rep,name=prompts,proto3" json:"prompts,omitempty"`
 	LoadingMessages []string               `protobuf:"bytes,10,rep,name=loading_messages,json=loadingMessages,proto3" json:"loading_messages,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The status's identity override (assistant.threads.setStatus username,
+	// icon_emoji and icon_url).
+	Username      string `protobuf:"bytes,11,opt,name=username,proto3" json:"username,omitempty"`
+	IconEmoji     string `protobuf:"bytes,12,opt,name=icon_emoji,json=iconEmoji,proto3" json:"icon_emoji,omitempty"`
+	IconUrl       string `protobuf:"bytes,13,opt,name=icon_url,json=iconUrl,proto3" json:"icon_url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SetAssistantThreadRequest) Reset() {
@@ -699,6 +737,27 @@ func (x *SetAssistantThreadRequest) GetLoadingMessages() []string {
 		return x.LoadingMessages
 	}
 	return nil
+}
+
+func (x *SetAssistantThreadRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *SetAssistantThreadRequest) GetIconEmoji() string {
+	if x != nil {
+		return x.IconEmoji
+	}
+	return ""
+}
+
+func (x *SetAssistantThreadRequest) GetIconUrl() string {
+	if x != nil {
+		return x.IconUrl
+	}
+	return ""
 }
 
 type SetAssistantThreadResponse struct {
@@ -3485,7 +3544,7 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\aresumed\x18\x01 \x01(\x05R\aresumed\"A\n" +
 	"\x0fAssistantPrompt\x12\x14\n" +
 	"\x05title\x18\x01 \x01(\tR\x05title\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xe4\x02\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x87\x04\n" +
 	"\x0fAssistantThread\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\"\n" +
 	"\fconversation\x18\x02 \x01(\tR\fconversation\x12\x1b\n" +
@@ -3495,7 +3554,12 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\rprompts_title\x18\x06 \x01(\tR\fpromptsTitle\x12>\n" +
 	"\aprompts\x18\a \x03(\v2$.sameoldchat.chat.v1.AssistantPromptR\aprompts\x12/\n" +
 	"\x14updated_at_unix_nano\x18\b \x01(\x03R\x11updatedAtUnixNano\x12)\n" +
-	"\x10loading_messages\x18\t \x03(\tR\x0floadingMessages\"\xec\x02\n" +
+	"\x10loading_messages\x18\t \x03(\tR\x0floadingMessages\x12$\n" +
+	"\x0estatus_user_id\x18\n" +
+	" \x01(\tR\fstatusUserId\x12'\n" +
+	"\x0fstatus_username\x18\v \x01(\tR\x0estatusUsername\x12*\n" +
+	"\x11status_icon_emoji\x18\f \x01(\tR\x0fstatusIconEmoji\x12&\n" +
+	"\x0fstatus_icon_url\x18\r \x01(\tR\rstatusIconUrl\"\xc2\x03\n" +
 	"\x19SetAssistantThreadRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
@@ -3507,7 +3571,11 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\rprompts_title\x18\b \x01(\tR\fpromptsTitle\x12>\n" +
 	"\aprompts\x18\t \x03(\v2$.sameoldchat.chat.v1.AssistantPromptR\aprompts\x12)\n" +
 	"\x10loading_messages\x18\n" +
-	" \x03(\tR\x0floadingMessages\",\n" +
+	" \x03(\tR\x0floadingMessages\x12\x1a\n" +
+	"\busername\x18\v \x01(\tR\busername\x12\x1d\n" +
+	"\n" +
+	"icon_emoji\x18\f \x01(\tR\ticonEmoji\x12\x19\n" +
+	"\bicon_url\x18\r \x01(\tR\aiconUrl\",\n" +
 	"\x1aSetAssistantThreadResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\"\x95\x01\n" +
 	"\x16AssistantThreadRequest\x12!\n" +

@@ -300,6 +300,11 @@ var (
 	// does not exist, and would hide the real reason from the operator reading the
 	// audit trail.
 	ErrNotWorkspaceAdmin = errors.New("actor is not a workspace administrator")
+	// ErrCannotUpdateAdminUser refuses an administrator changing the profile of
+	// an administrator or owner: only the primary owner changes those, so one
+	// administrator cannot rewrite another's identity. users.profile.set
+	// declares cannot_update_admin_user for it.
+	ErrCannotUpdateAdminUser = errors.New("only the primary owner can update an administrator's profile")
 	// ErrUserIsRestricted and ErrUserIsUltraRestricted are the two guest tiers
 	// refusing an action Slack keeps away from guests. They are separate
 	// sentinels because the pinned enums for conversations.join and

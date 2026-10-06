@@ -259,7 +259,7 @@ func TestListUsersAndConversationsAreBoundedAndAuthorized(t *testing.T) {
 	if err != nil || len(users.Users) != 1 || users.HasMore {
 		t.Fatalf("second users=%+v err=%v", users, err)
 	}
-	adminUsers, err := s.ListAdminUsers(ctx, "T1", domain.PageRequest{Limit: 1})
+	adminUsers, err := s.ListAdminUsers(ctx, "T1", domain.MemberActivityAny, domain.PageRequest{Limit: 1})
 	if err != nil || len(adminUsers.Users) != 1 || !adminUsers.HasMore || adminUsers.NextCursor == "" {
 		t.Fatalf("first administrator users=%+v err=%v", adminUsers, err)
 	}

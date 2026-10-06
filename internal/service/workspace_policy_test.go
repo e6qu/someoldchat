@@ -61,30 +61,30 @@ func TestWorkspacePolicyDefaultsToSlacksAndOnlyAnAdministratorChangesIt(t *testi
 
 func TestPrivateChannelCreationFollowsTheWorkspacePolicy(t *testing.T) {
 	ctx, messages, _ := policyWorld(t)
-	if _, err := messages.CreateConversation(ctx, "T1", "Umember", "anyone-private", true); err != nil {
+	if _, err := messages.CreateConversation(ctx, "T1", "Umember", "anyone-private", true, ""); err != nil {
 		t.Fatalf("by default a member creates a private channel: %v", err)
 	}
 
 	if _, err := messages.SetWorkspacePolicy(ctx, "T1", "Uadmin", domain.WorkspacePolicy{PrivateChannelCreators: domain.PolicyAudienceAdmins}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.CreateConversation(ctx, "T1", "Umember", "member-private", true); !errors.Is(err, domain.ErrPrivateChannelCreationRestricted) {
+	if _, err := messages.CreateConversation(ctx, "T1", "Umember", "member-private", true, ""); !errors.Is(err, domain.ErrPrivateChannelCreationRestricted) {
 		t.Fatalf("a member under admins-only: err=%v, want ErrPrivateChannelCreationRestricted", err)
 	}
-	if _, err := messages.CreateConversation(ctx, "T1", "Umember", "member-public", false); err != nil {
+	if _, err := messages.CreateConversation(ctx, "T1", "Umember", "member-public", false, ""); err != nil {
 		t.Fatalf("the policy governs private channels only, and refused a public one: %v", err)
 	}
-	if _, err := messages.CreateConversation(ctx, "T1", "Uadmin", "admin-private", true); err != nil {
+	if _, err := messages.CreateConversation(ctx, "T1", "Uadmin", "admin-private", true, ""); err != nil {
 		t.Fatalf("an administrator under admins-only: %v", err)
 	}
 
 	if _, err := messages.SetWorkspacePolicy(ctx, "T1", "Uowner", domain.WorkspacePolicy{PrivateChannelCreators: domain.PolicyAudienceOwners}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.CreateConversation(ctx, "T1", "Uadmin", "admin-private-2", true); !errors.Is(err, domain.ErrPrivateChannelCreationRestricted) {
+	if _, err := messages.CreateConversation(ctx, "T1", "Uadmin", "admin-private-2", true, ""); !errors.Is(err, domain.ErrPrivateChannelCreationRestricted) {
 		t.Fatalf("an administrator under owners-only: err=%v, want ErrPrivateChannelCreationRestricted", err)
 	}
-	if _, err := messages.CreateConversation(ctx, "T1", "Uowner", "owner-private", true); err != nil {
+	if _, err := messages.CreateConversation(ctx, "T1", "Uowner", "owner-private", true, ""); err != nil {
 		t.Fatalf("an owner under owners-only: %v", err)
 	}
 }

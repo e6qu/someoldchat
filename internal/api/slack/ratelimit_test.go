@@ -375,8 +375,12 @@ func TestEveryLedgerMethodIsEnforcedAtItsPublishedTier(t *testing.T) {
 		case listed && !fromTable:
 			t.Errorf("%s: the pinned table publishes %s, so publishedMethodTiers must carry it", method, tier)
 		case listed && strings.HasPrefix(tier, "SpecialTier_"):
-			if got := methodTier(method); got != tierHundreds {
-				t.Errorf("%s: the pinned table publishes %s, enforced at %+v, want tierHundreds", method, tier, got)
+			expected := tierHundreds
+			if tier == "SpecialTier_blocks_validate" {
+				expected = tierBlocksValidate
+			}
+			if got := methodTier(method); got != expected {
+				t.Errorf("%s: the pinned table publishes %s, enforced at %+v, want %+v", method, tier, got, expected)
 			}
 		case listed:
 			expected, known := want[tier]

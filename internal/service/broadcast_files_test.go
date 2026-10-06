@@ -32,7 +32,7 @@ func TestAReplyWithFilesKeepsItsBroadcast(t *testing.T) {
 	ctx := context.Background()
 	upload := func() domain.ExternalUploadCompletion {
 		t.Helper()
-		value, err := messages.CreateExternalUpload(ctx, "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+		value, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "notes.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 		if err != nil {
 			t.Fatal(err)
 		}

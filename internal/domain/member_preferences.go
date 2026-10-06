@@ -49,6 +49,13 @@ func NormalizeMemberPreference(name, value string) (string, string, error) {
 	return name, value, nil
 }
 
+// LanguagePreference is the member preference Language & region's picker
+// writes: the locale the member reads the product in. It is the one
+// preference the server reads about a member other than the caller, because
+// Slack's user object reports it as the member's locale (users.info and
+// users.list with include_locale).
+const LanguagePreference = "language"
+
 // hiddenPersonPreference prefixes the preference that records a person the
 // member has hidden, as Slack's "Hide a person" does. It is the member's own
 // preference: nobody else, administrators included, can read it.

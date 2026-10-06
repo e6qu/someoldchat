@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/l10n"
 	"github.com/sameoldchat/sameoldchat/internal/slackobject"
 )
 
@@ -89,10 +90,27 @@ func conversationTextResponse(value string, setBy domain.UserID, setAt time.Time
 	return map[string]any{"value": value, "creator": setBy, "last_set": unixSeconds(setAt)}
 }
 
-// workspaceLocale is the locale include_locale reports. Nothing here stores a
-// per-member or per-workspace locale and the first-party client is English
-// only, so this is the one locale every reader actually gets.
+// workspaceLocale is the locale include_locale reports for a conversation,
+// and for a member who chose no language. Nothing here stores a
+// per-workspace locale, and the source catalog the product falls back to is
+// English, which Slack spells en-US.
 const workspaceLocale = "en-US"
+
+// memberLocale is the locale include_locale reports for a member: the
+// language they chose in Language & region, as the catalog it resolves to,
+// else the source language. users.info and users.list used to drop
+// include_locale, so no member object carried one.
+func memberLocale(user domain.User) string {
+	chosen := strings.TrimSpace(user.Locale)
+	if chosen == "" {
+		return workspaceLocale
+	}
+	locale := l10n.Negotiate(l10n.Locale(chosen), "")
+	if locale == l10n.Default {
+		return workspaceLocale
+	}
+	return string(locale)
+}
 
 // defaultAvatar serves the image a member without a photo is shown with: a
 // square in their color at one of the profile sizes. It is a PNG rendered

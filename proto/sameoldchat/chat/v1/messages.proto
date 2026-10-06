@@ -110,6 +110,9 @@ message EphemeralMessage {
   string app_id = 10;
   string created_at = 11;
   string thread_timestamp = 12;
+  // stream_state is the presentation the message was posted with, encoded as
+  // a posted message's stream state is.
+  string stream_state = 13;
 }
 
 message PostEphemeralRequest {
@@ -125,6 +128,13 @@ message PostEphemeralRequest {
   // link_names links the @names and #names of text, as chat.postMessage's
   // link_names does.
   bool link_names = 10;
+  // markdown_text, parse, username, icon_emoji and icon_url are
+  // chat.postEphemeral's, as chat.postMessage takes them.
+  bool markdown_text = 11;
+  string parse = 12;
+  string username = 13;
+  string icon_emoji = 14;
+  string icon_url = 15;
 }
 
 message EphemeralMessagesRequest {
@@ -167,6 +177,20 @@ message UpdateMessageRequest {
   // link_names links the @names and #names of the new text, as
   // chat.update's link_names does. It describes this edit only.
   bool link_names = 8;
+  // markdown_text marks text as chat.update's markdown_text; parse is its
+  // parse, which, like link_names, describes this edit only.
+  bool markdown_text = 9;
+  string parse = 10;
+  // metadata, when present, replaces the message's metadata; app_id names
+  // the app making the edit, which only an app may attach.
+  optional string metadata = 11;
+  string app_id = 12;
+  // reply_broadcast broadcasts a thread reply to its channel.
+  bool reply_broadcast = 13;
+  // file_ids, when file_ids_set, are the files the message carries after the
+  // edit (chat.update's file_ids).
+  repeated string file_ids = 14;
+  bool file_ids_set = 15;
 }
 
 message StartMessageStreamRequest {

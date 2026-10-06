@@ -284,6 +284,11 @@ message UserConnectionRequest {
   string workspace_id = 1;
   string user_id = 2;
   string app_id = 3;
+  // UpdateUserAppConnection only: the member the app reports about, and
+  // their connection status. An older caller sends neither and meant the
+  // caller's own connection, connected.
+  string target_user_id = 4;
+  string status = 5;
 }
 
 message ExternalAuthProvider {

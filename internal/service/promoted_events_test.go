@@ -86,7 +86,7 @@ func TestPromotedProducerPayloadsTranslateEndToEnd(t *testing.T) {
 
 	// Conversation lifecycle: public create/rename/archive, and the private
 	// rename that must travel under the group_* vocabulary.
-	public, err := messages.CreateConversation(ctx, "T1", "U1", "announcements", false)
+	public, err := messages.CreateConversation(ctx, "T1", "U1", "announcements", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestPromotedProducerPayloadsTranslateEndToEnd(t *testing.T) {
 	firstEncoded("conversation.archived", events.SurfaceEventsAPI, "channel_archive",
 		`"channel":"`+string(public.ID)+`"`, `"user":"U1"`)
 
-	private, err := messages.CreateConversation(ctx, "T1", "U1", "secrets", true)
+	private, err := messages.CreateConversation(ctx, "T1", "U1", "secrets", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestPromotedProducerPayloadsTranslateEndToEnd(t *testing.T) {
 	// Profile change: the record fans out to the current catalog names, and a
 	// status change adds the third.
 	profile := domain.UserProfile{DisplayName: "Bobby", StatusText: "away fishing", StatusEmoji: ":fish:"}
-	if _, err := messages.SetUserProfile(ctx, "T1", "U2", profile); err != nil {
+	if _, err := messages.SetUserProfile(ctx, "T1", "U2", "U2", profile); err != nil {
 		t.Fatal(err)
 	}
 	inners := translated("user.profile_changed", events.SurfaceEventsAPI)

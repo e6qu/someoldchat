@@ -53,6 +53,8 @@ message User {
   int64 connected_until_unix_nano = 17;
   // The running huddle the member is in; empty when none.
   string huddle_call_id = 18;
+  // The language the member chose; empty when none.
+  string locale = 19;
 }
 
 // ClientConnection is one open client of a member, held as a lease.
@@ -113,6 +115,8 @@ message SetUserProfileRequest {
   string workspace_id = 1;
   string user_id = 2;
   UserProfile profile = 3;
+  // target_user_id is the member whose profile changes; empty is user_id.
+  string target_user_id = 4;
 }
 
 message ScheduledStatus {

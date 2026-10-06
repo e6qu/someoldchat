@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@slack/socket-mode": "3.0.0"
+    "@slack/socket-mode": "3.1.0"
   }
 }

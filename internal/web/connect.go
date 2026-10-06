@@ -29,7 +29,7 @@ func (h Handler) connectInvite(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusBadRequest, "No invitation was sent", "Choose an organization and try again.")
 		return
 	}
-	if _, err := h.Messages.InviteShared(r.Context(), principal.WorkspaceID, principal.UserID, channel, target, ""); err != nil {
+	if _, err := h.Messages.InviteShared(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.SharedInviteRecipient{Workspace: target}); err != nil {
 		h.writeConnectError(w, r, err, "sent")
 		return
 	}
@@ -37,7 +37,13 @@ func (h Handler) connectInvite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) connectApprove(w http.ResponseWriter, r *http.Request) {
-	h.decideConnectInvite(w, r, "approved", "Invitation approved", h.Messages.ApproveSharedInvite)
+	h.decideConnectInvite(w, r, "approved", "Invitation approved", h.approveSharedInvite)
+}
+
+// approveSharedInvite approves as the invitation was raised: the browser's
+// control moves nothing and attaches no note.
+func (h Handler) approveSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
+	return h.Messages.ApproveSharedInvite(ctx, workspaceID, actorID, id, domain.SharedInviteReview{})
 }
 
 // connectDeny withdraws, whichever side of the state machine the invitation is
@@ -48,7 +54,7 @@ func (h Handler) connectDeny(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) withdrawSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
-	invite, err := h.Messages.DenySharedInvite(ctx, workspaceID, actorID, id)
+	invite, err := h.Messages.DenySharedInvite(ctx, workspaceID, actorID, id, domain.SharedInviteReview{})
 	if err == nil || !errors.Is(err, domain.ErrSharedInviteSettled) {
 		return invite, err
 	}

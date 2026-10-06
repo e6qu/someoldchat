@@ -70,10 +70,10 @@ sdks:
     ecosystem: npm
     package: '@slack/bolt'
     upstream: https://github.com/slackapi/bolt-js
-    release: 5.0.0
-    revision: e2b90aa003e5a1de256b31c37b29d032566585ab
-    artifact: slack-bolt-5.0.0.tgz
-    sha256: 62cedd4e4520ce963721d3a82bf6f5c5a9fc6b66b920eaf4d1cf4bb2f483f84b
+    release: 5.1.0
+    revision: ffbe0b6c03a6b1e16b3d5d3c5c9a8ab3effcbc1d
+    artifact: slack-bolt-5.1.0.tgz
+    sha256: 021ba2a80736c9afe6ef5917a26b2b95eec0f6e46f2d704ccd189560c15567c0
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
@@ -93,10 +93,10 @@ sdks:
     ecosystem: npm
     package: '@slack/socket-mode'
     upstream: https://github.com/slackapi/node-slack-sdk
-    release: 3.0.0
-    revision: 70e15b8442745d215f9ae259a2c970b306aff51a
-    artifact: socket-mode-3.0.0.tgz
-    sha256: 3d70683ca2872323150747e9611f4de35d9df333bdc6321bb4360c9f1d165fe6
+    release: 3.1.0
+    revision: a98047a7f27149812664c78e2dccfe4155b0e145
+    artifact: socket-mode-3.1.0.tgz
+    sha256: 9c48f88dae7504c8ba31cbcedca4ffd6b09baa951dd19103255635ba578cb7ec
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-socket-mode/qualification.mjs
@@ -140,10 +140,10 @@ sdks:
     ecosystem: pypi
     package: slack-bolt
     upstream: https://github.com/slackapi/bolt-python
-    release: 1.28.0
-    revision: c64d69d2b64801602c849aa56e0ba2d4161e1f98
-    artifact: slack_bolt-1.28.0-py2.py3-none-any.whl
-    sha256: 738d1ca5e7c7039b6e18103d29267ced6e18c2517053eff18991fdd593acce5c
+    release: 1.30.0
+    revision: c3eb4c27238eef2a506c40ef4c6f31074fa66910
+    artifact: slack_bolt-1.30.0-py2.py3-none-any.whl
+    sha256: 81f5bc46e79516d23d5e2a31dded6304dd1b8b6b72c0083f2f31d5d801e262c4
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
@@ -192,10 +192,10 @@ sdks:
     ecosystem: maven
     package: com.slack.api:slack-api-client
     upstream: https://github.com/slackapi/java-slack-sdk
-    release: 1.49.0
-    revision: 06f512b9d2741ed38573915528c9f66cee90df48
-    artifact: slack-api-client-1.49.0.jar
-    sha256: eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f
+    release: 1.52.0
+    revision: b2f13ecbfe63a198f9fbea4beaf34624693a5cf6
+    artifact: slack-api-client-1.52.0.jar
+    sha256: a146a48e823e95932c828d6f455d5b269bd0d4ba8f9d3648474d3b8611a7764f
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
@@ -203,10 +203,10 @@ sdks:
     ecosystem: maven
     package: com.slack.api:slack-api-client
     upstream: https://github.com/slackapi/java-slack-sdk
-    release: 1.49.0
-    revision: 06f512b9d2741ed38573915528c9f66cee90df48
-    artifact: slack-api-client-1.49.0.jar
-    sha256: eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f
+    release: 1.52.0
+    revision: b2f13ecbfe63a198f9fbea4beaf34624693a5cf6
+    artifact: slack-api-client-1.52.0.jar
+    sha256: a146a48e823e95932c828d6f455d5b269bd0d4ba8f9d3648474d3b8611a7764f
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/SocketModeQualification.java
@@ -229,10 +229,10 @@ bolt:
   - id: bolt-js
     ecosystem: npm
     package: '@slack/bolt'
-    release: 5.0.0
-    revision: e2b90aa003e5a1de256b31c37b29d032566585ab
-    artifact: slack-bolt-5.0.0.tgz
-    sha256: 62cedd4e4520ce963721d3a82bf6f5c5a9fc6b66b920eaf4d1cf4bb2f483f84b
+    release: 5.1.0
+    revision: ffbe0b6c03a6b1e16b3d5d3c5c9a8ab3effcbc1d
+    artifact: slack-bolt-5.1.0.tgz
+    sha256: 021ba2a80736c9afe6ef5917a26b2b95eec0f6e46f2d704ccd189560c15567c0
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
     note: >-
@@ -250,10 +250,10 @@ bolt:
   - id: bolt-python
     ecosystem: pypi
     package: slack-bolt
-    release: 1.28.0
-    revision: c64d69d2b64801602c849aa56e0ba2d4161e1f98
-    artifact: slack_bolt-1.28.0-py2.py3-none-any.whl
-    sha256: 738d1ca5e7c7039b6e18103d29267ced6e18c2517053eff18991fdd593acce5c
+    release: 1.30.0
+    revision: c3eb4c27238eef2a506c40ef4c6f31074fa66910
+    artifact: slack_bolt-1.30.0-py2.py3-none-any.whl
+    sha256: 81f5bc46e79516d23d5e2a31dded6304dd1b8b6b72c0083f2f31d5d801e262c4
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
     note: >-
@@ -268,10 +268,10 @@ bolt:
   - id: bolt-java
     ecosystem: maven
     package: com.slack.api:bolt
-    release: 1.49.0
-    revision: 06f512b9d2741ed38573915528c9f66cee90df48
-    artifact: bolt-1.49.0.jar
-    sha256: 9c298264096ba9343e55260361fcc54035a673ecc03ce5dfcee32899a6e9eca0
+    release: 1.52.0
+    revision: b2f13ecbfe63a198f9fbea4beaf34624693a5cf6
+    artifact: bolt-1.52.0.jar
+    sha256: b8f6f61f06d3bf050df9aedf2dbaed8b79123661d9d8e3632e8fed334e91c393
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/BoltQualification.java
     note: >-

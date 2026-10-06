@@ -550,7 +550,7 @@ func TestSQLiteSearchConversationsTreatsLikeMetacharactersLiterally(t *testing.T
 		"eral":  {"C1"},
 		"gener": {"C1"},
 	} {
-		page, err := s.SearchConversations(ctx, "T1", query, domain.PageRequest{Limit: 10})
+		page, err := s.SearchConversations(ctx, "T1", domain.ConversationSearch{Query: query, Sort: domain.ConversationSortName}, domain.PageRequest{Limit: 10})
 		if err != nil {
 			t.Fatalf("search %q: %v", query, err)
 		}

@@ -127,7 +127,14 @@ func TestAdminAppUninstallAndRequestCancelTakeEffect(t *testing.T) {
 	if err != nil || len(before) == 0 {
 		t.Fatalf("the fixture app is not installed: %+v err=%v", before, err)
 	}
-	if uninstalled := adminCall(t, handler, http.MethodPost, "admin.apps.uninstall", "app_ids=A1"); uninstalled["ok"] != true {
+	// Every published client sends one app as app_id; team_ids may name only
+	// this workspace. The old app_ids spelling is no published argument.
+	for body, code := range map[string]string{"app_ids=A1": "invalid_arg_name", "app_id=A1&team_ids=T-elsewhere": "invalid_arg_name"} {
+		if refused := adminCall(t, handler, http.MethodPost, "admin.apps.uninstall", body); refused["error"] != code {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if uninstalled := adminCall(t, handler, http.MethodPost, "admin.apps.uninstall", "app_id=A1&team_ids=T1"); uninstalled["ok"] != true {
 		t.Fatalf("uninstall=%v", uninstalled)
 	}
 	after, err := store.ListAppInstallations(context.Background(), "A1")
@@ -146,10 +153,11 @@ func TestAdminAppUninstallAndRequestCancelTakeEffect(t *testing.T) {
 
 // TestAdminFunctionsListReadsTheManifest holds admin.functions.list. A function
 // exists in an app's manifest and nowhere else, so a route that answered an
-// empty list would look the same as a workspace with no functions.
+// empty list would look the same as a workspace with no functions. app_ids is
+// required and scopes the answer; limit and cursor page it.
 func TestAdminFunctionsListReadsTheManifest(t *testing.T) {
 	handler, _ := testUserHandlerWithStore()
-	listed := adminCall(t, handler, http.MethodGet, "admin.functions.list", "")
+	listed := adminCall(t, handler, http.MethodPost, "admin.functions.list", "app_ids=A1")
 	functions, ok := listed["functions"].([]any)
 	if !ok || len(functions) == 0 {
 		t.Fatalf("the fixture app declares a function and none was listed: %v", listed)
@@ -157,6 +165,31 @@ func TestAdminFunctionsListReadsTheManifest(t *testing.T) {
 	first := functions[0].(map[string]any)
 	if first["app_id"] != "A1" || first["callback_id"] != "triage" {
 		t.Fatalf("the listed function is not the one the manifest declares: %v", first)
+	}
+	// One function per page reaches every one of them, and no more.
+	seen, cursor := 0, ""
+	for page := 0; page <= len(functions); page++ {
+		body := "app_ids=A1&limit=1"
+		if cursor != "" {
+			body += "&cursor=" + cursor
+		}
+		got := adminCall(t, handler, http.MethodPost, "admin.functions.list", body)
+		seen += len(got["functions"].([]any))
+		cursor, _ = got["response_metadata"].(map[string]any)["next_cursor"].(string)
+		if cursor == "" {
+			break
+		}
+	}
+	if seen != len(functions) {
+		t.Fatalf("paging one at a time saw %d functions, want %d", seen, len(functions))
+	}
+	if other := adminCall(t, handler, http.MethodPost, "admin.functions.list", "app_ids=A-elsewhere"); len(other["functions"].([]any)) != 0 {
+		t.Fatalf("an app that was not named answered functions: %v", other)
+	}
+	for _, body := range []string{"", "app_ids=A1&team_id=T-elsewhere"} {
+		if refused := adminCall(t, handler, http.MethodPost, "admin.functions.list", body); refused["error"] != "invalid_arg_name" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
 	}
 }
 
@@ -238,21 +271,23 @@ func TestAdminWorkflowCollaboratorsTakeEffect(t *testing.T) {
 // match.
 func TestDiscoverableContactsLookupFollowsTheWorkspaceSetting(t *testing.T) {
 	handler, store := testHandlerWithStore()
-	open := adminCall(t, handler, http.MethodPost, "users.discoverableContacts.lookup", "emails=alice@example.com,nobody@example.invalid")
-	contacts, ok := open["contacts"].([]any)
-	if !ok || len(contacts) != 1 {
+	// Every published client sends one address as email and reads
+	// is_discoverable.
+	if open := adminCall(t, handler, http.MethodPost, "users.discoverableContacts.lookup", "email=alice@example.com"); open["is_discoverable"] != true {
 		t.Fatalf("an open workspace answered %v", open)
 	}
-	if contacts[0].(map[string]any)["email"] != "alice@example.com" {
-		t.Fatalf("the wrong contact was matched: %v", contacts[0])
+	if nobody := adminCall(t, handler, http.MethodPost, "users.discoverableContacts.lookup", "email=nobody@example.invalid"); nobody["ok"] != true || nobody["is_discoverable"] != false {
+		t.Fatalf("an address nobody holds answered %v", nobody)
 	}
-	if unnamed := adminCall(t, handler, http.MethodGet, "users.discoverableContacts.lookup", ""); unnamed["ok"] == true {
-		t.Fatalf("a lookup naming no address answered: %v", unnamed)
+	for _, body := range []string{"", "emails=alice@example.com"} {
+		if unnamed := adminCall(t, handler, http.MethodPost, "users.discoverableContacts.lookup", body); unnamed["error"] != "invalid_arg_name" {
+			t.Fatalf("body=%q answered: %v", body, unnamed)
+		}
 	}
 
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test", Discoverability: domain.WorkspaceDiscoverabilityClosed})
-	closed := adminCall(t, handler, http.MethodPost, "users.discoverableContacts.lookup", "emails=alice@example.com")
-	if found := closed["contacts"].([]any); len(found) != 0 {
+	closed := adminCall(t, handler, http.MethodPost, "users.discoverableContacts.lookup", "email=alice@example.com")
+	if closed["ok"] != true || closed["is_discoverable"] != false {
 		t.Fatalf("a closed workspace disclosed its members: %v", closed)
 	}
 }

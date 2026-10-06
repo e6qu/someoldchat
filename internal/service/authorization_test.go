@@ -177,7 +177,7 @@ func TestUserGroupMutationsRequireWorkspaceAdmin(t *testing.T) {
 	if _, err := messages.ListUserGroups(ctx, "T1", "U2", false, domain.PageRequest{Limit: 10}); err != nil {
 		t.Fatalf("a member could not list user groups: %v", err)
 	}
-	if _, err := messages.UserGroupUsers(ctx, "T1", "U2", group.ID); err != nil {
+	if _, err := messages.UserGroupUsers(ctx, "T1", "U2", group.ID, true); err != nil {
 		t.Fatalf("a member could not read a user group's members: %v", err)
 	}
 	// The administrator is not locked out.
@@ -383,11 +383,11 @@ func TestUpdateListCellsRefusesABatchWholeAndKeepsRequestOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"a","text":"0"}]`)
+	first, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"a","text":"0"}]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"a","text":"0"}]`)
+	second, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"a","text":"0"}]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +439,7 @@ func TestCreateListRefusesACopyAboveTheRecordCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	for index := 0; index <= maxCopiedListRecords; index++ {
-		if _, err := messages.CreateListItem(ctx, "T1", "U1", source.ID, "", `[{"column_id":"a","text":"x"}]`); err != nil {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", source.ID, "", `[{"column_id":"a","text":"x"}]`, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -663,7 +663,7 @@ func TestCreatingAConversationMakesTheCreatorAMemberOfIt(t *testing.T) {
 			}
 			messages := Messages{Store: repository}
 
-			conversation, err := messages.CreateConversation(ctx, "T1", "U1", "qualification-"+name, private)
+			conversation, err := messages.CreateConversation(ctx, "T1", "U1", "qualification-"+name, private, "")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -55,7 +55,9 @@ import (
 //     chat.getPermalink "hundreds of requests per minute",
 //     chat.postMessage "several hundred messages per minute" to the
 //     workspace, and assistant.threads.setStatus "similar" to it — are
-//     tierHundreds, the pinned SDK's 600 per minute. assistant.threads.setStatus's
+//     tierHundreds, the pinned SDK's 600 per minute; blocks.validate's, set
+//     apart because it "requires no token", is the SDK's 60 per minute
+//     (tierBlocksValidate). assistant.threads.setStatus's
 //     per-conversation allowance is not enforced separately: laxer than
 //     Slack, so it refuses no conforming client.
 //   - chat.postMessage's special allowance IS documented method-level
@@ -130,6 +132,11 @@ var (
 	// chat.getPermalink, chat.postMessage and assistant.threads.setStatus:
 	// "hundreds of requests per minute", which the SDK paces at 600.
 	tierHundreds = rateTier{perMinute: specialBudgetPerMinute, burst: specialBudgetPerMinute}
+	// tierBlocksValidate is the special tier the pinned SDK names for
+	// blocks.validate, which "requires no token, so it has special rate
+	// limiting conditions rather than a standard tier"; the SDK paces it at 60
+	// a minute. Called without a token, it is counted per client address.
+	tierBlocksValidate = rateTier{perMinute: 60, burst: 60}
 )
 
 // methodTier is the tier the method is enforced at.

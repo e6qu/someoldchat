@@ -94,8 +94,8 @@ cp "$root/tests/official-sdk-qualification/node-web-api/qualification.mjs" "$wor
 stop_fixture
 start_fixture
 
-npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/socket-mode@3.0.0')
-require_hash "$work/npm/$npm_tarball" 3d70683ca2872323150747e9611f4de35d9df333bdc6321bb4360c9f1d165fe6
+npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/socket-mode@3.1.0')
+require_hash "$work/npm/$npm_tarball" 9c48f88dae7504c8ba31cbcedca4ffd6b09baa951dd19103255635ba578cb7ec
 npm install --prefix "$work/node-socket-mode" --no-save --ignore-scripts "$work/npm/$npm_tarball"
 cp "$root/tests/official-sdk-qualification/node-socket-mode/qualification.mjs" "$work/node-socket-mode/qualification.mjs"
 (cd "$work/node-socket-mode" && SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ node qualification.mjs)
@@ -110,8 +110,8 @@ cp "$root/tests/official-sdk-qualification/node-rtm-api/qualification.mjs" "$wor
 stop_fixture
 start_fixture
 
-npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/bolt@5.0.0')
-require_hash "$work/npm/$npm_tarball" 62cedd4e4520ce963721d3a82bf6f5c5a9fc6b66b920eaf4d1cf4bb2f483f84b
+npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/bolt@5.1.0')
+require_hash "$work/npm/$npm_tarball" 021ba2a80736c9afe6ef5917a26b2b95eec0f6e46f2d704ccd189560c15567c0
 npm install --prefix "$work/node-bolt" --no-save --ignore-scripts "$work/npm/$npm_tarball"
 cp "$root/tests/official-sdk-qualification/node-bolt/qualification.mjs" "$work/node-bolt/qualification.mjs"
 (cd "$work/node-bolt" && SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ node qualification.mjs)
@@ -134,20 +134,20 @@ PYTHONPATH="$work/python-slack-sdk" SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/a
 stop_fixture
 start_fixture
 
-python3 -m pip download --disable-pip-version-check --no-deps --only-binary=:all: --dest "$work/python" slack-bolt==1.28.0
-python_wheel=$(find "$work/python" -maxdepth 1 -type f -name 'slack_bolt-1.28.0-*.whl' -print -quit)
-require_hash "$python_wheel" 738d1ca5e7c7039b6e18103d29267ced6e18c2517053eff18991fdd593acce5c
+python3 -m pip download --disable-pip-version-check --no-deps --only-binary=:all: --dest "$work/python" slack-bolt==1.30.0
+python_wheel=$(find "$work/python" -maxdepth 1 -type f -name 'slack_bolt-1.30.0-*.whl' -print -quit)
+require_hash "$python_wheel" 81f5bc46e79516d23d5e2a31dded6304dd1b8b6b72c0083f2f31d5d801e262c4
 python3 -m pip install --disable-pip-version-check --no-index --no-deps --target "$work/python-bolt" "$python_wheel"
 PYTHONPATH="$work/python-bolt:$work/python-slack-sdk" SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ python3 "$root/tests/official-sdk-qualification/python-bolt/qualification.py"
 stop_fixture
 start_fixture
 
 mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" dependency:go-offline compile
-java_api_jar="$HOME/.m2/repository/com/slack/api/slack-api-client/1.49.0/slack-api-client-1.49.0.jar"
-java_bolt_jar="$HOME/.m2/repository/com/slack/api/bolt/1.49.0/bolt-1.49.0.jar"
+java_api_jar="$HOME/.m2/repository/com/slack/api/slack-api-client/1.52.0/slack-api-client-1.52.0.jar"
+java_bolt_jar="$HOME/.m2/repository/com/slack/api/bolt/1.52.0/bolt-1.52.0.jar"
 java_websocket_jar="$HOME/.m2/repository/org/java-websocket/Java-WebSocket/1.6.0/Java-WebSocket-1.6.0.jar"
-require_hash "$java_api_jar" eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f
-require_hash "$java_bolt_jar" 9c298264096ba9343e55260361fcc54035a673ecc03ce5dfcee32899a6e9eca0
+require_hash "$java_api_jar" a146a48e823e95932c828d6f455d5b269bd0d4ba8f9d3648474d3b8611a7764f
+require_hash "$java_bolt_jar" b8f6f61f06d3bf050df9aedf2dbaed8b79123661d9d8e3632e8fed334e91c393
 require_hash "$java_websocket_jar" eae29213e4f16515639c28957200f011b3967fffcada1962cf0255d24919c22f
 mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" dependency:build-classpath -Dmdep.outputFile="$work/java-classpath"
 # The server's per-method tiers are tested against the vendored copy of the

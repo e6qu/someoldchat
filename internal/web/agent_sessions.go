@@ -45,16 +45,43 @@ type agentSessionView struct {
 }
 
 type agentSessionAgentView struct {
-	Name       string
-	IconEmoji  string
+	Identity   agentIdentityView
 	Status     domain.AgentSessionStatus
 	StatusText string
 }
 
+// agentIdentityView is a setStatus identity override as the thread pane shows
+// it — an agent's in the session panel, an assistant's beside its status: the
+// override's username in place of the app's own name, and one icon before it,
+// the icon_emoji when the emoji catalog can draw it and the icon_url image
+// otherwise. The icon is decoration beside a name that is always shown, so it
+// is hidden from assistive technology and the image has an empty alt.
+type agentIdentityView struct {
+	Name      string
+	IconEmoji string
+	IconURL   string
+}
+
+// newAgentIdentityView shows identity, falling back to name for the app's
+// own when the override sets no username.
+func newAgentIdentityView(identity domain.AgentIdentity, name string) agentIdentityView {
+	view := agentIdentityView{Name: identity.Username, IconURL: identity.IconURL}
+	if view.Name == "" {
+		view.Name = name
+	}
+	// icon_emoji is a shortcode; only one the catalog can draw is shown.
+	if icon, ok := slackemoji.ReactionUnicode(identity.IconEmoji); ok {
+		view.IconEmoji, view.IconURL = icon, ""
+	}
+	return view
+}
+
+const agentIdentityPartial = `{{define "agent-identity-icon"}}{{if .IconEmoji}}<span aria-hidden="true">{{.IconEmoji}}</span> {{else if .IconURL}}<img class="agent-identity-icon" src="{{.IconURL}}" alt="" loading="lazy"> {{end}}{{end}}`
+
 const agentSessionPartial = `{{define "agent-session"}}{{if .Present}}<section class="agent-session" aria-label="Agent session" data-agent-session-status="{{.Status}}">
   <div class="agent-session-head">{{if .Title}}<p class="agent-session-title">{{.Title}}</p>{{else}}<p class="agent-session-title untitled">Untitled session</p>{{end}}
     <p class="agent-session-status" role="status">{{if eq .Status "processing"}}<span class="agent-session-spinner" aria-hidden="true"></span>{{end}}{{.StatusText}}</p></div>
-  {{if .Agents}}<ul class="agent-session-agents">{{range .Agents}}<li>{{if .IconEmoji}}<span aria-hidden="true">{{.IconEmoji}}</span> {{end}}<span class="agent-session-agent">{{.Name}}</span> · {{.StatusText}}</li>{{end}}</ul>{{end}}
+  {{if .Agents}}<ul class="agent-session-agents">{{range .Agents}}<li>{{template "agent-identity-icon" .Identity}}<span class="agent-session-agent">{{.Identity.Name}}</span> · {{.StatusText}}</li>{{end}}</ul>{{end}}
   {{if .CanAct}}<div class="agent-session-actions">
     {{if .Stoppable}}<form method="post" action="{{.StopURL}}" hx-post="{{.StopURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="agent-session-stop" type="submit">Stop</button></form>{{end}}
     <form class="agent-session-rename" method="post" action="{{.TitleURL}}" hx-post="{{.TitleURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
@@ -72,6 +99,7 @@ const agentSessionStyle = `
 @keyframes agent-session-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.agent-session-spinner{animation:none}}
 .agent-session-agents{margin:0;padding:0;list-style:none;font-size:13px;color:var(--muted)}.agent-session-agent{color:var(--text);font-weight:600}
+.agent-identity-icon{width:16px;height:16px;border-radius:4px;object-fit:cover;vertical-align:-3px}
 .agent-session-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.agent-session-actions form{margin:0}
 .agent-session-rename{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.agent-session-rename label{font-size:12px;font-weight:700;color:var(--muted)}
 .agent-session-rename input{min-height:30px;padding:4px 8px;border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text)}
@@ -93,7 +121,9 @@ func agentSessionStatusText(status domain.AgentSessionStatus) string {
 	return string(status)
 }
 
-func agentSessionAddress(path string, channel domain.ConversationID, thread domain.MessageTimestamp) string {
+// threadRegionAddress addresses a thread pane region — the agent session's or
+// the assistant state's fragment, or one of their controls — for one thread.
+func threadRegionAddress(path string, channel domain.ConversationID, thread domain.MessageTimestamp) string {
 	return path + "?" + url.Values{"channel": {string(channel)}, "thread": {string(thread)}}.Encode()
 }
 
@@ -101,7 +131,7 @@ func agentSessionAddress(path string, channel domain.ConversationID, thread doma
 // session on is the common case and renders an empty region; a session that
 // cannot be read renders empty too, so the thread itself still opens.
 func (h Handler) agentSessionView(ctx context.Context, principal auth.Principal, channel domain.ConversationID, thread domain.MessageTimestamp, csrfToken string, member bool) agentSessionView {
-	view := agentSessionView{FragmentURL: agentSessionAddress("/app/agent-session", channel, thread)}
+	view := agentSessionView{FragmentURL: threadRegionAddress("/app/agent-session", channel, thread)}
 	if thread == "" {
 		return view
 	}
@@ -122,22 +152,17 @@ func (h Handler) agentSessionView(ctx context.Context, principal auth.Principal,
 	view.StatusText = agentSessionStatusText(view.Status)
 	view.Stoppable = value.Stoppable
 	view.CanAct = member
-	view.StopURL = agentSessionAddress("/app/agent-session/stop", channel, thread)
-	view.TitleURL = agentSessionAddress("/app/agent-session/title", channel, thread)
+	view.StopURL = threadRegionAddress("/app/agent-session/stop", channel, thread)
+	view.TitleURL = threadRegionAddress("/app/agent-session/title", channel, thread)
 	view.CSRFToken = csrfToken
 	for _, agent := range session.Agents {
-		name := agent.Identity.Username
-		if name == "" {
-			name = names[agent.AppID]
-		}
+		name := names[agent.AppID]
 		if name == "" {
 			name = string(agent.AppID)
 		}
-		// icon_emoji is a shortcode; only one the catalog can draw is shown.
-		icon, _ := slackemoji.ReactionUnicode(agent.Identity.IconEmoji)
 		view.Agents = append(view.Agents, agentSessionAgentView{
-			Name: name, IconEmoji: icon,
-			Status: agent.Status, StatusText: agentSessionStatusText(agent.Status),
+			Identity: newAgentIdentityView(agent.Identity, name),
+			Status:   agent.Status, StatusText: agentSessionStatusText(agent.Status),
 		})
 	}
 	return view

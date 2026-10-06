@@ -127,7 +127,7 @@ func TestListCopyIsOneTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	for index := 0; index < 3; index++ {
-		if _, err := seeding.CreateListItem(ctx, "T1", "U1", source.ID, "", `[{"column_id":"title","value":"row"}]`); err != nil {
+		if _, err := seeding.CreateListItem(ctx, "T1", "U1", source.ID, "", `[{"column_id":"title","value":"row"}]`, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

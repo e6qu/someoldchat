@@ -350,7 +350,7 @@ func TestAdminAppsMCPServersFollowTheSlackReference(t *testing.T) {
 
 	// The allowlist reflects approval, not installation: an uninstalled app's
 	// servers are still listed.
-	if got := callAppAccess(t, handler, "admin.apps.uninstall", url.Values{"app_ids": {"AM"}}); got["ok"] != true {
+	if got := callAppAccess(t, handler, "admin.apps.uninstall", url.Values{"app_id": {"AM"}}); got["ok"] != true {
 		t.Fatalf("uninstall=%v", got)
 	}
 	if got := callAppAccess(t, handler, "admin.apps.mcp.servers.list", url.Values{}); len(got["mcp_servers"].([]any)) != 2 {

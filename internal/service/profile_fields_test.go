@@ -75,9 +75,13 @@ func TestWorkspaceProfileFieldsAreAdminDefinedAndMemberSet(t *testing.T) {
 	if err := messages.SetUserProfileFields(ctx, "T1", "U2", "U2", []domain.UserProfileFieldValue{{FieldID: "Xf-nope", Value: "x"}}); !errors.Is(err, domain.ErrInvalidProfile) {
 		t.Fatalf("undefined field = %v, want ErrInvalidProfile", err)
 	}
-	// A member cannot set another member's fields.
-	if err := messages.SetUserProfileFields(ctx, "T1", "U2", "U3", []domain.UserProfileFieldValue{{FieldID: pronouns.ID, Value: "they/them"}}); !errors.Is(err, domain.ErrInvalidProfile) {
-		t.Fatalf("set other's fields = %v, want ErrInvalidProfile", err)
+	// A member cannot set another member's fields; an administrator can, which
+	// is users.profile.set's user argument.
+	if err := messages.SetUserProfileFields(ctx, "T1", "U2", "U3", []domain.UserProfileFieldValue{{FieldID: pronouns.ID, Value: "they/them"}}); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {
+		t.Fatalf("set other's fields = %v, want ErrNotWorkspaceAdmin", err)
+	}
+	if err := messages.SetUserProfileFields(ctx, "T1", "U1", "U3", []domain.UserProfileFieldValue{{FieldID: pronouns.ID, Value: "they/them"}}); err != nil {
+		t.Fatalf("an administrator setting a member's fields: %v", err)
 	}
 
 	values, err := messages.UserProfileFields(ctx, "T1", "U2", "U2")

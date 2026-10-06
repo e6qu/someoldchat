@@ -128,7 +128,7 @@ func TestOIDCProvisioningAcrossPostgreSQLAndGRPC(t *testing.T) {
 	if membership.Role != domain.WorkspaceRoleMember || !membership.Active {
 		t.Fatalf("provisioned membership=%+v", membership)
 	}
-	page, err := remote.AdminListUsers(ctx, workspaceID, provisioned, domain.PageRequest{Limit: 100})
+	page, err := remote.AdminListUsers(ctx, workspaceID, provisioned, domain.MemberActivityAny, domain.PageRequest{Limit: 100})
 	if err == nil {
 		t.Fatalf("a member listed the workspace: page=%+v", page)
 	}

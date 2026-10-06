@@ -121,7 +121,7 @@ deviations.
   browser scenario and 55 without a current official-source assertion.
 - Add visual baselines and manual assistive-technology evidence to the
   browser qualification.
-- Cite the reference-page rate-limit tier of the 43 ledger methods the pinned
+- Cite the reference-page rate-limit tier of the 42 ledger methods the pinned
   Java SDK's tier table predates (`uncitedTierMethods` in
   `internal/api/slack/ratelimit_tiers.go`); until then they hold Tier 4's
   floor (see the `rate-limit-tiers` decision in the ledger).

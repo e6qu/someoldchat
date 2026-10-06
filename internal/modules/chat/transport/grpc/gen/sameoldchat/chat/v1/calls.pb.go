@@ -331,8 +331,10 @@ type AddCallRequest struct {
 	StartedAt            int64                      `protobuf:"varint,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	Participants         []string                   `protobuf:"bytes,9,rep,name=participants,proto3" json:"participants,omitempty"`
 	ExternalParticipants []*ExternalCallParticipant `protobuf:"bytes,10,rep,name=external_participants,json=externalParticipants,proto3" json:"external_participants,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// created_by is the member the call is attributed to; empty is the caller.
+	CreatedBy     string `protobuf:"bytes,11,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AddCallRequest) Reset() {
@@ -433,6 +435,13 @@ func (x *AddCallRequest) GetExternalParticipants() []*ExternalCallParticipant {
 		return x.ExternalParticipants
 	}
 	return nil
+}
+
+func (x *AddCallRequest) GetCreatedBy() string {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return ""
 }
 
 type CallRequest struct {
@@ -978,7 +987,7 @@ const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x14\n" +
-	"\x05title\x18\x04 \x01(\tR\x05title\"\xb2\x03\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\"\xd1\x03\n" +
 	"\x0eAddCallRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12,\n" +
@@ -991,7 +1000,9 @@ const file_sameoldchat_chat_v1_calls_proto_rawDesc = "" +
 	"started_at\x18\b \x01(\x03R\tstartedAt\x12\"\n" +
 	"\fparticipants\x18\t \x03(\tR\fparticipants\x12a\n" +
 	"\x15external_participants\x18\n" +
-	" \x03(\v2,.sameoldchat.chat.v1.ExternalCallParticipantR\x14externalParticipants\"b\n" +
+	" \x03(\v2,.sameoldchat.chat.v1.ExternalCallParticipantR\x14externalParticipants\x12\x1d\n" +
+	"\n" +
+	"created_by\x18\v \x01(\tR\tcreatedBy\"b\n" +
 	"\vCallRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +

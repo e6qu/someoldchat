@@ -250,7 +250,7 @@ func TestRemoteListsUseTheProcessIndependentContract(t *testing.T) {
 	if err != nil || list.ID == "" {
 		t.Fatalf("list=%+v err=%v", list, err)
 	}
-	item, err := remote.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"before"}]`)
+	item, err := remote.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"before"}]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	remote := servedRemote(t, service.Messages{Store: store, Blob: blobs}, store)
 	ctx := context.Background()
 	content := []byte("external bytes")
-	upload, err := remote.CreateExternalUpload(ctx, "T1", "U1", "external.txt", "text/plain", int64(len(content)), time.Minute)
+	upload, err := remote.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "external.txt", MIMEType: "text/plain", Size: int64(len(content)), TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,11 +431,11 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks != "" {
 		t.Fatalf("published messages=%+v err=%v", page.Messages, err)
 	}
-	firstBatch, err := remote.CreateExternalUpload(ctx, "T1", "U1", "first-batch.txt", "text/plain", 5, time.Minute)
+	firstBatch, err := remote.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "first-batch.txt", MIMEType: "text/plain", Size: 5, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondBatch, err := remote.CreateExternalUpload(ctx, "T1", "U1", "second-batch.txt", "text/plain", 6, time.Minute)
+	secondBatch, err := remote.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "second-batch.txt", MIMEType: "text/plain", Size: 6, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,11 +511,11 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if _, err := remote.AdminCreateUser(ctx, "T1", "U1", "NEW@example.com", "Duplicate", domain.WorkspaceRoleMember); !errors.Is(err, storepkg.ErrAlreadyExists) {
 		t.Fatalf("duplicate manual user error=%v, want domain already-exists", err)
 	}
-	adminUsers, err := remote.AdminListUsers(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+	adminUsers, err := remote.AdminListUsers(ctx, "T1", "U1", domain.MemberActivityAny, domain.PageRequest{Limit: 10})
 	if err != nil || len(adminUsers.Users) != 3 {
 		t.Fatalf("admin users=%+v err=%v", adminUsers, err)
 	}
-	if _, err := remote.AdminListUsers(ctx, "", "U1", domain.PageRequest{Limit: 10}); err == nil {
+	if _, err := remote.AdminListUsers(ctx, "", "U1", domain.MemberActivityAny, domain.PageRequest{Limit: 10}); err == nil {
 		t.Fatal("administrator user listing accepted an empty workspace")
 	}
 	for _, item := range adminUsers.Users {
@@ -691,7 +691,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 		t.Fatalf("user by email=%+v err=%v", user, err)
 	}
 	statusExpiration := time.Unix(4102444800, 0).UTC()
-	user, err = remote.SetUserProfile(ctx, "T1", "U1", domain.UserProfile{DisplayName: "remote-alice", StatusText: "Ready", StatusEmoji: ":white_check_mark:", StatusExpiration: statusExpiration})
+	user, err = remote.SetUserProfile(ctx, "T1", "U1", "U1", domain.UserProfile{DisplayName: "remote-alice", StatusText: "Ready", StatusEmoji: ":white_check_mark:", StatusExpiration: statusExpiration})
 	if err != nil || user.Profile.DisplayName != "remote-alice" || user.Profile.StatusText != "Ready" || !user.Profile.StatusExpiration.Equal(statusExpiration) {
 		t.Fatalf("updated user=%+v err=%v", user, err)
 	}
@@ -793,7 +793,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err != nil || len(publicConversations.Conversations) != 1 || !containsConversation(publicConversations.Conversations, "C1") {
 		t.Fatalf("public conversations=%+v err=%v", publicConversations, err)
 	}
-	createdConversation, err := remote.CreateConversation(ctx, "T1", "U1", "private-room", true)
+	createdConversation, err := remote.CreateConversation(ctx, "T1", "U1", "private-room", true, "")
 	if err != nil || !createdConversation.PrivateFlag() || createdConversation.Name != "private-room" {
 		t.Fatalf("created conversation=%+v err=%v", createdConversation, err)
 	}

@@ -603,7 +603,7 @@ func conversationSearchTreatsMetacharactersLiterally(t *testing.T, open opener) 
 		t.Fatal(err)
 	}
 	for query, want := range map[string]domain.ConversationID{"%": literal.ID, "_": underscore.ID} {
-		page, err := f.repository.SearchConversations(ctx, f.workspaceID, query, domain.PageRequest{Limit: 10})
+		page, err := f.repository.SearchConversations(ctx, f.workspaceID, domain.ConversationSearch{Query: query, Sort: domain.ConversationSortName}, domain.PageRequest{Limit: 10})
 		if err != nil {
 			t.Fatalf("search %q: %v", query, err)
 		}
@@ -700,7 +700,7 @@ func searchFoldsUnicodeIdentically(t *testing.T, open opener) {
 	}
 	assertConversation := func(query string) {
 		t.Helper()
-		page, err := f.repository.SearchConversations(ctx, f.workspaceID, query, domain.PageRequest{Limit: 10})
+		page, err := f.repository.SearchConversations(ctx, f.workspaceID, domain.ConversationSearch{Query: query, Sort: domain.ConversationSortName}, domain.PageRequest{Limit: 10})
 		if err != nil {
 			t.Fatalf("conversation search %q: %v", query, err)
 		}
@@ -2444,7 +2444,7 @@ func slackConnectCapacityIsClaimedTransactionally(t *testing.T, open opener) {
 	if err := f.repository.CreateSharedInvite(ctx, duplicate, f.event("connect-duplicate", "shared_invite.created", string(duplicate.ID))); !errors.Is(err, store.ErrAlreadyExists) {
 		t.Fatalf("a second outstanding invitation err=%v, want it refused", err)
 	}
-	if err := f.repository.SetSharedInviteStatus(ctx, invite.ID, domain.SharedInvitePending, domain.SharedInviteApproved, time.Unix(1_700_001_100, 0).UTC(), f.event("connect-approved", "shared_invite.approved", string(invite.ID))); err != nil {
+	if err := f.repository.SetSharedInviteStatus(ctx, invite.ID, domain.SharedInvitePending, domain.SharedInviteApproved, time.Unix(1_700_001_100, 0).UTC(), domain.SharedInviteReview{}, f.event("connect-approved", "shared_invite.approved", string(invite.ID))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2460,7 +2460,7 @@ func slackConnectCapacityIsClaimedTransactionally(t *testing.T, open opener) {
 
 	// A transition the state machine forbids is refused on both profiles, so
 	// no caller can move an invitation somewhere it may not go.
-	if err := f.repository.SetSharedInviteStatus(ctx, invite.ID, domain.SharedInviteApproved, domain.SharedInvitePending, time.Unix(1_700_001_300, 0).UTC(), f.event("connect-back", "shared_invite.created", string(invite.ID))); err == nil {
+	if err := f.repository.SetSharedInviteStatus(ctx, invite.ID, domain.SharedInviteApproved, domain.SharedInvitePending, time.Unix(1_700_001_300, 0).UTC(), domain.SharedInviteReview{}, f.event("connect-back", "shared_invite.created", string(invite.ID))); err == nil {
 		t.Fatal("an approved invitation was moved back to pending")
 	}
 }

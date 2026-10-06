@@ -28,7 +28,7 @@ func assignmentWorld(t *testing.T) (context.Context, Messages, domain.ListID, do
 	if err := messages.SetListAccess(ctx, "T1", "U1", list.ID, "read", nil, []domain.UserID{"U2"}); err != nil {
 		t.Fatal(err)
 	}
-	item, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"ship it"}]`)
+	item, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"ship it"}]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}

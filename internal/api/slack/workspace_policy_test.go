@@ -64,7 +64,7 @@ func TestPrivateChannelCreationAnswersRestrictedActionUnderTheWorkspacePolicy(t 
 	}
 	// admin.conversations.create declares the same code, and the policy is
 	// the same whichever method makes the channel.
-	if status, body := policyCall(t, mux, "/api/admin.conversations.create", url.Values{"name": {"admin-api-private"}, "is_private": {"true"}}, "session-one"); status != http.StatusOK || body["error"] != "restricted_action" {
+	if status, body := policyCall(t, mux, "/api/admin.conversations.create", url.Values{"name": {"admin-api-private"}, "is_private": {"true"}, "team_id": {"T1"}}, "session-one"); status != http.StatusOK || body["error"] != "restricted_action" {
 		t.Fatalf("admin.conversations.create by an administrator under owners-only: status=%d body=%v, want restricted_action", status, body)
 	}
 }

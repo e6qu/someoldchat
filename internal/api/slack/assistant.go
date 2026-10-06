@@ -17,10 +17,13 @@ import (
 // All three write display state for a thread and none of them creates a
 // message, so they carry chat:write — the caller must be able to post where the
 // state will be shown — and they answer a bare {"ok": true} as the SDK's own
-// response types expect.
+// response types expect. setStatus also takes the icon_emoji, icon_url and
+// username python-slack-sdk 3.45 and slack-bolt 1.30 send, under the contract
+// agents.sessions.setStatus documents for the same three: chat:write.customize
+// on top of chat:write, and a JSON null the same as leaving one out.
 
 func (h Handler) setAssistantThreadTitle(w http.ResponseWriter, r *http.Request) {
-	principal, fields, target, thread, ok := h.assistantTarget(w, r)
+	principal, fields, target, thread, ok := h.assistantTarget(w, r, normalizeJSONField)
 	if !ok {
 		return
 	}
@@ -32,7 +35,7 @@ func (h Handler) setAssistantThreadTitle(w http.ResponseWriter, r *http.Request)
 }
 
 func (h Handler) setAssistantThreadStatus(w http.ResponseWriter, r *http.Request) {
-	principal, fields, target, thread, ok := h.assistantTarget(w, r)
+	principal, fields, target, thread, ok := h.assistantTarget(w, r, identityOverrideJSONMember)
 	if !ok {
 		return
 	}
@@ -45,7 +48,11 @@ func (h Handler) setAssistantThreadStatus(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	if err := h.Messages.SetAssistantThreadStatus(r.Context(), principal.WorkspaceID, principal.UserID, target, thread, fields["status"], loadingMessages); err != nil {
+	identity, ok := identityOverride(w, principal, fields)
+	if !ok {
+		return
+	}
+	if err := h.Messages.SetAssistantThreadStatus(r.Context(), principal.WorkspaceID, principal.UserID, target, thread, fields["status"], loadingMessages, identity); err != nil {
 		writeAssistantError(w, err)
 		return
 	}
@@ -53,7 +60,7 @@ func (h Handler) setAssistantThreadStatus(w http.ResponseWriter, r *http.Request
 }
 
 func (h Handler) setAssistantThreadSuggestedPrompts(w http.ResponseWriter, r *http.Request) {
-	principal, fields, target, thread, ok := h.assistantTarget(w, r)
+	principal, fields, target, thread, ok := h.assistantTarget(w, r, normalizeJSONField)
 	if !ok {
 		return
 	}
@@ -77,13 +84,15 @@ func (h Handler) setAssistantThreadSuggestedPrompts(w http.ResponseWriter, r *ht
 }
 
 // assistantTarget resolves the three arguments every assistant write shares.
-func (h Handler) assistantTarget(w http.ResponseWriter, r *http.Request) (auth.Principal, map[string]string, domain.ConversationID, domain.MessageTimestamp, bool) {
+// jsonMember decodes a JSON body's members: setStatus's accepts a null
+// identity override, the other two refuse a null as every method does.
+func (h Handler) assistantTarget(w http.ResponseWriter, r *http.Request, jsonMember func(string, json.RawMessage) (string, error)) (auth.Principal, map[string]string, domain.ConversationID, domain.MessageTimestamp, bool) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
 		writeAuthError(w, err)
 		return auth.Principal{}, nil, "", "", false
 	}
-	fields, err := decodeFields(w, r)
+	fields, err := decodeArguments(w, r, jsonMember)
 	if err != nil {
 		writeDecodeError(w, err)
 		return auth.Principal{}, nil, "", "", false

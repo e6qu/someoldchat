@@ -43,13 +43,8 @@ func (m Messages) SetAgentSessionStatus(ctx context.Context, workspaceID domain.
 	if !request.Status.Valid() {
 		return domain.AgentSessionStatusResult{}, domain.ErrInvalidAgentSessionStatus
 	}
-	identity := domain.AgentIdentity{
-		Username:  strings.TrimSpace(request.Identity.Username),
-		IconEmoji: strings.TrimSpace(request.Identity.IconEmoji),
-		IconURL:   strings.TrimSpace(request.Identity.IconURL),
-	}
-	if utf8.RuneCountInString(identity.Username) > domain.AgentSessionUsernameLimit ||
-		(identity.IconURL != "" && !validMessageIconURL(identity.IconURL)) {
+	identity, ok := normalizeAgentIdentity(request.Identity)
+	if !ok {
 		return domain.AgentSessionStatusResult{}, domain.ErrInvalidAgentSession
 	}
 	write := domain.AgentSessionStatusWrite{
@@ -478,4 +473,18 @@ func (m Messages) appSubscribesToAgentSessionStopped(ctx context.Context, worksp
 		return false, err
 	}
 	return slices.Contains(parsed.BotEvents, domain.AgentSessionStoppedEvent) || slices.Contains(parsed.UserEvents, domain.AgentSessionStoppedEvent), nil
+}
+
+// normalizeAgentIdentity trims a setStatus identity override and reports
+// whether it may be stored: a username within the bound and an icon_url that
+// is an absolute http(s) address, as a message's own icon_url must be.
+func normalizeAgentIdentity(identity domain.AgentIdentity) (domain.AgentIdentity, bool) {
+	identity = domain.AgentIdentity{
+		Username:  strings.TrimSpace(identity.Username),
+		IconEmoji: strings.TrimSpace(identity.IconEmoji),
+		IconURL:   strings.TrimSpace(identity.IconURL),
+	}
+	valid := utf8.RuneCountInString(identity.Username) <= domain.AgentIdentityUsernameLimit &&
+		(identity.IconURL == "" || validMessageIconURL(identity.IconURL))
+	return identity, valid
 }

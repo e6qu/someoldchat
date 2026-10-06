@@ -44,7 +44,7 @@ func (h Handler) createCodeChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	// team_id names the workspace an organization token creates in; a
 	// workspace token's own workspace is the only one there is.
-	if team := strings.TrimSpace(fields["team_id"]); team != "" && domain.WorkspaceID(team) != principal.WorkspaceID {
+	if namesForeignTeam(fields, principal) {
 		writeError(w, "invalid_arguments")
 		return
 	}

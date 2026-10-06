@@ -26,7 +26,7 @@ func TestASlackConnectDecisionReachesTheMemberWhoAskedForIt(t *testing.T) {
 	repository.SeedConversationMember("C1", "UA")
 	messages := Messages{Store: repository}
 
-	invite, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", "")
+	invite, err := messages.InviteShared(ctx, "T1", "U1", "C1", domain.SharedInviteRecipient{Workspace: "T2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestASlackConnectDecisionReachesTheMemberWhoAskedForIt(t *testing.T) {
 		}
 	}
 
-	if _, err := messages.ApproveSharedInvite(ctx, "T1", "UA", invite.ID); err != nil {
+	if _, err := messages.ApproveSharedInvite(ctx, "T1", "UA", invite.ID, domain.SharedInviteReview{}); err != nil {
 		t.Fatal(err)
 	}
 	told, err := messages.Activity(ctx, "T1", "U1", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})

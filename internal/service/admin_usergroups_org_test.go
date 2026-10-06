@@ -154,7 +154,7 @@ func TestAdminAddUserGroupUsersAddsMembersAndListsTheRefused(t *testing.T) {
 			t.Fatalf("%s: err=%v, want user not found", unknown, err)
 		}
 	}
-	if users, _ := messages.UserGroupUsers(ctx, "T1", "UA", group.ID); !slices.Equal(users, []domain.UserID{"U1"}) {
+	if users, _ := messages.UserGroupUsers(ctx, "T1", "UA", group.ID, true); !slices.Equal(users, []domain.UserID{"U1"}) {
 		t.Fatalf("a refused call changed the members: %v", users)
 	}
 	if _, err := messages.AdminAddUserGroupUsers(ctx, "T1", "UA", group.ID, []domain.UserID{"UG"}); !errors.Is(err, domain.ErrInvalidUserGroupUsers) {
@@ -218,7 +218,7 @@ func TestAdminRemoveUserGroupUsersRemovesOnlyThoseNamed(t *testing.T) {
 	if err := messages.AdminRemoveUserGroupUsers(ctx, "T1", "UA", group.ID, []domain.UserID{"U1", "UA"}); err != nil {
 		t.Fatal(err)
 	}
-	if users, _ := messages.UserGroupUsers(ctx, "T1", "UA", group.ID); !slices.Equal(users, []domain.UserID{"U2"}) {
+	if users, _ := messages.UserGroupUsers(ctx, "T1", "UA", group.ID, true); !slices.Equal(users, []domain.UserID{"U2"}) {
 		t.Fatalf("members %v", users)
 	}
 	// Removing somebody who is not a member is already done.
@@ -232,7 +232,7 @@ func TestAdminRemoveUserGroupUsersRemovesOnlyThoseNamed(t *testing.T) {
 	if err := messages.AdminRemoveUserGroupUsers(ctx, "T1", "UA", group.ID, []domain.UserID{"UX"}); !errors.Is(err, domain.ErrUserNotFound) {
 		t.Fatalf("another organization's user err=%v", err)
 	}
-	if users, _ := messages.UserGroupUsers(ctx, "T1", "UA", group.ID); !slices.Equal(users, []domain.UserID{"U2"}) {
+	if users, _ := messages.UserGroupUsers(ctx, "T1", "UA", group.ID, true); !slices.Equal(users, []domain.UserID{"U2"}) {
 		t.Fatalf("a refused removal changed the members: %v", users)
 	}
 	if err := messages.AdminRemoveUserGroupUsers(ctx, "T1", "U1", group.ID, []domain.UserID{"U2"}); !errors.Is(err, domain.ErrNotWorkspaceAdmin) {

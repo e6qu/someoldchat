@@ -131,6 +131,8 @@ message SharedInvite {
   int64 reviewed_at = 9;
   int64 settled_at = 10;
   int64 expires_at = 11;
+  bool external_limited = 12;
+  string review_message = 13;
 }
 
 message SharedInvitePage {
@@ -156,6 +158,10 @@ message ExternalTeamsRequest {
   string user_id = 2;
   int32 limit = 3;
   string cursor = 4;
+  bool descending = 5;
+  string connection_status = 6;
+  repeated string slack_connect_prefs = 7;
+  repeated string workspaces = 8;
 }
 
 message DisconnectExternalTeamRequest {
@@ -174,20 +180,40 @@ message InviteSharedRequest {
   string conversation_id = 3;
   string target_workspace_id = 4;
   string target_email = 5;
+  // target_user_id names a person in another organization; that
+  // organization is the one invited.
+  string target_user_id = 6;
+  bool external_limited = 7;
 }
 
 message SharedInviteMutationRequest {
   string workspace_id = 1;
   string user_id = 2;
   string shared_invite_id = 3;
+  // The host's review of a pending invitation (approve and deny only).
+  string review_conversation_id = 4;
+  bool review_set_external_limited = 5;
+  bool review_external_limited = 6;
+  string review_message = 7;
+  // accept only: the accepting organization asked for a private channel.
+  bool accept_private = 8;
 }
 
 message SharedInvitesRequest {
   string workspace_id = 1;
   string user_id = 2;
+  // status is the single status an older caller lists by; it is read only
+  // when statuses and decisions are both empty.
   string status = 3;
   int32 limit = 4;
   string cursor = 5;
+  repeated string statuses = 6;
+  repeated string decisions = 7;
+  repeated string invite_ids = 8;
+  string conversation_id = 9;
+  string invited_by = 10;
+  // Unix nanoseconds; zero lists lapsed invitations too.
+  int64 exclude_expired_at = 11;
 }
 
 message ExternalInvitePermissionsRequest {

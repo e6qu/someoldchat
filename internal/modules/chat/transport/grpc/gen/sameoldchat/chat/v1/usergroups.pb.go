@@ -189,12 +189,16 @@ func (x *UserGroup) GetTeams() []string {
 }
 
 type UserGroupRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	UserGroupId   string                 `protobuf:"bytes,3,opt,name=user_group_id,json=userGroupId,proto3" json:"user_group_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UserGroupId string                 `protobuf:"bytes,3,opt,name=user_group_id,json=userGroupId,proto3" json:"user_group_id,omitempty"`
+	// UserGroupUsers only: refuse a disabled group. It is the negation of
+	// usergroups.users.list's include_disabled so that an older caller, which
+	// sends neither, keeps the answer it was built for.
+	ExcludeDisabled bool `protobuf:"varint,4,opt,name=exclude_disabled,json=excludeDisabled,proto3" json:"exclude_disabled,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UserGroupRequest) Reset() {
@@ -246,6 +250,13 @@ func (x *UserGroupRequest) GetUserGroupId() string {
 		return x.UserGroupId
 	}
 	return ""
+}
+
+func (x *UserGroupRequest) GetExcludeDisabled() bool {
+	if x != nil {
+		return x.ExcludeDisabled
+	}
+	return false
 }
 
 type UserGroupsRequest struct {
@@ -1239,11 +1250,12 @@ const file_sameoldchat_chat_v1_usergroups_proto_rawDesc = "" +
 	"\bchannels\x18\r \x03(\tR\bchannels\x12\x1b\n" +
 	"\torg_level\x18\x0e \x01(\bR\borgLevel\x12\x16\n" +
 	"\x06hidden\x18\x0f \x01(\bR\x06hidden\x12\x14\n" +
-	"\x05teams\x18\x10 \x03(\tR\x05teams\"r\n" +
+	"\x05teams\x18\x10 \x03(\tR\x05teams\"\x9d\x01\n" +
 	"\x10UserGroupRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
-	"\ruser_group_id\x18\x03 \x01(\tR\vuserGroupId\"\xa8\x01\n" +
+	"\ruser_group_id\x18\x03 \x01(\tR\vuserGroupId\x12)\n" +
+	"\x10exclude_disabled\x18\x04 \x01(\bR\x0fexcludeDisabled\"\xa8\x01\n" +
 	"\x11UserGroupsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12)\n" +

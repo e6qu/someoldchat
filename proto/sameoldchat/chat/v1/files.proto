@@ -62,6 +62,10 @@ message ExternalUpload {
   string expires_at = 10;
   string uploaded_at = 11;
   string completed_at = 12;
+  // description and file_type are the alt_txt and snippet_type the ticket
+  // was issued with.
+  string description = 13;
+  string file_type = 14;
 }
 
 message ExternalUploadRequest {
@@ -72,6 +76,10 @@ message ExternalUploadRequest {
   int64 size = 5;
   int64 ttl_seconds = 6;
   string upload_id = 7;
+  // description and file_type are files.getUploadURLExternal's alt_txt and
+  // snippet_type.
+  string description = 8;
+  string file_type = 9;
 }
 
 message ExternalUploadPart {
@@ -152,6 +160,12 @@ message RemoteFilesRequest {
   string user_id = 2;
   int32 limit = 3;
   string cursor = 4;
+  // channel, created_from and created_to are files.remote.list's channel,
+  // ts_from and ts_to. The bounds are stored-time instants and inclusive; an
+  // empty value does not narrow the list.
+  string channel = 5;
+  string created_from = 6;
+  string created_to = 7;
 }
 
 message ShareRemoteFileRequest {

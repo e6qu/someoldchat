@@ -293,13 +293,13 @@ func sharedInviteDriver() driver {
 			ctx := context.Background()
 			switch domain.SharedInviteStatus(to) {
 			case domain.SharedInviteApproved:
-				_, err := messages.ApproveSharedInvite(ctx, host, hostAdmin, invite)
+				_, err := messages.ApproveSharedInvite(ctx, host, hostAdmin, invite, domain.SharedInviteReview{})
 				return err
 			case domain.SharedInviteRevoked:
 				// Denying is the host refusing to send one it has not approved;
 				// revoking is withdrawing one it has. Both land on revoked.
 				if domain.SharedInviteStatus(from) == domain.SharedInvitePending {
-					_, err := messages.DenySharedInvite(ctx, host, hostAdmin, invite)
+					_, err := messages.DenySharedInvite(ctx, host, hostAdmin, invite, domain.SharedInviteReview{})
 					return err
 				}
 				_, err := messages.RevokeSharedInvite(ctx, host, hostAdmin, invite)
@@ -308,7 +308,7 @@ func sharedInviteDriver() driver {
 				_, err := messages.DeclineSharedInvite(ctx, target, guest, invite)
 				return err
 			case domain.SharedInviteAccepted:
-				_, err := messages.AcceptSharedInvite(ctx, target, guest, invite)
+				_, err := messages.AcceptSharedInvite(ctx, target, guest, invite, false)
 				return err
 			}
 			return errNoSuchTransition
@@ -336,7 +336,7 @@ func routeToSharedInviteState(state string) []func(service.Messages) error {
 		invite    = domain.SharedInviteID("I1")
 	)
 	approve := func(messages service.Messages) error {
-		_, err := messages.ApproveSharedInvite(context.Background(), host, hostAdmin, invite)
+		_, err := messages.ApproveSharedInvite(context.Background(), host, hostAdmin, invite, domain.SharedInviteReview{})
 		return err
 	}
 	switch domain.SharedInviteStatus(state) {
@@ -346,7 +346,7 @@ func routeToSharedInviteState(state string) []func(service.Messages) error {
 		return []func(service.Messages) error{approve}
 	case domain.SharedInviteAccepted:
 		return []func(service.Messages) error{approve, func(messages service.Messages) error {
-			_, err := messages.AcceptSharedInvite(context.Background(), target, guest, invite)
+			_, err := messages.AcceptSharedInvite(context.Background(), target, guest, invite, false)
 			return err
 		}}
 	case domain.SharedInviteDeclined:
@@ -356,7 +356,7 @@ func routeToSharedInviteState(state string) []func(service.Messages) error {
 		}}
 	case domain.SharedInviteRevoked:
 		return []func(service.Messages) error{func(messages service.Messages) error {
-			_, err := messages.DenySharedInvite(context.Background(), host, hostAdmin, invite)
+			_, err := messages.DenySharedInvite(context.Background(), host, hostAdmin, invite, domain.SharedInviteReview{})
 			return err
 		}}
 	}
@@ -498,7 +498,7 @@ func externalUploadDriver() driver {
 				t.Fatal(err)
 			}
 			messages := service.Messages{Store: repository, Blob: objects}
-			ticket, err := messages.CreateExternalUpload(ctx, workspace, member, "fixture.txt", "text/plain", int64(len(payload)), time.Hour)
+			ticket, err := messages.CreateExternalUpload(ctx, workspace, member, domain.ExternalUploadRequest{Name: "fixture.txt", MIMEType: "text/plain", Size: int64(len(payload)), TTL: time.Hour})
 			if err != nil {
 				t.Fatal(err)
 			}

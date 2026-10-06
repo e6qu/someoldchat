@@ -32,10 +32,17 @@ func (m Messages) SetAssistantThreadTitle(ctx context.Context, workspaceID domai
 // SetAssistantThreadStatus shows what the assistant is doing. It is transient
 // by design: an app clears it by setting an empty status, which is why the
 // empty string is accepted here and refused for a title. loadingMessages are
-// the lines a client rotates through while the status shows, at most ten; they
-// are cleared with the status.
-func (m Messages) SetAssistantThreadStatus(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, thread domain.MessageTimestamp, status string, loadingMessages []string) error {
+// the lines a client rotates through while the status shows, at most ten.
+// identity is the icon_emoji, icon_url and username the status is shown with
+// in place of the actor's own name; whether the caller may send one
+// (chat:write.customize) is the transport's to decide. All three, and the
+// actor, are replaced by each call and cleared with the status.
+func (m Messages) SetAssistantThreadStatus(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, thread domain.MessageTimestamp, status string, loadingMessages []string, identity domain.AgentIdentity) error {
 	if len(loadingMessages) > domain.AssistantLoadingMessageLimit {
+		return domain.ErrInvalidAssistantThread
+	}
+	identity, ok := normalizeAgentIdentity(identity)
+	if !ok {
 		return domain.ErrInvalidAssistantThread
 	}
 	status = strings.TrimSpace(status)
@@ -45,8 +52,15 @@ func (m Messages) SetAssistantThreadStatus(ctx context.Context, workspaceID doma
 			cleaned = append(cleaned, message)
 		}
 	}
+	author := actor
+	if status == "" {
+		author, identity = "", domain.AgentIdentity{}
+	}
 	return m.setAssistantThread(ctx, workspaceID, actor, conversationID, thread, domain.AssistantThreadStatus,
-		func(value *domain.AssistantThread) { value.Status, value.LoadingMessages = status, cleaned })
+		func(value *domain.AssistantThread) {
+			value.Status, value.LoadingMessages = status, cleaned
+			value.StatusUserID, value.StatusIdentity = author, identity
+		})
 }
 
 // SetAssistantThreadSuggestedPrompts offers openings a member can click.
@@ -92,7 +106,7 @@ func (m Messages) setAssistantThread(ctx context.Context, workspaceID domain.Wor
 	now := time.Now().UTC()
 	value := domain.AssistantThread{WorkspaceID: workspaceID, Conversation: conversationID, ThreadTimestamp: thread, UpdatedAt: now}
 	apply(&value)
-	event, err := newEvent(workspaceID, actor, events.NewPayload("assistant.thread_updated",
+	event, err := newEvent(workspaceID, actor, events.NewPayload(events.AssistantThreadUpdatedTopic,
 		events.String("channel_id", string(conversationID)),
 		events.String("thread_ts", string(thread)),
 		events.String("field", string(field)),

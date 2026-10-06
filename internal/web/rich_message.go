@@ -960,7 +960,10 @@ func carouselBlockContent(value map[string]any) (string, template.HTML, []messag
 	var textParts []string
 	var actions []messageActionView
 	var output strings.Builder
-	output.WriteString(`<div class="block-carousel-track">`)
+	// The track is what scrolls sideways, so it takes keyboard focus: a
+	// reader without a pointer reaches the cards past the first by scrolling
+	// it with the arrow keys, and axe's scrollable-region-focusable holds.
+	output.WriteString(`<div class="block-carousel-track" role="group" aria-label="Carousel" tabindex="0">`)
 	for _, raw := range elements {
 		card, _ := raw.(map[string]any)
 		if strings.TrimSpace(stringValue(card["type"])) != "card" {
@@ -1516,6 +1519,16 @@ func newMessageAttachmentView(value map[string]any, sourceURL string) (messageAt
 		Footer:    strings.TrimSpace(stringValue(value["footer"])),
 		ImageURL:  strings.TrimSpace(stringValue(value["image_url"])),
 		ImageAlt:  strings.TrimSpace(stringValue(value["alt_text"])),
+	}
+	// A Work Object unfurl (chat.unfurl's metadata entities) is an entity, not
+	// an attachment: its title is entity_payload.attributes.title.text, it
+	// links to the entity's url, and it names the product it comes from.
+	if payload, ok := value["entity_payload"].(map[string]any); ok && attachment.Title == "" {
+		attributes, _ := payload["attributes"].(map[string]any)
+		title, _ := attributes["title"].(map[string]any)
+		attachment.Title = strings.TrimSpace(stringValue(title["text"]))
+		attachment.TitleURL = strings.TrimSpace(stringValue(value["url"]))
+		attachment.Footer = strings.TrimSpace(stringValue(attributes["product_name"]))
 	}
 	if attachment.Title == "" && attachment.Text == "" {
 		attachment.Text = strings.TrimSpace(stringValue(value["fallback"]))

@@ -63,13 +63,17 @@ func (s AgentSessionStatus) precedence() int {
 // rename takes 1-200 characters and a creating setStatus at most 200.
 const AgentSessionTitleLimit = 200
 
-// AgentSessionUsernameLimit bounds setStatus's username override.
-const AgentSessionUsernameLimit = 200
+// AgentIdentityUsernameLimit bounds the username override of an
+// AgentIdentity.
+const AgentIdentityUsernameLimit = 200
 
 // AgentIdentity is the display override an agent may set with setStatus's
-// icon_emoji, icon_url and username. The three travel as one set: a call that
-// sets any of them replaces all three, so one left out of that call is
-// cleared, and a call that sets none leaves the set as it was.
+// icon_emoji, icon_url and username — agents.sessions.setStatus's and
+// assistant.threads.setStatus's alike. The three travel as one set. On an
+// agent session a call that sets any of them replaces all three, so one left
+// out of that call is cleared, and a call that sets none leaves the set as it
+// was; on an assistant thread the set belongs to the status it was sent with
+// and is replaced, or cleared, with it.
 type AgentIdentity struct {
 	Username  string
 	IconEmoji string

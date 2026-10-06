@@ -2626,10 +2626,15 @@ func (x *ExternalAuthTokenRequest) GetExternalTokenId() string {
 }
 
 type UserConnectionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	AppId         string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId       string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	// UpdateUserAppConnection only: the member the app reports about, and
+	// their connection status. An older caller sends neither and meant the
+	// caller's own connection, connected.
+	TargetUserId  string `protobuf:"bytes,4,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
+	Status        string `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2681,6 +2686,20 @@ func (x *UserConnectionRequest) GetUserId() string {
 func (x *UserConnectionRequest) GetAppId() string {
 	if x != nil {
 		return x.AppId
+	}
+	return ""
+}
+
+func (x *UserConnectionRequest) GetTargetUserId() string {
+	if x != nil {
+		return x.TargetUserId
+	}
+	return ""
+}
+
+func (x *UserConnectionRequest) GetStatus() string {
+	if x != nil {
+		return x.Status
 	}
 	return ""
 }
@@ -4173,11 +4192,13 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
 	"\x06app_id\x18\x03 \x01(\tR\x05appId\x12*\n" +
-	"\x11external_token_id\x18\x04 \x01(\tR\x0fexternalTokenId\"j\n" +
+	"\x11external_token_id\x18\x04 \x01(\tR\x0fexternalTokenId\"\xa8\x01\n" +
 	"\x15UserConnectionRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
-	"\x06app_id\x18\x03 \x01(\tR\x05appId\"\xf1\x01\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\x12$\n" +
+	"\x0etarget_user_id\x18\x04 \x01(\tR\ftargetUserId\x12\x16\n" +
+	"\x06status\x18\x05 \x01(\tR\x06status\"\xf1\x01\n" +
 	"\x14ExternalAuthProvider\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +

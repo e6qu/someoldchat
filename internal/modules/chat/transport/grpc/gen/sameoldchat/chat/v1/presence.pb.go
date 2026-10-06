@@ -227,7 +227,9 @@ type User struct {
 	// When the member's last open client lapses; zero when never connected.
 	ConnectedUntilUnixNano int64 `protobuf:"varint,17,opt,name=connected_until_unix_nano,json=connectedUntilUnixNano,proto3" json:"connected_until_unix_nano,omitempty"`
 	// The running huddle the member is in; empty when none.
-	HuddleCallId  string `protobuf:"bytes,18,opt,name=huddle_call_id,json=huddleCallId,proto3" json:"huddle_call_id,omitempty"`
+	HuddleCallId string `protobuf:"bytes,18,opt,name=huddle_call_id,json=huddleCallId,proto3" json:"huddle_call_id,omitempty"`
+	// The language the member chose; empty when none.
+	Locale        string `protobuf:"bytes,19,opt,name=locale,proto3" json:"locale,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -384,6 +386,13 @@ func (x *User) GetConnectedUntilUnixNano() int64 {
 func (x *User) GetHuddleCallId() string {
 	if x != nil {
 		return x.HuddleCallId
+	}
+	return ""
+}
+
+func (x *User) GetLocale() string {
+	if x != nil {
+		return x.Locale
 	}
 	return ""
 }
@@ -908,10 +917,12 @@ func (x *UserByEmailRequest) GetEmail() string {
 }
 
 type SetUserProfileRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Profile       *UserProfile           `protobuf:"bytes,3,opt,name=profile,proto3" json:"profile,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Profile     *UserProfile           `protobuf:"bytes,3,opt,name=profile,proto3" json:"profile,omitempty"`
+	// target_user_id is the member whose profile changes; empty is user_id.
+	TargetUserId  string `protobuf:"bytes,4,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -965,6 +976,13 @@ func (x *SetUserProfileRequest) GetProfile() *UserProfile {
 		return x.Profile
 	}
 	return nil
+}
+
+func (x *SetUserProfileRequest) GetTargetUserId() string {
+	if x != nil {
+		return x.TargetUserId
+	}
+	return ""
 }
 
 type ScheduledStatus struct {
@@ -2257,7 +2275,7 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\n" +
 	"first_name\x18\x10 \x01(\tR\tfirstName\x12\x1b\n" +
 	"\tlast_name\x18\x11 \x01(\tR\blastName\x12\x14\n" +
-	"\x05phone\x18\x12 \x01(\tR\x05phone\"\xe9\x04\n" +
+	"\x05phone\x18\x12 \x01(\tR\x05phone\"\x81\x05\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x14\n" +
@@ -2279,7 +2297,8 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\x10ultra_restricted\x18\x0f \x01(\bR\x0fultraRestricted\x12#\n" +
 	"\rprimary_owner\x18\x10 \x01(\bR\fprimaryOwner\x129\n" +
 	"\x19connected_until_unix_nano\x18\x11 \x01(\x03R\x16connectedUntilUnixNano\x12$\n" +
-	"\x0ehuddle_call_id\x18\x12 \x01(\tR\fhuddleCallId\"\x8f\x01\n" +
+	"\x0ehuddle_call_id\x18\x12 \x01(\tR\fhuddleCallId\x12\x16\n" +
+	"\x06locale\x18\x13 \x01(\tR\x06locale\"\x8f\x01\n" +
 	"\x10ClientConnection\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -2315,11 +2334,12 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\x12UserByEmailRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
-	"\x05email\x18\x03 \x01(\tR\x05email\"\x8f\x01\n" +
+	"\x05email\x18\x03 \x01(\tR\x05email\"\xb5\x01\n" +
 	"\x15SetUserProfileRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12:\n" +
-	"\aprofile\x18\x03 \x01(\v2 .sameoldchat.chat.v1.UserProfileR\aprofile\"\xb9\x02\n" +
+	"\aprofile\x18\x03 \x01(\v2 .sameoldchat.chat.v1.UserProfileR\aprofile\x12$\n" +
+	"\x0etarget_user_id\x18\x04 \x01(\tR\ftargetUserId\"\xb9\x02\n" +
 	"\x0fScheduledStatus\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +

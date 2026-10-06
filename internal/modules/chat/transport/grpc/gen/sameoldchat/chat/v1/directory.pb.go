@@ -226,11 +226,14 @@ func (x *AdminUserPage) GetHasMore() bool {
 }
 
 type AdminUsersRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
-	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit       int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor      string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	// activity is the admin.users.list is_active filter: "" lists every member,
+	// "active" only active ones and "deactivated" only deactivated ones.
+	Activity      string `protobuf:"bytes,5,opt,name=activity,proto3" json:"activity,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -289,6 +292,13 @@ func (x *AdminUsersRequest) GetLimit() int32 {
 func (x *AdminUsersRequest) GetCursor() string {
 	if x != nil {
 		return x.Cursor
+	}
+	return ""
+}
+
+func (x *AdminUsersRequest) GetActivity() string {
+	if x != nil {
+		return x.Activity
 	}
 	return ""
 }
@@ -1542,10 +1552,13 @@ func (x *SetUserExpirationRequest) GetExpirationTs() int64 {
 }
 
 type ResetUserSessionsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	TargetUserId  string                 `protobuf:"bytes,3,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId  string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId       string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	TargetUserId string                 `protobuf:"bytes,3,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
+	// clients is which sessions a reset ends: "" every one, "web" the web
+	// sessions and "mobile" the mobile ones. UserSessions ignores it.
+	Clients       string `protobuf:"bytes,4,opt,name=clients,proto3" json:"clients,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1597,6 +1610,13 @@ func (x *ResetUserSessionsRequest) GetUserId() string {
 func (x *ResetUserSessionsRequest) GetTargetUserId() string {
 	if x != nil {
 		return x.TargetUserId
+	}
+	return ""
+}
+
+func (x *ResetUserSessionsRequest) GetClients() string {
+	if x != nil {
+		return x.Clients
 	}
 	return ""
 }
@@ -1778,6 +1798,7 @@ type ResetUserSessionsBulkRequest struct {
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	TargetUserIds []string               `protobuf:"bytes,3,rep,name=target_user_ids,json=targetUserIds,proto3" json:"target_user_ids,omitempty"`
+	Clients       string                 `protobuf:"bytes,4,opt,name=clients,proto3" json:"clients,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1831,6 +1852,13 @@ func (x *ResetUserSessionsBulkRequest) GetTargetUserIds() []string {
 		return x.TargetUserIds
 	}
 	return nil
+}
+
+func (x *ResetUserSessionsBulkRequest) GetClients() string {
+	if x != nil {
+		return x.Clients
+	}
+	return ""
 }
 
 type Emoji struct {
@@ -2306,6 +2334,9 @@ type SearchConversationsRequest struct {
 	Query         string                 `protobuf:"bytes,3,opt,name=query,proto3" json:"query,omitempty"`
 	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
 	Cursor        string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	ChannelTypes  []string               `protobuf:"bytes,6,rep,name=channel_types,json=channelTypes,proto3" json:"channel_types,omitempty"`
+	Sort          string                 `protobuf:"bytes,7,opt,name=sort,proto3" json:"sort,omitempty"`
+	Descending    bool                   `protobuf:"varint,8,opt,name=descending,proto3" json:"descending,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2373,6 +2404,27 @@ func (x *SearchConversationsRequest) GetCursor() string {
 		return x.Cursor
 	}
 	return ""
+}
+
+func (x *SearchConversationsRequest) GetChannelTypes() []string {
+	if x != nil {
+		return x.ChannelTypes
+	}
+	return nil
+}
+
+func (x *SearchConversationsRequest) GetSort() string {
+	if x != nil {
+		return x.Sort
+	}
+	return ""
+}
+
+func (x *SearchConversationsRequest) GetDescending() bool {
+	if x != nil {
+		return x.Descending
+	}
+	return false
 }
 
 type SearchPeopleRequest struct {
@@ -3686,11 +3738,15 @@ func (x *SynchronizeExternalUserRoleRequest) GetRole() string {
 }
 
 type AdminAssignUserRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	TargetUserId  string                 `protobuf:"bytes,3,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
-	ChannelIds    []string               `protobuf:"bytes,4,rep,name=channel_ids,json=channelIds,proto3" json:"channel_ids,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId  string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId       string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	TargetUserId string                 `protobuf:"bytes,3,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
+	ChannelIds   []string               `protobuf:"bytes,4,rep,name=channel_ids,json=channelIds,proto3" json:"channel_ids,omitempty"`
+	// guest_tier is domain.GuestTier: 0 keeps the membership's tier (what a
+	// peer that predates the field meant), 1 a full member, 2 a multi-channel
+	// guest and 3 a single-channel guest.
+	GuestTier     int32 `protobuf:"varint,5,opt,name=guest_tier,json=guestTier,proto3" json:"guest_tier,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3751,6 +3807,13 @@ func (x *AdminAssignUserRequest) GetChannelIds() []string {
 		return x.ChannelIds
 	}
 	return nil
+}
+
+func (x *AdminAssignUserRequest) GetGuestTier() int32 {
+	if x != nil {
+		return x.GuestTier
+	}
+	return 0
 }
 
 type InviteRequest struct {
@@ -5155,12 +5218,18 @@ func (x *RoleAssignmentMutationRequest) GetTargetUserIds() []string {
 }
 
 type RoleAssignmentsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	RoleId        string                 `protobuf:"bytes,3,opt,name=role_id,json=roleId,proto3" json:"role_id,omitempty"`
-	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
-	Cursor        string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// role_id is the single role an older caller names. A current caller sends
+	// role_ids, and also role_id when it names exactly one role, so a process
+	// that predates role_ids still answers that request correctly.
+	RoleId        string   `protobuf:"bytes,3,opt,name=role_id,json=roleId,proto3" json:"role_id,omitempty"`
+	Limit         int32    `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string   `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	RoleIds       []string `protobuf:"bytes,6,rep,name=role_ids,json=roleIds,proto3" json:"role_ids,omitempty"`
+	EntityIds     []string `protobuf:"bytes,7,rep,name=entity_ids,json=entityIds,proto3" json:"entity_ids,omitempty"`
+	Descending    bool     `protobuf:"varint,8,opt,name=descending,proto3" json:"descending,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5228,6 +5297,27 @@ func (x *RoleAssignmentsRequest) GetCursor() string {
 		return x.Cursor
 	}
 	return ""
+}
+
+func (x *RoleAssignmentsRequest) GetRoleIds() []string {
+	if x != nil {
+		return x.RoleIds
+	}
+	return nil
+}
+
+func (x *RoleAssignmentsRequest) GetEntityIds() []string {
+	if x != nil {
+		return x.EntityIds
+	}
+	return nil
+}
+
+func (x *RoleAssignmentsRequest) GetDescending() bool {
+	if x != nil {
+		return x.Descending
+	}
+	return false
 }
 
 type RoleAssignmentPage struct {
@@ -6271,12 +6361,13 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"\x05users\x18\x01 \x03(\v2\x1e.sameoldchat.chat.v1.AdminUserR\x05users\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"}\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x99\x01\n" +
 	"\x11AdminUsersRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"x\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x1a\n" +
+	"\bactivity\x18\x05 \x01(\tR\bactivity\"x\n" +
 	"\fUsersRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
@@ -6371,11 +6462,12 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12$\n" +
 	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\x12#\n" +
-	"\rexpiration_ts\x18\x04 \x01(\x03R\fexpirationTs\"|\n" +
+	"\rexpiration_ts\x18\x04 \x01(\x03R\fexpirationTs\"\x96\x01\n" +
 	"\x18ResetUserSessionsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12$\n" +
-	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\"p\n" +
+	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\x12\x18\n" +
+	"\aclients\x18\x04 \x01(\tR\aclients\"p\n" +
 	"\x19AdminUninstallAppsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
@@ -6386,11 +6478,12 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"\x14created_at_unix_nano\x18\x03 \x01(\x03R\x11createdAtUnixNano\x12/\n" +
 	"\x14expires_at_unix_nano\x18\x04 \x01(\x03R\x11expiresAtUnixNano\"Y\n" +
 	"\x14UserSessionsResponse\x12A\n" +
-	"\bsessions\x18\x01 \x03(\v2%.sameoldchat.chat.v1.WorkspaceSessionR\bsessions\"\x82\x01\n" +
+	"\bsessions\x18\x01 \x03(\v2%.sameoldchat.chat.v1.WorkspaceSessionR\bsessions\"\x9c\x01\n" +
 	"\x1cResetUserSessionsBulkRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12&\n" +
-	"\x0ftarget_user_ids\x18\x03 \x03(\tR\rtargetUserIds\"\x9a\x01\n" +
+	"\x0ftarget_user_ids\x18\x03 \x03(\tR\rtargetUserIds\x12\x18\n" +
+	"\aclients\x18\x04 \x01(\tR\aclients\"\x9a\x01\n" +
 	"\x05Emoji\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x1b\n" +
@@ -6422,13 +6515,18 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"\tmime_type\x18\x01 \x01(\tR\bmimeType\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\fR\x05image\"G\n" +
 	"\x11EmojiListResponse\x122\n" +
-	"\x06emojis\x18\x01 \x03(\v2\x1a.sameoldchat.chat.v1.EmojiR\x06emojis\"\x9c\x01\n" +
+	"\x06emojis\x18\x01 \x03(\v2\x1a.sameoldchat.chat.v1.EmojiR\x06emojis\"\xf5\x01\n" +
 	"\x1aSearchConversationsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05query\x18\x03 \x01(\tR\x05query\x12\x14\n" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"\x95\x01\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12#\n" +
+	"\rchannel_types\x18\x06 \x03(\tR\fchannelTypes\x12\x12\n" +
+	"\x04sort\x18\a \x01(\tR\x04sort\x12\x1e\n" +
+	"\n" +
+	"descending\x18\b \x01(\bR\n" +
+	"descending\"\x95\x01\n" +
 	"\x13SearchPeopleRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
@@ -6533,13 +6631,15 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"\"SynchronizeExternalUserRoleRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12$\n" +
 	"\x0etarget_user_id\x18\x02 \x01(\tR\ftargetUserId\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\"\x9b\x01\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\"\xba\x01\n" +
 	"\x16AdminAssignUserRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12$\n" +
 	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\x12\x1f\n" +
 	"\vchannel_ids\x18\x04 \x03(\tR\n" +
-	"channelIds\"\xac\x04\n" +
+	"channelIds\x12\x1d\n" +
+	"\n" +
+	"guest_tier\x18\x05 \x01(\x05R\tguestTier\"\xac\x04\n" +
 	"\rInviteRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x14\n" +
@@ -6669,13 +6769,19 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"\arole_id\x18\x03 \x01(\tR\x06roleId\x12\x1d\n" +
 	"\n" +
 	"entity_ids\x18\x04 \x03(\tR\tentityIds\x12&\n" +
-	"\x0ftarget_user_ids\x18\x05 \x03(\tR\rtargetUserIds\"\x9b\x01\n" +
+	"\x0ftarget_user_ids\x18\x05 \x03(\tR\rtargetUserIds\"\xf5\x01\n" +
 	"\x16RoleAssignmentsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
 	"\arole_id\x18\x03 \x01(\tR\x06roleId\x12\x14\n" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"\x97\x01\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12\x19\n" +
+	"\brole_ids\x18\x06 \x03(\tR\aroleIds\x12\x1d\n" +
+	"\n" +
+	"entity_ids\x18\a \x03(\tR\tentityIds\x12\x1e\n" +
+	"\n" +
+	"descending\x18\b \x01(\bR\n" +
+	"descending\"\x97\x01\n" +
 	"\x12RoleAssignmentPage\x12E\n" +
 	"\vassignments\x18\x01 \x03(\v2#.sameoldchat.chat.v1.RoleAssignmentR\vassignments\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +

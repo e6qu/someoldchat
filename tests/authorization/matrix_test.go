@@ -313,17 +313,11 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 			return reflect.ValueOf(domain.UserID("U-owner"))
 		}
 		return reflect.ValueOf(domain.UserID("U-member"))
-	case reflect.TypeOf(domain.WorkspaceID("")):
-		// The workspace and caller are already filled by invoke, so a
-		// WorkspaceID reaching here is a target organization. InviteShared needs
-		// a real one it has no outstanding invitation to, or it dies at its
-		// argument check for everyone and the guard-mutation gate can strip its
-		// membership guard unnoticed. Other operations that take a target
-		// organization are left zeroed, so this changes only the one it names.
-		if method == "InviteShared" {
-			return reflect.ValueOf(domain.WorkspaceID("T4"))
-		}
-		return reflect.Zero(argument)
+	case reflect.TypeOf(domain.SharedInviteRecipient{}):
+		// InviteShared needs a real organization it has no outstanding
+		// invitation to, or it dies at its argument check for everyone and
+		// the guard-mutation gate can strip its membership guard unnoticed.
+		return reflect.ValueOf(domain.SharedInviteRecipient{Workspace: "T4"})
 	case reflect.TypeOf(domain.ConversationID("")):
 		// ConvertGroupDirectToPrivate needs a DM or group DM, not the seeded
 		// channel, so it alone is handed the group direct message; every other
@@ -584,6 +578,10 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 // honest about the probe not knowing that argument's meaning.
 func fixtureStringArgument(method string) reflect.Value {
 	switch method {
+	case "AdminRenameConversation", "AdminUnlinkConversationObjects":
+		// A channel name the holder may give the seeded channel; both now
+		// refuse an empty name, which would answer every tier alike.
+		return reflect.ValueOf("matrix-renamed")
 	case "AddReaction":
 		// A name the holder has not used, so adding it succeeds rather than
 		// colliding with the holder's own seeded reaction.
@@ -952,7 +950,7 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		TargetEmail: "approved@example.test", InvitedBy: "U-owner", Status: domain.SharedInvitePending,
 		CreatedAt: at, ExpiresAt: inviteExpiry,
 	}, event("E-approved-invite", "conversation.shared_invite_sent")))
-	if _, err := (service.Messages{Store: repository}).ApproveSharedInvite(ctx, "T1", "U-owner", fixtureApprovedInviteID); err != nil {
+	if _, err := (service.Messages{Store: repository}).ApproveSharedInvite(ctx, "T1", "U-owner", fixtureApprovedInviteID, domain.SharedInviteReview{}); err != nil {
 		t.Fatalf("driving the approved invitation: %v", err)
 	}
 	seed("workflow trigger", repository.SetWorkflowTrigger(ctx, domain.WorkflowTrigger{

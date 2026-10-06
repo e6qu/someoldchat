@@ -147,6 +147,15 @@ type FileUnshare struct {
 	Event  events.Event
 }
 
+// FileShareGrant pairs a file an edit adds to a message with the file.shared
+// event to journal if the file was not already shared into the message's
+// conversation. Like FileUnshare's, the event is a candidate the store
+// decides on inside the write. See Store.UpdateMessageFiles.
+type FileShareGrant struct {
+	FileID domain.FileID
+	Event  events.Event
+}
+
 // BetterAccessGrant reports whether one grant should replace another as the
 // grant that decided a resolved access level.
 //
@@ -427,9 +436,10 @@ type Store interface {
 	SetRoleAssignments(context.Context, []domain.RoleAssignment, events.Event) error
 	// DeleteRoleAssignments removes those rows.
 	DeleteRoleAssignments(context.Context, []domain.RoleAssignment, events.Event) error
-	// ListRoleAssignments reports the members who hold one role, in a stable
-	// order so two reads agree.
-	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	// ListRoleAssignments reports the assignments the query names (every one
+	// for an empty query) ordered by member, entity and role, ascending or
+	// descending as the request asks, so two reads agree.
+	ListRoleAssignments(context.Context, domain.WorkspaceID, domain.RoleAssignmentQuery, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// SetAuthPolicyEntities puts entities under one authentication policy. The
 	// same entity twice adds no row.
 	// SetAppIcon records what a client draws beside an app's messages.
@@ -575,7 +585,10 @@ type Store interface {
 	// deactivates an active guest, because a guest becoming a deactivated
 	// guest is a guest status change.
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error
-	AssignUser(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, events.Event) error
+	// AssignUser (re)activates a member with the guest tier asked for and adds
+	// them to the channels. A guest tier for an administrator or owner is
+	// refused with store.ErrInvalidArgument: a guest cannot hold either role.
+	AssignUser(context.Context, domain.WorkspaceID, domain.UserID, domain.GuestTier, []domain.ConversationID, events.Event) error
 	SetWorkspaceRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole, events.Event) error
 	// TransferPrimaryOwnership moves the primary owner's role from fromID, who
 	// must hold it, to toID, an active full member, who becomes an owner if
@@ -771,7 +784,8 @@ type Store interface {
 	DisconnectConversationTeams(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.WorkspaceID, events.Event) error
 	// ListExternalTeams reports the organizations this workspace shares
 	// channels with, derived from the channels themselves so there is one
-	// answer rather than two that can disagree.
+	// answer rather than two that can disagree. It pages by name and then
+	// identifier, in either direction.
 	ListExternalTeams(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.ExternalTeamPage, error)
 	// DisconnectExternalTeam removes one organization from every conversation
 	// of this workspace, in one transaction: a disconnection that left the
@@ -779,17 +793,25 @@ type Store interface {
 	DisconnectExternalTeam(context.Context, domain.WorkspaceID, domain.WorkspaceID, events.Event) error
 	CreateSharedInvite(context.Context, domain.SharedInvite, events.Event) error
 	GetSharedInvite(context.Context, domain.SharedInviteID) (domain.SharedInvite, error)
-	// ListSharedInvites pages one workspace's invitations in a given status.
-	// The workspace matches either side: the host sees what it sent, and the
+	// ListSharedInvites pages one workspace's invitations that the filter
+	// matches (domain.SharedInviteFilter.Matches is the definition). The
+	// workspace matches either side: the host sees what it sent, and the
 	// invited organization sees what it was sent.
-	ListSharedInvites(context.Context, domain.WorkspaceID, domain.SharedInviteStatus, domain.PageRequest) (domain.SharedInvitePage, error)
+	ListSharedInvites(context.Context, domain.WorkspaceID, domain.SharedInviteFilter, domain.PageRequest) (domain.SharedInvitePage, error)
 	// SetSharedInviteStatus is a compare-and-set over domain's transition
 	// table, so no caller can move an invitation somewhere the state machine
-	// does not allow, and two concurrent decisions cannot both win.
-	SetSharedInviteStatus(context.Context, domain.SharedInviteID, domain.SharedInviteStatus, domain.SharedInviteStatus, time.Time, events.Event) error
+	// does not allow, and two concurrent decisions cannot both win. It applies
+	// the review in the same write: the note is kept with any decision, and an
+	// approval may move the invitation to another of the host's conversations
+	// (store.ErrAlreadyExists when that conversation already has an
+	// outstanding invitation for the same organization) and override its
+	// external-limited restriction.
+	SetSharedInviteStatus(context.Context, domain.SharedInviteID, domain.SharedInviteStatus, domain.SharedInviteStatus, time.Time, domain.SharedInviteReview, events.Event) error
 	// AcceptSharedInvite appends the invited organization to the conversation
 	// and settles the invitation in one transaction, refusing when the channel
-	// is already at domain.SlackConnectCapacity.
+	// is already at domain.SlackConnectCapacity. An external-limited
+	// invitation records, in the same transaction, that the organization may
+	// not invite further organizations into the conversation.
 	//
 	// The capacity is checked here and nowhere else. CONNECT-01 forbids
 	// promising a place from a stale count, and a count read before the
@@ -1059,7 +1081,7 @@ type Store interface {
 	// listing's scan rather than introducing a second one that could page
 	// differently or handle deleted members differently.
 	SearchUsers(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.UserPage, error)
-	ListAdminUsers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.AdminUserPage, error)
+	ListAdminUsers(context.Context, domain.WorkspaceID, domain.MemberActivity, domain.PageRequest) (domain.AdminUserPage, error)
 	ListUsersByRole(context.Context, domain.WorkspaceID, domain.WorkspaceRole, domain.PageRequest) (domain.UserPage, error)
 	ListConversationMembers(context.Context, domain.ConversationID, domain.PageRequest) (domain.UserPage, error)
 	// CountConversationMembers reports how many members ListConversationMembers
@@ -1073,7 +1095,10 @@ type Store interface {
 	// NumMembers, which a listing has to compute per row anyway and which would
 	// otherwise cost two more round trips per row.
 	ListConversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
-	SearchConversations(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.ConversationPage, error)
+	// SearchConversations is the administrator's channel search: the channels
+	// (never a direct or group direct conversation) the search matches, in its
+	// sort, ascending or descending as the request asks.
+	SearchConversations(context.Context, domain.WorkspaceID, domain.ConversationSearch, domain.PageRequest) (domain.ConversationPage, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
 	// DirectParticipants lists everyone in a direct conversation, deactivated
 	// accounts included, in identifier order. ListConversationMembers leaves a
@@ -1126,6 +1151,14 @@ type Store interface {
 	// edit adds - so it can neither be lost nor journalled for a change that
 	// did not commit.
 	UpdateMessage(context.Context, domain.Message, events.Event, ...events.Event) error
+	// UpdateMessageFiles is UpdateMessage for an edit that also replaces the
+	// files the message carries (chat.update's file_ids) with message.Files,
+	// in order. Each file must be a live file of the message's workspace. A
+	// grant shares its file into the conversation and journals its event
+	// only if that share is new; an unshare ends its file's share and
+	// journals its event only if no other live message still carries the
+	// file there, as DeleteMessage decides. It is one transaction.
+	UpdateMessageFiles(context.Context, domain.Message, events.Event, []FileShareGrant, []FileUnshare, ...events.Event) error
 	// DeleteMessage marks one message deleted and retracts the file shares that
 	// message was carrying. A file is visible to whoever can see a conversation
 	// it is shared into, and the share is a row of its own: without this, the
@@ -1441,7 +1474,7 @@ type Store interface {
 	WalkBlobReferences(context.Context, domain.WorkspaceID, func(string) error) error
 	AddRemoteFile(context.Context, domain.RemoteFile, events.Event) error
 	GetRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFileLookup) (domain.RemoteFile, error)
-	ListRemoteFiles(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.RemoteFilePage, error)
+	ListRemoteFiles(context.Context, domain.WorkspaceID, domain.RemoteFileFilter, domain.PageRequest) (domain.RemoteFilePage, error)
 	RemoveRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFileLookup, events.Event) error
 	SetRemoteFileShares(context.Context, domain.WorkspaceID, domain.RemoteFileLookup, []domain.ConversationID, events.Event) (domain.RemoteFile, error)
 	UpdateRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFile, events.Event) (domain.RemoteFile, error)

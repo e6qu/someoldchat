@@ -44,7 +44,7 @@ func TestAssistantWritesTouchOneFieldEach(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", []string{"Reading the runbook", " ", "Checking the deploy"}); err != nil {
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", []string{"Reading the runbook", " ", "Checking the deploy"}, domain.AgentIdentity{}); err != nil {
 		t.Fatal(err)
 	}
 	value, err := messages.AssistantThread(ctx, "T1", "U1", "C1", thread)
@@ -58,13 +58,13 @@ func TestAssistantWritesTouchOneFieldEach(t *testing.T) {
 	if strings.Join(value.LoadingMessages, "|") != "Reading the runbook|Checking the deploy" {
 		t.Fatalf("loading messages = %q", value.LoadingMessages)
 	}
-	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", make([]string, domain.AssistantLoadingMessageLimit+1)); !errors.Is(err, domain.ErrInvalidAssistantThread) {
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", make([]string, domain.AssistantLoadingMessageLimit+1), domain.AgentIdentity{}); !errors.Is(err, domain.ErrInvalidAssistantThread) {
 		t.Fatalf("eleven loading messages error = %v, want %v", err, domain.ErrInvalidAssistantThread)
 	}
 
 	// Clearing the status is how an assistant says it has stopped working, so
 	// the empty string is accepted here and must leave the rest alone.
-	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "", nil); err != nil {
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "", nil, domain.AgentIdentity{}); err != nil {
 		t.Fatal(err)
 	}
 	after, err := messages.AssistantThread(ctx, "T1", "U1", "C1", thread)
@@ -76,12 +76,64 @@ func TestAssistantWritesTouchOneFieldEach(t *testing.T) {
 	}
 }
 
+// The icon_emoji, icon_url and username an assistant sets its status with
+// belong to that status: stored trimmed with who set it, replaced by the next
+// call — one without them shows the setter's own name again — and cleared with
+// the status. A username past the bound or an icon_url that is not an absolute
+// http(s) address is refused before anything is written.
+func TestAssistantStatusIdentityTravelsWithTheStatus(t *testing.T) {
+	ctx, _, messages, thread := assistantWorld(t)
+	read := func() domain.AssistantThread {
+		t.Helper()
+		value, err := messages.AssistantThread(ctx, "T1", "U1", "C1", thread)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	identity := domain.AgentIdentity{Username: " Deploy bot ", IconEmoji: ":robot_face:", IconURL: "https://example.test/bot.png"}
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", nil, identity); err != nil {
+		t.Fatal(err)
+	}
+	if value := read(); value.StatusUserID != "U1" || value.StatusIdentity != (domain.AgentIdentity{Username: "Deploy bot", IconEmoji: ":robot_face:", IconURL: "https://example.test/bot.png"}) {
+		t.Fatalf("status = %+v, want the trimmed identity and its setter", value)
+	}
+	for name, invalid := range map[string]domain.AgentIdentity{
+		"long username":   {Username: strings.Repeat("u", domain.AgentIdentityUsernameLimit+1)},
+		"relative icon":   {IconURL: "/bot.png"},
+		"script icon":     {IconURL: "javascript:alert(1)"},
+		"schemeless icon": {IconURL: "example.test/bot.png"},
+	} {
+		if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is still thinking...", nil, invalid); !errors.Is(err, domain.ErrInvalidAssistantThread) {
+			t.Errorf("%s = %v, want %v", name, err, domain.ErrInvalidAssistantThread)
+		}
+	}
+	if value := read(); value.Status != "is thinking..." || value.StatusIdentity.Username != "Deploy bot" {
+		t.Fatalf("a refused identity changed the status: %+v", value)
+	}
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is still thinking...", nil, domain.AgentIdentity{}); err != nil {
+		t.Fatal(err)
+	}
+	if value := read(); value.Status != "is still thinking..." || !value.StatusIdentity.Empty() || value.StatusUserID != "U1" {
+		t.Fatalf("status = %+v, want the identity replaced by the call that set none", value)
+	}
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", nil, identity); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, " ", nil, identity); err != nil {
+		t.Fatal(err)
+	}
+	if value := read(); value.Status != "" || !value.StatusIdentity.Empty() || value.StatusUserID != "" {
+		t.Fatalf("cleared status = %+v, want its identity and setter gone with it", value)
+	}
+}
+
 // Assistant state is not message content: it must not become a message, or it
 // would appear in history, in search and in unread counts, and outlive the
 // moment it describes.
 func TestAssistantStateIsNotAMessage(t *testing.T) {
 	ctx, repository, messages, thread := assistantWorld(t)
-	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", nil); err != nil {
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", nil, domain.AgentIdentity{}); err != nil {
 		t.Fatal(err)
 	}
 	page, err := repository.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 20}})
@@ -129,7 +181,7 @@ func TestAssistantWriteRequiresConversationMembership(t *testing.T) {
 	if err := repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "outsider"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U2", "C1", thread, "meddling", nil); err == nil {
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U2", "C1", thread, "meddling", nil, domain.AgentIdentity{}); err == nil {
 		t.Fatal("a non-member set assistant state")
 	}
 }

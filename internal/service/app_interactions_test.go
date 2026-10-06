@@ -736,7 +736,7 @@ func TestSocketModeInteractionsQueueSlackEnvelopesAndApplyAcknowledgementPayload
 	}
 
 	privateBlocks := `[{"type":"actions","block_id":"private","elements":[{"type":"button","action_id":"confirm","text":{"type":"plain_text","text":"Confirm"},"value":"yes"}]}]`
-	privateMessage, err := messages.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "UBOT", "C1", "U1", "Private deployment", privateBlocks, "", "A1", "", false)
+	privateMessage, err := messages.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "UBOT", "C1", "U1", "Private deployment", privateBlocks, "", "A1", "", domain.EphemeralPresentation{})
 	if err != nil {
 		t.Fatal(err)
 	}
