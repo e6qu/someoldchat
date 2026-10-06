@@ -14115,6 +14115,8 @@ type incomingWebhookPayload struct {
 	ThreadTS    string          `json:"thread_ts"`
 	Blocks      json.RawMessage `json:"blocks"`
 	Attachments json.RawMessage `json:"attachments"`
+	UnfurlLinks *bool           `json:"unfurl_links"`
+	UnfurlMedia *bool           `json:"unfurl_media"`
 }
 
 // maxIncomingWebhookBody bounds what an incoming webhook reads, in either
@@ -14170,7 +14172,11 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	// Slack's incoming-webhook response body is the literal string "ok" and carries
 	// no message, so the posted message is intentionally not part of the response.
-	if _, err := h.Messages.PostIncomingWebhookWithAttachments(r.Context(), workspaceID, appID, secret, payload.Text, blocks, attachments, domain.MessageTimestamp(payload.ThreadTS), r.Header.Get("Idempotency-Key")); err != nil {
+	if _, err := h.Messages.PostIncomingWebhookWithAttachments(r.Context(), workspaceID, appID, secret, domain.IncomingWebhookPost{
+		Text: payload.Text, Blocks: blocks, Attachments: attachments,
+		ThreadTimestamp: domain.MessageTimestamp(payload.ThreadTS), IdempotencyKey: r.Header.Get("Idempotency-Key"),
+		UnfurlLinks: payload.UnfurlLinks, UnfurlMedia: payload.UnfurlMedia,
+	}); err != nil {
 		// Incoming webhooks are not Web API methods: the pinned contract for
 		// hooks.slack.com is a plain-text body with a non-200 status. An unknown
 		// workspace, app, secret, or a disabled hook is indistinguishable to the

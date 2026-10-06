@@ -13807,7 +13807,7 @@ func (r Remote) AdminSetIncomingWebhookEnabled(ctx context.Context, workspaceID 
 }
 
 func (r Remote) PostIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	return r.PostIncomingWebhookWithAttachments(ctx, workspaceID, appID, secret, text, blocks, "", threadTimestamp, idempotencyKey)
+	return r.PostIncomingWebhookWithAttachments(ctx, workspaceID, appID, secret, domain.IncomingWebhookPost{Text: text, Blocks: blocks, ThreadTimestamp: threadTimestamp, IdempotencyKey: idempotencyKey})
 }
 
 func (s *Server) AdminCreateIncomingWebhook(ctx context.Context, input *chatv1.IncomingWebhookCreateRequest) (*chatv1.IncomingWebhookCreateResponse, error) {
@@ -13827,7 +13827,11 @@ func (s *Server) AdminSetIncomingWebhookEnabled(ctx context.Context, input *chat
 }
 
 func (s *Server) PostIncomingWebhook(ctx context.Context, input *chatv1.IncomingWebhookPostRequest) (*chatv1.Message, error) {
-	value, err := s.implementation.PostIncomingWebhookWithAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.AppID(input.GetAppId()), input.GetSecret(), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetIdempotencyKey())
+	value, err := s.implementation.PostIncomingWebhookWithAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.AppID(input.GetAppId()), input.GetSecret(), domain.IncomingWebhookPost{
+		Text: input.GetText(), Blocks: input.GetBlocks(), Attachments: input.GetAttachments(),
+		ThreadTimestamp: domain.MessageTimestamp(input.GetThreadTimestamp()), IdempotencyKey: input.GetIdempotencyKey(),
+		UnfurlLinks: input.UnfurlLinks, UnfurlMedia: input.UnfurlMedia,
+	})
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -14033,8 +14037,11 @@ func encodeStreamMutation(workspaceID domain.WorkspaceID, userID domain.UserID, 
 	}
 }
 
-func (r Remote) PostIncomingWebhookWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	out, err := r.messages.PostIncomingWebhook(ctx, &chatv1.IncomingWebhookPostRequest{WorkspaceId: string(workspaceID), AppId: string(appID), Secret: secret, Text: text, Blocks: blocks, Attachments: attachments, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey})
+func (r Remote) PostIncomingWebhookWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret string, post domain.IncomingWebhookPost) (domain.Message, error) {
+	out, err := r.messages.PostIncomingWebhook(ctx, &chatv1.IncomingWebhookPostRequest{
+		WorkspaceId: string(workspaceID), AppId: string(appID), Secret: secret, Text: post.Text, Blocks: post.Blocks, Attachments: post.Attachments,
+		ThreadTimestamp: string(post.ThreadTimestamp), IdempotencyKey: post.IdempotencyKey, UnfurlLinks: post.UnfurlLinks, UnfurlMedia: post.UnfurlMedia,
+	})
 	if err != nil {
 		return domain.Message{}, err
 	}

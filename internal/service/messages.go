@@ -9695,7 +9695,7 @@ func (m Messages) AdminSetIncomingWebhookEnabled(ctx context.Context, workspaceI
 }
 
 func (m Messages) PostIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	return m.PostIncomingWebhookWithAttachments(ctx, workspaceID, appID, secret, text, blocks, "", threadTimestamp, idempotencyKey)
+	return m.PostIncomingWebhookWithAttachments(ctx, workspaceID, appID, secret, domain.IncomingWebhookPost{Text: text, Blocks: blocks, ThreadTimestamp: threadTimestamp, IdempotencyKey: idempotencyKey})
 }
 
 // Unfurl attaches link previews to a message.
@@ -10920,7 +10920,7 @@ func (m Messages) createMessage(ctx context.Context, message domain.Message, ide
 	}
 }
 
-func (m Messages) PostIncomingWebhookWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+func (m Messages) PostIncomingWebhookWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret string, post domain.IncomingWebhookPost) (domain.Message, error) {
 	value, err := m.Store.LookupIncomingWebhook(ctx, workspaceID, appID, secret)
 	if err != nil {
 		return domain.Message{}, err
@@ -10930,8 +10930,9 @@ func (m Messages) PostIncomingWebhookWithAttachments(ctx context.Context, worksp
 	// post does: Slack's webhook messages carry bot_id, and every projection
 	// reads it from domain.Message.PostingBot.
 	request := domain.MessagePostRequest{
-		Conversation: value.ConversationID, Text: text, Blocks: blocks, Attachments: attachments,
-		ThreadTimestamp: threadTimestamp, IdempotencyKey: idempotencyKey, AppID: value.AppID,
+		Conversation: value.ConversationID, Text: post.Text, Blocks: post.Blocks, Attachments: post.Attachments,
+		ThreadTimestamp: post.ThreadTimestamp, IdempotencyKey: post.IdempotencyKey, AppID: value.AppID,
+		UnfurlLinks: post.UnfurlLinks, UnfurlMedia: post.UnfurlMedia,
 	}
 	if bot, botErr := m.Store.GetBotByApp(ctx, workspaceID, value.AppID); botErr == nil && bot.UserID == value.UserID {
 		request.BotID = bot.ID

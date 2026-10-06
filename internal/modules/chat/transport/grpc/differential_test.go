@@ -1227,7 +1227,8 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				withAttachments, err := chat.PostIncomingWebhookWithAttachments(ctx, "T1", "A1", secret, "with attachments", "", `[{"text":"detail"}]`, "", "")
+				unfurlOff := false
+				withAttachments, err := chat.PostIncomingWebhookWithAttachments(ctx, "T1", "A1", secret, domain.IncomingWebhookPost{Text: "with attachments", Attachments: `[{"text":"detail"}]`, UnfurlLinks: &unfurlOff})
 				if err != nil {
 					return nil, err
 				}
@@ -1251,6 +1252,7 @@ func parityCases() []parityCase {
 				member := chat.AdminSetIncomingWebhookEnabled(ctx, "T1", "U1", hook.ID, false)
 				return []any{
 					hook.ConversationID, secret != "", posted.Text, withAttachments.Attachments != "", reenabled.Text,
+					posted.UnfurlsLinks(), withAttachments.UnfurlsLinks(),
 					wrongSecret != nil, wrongApp != nil, disabled != nil, missingHook != nil, member != nil,
 				}, nil
 			},
