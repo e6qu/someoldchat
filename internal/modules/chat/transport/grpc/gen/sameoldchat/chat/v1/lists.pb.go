@@ -1578,14 +1578,16 @@ func (x *ListItemRequest) GetItemId() string {
 }
 
 type CreateListItemRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	ListId        string                 `protobuf:"bytes,3,opt,name=list_id,json=listId,proto3" json:"list_id,omitempty"`
-	ParentItemId  string                 `protobuf:"bytes,4,opt,name=parent_item_id,json=parentItemId,proto3" json:"parent_item_id,omitempty"`
-	Fields        string                 `protobuf:"bytes,5,opt,name=fields,proto3" json:"fields,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId  string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId       string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ListId       string                 `protobuf:"bytes,3,opt,name=list_id,json=listId,proto3" json:"list_id,omitempty"`
+	ParentItemId string                 `protobuf:"bytes,4,opt,name=parent_item_id,json=parentItemId,proto3" json:"parent_item_id,omitempty"`
+	Fields       string                 `protobuf:"bytes,5,opt,name=fields,proto3" json:"fields,omitempty"`
+	// duplicated_item_id names an item of the same list to copy.
+	DuplicatedItemId string `protobuf:"bytes,6,opt,name=duplicated_item_id,json=duplicatedItemId,proto3" json:"duplicated_item_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *CreateListItemRequest) Reset() {
@@ -1649,6 +1651,13 @@ func (x *CreateListItemRequest) GetParentItemId() string {
 func (x *CreateListItemRequest) GetFields() string {
 	if x != nil {
 		return x.Fields
+	}
+	return ""
+}
+
+func (x *CreateListItemRequest) GetDuplicatedItemId() string {
+	if x != nil {
+		return x.DuplicatedItemId
 	}
 	return ""
 }
@@ -3298,13 +3307,14 @@ const file_sameoldchat_chat_v1_lists_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
 	"\alist_id\x18\x03 \x01(\tR\x06listId\x12\x17\n" +
-	"\aitem_id\x18\x04 \x01(\tR\x06itemId\"\xaa\x01\n" +
+	"\aitem_id\x18\x04 \x01(\tR\x06itemId\"\xd8\x01\n" +
 	"\x15CreateListItemRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
 	"\alist_id\x18\x03 \x01(\tR\x06listId\x12$\n" +
 	"\x0eparent_item_id\x18\x04 \x01(\tR\fparentItemId\x12\x16\n" +
-	"\x06fields\x18\x05 \x01(\tR\x06fields\"\xb1\x01\n" +
+	"\x06fields\x18\x05 \x01(\tR\x06fields\x12,\n" +
+	"\x12duplicated_item_id\x18\x06 \x01(\tR\x10duplicatedItemId\"\xb1\x01\n" +
 	"\x10ListItemsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +

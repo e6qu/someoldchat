@@ -12,7 +12,8 @@ import (
 // with the user: the member's workspace role and guest tier, and the bot and
 // app a bot user belongs to. users.info reported every account as a person with
 // no role, so an app could not tell its own bot user, an owner, or a guest from
-// anyone else.
+// anyone else. It also reads the language the member chose, which
+// include_locale reports.
 func (m Messages) describeUser(ctx context.Context, user domain.User) (domain.User, error) {
 	membership, err := m.Store.GetWorkspaceMembership(ctx, user.WorkspaceID, user.ID)
 	switch {
@@ -25,6 +26,13 @@ func (m Messages) describeUser(ctx context.Context, user domain.User) (domain.Us
 	switch {
 	case err == nil:
 		user.BotID, user.AppID = bot.ID, bot.AppID
+	case !errors.Is(err, store.ErrNotFound):
+		return domain.User{}, err
+	}
+	preferences, err := m.Store.MemberPreferences(ctx, user.WorkspaceID, user.ID)
+	switch {
+	case err == nil:
+		user.Locale = preferences[domain.LanguagePreference]
 	case !errors.Is(err, store.ErrNotFound):
 		return domain.User{}, err
 	}

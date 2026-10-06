@@ -37,7 +37,8 @@ var pageRequestProtoField = map[string]string{
 // pageRequestExemptions records a method that deliberately does not carry a
 // field, with the reason. An exemption is a decision; a silent drop is a defect.
 var pageRequestExemptions = func() map[string]map[string]string {
-	// History is the only read whose store contract implements reverse paging.
+	// History and ExternalTeams are the reads whose store contracts implement
+	// reverse paging.
 	// Every other paged RPC is explicit here so adding reverse paging to one
 	// requires carrying the bit over its wire boundary rather than silently
 	// ignoring it in split composition.
@@ -63,7 +64,6 @@ var pageRequestExemptions = func() map[string]map[string]string {
 		"Files",
 		"ListItems",
 		"FollowedThreads",
-		"ExternalTeams",
 		"ListSharedInvites",
 		"ListUserGroups",
 		"Pins",

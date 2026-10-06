@@ -537,7 +537,7 @@ func TestListsLifecycleNormalizesCellsAndStreamsCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 101; i++ {
-		if _, err := messages.CreateListItem(ctx, "T1", "U1", source.ID, "", fmt.Sprintf(`[{"column_id":"title","value":"row-%03d"}]`, i)); err != nil {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", source.ID, "", fmt.Sprintf(`[{"column_id":"title","value":"row-%03d"}]`, i), ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1503,7 +1503,7 @@ func TestCallLifecycleNormalizesParticipants(t *testing.T) {
 	messages := Messages{Store: s}
 	guest := domain.ExternalCallParticipant{ExternalID: "guest-1", DisplayName: "Guest", AvatarURL: "https://call.example/guest.png"}
 	value, err := messages.AddCall(context.Background(), "T1", "U1", "external", "", "https://call.example", "", "demo", time.Time{},
-		[]domain.CallParticipant{{SlackID: "U2"}, {SlackID: "U1"}, {SlackID: "U2"}, {External: guest}, {External: guest}})
+		[]domain.CallParticipant{{SlackID: "U2"}, {SlackID: "U1"}, {SlackID: "U2"}, {External: guest}, {External: guest}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

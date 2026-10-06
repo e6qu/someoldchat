@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS shared_invites (
  conversation_id TEXT NOT NULL REFERENCES conversations(id), target_workspace_id TEXT NOT NULL DEFAULT '',
  target_email TEXT NOT NULL DEFAULT '', invited_by TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL,
  created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0, settled_at INTEGER NOT NULL DEFAULT 0,
- expires_at INTEGER NOT NULL DEFAULT 0
+ expires_at INTEGER NOT NULL DEFAULT 0, external_limited INTEGER NOT NULL DEFAULT 0, review_message TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS shared_invites_workspace ON shared_invites(workspace_id, status, id);
 CREATE INDEX IF NOT EXISTS shared_invites_target ON shared_invites(target_workspace_id, status, id);
@@ -611,7 +611,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 220
+const schemaVersion = 221
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3605,6 +3605,28 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 221: Slack Connect invitation review ---
+	if version < 221 {
+		// An invitation records whether the invited organization joins
+		// external-limited, and the note its host kept with the decision.
+		// Every invitation written before either existed was unrestricted and
+		// carried no note, which is what the defaults say.
+		columns, err := s.tableColumns(ctx, db, "shared_invites")
+		if err != nil {
+			return err
+		}
+		if !columns["external_limited"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE shared_invites ADD COLUMN external_limited INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate shared invite restriction: %w", err)
+			}
+		}
+		if !columns["review_message"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE shared_invites ADD COLUMN review_message TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate shared invite review: %w", err)
+			}
+		}
+	}
+	// --- end schema 221 ---
 	// --- schema 220: upload descriptions and ephemeral presentation ---
 	if version < 220 {
 		// files.getUploadURLExternal's alt_txt and snippet_type are held on the
@@ -5463,6 +5485,7 @@ var migratableTables = []string{
 	"scheduled_messages",
 	"schema_backfills",
 	"sessions",
+	"shared_invites",
 	"slack_apps",
 	"socket_mode_connections",
 	"tokens",
@@ -11246,14 +11269,16 @@ func (s *Store) FindUserMigration(ctx context.Context, workspace domain.Workspac
 	return value, nil
 }
 
-const sharedInviteSelectColumns = `id, workspace_id, conversation_id, target_workspace_id, target_email, invited_by, status, created_at, reviewed_at, settled_at, expires_at`
+const sharedInviteSelectColumns = `id, workspace_id, conversation_id, target_workspace_id, target_email, invited_by, status, created_at, reviewed_at, settled_at, expires_at, external_limited, review_message`
 
 func scanSharedInvite(row rowScanner) (domain.SharedInvite, error) {
 	var value domain.SharedInvite
 	var created, reviewed, settled, expires int64
-	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.ConversationID, &value.TargetWorkspaceID, &value.TargetEmail, &value.InvitedBy, &value.Status, &created, &reviewed, &settled, &expires); err != nil {
+	var limited int
+	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.ConversationID, &value.TargetWorkspaceID, &value.TargetEmail, &value.InvitedBy, &value.Status, &created, &reviewed, &settled, &expires, &limited, &value.ReviewMessage); err != nil {
 		return domain.SharedInvite{}, err
 	}
+	value.ExternalLimited = limited != 0
 	value.CreatedAt = time.Unix(created, 0).UTC()
 	if reviewed != 0 {
 		value.ReviewedAt = time.Unix(reviewed, 0).UTC()
@@ -11301,8 +11326,8 @@ func (s *Store) CreateSharedInvite(ctx context.Context, value domain.SharedInvit
 			return store.ErrAlreadyExists
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO shared_invites(`+sharedInviteSelectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
-		value.ID, value.WorkspaceID, value.ConversationID, value.TargetWorkspaceID, value.TargetEmail, value.InvitedBy, value.Status, value.CreatedAt.UTC().Unix(), unixSeconds(value.ExpiresAt)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO shared_invites(`+sharedInviteSelectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, '')`,
+		value.ID, value.WorkspaceID, value.ConversationID, value.TargetWorkspaceID, value.TargetEmail, value.InvitedBy, value.Status, value.CreatedAt.UTC().Unix(), unixSeconds(value.ExpiresAt), boolInt(value.ExternalLimited)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -11319,7 +11344,7 @@ func (s *Store) GetSharedInvite(ctx context.Context, id domain.SharedInviteID) (
 	return value, nil
 }
 
-func (s *Store) ListSharedInvites(ctx context.Context, workspace domain.WorkspaceID, status domain.SharedInviteStatus, request domain.PageRequest) (domain.SharedInvitePage, error) {
+func (s *Store) ListSharedInvites(ctx context.Context, workspace domain.WorkspaceID, filter domain.SharedInviteFilter, request domain.PageRequest) (domain.SharedInvitePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.SharedInvitePage{}, err
 	}
@@ -11327,9 +11352,10 @@ func (s *Store) ListSharedInvites(ctx context.Context, workspace domain.Workspac
 	if err != nil {
 		return domain.SharedInvitePage{}, err
 	}
+	predicate, args := sharedInviteFilterPredicate(filter)
 	rows, err := s.db.QueryContext(ctx, `SELECT `+sharedInviteSelectColumns+` FROM shared_invites
-		WHERE (workspace_id = ? OR target_workspace_id = ?) AND status = ? AND id > ? ORDER BY id LIMIT ?`,
-		workspace, workspace, status, after, request.Limit+1)
+		WHERE (workspace_id = ? OR target_workspace_id = ?)`+predicate+` AND id > ? ORDER BY id LIMIT ?`,
+		append(append([]any{workspace, workspace}, args...), after, request.Limit+1)...)
 	if err != nil {
 		return domain.SharedInvitePage{}, err
 	}
@@ -11354,20 +11380,119 @@ func (s *Store) ListSharedInvites(ctx context.Context, workspace domain.Workspac
 	return page, err
 }
 
-func (s *Store) SetSharedInviteStatus(ctx context.Context, id domain.SharedInviteID, from, to domain.SharedInviteStatus, at time.Time, event events.Event) error {
+// sharedInviteFilterPredicate is domain.SharedInviteFilter.Matches as SQL, to
+// be appended to a WHERE clause.
+func sharedInviteFilterPredicate(filter domain.SharedInviteFilter) (string, []any) {
+	var clause strings.Builder
+	args := []any{}
+	in := func(column string, values []any) {
+		clause.WriteString(" AND " + column + " IN (?" + strings.Repeat(", ?", len(values)-1) + ")")
+		args = append(args, values...)
+	}
+	if len(filter.Statuses) > 0 {
+		values := make([]any, 0, len(filter.Statuses))
+		for _, status := range filter.Statuses {
+			values = append(values, status)
+		}
+		in("status", values)
+	}
+	if len(filter.Decisions) > 0 {
+		states := make([]string, 0, len(filter.Decisions))
+		for _, state := range filter.Decisions {
+			switch state {
+			case domain.SharedInviteDecisionPending:
+				states = append(states, "status = ?")
+				args = append(args, domain.SharedInvitePending)
+			case domain.SharedInviteDecisionApproved:
+				states = append(states, "status IN (?, ?, ?) OR (status = ? AND reviewed_at <> 0)")
+				args = append(args, domain.SharedInviteApproved, domain.SharedInviteAccepted, domain.SharedInviteDeclined, domain.SharedInviteRevoked)
+			case domain.SharedInviteDecisionDenied:
+				states = append(states, "(status = ? AND reviewed_at = 0)")
+				args = append(args, domain.SharedInviteRevoked)
+			default:
+				states = append(states, "0 = 1")
+			}
+		}
+		clause.WriteString(" AND (" + strings.Join(states, " OR ") + ")")
+	}
+	if len(filter.IDs) > 0 {
+		values := make([]any, 0, len(filter.IDs))
+		for _, id := range filter.IDs {
+			values = append(values, id)
+		}
+		in("id", values)
+	}
+	if filter.Conversation != "" {
+		clause.WriteString(" AND conversation_id = ?")
+		args = append(args, filter.Conversation)
+	}
+	if filter.InvitedBy != "" {
+		clause.WriteString(" AND invited_by = ?")
+		args = append(args, filter.InvitedBy)
+	}
+	if !filter.ExcludeExpiredAt.IsZero() {
+		// domain.SharedInvite.Expired: a deadline strictly before the instant.
+		// The deadline is stored in whole seconds, so an instant inside a
+		// second has passed every deadline at or before that second.
+		at := filter.ExcludeExpiredAt.UTC()
+		comparison := "<"
+		if at.Nanosecond() != 0 {
+			comparison = "<="
+		}
+		clause.WriteString(" AND NOT (status IN (?, ?) AND expires_at <> 0 AND expires_at " + comparison + " ?)")
+		args = append(args, domain.SharedInvitePending, domain.SharedInviteApproved, at.Unix())
+	}
+	return clause.String(), args
+}
+
+func (s *Store) SetSharedInviteStatus(ctx context.Context, id domain.SharedInviteID, from, to domain.SharedInviteStatus, at time.Time, review domain.SharedInviteReview, event events.Event) error {
 	if !domain.SharedInviteTransition(from, to) {
 		return store.InvalidArgument("a shared invitation cannot move between those states")
+	}
+	if to != domain.SharedInviteApproved && (review.Conversation != "" || review.SetExternalLimited) {
+		return store.InvalidArgument("only an approval moves or restricts a shared invitation")
 	}
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if review.Conversation != "" {
+		// The move is decided in the same transaction as the status, so the
+		// one-outstanding-invitation rule CreateSharedInvite keeps cannot be
+		// broken by approving an invitation into a channel that already has
+		// one for the same organization.
+		var workspace, target string
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id, target_workspace_id FROM shared_invites WHERE id = ?`, id).Scan(&workspace, &target); err != nil {
+			return translateNotFound(err)
+		}
+		var hosted int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversations WHERE id = ? AND workspace_id = ?`, review.Conversation, workspace).Scan(&hosted); err != nil {
+			return err
+		}
+		if hosted == 0 {
+			return store.ErrNotFound
+		}
+		if target != "" {
+			var outstanding int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM shared_invites WHERE id <> ? AND conversation_id = ? AND target_workspace_id = ? AND status IN (?, ?, ?)`,
+				id, review.Conversation, target, domain.SharedInvitePending, domain.SharedInviteApproved, domain.SharedInviteAccepted).Scan(&outstanding); err != nil {
+				return err
+			}
+			if outstanding > 0 {
+				return store.ErrAlreadyExists
+			}
+		}
+	}
 	column := "settled_at"
 	if to == domain.SharedInviteApproved {
 		column = "reviewed_at"
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE shared_invites SET status = ?, `+column+` = ? WHERE id = ? AND status = ?`, to, at.UTC().Unix(), id, from)
+	result, err := tx.ExecContext(ctx, `UPDATE shared_invites SET status = ?, `+column+` = ?, review_message = ?,
+		conversation_id = CASE WHEN ? <> '' THEN ? ELSE conversation_id END,
+		external_limited = CASE WHEN ? = 1 THEN ? ELSE external_limited END
+		WHERE id = ? AND status = ?`,
+		to, at.UTC().Unix(), review.Message, string(review.Conversation), string(review.Conversation), boolInt(review.SetExternalLimited), boolInt(review.ExternalLimited), id, from)
 	if err != nil {
 		return err
 	}
@@ -11431,6 +11556,16 @@ func (s *Store) AcceptSharedInvite(ctx context.Context, id domain.SharedInviteID
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_teams(conversation_id, team_id) VALUES (?, ?) ON CONFLICT(conversation_id, team_id) DO NOTHING`, invite.ConversationID, invite.TargetWorkspaceID); err != nil {
 			return domain.Conversation{}, classify(err)
+		}
+	}
+	if invite.ExternalLimited {
+		// An external-limited organization may post here and may not bring
+		// anyone else in. The restriction is the row
+		// conversations.externalInvitePermissions.set writes and InviteShared
+		// enforces, recorded with the acceptance so it is never missing.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_team_invite_permissions(conversation_id, team_id, can_invite) VALUES (?, ?, 0)
+			ON CONFLICT(conversation_id, team_id) DO UPDATE SET can_invite = excluded.can_invite`, invite.ConversationID, invite.TargetWorkspaceID); err != nil {
+			return domain.Conversation{}, err
 		}
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE shared_invites SET status = ?, settled_at = ? WHERE id = ? AND status = ?`, domain.SharedInviteAccepted, at.UTC().Unix(), id, domain.SharedInviteApproved)
@@ -11618,20 +11753,38 @@ func (s *Store) SetConversationTeams(ctx context.Context, workspace domain.Works
 // carry them. The workspace itself is excluded: a workspace is not connected to
 // itself, and every one of its channels names it.
 func (s *Store) ListExternalTeams(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.ExternalTeamPage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+	if err := store.CheckPage(request); err != nil {
 		return domain.ExternalTeamPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
 		return domain.ExternalTeamPage{}, err
 	}
+	// Ordered by name, then identifier: domain.PageRequest.ExternalTeamAfter
+	// is the boundary, spelled here as SQL.
+	boundary, order, args := "", "ASC", []any{workspace, workspace}
+	if request.Descending {
+		order = "DESC"
+	}
+	if after != "" {
+		name, id, ok := domain.ParseExternalTeamCursorKey(after)
+		if !ok {
+			return domain.ExternalTeamPage{}, store.InvalidArgument("invalid external team cursor")
+		}
+		comparison := ">"
+		if request.Descending {
+			comparison = "<"
+		}
+		boundary = ` AND (COALESCE(w.name, '') ` + comparison + ` ? OR (COALESCE(w.name, '') = ? AND t.team_id ` + comparison + ` ?))`
+		args = append(args, name, name, string(id))
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT t.team_id, COALESCE(w.name, ''), COUNT(*)
 		FROM conversation_teams t
 		JOIN conversations c ON c.id = t.conversation_id
 		LEFT JOIN workspaces w ON w.id = t.team_id
-		WHERE c.workspace_id = ? AND t.team_id <> ? AND t.team_id > ?
+		WHERE c.workspace_id = ? AND t.team_id <> ?`+boundary+`
 		GROUP BY t.team_id, w.name
-		ORDER BY t.team_id LIMIT ?`, workspace, workspace, after, request.Limit+1)
+		ORDER BY COALESCE(w.name, '') `+order+`, t.team_id `+order+` LIMIT ?`, append(args, request.Limit+1)...)
 	if err != nil {
 		return domain.ExternalTeamPage{}, err
 	}
@@ -11653,7 +11806,7 @@ func (s *Store) ListExternalTeams(ctx context.Context, workspace domain.Workspac
 	}
 	page := domain.ExternalTeamPage{Teams: teams, HasMore: hasMore}
 	if hasMore {
-		page.NextCursor, err = domain.NewListCursor(string(teams[len(teams)-1].ID))
+		page.NextCursor, err = domain.NewListCursor(domain.ExternalTeamCursorKey(teams[len(teams)-1]))
 	}
 	return page, err
 }
@@ -14974,6 +15127,7 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 			invite, inviteErr := s.GetSharedInvite(ctx, item.SharedInviteID)
 			if inviteErr == nil && invite.WorkspaceID == workspace {
 				item.SharedInviteStatus = invite.Status
+				item.SharedInviteMessage = invite.ReviewMessage
 				item.SourceAvailable = true
 			} else if inviteErr != nil && !errors.Is(inviteErr, store.ErrNotFound) {
 				return domain.ActivityPage{}, inviteErr
@@ -16856,6 +17010,12 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 	// row split a message reacted to twice across pages.
 	visible := ` FROM reactions r JOIN messages m ON m.id = r.message_id JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND r.user_id = ? AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
 	args := []any{workspace, user, user}
+	// Total is every reacted message the member can see, whichever page this
+	// is: reactions.list's legacy paging object reports it.
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT m.id)`+visible, args...).Scan(&total); err != nil {
+		return domain.UserReactionPage{}, err
+	}
 	if after != "" {
 		created, message, ok := domain.ParseUserReactionCursorKey(after)
 		if !ok {
@@ -16888,7 +17048,7 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 		pageMessages = pageMessages[:request.Limit]
 	}
 	if len(pageMessages) == 0 {
-		return domain.UserReactionPage{Items: []domain.UserReaction{}}, nil
+		return domain.UserReactionPage{Items: []domain.UserReaction{}, Total: total}, nil
 	}
 	query := `SELECT m.conversation, m.id, m.workspace_id, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted, r.name, r.user_id, r.created_at` + visible +
 		` AND m.id IN (?` + strings.Repeat(`, ?`, len(pageMessages)-1) + `) ORDER BY m.created_at, r.message_id, r.name, r.user_id`
@@ -16931,7 +17091,7 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 	for index := range items {
 		items[index].Message = messages[index]
 	}
-	page := domain.UserReactionPage{Items: items, HasMore: hasMore}
+	page := domain.UserReactionPage{Items: items, HasMore: hasMore, Total: total}
 	if hasMore {
 		page.NextCursor, err = domain.NewListCursor(domain.UserReactionCursorKey(items[len(items)-1].Message))
 	}

@@ -1521,7 +1521,7 @@ func TestMapServiceErrorNamesHandledFailuresFromThePinnedEnums(t *testing.T) {
 
 func TestCallsLifecycle(t *testing.T) {
 	handler := testHandler()
-	add := httptest.NewRequest(http.MethodPost, "/api/calls.add", strings.NewReader("external_unique_id=external-1&join_url=https%3A%2F%2Fcall.example%2F1&users=U2"))
+	add := httptest.NewRequest(http.MethodPost, "/api/calls.add", strings.NewReader("external_unique_id=external-1&join_url=https%3A%2F%2Fcall.example%2F1&users=U2&created_by=U1"))
 	add.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	add.Header.Set("Authorization", "Bearer token")
 	created := httptest.NewRecorder()
@@ -3142,8 +3142,31 @@ func TestAppCredentialsAndAssistantSearch(t *testing.T) {
 	if again := call(t, http.MethodPost, "apps.auth.external.delete", "external_token_id=Et1"); again["error"] != "token_not_found" {
 		t.Fatalf("again=%v", again)
 	}
-	if connection := call(t, http.MethodPost, "apps.user.connection.update", ""); connection["ok"] != true {
+	// apps.user.connection.update records the app's report about the member
+	// it names, with the status it gives; the caller's own connection is not
+	// what it is about.
+	if connection := call(t, http.MethodPost, "apps.user.connection.update", "user_id=U2&status=disconnected"); connection["ok"] != true {
 		t.Fatalf("connection=%v", connection)
+	}
+	reported := false
+	for _, event := range target.Outbox() {
+		if event.Topic == "app.user_connection_updated" {
+			reported = strings.Contains(event.Payload, `"user_id":"U2"`) && strings.Contains(event.Payload, `"status":"disconnected"`)
+		}
+	}
+	if !reported {
+		t.Fatalf("the disconnection of U2 was not what was recorded: %v", target.Outbox())
+	}
+	for body, want := range map[string]string{
+		"":                                  "invalid_arguments",
+		"user_id=U2":                        "invalid_arguments",
+		"status=connected":                  "invalid_arguments",
+		"user_id=U2&status=paused":          "invalid_arguments",
+		"user_id=U-nobody&status=connected": "user_not_found",
+	} {
+		if refused := call(t, http.MethodPost, "apps.user.connection.update", body); refused["error"] != want {
+			t.Fatalf("body=%q answered %v, want %s", body, refused, want)
+		}
 	}
 	info := call(t, http.MethodGet, "assistant.search.info", "")
 	if info["enabled"] != true || len(info["searchable_sources"].([]any)) == 0 {
@@ -6503,5 +6526,46 @@ func TestFileSearchFindsRemoteFiles(t *testing.T) {
 	call("files.remote.remove", "external_id=plan-1")
 	if found := matches(call("search.files", "query=quarterly"), "files"); len(found) != 0 {
 		t.Fatalf("a removed remote file was found: %v", found)
+	}
+}
+
+// calls.add's created_by is the member the call is attributed to. Pinned: "When
+// this method is called with a user token, the created_by field is optional and
+// defaults to the authed user of the token. Otherwise, the field is required."
+// It was ignored, so a call a bot registered for a member was attributed to the
+// bot and a bot could register one attributed to nobody in particular.
+func TestCallsAddAttributesTheCallToCreatedBy(t *testing.T) {
+	add := func(t *testing.T, handler http.Handler, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/calls.add", strings.NewReader("external_unique_id=external-"+url.QueryEscape(body)+"&join_url=https%3A%2F%2Fcall.example%2F1"+body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body)
+		}
+		return payload
+	}
+	bot := testHandler()
+	if refused := add(t, bot, ""); refused["error"] != "invalid_arguments" {
+		t.Fatalf("a bot token without created_by answered %v", refused)
+	}
+	if unknown := add(t, bot, "&created_by=U-nobody"); unknown["error"] != "user_not_found" {
+		t.Fatalf("an unknown creator answered %v", unknown)
+	}
+	attributed := add(t, bot, "&created_by=U1")
+	if attributed["ok"] != true || attributed["call"].(map[string]any)["created_by"] != "U1" {
+		t.Fatalf("a bot's call for U1=%v", attributed)
+	}
+	user, _ := testUserHandlerWithStore()
+	own := add(t, user, "")
+	if own["ok"] != true || own["call"].(map[string]any)["created_by"] != "U1" {
+		t.Fatalf("a user token's call defaults to its own member: %v", own)
+	}
+	onBehalf := add(t, user, "&created_by=U2&external_display_id=second")
+	if onBehalf["ok"] != true || onBehalf["call"].(map[string]any)["created_by"] != "U2" {
+		t.Fatalf("created_by=U2 with a user token=%v", onBehalf)
 	}
 }

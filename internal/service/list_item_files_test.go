@@ -36,7 +36,7 @@ func listFileWorld(t *testing.T) (context.Context, Messages, *memory.Store, doma
 	if _, err := messages.AddListColumn(ctx, "T1", "U1", list.ID, "Title", domain.ListColumnText, nil); err != nil {
 		t.Fatal(err)
 	}
-	item, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"the logo"}]`)
+	item, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"the logo"}]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}

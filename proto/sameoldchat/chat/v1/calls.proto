@@ -55,6 +55,8 @@ message AddCallRequest {
   int64 started_at = 8;
   repeated string participants = 9;
   repeated ExternalCallParticipant external_participants = 10;
+  // created_by is the member the call is attributed to; empty is the caller.
+  string created_by = 11;
 }
 
 message CallRequest {

@@ -1637,16 +1637,15 @@ func (m Messages) withSharedIdentity(ctx context.Context, conversation domain.Co
 			}
 		}
 	}
-	for _, status := range []domain.SharedInviteStatus{domain.SharedInvitePending, domain.SharedInviteApproved} {
-		page, err := m.Store.ListSharedInvites(ctx, conversation.WorkspaceID, status, domain.PageRequest{Limit: 50})
-		if err != nil {
-			continue
-		}
-		for _, invite := range page.Invites {
-			if invite.ConversationID == conversation.ID {
-				conversation.IsPendingExtShared = true
-			}
-		}
+	// The conversation is part of the query. It used to be filtered from the
+	// workspace's first fifty outstanding invitations, so a workspace with more
+	// than fifty reported a channel with one of its own as not pending.
+	page, err := m.Store.ListSharedInvites(ctx, conversation.WorkspaceID, domain.SharedInviteFilter{
+		Statuses:     []domain.SharedInviteStatus{domain.SharedInvitePending, domain.SharedInviteApproved},
+		Conversation: conversation.ID,
+	}, domain.PageRequest{Limit: 1})
+	if err == nil && len(page.Invites) > 0 {
+		conversation.IsPendingExtShared = true
 	}
 	return conversation
 }
@@ -4282,16 +4281,29 @@ func (m Messages) DeleteExternalAuthToken(ctx context.Context, workspaceID domai
 	return m.Store.DeleteExternalAuthToken(ctx, workspaceID, appID, strings.TrimSpace(id), event)
 }
 
-// UpdateUserAppConnection records that a member has re-authorised an app. Slack
-// answers ok and refreshes the connection rather than reporting one, so the
-// membership check is the whole contract: a member who is not here cannot hold
-// a connection to anything.
-func (m Messages) UpdateUserAppConnection(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID) error {
+// UpdateUserAppConnection records an app's report of one member's connection
+// to it: connected or disconnected. The member is the one the app names, not
+// the caller — an app reports about the people using it — and must be an
+// active member of the workspace the app is installed in. It used to record
+// every call as the caller refreshing their own connection, so an app telling
+// the workspace that someone had disconnected recorded the opposite, about
+// somebody else.
+func (m Messages) UpdateUserAppConnection(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, targetID domain.UserID, status domain.AppUserConnection) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
-	if appID == "" {
+	if appID == "" || targetID == "" || !status.Valid() {
 		return domain.ErrInvalidWorkspace
+	}
+	target, err := m.Store.GetUser(ctx, targetID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return domain.ErrUserNotFound
+		}
+		return err
+	}
+	if target.WorkspaceID != workspaceID || target.Deleted {
+		return domain.ErrUserNotFound
 	}
 	installations, err := m.Store.ListAppInstallations(ctx, appID)
 	if err != nil {
@@ -4308,7 +4320,7 @@ func (m Messages) UpdateUserAppConnection(ctx context.Context, workspaceID domai
 		return store.ErrNotFound
 	}
 	event, eventErr := newEvent(workspaceID, actorID, events.NewPayload("app.user_connection_updated",
-		events.String("app_id", string(appID))), time.Now().UTC())
+		events.String("app_id", string(appID)), events.String("user_id", string(targetID)), events.String("status", string(status))), time.Now().UTC())
 	if eventErr != nil {
 		return eventErr
 	}
@@ -8499,13 +8511,20 @@ func (m Messages) ListUserGroups(ctx context.Context, workspaceID domain.Workspa
 	return m.Store.ListUserGroups(ctx, workspaceID, includeDisabled, request)
 }
 
-func (m Messages) UserGroupUsers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID) ([]domain.UserID, error) {
+// UserGroupUsers lists a group's members. A disabled group is answered only
+// when the caller includes disabled groups, as usergroups.users.list's
+// include_disabled asks; otherwise it is not one of the groups the caller is
+// asking about, as ListUserGroups leaves it out.
+func (m Messages) UserGroupUsers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, includeDisabled bool) ([]domain.UserID, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return nil, err
 	}
 	value, err := m.Store.GetUserGroup(ctx, workspaceID, id)
 	if err != nil {
 		return nil, err
+	}
+	if !value.Enabled && !includeDisabled {
+		return nil, store.ErrNotFound
 	}
 	return append([]domain.UserID(nil), value.Users...), nil
 }
@@ -8920,9 +8939,24 @@ func (m Messages) huddleReactionEmoji(ctx context.Context, workspaceID domain.Wo
 	return "", domain.ErrInvalidReaction
 }
 
-func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, participants []domain.CallParticipant) (domain.Call, error) {
+// AddCall registers a call from a calls provider. createdBy is the member it
+// is attributed to, which defaults to the caller; a bot registers calls on a
+// member's behalf, and attributing those to the bot named the wrong person as
+// the one who started the call.
+func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, participants []domain.CallParticipant, createdBy domain.UserID) (domain.Call, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.Call{}, err
+	}
+	if createdBy == "" {
+		createdBy = actor
+	} else if createdBy != actor {
+		creator, err := m.Store.GetUser(ctx, createdBy)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return domain.Call{}, err
+		}
+		if err != nil || creator.WorkspaceID != workspaceID || creator.Deleted {
+			return domain.Call{}, domain.ErrUserNotFound
+		}
 	}
 	externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title = strings.TrimSpace(externalUniqueID), strings.TrimSpace(externalDisplayID), strings.TrimSpace(joinURL), strings.TrimSpace(desktopAppJoinURL), strings.TrimSpace(title)
 	if externalUniqueID == "" || joinURL == "" {
@@ -8938,8 +8972,9 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 		return domain.Call{}, err
 	}
 	// The people a call would put together must not include two the barrier
-	// separates. The caller is one of them: starting a call is joining it.
-	separated, err := m.barrierSeparates(ctx, workspaceID, append([]domain.UserID{actor}, normalized...), domain.BarrierSubjectCall)
+	// separates. The member who starts it is one of them: starting a call is
+	// joining it.
+	separated, err := m.barrierSeparates(ctx, workspaceID, append([]domain.UserID{createdBy}, normalized...), domain.BarrierSubjectCall)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -8953,7 +8988,7 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	if err != nil {
 		return domain.Call{}, err
 	}
-	value := domain.Call{ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindExternal, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: actor, Participants: normalized, ExternalParticipants: externals, StartedAt: startedAt}
+	value := domain.Call{ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindExternal, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: createdBy, Participants: normalized, ExternalParticipants: externals, StartedAt: startedAt}
 	event, err := newEvent(workspaceID, actor, events.NewPayload("call.created", events.String("call_id", string(id))), time.Now().UTC())
 	if err != nil {
 		return domain.Call{}, err

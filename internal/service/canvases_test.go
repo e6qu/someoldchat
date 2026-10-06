@@ -210,14 +210,14 @@ func TestAnotherMemberWithoutAGrantCannotReachAList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"first"}]`); err != nil {
+	if _, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"first"}]`, ""); err != nil {
 		t.Fatal(err)
 	}
 
 	if _, err := messages.ListItems(ctx, "T1", "U2", list.ID, domain.PageRequest{Limit: 10}, false); err == nil {
 		t.Fatal("a member with no grant read another member's list items")
 	}
-	if _, err := messages.CreateListItem(ctx, "T1", "U2", list.ID, "", `[{"column_id":"title","value":"injected"}]`); err == nil {
+	if _, err := messages.CreateListItem(ctx, "T1", "U2", list.ID, "", `[{"column_id":"title","value":"injected"}]`, ""); err == nil {
 		t.Fatal("a member with no grant wrote to another member's list")
 	}
 

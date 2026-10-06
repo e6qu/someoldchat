@@ -257,6 +257,9 @@ type User struct {
 	Restricted      bool
 	UltraRestricted bool
 	PrimaryOwner    bool
+	// Locale is the language the member chose (LanguagePreference), empty
+	// when they chose none.
+	Locale string
 }
 
 // SlackDomain is the workspace's subdomain as Slack reports it. A workspace
@@ -1372,12 +1375,95 @@ type ExternalTeam struct {
 	Channels int
 }
 
-// ExternalTeamPage is one page of connections, ordered by name so a list read
+// ExternalTeamPage is one page of connections, ordered by name and then
+// identifier (the reverse when the request is descending), so a list read
 // twice reads the same.
 type ExternalTeamPage struct {
 	Teams      []ExternalTeam
 	NextCursor Cursor
 	HasMore    bool
+}
+
+// ExternalTeamCursorKey is the keyset position after one connection: its name
+// and identifier, which is the order the page is read in.
+func ExternalTeamCursorKey(team ExternalTeam) string {
+	return team.Name + "\x00" + string(team.ID)
+}
+
+// ParseExternalTeamCursorKey reads a position ExternalTeamCursorKey minted.
+func ParseExternalTeamCursorKey(key string) (string, WorkspaceID, bool) {
+	name, id, found := strings.Cut(key, "\x00")
+	if !found || id == "" {
+		return "", "", false
+	}
+	return name, WorkspaceID(id), true
+}
+
+// ExternalTeamAfter reports whether a connection belongs on the page a
+// request with this cursor position asks for. Both repositories decide the
+// boundary here or with the equivalent SQL predicate.
+func (r PageRequest) ExternalTeamAfter(team ExternalTeam, name string, id WorkspaceID) bool {
+	if r.Descending {
+		return team.Name < name || (team.Name == name && team.ID < id)
+	}
+	return team.Name > name || (team.Name == name && team.ID > id)
+}
+
+// Connection statuses team.externalTeams.list filters by. Every connection
+// this deployment records is a channel some organization is in, so it is
+// connected; the others name states nothing here can reach.
+const (
+	ExternalTeamConnected    = "CONNECTED"
+	ExternalTeamDisconnected = "DISCONNECTED"
+	ExternalTeamBlocked      = "BLOCKED"
+	ExternalTeamInReview     = "IN_REVIEW"
+)
+
+// ExternalTeamPrefs are the Slack Connect preference overrides
+// team.externalTeams.list's slack_connect_pref_filter names.
+var ExternalTeamPrefs = []string{
+	"approved_orgs_only", "allow_sc_file_uploads", "profile_visibility", "away_team_sc_invite_permissions",
+	"accept_sc_invites", "sc_mpdm_to_private", "require_sc_channel_for_sc_dm", "external_awareness_context_bar",
+}
+
+// ExternalTeamFilter narrows team.externalTeams.list. A connection matches when
+// its status is ConnectionStatus (any, when empty), it carries an override of
+// one of SlackConnectPrefs (any connection, when empty), and it is connected
+// through one of Workspaces (any, when empty).
+type ExternalTeamFilter struct {
+	ConnectionStatus  string
+	SlackConnectPrefs []string
+	Workspaces        []WorkspaceID
+}
+
+// Valid reports whether every value the filter names is one Slack defines.
+func (filter ExternalTeamFilter) Valid() bool {
+	switch filter.ConnectionStatus {
+	case "", ExternalTeamConnected, ExternalTeamDisconnected, ExternalTeamBlocked, ExternalTeamInReview:
+	default:
+		return false
+	}
+	for _, pref := range filter.SlackConnectPrefs {
+		if !slices.Contains(ExternalTeamPrefs, pref) {
+			return false
+		}
+	}
+	return true
+}
+
+// MatchesNothing reports whether, for a workspace, the filter excludes every
+// connection the workspace can have. A connection here is always connected,
+// carries no Slack Connect preference override (the workspace keeps none),
+// and is made through the workspace itself — there is one workspace per
+// organization.
+func (filter ExternalTeamFilter) MatchesNothing(workspace WorkspaceID) bool {
+	if filter.ConnectionStatus != "" && filter.ConnectionStatus != ExternalTeamConnected {
+		return true
+	}
+	if len(filter.SlackConnectPrefs) > 0 {
+		return true
+	}
+	return len(filter.Workspaces) > 0 && !slices.Contains(filter.Workspaces, workspace)
 }
 
 // SharedInvite is one invitation for an external organization to join one
@@ -1401,6 +1487,131 @@ type SharedInvite struct {
 	ReviewedAt  time.Time
 	SettledAt   time.Time
 	ExpiresAt   time.Time
+	// ExternalLimited makes the invited organization an external-limited
+	// participant: once it accepts, it may post in the conversation but may
+	// not invite further organizations into it. conversations.inviteShared
+	// sets it (Slack defaults it to true) and
+	// conversations.requestSharedInvite.approve may override it.
+	ExternalLimited bool
+	// ReviewMessage is the host's note on its decision: the text attached to
+	// an approval, or the reason given to the member whose request was
+	// denied. It reaches the requester with the decision.
+	ReviewMessage string
+}
+
+// SharedInviteRecipient is who conversations.inviteShared invites. Exactly one
+// of Workspace, User and Email names the recipient: an organization chosen
+// directly (the browser's picker), a person in another organization on this
+// deployment, whose organization is the one invited, or an address.
+type SharedInviteRecipient struct {
+	Workspace       WorkspaceID
+	User            UserID
+	Email           string
+	ExternalLimited bool
+}
+
+// SharedInviteReview is what a host may say with its decision on a pending
+// invitation. Conversation, when set, moves an approved invitation to another
+// of the host's conversations; SetExternalLimited overrides the restriction
+// the invitation was raised with. Both apply only to an approval. Message is
+// kept with either decision.
+type SharedInviteReview struct {
+	Conversation       ConversationID
+	SetExternalLimited bool
+	ExternalLimited    bool
+	Message            string
+}
+
+// MaxSharedInviteReviewMessage bounds the note a host keeps with a decision.
+const MaxSharedInviteReviewMessage = 4000
+
+// SharedInviteDecision is the host's decision on a member's request to invite
+// an organization, as conversations.requestSharedInvite.list reports it: not
+// yet made, approved (whatever the invited organization then did), or denied
+// before the invitation was ever sent. It is derived from SharedInviteStatus
+// rather than stored, so it is a classification and not a second lifecycle.
+type SharedInviteDecision string
+
+const (
+	SharedInviteDecisionPending  SharedInviteDecision = "pending"
+	SharedInviteDecisionApproved SharedInviteDecision = "approved"
+	SharedInviteDecisionDenied   SharedInviteDecision = "denied"
+)
+
+// Decision classifies an invitation as a request. A revoked invitation
+// that was never reviewed was denied; one revoked after its approval was
+// approved and then withdrawn, and reads as approved.
+func (invite SharedInvite) Decision() SharedInviteDecision {
+	switch invite.Status {
+	case SharedInvitePending:
+		return SharedInviteDecisionPending
+	case SharedInviteRevoked:
+		if invite.ReviewedAt.IsZero() {
+			return SharedInviteDecisionDenied
+		}
+	}
+	return SharedInviteDecisionApproved
+}
+
+// SharedInviteFilter selects the invitations a listing reports. Statuses and
+// Decisions each match any of their members and are both applied when both
+// are set; IDs, Conversation and InvitedBy narrow further. ExcludeExpiredAt,
+// when set, leaves out an invitation still awaiting an answer (pending or
+// approved) whose deadline had passed by that instant.
+type SharedInviteFilter struct {
+	Statuses         []SharedInviteStatus
+	Decisions        []SharedInviteDecision
+	IDs              []SharedInviteID
+	Conversation     ConversationID
+	InvitedBy        UserID
+	ExcludeExpiredAt time.Time
+}
+
+// Matches is the single definition of the filter, which the SQL profile
+// spells as the equivalent predicate.
+func (filter SharedInviteFilter) Matches(invite SharedInvite) bool {
+	if len(filter.Statuses) > 0 && !slices.Contains(filter.Statuses, invite.Status) {
+		return false
+	}
+	if len(filter.Decisions) > 0 && !slices.Contains(filter.Decisions, invite.Decision()) {
+		return false
+	}
+	if len(filter.IDs) > 0 && !slices.Contains(filter.IDs, invite.ID) {
+		return false
+	}
+	if filter.Conversation != "" && invite.ConversationID != filter.Conversation {
+		return false
+	}
+	if filter.InvitedBy != "" && invite.InvitedBy != filter.InvitedBy {
+		return false
+	}
+	if !filter.ExcludeExpiredAt.IsZero() && (invite.Status == SharedInvitePending || invite.Status == SharedInviteApproved) && invite.Expired(filter.ExcludeExpiredAt) {
+		return false
+	}
+	return true
+}
+
+// Valid reports whether the filter names something to list, in states that
+// exist.
+func (filter SharedInviteFilter) Valid() bool {
+	if len(filter.Statuses) == 0 && len(filter.Decisions) == 0 {
+		return false
+	}
+	for _, status := range filter.Statuses {
+		switch status {
+		case SharedInvitePending, SharedInviteApproved, SharedInviteAccepted, SharedInviteDeclined, SharedInviteRevoked:
+		default:
+			return false
+		}
+	}
+	for _, state := range filter.Decisions {
+		switch state {
+		case SharedInviteDecisionPending, SharedInviteDecisionApproved, SharedInviteDecisionDenied:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Acceptable reports whether the invitation can still be accepted or declined.
@@ -2190,7 +2401,10 @@ type ActivityItem struct {
 	// SharedInviteStatus is resolved when the item is read, so a row can say
 	// what was decided without the reader opening anything.
 	SharedInviteStatus SharedInviteStatus
-	SourceAvailable    bool
+	// SharedInviteMessage is the note the host kept with that decision, such
+	// as the reason a request was denied, read with the status.
+	SharedInviteMessage string
+	SourceAvailable     bool
 }
 
 type ActivityQuery struct {
@@ -3641,6 +3855,19 @@ type ExternalAuthToken struct {
 	Ciphertext  string
 	ExpiresAt   time.Time
 	CreatedAt   time.Time
+}
+
+// AppUserConnection is what apps.user.connection.update reports about a
+// member's connection to an app: connected or disconnected.
+type AppUserConnection string
+
+const (
+	AppUserConnected    AppUserConnection = "connected"
+	AppUserDisconnected AppUserConnection = "disconnected"
+)
+
+func (status AppUserConnection) Valid() bool {
+	return status == AppUserConnected || status == AppUserDisconnected
 }
 
 // ExternalAuthProvider is an OAuth provider an app declares so its members can

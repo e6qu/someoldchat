@@ -24,7 +24,7 @@ func TestCallBlockRendersTheRegisteredCall(t *testing.T) {
 	}
 	messages := service.Messages{Store: s}
 	call, err := messages.AddCall(context.Background(), "T1", "U1", "external-1", "EXT-1",
-		"https://calls.example/join/1", "", "Release sync", time.Unix(1700000400, 0).UTC(), []domain.CallParticipant{{SlackID: "U1"}, {SlackID: "U2"}, {External: domain.ExternalCallParticipant{ExternalID: "guest-7", DisplayName: "Guest Speaker"}}})
+		"https://calls.example/join/1", "", "Release sync", time.Unix(1700000400, 0).UTC(), []domain.CallParticipant{{SlackID: "U1"}, {SlackID: "U2"}, {External: domain.ExternalCallParticipant{ExternalID: "guest-7", DisplayName: "Guest Speaker"}}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestEndedCallKeepsItsCardAndLosesItsJoinControl(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	messages := service.Messages{Store: s}
 	ctx := context.Background()
-	call, err := messages.AddCall(ctx, "T1", "U1", "external-2", "EXT-2", "https://calls.example/join/2", "", "Retro", time.Unix(1700000500, 0).UTC(), nil)
+	call, err := messages.AddCall(ctx, "T1", "U1", "external-2", "EXT-2", "https://calls.example/join/2", "", "Retro", time.Unix(1700000500, 0).UTC(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

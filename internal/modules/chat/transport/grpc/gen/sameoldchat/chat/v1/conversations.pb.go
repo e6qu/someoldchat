@@ -833,6 +833,8 @@ type SharedInvite struct {
 	ReviewedAt        int64                  `protobuf:"varint,9,opt,name=reviewed_at,json=reviewedAt,proto3" json:"reviewed_at,omitempty"`
 	SettledAt         int64                  `protobuf:"varint,10,opt,name=settled_at,json=settledAt,proto3" json:"settled_at,omitempty"`
 	ExpiresAt         int64                  `protobuf:"varint,11,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	ExternalLimited   bool                   `protobuf:"varint,12,opt,name=external_limited,json=externalLimited,proto3" json:"external_limited,omitempty"`
+	ReviewMessage     string                 `protobuf:"bytes,13,opt,name=review_message,json=reviewMessage,proto3" json:"review_message,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -942,6 +944,20 @@ func (x *SharedInvite) GetExpiresAt() int64 {
 		return x.ExpiresAt
 	}
 	return 0
+}
+
+func (x *SharedInvite) GetExternalLimited() bool {
+	if x != nil {
+		return x.ExternalLimited
+	}
+	return false
+}
+
+func (x *SharedInvite) GetReviewMessage() string {
+	if x != nil {
+		return x.ReviewMessage
+	}
+	return ""
 }
 
 type SharedInvitePage struct {
@@ -1125,13 +1141,17 @@ func (x *ExternalTeamPage) GetHasMore() bool {
 }
 
 type ExternalTeamsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
-	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId       string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId            string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit             int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor            string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Descending        bool                   `protobuf:"varint,5,opt,name=descending,proto3" json:"descending,omitempty"`
+	ConnectionStatus  string                 `protobuf:"bytes,6,opt,name=connection_status,json=connectionStatus,proto3" json:"connection_status,omitempty"`
+	SlackConnectPrefs []string               `protobuf:"bytes,7,rep,name=slack_connect_prefs,json=slackConnectPrefs,proto3" json:"slack_connect_prefs,omitempty"`
+	Workspaces        []string               `protobuf:"bytes,8,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ExternalTeamsRequest) Reset() {
@@ -1190,6 +1210,34 @@ func (x *ExternalTeamsRequest) GetCursor() string {
 		return x.Cursor
 	}
 	return ""
+}
+
+func (x *ExternalTeamsRequest) GetDescending() bool {
+	if x != nil {
+		return x.Descending
+	}
+	return false
+}
+
+func (x *ExternalTeamsRequest) GetConnectionStatus() string {
+	if x != nil {
+		return x.ConnectionStatus
+	}
+	return ""
+}
+
+func (x *ExternalTeamsRequest) GetSlackConnectPrefs() []string {
+	if x != nil {
+		return x.SlackConnectPrefs
+	}
+	return nil
+}
+
+func (x *ExternalTeamsRequest) GetWorkspaces() []string {
+	if x != nil {
+		return x.Workspaces
+	}
+	return nil
 }
 
 type DisconnectExternalTeamRequest struct {
@@ -1303,8 +1351,12 @@ type InviteSharedRequest struct {
 	ConversationId    string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	TargetWorkspaceId string                 `protobuf:"bytes,4,opt,name=target_workspace_id,json=targetWorkspaceId,proto3" json:"target_workspace_id,omitempty"`
 	TargetEmail       string                 `protobuf:"bytes,5,opt,name=target_email,json=targetEmail,proto3" json:"target_email,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// target_user_id names a person in another organization; that
+	// organization is the one invited.
+	TargetUserId    string `protobuf:"bytes,6,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
+	ExternalLimited bool   `protobuf:"varint,7,opt,name=external_limited,json=externalLimited,proto3" json:"external_limited,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *InviteSharedRequest) Reset() {
@@ -1372,13 +1424,34 @@ func (x *InviteSharedRequest) GetTargetEmail() string {
 	return ""
 }
 
+func (x *InviteSharedRequest) GetTargetUserId() string {
+	if x != nil {
+		return x.TargetUserId
+	}
+	return ""
+}
+
+func (x *InviteSharedRequest) GetExternalLimited() bool {
+	if x != nil {
+		return x.ExternalLimited
+	}
+	return false
+}
+
 type SharedInviteMutationRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	SharedInviteId string                 `protobuf:"bytes,3,opt,name=shared_invite_id,json=sharedInviteId,proto3" json:"shared_invite_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The host's review of a pending invitation (approve and deny only).
+	ReviewConversationId     string `protobuf:"bytes,4,opt,name=review_conversation_id,json=reviewConversationId,proto3" json:"review_conversation_id,omitempty"`
+	ReviewSetExternalLimited bool   `protobuf:"varint,5,opt,name=review_set_external_limited,json=reviewSetExternalLimited,proto3" json:"review_set_external_limited,omitempty"`
+	ReviewExternalLimited    bool   `protobuf:"varint,6,opt,name=review_external_limited,json=reviewExternalLimited,proto3" json:"review_external_limited,omitempty"`
+	ReviewMessage            string `protobuf:"bytes,7,opt,name=review_message,json=reviewMessage,proto3" json:"review_message,omitempty"`
+	// accept only: the accepting organization asked for a private channel.
+	AcceptPrivate bool `protobuf:"varint,8,opt,name=accept_private,json=acceptPrivate,proto3" json:"accept_private,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SharedInviteMutationRequest) Reset() {
@@ -1432,15 +1505,59 @@ func (x *SharedInviteMutationRequest) GetSharedInviteId() string {
 	return ""
 }
 
+func (x *SharedInviteMutationRequest) GetReviewConversationId() string {
+	if x != nil {
+		return x.ReviewConversationId
+	}
+	return ""
+}
+
+func (x *SharedInviteMutationRequest) GetReviewSetExternalLimited() bool {
+	if x != nil {
+		return x.ReviewSetExternalLimited
+	}
+	return false
+}
+
+func (x *SharedInviteMutationRequest) GetReviewExternalLimited() bool {
+	if x != nil {
+		return x.ReviewExternalLimited
+	}
+	return false
+}
+
+func (x *SharedInviteMutationRequest) GetReviewMessage() string {
+	if x != nil {
+		return x.ReviewMessage
+	}
+	return ""
+}
+
+func (x *SharedInviteMutationRequest) GetAcceptPrivate() bool {
+	if x != nil {
+		return x.AcceptPrivate
+	}
+	return false
+}
+
 type SharedInvitesRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
-	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
-	Cursor        string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// status is the single status an older caller lists by; it is read only
+	// when statuses and decisions are both empty.
+	Status         string   `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	Limit          int32    `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor         string   `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Statuses       []string `protobuf:"bytes,6,rep,name=statuses,proto3" json:"statuses,omitempty"`
+	Decisions      []string `protobuf:"bytes,7,rep,name=decisions,proto3" json:"decisions,omitempty"`
+	InviteIds      []string `protobuf:"bytes,8,rep,name=invite_ids,json=inviteIds,proto3" json:"invite_ids,omitempty"`
+	ConversationId string   `protobuf:"bytes,9,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	InvitedBy      string   `protobuf:"bytes,10,opt,name=invited_by,json=invitedBy,proto3" json:"invited_by,omitempty"`
+	// Unix nanoseconds; zero lists lapsed invitations too.
+	ExcludeExpiredAt int64 `protobuf:"varint,11,opt,name=exclude_expired_at,json=excludeExpiredAt,proto3" json:"exclude_expired_at,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *SharedInvitesRequest) Reset() {
@@ -1506,6 +1623,48 @@ func (x *SharedInvitesRequest) GetCursor() string {
 		return x.Cursor
 	}
 	return ""
+}
+
+func (x *SharedInvitesRequest) GetStatuses() []string {
+	if x != nil {
+		return x.Statuses
+	}
+	return nil
+}
+
+func (x *SharedInvitesRequest) GetDecisions() []string {
+	if x != nil {
+		return x.Decisions
+	}
+	return nil
+}
+
+func (x *SharedInvitesRequest) GetInviteIds() []string {
+	if x != nil {
+		return x.InviteIds
+	}
+	return nil
+}
+
+func (x *SharedInvitesRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *SharedInvitesRequest) GetInvitedBy() string {
+	if x != nil {
+		return x.InvitedBy
+	}
+	return ""
+}
+
+func (x *SharedInvitesRequest) GetExcludeExpiredAt() int64 {
+	if x != nil {
+		return x.ExcludeExpiredAt
+	}
+	return 0
 }
 
 type ExternalInvitePermissionsRequest struct {
@@ -1773,7 +1932,7 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\rduration_days\x18\x01 \x01(\x05R\fdurationDays\x12\x1d\n" +
 	"\n" +
 	"updated_at\x18\x02 \x01(\x03R\tupdatedAt\x12%\n" +
-	"\x0eeffective_days\x18\x03 \x01(\x05R\reffectiveDays\"\xf2\x02\n" +
+	"\x0eeffective_days\x18\x03 \x01(\x05R\reffectiveDays\"\xc4\x03\n" +
 	"\fSharedInvite\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12'\n" +
@@ -1791,7 +1950,9 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"settled_at\x18\n" +
 	" \x01(\x03R\tsettledAt\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\v \x01(\x03R\texpiresAt\"\x8b\x01\n" +
+	"expires_at\x18\v \x01(\x03R\texpiresAt\x12)\n" +
+	"\x10external_limited\x18\f \x01(\bR\x0fexternalLimited\x12%\n" +
+	"\x0ereview_message\x18\r \x01(\tR\rreviewMessage\"\x8b\x01\n" +
 	"\x10SharedInvitePage\x12;\n" +
 	"\ainvites\x18\x01 \x03(\v2!.sameoldchat.chat.v1.SharedInviteR\ainvites\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -1805,34 +1966,58 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\x05teams\x18\x01 \x03(\v2!.sameoldchat.chat.v1.ExternalTeamR\x05teams\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x80\x01\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x9d\x02\n" +
 	"\x14ExternalTeamsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"t\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x1e\n" +
+	"\n" +
+	"descending\x18\x05 \x01(\bR\n" +
+	"descending\x12+\n" +
+	"\x11connection_status\x18\x06 \x01(\tR\x10connectionStatus\x12.\n" +
+	"\x13slack_connect_prefs\x18\a \x03(\tR\x11slackConnectPrefs\x12\x1e\n" +
+	"\n" +
+	"workspaces\x18\b \x03(\tR\n" +
+	"workspaces\"t\n" +
 	"\x1dDisconnectExternalTeamRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
 	"\ateam_id\x18\x03 \x01(\tR\x06teamId\"0\n" +
 	"\x1eDisconnectExternalTeamResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xcd\x01\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\x9e\x02\n" +
 	"\x13InviteSharedRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12.\n" +
 	"\x13target_workspace_id\x18\x04 \x01(\tR\x11targetWorkspaceId\x12!\n" +
-	"\ftarget_email\x18\x05 \x01(\tR\vtargetEmail\"\x83\x01\n" +
+	"\ftarget_email\x18\x05 \x01(\tR\vtargetEmail\x12$\n" +
+	"\x0etarget_user_id\x18\x06 \x01(\tR\ftargetUserId\x12)\n" +
+	"\x10external_limited\x18\a \x01(\bR\x0fexternalLimited\"\xfe\x02\n" +
 	"\x1bSharedInviteMutationRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12(\n" +
-	"\x10shared_invite_id\x18\x03 \x01(\tR\x0esharedInviteId\"\x98\x01\n" +
+	"\x10shared_invite_id\x18\x03 \x01(\tR\x0esharedInviteId\x124\n" +
+	"\x16review_conversation_id\x18\x04 \x01(\tR\x14reviewConversationId\x12=\n" +
+	"\x1breview_set_external_limited\x18\x05 \x01(\bR\x18reviewSetExternalLimited\x126\n" +
+	"\x17review_external_limited\x18\x06 \x01(\bR\x15reviewExternalLimited\x12%\n" +
+	"\x0ereview_message\x18\a \x01(\tR\rreviewMessage\x12%\n" +
+	"\x0eaccept_private\x18\b \x01(\bR\racceptPrivate\"\xe7\x02\n" +
 	"\x14SharedInvitesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06status\x18\x03 \x01(\tR\x06status\x12\x14\n" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"\xd6\x01\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12\x1a\n" +
+	"\bstatuses\x18\x06 \x03(\tR\bstatuses\x12\x1c\n" +
+	"\tdecisions\x18\a \x03(\tR\tdecisions\x12\x1d\n" +
+	"\n" +
+	"invite_ids\x18\b \x03(\tR\tinviteIds\x12'\n" +
+	"\x0fconversation_id\x18\t \x01(\tR\x0econversationId\x12\x1d\n" +
+	"\n" +
+	"invited_by\x18\n" +
+	" \x01(\tR\tinvitedBy\x12,\n" +
+	"\x12exclude_expired_at\x18\v \x01(\x03R\x10excludeExpiredAt\"\xd6\x01\n" +
 	" ExternalInvitePermissionsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +

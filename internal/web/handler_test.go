@@ -497,7 +497,7 @@ func TestListItemIsNamedByItsPrimaryColumn(t *testing.T) {
 	if _, err := messages.AddListColumn(context.Background(), "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.CreateListItem(context.Background(), "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"}]`); err != nil {
+	if _, err := messages.CreateListItem(context.Background(), "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"}]`, ""); err != nil {
 		t.Fatal(err)
 	}
 	requireContains(t, "list", get(t, mux, "/app/lists/"+string(value.ID)).Body.String(), "ship it")
@@ -524,7 +524,7 @@ func TestListColumnCanBeRemovedAndTakesItsCellsWithIt(t *testing.T) {
 			t.Fatalf("add column = %d: %s", added.Code, added.Body)
 		}
 	}
-	item, err := messages.CreateListItem(context.Background(), "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`)
+	item, err := messages.CreateListItem(context.Background(), "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -637,7 +637,7 @@ func TestListBoardViewGroupsItemsIntoLanes(t *testing.T) {
 		`[{"column_id":"task","value":"fix bug"},{"column_id":"status","value":"done"}]`,
 		`[{"column_id":"task","value":"triage later"}]`, // no status → the empty lane
 	} {
-		if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", fields); err != nil {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", fields, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -674,7 +674,7 @@ func TestListItemActionReturnsToTheViewItWasTakenFrom(t *testing.T) {
 	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Status", domain.ListColumnSelect, []string{"open", "done"}); err != nil {
 		t.Fatal(err)
 	}
-	item, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`)
+	item, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"},{"column_id":"status","value":"open"}]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -905,7 +905,7 @@ func TestListWithoutAGroupableColumnOffersNoBoard(t *testing.T) {
 	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Note", domain.ListColumnText, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"note","value":"remember this"}]`); err != nil {
+	if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"note","value":"remember this"}]`, ""); err != nil {
 		t.Fatal(err)
 	}
 	target := "/app/lists/" + string(value.ID)
@@ -1437,7 +1437,7 @@ func TestListTableViewSortsByColumn(t *testing.T) {
 		`[{"column_id":"task","value":"high"},{"column_id":"priority","value":3}]`,
 		`[{"column_id":"task","value":"mid"},{"column_id":"priority","value":2}]`,
 	} {
-		if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", fields); err != nil {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", fields, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1498,7 +1498,7 @@ func TestListFilterNarrowsItemsAndSurvivesViewSwitch(t *testing.T) {
 		`[{"column_id":"task","value":"beta"},{"column_id":"status","value":"done"}]`,
 		`[{"column_id":"task","value":"gamma"},{"column_id":"status","value":"open"}]`,
 	} {
-		if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", fields); err != nil {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", fields, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1545,7 +1545,7 @@ func TestListCalendarViewPlacesItemsByDate(t *testing.T) {
 	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "When", domain.ListColumnDate, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"kickoff"},{"column_id":"when","value":"2026-09-10"}]`); err != nil {
+	if _, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"kickoff"},{"column_id":"when","value":"2026-09-10"}]`, ""); err != nil {
 		t.Fatal(err)
 	}
 	target := "/app/lists/" + string(value.ID)
@@ -1583,7 +1583,7 @@ func TestListItemPageShowsAndAcceptsComments(t *testing.T) {
 	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
 		t.Fatal(err)
 	}
-	item, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"}]`)
+	item, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"}]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1626,7 +1626,7 @@ func TestListItemPageAttachesAndServesFiles(t *testing.T) {
 	if _, err := messages.AddListColumn(ctx, "T1", "U1", value.ID, "Task", domain.ListColumnText, nil); err != nil {
 		t.Fatal(err)
 	}
-	item, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"}]`)
+	item, err := messages.CreateListItem(ctx, "T1", "U1", value.ID, "", `[{"column_id":"task","value":"ship it"}]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}

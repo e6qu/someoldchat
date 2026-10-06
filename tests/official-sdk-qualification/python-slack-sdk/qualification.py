@@ -501,6 +501,7 @@ added_call = client.calls_add(
     desktop_app_join_url="https://example.com/call-desktop",
     title="Qualification call",
     date_start=int(time.time()),
+    created_by="U1",
     users=[
         {"slack_id": "U1"},
         {"external_id": "qualification-guest", "display_name": "Qualification Guest", "avatar_url": "https://example.com/guest.png"},

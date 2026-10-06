@@ -250,7 +250,7 @@ func TestRemoteListsUseTheProcessIndependentContract(t *testing.T) {
 	if err != nil || list.ID == "" {
 		t.Fatalf("list=%+v err=%v", list, err)
 	}
-	item, err := remote.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"before"}]`)
+	item, err := remote.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"before"}]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}

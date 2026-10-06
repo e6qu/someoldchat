@@ -37,7 +37,12 @@ const SharedInviteLifetime = 14 * 24 * time.Hour
 // conversation. It is created pending: recording who should be invited and
 // deciding that they may be are separate, and a member without the manage
 // scope may raise one for an administrator to answer.
-func (m Messages) InviteShared(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, target domain.WorkspaceID, email string) (domain.SharedInvite, error) {
+//
+// The recipient is an organization, a person or an address. A person named by
+// conversations.inviteShared's user_ids is a member of another organization on
+// this deployment, and that organization is the one invited; a person in the
+// host's own workspace is already there and cannot be invited to it.
+func (m Messages) InviteShared(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, recipient domain.SharedInviteRecipient) (domain.SharedInvite, error) {
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
 	if err != nil {
 		return domain.SharedInvite{}, store.ErrNotFound
@@ -73,12 +78,9 @@ func (m Messages) InviteShared(ctx context.Context, workspaceID domain.Workspace
 			return domain.SharedInvite{}, domain.ErrExternalInviteNotPermitted
 		}
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
-	if target == "" && email == "" {
-		return domain.SharedInvite{}, domain.ErrInvalidSharedInvite
-	}
-	if email != "" && !strings.Contains(email, "@") {
-		return domain.SharedInvite{}, domain.ErrInvalidSharedInvite
+	target, email, err := m.sharedInviteTarget(ctx, conversation.WorkspaceID, recipient)
+	if err != nil {
+		return domain.SharedInvite{}, err
 	}
 	if conversation.IsDirectOrGroup() {
 		return domain.SharedInvite{}, domain.ErrInvalidSharedInvite
@@ -97,7 +99,7 @@ func (m Messages) InviteShared(ctx context.Context, workspaceID domain.Workspace
 	// where the invitation is stored and approved.
 	invite := domain.SharedInvite{
 		ID: domain.SharedInviteID(id), WorkspaceID: conversation.WorkspaceID, ConversationID: conversationID,
-		TargetWorkspaceID: target, TargetEmail: email, InvitedBy: actorID,
+		TargetWorkspaceID: target, TargetEmail: email, InvitedBy: actorID, ExternalLimited: recipient.ExternalLimited,
 		Status: domain.SharedInvitePending, CreatedAt: now, ExpiresAt: now.Add(SharedInviteLifetime),
 	}
 	event, err := sharedInviteEvent(conversation.WorkspaceID, actorID, "shared_invite.created", invite, now)
@@ -111,35 +113,58 @@ func (m Messages) InviteShared(ctx context.Context, workspaceID domain.Workspace
 }
 
 // ApproveSharedInvite is the host's decision that the invitation may be sent.
-func (m Messages) ApproveSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
-	return m.decideSharedInvite(ctx, workspaceID, actorID, id, domain.SharedInvitePending, domain.SharedInviteApproved, "shared_invite.approved", true)
+// The review may move it to another of the host's conversations, override
+// whether the invited organization is external-limited, and attach a note.
+func (m Messages) ApproveSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID, review domain.SharedInviteReview) (domain.SharedInvite, error) {
+	return m.decideSharedInvite(ctx, workspaceID, actorID, id, domain.SharedInvitePending, domain.SharedInviteApproved, "shared_invite.approved", true, review)
 }
 
 // DenySharedInvite refuses a request before it is ever sent. It is recorded as
 // revoked rather than declined: declining is the invited organization's answer,
-// and an administrator reading the record needs to tell the two apart.
-func (m Messages) DenySharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
-	return m.decideSharedInvite(ctx, workspaceID, actorID, id, domain.SharedInvitePending, domain.SharedInviteRevoked, "shared_invite.revoked", true)
+// and an administrator reading the record needs to tell the two apart. The
+// review's message is the reason the requester is told; a denial moves and
+// restricts nothing, so a review asking it to is refused rather than half
+// applied.
+func (m Messages) DenySharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID, review domain.SharedInviteReview) (domain.SharedInvite, error) {
+	return m.decideSharedInvite(ctx, workspaceID, actorID, id, domain.SharedInvitePending, domain.SharedInviteRevoked, "shared_invite.revoked", true, review)
 }
 
 // RevokeSharedInvite withdraws an approved invitation nobody has accepted yet.
 func (m Messages) RevokeSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
-	return m.decideSharedInvite(ctx, workspaceID, actorID, id, domain.SharedInviteApproved, domain.SharedInviteRevoked, "shared_invite.revoked", true)
+	return m.decideSharedInvite(ctx, workspaceID, actorID, id, domain.SharedInviteApproved, domain.SharedInviteRevoked, "shared_invite.revoked", true, domain.SharedInviteReview{})
 }
 
 // DeclineSharedInvite is the invited organization's answer, so the authority is
 // membership of the *target* workspace rather than the host's.
 func (m Messages) DeclineSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID) (domain.SharedInvite, error) {
-	return m.decideSharedInvite(ctx, workspaceID, actorID, id, domain.SharedInviteApproved, domain.SharedInviteDeclined, "shared_invite.declined", false)
+	return m.decideSharedInvite(ctx, workspaceID, actorID, id, domain.SharedInviteApproved, domain.SharedInviteDeclined, "shared_invite.declined", false, domain.SharedInviteReview{})
 }
 
-func (m Messages) decideSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID, from, to domain.SharedInviteStatus, topic string, host bool) (domain.SharedInvite, error) {
+func (m Messages) decideSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID, from, to domain.SharedInviteStatus, topic string, host bool, review domain.SharedInviteReview) (domain.SharedInvite, error) {
 	invite, err := m.Store.GetSharedInvite(ctx, id)
 	if err != nil {
 		return domain.SharedInvite{}, err
 	}
 	if err := m.authorizeSharedInvite(ctx, workspaceID, actorID, invite, host); err != nil {
 		return domain.SharedInvite{}, err
+	}
+	review.Message = strings.TrimSpace(review.Message)
+	if len(review.Message) > domain.MaxSharedInviteReviewMessage {
+		return domain.SharedInvite{}, domain.ErrInvalidSharedInvite
+	}
+	if to != domain.SharedInviteApproved && (review.Conversation != "" || review.SetExternalLimited) {
+		return domain.SharedInvite{}, domain.ErrInvalidSharedInvite
+	}
+	if review.Conversation == invite.ConversationID {
+		review.Conversation = ""
+	}
+	if review.Conversation != "" {
+		// Moving the invitation is the host choosing which of its channels the
+		// organization is invited to, so it must be one the host could have
+		// raised the invitation on in the first place.
+		if err := m.requireSharedInviteConversation(ctx, workspaceID, actorID, review.Conversation); err != nil {
+			return domain.SharedInvite{}, err
+		}
 	}
 	if invite.Status != from {
 		return domain.SharedInvite{}, domain.ErrSharedInviteSettled
@@ -153,17 +178,29 @@ func (m Messages) decideSharedInvite(ctx context.Context, workspaceID domain.Wor
 	if to == domain.SharedInviteApproved && invite.Expired(now) {
 		return domain.SharedInvite{}, domain.ErrInvitationExpired
 	}
+	if review.Conversation != "" {
+		invite.ConversationID = review.Conversation
+	}
+	if review.SetExternalLimited {
+		invite.ExternalLimited = review.ExternalLimited
+	}
+	invite.ReviewMessage = review.Message
 	event, err := sharedInviteEvent(workspaceID, actorID, topic, invite, now)
 	if err != nil {
 		return domain.SharedInvite{}, err
 	}
-	if err := m.Store.SetSharedInviteStatus(ctx, id, from, to, now, event); err != nil {
+	if err := m.Store.SetSharedInviteStatus(ctx, id, from, to, now, review, event); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return domain.SharedInvite{}, domain.ErrSharedInviteSettled
 		}
 		return domain.SharedInvite{}, err
 	}
 	invite.Status = to
+	if to == domain.SharedInviteApproved {
+		invite.ReviewedAt = now
+	} else {
+		invite.SettledAt = now
+	}
 	// The member who asked for the invitation is told what was decided. It is
 	// news only to them and only when someone else decided: an administrator
 	// approving their own request has not been told anything, and the requester
@@ -178,7 +215,13 @@ func (m Messages) decideSharedInvite(ctx context.Context, workspaceID domain.Wor
 
 // AcceptSharedInvite brings the invited organization into the conversation. The
 // capacity is enforced by the store, in the transaction that appends the team.
-func (m Messages) AcceptSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID) (domain.Conversation, error) {
+//
+// The accepting organization does not get a channel of its own: it joins the
+// host's conversation, under the host's name and visibility. So a request to
+// join as a private channel is refused for a public conversation rather than
+// answered by joining one everybody in the organization can read; asking for a
+// public channel and joining a private one exposes nothing, and is allowed.
+func (m Messages) AcceptSharedInvite(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.SharedInviteID, private bool) (domain.Conversation, error) {
 	invite, err := m.Store.GetSharedInvite(ctx, id)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -192,6 +235,15 @@ func (m Messages) AcceptSharedInvite(ctx context.Context, workspaceID domain.Wor
 		// not have.
 		return domain.Conversation{}, domain.ErrInvalidSharedInvite
 	}
+	if private {
+		shared, getErr := m.Store.GetConversation(ctx, invite.ConversationID)
+		if getErr != nil {
+			return domain.Conversation{}, getErr
+		}
+		if !shared.PrivateFlag() {
+			return domain.Conversation{}, domain.ErrInvalidSharedInvite
+		}
+	}
 	now := time.Now().UTC()
 	if !invite.Acceptable(now) {
 		return domain.Conversation{}, domain.ErrSharedInviteSettled
@@ -203,6 +255,7 @@ func (m Messages) AcceptSharedInvite(ctx context.Context, workspaceID domain.Wor
 	connected, err := newEvent(invite.WorkspaceID, actorID, events.NewPayload("conversation.connected",
 		events.String("channel_id", string(invite.ConversationID)),
 		events.String("team_id", string(invite.TargetWorkspaceID)),
+		events.String("external_limited", boolText(invite.ExternalLimited)),
 	), now)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -227,16 +280,73 @@ func (m Messages) AcceptSharedInvite(ctx context.Context, workspaceID domain.Wor
 // either side: the host sees what it sent and the invited organization sees
 // what it was sent, which is what conversations.listConnectInvites and
 // conversations.requestSharedInvite.list each ask for.
-func (m Messages) ListSharedInvites(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, status domain.SharedInviteStatus, request domain.PageRequest) (domain.SharedInvitePage, error) {
+func (m Messages) ListSharedInvites(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, filter domain.SharedInviteFilter, request domain.PageRequest) (domain.SharedInvitePage, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
 		return domain.SharedInvitePage{}, err
 	}
-	switch status {
-	case domain.SharedInvitePending, domain.SharedInviteApproved, domain.SharedInviteAccepted, domain.SharedInviteDeclined, domain.SharedInviteRevoked:
-	default:
+	if !filter.Valid() {
 		return domain.SharedInvitePage{}, domain.ErrInvalidSharedInvite
 	}
-	return m.Store.ListSharedInvites(ctx, workspaceID, status, request)
+	return m.Store.ListSharedInvites(ctx, workspaceID, filter, request)
+}
+
+// sharedInviteTarget resolves an invitation's recipient to the organization
+// and address it records. Exactly one of the three must be named.
+func (m Messages) sharedInviteTarget(ctx context.Context, host domain.WorkspaceID, recipient domain.SharedInviteRecipient) (domain.WorkspaceID, string, error) {
+	email := strings.ToLower(strings.TrimSpace(recipient.Email))
+	named := 0
+	for _, present := range []bool{recipient.Workspace != "", recipient.User != "", email != ""} {
+		if present {
+			named++
+		}
+	}
+	if named != 1 {
+		return "", "", domain.ErrInvalidSharedInvite
+	}
+	switch {
+	case recipient.User != "":
+		user, err := m.Store.GetUser(ctx, recipient.User)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return "", "", domain.ErrInvalidSharedInvite
+			}
+			return "", "", err
+		}
+		// A member of the host is already in reach of the channel, and a
+		// deactivated account cannot accept anything.
+		if user.Deleted || user.WorkspaceID == host || user.WorkspaceID == domain.SlackbotHomeWorkspaceID {
+			return "", "", domain.ErrInvalidSharedInvite
+		}
+		return user.WorkspaceID, "", nil
+	case email != "":
+		if !strings.Contains(email, "@") {
+			return "", "", domain.ErrInvalidSharedInvite
+		}
+		return "", email, nil
+	default:
+		return recipient.Workspace, "", nil
+	}
+}
+
+// requireSharedInviteConversation is the check InviteShared applies to the
+// host's own conversation, for an approval that moves an invitation to another
+// one: a channel of the host's that the approving member is in, not a direct
+// message, and not archived.
+func (m Messages) requireSharedInviteConversation(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID) error {
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil || conversation.WorkspaceID != workspaceID {
+		return store.ErrNotFound
+	}
+	if err := m.requireConversationMembership(ctx, workspaceID, actorID, conversationID); err != nil {
+		return err
+	}
+	if conversation.IsDirectOrGroup() {
+		return domain.ErrInvalidSharedInvite
+	}
+	if conversation.Archived {
+		return domain.ErrConversationAlreadyArchived
+	}
+	return nil
 }
 
 // ExternalTeams reports the organizations this workspace shares channels with.
@@ -246,9 +356,23 @@ func (m Messages) ListSharedInvites(ctx context.Context, workspaceID domain.Work
 // is in, and Slack puts it behind an administrator's token for the same reason.
 // A member can still see the organizations in a channel they belong to, which
 // is what conversations.info answers.
-func (m Messages) ExternalTeams(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, request domain.PageRequest) (domain.ExternalTeamPage, error) {
+//
+// The filter is applied to what a connection here can be: always connected,
+// with no Slack Connect preference override, through this workspace. A filter
+// that rules all of that out answers an empty page rather than an error, as a
+// filter that matches nothing does.
+func (m Messages) ExternalTeams(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, filter domain.ExternalTeamFilter, request domain.PageRequest) (domain.ExternalTeamPage, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.ExternalTeamPage{}, err
+	}
+	if !filter.Valid() {
+		return domain.ExternalTeamPage{}, domain.ErrInvalidSharedInvite
+	}
+	if filter.MatchesNothing(workspaceID) {
+		if err := store.CheckPage(request); err != nil {
+			return domain.ExternalTeamPage{}, err
+		}
+		return domain.ExternalTeamPage{Teams: []domain.ExternalTeam{}}, nil
 	}
 	return m.Store.ListExternalTeams(ctx, workspaceID, request)
 }

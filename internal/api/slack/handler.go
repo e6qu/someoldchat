@@ -3210,7 +3210,36 @@ func (h Handler) externalTeamsList(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.ExternalTeams(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	// The filters and the sort were ignored, so a caller asking for blocked
+	// organizations was handed every connected one, in identifier order.
+	// sort_field names team_name (the default), connection_status or
+	// last_active_timestamp. Every connection here is connected and none
+	// records when it was last active, so the latter two order nothing and
+	// the page stays in name order, which is the tie-break either would use.
+	switch strings.TrimSpace(fields["sort_field"]) {
+	case "", "team_name", "connection_status", "last_active_timestamp":
+	default:
+		writeError(w, "invalid_arguments")
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(fields["sort_direction"])) {
+	case "", "asc":
+	case "desc":
+		request.Descending = true
+	default:
+		writeError(w, "invalid_arguments")
+		return
+	}
+	filter := domain.ExternalTeamFilter{
+		ConnectionStatus:  strings.ToUpper(strings.TrimSpace(fields["connection_status_filter"])),
+		SlackConnectPrefs: parseIDList[string](fields["slack_connect_pref_filter"]),
+		Workspaces:        parseIDList[domain.WorkspaceID](fields["workspace_filter"]),
+	}
+	if !filter.Valid() {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	page, err := h.Messages.ExternalTeams(r.Context(), principal.WorkspaceID, principal.UserID, filter, request)
 	if err != nil {
 		writeError(w, mapServiceError(err, "not_an_admin"))
 		return
@@ -4075,7 +4104,10 @@ func (h Handler) appCredentialRequest(w http.ResponseWriter, r *http.Request) (a
 	return principal, appID, fields, true
 }
 
-// apps.user.connection.update refreshes a member's connection to an app.
+// apps.user.connection.update records an app's report that a member is
+// connected to it or disconnected: user_id and status, both required by the
+// SDKs. Both used to be ignored, so a "disconnected" report about somebody was
+// recorded as the caller refreshing their own connection.
 func (h Handler) appsUserConnectionUpdate(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeAuthorizationsRead)
 	if err != nil {
@@ -4091,11 +4123,13 @@ func (h Handler) appsUserConnectionUpdate(w http.ResponseWriter, r *http.Request
 	if appID == "" {
 		appID = domain.AppID(strings.TrimSpace(fields["app_id"]))
 	}
-	if appID == "" {
+	target := domain.UserID(strings.TrimSpace(fields["user_id"]))
+	status := domain.AppUserConnection(strings.ToLower(strings.TrimSpace(fields["status"])))
+	if appID == "" || target == "" || !status.Valid() {
 		writeError(w, "invalid_arguments")
 		return
 	}
-	if err := h.Messages.UpdateUserAppConnection(r.Context(), principal.WorkspaceID, principal.UserID, appID); err != nil {
+	if err := h.Messages.UpdateUserAppConnection(r.Context(), principal.WorkspaceID, principal.UserID, appID, target, status); err != nil {
 		writeError(w, mapServiceError(err, "app_not_found"))
 		return
 	}
@@ -6841,12 +6875,21 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "user_not_found")
 		return
 	}
+	includeLocale, err := parseBoolField(fields["include_locale"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, requested)
 	if err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": slackobject.User(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))})
+	member := slackobject.User(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))
+	if includeLocale {
+		member["locale"] = memberLocale(user)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": member})
 }
 
 func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
@@ -6927,13 +6970,18 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	if teamID := strings.TrimSpace(fields["team_id"]); teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID {
+	if namesForeignTeam(fields, principal) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
 	request, err := decodeListRequestFields(fields, "invalid_cursor")
 	if err != nil {
 		writeDecodeError(w, err)
+		return
+	}
+	includeLocale, err := parseBoolField(fields["include_locale"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	page, err := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, request)
@@ -6945,7 +6993,11 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 	}
 	members := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		members = append(members, slackobject.User(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail)))
+		member := slackobject.User(h.origin(r), user, principal.HasScope(auth.ScopeUsersReadEmail))
+		if includeLocale {
+			member["locale"] = memberLocale(user)
+		}
+		members = append(members, member)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "members": members, "cache_ts": time.Now().Unix(), "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -7587,6 +7639,12 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
+		return
+	}
+	// team_id selects the workspace of an organization-wide token, so it may
+	// name only this one; see namesForeignTeam.
+	if namesForeignTeam(fields, principal) {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	request, err := decodeConversationListFields(fields)
@@ -8390,6 +8448,9 @@ func (h Handler) addReaction(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	if reactionsAddFileItem(w, fields) {
+		return
+	}
 	channel, timestamp, name, err := normalizeReactionFields(fields)
 	if err != nil {
 		writeDecodeError(w, err)
@@ -8414,6 +8475,9 @@ func (h Handler) removeReaction(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	if h.reactionsRemoveFileItem(w, r, principal, fields) {
+		return
+	}
 	channel, timestamp, name, err := normalizeReactionFields(fields)
 	if err != nil {
 		writeDecodeError(w, err)
@@ -8435,6 +8499,9 @@ func (h Handler) getReactions(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
+		return
+	}
+	if h.reactionsGetFileItem(w, r, principal, fields) {
 		return
 	}
 	channel, timestamp, err := normalizeReactionTarget(fields)
@@ -8478,16 +8545,55 @@ func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "no_permission")
 		return
 	}
-	request, err := decodeListRequestFields(fields, "invalid_arg_name")
-	if err != nil {
+	if namesForeignTeam(fields, principal) {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	// reactions.list pages two ways, as stars.list does: cursor/limit, and
+	// the legacy count/page its paging object describes. A caller naming
+	// either legacy argument and neither cursor argument gets legacy paging.
+	// count and page used to be ignored, so every legacy page was the first
+	// and a legacy paginator never reached the end.
+	legacy := strings.TrimSpace(fields["cursor"]) == "" && strings.TrimSpace(fields["limit"]) == "" &&
+		(strings.TrimSpace(fields["count"]) != "" || strings.TrimSpace(fields["page"]) != "")
+	var request domain.PageRequest
+	pageNumberWanted := 1
+	if legacy {
+		count, countErr := clampLimit(fields["count"], 100, 1000)
+		if countErr == nil {
+			pageNumberWanted, countErr = pageNumber(fields["page"])
+		}
+		if countErr != nil {
+			writeDecodeError(w, countErr)
+			return
+		}
+		if pageNumberWanted > maxStarPages {
+			writeError(w, "invalid_arg_name")
+			return
+		}
+		request = domain.PageRequest{Limit: count}
+	} else if request, err = decodeListRequestFields(fields, "invalid_arg_name"); err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.UserReactions(r.Context(), principal.WorkspaceID, principal.UserID, request)
-	if err != nil {
-		// /reactions.list declares user_not_found, not team_not_found.
-		writeError(w, mapServiceError(err, "user_not_found"))
-		return
+	// A legacy page past the first is reached by walking the keyset from the
+	// start, bounded like stars.list's.
+	var page domain.UserReactionPage
+	for current := 1; ; current++ {
+		page, err = h.Messages.UserReactions(r.Context(), principal.WorkspaceID, principal.UserID, request)
+		if err != nil {
+			// /reactions.list declares user_not_found, not team_not_found.
+			writeError(w, mapServiceError(err, "user_not_found"))
+			return
+		}
+		if current >= pageNumberWanted {
+			break
+		}
+		if !page.HasMore {
+			page.Items, page.HasMore, page.NextCursor = nil, false, ""
+			break
+		}
+		request.Cursor = page.NextCursor
 	}
 	// Slack lists one item per message, carrying every reaction on it. The
 	// store pages by message and returns each message's reaction rows
@@ -8525,7 +8631,11 @@ func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
 	for _, item := range ordered {
 		items = append(items, map[string]any{"type": "message", "channel": item.conversation, "message": projected[item.message.ID]})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
+	body := map[string]any{"ok": true, "items": items, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore}
+	if legacy {
+		body["paging"] = legacyPaging(request.Limit, pageNumberWanted, page.Total)
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (h Handler) addBookmark(w http.ResponseWriter, r *http.Request) {
@@ -8647,6 +8757,9 @@ func (h Handler) addPin(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	if pinsAddFileItem(w, fields) {
+		return
+	}
 	channel, timestamp, err := normalizeReactionTarget(fields)
 	if err != nil {
 		writeDecodeError(w, err)
@@ -8669,6 +8782,9 @@ func (h Handler) removePin(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
+		return
+	}
+	if h.pinsRemoveFileItem(w, r, principal, fields) {
 		return
 	}
 	channel, timestamp, err := normalizeReactionTarget(fields)
@@ -12039,6 +12155,12 @@ func (h Handler) mutateUserGroup(w http.ResponseWriter, r *http.Request, denied 
 		writeDecodeError(w, err)
 		return
 	}
+	// team_id selects the workspace of an organization-wide token, so it may
+	// name only this one; see namesForeignTeam.
+	if namesForeignTeam(fields, principal) {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	value, err := operation(principal, fields)
 	if errors.Is(err, domain.ErrNotWorkspaceAdmin) {
 		denied(w)
@@ -12059,6 +12181,12 @@ func (h Handler) listUserGroups(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
+		return
+	}
+	// team_id selects the workspace of an organization-wide token, so it may
+	// name only this one; see namesForeignTeam.
+	if namesForeignTeam(fields, principal) {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	request, err := decodeListRequestFields(fields, "invalid_arg_name")
@@ -12108,7 +12236,18 @@ func (h Handler) userGroupUsers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	values, err := h.Messages.UserGroupUsers(r.Context(), principal.WorkspaceID, principal.UserID, group)
+	if namesForeignTeam(fields, principal) {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	// include_disabled answers for a disabled group; it was ignored, so a
+	// disabled group's members were listed whatever the caller asked.
+	includeDisabled, err := parseBoolField(fields["include_disabled"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	values, err := h.Messages.UserGroupUsers(r.Context(), principal.WorkspaceID, principal.UserID, group, includeDisabled)
 	if err != nil {
 		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
@@ -12128,6 +12267,12 @@ func (h Handler) updateUserGroupUsers(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
+		return
+	}
+	// team_id selects the workspace of an organization-wide token, so it may
+	// name only this one; see namesForeignTeam.
+	if namesForeignTeam(fields, principal) {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	// Both `usergroup` and `users` are required:true in the pinned contract. An
@@ -12583,7 +12728,16 @@ func (h Handler) addCall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arguments")
 		return
 	}
-	value, err := h.Messages.AddCall(r.Context(), principal.WorkspaceID, principal.UserID, fields["external_unique_id"], fields["external_display_id"], fields["join_url"], fields["desktop_app_join_url"], fields["title"], started, participants)
+	// Pinned /calls.add created_by: "When this method is called with a user
+	// token, the created_by field is optional and defaults to the authed user
+	// of the token. Otherwise, the field is required." It was ignored, so a
+	// call a bot registered for a member was attributed to the bot.
+	createdBy := domain.UserID(strings.TrimSpace(fields["created_by"]))
+	if createdBy == "" && isBotPrincipal(principal) {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	value, err := h.Messages.AddCall(r.Context(), principal.WorkspaceID, principal.UserID, fields["external_unique_id"], fields["external_display_id"], fields["join_url"], fields["desktop_app_join_url"], fields["title"], started, participants, createdBy)
 	if err != nil {
 		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
@@ -13949,7 +14103,9 @@ func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	value, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), domain.ListItemID(strings.TrimSpace(fields["parent_item_id"])), fields["initial_fields"])
+	// duplicated_item_id copies an item of the list; it was ignored, so
+	// duplicating an item made an empty one.
+	value, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), domain.ListItemID(strings.TrimSpace(fields["parent_item_id"])), fields["initial_fields"], domain.ListItemID(strings.TrimSpace(fields["duplicated_item_id"])))
 	if err != nil {
 		writeError(w, mapServiceError(err, "list_not_found"))
 		return
@@ -13972,12 +14128,26 @@ func (h Handler) listItemInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	includeSubscribed, err := parseBoolField(fields["include_is_subscribed"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	value, err := h.Messages.GetListItem(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), domain.ListItemID(strings.TrimSpace(fields["id"])))
 	if err != nil {
 		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "item": listItemResponse(value)})
+	item := listItemResponse(value)
+	// include_is_subscribed asks whether the reader follows the row. Nothing
+	// here lets a member follow a list row, so nobody does; it was dropped,
+	// so the field a client asked for was missing rather than false.
+	if includeSubscribed {
+		item["is_subscribed"] = false
+	}
+	// Slack answers the row as `record`; `item` is kept for callers that
+	// read this method before it said so.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "item": item, "record": item})
 }
 
 func (h Handler) listItems(w http.ResponseWriter, r *http.Request) {

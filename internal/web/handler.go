@@ -6593,15 +6593,15 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		// One instant for the whole list, so two invitations with the same
 		// deadline cannot be rendered on opposite sides of it.
 		now := time.Now().UTC()
-		for _, status := range []domain.SharedInviteStatus{domain.SharedInvitePending, domain.SharedInviteApproved} {
-			page, listErr := h.Messages.ListSharedInvites(ctx, principal.WorkspaceID, principal.UserID, status, domain.PageRequest{Limit: 25})
-			if listErr != nil {
-				continue
-			}
+		// The conversation is part of the query. It used to be filtered from
+		// the first twenty-five of each status across the whole workspace, so
+		// a busy workspace's channel showed none of its own invitations.
+		page, listErr := h.Messages.ListSharedInvites(ctx, principal.WorkspaceID, principal.UserID, domain.SharedInviteFilter{
+			Statuses:     []domain.SharedInviteStatus{domain.SharedInvitePending, domain.SharedInviteApproved},
+			Conversation: conversation.ID,
+		}, domain.PageRequest{Limit: 25})
+		if listErr == nil {
 			for _, invite := range page.Invites {
-				if invite.ConversationID != conversation.ID {
-					continue
-				}
 				view := connectInviteView{
 					ID: string(invite.ID), Status: string(invite.Status),
 					Target:     h.workspaceName(ctx, principal, invite.TargetWorkspaceID),
@@ -7088,7 +7088,13 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 			if decided == "" {
 				decided = "decided"
 			}
-			view.Text = template.HTML("Your Slack Connect invitation for " + template.HTMLEscapeString(name) + " was " + template.HTMLEscapeString(decided) + ".")
+			text := "Your Slack Connect invitation for " + template.HTMLEscapeString(name) + " was " + template.HTMLEscapeString(decided) + "."
+			// The note the host kept with the decision is addressed to this
+			// member; it was accepted by the API and never shown to them.
+			if note := strings.TrimSpace(item.SharedInviteMessage); note != "" {
+				text += " “" + template.HTMLEscapeString(note) + "”"
+			}
+			view.Text = template.HTML(text)
 		}
 		if item.ListItemID != "" && item.SourceAvailable {
 			name := strings.TrimSpace(item.ListName)
@@ -10487,7 +10493,7 @@ func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
 	if value, listErr := h.Messages.List(r.Context(), principal.WorkspaceID, principal.UserID, id); listErr == nil {
 		primaryKey = listPrimaryColumnKey(value.Schema)
 	}
-	if _, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, id, "", listTitleFields(fields["title"], primaryKey)); err != nil {
+	if _, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, id, "", listTitleFields(fields["title"], primaryKey), ""); err != nil {
 		h.writeMutationError(w, r, http.StatusBadRequest, "The item was not added", "Enter a title and try again.")
 		return
 	}

@@ -31,27 +31,28 @@ type ActivityItem struct {
 	ConversationId string                 `protobuf:"bytes,6,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	MessageId      string                 `protobuf:"bytes,7,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	// reminder_id names the to-do whose reminder came due.
-	ReminderId         string           `protobuf:"bytes,8,opt,name=reminder_id,json=reminderId,proto3" json:"reminder_id,omitempty"`
-	ReactionName       string           `protobuf:"bytes,9,opt,name=reaction_name,json=reactionName,proto3" json:"reaction_name,omitempty"`
-	OccurredAt         int64            `protobuf:"varint,10,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
-	ReadAt             int64            `protobuf:"varint,11,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
-	ClearedAt          int64            `protobuf:"varint,12,opt,name=cleared_at,json=clearedAt,proto3" json:"cleared_at,omitempty"`
-	Message            *Message         `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
-	SourceAvailable    bool             `protobuf:"varint,15,opt,name=source_available,json=sourceAvailable,proto3" json:"source_available,omitempty"`
-	CanvasId           string           `protobuf:"bytes,16,opt,name=canvas_id,json=canvasId,proto3" json:"canvas_id,omitempty"`
-	CanvasTitle        string           `protobuf:"bytes,17,opt,name=canvas_title,json=canvasTitle,proto3" json:"canvas_title,omitempty"`
-	ListItemId         string           `protobuf:"bytes,18,opt,name=list_item_id,json=listItemId,proto3" json:"list_item_id,omitempty"`
-	ListId             string           `protobuf:"bytes,19,opt,name=list_id,json=listId,proto3" json:"list_id,omitempty"`
-	ListName           string           `protobuf:"bytes,20,opt,name=list_name,json=listName,proto3" json:"list_name,omitempty"`
-	ListItem           *ListItemSummary `protobuf:"bytes,21,opt,name=list_item,json=listItem,proto3" json:"list_item,omitempty"`
-	SharedInviteId     string           `protobuf:"bytes,22,opt,name=shared_invite_id,json=sharedInviteId,proto3" json:"shared_invite_id,omitempty"`
-	SharedInviteStatus string           `protobuf:"bytes,23,opt,name=shared_invite_status,json=sharedInviteStatus,proto3" json:"shared_invite_status,omitempty"`
-	AppReminderId      string           `protobuf:"bytes,24,opt,name=app_reminder_id,json=appReminderId,proto3" json:"app_reminder_id,omitempty"`
-	AppReminder        *Reminder        `protobuf:"bytes,25,opt,name=app_reminder,json=appReminder,proto3" json:"app_reminder,omitempty"`
-	CallId             string           `protobuf:"bytes,26,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
-	Todo               *Todo            `protobuf:"bytes,27,opt,name=todo,proto3" json:"todo,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	ReminderId          string           `protobuf:"bytes,8,opt,name=reminder_id,json=reminderId,proto3" json:"reminder_id,omitempty"`
+	ReactionName        string           `protobuf:"bytes,9,opt,name=reaction_name,json=reactionName,proto3" json:"reaction_name,omitempty"`
+	OccurredAt          int64            `protobuf:"varint,10,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
+	ReadAt              int64            `protobuf:"varint,11,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
+	ClearedAt           int64            `protobuf:"varint,12,opt,name=cleared_at,json=clearedAt,proto3" json:"cleared_at,omitempty"`
+	Message             *Message         `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
+	SourceAvailable     bool             `protobuf:"varint,15,opt,name=source_available,json=sourceAvailable,proto3" json:"source_available,omitempty"`
+	CanvasId            string           `protobuf:"bytes,16,opt,name=canvas_id,json=canvasId,proto3" json:"canvas_id,omitempty"`
+	CanvasTitle         string           `protobuf:"bytes,17,opt,name=canvas_title,json=canvasTitle,proto3" json:"canvas_title,omitempty"`
+	ListItemId          string           `protobuf:"bytes,18,opt,name=list_item_id,json=listItemId,proto3" json:"list_item_id,omitempty"`
+	ListId              string           `protobuf:"bytes,19,opt,name=list_id,json=listId,proto3" json:"list_id,omitempty"`
+	ListName            string           `protobuf:"bytes,20,opt,name=list_name,json=listName,proto3" json:"list_name,omitempty"`
+	ListItem            *ListItemSummary `protobuf:"bytes,21,opt,name=list_item,json=listItem,proto3" json:"list_item,omitempty"`
+	SharedInviteId      string           `protobuf:"bytes,22,opt,name=shared_invite_id,json=sharedInviteId,proto3" json:"shared_invite_id,omitempty"`
+	SharedInviteStatus  string           `protobuf:"bytes,23,opt,name=shared_invite_status,json=sharedInviteStatus,proto3" json:"shared_invite_status,omitempty"`
+	AppReminderId       string           `protobuf:"bytes,24,opt,name=app_reminder_id,json=appReminderId,proto3" json:"app_reminder_id,omitempty"`
+	AppReminder         *Reminder        `protobuf:"bytes,25,opt,name=app_reminder,json=appReminder,proto3" json:"app_reminder,omitempty"`
+	CallId              string           `protobuf:"bytes,26,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	Todo                *Todo            `protobuf:"bytes,27,opt,name=todo,proto3" json:"todo,omitempty"`
+	SharedInviteMessage string           `protobuf:"bytes,28,opt,name=shared_invite_message,json=sharedInviteMessage,proto3" json:"shared_invite_message,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ActivityItem) Reset() {
@@ -264,6 +265,13 @@ func (x *ActivityItem) GetTodo() *Todo {
 		return x.Todo
 	}
 	return nil
+}
+
+func (x *ActivityItem) GetSharedInviteMessage() string {
+	if x != nil {
+		return x.SharedInviteMessage
+	}
+	return ""
 }
 
 // ListItemSummary is what an Activity row needs to name assigned work without
@@ -2636,7 +2644,7 @@ var File_sameoldchat_chat_v1_activity_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/activity.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a#sameoldchat/chat/v1/reminders.proto\x1a\x1fsameoldchat/chat/v1/todos.proto\"\xce\a\n" +
+	"\"sameoldchat/chat/v1/activity.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a#sameoldchat/chat/v1/reminders.proto\x1a\x1fsameoldchat/chat/v1/todos.proto\"\x82\b\n" +
 	"\fActivityItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -2669,7 +2677,8 @@ const file_sameoldchat_chat_v1_activity_proto_rawDesc = "" +
 	"\x0fapp_reminder_id\x18\x18 \x01(\tR\rappReminderId\x12@\n" +
 	"\fapp_reminder\x18\x19 \x01(\v2\x1d.sameoldchat.chat.v1.ReminderR\vappReminder\x12\x17\n" +
 	"\acall_id\x18\x1a \x01(\tR\x06callId\x12-\n" +
-	"\x04todo\x18\x1b \x01(\v2\x19.sameoldchat.chat.v1.TodoR\x04todoJ\x04\b\x0e\x10\x0fR\breminder\"~\n" +
+	"\x04todo\x18\x1b \x01(\v2\x19.sameoldchat.chat.v1.TodoR\x04todo\x122\n" +
+	"\x15shared_invite_message\x18\x1c \x01(\tR\x13sharedInviteMessageJ\x04\b\x0e\x10\x0fR\breminder\"~\n" +
 	"\x0fListItemSummary\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06fields\x18\x02 \x01(\tR\x06fields\x12\x1a\n" +

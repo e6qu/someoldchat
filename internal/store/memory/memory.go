@@ -5856,7 +5856,7 @@ func (s *Store) GetSharedInvite(_ context.Context, id domain.SharedInviteID) (do
 	return value, nil
 }
 
-func (s *Store) ListSharedInvites(_ context.Context, workspace domain.WorkspaceID, status domain.SharedInviteStatus, request domain.PageRequest) (domain.SharedInvitePage, error) {
+func (s *Store) ListSharedInvites(_ context.Context, workspace domain.WorkspaceID, filter domain.SharedInviteFilter, request domain.PageRequest) (domain.SharedInvitePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.SharedInvitePage{}, err
 	}
@@ -5867,7 +5867,7 @@ func (s *Store) ListSharedInvites(_ context.Context, workspace domain.WorkspaceI
 	s.mu.RLock()
 	values := make([]domain.SharedInvite, 0, request.Limit+1)
 	for _, value := range s.sharedInvites {
-		if value.Status != status || string(value.ID) <= after {
+		if !filter.Matches(value) || string(value.ID) <= after {
 			continue
 		}
 		if value.WorkspaceID != workspace && value.TargetWorkspaceID != workspace {
@@ -5885,9 +5885,12 @@ func (s *Store) ListSharedInvites(_ context.Context, workspace domain.WorkspaceI
 	return page, err
 }
 
-func (s *Store) SetSharedInviteStatus(_ context.Context, id domain.SharedInviteID, from, to domain.SharedInviteStatus, at time.Time, event events.Event) error {
+func (s *Store) SetSharedInviteStatus(_ context.Context, id domain.SharedInviteID, from, to domain.SharedInviteStatus, at time.Time, review domain.SharedInviteReview, event events.Event) error {
 	if !domain.SharedInviteTransition(from, to) {
 		return store.InvalidArgument("a shared invitation cannot move between those states")
+	}
+	if to != domain.SharedInviteApproved && (review.Conversation != "" || review.SetExternalLimited) {
+		return store.InvalidArgument("only an approval moves or restricts a shared invitation")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -5898,6 +5901,27 @@ func (s *Store) SetSharedInviteStatus(_ context.Context, id domain.SharedInviteI
 	if value.Status != from {
 		return store.ErrConflict
 	}
+	if review.Conversation != "" && review.Conversation != value.ConversationID {
+		conversation, exists := s.conversations[review.Conversation]
+		if !exists || conversation.WorkspaceID != value.WorkspaceID {
+			return store.ErrNotFound
+		}
+		if value.TargetWorkspaceID != "" {
+			for _, existing := range s.sharedInvites {
+				if existing.ID == value.ID || existing.ConversationID != review.Conversation || existing.TargetWorkspaceID != value.TargetWorkspaceID {
+					continue
+				}
+				if existing.Status == domain.SharedInvitePending || existing.Status == domain.SharedInviteApproved || existing.Status == domain.SharedInviteAccepted {
+					return store.ErrAlreadyExists
+				}
+			}
+		}
+		value.ConversationID = review.Conversation
+	}
+	if review.SetExternalLimited {
+		value.ExternalLimited = review.ExternalLimited
+	}
+	value.ReviewMessage = review.Message
 	value.Status = to
 	if to == domain.SharedInviteApproved {
 		value.ReviewedAt = at.UTC()
@@ -5942,6 +5966,12 @@ func (s *Store) AcceptSharedInvite(_ context.Context, id domain.SharedInviteID, 
 		}
 		teams[invite.TargetWorkspaceID] = struct{}{}
 		s.conversationTeams[invite.ConversationID] = teams
+	}
+	if invite.ExternalLimited {
+		if s.externalInvitePermissions[invite.ConversationID] == nil {
+			s.externalInvitePermissions[invite.ConversationID] = map[domain.WorkspaceID]bool{}
+		}
+		s.externalInvitePermissions[invite.ConversationID][invite.TargetWorkspaceID] = false
 	}
 	invite.Status = domain.SharedInviteAccepted
 	invite.SettledAt = at.UTC()
@@ -6017,12 +6047,19 @@ func (s *Store) SetConversationTeams(_ context.Context, workspace domain.Workspa
 // ListExternalTeams mirrors the SQL derivation: the connections are whatever
 // organizations appear in this workspace's channels.
 func (s *Store) ListExternalTeams(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.ExternalTeamPage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+	if err := store.CheckPage(request); err != nil {
 		return domain.ExternalTeamPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
 		return domain.ExternalTeamPage{}, err
+	}
+	afterName, afterID := "", domain.WorkspaceID("")
+	if after != "" {
+		var ok bool
+		if afterName, afterID, ok = domain.ParseExternalTeamCursorKey(after); !ok {
+			return domain.ExternalTeamPage{}, store.InvalidArgument("invalid external team cursor")
+		}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -6041,19 +6078,25 @@ func (s *Store) ListExternalTeams(_ context.Context, workspace domain.WorkspaceI
 	}
 	teams := make([]domain.ExternalTeam, 0, len(counts))
 	for team, channels := range counts {
-		if string(team) <= after {
+		value := domain.ExternalTeam{ID: team, Name: s.workspaces[team].Name, Channels: channels}
+		if after != "" && !request.ExternalTeamAfter(value, afterName, afterID) {
 			continue
 		}
-		teams = append(teams, domain.ExternalTeam{ID: team, Name: s.workspaces[team].Name, Channels: channels})
+		teams = append(teams, value)
 	}
-	sort.Slice(teams, func(i, j int) bool { return teams[i].ID < teams[j].ID })
+	sort.Slice(teams, func(i, j int) bool {
+		if teams[i].Name != teams[j].Name {
+			return (teams[i].Name < teams[j].Name) != request.Descending
+		}
+		return (teams[i].ID < teams[j].ID) != request.Descending
+	})
 	hasMore := len(teams) > request.Limit
 	if hasMore {
 		teams = teams[:request.Limit]
 	}
 	page := domain.ExternalTeamPage{Teams: teams, HasMore: hasMore}
 	if hasMore {
-		page.NextCursor, err = domain.NewListCursor(string(teams[len(teams)-1].ID))
+		page.NextCursor, err = domain.NewListCursor(domain.ExternalTeamCursorKey(teams[len(teams)-1]))
 	}
 	return page, err
 }
@@ -8181,6 +8224,7 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 			// this member made, which remains true either way.
 			if invite, ok := s.sharedInvites[item.SharedInviteID]; ok && invite.WorkspaceID == workspace {
 				item.SharedInviteStatus = invite.Status
+				item.SharedInviteMessage = invite.ReviewMessage
 				item.SourceAvailable = true
 			}
 		}
@@ -9281,6 +9325,7 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 	}
 	s.mu.RLock()
 	values := make([]domain.UserReaction, 0, request.Limit+1)
+	total := 0
 	for conversationID, messages := range s.messages {
 		// The SQL repositories list a reaction in a private conversation only
 		// while the reactor is still a member. Without the same rule here a
@@ -9293,7 +9338,14 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 			if message.WorkspaceID != workspace {
 				continue
 			}
-			if position != "" && domain.UserReactionCursorKey(message) <= position {
+			reacted := false
+			for _, reaction := range s.reactions[message.ID] {
+				reacted = reacted || reaction.UserID == user
+			}
+			if reacted {
+				total++
+			}
+			if !reacted || (position != "" && domain.UserReactionCursorKey(message) <= position) {
 				continue
 			}
 			for _, reaction := range s.reactions[message.ID] {
@@ -9307,7 +9359,7 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 	s.mu.RUnlock()
 	sort.Slice(values, func(left, right int) bool { return userReactionKey(values[left]) < userReactionKey(values[right]) })
 	// A page is Limit messages with every reaction row of each.
-	page := domain.UserReactionPage{Items: make([]domain.UserReaction, 0, len(values))}
+	page := domain.UserReactionPage{Items: make([]domain.UserReaction, 0, len(values)), Total: total}
 	messages := 0
 	for _, value := range values {
 		if len(page.Items) == 0 || page.Items[len(page.Items)-1].Message.ID != value.Message.ID {

@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
@@ -46,14 +48,14 @@ func TestSlackConnectCapacityIsEnforcedAtAcceptance(t *testing.T) {
 	if err := store.SeedWorkspaceRole("T-late", "U-late", domain.WorkspaceRoleAdmin); err != nil {
 		t.Fatal(err)
 	}
-	invite, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T-late", "")
+	invite, err := messages.InviteShared(ctx, "T1", "U1", "C1", domain.SharedInviteRecipient{Workspace: "T-late"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", invite.ID); err != nil {
+	if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", invite.ID, domain.SharedInviteReview{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.AcceptSharedInvite(ctx, "T-late", "U-late", invite.ID); !errors.Is(err, domain.ErrSlackConnectFull) {
+	if _, err := messages.AcceptSharedInvite(ctx, "T-late", "U-late", invite.ID, false); !errors.Is(err, domain.ErrSlackConnectFull) {
 		t.Fatalf("acceptance into a full channel err=%v, want the capacity refusal", err)
 	}
 	// The refusal left the invitation acceptable: nothing was consumed by
@@ -82,22 +84,22 @@ func TestSharedInviteDecisionsBelongToTheirOwnSide(t *testing.T) {
 	store.SeedConversationMember("C1", "U1")
 	messages := Messages{Store: store}
 
-	invite, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", "")
+	invite, err := messages.InviteShared(ctx, "T1", "U1", "C1", domain.SharedInviteRecipient{Workspace: "T2"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The invited organization cannot approve its own invitation.
-	if _, err := messages.ApproveSharedInvite(ctx, "T2", "U2", invite.ID); err == nil {
+	if _, err := messages.ApproveSharedInvite(ctx, "T2", "U2", invite.ID, domain.SharedInviteReview{}); err == nil {
 		t.Fatal("the invited organization approved the host's invitation")
 	}
-	if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", invite.ID); err != nil {
+	if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", invite.ID, domain.SharedInviteReview{}); err != nil {
 		t.Fatal(err)
 	}
 	// And the host cannot accept on the invited organization's behalf.
-	if _, err := messages.AcceptSharedInvite(ctx, "T1", "U1", invite.ID); err == nil {
+	if _, err := messages.AcceptSharedInvite(ctx, "T1", "U1", invite.ID, false); err == nil {
 		t.Fatal("the host accepted its own invitation")
 	}
-	if _, err := messages.AcceptSharedInvite(ctx, "T2", "U2", invite.ID); err != nil {
+	if _, err := messages.AcceptSharedInvite(ctx, "T2", "U2", invite.ID, false); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -116,10 +118,10 @@ func TestASecondOutstandingInvitationIsRefused(t *testing.T) {
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "shared"})
 	store.SeedConversationMember("C1", "U1")
 	messages := Messages{Store: store}
-	if _, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", ""); err != nil {
+	if _, err := messages.InviteShared(ctx, "T1", "U1", "C1", domain.SharedInviteRecipient{Workspace: "T2"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T2", ""); err == nil {
+	if _, err := messages.InviteShared(ctx, "T1", "U1", "C1", domain.SharedInviteRecipient{Workspace: "T2"}); err == nil {
 		t.Fatal("a second outstanding invitation was recorded for the same organization")
 	}
 }
@@ -167,7 +169,7 @@ func TestALapsedInvitationCannotBeApprovedButCanBeWithdrawn(t *testing.T) {
 	t.Run("approval is refused", func(t *testing.T) {
 		store, messages := newFixture(t)
 		lapsed(t, store, "SI_lapsed")
-		if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", "SI_lapsed"); !errors.Is(err, domain.ErrInvitationExpired) {
+		if _, err := messages.ApproveSharedInvite(ctx, "T1", "U1", "SI_lapsed", domain.SharedInviteReview{}); !errors.Is(err, domain.ErrInvitationExpired) {
 			t.Fatalf("approving a lapsed invitation err=%v, want ErrInvitationExpired", err)
 		}
 		// The refusal changed nothing: the invitation is still pending, not
@@ -184,7 +186,7 @@ func TestALapsedInvitationCannotBeApprovedButCanBeWithdrawn(t *testing.T) {
 	t.Run("withdrawal is allowed", func(t *testing.T) {
 		store, messages := newFixture(t)
 		lapsed(t, store, "SI_withdrawn")
-		invite, err := messages.DenySharedInvite(ctx, "T1", "U1", "SI_withdrawn")
+		invite, err := messages.DenySharedInvite(ctx, "T1", "U1", "SI_withdrawn", domain.SharedInviteReview{})
 		if err != nil {
 			t.Fatalf("withdrawing a lapsed invitation: %v", err)
 		}
@@ -232,7 +234,7 @@ func TestExternalInvitePermissionIsStoredReadableAndEnforced(t *testing.T) {
 	if err != nil || !allowed {
 		t.Fatalf("default permission = %v err = %v, want may-invite", allowed, err)
 	}
-	if _, err := messages.InviteShared(ctx, "T2", "U2", "C1", "T3", ""); err != nil {
+	if _, err := messages.InviteShared(ctx, "T2", "U2", "C1", domain.SharedInviteRecipient{Workspace: "T3"}); err != nil {
 		t.Fatalf("a permitted connected team was refused: %v", err)
 	}
 
@@ -247,14 +249,158 @@ func TestExternalInvitePermissionIsStoredReadableAndEnforced(t *testing.T) {
 
 	// Now the connected team is refused when it tries to invite, and with the
 	// classified sentinel rather than a not-found.
-	if _, err := messages.InviteShared(ctx, "T2", "U2", "C1", "T3", ""); !errors.Is(err, domain.ErrExternalInviteNotPermitted) {
+	if _, err := messages.InviteShared(ctx, "T2", "U2", "C1", domain.SharedInviteRecipient{Workspace: "T3"}); !errors.Is(err, domain.ErrExternalInviteNotPermitted) {
 		t.Fatalf("a restricted connected team's invite = %v, want ErrExternalInviteNotPermitted", err)
 	}
 
 	// The host is never restricted by this: it owns the channel. A distinct
 	// target, because T3 was already invited above and inviting it twice is a
 	// separate refusal.
-	if _, err := messages.InviteShared(ctx, "T1", "U1", "C1", "T4", ""); err != nil {
+	if _, err := messages.InviteShared(ctx, "T1", "U1", "C1", domain.SharedInviteRecipient{Workspace: "T4"}); err != nil {
 		t.Fatalf("the host was refused its own channel's invite: %v", err)
+	}
+}
+
+// The host's reason for denying a request reaches the member who asked, with
+// the decision. conversations.requestSharedInvite.deny accepted the message and
+// dropped it.
+func TestADenialsReasonReachesTheMemberWhoAsked(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "host"})
+	repository.SeedWorkspace(domain.Workspace{ID: "T2", Name: "guest"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "requester"})
+	repository.SeedUser(domain.User{ID: "UA", WorkspaceID: "T1", Name: "admin"})
+	if err := repository.SeedWorkspaceRole("T1", "UA", domain.WorkspaceRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "shared"})
+	repository.SeedConversationMember("C1", "U1")
+	repository.SeedConversationMember("C1", "UA")
+	messages := Messages{Store: repository}
+
+	invite, err := messages.InviteShared(ctx, "T1", "U1", "C1", domain.SharedInviteRecipient{Workspace: "T2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A denial moves and restricts nothing, so a review asking it to is
+	// refused rather than half applied.
+	if _, err := messages.DenySharedInvite(ctx, "T1", "UA", invite.ID, domain.SharedInviteReview{Conversation: "C1", Message: "no"}); !errors.Is(err, domain.ErrInvalidSharedInvite) {
+		t.Fatalf("a denial that moves the invitation err=%v", err)
+	}
+	if _, err := messages.DenySharedInvite(ctx, "T1", "UA", invite.ID, domain.SharedInviteReview{Message: strings.Repeat("x", domain.MaxSharedInviteReviewMessage+1)}); !errors.Is(err, domain.ErrInvalidSharedInvite) {
+		t.Fatalf("an oversized reason err=%v", err)
+	}
+	denied, err := messages.DenySharedInvite(ctx, "T1", "UA", invite.ID, domain.SharedInviteReview{Message: "  Not this quarter  "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if denied.ReviewMessage != "Not this quarter" || denied.Decision() != domain.SharedInviteDecisionDenied || denied.SettledAt.IsZero() {
+		t.Fatalf("denied=%+v, want the trimmed reason on a denied, settled request", denied)
+	}
+	told, err := messages.Activity(ctx, "T1", "U1", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range told.Items {
+		if item.SharedInviteID == invite.ID {
+			found = true
+			if item.SharedInviteMessage != "Not this quarter" || item.SharedInviteStatus != domain.SharedInviteRevoked {
+				t.Fatalf("decision=%+v, want the reason with the denial", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the requester was not told: %+v", told.Items)
+	}
+}
+
+// An approval may move the invitation to another of the host's channels, but
+// only to one the invitation could have been raised on, and never into a
+// channel that already has an outstanding invitation for the same
+// organization: two acceptances would each claim a place.
+func TestAnApprovalMovesAnInvitationOnlyWhereItCouldHaveBeenRaised(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "host"})
+	repository.SeedWorkspace(domain.Workspace{ID: "T2", Name: "guest"})
+	repository.SeedWorkspace(domain.Workspace{ID: "T3", Name: "elsewhere"})
+	repository.SeedUser(domain.User{ID: "UA", WorkspaceID: "T1", Name: "admin"})
+	repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T2", Name: "guest"})
+	repository.SeedUser(domain.User{ID: "U-gone", WorkspaceID: "T2", Name: "gone", Deleted: true})
+	if err := repository.SeedWorkspaceRole("T1", "UA", domain.WorkspaceRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	for _, conversation := range []domain.Conversation{
+		{ID: "C1", WorkspaceID: "T1", Name: "one"},
+		{ID: "C2", WorkspaceID: "T1", Name: "two"},
+		{ID: "C-out", WorkspaceID: "T1", Name: "not-a-member"},
+		{ID: "D1", WorkspaceID: "T1", Kind: domain.ConversationTypeIM},
+		{ID: "C-other", WorkspaceID: "T3", Name: "other"},
+	} {
+		repository.SeedConversation(conversation)
+	}
+	for _, conversation := range []domain.ConversationID{"C1", "C2", "D1"} {
+		repository.SeedConversationMember(conversation, "UA")
+	}
+	messages := Messages{Store: repository}
+
+	// A person names their organization; one in the host, or deactivated, or
+	// unknown, names nobody who can be invited, and so does naming two kinds
+	// of recipient at once.
+	for _, recipient := range []domain.SharedInviteRecipient{
+		{User: "UA"}, {User: "U-gone"}, {User: "U-nobody"}, {User: "U2", Email: "two@example.org"}, {},
+	} {
+		if _, err := messages.InviteShared(ctx, "T1", "UA", "C1", recipient); !errors.Is(err, domain.ErrInvalidSharedInvite) {
+			t.Fatalf("recipient=%+v err=%v", recipient, err)
+		}
+	}
+	first, err := messages.InviteShared(ctx, "T1", "UA", "C1", domain.SharedInviteRecipient{User: "U2", ExternalLimited: true})
+	if err != nil || first.TargetWorkspaceID != "T2" || !first.ExternalLimited {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	second, err := messages.InviteShared(ctx, "T1", "UA", "C2", domain.SharedInviteRecipient{Workspace: "T2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for conversation, want := range map[domain.ConversationID]error{
+		"C2":      store.ErrAlreadyExists,
+		"C-out":   domain.ErrNotInConversation,
+		"C-other": store.ErrNotFound,
+		"D1":      domain.ErrInvalidSharedInvite,
+	} {
+		if _, err := messages.ApproveSharedInvite(ctx, "T1", "UA", first.ID, domain.SharedInviteReview{Conversation: conversation}); !errors.Is(err, want) {
+			t.Fatalf("moving to %s err=%v, want %v", conversation, err, want)
+		}
+	}
+	if stored, err := repository.GetSharedInvite(ctx, first.ID); err != nil || stored.Status != domain.SharedInvitePending || stored.ConversationID != "C1" {
+		t.Fatalf("a refused move changed the invitation: %+v err=%v", stored, err)
+	}
+	if _, err := messages.DenySharedInvite(ctx, "T1", "UA", second.ID, domain.SharedInviteReview{}); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := messages.ApproveSharedInvite(ctx, "T1", "UA", first.ID, domain.SharedInviteReview{Conversation: "C2", SetExternalLimited: true, ExternalLimited: false, Message: "welcome"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repository.GetSharedInvite(ctx, first.ID)
+	if err != nil || stored.ConversationID != "C2" || stored.ExternalLimited || stored.ReviewMessage != "welcome" || stored.ReviewedAt.IsZero() || moved.ConversationID != "C2" {
+		t.Fatalf("moved=%+v stored=%+v err=%v", moved, stored, err)
+	}
+
+	// The listing's filter: by request state, by requester and by deadline.
+	listed, err := messages.ListSharedInvites(ctx, "T1", "UA", domain.SharedInviteFilter{Decisions: []domain.SharedInviteDecision{domain.SharedInviteDecisionDenied}}, domain.PageRequest{Limit: 10})
+	if err != nil || len(listed.Invites) != 1 || listed.Invites[0].ID != second.ID {
+		t.Fatalf("denied requests=%+v err=%v", listed.Invites, err)
+	}
+	if _, err := messages.ListSharedInvites(ctx, "T1", "UA", domain.SharedInviteFilter{}, domain.PageRequest{Limit: 10}); !errors.Is(err, domain.ErrInvalidSharedInvite) {
+		t.Fatalf("an empty filter err=%v", err)
+	}
+	late, err := messages.ListSharedInvites(ctx, "T1", "UA", domain.SharedInviteFilter{
+		Decisions: []domain.SharedInviteDecision{domain.SharedInviteDecisionApproved}, ExcludeExpiredAt: time.Now().Add(SharedInviteLifetime + time.Hour),
+	}, domain.PageRequest{Limit: 10})
+	if err != nil || len(late.Invites) != 0 {
+		t.Fatalf("an approval past its deadline was listed as live: %+v err=%v", late.Invites, err)
 	}
 }

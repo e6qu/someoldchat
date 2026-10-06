@@ -67,7 +67,7 @@ func TestDeclaringAColumnDoesNotStrandExistingItems(t *testing.T) {
 		t.Fatal(err)
 	}
 	freeForm := `[{"column_id":"note","value":"written before anyone declared anything"}]`
-	item, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", freeForm)
+	item, err := messages.CreateListItem(ctx, "T1", "U1", list.ID, "", freeForm, "")
 	if err != nil {
 		t.Fatal(err)
 	}

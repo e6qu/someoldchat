@@ -204,6 +204,9 @@ type UserReactionPage struct {
 	Items      []UserReaction
 	NextCursor Cursor
 	HasMore    bool
+	// Total is how many reacted messages the whole listing holds, which
+	// reactions.list's legacy paging object reports.
+	Total int
 }
 
 // UserReactionCursorKey is the keyset position after one reacted message: its

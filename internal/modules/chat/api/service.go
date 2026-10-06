@@ -132,14 +132,16 @@ type Service interface {
 	// the create-channel dialog follow them; only an administrator sets them.
 	WorkspacePolicy(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspacePolicy, error)
 	SetWorkspacePolicy(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspacePolicy) (domain.WorkspacePolicy, error)
-	InviteShared(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, string) (domain.SharedInvite, error)
-	ApproveSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
-	DenySharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
+	InviteShared(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.SharedInviteRecipient) (domain.SharedInvite, error)
+	ApproveSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID, domain.SharedInviteReview) (domain.SharedInvite, error)
+	DenySharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID, domain.SharedInviteReview) (domain.SharedInvite, error)
 	RevokeSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
 	DeclineSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
-	AcceptSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.Conversation, error)
-	ListSharedInvites(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteStatus, domain.PageRequest) (domain.SharedInvitePage, error)
-	ExternalTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ExternalTeamPage, error)
+	// AcceptSharedInvite's bool is the accepting organization asking for a
+	// private channel.
+	AcceptSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID, bool) (domain.Conversation, error)
+	ListSharedInvites(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteFilter, domain.PageRequest) (domain.SharedInvitePage, error)
+	ExternalTeams(context.Context, domain.WorkspaceID, domain.UserID, domain.ExternalTeamFilter, domain.PageRequest) (domain.ExternalTeamPage, error)
 	DisconnectExternalTeam(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceID) error
 	SetExternalInvitePermissions(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, bool) (domain.Conversation, error)
 	ExternalInvitePermission(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID) (bool, error)
@@ -356,7 +358,9 @@ type Service interface {
 	AppExternalAuthProviders(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) ([]domain.ExternalAuthProvider, error)
 	StartExternalAuthConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (string, error)
 	CompleteExternalAuthConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, string, string) error
-	UpdateUserAppConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) error
+	// UpdateUserAppConnection records an app's report of a member's
+	// connection: the member and the status follow the app.
+	UpdateUserAppConnection(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.UserID, domain.AppUserConnection) error
 	AssistantSearchAvailability(context.Context, domain.WorkspaceID, domain.UserID) (domain.AssistantSearchAvailability, error)
 	AssistantSearchContext(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	SendCallSignal(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, domain.UserID, domain.CallSignalKind, string) error
@@ -535,9 +539,12 @@ type Service interface {
 	UpdateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, string, string, string, []domain.ConversationID) (domain.UserGroup, error)
 	SetUserGroupEnabled(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, bool) (domain.UserGroup, error)
 	ListUserGroups(context.Context, domain.WorkspaceID, domain.UserID, bool, domain.PageRequest) (domain.UserGroupPage, error)
-	UserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID) ([]domain.UserID, error)
+	// UserGroupUsers' bool is usergroups.users.list's include_disabled.
+	UserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, bool) ([]domain.UserID, error)
 	SetUserGroupUsers(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, []domain.UserID) (domain.UserGroup, error)
-	AddCall(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string, time.Time, []domain.CallParticipant) (domain.Call, error)
+	// AddCall's last argument is the member the call is attributed to; empty
+	// is the caller.
+	AddCall(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string, time.Time, []domain.CallParticipant, domain.UserID) (domain.Call, error)
 	// The huddle family takes a conversation rather than a call identifier: a
 	// conversation has at most one running huddle, and naming the conversation
 	// is what lets two concurrent starts converge on one.
@@ -626,7 +633,8 @@ type Service interface {
 	Lists(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ListPage, error)
 	SearchLists(context.Context, domain.WorkspaceID, domain.UserID, domain.ListSearchRequest) (domain.ListPage, error)
 	UpdateList(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, string, string, bool, bool) (domain.List, error)
-	CreateListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, string) (domain.ListItem, error)
+	// CreateListItem's last argument is an item of the same list to copy.
+	CreateListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, string, domain.ListItemID) (domain.ListItem, error)
 	GetListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID) (domain.ListItem, error)
 	ListItems(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.PageRequest, bool) (domain.ListItemPage, error)
 	UpdateListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, string, bool) (domain.ListItem, error)

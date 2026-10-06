@@ -178,6 +178,8 @@ message CreateListItemRequest {
   string list_id = 3;
   string parent_item_id = 4;
   string fields = 5;
+  // duplicated_item_id names an item of the same list to copy.
+  string duplicated_item_id = 6;
 }
 
 message ListItemsRequest {

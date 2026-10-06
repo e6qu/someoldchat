@@ -40,6 +40,7 @@ message ActivityItem {
   Reminder app_reminder = 25;
   string call_id = 26;
   Todo todo = 27;
+  string shared_invite_message = 28;
 }
 
 // ListItemSummary is what an Activity row needs to name assigned work without

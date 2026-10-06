@@ -214,6 +214,7 @@ type UserReactionPage struct {
 	Items         []*UserReaction        `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
 	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
 	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	Total         int32                  `protobuf:"varint,4,opt,name=total,proto3" json:"total,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -267,6 +268,13 @@ func (x *UserReactionPage) GetHasMore() bool {
 		return x.HasMore
 	}
 	return false
+}
+
+func (x *UserReactionPage) GetTotal() int32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
 }
 
 type Pin struct {
@@ -1107,12 +1115,13 @@ const file_sameoldchat_chat_v1_reactions_proto_rawDesc = "" +
 	"\fUserReaction\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x126\n" +
 	"\amessage\x18\x02 \x01(\v2\x1c.sameoldchat.chat.v1.MessageR\amessage\x129\n" +
-	"\breaction\x18\x03 \x01(\v2\x1d.sameoldchat.chat.v1.ReactionR\breaction\"\x87\x01\n" +
+	"\breaction\x18\x03 \x01(\v2\x1d.sameoldchat.chat.v1.ReactionR\breaction\"\x9d\x01\n" +
 	"\x10UserReactionPage\x127\n" +
 	"\x05items\x18\x01 \x03(\v2!.sameoldchat.chat.v1.UserReactionR\x05items\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x8e\x01\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12\x14\n" +
+	"\x05total\x18\x04 \x01(\x05R\x05total\"\x8e\x01\n" +
 	"\x03Pin\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x17\n" +

@@ -32,6 +32,10 @@ message UserGroupRequest {
   string workspace_id = 1;
   string user_id = 2;
   string user_group_id = 3;
+  // UserGroupUsers only: refuse a disabled group. It is the negation of
+  // usergroups.users.list's include_disabled so that an older caller, which
+  // sends neither, keeps the answer it was built for.
+  bool exclude_disabled = 4;
 }
 
 message UserGroupsRequest {

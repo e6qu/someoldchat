@@ -740,6 +740,8 @@ const addedCall = await client.calls.add({
   desktop_app_join_url: "https://example.com/call-desktop",
   title: "Qualification call",
   date_start: Math.floor(Date.now() / 1000),
+  // A bot token must name who started the call.
+  created_by: "U1",
 });
 assert.equal(addedCall.ok, true);
 const callId = addedCall.call.id;
@@ -896,7 +898,9 @@ assert.equal((await adminClient.admin.conversations.getCustomRetention({ channel
 // approves; the invited organization accepts, through its own credential —
 // doing it all with one token would prove the opposite of what CONNECT-02
 // asks for.
-const sharedInvite = await client.conversations.inviteShared({ channel: "C1", external_limited: "T2" });
+// The invitation names a person in the other organization; external_limited
+// is the boolean restriction the SDK types declare, not an organization.
+const sharedInvite = await client.conversations.inviteShared({ channel: "C1", user_ids: ["U-external"], external_limited: false });
 assert.equal(sharedInvite.ok, true);
 assert.equal(typeof sharedInvite.invite.id, "string");
 assert.equal(sharedInvite.invite.status, "pending");
@@ -910,7 +914,8 @@ const issued = await client.conversations.listConnectInvites({});
 assert.equal(issued.ok, true);
 assert.equal(issued.invites.some((invite) => invite.id === sharedInvite.invite.id), true);
 
-const accepted = await externalClient.conversations.acceptSharedInvite({ invite_id: sharedInvite.invite.id });
+const accepted = await externalClient.conversations.acceptSharedInvite({ invite_id: sharedInvite.invite.id, channel_name: "sdk-shared" });
+assert.equal(accepted.channel_id, "C1");
 assert.equal(accepted.ok, true);
 assert.equal(accepted.is_ext_shared, true);
 
@@ -926,13 +931,21 @@ assert.equal((await client.conversations.externalInvitePermissions.set({
 })).ok, true);
 
 // Denying and declining are different outcomes, so both are exercised.
-const denied = await client.conversations.inviteShared({ channel: "C1", external_limited: "T3" });
-assert.equal((await client.conversations.requestSharedInvite.deny({ invite_id: denied.invite.id })).ok, true);
+const denied = await client.conversations.inviteShared({ channel: "C1", user_ids: ["U-third"] });
+assert.equal(denied.invite_id, denied.invite.id);
+assert.equal(denied.invite.is_external_limited, true);
+assert.equal((await client.conversations.requestSharedInvite.deny({ invite_id: denied.invite.id, message: "Not this quarter" })).ok, true);
+const deniedRequests = await client.conversations.requestSharedInvite.list({ include_denied: true, invite_ids: [denied.invite.id] });
+assert.equal(deniedRequests.invite_requests.length, 1);
 
-const toDecline = await client.conversations.inviteShared({ channel: "C1", external_limited: "T3" });
+const toDecline = await client.conversations.inviteShared({ channel: "C1", user_ids: ["U-third"] });
 // Slack publishes the same host approval under a request-oriented name too, so
 // both reach the same decision here.
-assert.equal((await client.conversations.requestSharedInvite.approve({ invite_id: toDecline.invite.id })).ok, true);
+assert.equal((await client.conversations.requestSharedInvite.approve({
+	invite_id: toDecline.invite.id,
+	is_external_limited: true,
+	message: { is_override: false, text: "Welcome" },
+})).ok, true);
 // Declined by the organization it was actually sent to: an invitation names
 // one organization, and only that one may answer it.
 assert.equal((await thirdOrgClient.conversations.declineSharedInvite({ invite_id: toDecline.invite.id })).ok, true);
@@ -1492,7 +1505,7 @@ assert.equal((await adminClient.apiCall("apps.icon.set", {
 	app_id: "A1",
 	image_url: "https://example.invalid/icon.png",
 })).ok, true);
-assert.equal((await client.apiCall("apps.user.connection.update", { app_id: "A1" })).ok, true);
+assert.equal((await client.apps.user.connection.update({ user_id: "U1", status: "connected" })).ok, true);
 const assistantInfo = await client.apiCall("assistant.search.info");
 assert.equal(assistantInfo.ok, true);
 assert.equal(assistantInfo.enabled, true);

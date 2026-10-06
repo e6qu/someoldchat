@@ -20,10 +20,6 @@ import (
 // before any script has run.
 const localeCookie = "sameoldchat_locale"
 
-// languagePreference is the member preference Language & region's picker
-// writes.
-const languagePreference = "language"
-
 // routes is what a set of routes is registered on: a ServeMux, or the
 // localizing wrapper Register uses.
 type routes interface {

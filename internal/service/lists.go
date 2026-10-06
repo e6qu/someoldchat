@@ -405,7 +405,12 @@ func (m Messages) RemoveListColumn(ctx context.Context, workspaceID domain.Works
 	return value, nil
 }
 
-func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, parentItemID domain.ListItemID, fields string) (domain.ListItem, error) {
+// CreateListItem adds an item to a list. duplicated, when set, is an item of
+// the same list to copy: the new item starts with its cells, under its parent
+// unless another is named, and any initial fields replace the copied cell of
+// the same column. It used to be ignored, so duplicating an item made an
+// empty one.
+func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, parentItemID domain.ListItemID, fields string, duplicated domain.ListItemID) (domain.ListItem, error) {
 	if err := m.requireListAccess(ctx, workspaceID, userID, listID, domain.AccessWrite); err != nil {
 		return domain.ListItem{}, err
 	}
@@ -417,10 +422,26 @@ func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.ListItem{}, domain.ErrInvalidList
 	}
+	previous := ""
+	if duplicated != "" {
+		source, err := m.Store.GetListItem(ctx, workspaceID, listID, duplicated)
+		if err != nil {
+			return domain.ListItem{}, err
+		}
+		if fields, err = overlayListCells(source.Fields, fields); err != nil {
+			return domain.ListItem{}, domain.ErrInvalidList
+		}
+		if parentItemID == "" {
+			parentItemID = source.ParentItemID
+		}
+		// The copy may carry a cell the source kept under a column since
+		// removed, exactly as editing the source could.
+		previous = source.Fields
+	}
 	// A cell under a column nobody declared is invisible to every reader of the
 	// list, so accepting it silently would lose the member's work while looking
 	// like it had been saved.
-	if err := domain.ValidateListFields(list.Schema, fields, ""); err != nil {
+	if err := domain.ValidateListFields(list.Schema, fields, previous); err != nil {
 		return domain.ListItem{}, domain.ErrInvalidList
 	}
 	id, err := domain.NewListItemID()
@@ -778,6 +799,60 @@ func validateListAccess(access domain.AccessLevel, channelIDs []domain.Conversat
 		return domain.ErrInvalidList
 	}
 	return nil
+}
+
+// overlayListCells is base's cells with each of overlay's in place of base's
+// cell for the same column, and overlay's other cells after them.
+func overlayListCells(base, overlay string) (string, error) {
+	type cell struct {
+		column string
+		raw    json.RawMessage
+	}
+	read := func(raw string) ([]cell, error) {
+		var values []json.RawMessage
+		if strings.TrimSpace(raw) != "" {
+			if err := json.Unmarshal([]byte(raw), &values); err != nil {
+				return nil, err
+			}
+		}
+		cells := make([]cell, 0, len(values))
+		for _, value := range values {
+			var keyed struct {
+				ColumnID string `json:"column_id"`
+			}
+			if err := json.Unmarshal(value, &keyed); err != nil {
+				return nil, err
+			}
+			cells = append(cells, cell{column: strings.TrimSpace(keyed.ColumnID), raw: value})
+		}
+		return cells, nil
+	}
+	copied, err := read(base)
+	if err != nil {
+		return "", err
+	}
+	replacements, err := read(overlay)
+	if err != nil {
+		return "", err
+	}
+	result := make([]json.RawMessage, 0, len(copied)+len(replacements))
+	replaced := make(map[string]bool, len(replacements))
+	for _, original := range copied {
+		value := original.raw
+		for _, replacement := range replacements {
+			if replacement.column != "" && replacement.column == original.column {
+				value, replaced[replacement.column] = replacement.raw, true
+			}
+		}
+		result = append(result, value)
+	}
+	for _, replacement := range replacements {
+		if replacement.column == "" || !replaced[replacement.column] {
+			result = append(result, replacement.raw)
+		}
+	}
+	encoded, err := json.Marshal(result)
+	return string(encoded), err
 }
 
 func normalizeJSONArray(value, defaultValue string) (string, error) {

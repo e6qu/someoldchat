@@ -447,6 +447,7 @@ public final class Qualification {
                             .joinUrl("https://example.com/call")
                             .desktopAppJoinUrl("https://example.com/call-desktop")
                             .title("Qualification call")
+                            .createdBy("U1")
                             .dateStart((int) (System.currentTimeMillis() / 1000))
                             .users(java.util.List.of(
                                     com.slack.api.model.CallParticipant.builder().slackId("U1").build(),
