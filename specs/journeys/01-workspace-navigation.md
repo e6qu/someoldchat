@@ -6,8 +6,8 @@
 
 **Target behavior:** The shell exposes stable workspace, navigation, sidebar,
 conversation, and secondary-detail regions. The active destination is both
-visually and programmatically current. Home, DMs, Activity, Later, More, Apps,
-channels, and direct messages appear according to Slack availability and
+visually and programmatically current. Home, DMs, Activity, To-dos, More,
+Apps, Saved, channels, and direct messages appear according to Slack availability and
 workspace policy. Collapsed sections retain their state without making the
 active item unreachable.
 
@@ -18,7 +18,7 @@ conversation.
 
 Every destination is drawn inside one frame, as Slack's client is: a top bar
 with history controls, search and Help; a left rail with the workspace menu,
-Home, DMs, Activity, Later and More (Files, Canvases, Lists, Workflows, People,
+Home, DMs, Activity, To-dos and More (Files, Canvases, Lists, Workflows, People,
 Apps), a Create button (Message, Channel, Canvas, List, Huddle, Workflow) and
 the member's avatar menu; and the destination beside it. Leaving the
 conversation for a secondary destination keeps the conversation in the rail's
@@ -43,7 +43,7 @@ documented platform and surface mapping:
 | Move among major sections | `F6` / `Shift+F6` | `F6` / `Shift+F6` | web uses `Command+F6` / `Command+Shift+F6` on Mac and `Control+F6` / `Control+Shift+F6` on Windows/Linux |
 | Previous/next unread conversation | `Option+Shift+Up/Down` | `Alt+Shift+Up/Down` | none |
 | Direct messages | `Command+Shift+K` | `Control+Shift+K` | none |
-| Later | `Command+Shift+S` | `Control+Shift+S` | Slack's saved-items surface is named Later here |
+| Saved items | `Command+Shift+S` | `Control+Shift+S` | opens the Saved section of Home |
 | Mark this conversation read | `Escape` | `Escape` | applies outside a text field, so `Escape` still dismisses the composer's suggestions, a dialog, or the navigation drawer |
 | Mark every conversation read | `Shift+Escape` | `Shift+Escape` | applies anywhere, including the composer: `Shift+Escape` means nothing else in a text field |
 | Attach a file | `Command+U` | `Control+U` | none |
@@ -180,7 +180,7 @@ scripts build — and choosing another language switches the page and is
 remembered for the member in every browser. Messages people write are never
 translated. See docs/localization.md.
 
-Navigation chooses which of DMs, Activity, Later and Files the rail shows
+Navigation chooses which of DMs, Activity, To-dos and Files the rail shows
 (Home always shows) and whether tabs show their names. A tab taken off the
 rail moves into More and keeps its keyboard shortcut; a name taken off the
 rail stays the tab's accessible name.

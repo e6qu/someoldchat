@@ -34,7 +34,9 @@ SAMEOLDCHAT_POSTGRES_DSN='postgres://sameoldchat:sameoldchat@localhost:5432/same
 The shared contract covers normalized user lookup, seeded workspace and
 conversation state, message persistence, idempotent message replay, bounded
 message listing, search, presence, do-not-disturb state, stars, files, remote
-file sharing and updates, reminders, scheduled-message claim and delivery,
+file sharing and updates, reminders, saved items, to-dos and channel
+reminders (including their reminder delivery claims), scheduled-message claim
+and delivery,
 workspace settings, user groups and their bindings, custom emoji, and the
 integration state used by OAuth, views, workflows, dialogs, app approvals,
 invites, conversation preferences, calls, and RTM connections. It also

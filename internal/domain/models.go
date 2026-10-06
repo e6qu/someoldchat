@@ -2436,7 +2436,7 @@ type File struct {
 	// it. Slack calls it an image description and shows a control for it; the
 	// pinned Web API snapshot predates the alt_txt parameter that carries it,
 	// so this is first-party durable state rather than an invented API field —
-	// the same standing as recent searches and Later.
+	// the same standing as recent searches, saved items and to-dos.
 	Description string
 	// FileType is the syntax language of a snippet — the text a member typed
 	// inline rather than a file they uploaded. It is empty for an ordinary hosted

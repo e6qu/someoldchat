@@ -15,7 +15,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
-// This file holds what the secondary views (Activity, Later, Unreads, Search,
+// This file holds what the secondary views (Activity, To-dos, Saved, Unreads, Search,
 // People, Files, Canvases, Lists, Notifications) share, so each view is built
 // from the same parts rather than from a private copy of them:
 //

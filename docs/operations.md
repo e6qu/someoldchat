@@ -317,9 +317,10 @@ app, stops taking more for an app after about a second, and serves up to eight
 apps concurrently, so one slow endpoint does not delay another app. Every
 claimed record carries its own `-lease`, so several workers can share an app.
 
-The same process executes due scheduled messages and first-party Later/channel
-reminders in both delivery formats. `record` is explicitly workspace-scoped;
-`slack-events` claims due schedules and reminders across every workspace.
+The same process executes due scheduled messages, first-party to-do reminders
+and `/remind` channel reminders in both delivery formats. `record` is
+explicitly workspace-scoped; `slack-events` claims due schedules and reminders
+across every workspace.
 Scheduled records retain their owner, app/bot attribution, thread parent, and
 terminal delivered or failed state. The owner is the identity that scheduled
 the message — the app's bot for a bot token, the member and app for a user

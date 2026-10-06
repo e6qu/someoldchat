@@ -1383,7 +1383,7 @@ operations:
       downgraded_from: behavior-compatible
       reason: The prior level inferred Slack behavior from local CRUD tests even though current documented parsing, recurrence, targeting, retirement, and delivery contracts were not implemented or observed.
       evidence:
-        - journey:specs/journeys/06-later-and-reminders.md
+        - journey:specs/journeys/06-saved-todos-and-reminders.md
         - go-test:internal/api/slack:TestMapServiceErrorNamesHandledFailuresFromThePinnedEnums
         - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: reminders.complete
@@ -1399,7 +1399,7 @@ operations:
       downgraded_from: behavior-compatible
       reason: The recurring and ownership error contract is implemented — cannot_complete_recurring for a recurring reminder, cannot_complete_others for one the caller set for another member, and not_found for one the caller neither set nor receives — and covered by service, Slack-handler, and differential-seam tests, but no official SDK exercises reminders.complete's error paths, so the method stays sdk-compatible rather than behavior-compatible.
       evidence:
-        - journey:specs/journeys/06-later-and-reminders.md
+        - journey:specs/journeys/06-saved-todos-and-reminders.md
         - source:internal/service/messages.go
         - go-test:internal/api/slack:TestReminderCompleteRefusesOthersAndRecurring
         - go-test:internal/service:TestCompleteReminderDistinguishesOthersAndRecurring
@@ -1417,7 +1417,7 @@ operations:
       downgraded_from: behavior-compatible
       reason: The local CRUD path has no delivery worker, so it cannot establish Slack's deletion outcome at the delivery boundary.
       evidence:
-        - journey:specs/journeys/06-later-and-reminders.md
+        - journey:specs/journeys/06-saved-todos-and-reminders.md
         - source:internal/service/messages.go
   - method: reminders.info
     status: sdk-compatible
@@ -1433,7 +1433,7 @@ operations:
       downgraded_from: behavior-compatible
       reason: The response is SDK-decodable but the only locally creatable reminder shape is non-recurring and has not been compared with Slack.
       evidence:
-        - journey:specs/journeys/06-later-and-reminders.md
+        - journey:specs/journeys/06-saved-todos-and-reminders.md
         - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: reminders.list
     status: sdk-compatible
@@ -1450,7 +1450,7 @@ operations:
       downgraded_from: behavior-compatible
       reason: Pagination and SDK decoding pass locally, but the returned set and recurring shape have not been established against current Slack behavior.
       evidence:
-        - journey:specs/journeys/06-later-and-reminders.md
+        - journey:specs/journeys/06-saved-todos-and-reminders.md
         - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: rtm.connect
     status: behavior-compatible

@@ -200,7 +200,7 @@ Remaining work, in order:
    Events API delivery, interactivity, views, Socket Mode, workflows and
    functions), real-time delivery (SSE and RTM fan-out, typing, presence; it
    only reads the journal), and collaboration (canvases, lists, huddles,
-   reminders, saved items). Libraries are `domain`, `blockkit`, `slackobject`,
+   reminders, to-dos, saved items). Libraries are `domain`, `blockkit`, `slackobject`,
    `slackemoji`, `appmanifest`, `bearer`, `secretbox`, `lease`,
    `clientaddr`, `observability`, `thumbnail`, and `huddlesfu`; `outbox`,
    `socketmode`, `realtime`, and `scheduler` are shared runtime libraries,
