@@ -258,6 +258,8 @@ var topicRules = []topicRule{
 		note: "inference: Slack reports deletion as user_change whose user object carries deleted true, which the producer's snapshot records"},
 	{topic: GuestStatusChangedTopic, slack: translated("user_guest_status_changed", appSurfaces, userGuestStatusChanged),
 		note: "current Slack event reference (users:read; compatible APIs: Events, so RTM does not carry it): the inner event is {type, user, cache_ts, event_ts} with the user object as the change leaves it; the repositories mint the record inside the mutation that changes the guest tier or deactivates a guest"},
+	{topic: UserHuddleChangedTopic, slack: translatedAmong("user_huddle_changed", []string{"user_change"}, everySurface, userHuddleChanged),
+		note: "current Slack event reference (users:read): the inner event is {type, user, cache_ts, event_ts}, whose profile carries huddle_state, huddle_state_expiration_ts and huddle_state_call_id as the official SDKs model it (Node @slack/types UserHuddleChangedEvent, Java slack-api-model UserHuddleChangedEvent); Slack sends it alongside user_change, which this record also renders. The repositories mint the record inside the huddle mutation that moves the member"},
 	{topic: "user.dnd_snoozed", slack: translated("dnd_updated", everySurface, dndUpdated),
 		note: "pinned topic; the payload carries the dnd_status fields. dnd_updated_user, the variant Slack addresses to everyone but the subject, remains a recorded gap: this delivery does not vary the event name per recipient"},
 	{topic: "user.dnd_snooze_ended", slack: translated("dnd_updated", everySurface, dndUpdated),
@@ -334,10 +336,6 @@ var topicRules = []topicRule{
 	{topic: "call.updated", note: "not pinned: calls postdate the snapshot"},
 	{topic: "call.ended", note: "not pinned: calls postdate the snapshot"},
 	{topic: "call.participants_changed", note: "not pinned: calls postdate the snapshot"},
-	// Huddles are first-party. Slack has no documented event for them at all —
-	// the pinned snapshot predates huddles and the current reference documents
-	// none — so these are named as this product's own facts rather than mapped
-	// onto a Slack event they are not.
 	// Retention deletion emits one summary per conversation per sweep, not one
 	// event per deleted message: Slack emits no event for retention deletion at
 	// all, and a workspace draining years of backlog would otherwise write
@@ -345,6 +343,7 @@ var topicRules = []topicRule{
 	{topic: "retention.swept", note: "not pinned: Slack emits no event for retention deletion"},
 	{topic: "retention.documents_swept", note: "not pinned: Slack emits no event for retention deletion"},
 	{topic: "retention.policy_changed", note: "not pinned: Slack emits no event for a retention policy change"},
+	{topic: "workspace.policy_changed", note: "not pinned: Slack emits no event for a workspace permission change"},
 	// Slack Connect invitations have no documented event either: the snapshot
 	// predates Slack Connect and the current reference documents no event for
 	// the invitation lifecycle, so these are this product's own facts.
@@ -355,6 +354,11 @@ var topicRules = []topicRule{
 	{topic: "shared_invite.revoked", note: "not pinned: Slack documents no Connect invitation event"},
 	{topic: "conversation.connected", note: "not pinned: Slack documents no Connect invitation event"},
 	{topic: "conversation.external_invite_permissions_set", note: "not pinned: Slack documents no Connect invitation event"},
+	// Huddles are first-party. Slack documents no event for a huddle itself —
+	// the pinned snapshot predates huddles, and the current reference's one
+	// huddle event, user_huddle_changed, is about a member's profile, which
+	// UserHuddleChangedTopic carries — so these are named as this product's own
+	// facts rather than mapped onto a Slack event they are not.
 	{topic: "huddle.started", note: "not pinned: Slack documents no huddle event"},
 	{topic: "huddle.joined", note: "not pinned: Slack documents no huddle event"},
 	{topic: "huddle.left", note: "not pinned: Slack documents no huddle event"},

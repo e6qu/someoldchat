@@ -55,6 +55,11 @@ Block Kit and legacy attachment payloads are stored as normalized JSON arrays
 of at most 100 objects each. An invalid array is refused, never silently
 discarded.
 
+A webhook message's links are handed to apps to unfurl (`link_shared`), like
+any message that omits `unfurl_links`. The endpoint does not read
+`unfurl_links`, `unfurl_media` or `link_names` from the payload, so a webhook
+cannot opt out of unfurling or link names; that is a known gap, not a choice.
+
 For upstream behavior, see [Sending messages using incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks)
 and the [`incoming-webhook` scope](https://docs.slack.dev/reference/scopes/incoming-webhook/).
 

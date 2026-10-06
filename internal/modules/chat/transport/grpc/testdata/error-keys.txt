@@ -132,6 +132,7 @@ service.invalid_user_group_users
 service.invalid_view
 service.invalid_workflow_step
 service.invalid_workspace
+service.invalid_workspace_policy
 service.invitation_expired
 service.last_workspace_owner
 service.message_already_deleted
@@ -152,6 +153,7 @@ service.not_workspace_admin
 service.oauth_app_mismatch
 service.origin_externally_shared
 service.primary_owner
+service.private_channel_creation_restricted
 service.recipient_not_in_conversation
 service.reminder_owned_by_other
 service.reminder_recurring

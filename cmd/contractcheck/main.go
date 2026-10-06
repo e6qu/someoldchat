@@ -73,6 +73,9 @@ var sources = []source{
 	{Path: "specs/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json", Hash: "742a5c977180a829df8767cf57bc417d99b3713583aee83741efb9c08ca731e7"},
 	{Path: "specs/upstream/slack-api-specs/events-api/slack_events_api_async_v1.json", Hash: "a491c82393abf9ef1aa38334cf71c747fbc2ea7a2b78533882ea24c888fe84be"},
 	{Path: "specs/upstream/slack-api-specs/events-api/slack_common_event_wrapper_schema.json", Hash: "f6d1704676f4866fc62704086a916dd4c3d9f53a570b9e2976a80450e641d05a"},
+	// The pinned Java SDK's published rate-limit tiers, which the server's
+	// per-method tiers are tested against (internal/api/slack).
+	{Path: "specs/upstream/java-slack-sdk/methods-rate-limits.json", Hash: "372aaf0dca1e59f5f8e8e2e6c375f7789f515d93362aac0bd466c794ac8bc242"},
 }
 
 func main() {

@@ -5617,7 +5617,10 @@ func (m Messages) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID d
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if !conversation.IsDirectOrGroup() {
+	// Only a group DM becomes a private channel; a one-to-one DM never does.
+	// The store refuses it too, but asking here first keeps a one-to-one DM
+	// from being reported as a permission refusal.
+	if conversation.Kind != domain.ConversationTypeMPIM {
 		return domain.Conversation{}, domain.ErrInvalidConversation
 	}
 	membership, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
@@ -5628,6 +5631,11 @@ func (m Messages) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID d
 	// single-channel guests.
 	if membership.UltraRestricted {
 		return domain.Conversation{}, domain.ErrNotWorkspaceAdmin
+	}
+	// The result is a private channel, so whoever the workspace lets create
+	// one is who may convert.
+	if err := m.requirePrivateChannelCreator(ctx, workspaceID, userID); err != nil {
+		return domain.Conversation{}, err
 	}
 	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
 	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
@@ -5667,6 +5675,11 @@ func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.Wor
 	}
 	if err := m.refuseGuest(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
+	}
+	if private {
+		if err := m.requirePrivateChannelCreator(ctx, workspaceID, userID); err != nil {
+			return domain.Conversation{}, err
+		}
 	}
 	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
 	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
@@ -7731,19 +7744,25 @@ func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.Reminder{}, domain.ErrInvalidReminder
 	}
 	due := schedule.Due.UTC()
+	anchor, ok := domain.ReminderSeriesAnchor(schedule.Recurrence, nil, schedule.Anchor.UTC(), due, location)
+	if !ok {
+		return domain.Reminder{}, domain.ErrInvalidReminder
+	}
 	if len(weekdays) > 0 {
 		local := due.In(location)
 		for !slices.Contains(weekdays, local.Weekday()) {
 			local = time.Date(local.Year(), local.Month(), local.Day()+1, local.Hour(), local.Minute(), local.Second(), 0, location)
 		}
-		due = local.UTC()
+		// The named weekdays position the series, so its first occurrence
+		// is its anchor.
+		due, anchor = local.UTC(), local.UTC()
 	}
 	id, err := domain.NewReminderID()
 	if err != nil {
 		return domain.Reminder{}, err
 	}
 	reminder := domain.Reminder{WorkspaceID: workspaceID, ID: id, Creator: userID, User: targetID, Text: text, Time: due,
-		Recurring: schedule.Recurrence != domain.ReminderOnce, Recurrence: schedule.Recurrence, TimeZone: timeZone, RecurrenceAnchor: due, Weekdays: weekdays}
+		Recurring: schedule.Recurrence != domain.ReminderOnce, Recurrence: schedule.Recurrence, TimeZone: timeZone, RecurrenceAnchor: anchor, Weekdays: weekdays}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("reminder.created", events.String("reminder_id", string(id)), events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
 		return domain.Reminder{}, err
@@ -7830,7 +7849,7 @@ func (m Messages) CreateLaterReminder(ctx context.Context, workspaceID domain.Wo
 		ID: id, WorkspaceID: workspaceID, Creator: userID, Target: normalized.Target,
 		Channel: normalized.Channel, Text: normalized.Text, DueAt: normalized.DueAt,
 		TimeZone: normalized.TimeZone, Recurrence: normalized.Recurrence,
-		RecurrenceAnchor: normalized.DueAt,
+		RecurrenceAnchor: normalized.RecurrenceAnchor,
 		CreatedAt:        now, UpdatedAt: now,
 	}
 	if normalized.Target == domain.LaterReminderPersonal {
@@ -7889,10 +7908,11 @@ func (m Messages) UpdateLaterReminder(ctx context.Context, workspaceID domain.Wo
 	}
 	current.Text = normalized.Text
 	current.DueAt = normalized.DueAt
-	// An edit chooses a fresh due instant, so it becomes the new recurrence
-	// anchor: a reminder moved to the 30th recurs on the 30th, not on whatever
-	// day it began life on.
-	current.RecurrenceAnchor = normalized.DueAt
+	// An edit chooses a fresh due instant, so it (or the anchor the edit's
+	// phrase positioned it by) becomes the new recurrence anchor: a reminder
+	// moved to the 30th recurs on the 30th, not on whatever day it began life
+	// on.
+	current.RecurrenceAnchor = normalized.RecurrenceAnchor
 	current.TimeZone = normalized.TimeZone
 	current.Recurrence = normalized.Recurrence
 	current.UpdatedAt = time.Now().UTC()
@@ -8146,9 +8166,15 @@ func (m Messages) normalizeLaterReminderRequest(ctx context.Context, workspaceID
 	if request.TimeZone == "" {
 		request.TimeZone = "UTC"
 	}
-	if _, err := time.LoadLocation(request.TimeZone); err != nil {
+	location, err := time.LoadLocation(request.TimeZone)
+	if err != nil {
 		return domain.LaterReminderRequest{}, domain.ErrInvalidLaterReminder
 	}
+	anchor, ok := domain.ReminderSeriesAnchor(request.Recurrence, nil, request.RecurrenceAnchor.UTC(), request.DueAt, location)
+	if !ok {
+		return domain.LaterReminderRequest{}, domain.ErrInvalidLaterReminder
+	}
+	request.RecurrenceAnchor = anchor
 	switch request.Target {
 	case domain.LaterReminderPersonal:
 		if request.Channel != "" {
@@ -8833,11 +8859,11 @@ func (m Messages) StartHuddle(ctx context.Context, workspaceID domain.WorkspaceI
 		ID: id, WorkspaceID: workspaceID, Kind: domain.CallKindHuddle, ConversationID: conversationID,
 		Title: strings.TrimSpace(title), CreatedBy: actor, StartedAt: now,
 	}
-	started, err := huddleEvent(workspaceID, actor, "huddle.started", id, conversationID, now)
+	started, err := events.HuddleEvent(workspaceID, actor, "huddle.started", id, conversationID, now)
 	if err != nil {
 		return domain.Call{}, err
 	}
-	joined, err := huddleEvent(workspaceID, actor, "huddle.joined", id, conversationID, now)
+	joined, err := events.HuddleEvent(workspaceID, actor, "huddle.joined", id, conversationID, now)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -8878,7 +8904,7 @@ func (m Messages) JoinHuddle(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.Call{}, err
 	}
-	joined, err := huddleEvent(workspaceID, actor, "huddle.joined", call.ID, conversationID, time.Now().UTC())
+	joined, err := events.HuddleEvent(workspaceID, actor, "huddle.joined", call.ID, conversationID, time.Now().UTC())
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -8894,11 +8920,11 @@ func (m Messages) LeaveHuddle(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.Call{}, err
 	}
 	now := time.Now().UTC()
-	left, err := huddleEvent(workspaceID, actor, "huddle.left", call.ID, conversationID, now)
+	left, err := events.HuddleEvent(workspaceID, actor, "huddle.left", call.ID, conversationID, now)
 	if err != nil {
 		return domain.Call{}, err
 	}
-	ended, err := huddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
+	ended, err := events.HuddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -8919,7 +8945,7 @@ func (m Messages) EndHuddle(ctx context.Context, workspaceID domain.WorkspaceID,
 		}
 	}
 	now := time.Now().UTC()
-	ended, err := huddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
+	ended, err := events.HuddleEvent(workspaceID, actor, "huddle.ended", call.ID, conversationID, now)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -9106,14 +9132,6 @@ func (m Messages) huddleReactionEmoji(ctx context.Context, workspaceID domain.Wo
 	return "", domain.ErrInvalidReaction
 }
 
-func huddleEvent(workspaceID domain.WorkspaceID, actor domain.UserID, topic string, id domain.CallID, conversationID domain.ConversationID, at time.Time) (events.Event, error) {
-	return newEvent(workspaceID, actor, events.NewPayload(topic,
-		events.String("call_id", string(id)),
-		events.String("channel_id", string(conversationID)),
-		events.String("user_id", string(actor)),
-	), at)
-}
-
 func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, externalUniqueID, externalDisplayID, joinURL, desktopAppJoinURL, title string, startedAt time.Time, participants []domain.CallParticipant) (domain.Call, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.Call{}, err
@@ -9169,7 +9187,7 @@ func (m Messages) UpdateCall(ctx context.Context, workspaceID domain.WorkspaceID
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.Call{}, err
 	}
-	value, err := m.Store.GetCall(ctx, workspaceID, id)
+	value, err := m.appCall(ctx, workspaceID, id)
 	if err != nil {
 		return domain.Call{}, err
 	}
@@ -9194,6 +9212,9 @@ func (m Messages) EndCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	if duration < 0 {
 		return domain.ErrInvalidCall
 	}
+	if _, err := m.appCall(ctx, workspaceID, id); err != nil {
+		return err
+	}
 	event, err := newEvent(workspaceID, actor, events.NewPayload("call.ended", events.String("call_id", string(id)), events.Int("duration", duration)), time.Now().UTC())
 	if err != nil {
 		return err
@@ -9201,11 +9222,28 @@ func (m Messages) EndCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	return m.Store.EndCall(ctx, workspaceID, id, duration, event)
 }
 
+// appCall reads a call the calls API may change. A huddle is not one: it is
+// joined, left and ended through the huddle operations, which check
+// conversation membership and who may end it, and which keep each member's
+// huddle_state with them. calls.end, calls.update and calls.participants.*
+// reached a huddle by its ID and bypassed all three, so to them a huddle is a
+// call that does not exist (call_not_found), as it is to Slack's calls API.
+func (m Messages) appCall(ctx context.Context, workspaceID domain.WorkspaceID, id domain.CallID) (domain.Call, error) {
+	value, err := m.Store.GetCall(ctx, workspaceID, id)
+	if err != nil {
+		return domain.Call{}, err
+	}
+	if value.Kind == domain.CallKindHuddle {
+		return domain.Call{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
 func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, participants []domain.CallParticipant, add bool) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
 	}
-	value, err := m.Store.GetCall(ctx, workspaceID, id)
+	value, err := m.appCall(ctx, workspaceID, id)
 	if err != nil {
 		return err
 	}
@@ -9321,7 +9359,7 @@ func (m Messages) Permalink(ctx context.Context, workspaceID domain.WorkspaceID,
 }
 
 func (m Messages) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "", "", "")
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "", "", "", false)
 }
 
 func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ip, userAgent string) error {
@@ -10375,7 +10413,7 @@ func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID dom
 }
 
 func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "", "", "")
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "", "", "", false)
 }
 
 func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
@@ -10574,15 +10612,24 @@ func normalizeScheduledMessageState(raw, text, blocks string, threadTimestamp do
 	return string(encoded), nil
 }
 
-func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp) (domain.EphemeralMessage, error) {
-	return m.postEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, attachments, appID, "", threadTimestamp)
+// PostEphemeralWithBlocksAndAttachments is chat.postEphemeral. linkNames is
+// its link_names, applied to text as chat.postMessage applies it.
+func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp, linkNames bool) (domain.EphemeralMessage, error) {
+	return m.postEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, attachments, appID, "", threadTimestamp, linkNames)
 }
 
-func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, idempotencyKey string, threadTimestamp domain.MessageTimestamp) (domain.EphemeralMessage, error) {
+func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, idempotencyKey string, threadTimestamp domain.MessageTimestamp, linkNames bool) (domain.EphemeralMessage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
 	text = strings.TrimSpace(text)
+	if linkNames {
+		linked, err := m.linkMessageNames(ctx, workspaceID, authorID, text)
+		if err != nil {
+			return domain.EphemeralMessage{}, err
+		}
+		text = linked
+	}
 	if messagePayloadTooLong(blocks, attachments) {
 		return domain.EphemeralMessage{}, domain.ErrInvalidEphemeral
 	}
@@ -10794,6 +10841,17 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 			threadTimestampValue = parent.ThreadTimestamp
 		}
 	}
+	// link_names rewrites the text only once the author is known to be
+	// allowed to post here, so a refused post never reads the directory. It
+	// does not apply to markdown_text, which is not Slack markup, or to text
+	// posted with mrkdwn=false, which Slack does not parse for markup at all.
+	text := request.Text
+	if request.LinkNames && !request.MarkdownText && !request.MrkdwnDisabled {
+		text, err = m.linkMessageNames(ctx, workspaceID, authorID, text)
+		if err != nil {
+			return domain.Message{}, err
+		}
+	}
 	id, err := domain.NewMessageID()
 	if err != nil {
 		return domain.Message{}, err
@@ -10816,7 +10874,7 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	}
 	message := domain.Message{
 		ID: id, WorkspaceID: workspaceID, Conversation: request.Conversation, AuthorID: authorID,
-		AppID: request.AppID, Text: request.Text, Blocks: normalizedBlocks, Attachments: normalizedAttachments,
+		AppID: request.AppID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments,
 		Metadata: metadata, StreamState: streamState, ThreadTimestamp: threadTimestampValue,
 		ReplyBroadcast: request.ReplyBroadcast,
 		CreatedAt:      domain.MessageInstant(time.Now()), Subtype: request.Subtype,
@@ -10910,6 +10968,12 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 	previous := message
 	if patch.Text != nil {
 		message.Text = *patch.Text
+		if patch.LinkNames && message.TextIsMarkup() {
+			message.Text, err = m.linkMessageNames(ctx, workspaceID, userID, message.Text)
+			if err != nil {
+				return domain.Message{}, err
+			}
+		}
 	}
 	if patch.Blocks != nil {
 		message.Blocks, err = domain.NormalizeBlocks([]byte(*patch.Blocks))

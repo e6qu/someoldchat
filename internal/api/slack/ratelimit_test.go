@@ -52,11 +52,11 @@ func TestRateLimiterAnswers429WithRetryAfterPerCredentialAndMethod(t *testing.T)
 	passed := 0
 	wrapped := limiter.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { passed++ }))
 	for i := 0; i < methodBudgetPerMinute; i++ {
-		if response := limitedRequest(t, wrapped, http.MethodPost, "/api/users.list", "xoxb-one", "", ""); response.Code != http.StatusOK {
+		if response := limitedRequest(t, wrapped, http.MethodPost, "/api/users.info", "xoxb-one", "", ""); response.Code != http.StatusOK {
 			t.Fatalf("request %d status=%d", i, response.Code)
 		}
 	}
-	limited := limitedRequest(t, wrapped, http.MethodPost, "/api/users.list", "xoxb-one", "", "")
+	limited := limitedRequest(t, wrapped, http.MethodPost, "/api/users.info", "xoxb-one", "", "")
 	if limited.Code != http.StatusTooManyRequests {
 		t.Fatalf("over-budget status=%d, want %d", limited.Code, http.StatusTooManyRequests)
 	}
@@ -71,15 +71,15 @@ func TestRateLimiterAnswers429WithRetryAfterPerCredentialAndMethod(t *testing.T)
 		t.Fatalf("handler ran %d times, want %d — a limited request must cost no work", passed, methodBudgetPerMinute)
 	}
 	// Another credential and another method are separate budgets.
-	if response := limitedRequest(t, wrapped, http.MethodPost, "/api/users.list", "xoxb-two", "", ""); response.Code != http.StatusOK {
+	if response := limitedRequest(t, wrapped, http.MethodPost, "/api/users.info", "xoxb-two", "", ""); response.Code != http.StatusOK {
 		t.Fatalf("other credential status=%d", response.Code)
 	}
-	if response := limitedRequest(t, wrapped, http.MethodPost, "/api/conversations.list", "xoxb-one", "", ""); response.Code != http.StatusOK {
+	if response := limitedRequest(t, wrapped, http.MethodPost, "/api/users.profile.get", "xoxb-one", "", ""); response.Code != http.StatusOK {
 		t.Fatalf("other method status=%d", response.Code)
 	}
 	// Waiting the advertised time restores service.
 	now = now.Add(time.Duration(retryAfter) * time.Second)
-	if response := limitedRequest(t, wrapped, http.MethodPost, "/api/users.list", "xoxb-one", "", ""); response.Code != http.StatusOK {
+	if response := limitedRequest(t, wrapped, http.MethodPost, "/api/users.info", "xoxb-one", "", ""); response.Code != http.StatusOK {
 		t.Fatalf("after Retry-After status=%d, want %d", response.Code, http.StatusOK)
 	}
 }
@@ -249,23 +249,35 @@ func TestIncomingWebhookIsServedAndLimitedPerWebhookBehindTheLimiter(t *testing.
 	}
 }
 
-// A method whose Slack reference names a stricter tier is held to it: its
-// burst passes, the next call answers 429 with ratelimited, and the refill is
-// that tier's per-minute floor. A method the table does not name keeps Tier 4,
-// so one strict method does not slow the rest. Covers chat.scheduleMessage and
-// chat.scheduledMessages.list (Tier 3), admin.apps.permissions.add (Tier 2)
-// and admin.usergroups.create (Tier 1).
+// Each method is held to the tier Slack publishes for it: its burst passes, the
+// next call answers 429 with ratelimited, and the refill is that tier's
+// per-minute floor. The cases span every tier and both sources: the pinned
+// Java SDK table (rtm.connect and apps.connections.open at Tier 1,
+// conversations.list, users.list and workflows.featured.set at Tier 2,
+// conversations.history and chat.scheduleMessage at Tier 3, users.info at
+// Tier 4, auth.test at its special tier) and reference pages the table
+// predates (admin.apps.permissions.add at Tier 2, admin.usergroups.create at
+// Tier 1). A method no table names, like the unknown-method catch-all, keeps
+// Tier 4's floor.
 func TestRateLimiterHoldsEachMethodToItsDocumentedTier(t *testing.T) {
 	for _, test := range []struct {
 		method    string
 		burst     int
 		perMinute float64
 	}{
+		{"rtm.connect", tier1Burst, 1},
+		{"apps.connections.open", tier1Burst, 1},
+		{"conversations.list", 20, 20},
+		{"users.list", 20, 20},
+		{"workflows.featured.set", 20, 20},
+		{"conversations.history", 50, 50},
 		{"chat.scheduleMessage", 50, 50},
 		{"chat.scheduledMessages.list", 50, 50},
+		{"users.info", methodBudgetPerMinute, methodBudgetPerMinute},
+		{"auth.test", specialBudgetPerMinute, specialBudgetPerMinute},
 		{"admin.apps.permissions.add", 20, 20},
 		{"admin.usergroups.create", tier1Burst, 1},
-		{"users.list", methodBudgetPerMinute, methodBudgetPerMinute},
+		{"definitely.not.a.method", methodBudgetPerMinute, methodBudgetPerMinute},
 	} {
 		t.Run(test.method, func(t *testing.T) {
 			now := time.Unix(1_700_000_000, 0).UTC()
@@ -293,16 +305,104 @@ func TestRateLimiterHoldsEachMethodToItsDocumentedTier(t *testing.T) {
 	}
 }
 
-// Every method the tier table names is one the ledger tracks, so a typo cannot
-// leave a strict method at Tier 4 while the table claims otherwise.
-func TestEveryTieredMethodIsALedgerMethod(t *testing.T) {
-	ledger, err := os.ReadFile("../../../specs/compatibility.yaml")
+// pinnedPublishedTiers reads the rate-limit tier table the pinned official
+// Java SDK publishes (slack-api-client 1.49.0, MethodsRateLimits), vendored
+// at specs/upstream/java-slack-sdk/methods-rate-limits.json with its hash
+// pinned by contractcheck and its contents re-derived from the pinned jar by
+// the SDK qualification.
+func pinnedPublishedTiers(t *testing.T) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile("../../../specs/upstream/java-slack-sdk/methods-rate-limits.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for method := range methodTiers {
-		if !strings.Contains(string(ledger), "\n  - method: "+method+"\n") {
-			t.Errorf("methodTiers names %s, which the compatibility ledger does not", method)
+	var tiers map[string]string
+	if err := json.Unmarshal(raw, &tiers); err != nil {
+		t.Fatal(err)
+	}
+	if len(tiers) < 300 {
+		t.Fatalf("the pinned table lists %d methods; it is truncated", len(tiers))
+	}
+	return tiers
+}
+
+// ledgerMethods is every operation the compatibility ledger tracks.
+func ledgerMethods(t *testing.T) map[string]struct{} {
+	t.Helper()
+	raw, err := os.ReadFile("../../../specs/compatibility.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, operations, ok := strings.Cut(string(raw), "\noperations:\n")
+	if !ok {
+		t.Fatal("the ledger has no operations section")
+	}
+	operations, _, _ = strings.Cut(operations, "\ndecisions:\n")
+	methods := make(map[string]struct{})
+	for _, match := range regexp.MustCompile(`(?m)^  - method: (\S+)$`).FindAllStringSubmatch(operations, -1) {
+		methods[match[1]] = struct{}{}
+	}
+	if len(methods) < 300 {
+		t.Fatalf("read %d ledger methods; the ledger scan is broken", len(methods))
+	}
+	return methods
+}
+
+// Every ledger method has exactly one tier source, and a method the pinned
+// SDK table lists is enforced at the tier it publishes: a new ledger method
+// with no tier, a table entry that disagrees with the pinned table, or a
+// reference citation for a method the table already decides fails here.
+func TestEveryLedgerMethodIsEnforcedAtItsPublishedTier(t *testing.T) {
+	published := pinnedPublishedTiers(t)
+	ledger := ledgerMethods(t)
+	want := map[string]rateTier{"Tier1": tier1, "Tier2": tier2, "Tier3": tier3, "Tier4": tier4}
+	for method := range ledger {
+		_, fromTable := publishedMethodTiers[method]
+		_, fromReference := referenceMethodTiers[method]
+		_, uncited := uncitedTierMethods[method]
+		sources := 0
+		for _, named := range []bool{fromTable, fromReference, uncited} {
+			if named {
+				sources++
+			}
+		}
+		if sources != 1 {
+			t.Errorf("%s has %d tier sources (table %v, reference %v, uncited %v), want exactly one", method, sources, fromTable, fromReference, uncited)
+			continue
+		}
+		tier, listed := published[method]
+		switch {
+		case listed && !fromTable:
+			t.Errorf("%s: the pinned table publishes %s, so publishedMethodTiers must carry it", method, tier)
+		case listed && strings.HasPrefix(tier, "SpecialTier_"):
+			if got := methodTier(method); got != tierHundreds {
+				t.Errorf("%s: the pinned table publishes %s, enforced at %+v, want tierHundreds", method, tier, got)
+			}
+		case listed:
+			expected, known := want[tier]
+			if !known {
+				t.Errorf("%s: the pinned table publishes an unknown tier %q", method, tier)
+			} else if got := methodTier(method); got != expected {
+				t.Errorf("%s: enforced at %+v, the pinned table publishes %s", method, got, tier)
+			}
+		case fromTable:
+			t.Errorf("%s: publishedMethodTiers names it, but the pinned table does not list it", method)
+		case uncited:
+			if got := methodTier(method); got != tier4 {
+				t.Errorf("%s: its reference tier is uncited, so it must hold Tier 4's floor, enforced at %+v", method, got)
+			}
+		}
+	}
+	for name, table := range map[string]map[string]rateTier{"publishedMethodTiers": publishedMethodTiers, "referenceMethodTiers": referenceMethodTiers} {
+		for method := range table {
+			if _, ok := ledger[method]; !ok {
+				t.Errorf("%s names %s, which the compatibility ledger does not", name, method)
+			}
+		}
+	}
+	for method := range uncitedTierMethods {
+		if _, ok := ledger[method]; !ok {
+			t.Errorf("uncitedTierMethods names %s, which the compatibility ledger does not", method)
 		}
 	}
 }

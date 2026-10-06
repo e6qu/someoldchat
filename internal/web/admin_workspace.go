@@ -17,7 +17,8 @@ import (
 // ADMIN-02 is explicit that a policy the deployment cannot apply must not be
 // rendered as a working control. This page therefore carries exactly the
 // settings with a durable backend and an enforced effect — the workspace name,
-// description, discoverability, icon and default channels — and says in plain
+// description, discoverability, icon, default channels and the permissions in
+// domain.WorkspacePolicy — and says in plain
 // words which governance controls do not exist here rather than drawing an
 // inert switch for them.
 //
@@ -55,7 +56,28 @@ type workspaceSettingsData struct {
 	// FieldTypeOptions are the kinds a new one can be.
 	ProfileFields    []profileFieldView
 	FieldTypeOptions []profileFieldTypeOption
-	CanWrite         bool
+	// Permissions. PolicyError replaces the controls when the policy could
+	// not be read, so a default is never drawn as though it were the
+	// workspace's choice.
+	BroadcastWarning       bool
+	PrivateChannelCreators []workspaceAudienceOption
+	PolicyError            string
+	CanWrite               bool
+}
+
+type workspaceAudienceOption struct {
+	Value    domain.PolicyAudience
+	Label    string
+	Detail   string
+	Selected bool
+}
+
+// privateChannelCreatorChoices names every audience domain.PolicyAudience
+// accepts for "who can create private channels", with what each one means.
+var privateChannelCreatorChoices = []workspaceAudienceOption{
+	{Value: domain.PolicyAudienceEveryone, Label: "Everyone", Detail: "Every full member. Multi-channel guests can also turn a group DM they are in into a private channel."},
+	{Value: domain.PolicyAudienceAdmins, Label: "Workspace admins and owners only", Detail: "Everyone else is refused, whether they create a private channel or convert a group DM."},
+	{Value: domain.PolicyAudienceOwners, Label: "Workspace owners only", Detail: "Administrators are refused too."},
 }
 
 type profileFieldView struct {
@@ -140,6 +162,22 @@ const workspaceSettingsMarkup = `{{define "title"}}Workspace settings · SameOld
 {{if .CanWrite}}<p><button class="toggle" type="submit">Save default channels</button></p>{{end}}
 </form>
 </section>
+<section class="card" aria-labelledby="permissions-heading">
+<div class="section-head"><h2 id="permissions-heading">Permissions</h2><p>Each of these is applied wherever the action happens: in the web client, the Web API, and an app acting for a member.</p></div>
+{{if .PolicyError}}<p class="read-only" role="status">{{.PolicyError}}</p>{{else}}<form method="post" action="/app/admin/settings/permissions">
+<input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<fieldset class="channel-choices"><legend>Channel notifications</legend>
+<label><input type="checkbox" name="broadcast_warning" value="on" aria-describedby="broadcast-warning-detail"{{if .BroadcastWarning}} checked{{end}} {{if not .CanWrite}}disabled{{end}}> Ask members to confirm before @channel, @here or @everyone notifies a channel</label>
+<p class="read-only" id="broadcast-warning-detail">The confirmation appears in channels of six or more members. Turning it off does not change who may use these mentions.</p>
+</fieldset>
+<fieldset class="channel-choices"><legend>Who can create private channels</legend>
+{{range .PrivateChannelCreators}}<label><input type="radio" name="private_channel_creators" value="{{.Value}}" aria-describedby="private-creators-{{.Value}}"{{if .Selected}} checked{{end}} {{if not $.CanWrite}}disabled{{end}}> <strong>{{.Label}}</strong></label>
+<p class="read-only" id="private-creators-{{.Value}}">{{.Detail}}</p>{{end}}
+<p class="read-only">Converting a group DM makes a private channel, so this governs that conversion too. Guests never create channels.</p>
+</fieldset>
+{{if .CanWrite}}<p><button class="toggle" type="submit">Save permissions</button></p>{{end}}
+</form>{{end}}
+</section>
 <section class="card" aria-labelledby="retention-heading">
 <div class="section-head"><h2 id="retention-heading">Retention</h2><p>Deletion under this policy is permanent and cannot be undone. It runs on a schedule rather than the instant something expires, so content stays readable for up to a day after its age passes the limit.</p></div>
 <form class="setup" method="post" action="/app/admin/settings/retention">
@@ -175,6 +213,7 @@ const workspaceSettingsMarkup = `{{define "title"}}Workspace settings · SameOld
 <section class="card" aria-labelledby="absent-heading">
 <div class="section-head"><h2 id="absent-heading">Not governed here</h2><p>These are absent rather than off. A switch that changed nothing would be worse than no switch, because you would stop looking for the missing capability.</p></div>
 <ul>
+<li><strong>Converting Slack Connect group DMs.</strong> Slack lets owners restrict who converts a group DM with people from another organization into a private channel. A group DM here only ever holds members of this workspace, so there is no such conversion to restrict; converting any group DM follows who can create private channels, above.</li>
 <li><strong>Audio and video.</strong> A huddle connects browsers directly to each other. There is no media server, so a huddle is only as large as every participant can upload to every other.</li>
 </ul>
 <p><a href="/app/admin/analytics">Workspace analytics</a> · <a href="/app/admin/audit">Audit</a> · <a href="/app/admin/auth">Access and invitations</a></p>
@@ -302,6 +341,15 @@ func (h Handler) workspaceSettingsPage(w http.ResponseWriter, r *http.Request) {
 			data.Channels = append(data.Channels, workspaceDefaultChannelOption{ID: option.ID, Name: option.Name, Selected: selected})
 		}
 	}
+	if policy, policyErr := h.Messages.WorkspacePolicy(r.Context(), principal.WorkspaceID, principal.UserID); policyErr == nil {
+		data.BroadcastWarning = !policy.BroadcastWarningOff
+		for _, option := range privateChannelCreatorChoices {
+			option.Selected = option.Value == policy.PrivateChannelCreators
+			data.PrivateChannelCreators = append(data.PrivateChannelCreators, option)
+		}
+	} else {
+		data.PolicyError = "The workspace permissions could not be read, so they are not shown. Reload the page to try again."
+	}
 	data.FieldTypeOptions = profileFieldTypeChoices
 	if definitions, fieldsErr := h.Messages.WorkspaceProfileFields(r.Context(), principal.WorkspaceID, principal.UserID); fieldsErr == nil {
 		for _, definition := range definitions {
@@ -386,6 +434,28 @@ func (h Handler) workspaceRetentionSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.redirectSettings(w, r, "Retention saved")
+}
+
+// workspacePermissionsSet replaces the workspace's permissions. The form
+// carries the whole policy, so an unchecked box is the warning turned off.
+func (h Handler) workspacePermissionsSet(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.workspaceSettingsMutation(w, r, "")
+	if !ok {
+		return
+	}
+	policy := domain.WorkspacePolicy{
+		BroadcastWarningOff:    strings.TrimSpace(fields["broadcast_warning"]) != "on",
+		PrivateChannelCreators: domain.PolicyAudience(strings.TrimSpace(fields["private_channel_creators"])),
+	}
+	if _, err := h.Messages.SetWorkspacePolicy(r.Context(), principal.WorkspaceID, principal.UserID, policy); err != nil {
+		if errors.Is(err, domain.ErrInvalidWorkspacePolicy) {
+			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_policy", Title: "Request rejected", Message: "Choose who can create private channels: everyone, workspace admins and owners, or workspace owners only."})
+			return
+		}
+		h.writeAuthAdminProblem(w, r, workspaceSettingsProblem(err, "The permissions were not changed."))
+		return
+	}
+	h.redirectSettings(w, r, "Permissions saved")
 }
 
 // workspaceProfileFieldSet defines or replaces a custom profile field. An

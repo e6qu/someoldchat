@@ -2882,6 +2882,16 @@ func (m Messages) ListFeaturedWorkflows(ctx context.Context, workspaceID domain.
 	return m.Store.ListFeaturedWorkflows(ctx, workspaceID, conversationIDs)
 }
 
+// workflowStepIdentity names a step across a workflow's revisions: its id and
+// the function it runs, resolved against the workflow's own app.
+func workflowStepIdentity(workflow domain.WorkflowDefinition, step workflowFunctionDefinition) string {
+	appID := step.AppID
+	if appID == "" {
+		appID = workflow.AppID
+	}
+	return step.ID + "\x00" + workflowFunctionID(appID, step.FunctionID)
+}
+
 func (m Messages) ListFunctionWorkflowSteps(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, functionID string, workflowID domain.WorkflowID, workflowReference string, workflowAppID domain.AppID) ([]domain.WorkflowStepVersion, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return nil, err
@@ -2931,6 +2941,22 @@ func (m Messages) ListFunctionWorkflowSteps(ctx context.Context, workspaceID dom
 		if err != nil {
 			return nil, err
 		}
+		// An occurrence is deleted when the workflow's live revision - the
+		// published one, or the head of a workflow never published - no
+		// longer has that step. A step is known by its id, which survives
+		// steps being added or moved around it, together with its function.
+		liveVersion := workflow.PublishedVersion
+		if liveVersion == 0 {
+			liveVersion = workflow.Version
+		}
+		liveSteps, err := m.workflowStepsAtVersion(ctx, workflow, liveVersion)
+		if err != nil {
+			return nil, err
+		}
+		live := make(map[string]struct{}, len(liveSteps))
+		for _, step := range liveSteps {
+			live[workflowStepIdentity(workflow, step)] = struct{}{}
+		}
 		for _, revision := range revisions {
 			_, steps, err := normalizeWorkflowSteps(revision.Steps)
 			if err != nil {
@@ -2944,6 +2970,7 @@ func (m Messages) ListFunctionWorkflowSteps(ctx context.Context, workspaceID dom
 				if workflowFunctionID(stepAppID, step.FunctionID) != functionID {
 					continue
 				}
+				_, kept := live[workflowStepIdentity(workflow, step)]
 				title := step.Title
 				if title == "" {
 					if function, err := m.workflowFunctionSnapshot(ctx, stepAppID, step.FunctionID); err == nil {
@@ -2951,7 +2978,7 @@ func (m Messages) ListFunctionWorkflowSteps(ctx context.Context, workspaceID dom
 					}
 				}
 				values = append(values, domain.WorkflowStepVersion{
-					Title: title, WorkflowID: workflow.ID, StepID: strconv.Itoa(index), IsDeleted: false,
+					Title: title, WorkflowID: workflow.ID, StepID: strconv.Itoa(index), IsDeleted: !kept,
 					WorkflowVersionCreated: strconv.FormatInt(revision.CreatedAt.UnixMicro(), 10),
 				})
 			}

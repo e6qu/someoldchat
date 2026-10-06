@@ -183,12 +183,30 @@ qualify it either way.
 
 **Administration** carries the settings with a durable backend and an enforced
 effect: workspace name, description, icon, discoverability, default channels
-and message, file, canvas and list retention; the invitation and app-request queues; analytics counted from the
+and message, file, canvas and list retention; the workspace permissions — whether
+the composer confirms `@channel`, `@here` and `@everyone` in a channel of six
+or more ([Manage who can notify a channel or workspace](https://slack.com/help/articles/115004855143-Manage-who-can-notify-a-channel-or-workspace))
+and who may create a private channel, which also governs converting a group
+DM into one ([Manage settings and permissions for Slack Connect direct messages](https://slack.com/help/articles/360060326994-Manage-settings-and-permissions-for-Slack-Connect-direct-messages));
+the invitation and app-request queues; analytics counted from the
 durable rows on each load; and an audit view over the durable event journal and
 the access log, whose export comes from the same query as the page.
 
+The permissions are one workspace policy. Any member reads it, because the
+composer and the create-channel dialog follow it; only an administrator
+changes it, and each change is journaled as `workspace.policy_changed`. A
+private channel the policy refuses is refused wherever it is made — the web
+dialog, `conversations.create`, `admin.conversations.create`,
+`agents.conversations.create` and group-DM conversion — with Slack's
+`restricted_action` on the Web API and a 403 that names the policy in the web
+client, never a 500. `team.preferences.list` reports both settings.
+
 Absent, and named on the page rather than rendered as an inert control:
 
+- **Converting Slack Connect group DMs.** Slack lets owners restrict who
+  converts a group DM with people from another organization. A group DM here
+  only holds members of its own workspace, so there is no such conversion to
+  restrict; converting any group DM follows who can create private channels.
 - **Audit visibility across private conversations.** The audit view reads the
   journal through the same visibility-filtered path the event stream uses, so
   it cannot show an administrator that a private conversation they are not in
@@ -229,6 +247,15 @@ Absent, and named on the page rather than rendered as an inert control:
   star whose add and remove share the probe's one timestamp, and the
   complex-state workflow and block-kit-payload operations whose front door needs
   a multi-step object graph the probe does not yet build.
+- The workspace permissions are covered at every layer they cross: service
+  tests for each audience, allowed and refused; Web API tests for
+  `restricted_action` at HTTP 200 and for `team.preferences.list`; web tests
+  for the settings form, a member's refusal, the composer attribute, the
+  create-channel dialog and group-DM conversion; a parity case across the gRPC
+  seam; the authorization matrix (any member reads, an administrator writes);
+  cross-profile persistence qualification; and the `[ADMIN-02 COMP-01 DM-05]`
+  browser journey, which changes both settings and finds them applied for the
+  owner and for a plain member.
 - Current official SDKs exercise applicable `admin.*`, `team.*`, `users.*`,
   `apps.*`, and Slack Connect `conversations.*` methods.
 - The `[ADMIN-04 APP-08 APP-09 WORKFLOW-02]` browser journey creates and

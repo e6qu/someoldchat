@@ -1992,6 +1992,52 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// "every month" set on the 31st after its time has passed first
+			// falls on the next month's last day while the series keeps the
+			// 31st, so the anchor travels apart from the due instant. Each
+			// mutation that takes one must carry it across the seam, and a
+			// series that does not contain its own first occurrence is refused
+			// in both compositions.
+			name: "a clamped monthly reminder keeps its anchor across the seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				anchor := time.Date(2099, time.January, 31, 9, 0, 0, 0, time.UTC)
+				due := time.Date(2099, time.February, 28, 9, 0, 0, 0, time.UTC)
+				added, err := chat.AddReminder(ctx, "T1", "U1", "U1", "pay rent", domain.ReminderSchedule{
+					Due: due, Recurrence: domain.ReminderMonthly, TimeZone: "UTC", Anchor: anchor,
+				})
+				if err != nil {
+					return nil, err
+				}
+				addedInfo, err := chat.ReminderInfo(ctx, "T1", "U1", added.ID)
+				if err != nil {
+					return nil, err
+				}
+				created, err := chat.CreateLaterReminder(ctx, "T1", "U1", domain.LaterReminderRequest{
+					Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: due, TimeZone: "UTC",
+					Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor,
+				})
+				if err != nil {
+					return nil, err
+				}
+				updated, err := chat.UpdateLaterReminder(ctx, "T1", "U1", created.ID, domain.LaterReminderRequest{
+					Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: due.AddDate(0, 2, 2), TimeZone: "UTC",
+					Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor.AddDate(0, 2, 0),
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, unrelated := chat.CreateLaterReminder(ctx, "T1", "U1", domain.LaterReminderRequest{
+					Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: due, TimeZone: "UTC",
+					Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor.AddDate(0, -1, 0),
+				})
+				return []any{
+					addedInfo.Time.Equal(due), addedInfo.RecurrenceAnchor.Equal(anchor),
+					created.DueAt.Equal(due), created.RecurrenceAnchor.Equal(anchor),
+					updated.RecurrenceAnchor.Equal(anchor.AddDate(0, 2, 0)), errors.Is(unrelated, domain.ErrInvalidLaterReminder),
+				}, nil
+			},
+		},
+		{
 			// Custom profile fields end to end: an administrator defines one, a
 			// member sets and reads a value, a non-administrator is refused the
 			// definition, and deleting the field takes its values with it. Both
@@ -2133,6 +2179,12 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// A member's huddle state crosses the boundary on the user
+				// object users.info reads.
+				inHuddle, err := chat.UserInfo(ctx, "T1", "U3", "U2")
+				if err != nil {
+					return nil, err
+				}
 				offered := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0\r\no=- 0 0 IN IP4 0.0.0.0")
 				answered := chat.SendCallSignal(ctx, "T1", "U2", started.ID, "U1", domain.CallSignalAnswer, "v=0")
 				candidate := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalCandidate, "candidate:0 1 UDP 1 127.0.0.1 1 typ host")
@@ -2177,6 +2229,10 @@ func parityCases() []parityCase {
 				if _, err := chat.LeaveHuddle(ctx, "T1", "U2", "C1"); err != nil {
 					return nil, err
 				}
+				leftHuddle, err := chat.UserInfo(ctx, "T1", "U3", "U2")
+				if err != nil {
+					return nil, err
+				}
 				// U1 is still in it, but once it ends a reaction is refused too.
 				// U2 has gone, so U1 can no longer reach them through the call.
 				afterLeaving := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
@@ -2187,7 +2243,13 @@ func parityCases() []parityCase {
 				afterEnding := chat.SendCallSignal(ctx, "T1", "U1", started.ID, "U2", domain.CallSignalOffer, "v=0")
 				reactAfterEnding := chat.SendHuddleReaction(ctx, "T1", "U1", started.ID, "tada")
 				_, gone := chat.ActiveHuddle(ctx, "T1", "U1", "C1")
+				endedHuddle, err := chat.UserInfo(ctx, "T1", "U3", "U1")
+				if err != nil {
+					return nil, err
+				}
 				return []any{
+					inHuddle.HuddleCallID == started.ID, inHuddle.HuddleState(),
+					leftHuddle.HuddleCallID == "", endedHuddle.HuddleState(),
 					invitationNamesTheHuddle,
 					started.Title, len(started.Participants), len(joined.Participants), len(active.Participants),
 					ended.EndedAt.IsZero(), gone != nil,
@@ -3533,7 +3595,10 @@ func parityCases() []parityCase {
 				if _, err := chat.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", "", `[{"type":"divider"}]`); err != nil {
 					return nil, err
 				}
-				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1", ""); err != nil {
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1", "", false); err != nil {
+					return nil, err
+				}
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "linked for @bob", "", "", "A1", "", true); err != nil {
 					return nil, err
 				}
 				values, err := chat.ListEphemeralMessages(ctx, "T1", "U2", "C1", 10)
@@ -4064,9 +4129,11 @@ func parityCases() []parityCase {
 				// they were, and one that must carry a field the first omitted. A
 				// converter that dropped a pointer, or that turned an absent one
 				// into an empty string, fails exactly one of the two.
-				patchedText := "reply patched"
+				// link_names crosses the seam too: a composition that dropped
+				// it stores "@bob" where the other stores "<@U2>".
+				patchedText := "reply patched for @bob"
 				patched, err := chat.UpdateMessage(ctx, "T1", "U1", "C1", replyTimestamp,
-					domain.MessagePatch{Text: &patchedText})
+					domain.MessagePatch{Text: &patchedText, LinkNames: true})
 				if err != nil {
 					return nil, err
 				}
@@ -4141,6 +4208,38 @@ func parityCases() []parityCase {
 					withBlocks.Text, withBlocks.Blocks, withBlocks.Attachments, withBlocks.PostAt.UTC().Equal(postAt),
 					withBoth.Text, withBoth.Blocks, withBoth.Attachments, withBoth.PostAt.UTC().Sub(postAt).String(),
 					stored, page.HasMore,
+				}, nil
+			},
+		},
+		{
+			// The workspace policy decides who may create a private channel,
+			// so both compositions have to agree on what was stored, on who may
+			// read and change it, and on the refusal it produces.
+			name: "workspace policy and its enforcement agree across the seam",
+			seed: seedBaseline,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				initial, err := chat.WorkspacePolicy(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				_, memberSetErr := chat.SetWorkspacePolicy(ctx, "T1", "U1", domain.WorkspacePolicy{PrivateChannelCreators: domain.PolicyAudienceEveryone})
+				_, invalidErr := chat.SetWorkspacePolicy(ctx, "T1", "UA", domain.WorkspacePolicy{PrivateChannelCreators: "guests"})
+				saved, err := chat.SetWorkspacePolicy(ctx, "T1", "UA", domain.WorkspacePolicy{BroadcastWarningOff: true, PrivateChannelCreators: domain.PolicyAudienceAdmins})
+				if err != nil {
+					return nil, err
+				}
+				readBack, err := chat.WorkspacePolicy(ctx, "T1", "U2")
+				if err != nil {
+					return nil, err
+				}
+				_, restrictedErr := chat.CreateConversation(ctx, "T1", "U1", "member-private", true)
+				admitted, err := chat.CreateConversation(ctx, "T1", "UA", "admin-private", true)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					initial, errors.Is(memberSetErr, domain.ErrNotWorkspaceAdmin), errors.Is(invalidErr, domain.ErrInvalidWorkspacePolicy), saved, readBack,
+					errors.Is(restrictedErr, domain.ErrPrivateChannelCreationRestricted), admitted.Name, admitted.PrivateFlag(),
 				}, nil
 			},
 		},

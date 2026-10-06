@@ -73,6 +73,8 @@ const (
 	DirectoryService_SetWorkspaceDiscoverability_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDiscoverability"
 	DirectoryService_SetWorkspaceIcon_FullMethodName                   = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceIcon"
 	DirectoryService_SetWorkspaceDefaultChannels_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/SetWorkspaceDefaultChannels"
+	DirectoryService_GetWorkspacePolicy_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/GetWorkspacePolicy"
+	DirectoryService_SetWorkspacePolicy_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/SetWorkspacePolicy"
 	DirectoryService_GetConversationPrefs_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/GetConversationPrefs"
 	DirectoryService_SetConversationPrefs_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/SetConversationPrefs"
 	DirectoryService_GetPostingPermissions_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/GetPostingPermissions"
@@ -162,6 +164,10 @@ type DirectoryServiceClient interface {
 	SetWorkspaceDiscoverability(ctx context.Context, in *SetWorkspaceDiscoverabilityRequest, opts ...grpc.CallOption) (*Workspace, error)
 	SetWorkspaceIcon(ctx context.Context, in *SetWorkspaceIconRequest, opts ...grpc.CallOption) (*Workspace, error)
 	SetWorkspaceDefaultChannels(ctx context.Context, in *SetWorkspaceDefaultChannelsRequest, opts ...grpc.CallOption) (*Workspace, error)
+	// Named GetWorkspacePolicy because an rpc named WorkspacePolicy would
+	// shadow the WorkspacePolicy message type for every later return here.
+	GetWorkspacePolicy(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*WorkspacePolicy, error)
+	SetWorkspacePolicy(ctx context.Context, in *SetWorkspacePolicyRequest, opts ...grpc.CallOption) (*WorkspacePolicy, error)
 	GetConversationPrefs(ctx context.Context, in *ConversationPrefsRequest, opts ...grpc.CallOption) (*ConversationPrefs, error)
 	SetConversationPrefs(ctx context.Context, in *SetConversationPrefsRequest, opts ...grpc.CallOption) (*ConversationPrefs, error)
 	GetPostingPermissions(ctx context.Context, in *ConversationPrefsRequest, opts ...grpc.CallOption) (*PostingPermissions, error)
@@ -735,6 +741,26 @@ func (c *directoryServiceClient) SetWorkspaceDefaultChannels(ctx context.Context
 	return out, nil
 }
 
+func (c *directoryServiceClient) GetWorkspacePolicy(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*WorkspacePolicy, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkspacePolicy)
+	err := c.cc.Invoke(ctx, DirectoryService_GetWorkspacePolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) SetWorkspacePolicy(ctx context.Context, in *SetWorkspacePolicyRequest, opts ...grpc.CallOption) (*WorkspacePolicy, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkspacePolicy)
+	err := c.cc.Invoke(ctx, DirectoryService_SetWorkspacePolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *directoryServiceClient) GetConversationPrefs(ctx context.Context, in *ConversationPrefsRequest, opts ...grpc.CallOption) (*ConversationPrefs, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ConversationPrefs)
@@ -1029,6 +1055,10 @@ type DirectoryServiceServer interface {
 	SetWorkspaceDiscoverability(context.Context, *SetWorkspaceDiscoverabilityRequest) (*Workspace, error)
 	SetWorkspaceIcon(context.Context, *SetWorkspaceIconRequest) (*Workspace, error)
 	SetWorkspaceDefaultChannels(context.Context, *SetWorkspaceDefaultChannelsRequest) (*Workspace, error)
+	// Named GetWorkspacePolicy because an rpc named WorkspacePolicy would
+	// shadow the WorkspacePolicy message type for every later return here.
+	GetWorkspacePolicy(context.Context, *WorkspaceRequest) (*WorkspacePolicy, error)
+	SetWorkspacePolicy(context.Context, *SetWorkspacePolicyRequest) (*WorkspacePolicy, error)
 	GetConversationPrefs(context.Context, *ConversationPrefsRequest) (*ConversationPrefs, error)
 	SetConversationPrefs(context.Context, *SetConversationPrefsRequest) (*ConversationPrefs, error)
 	GetPostingPermissions(context.Context, *ConversationPrefsRequest) (*PostingPermissions, error)
@@ -1222,6 +1252,12 @@ func (UnimplementedDirectoryServiceServer) SetWorkspaceIcon(context.Context, *Se
 }
 func (UnimplementedDirectoryServiceServer) SetWorkspaceDefaultChannels(context.Context, *SetWorkspaceDefaultChannelsRequest) (*Workspace, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetWorkspaceDefaultChannels not implemented")
+}
+func (UnimplementedDirectoryServiceServer) GetWorkspacePolicy(context.Context, *WorkspaceRequest) (*WorkspacePolicy, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetWorkspacePolicy not implemented")
+}
+func (UnimplementedDirectoryServiceServer) SetWorkspacePolicy(context.Context, *SetWorkspacePolicyRequest) (*WorkspacePolicy, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetWorkspacePolicy not implemented")
 }
 func (UnimplementedDirectoryServiceServer) GetConversationPrefs(context.Context, *ConversationPrefsRequest) (*ConversationPrefs, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConversationPrefs not implemented")
@@ -2284,6 +2320,42 @@ func _DirectoryService_SetWorkspaceDefaultChannels_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DirectoryService_GetWorkspacePolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).GetWorkspacePolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_GetWorkspacePolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).GetWorkspacePolicy(ctx, req.(*WorkspaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_SetWorkspacePolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetWorkspacePolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).SetWorkspacePolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_SetWorkspacePolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).SetWorkspacePolicy(ctx, req.(*SetWorkspacePolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DirectoryService_GetConversationPrefs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ConversationPrefsRequest)
 	if err := dec(in); err != nil {
@@ -2920,6 +2992,14 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetWorkspaceDefaultChannels",
 			Handler:    _DirectoryService_SetWorkspaceDefaultChannels_Handler,
+		},
+		{
+			MethodName: "GetWorkspacePolicy",
+			Handler:    _DirectoryService_GetWorkspacePolicy_Handler,
+		},
+		{
+			MethodName: "SetWorkspacePolicy",
+			Handler:    _DirectoryService_SetWorkspacePolicy_Handler,
 		},
 		{
 			MethodName: "GetConversationPrefs",

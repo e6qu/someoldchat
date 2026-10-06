@@ -64,6 +64,13 @@ type site struct {
 	inside string
 	start  int
 	end    int
+	// keep replaces the guard in the mutant: a blank assignment of the guard
+	// call's arguments, so a value loaded only to hand to the guard (the
+	// actor's membership, the workflow it checks) is still used and the
+	// mutant compiles. Without it such a mutant failed with "declared and not
+	// used" and its guard went unjudged. Evaluating the arguments decides
+	// nothing: the guard's own check is what is gone.
+	keep string
 }
 
 func (s site) String() string {
@@ -137,8 +144,12 @@ func findGuardSites(t *testing.T, root string) (sites []site, unmutatable int) {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
 		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
 		fset := token.NewFileSet()
-		parsed, err := parser.ParseFile(fset, path, nil, 0)
+		parsed, err := parser.ParseFile(fset, path, source, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}
@@ -167,7 +178,7 @@ func findGuardSites(t *testing.T, root string) (sites []site, unmutatable int) {
 				end := fset.Position(node.End())
 				sites = append(sites, site{
 					file: relative, line: start.Line, guard: name, inside: enclosing,
-					start: start.Offset, end: end.Offset,
+					start: start.Offset, end: end.Offset, keep: keptArguments(fset, source, assign),
 				})
 			}
 			return true
@@ -181,6 +192,28 @@ func findGuardSites(t *testing.T, root string) (sites []site, unmutatable int) {
 		return sites[i].line < sites[j].line
 	})
 	return sites, unmutatable
+}
+
+// keptArguments renders the statement that stands in for a removed guard: a
+// block "{ _, _ = a, b }" over the guard call's arguments, leaving out an
+// untyped nil, which cannot be assigned to the blank identifier. It is a block
+// because a guard can be an else-if, where only a block or an if may follow
+// else; deleting such a guard outright left "else" to capture the statement
+// after it, so the mutant changed more than the guard. A guard without
+// arguments leaves an empty block.
+func keptArguments(fset *token.FileSet, source []byte, assign *ast.AssignStmt) string {
+	call := assign.Rhs[0].(*ast.CallExpr)
+	var kept []string
+	for _, argument := range call.Args {
+		if ident, ok := argument.(*ast.Ident); ok && ident.Name == "nil" {
+			continue
+		}
+		kept = append(kept, string(source[fset.Position(argument.Pos()).Offset:fset.Position(argument.End()).Offset]))
+	}
+	if len(kept) == 0 {
+		return "{}"
+	}
+	return "{ " + strings.Repeat("_, ", len(kept)-1) + "_ = " + strings.Join(kept, ", ") + " }"
 }
 
 func guardCallName(assign *ast.AssignStmt) (string, bool) {
@@ -309,11 +342,14 @@ func TestEveryAuthorizationGuardIsLoadBearing(t *testing.T) {
 		t.Fatalf("%d mutants failed for reasons that are not about the mutant, so this run decides nothing:\n  %s",
 			len(broken), strings.Join(broken, "\n  "))
 	}
-	// A mutant that does not compile proves nothing either way. It is reported
-	// rather than counted as killed, because counting it as killed is how a
-	// mutation score flatters itself.
+	// A mutant that does not compile proves nothing either way, and counting
+	// it as killed is how a mutation score flatters itself. It fails the run:
+	// the guard it stood for is unjudged. Each guard is replaced by a blank
+	// use of its arguments (site.keep), so a value loaded only for a guard
+	// does not stop its mutant building; ten operations once went unjudged
+	// that way, three of them with no test behind their guard.
 	if len(unbuildable) > 0 {
-		t.Logf("%d mutants did not compile and decide nothing:\n  %s", len(unbuildable), strings.Join(unbuildable, "\n  "))
+		t.Fatalf("%d mutants did not compile, so their guards are unjudged:\n  %s", len(unbuildable), strings.Join(unbuildable, "\n  "))
 	}
 	// A filtered run judges the operations it was asked about and nothing else.
 	// The ceiling counts the whole service, so it cannot be applied to a subset:
@@ -390,7 +426,7 @@ func runMutant(root string, target operation) (verdict, string) {
 		if guard.end > len(mutated) {
 			return didNotBuild, "guard range is outside the file"
 		}
-		mutated = append(append([]byte{}, mutated[:guard.start]...), mutated[guard.end:]...)
+		mutated = append(append(append([]byte{}, mutated[:guard.start]...), guard.keep...), mutated[guard.end:]...)
 	}
 	dir, err := os.MkdirTemp("", "guard-mutant")
 	if err != nil {

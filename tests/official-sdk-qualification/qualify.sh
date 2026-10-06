@@ -150,6 +150,14 @@ require_hash "$java_api_jar" eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503
 require_hash "$java_bolt_jar" 9c298264096ba9343e55260361fcc54035a673ecc03ce5dfcee32899a6e9eca0
 require_hash "$java_websocket_jar" eae29213e4f16515639c28957200f011b3967fffcada1962cf0255d24919c22f
 mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" dependency:build-classpath -Dmdep.outputFile="$work/java-classpath"
+# The server's per-method tiers are tested against the vendored copy of the
+# pinned SDK's published rate-limit table; the copy must be that table.
+java -cp "$root/tests/official-sdk-qualification/java-slack-api/target/classes:$(cat "$work/java-classpath")" sameoldchat.qualification.RateLimitTable >"$work/methods-rate-limits.json"
+if ! cmp -s "$work/methods-rate-limits.json" "$root/specs/upstream/java-slack-sdk/methods-rate-limits.json"; then
+	echo "specs/upstream/java-slack-sdk/methods-rate-limits.json differs from the pinned slack-api-client's MethodsRateLimits" >&2
+	diff "$root/specs/upstream/java-slack-sdk/methods-rate-limits.json" "$work/methods-rate-limits.json" >&2 || true
+	exit 1
+fi
 SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" exec:java
 SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ SAMEOLDCHAT_QUALIFICATION_URL=http://127.0.0.1:18080 java -cp "$root/tests/official-sdk-qualification/java-slack-api/target/classes:$(cat "$work/java-classpath")" sameoldchat.qualification.SocketModeQualification
 SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ java -cp "$root/tests/official-sdk-qualification/java-slack-api/target/classes:$(cat "$work/java-classpath")" sameoldchat.qualification.BoltQualification

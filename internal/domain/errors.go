@@ -343,6 +343,15 @@ var (
 	// ErrRetentionNotSupported refuses a conversation type Slack will not apply
 	// a custom retention policy to.
 	ErrRetentionNotSupported = errors.New("conversation type does not support a retention policy")
+	// ErrInvalidWorkspacePolicy refuses a workspace policy naming a value the
+	// product does not apply.
+	ErrInvalidWorkspacePolicy = errors.New("workspace policy is invalid")
+	// ErrPrivateChannelCreationRestricted refuses a member the workspace's
+	// "who can create private channels" policy leaves out, whether they create
+	// the channel or convert a group DM into one. It is Slack's
+	// restricted_action: a team preference prevents the member, who may act in
+	// general, from doing this.
+	ErrPrivateChannelCreationRestricted = errors.New("a workspace policy restricts who can create private channels")
 )
 
 // ErrViewFilesInvalid reports a file_input value the element does not accept:

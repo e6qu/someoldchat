@@ -2608,6 +2608,37 @@ func (r Remote) AdminSetWorkspaceDiscoverability(ctx context.Context, workspaceI
 	return decodeProtoWorkspace(out)
 }
 
+func encodeProtoWorkspacePolicy(value domain.WorkspacePolicy) *chatv1.WorkspacePolicy {
+	return &chatv1.WorkspacePolicy{BroadcastWarningOff: value.BroadcastWarningOff, PrivateChannelCreators: string(value.PrivateChannelCreators)}
+}
+
+// decodeProtoWorkspacePolicy refuses a policy naming an audience this build
+// does not apply, rather than reading it as the default: a mixed-version
+// rollout must not quietly widen who may create a private channel.
+func decodeProtoWorkspacePolicy(value *chatv1.WorkspacePolicy) (domain.WorkspacePolicy, error) {
+	policy := domain.WorkspacePolicy{BroadcastWarningOff: value.GetBroadcastWarningOff(), PrivateChannelCreators: domain.PolicyAudience(value.GetPrivateChannelCreators())}
+	if !policy.Valid() {
+		return domain.WorkspacePolicy{}, errors.New("typed workspace policy names an unknown audience")
+	}
+	return policy, nil
+}
+
+func (r Remote) WorkspacePolicy(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspacePolicy, error) {
+	out, err := r.directory.GetWorkspacePolicy(ctx, &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.WorkspacePolicy{}, err
+	}
+	return decodeProtoWorkspacePolicy(out)
+}
+
+func (r Remote) SetWorkspacePolicy(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, policy domain.WorkspacePolicy) (domain.WorkspacePolicy, error) {
+	out, err := r.directory.SetWorkspacePolicy(ctx, &chatv1.SetWorkspacePolicyRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Policy: encodeProtoWorkspacePolicy(policy)})
+	if err != nil {
+		return domain.WorkspacePolicy{}, err
+	}
+	return decodeProtoWorkspacePolicy(out)
+}
+
 func (r Remote) AdminSetWorkspaceIcon(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, iconURL string) (domain.Workspace, error) {
 	out, err := r.directory.SetWorkspaceIcon(ctx, &chatv1.SetWorkspaceIconRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ImageUrl: iconURL})
 	if err != nil {
@@ -5382,7 +5413,7 @@ func (r Remote) RemoveBookmark(ctx context.Context, workspaceID domain.Workspace
 }
 
 func (r Remote) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, schedule domain.ReminderSchedule) (domain.Reminder, error) {
-	out, err := r.reminders.AddReminder(ctx, &chatv1.AddReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Text: text, Time: schedule.Due.Unix(), Recurrence: string(schedule.Recurrence), TimeZone: schedule.TimeZone, Weekdays: reminderWeekdayNames(schedule.Weekdays)})
+	out, err := r.reminders.AddReminder(ctx, &chatv1.AddReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Text: text, Time: schedule.Due.Unix(), Recurrence: string(schedule.Recurrence), TimeZone: schedule.TimeZone, Weekdays: reminderWeekdayNames(schedule.Weekdays), RecurrenceAnchor: unixOrZero(schedule.Anchor)})
 	if err != nil {
 		return domain.Reminder{}, err
 	}
@@ -5440,7 +5471,7 @@ func (r Remote) CreateLaterReminder(ctx context.Context, workspaceID domain.Work
 		WorkspaceId: string(workspaceID), UserId: string(userID), Target: string(request.Target),
 		ChannelId: string(request.Channel), SourceChannelId: string(request.SourceChannel),
 		SourceTimestamp: string(request.SourceTimestamp), Text: request.Text, DueAt: request.DueAt.Unix(),
-		Timezone: request.TimeZone, Recurrence: string(request.Recurrence),
+		Timezone: request.TimeZone, Recurrence: string(request.Recurrence), RecurrenceAnchor: unixOrZero(request.RecurrenceAnchor),
 	})
 	if err != nil {
 		return domain.LaterReminder{}, err
@@ -5480,6 +5511,7 @@ func (r Remote) UpdateLaterReminder(ctx context.Context, workspaceID domain.Work
 		WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID),
 		Target: string(request.Target), ChannelId: string(request.Channel), Text: request.Text,
 		DueAt: request.DueAt.Unix(), Timezone: request.TimeZone, Recurrence: string(request.Recurrence),
+		RecurrenceAnchor: unixOrZero(request.RecurrenceAnchor),
 	})
 	if err != nil {
 		return domain.LaterReminder{}, err
@@ -7369,6 +7401,28 @@ func (s *Server) SetWorkspaceDiscoverability(ctx context.Context, input *chatv1.
 	return encodeProtoWorkspace(value), nil
 }
 
+// GetWorkspacePolicy is the transport name; see the comment on the rpc.
+func (s *Server) GetWorkspacePolicy(ctx context.Context, input *chatv1.WorkspaceRequest) (*chatv1.WorkspacePolicy, error) {
+	policy, err := s.implementation.WorkspacePolicy(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoWorkspacePolicy(policy), nil
+}
+
+// SetWorkspacePolicy passes an unknown audience through to the service, which
+// refuses it as ErrInvalidWorkspacePolicy, so a remote caller is answered with
+// the same refusal a local one is.
+func (s *Server) SetWorkspacePolicy(ctx context.Context, input *chatv1.SetWorkspacePolicyRequest) (*chatv1.WorkspacePolicy, error) {
+	requested := input.GetPolicy()
+	policy := domain.WorkspacePolicy{BroadcastWarningOff: requested.GetBroadcastWarningOff(), PrivateChannelCreators: domain.PolicyAudience(requested.GetPrivateChannelCreators())}
+	saved, err := s.implementation.SetWorkspacePolicy(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), policy)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoWorkspacePolicy(saved), nil
+}
+
 func (s *Server) SetWorkspaceIcon(ctx context.Context, input *chatv1.SetWorkspaceIconRequest) (*chatv1.Workspace, error) {
 	value, err := s.implementation.AdminSetWorkspaceIcon(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetImageUrl())
 	if err != nil {
@@ -8940,7 +8994,7 @@ func (s *Server) PromptUnfurlAuthentication(ctx context.Context, input *chatv1.U
 }
 
 func (s *Server) PostEphemeral(ctx context.Context, input *chatv1.PostEphemeralRequest) (*chatv1.EphemeralMessage, error) {
-	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.AppID(input.GetAppId()), domain.MessageTimestamp(input.GetThreadTimestamp()))
+	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.AppID(input.GetAppId()), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetLinkNames())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -11409,7 +11463,8 @@ func (s *Server) removeBookmarkProto(ctx context.Context, input *chatv1.Bookmark
 
 func (s *Server) addReminderProto(ctx context.Context, input *chatv1.AddReminderRequest) (*chatv1.Reminder, error) {
 	reminder, err := s.implementation.AddReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), input.GetText(),
-		domain.ReminderSchedule{Due: time.Unix(input.GetTime(), 0).UTC(), Recurrence: domain.ReminderRecurrence(input.GetRecurrence()), TimeZone: input.GetTimeZone(), Weekdays: reminderWeekdaysFromNames(input.GetWeekdays())})
+		domain.ReminderSchedule{Due: time.Unix(input.GetTime(), 0).UTC(), Recurrence: domain.ReminderRecurrence(input.GetRecurrence()), TimeZone: input.GetTimeZone(), Weekdays: reminderWeekdaysFromNames(input.GetWeekdays()),
+			Anchor: timeFromUnix(input.GetRecurrenceAnchor())})
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -11456,7 +11511,7 @@ func (s *Server) createLaterReminderProto(ctx context.Context, input *chatv1.Cre
 		Target: domain.LaterReminderTarget(input.GetTarget()), Channel: domain.ConversationID(input.GetChannelId()),
 		SourceChannel: domain.ConversationID(input.GetSourceChannelId()), SourceTimestamp: domain.MessageTimestamp(input.GetSourceTimestamp()),
 		Text: input.GetText(), DueAt: timeFromUnix(input.GetDueAt()), TimeZone: input.GetTimezone(),
-		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()),
+		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()), RecurrenceAnchor: timeFromUnix(input.GetRecurrenceAnchor()),
 	})
 	if err != nil {
 		return nil, mapError(err)
@@ -11488,7 +11543,7 @@ func (s *Server) updateLaterReminderProto(ctx context.Context, input *chatv1.Upd
 	reminder, err := s.implementation.UpdateLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId()), domain.LaterReminderRequest{
 		Target: domain.LaterReminderTarget(input.GetTarget()), Channel: domain.ConversationID(input.GetChannelId()),
 		Text: input.GetText(), DueAt: timeFromUnix(input.GetDueAt()), TimeZone: input.GetTimezone(),
-		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()),
+		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()), RecurrenceAnchor: timeFromUnix(input.GetRecurrenceAnchor()),
 	})
 	if err != nil {
 		return nil, mapError(err)
@@ -11620,6 +11675,7 @@ func encodeProtoUser(value domain.User) *chatv1.User {
 		UltraRestricted:        value.UltraRestricted,
 		PrimaryOwner:           value.PrimaryOwner,
 		ConnectedUntilUnixNano: optionalUnixNano(value.ConnectedUntil),
+		HuddleCallId:           string(value.HuddleCallID),
 	}
 }
 
@@ -13465,6 +13521,7 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 		Restricted:      value.GetRestricted(),
 		UltraRestricted: value.GetUltraRestricted(),
 		PrimaryOwner:    value.GetPrimaryOwner(),
+		HuddleCallID:    domain.CallID(value.GetHuddleCallId()),
 	}
 	if profile.GetStatusExpiration() != 0 {
 		result.Profile.StatusExpiration = time.Unix(profile.GetStatusExpiration(), 0).UTC()
@@ -13850,7 +13907,7 @@ func (s *Server) UpdateWithBlocks(ctx context.Context, input *chatv1.UpdateWithB
 }
 
 func (s *Server) UpdateMessage(ctx context.Context, input *chatv1.UpdateMessageRequest) (*chatv1.Message, error) {
-	patch := domain.MessagePatch{Text: input.Text, Blocks: input.Blocks, Attachments: input.Attachments}
+	patch := domain.MessagePatch{Text: input.Text, Blocks: input.Blocks, Attachments: input.Attachments, LinkNames: input.GetLinkNames()}
 	value, err := s.implementation.UpdateMessage(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), patch)
 	if err != nil {
 		return nil, mapError(err)
@@ -13901,7 +13958,7 @@ func (r Remote) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domai
 }
 
 func (r Remote) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "", "", "")
+	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "", "", "", false)
 }
 
 func (r Remote) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string, appID domain.AppID) (domain.Message, error) {
@@ -13992,8 +14049,8 @@ func (r Remote) PostAsSlackbot(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoMessage(out)
 }
 
-func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp) (domain.EphemeralMessage, error) {
-	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments, AppId: string(appID), ThreadTimestamp: string(threadTimestamp)})
+func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp, linkNames bool) (domain.EphemeralMessage, error) {
+	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments, AppId: string(appID), ThreadTimestamp: string(threadTimestamp), LinkNames: linkNames})
 	if err != nil {
 		return domain.EphemeralMessage{}, err
 	}
@@ -14033,6 +14090,7 @@ func (r Remote) UpdateMessage(ctx context.Context, workspaceID domain.WorkspaceI
 		Text:           patch.Text,
 		Blocks:         patch.Blocks,
 		Attachments:    patch.Attachments,
+		LinkNames:      patch.LinkNames,
 	})
 	if err != nil {
 		return domain.Message{}, err

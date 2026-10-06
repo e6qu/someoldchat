@@ -158,6 +158,15 @@ func Profile(origin string, user domain.User) map[string]any {
 		"status_text": user.Profile.StatusText, "status_emoji": user.Profile.StatusEmoji, "status_expiration": unixSeconds(user.Profile.StatusExpiration),
 		"avatar_hash": AvatarHash(user),
 		"team":        user.WorkspaceID, "user_id": user.ID,
+		// A member's huddle participation, as the official SDKs model the
+		// profile (huddle_state, huddle_state_expiration_ts and, on
+		// user_huddle_changed, huddle_state_call_id). The state lasts until
+		// the member leaves, so it has no expiry; the call is named only while
+		// there is one.
+		"huddle_state": user.HuddleState(), "huddle_state_expiration_ts": 0,
+	}
+	if user.HuddleCallID != "" {
+		profile["huddle_state_call_id"] = user.HuddleCallID
 	}
 	for _, image := range []struct {
 		size   int

@@ -409,6 +409,12 @@ carries an execution-scoped `bot_access_token` (`xwfp-`): what the app posts
 or opens with it belongs to the execution, the resulting interactions carry
 `function_data` so the app can complete the step from a button or a modal, and
 the token expires when the execution ends.
+`functions.workflows.steps.list` reports every revision's occurrence of the
+function's steps and marks one `is_deleted` when the workflow's live revision
+(the published one, or the head of a workflow never published) no longer has
+that step, known by its step id and function rather than its position, so a
+step that moved stays live and one a later revision removed reads as deleted
+(`TestCurrentWorkflowPermissionFeaturedAndStepMethodsAreDurable`).
 
 This is not full Slack Workflow Builder parity. find/use/copy
 permissions, plan/admin policy, Slack built-in and connector functions,

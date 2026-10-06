@@ -77,6 +77,64 @@ test('[ADMIN-02 ADMIN-05] workspace policy writes through and retention states i
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+// The permissions Slack lets owners and admins set — the @channel warning and
+// who may create private channels — are switches only if something follows
+// them. The composer and the create-channel dialog read them from the page, so
+// this journey changes both and then looks where they are applied.
+test('[ADMIN-02 COMP-01 DM-05] workspace permissions write through to the composer and the create-channel dialog', async ({ page, context, browser }) => {
+  await signIn(context);
+  await page.goto('/app/admin/settings');
+
+  const permissions = page.locator('form[action="/app/admin/settings/permissions"]');
+  const warning = permissions.getByRole('checkbox', { name: /Ask members to confirm before @channel/ });
+  await expect(warning).toBeChecked();
+  await expect(permissions.getByRole('radio', { name: 'Everyone' })).toBeChecked();
+  await expect(page.locator('body')).toContainText('Converting Slack Connect group DMs.');
+  await expectNoSeriousAccessibilityViolations(page, 'form[action="/app/admin/settings/permissions"]');
+
+  try {
+    await warning.uncheck();
+    await permissions.getByRole('radio', { name: 'Workspace admins and owners only' }).check();
+    await permissions.getByRole('button', { name: 'Save permissions' }).click();
+    await page.goto('/app/admin/settings');
+    await expect(page.locator('form[action="/app/admin/settings/permissions"]').getByRole('checkbox', { name: /Ask members to confirm/ })).not.toBeChecked();
+    await expect(page.locator('form[action="/app/admin/settings/permissions"]').getByRole('radio', { name: 'Workspace admins and owners only' })).toBeChecked();
+
+    // The composer is told the warning is off by the server, on its form.
+    await page.goto('/app?channel=Cdev');
+    await expect(page.locator('form#composer')).toHaveAttribute('data-broadcast-warning-off', '');
+
+    // The signed-in session is the workspace's owner, whom the policy admits.
+    await page.goto('/app/channels/new');
+    await expect(page.locator('input[name="is_private"][value="true"]')).toBeEnabled();
+
+    // The development peer is a plain member, so the dialog offers a private
+    // channel as unavailable and says why, instead of letting the choice fail
+    // after the last step.
+    const peerContext = await browser.newContext({ baseURL: 'http://127.0.0.1:18083' });
+    try {
+      await peerContext.addCookies([{ name: 'sameoldchat_session', value: 'browser-peer', url: 'http://127.0.0.1:18083' }]);
+      const peer = await peerContext.newPage();
+      await peer.goto('/app/channels/new');
+      await expect(peer.locator('input[name="is_private"][value="true"]')).toBeDisabled();
+      await expect(peer.locator('#new-channel-private-restricted')).toContainText('Your workspace limits who can create private channels.');
+      await expectNoSeriousAccessibilityViolations(peer, '.create-channel-form');
+    } finally {
+      await peerContext.close();
+    }
+  } finally {
+    // Restore Slack's defaults so the other administration journeys start
+    // from the workspace they expect.
+    await page.goto('/app/admin/settings');
+    const restore = page.locator('form[action="/app/admin/settings/permissions"]');
+    await restore.getByRole('checkbox', { name: /Ask members to confirm/ }).check();
+    await restore.getByRole('radio', { name: 'Everyone' }).check();
+    await restore.getByRole('button', { name: 'Save permissions' }).click();
+  }
+  await page.goto('/app?channel=Cdev');
+  await expect(page.locator('form#composer')).not.toHaveAttribute('data-broadcast-warning-off', '');
+});
+
 // Slack Connect had a per-channel disconnection and no answer to "who are we
 // connected to". The populated list and the disconnection are asserted by the
 // web, API and cross-profile tests, which can arrange two organizations; this

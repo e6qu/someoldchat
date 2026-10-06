@@ -235,6 +235,12 @@ type User struct {
 	// activation — last changed. It is zero for a record last written before
 	// schema 181, which kept no such instant.
 	Updated time.Time
+	// HuddleCallID is the huddle the member is in right now, empty when they
+	// are in none. Only the huddle mutations write it, in the transaction that
+	// moves the member in or out, so it never names a huddle the member has
+	// left or one that has ended. Slack's profile reports it as huddle_state
+	// and huddle_state_call_id (see HuddleState).
+	HuddleCallID CallID
 
 	// The fields below are not stored with the user. The service derives them
 	// from the member's workspace membership and from the bot, if any, the
@@ -288,6 +294,23 @@ func (u User) NameParts() (string, string) {
 // JoinRealName is the full name a first and last name make.
 func JoinRealName(first, last string) string {
 	return strings.TrimSpace(strings.TrimSpace(first) + " " + strings.TrimSpace(last))
+}
+
+// The values Slack's profile carries in huddle_state. Slack publishes them in
+// the user_huddle_changed reference's example (in a huddle) and in every
+// users.info profile of a member who is not in one.
+const (
+	HuddleStateInAHuddle    = "in_a_huddle"
+	HuddleStateDefaultUnset = "default_unset"
+)
+
+// HuddleState is the member's huddle_state: in_a_huddle while HuddleCallID
+// names a huddle, default_unset otherwise.
+func (u User) HuddleState() string {
+	if u.HuddleCallID != "" {
+		return HuddleStateInAHuddle
+	}
+	return HuddleStateDefaultUnset
 }
 
 // IsBot reports whether the account is an app's bot user rather than a person.
@@ -381,6 +404,41 @@ const (
 
 func (kind CallKind) Valid() bool {
 	return kind == CallKindExternal || kind == CallKindHuddle
+}
+
+// CurrentHuddle chooses the huddle a member is in from the running huddles
+// they participate in: preferred when they are in it (the one they have just
+// joined), else recorded (their state before the change) while they are still
+// in it, else the most recently started (the lowest ID among equals), else
+// none. Both repositories settle User.HuddleCallID with it, so a member who
+// leaves one of two huddles stays in the other on every storage profile.
+func CurrentHuddle(in []Call, preferred, recorded CallID) CallID {
+	contains := func(id CallID) bool {
+		if id == "" {
+			return false
+		}
+		for _, call := range in {
+			if call.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case contains(preferred):
+		return preferred
+	case contains(recorded):
+		return recorded
+	case len(in) == 0:
+		return ""
+	}
+	latest := in[0]
+	for _, call := range in[1:] {
+		if call.StartedAt.After(latest.StartedAt) || (call.StartedAt.Equal(latest.StartedAt) && call.ID < latest.ID) {
+			latest = call
+		}
+	}
+	return latest.ID
 }
 
 // CallSignalKind is one step of the WebRTC handshake. The three are the whole
@@ -2849,6 +2907,9 @@ type ReminderSchedule struct {
 	Due        time.Time
 	Recurrence ReminderRecurrence
 	TimeZone   string
+	// Anchor positions a recurring series when it differs from Due (see
+	// ReminderOccurrence); zero means the series starts at Due.
+	Anchor time.Time
 	// Weekdays are a weekly recurrence's days; see Reminder.Weekdays.
 	Weekdays []time.Weekday
 }
@@ -2910,8 +2971,11 @@ type LaterReminder struct {
 	DueAt              time.Time
 	TimeZone           string
 	Recurrence         ReminderRecurrence
-	// RecurrenceAnchor is the reminder's original due instant, fixed at creation
-	// and never advanced. Recurrence is computed from it rather than from the
+	// RecurrenceAnchor positions the series, fixed at creation (or edit) and
+	// never advanced. It is the first due instant, or, when that first
+	// occurrence was already clamped ("every month" set on the 31st after its
+	// time had passed, first due on the 30th), the passed occurrence whose day
+	// the series keeps. Recurrence is computed from it rather than from the
 	// last DueAt so a monthly reminder on the 31st clamps to each short month's
 	// last day and returns to the 31st afterwards, instead of drifting earlier
 	// every time it meets a February. For one-time reminders it equals DueAt.
@@ -2940,6 +3004,9 @@ type LaterReminderRequest struct {
 	DueAt           time.Time
 	TimeZone        string
 	Recurrence      ReminderRecurrence
+	// RecurrenceAnchor positions a recurring series when it differs from
+	// DueAt (see ReminderOccurrence); zero means the series starts at DueAt.
+	RecurrenceAnchor time.Time
 }
 
 type ScheduledMessage struct {
@@ -4268,6 +4335,42 @@ func (m Message) PostingBot() BotID {
 	return state.BotID
 }
 
+// TextIsMarkup reports whether the message's text is Slack markup: neither
+// markdown_text, which is Markdown, nor text posted with mrkdwn=false, which
+// Slack shows without parsing. link_names applies only to markup.
+func (m Message) TextIsMarkup() bool {
+	if m.StreamState == "" {
+		return true
+	}
+	var state MessageStreamState
+	if json.Unmarshal([]byte(m.StreamState), &state) != nil {
+		return true
+	}
+	return !state.MarkdownText && !state.MrkdwnDisabled
+}
+
+// UnfurlsLinks reports whether the links in the message may be unfurled as
+// text-based content — the kind an app's unfurl domains produce through
+// link_shared and chat.unfurl. chat.postMessage's unfurl_links ("Pass true to
+// enable unfurling of primarily text-based content") decides when the poster
+// gave it explicitly. A message that omits it is unfurled, whoever posted it:
+// no published source in the repository states a different default for bot
+// and person messages, so the behaviour before unfurl_links was applied is
+// kept (specs/product-gap-audit.md).
+func (m Message) UnfurlsLinks() bool {
+	if m.StreamState == "" {
+		return true
+	}
+	var state MessageStreamState
+	if json.Unmarshal([]byte(m.StreamState), &state) != nil {
+		return true
+	}
+	if state.UnfurlLinks != nil {
+		return *state.UnfurlLinks
+	}
+	return true
+}
+
 // FunctionExecution is the function execution whose token posted the
 // message, or empty for every other message.
 func (m Message) FunctionExecution() WorkflowStepID {
@@ -4329,6 +4432,11 @@ type MessagePatch struct {
 	Text        *string
 	Blocks      *string
 	Attachments *string
+	// LinkNames is chat.update's link_names: it links the @names and #names
+	// of the new text. It describes this edit only — the pinned reference
+	// says an omitted link_names is overwritten with the default, none — so
+	// an edit without it is not linked, whatever the message was posted with.
+	LinkNames bool
 }
 
 // NoStructuredContent reports whether a normalized blocks or attachments value

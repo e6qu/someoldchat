@@ -92,6 +92,10 @@ type shellView struct {
 	ReminderUnread bool
 	Keyboard       []keyboardSectionView
 	Switcher       []switcherEntry
+	// CanCreatePrivate is whether the workspace's "who can create private
+	// channels" policy admits this member. The create-channel dialog still
+	// shows the private choice to everyone else, unavailable, with the reason.
+	CanCreatePrivate bool
 	// Directs is the member's DMs, newest activity first, for the DMs pane.
 	Directs []conversationView
 	// SearchQuery pre-fills the top bar's search field on the search page.
@@ -210,6 +214,8 @@ func (h Handler) newShell(r *http.Request, principal auth.Principal, request she
 		WorkspaceName: "SameOldChat",
 	}
 	view.ShowAuthAdmin = h.Login != nil && view.ShowAdmin
+	// Narrowed below once the member and the workspace policy are read.
+	view.CanCreatePrivate = view.CanCreate
 	if preferences, err := h.Messages.MemberPreferences(ctx, principal.WorkspaceID, principal.UserID); err == nil {
 		if encoded, err := json.Marshal(preferences); err == nil {
 			view.Preferences = string(encoded)
@@ -227,6 +233,11 @@ func (h Handler) newShell(r *http.Request, principal auth.Principal, request she
 		view.Username = displayName(user)
 		view.Timezone = user.Profile.Timezone
 		view.CanRequestInvite = !view.ShowAuthAdmin && view.CanCreate && !user.Restricted && !user.UltraRestricted
+		// A policy that cannot be read leaves the choice offered: the server
+		// applies the policy whatever the dialog shows.
+		if policy, err := h.Messages.WorkspacePolicy(ctx, principal.WorkspaceID, principal.UserID); err == nil {
+			view.CanCreatePrivate = view.CanCreate && policy.PrivateChannelCreators.Admits(user.Role)
+		}
 		view.AvatarURL = profileImageURL(user.Profile)
 		view.Away = user.Presence == domain.PresenceAway
 		view.StatusEmoji = user.Profile.StatusEmoji

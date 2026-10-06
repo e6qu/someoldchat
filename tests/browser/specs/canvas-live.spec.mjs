@@ -6,11 +6,25 @@ const SESSION = 'browser-session';
 const PEER_SESSION = 'browser-peer';
 const PEER = 'Upeer';
 
+// A script error on either page fails the journey, whatever the page still
+// shows: the editor once called an undefined function at the end of every
+// remote edit, which cut short the caret restore after it and was invisible to
+// assertions on the text alone.
+let pageErrors = [];
+
 async function signedIn(browser, baseURL, session) {
   const context = await browser.newContext({ baseURL });
   await context.addCookies([{ name: 'sameoldchat_session', value: session, url: baseURL }]);
-  return { context, page: await context.newPage() };
+  const page = await context.newPage();
+  page.on('pageerror', (error) => pageErrors.push(`${session}: ${error.message}`));
+  return { context, page };
 }
+
+test.afterEach(() => {
+  const seen = pageErrors;
+  pageErrors = [];
+  expect(seen, 'uncaught script errors').toEqual([]);
+});
 
 async function createCanvas(page, name, content) {
   await page.goto('/app/canvases');
@@ -103,6 +117,46 @@ test('[CANVAS-02] two people writing on one canvas see each other’s words as t
     await expect(theirs).toContainText('Agenda for Monday and Tuesday');
     await expect(theirs).toContainText('Notes from the call!');
     await expect(theirs).toContainText('Follow-ups');
+  } finally {
+    await owner.context.close();
+    await peer.context.close();
+  }
+});
+
+// Words another writer adds before your caret arrive without moving you: the
+// caret stays after the character it was after, so what you type next lands
+// where you were typing. It used to be put back at the same character offset,
+// which the other writer's words had pushed along, so a remote insert at the
+// start of your block sent your next keystroke that many characters back.
+test('[CANVAS-02] another writer typing before your caret does not move it', async ({ browser, baseURL }) => {
+  const owner = await signedIn(browser, baseURL, SESSION);
+  const peer = await signedIn(browser, baseURL, PEER_SESSION);
+  try {
+    const name = `caret-${Date.now()}`;
+    await createCanvas(owner.page, name, 'the first line');
+    await shareWithPeer(owner.page, 'write');
+    await peer.page.goto(owner.page.url());
+
+    const mine = owner.page.getByRole('textbox', { name: 'Canvas content' });
+    const theirs = peer.page.getByRole('textbox', { name: 'Canvas content' });
+    await expect(theirs).toContainText('the first line');
+    await mine.locator('[data-canvas-block]').first().click();
+    await owner.page.keyboard.press('End');
+    await owner.page.keyboard.type(' and mine');
+    await expect(owner.page.locator('[data-canvas-status]')).toHaveText('Saved');
+    await expect(theirs.locator('[data-canvas-block]').first()).toHaveText('the first line and mine');
+
+    await theirs.locator('[data-canvas-block]').first().click();
+    await peer.page.keyboard.press('Home');
+    await peer.page.keyboard.type('Intro: ');
+    await expect(peer.page.locator('[data-canvas-status]')).toHaveText('Saved');
+    await expect(mine.locator('[data-canvas-block]').first()).toHaveText('Intro: the first line and mine');
+
+    await owner.page.keyboard.type(' too');
+    await expect(owner.page.locator('[data-canvas-status]')).toHaveText('Saved');
+    for (const editor of [mine, theirs]) {
+      await expect(editor.locator('[data-canvas-block]').first()).toHaveText('Intro: the first line and mine too');
+    }
   } finally {
     await owner.context.close();
     await peer.context.close();

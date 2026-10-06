@@ -1867,7 +1867,7 @@ func TestWorkspaceRendersEphemeralAppResponsesOnlyToTheirRecipient(t *testing.T)
 	}
 	if _, err := (service.Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(
 		context.Background(), "T1", "UBOT", "Cdev", "U1", "Private result",
-		`[{"type":"section","text":{"type":"plain_text","text":"Build is ready"}},{"type":"actions","block_id":"private-result","elements":[{"type":"button","action_id":"acknowledge","text":{"type":"plain_text","text":"Acknowledge"},"value":"yes"}]}]`, "", "A1", "",
+		`[{"type":"section","text":{"type":"plain_text","text":"Build is ready"}},{"type":"actions","block_id":"private-result","elements":[{"type":"button","action_id":"acknowledge","text":{"type":"plain_text","text":"Acknowledge"},"value":"yes"}]}]`, "", "A1", "", false,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -1903,7 +1903,7 @@ func TestAThreadedEphemeralMessageRendersInItsThreadOnly(t *testing.T) {
 	root := seedMessage(t, s, "M1", "the root of the thread", time.Now().UTC().Add(-time.Minute))
 	rootTimestamp := domain.NewMessageTimestamp(root.CreatedAt)
 	if _, err := (service.Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(
-		context.Background(), "T1", "UBOT", "Cdev", "U1", "Private threaded answer", "", "", "A1", rootTimestamp,
+		context.Background(), "T1", "UBOT", "Cdev", "U1", "Private threaded answer", "", "", "A1", rootTimestamp, false,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -2967,7 +2967,8 @@ func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *tes
 		{expression: "stand-up at 7am", wantError: domain.ErrReminderTimeInPast},
 	} {
 		t.Run(testCase.expression, func(t *testing.T) {
-			text, due, recurrence, err := domain.ParseReminderExpression(testCase.expression, now, time.UTC)
+			text, occurrence, err := domain.ParseReminderExpression(testCase.expression, now, time.UTC)
+			due, recurrence := occurrence.Due, occurrence.Recurrence
 			if testCase.wantError != nil {
 				if !errors.Is(err, testCase.wantError) {
 					t.Fatalf("error=%v want=%v", err, testCase.wantError)
@@ -3453,6 +3454,67 @@ func TestMutationsAreRefusedWhenTheBrowserReportsAnotherSite(t *testing.T) {
 	mux.ServeHTTP(response, accepted)
 	if response.Code != http.StatusOK {
 		t.Fatalf("a same-origin post with only the session cookie was refused: %d %s", response.Code, response.Body)
+	}
+}
+
+// failingAfterPostStore commits a message and then cannot read the
+// conversation back, as a store does when it goes away between the write and
+// the read that renders the sent message.
+type failingAfterPostStore struct {
+	*memory.Store
+	posted *bool
+}
+
+func (s failingAfterPostStore) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string, companions ...events.Event) error {
+	if err := s.Store.CreateMessage(ctx, message, event, idempotencyKey, companions...); err != nil {
+		return err
+	}
+	*s.posted = true
+	return nil
+}
+
+func (s failingAfterPostStore) GetConversation(ctx context.Context, id domain.ConversationID) (domain.Conversation, error) {
+	if *s.posted {
+		return domain.Conversation{}, errors.New("store unavailable after the post committed")
+	}
+	return s.Store.GetConversation(ctx, id)
+}
+
+// TestPostMessageReportsACommittedSendAsSentWhenTheReadBackFails covers the
+// send that was stored but answered with an error because rendering it read
+// the conversation again and that read failed: the composer filed a delivered
+// message under "Not sent". Once the message is stored the answer is the
+// success the composer treats as sent (204), with a note that the view will
+// refresh to show it, never an error.
+func TestPostMessageReportsACommittedSendAsSentWhenTheReadBackFails(t *testing.T) {
+	s, _ := browserWorkspace(t, auth.AllScopes())
+	posted := false
+	authenticator, err := auth.NewBrowser(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: failingAfterPostStore{Store: s, posted: &posted}}, authenticator, s, "Cdev", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	response := postForm(t, mux, "/app/message?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "text": {"delivered anyway"}, "client_msg_id": {"4f0c3b8e-8d0a-4c55-9a43-0d5b3c1f2e7a"},
+	}.Encode(), true)
+	if !posted {
+		t.Fatalf("the message was not committed: status=%d body=%s", response.Code, response.Body)
+	}
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("a committed send answered status=%d body=%q, want 204", response.Code, response.Body)
+	}
+	if response.Header().Get(sentViewRefreshHeader) != "pending" {
+		t.Fatalf("the response does not say the view will refresh: headers=%v", response.Header())
+	}
+	page, err := s.ListMessages(context.Background(), "Cdev", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "delivered anyway" {
+		t.Fatalf("stored messages=%+v err=%v", page.Messages, err)
 	}
 }
 

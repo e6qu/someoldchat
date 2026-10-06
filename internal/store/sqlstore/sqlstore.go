@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS users (
  image_72 TEXT NOT NULL DEFAULT '', image_192 TEXT NOT NULL DEFAULT '', image_512 TEXT NOT NULL DEFAULT '', image_1024 TEXT NOT NULL DEFAULT '',
  deleted INTEGER NOT NULL DEFAULT 0, presence TEXT NOT NULL DEFAULT 'auto', last_active_at INTEGER NOT NULL DEFAULT 0,
  updated_at INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '', pronouns TEXT NOT NULL DEFAULT '', tz TEXT NOT NULL DEFAULT '', first_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
- connected_until INTEGER NOT NULL DEFAULT 0
+ connected_until INTEGER NOT NULL DEFAULT 0,
+ huddle_call_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS user_expirations (user_id TEXT PRIMARY KEY REFERENCES users(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), expiration_ts INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS scheduled_statuses (
@@ -225,6 +226,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
 ` + clientConnectionSchema + `
 ` + canvasPresenceSchema + `
 ` + memberPreferenceSchema + `
+` + workspacePolicySchema + `
 ` + rateLimitSchema + `
 CREATE TABLE IF NOT EXISTS conversation_typing (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
@@ -550,6 +552,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS calls_workspace_external ON calls(workspace_id
 CREATE TABLE IF NOT EXISTS call_participants (
  call_id TEXT NOT NULL REFERENCES calls(id), user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY (call_id, user_id)
 );
+-- A member's huddle state is the running huddle they are in, read by member.
+CREATE INDEX IF NOT EXISTS call_participants_user ON call_participants(user_id, call_id);
 CREATE TABLE IF NOT EXISTS call_external_participants (
  call_id TEXT NOT NULL REFERENCES calls(id), external_id TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '', avatar_url TEXT NOT NULL DEFAULT '',
  PRIMARY KEY (call_id, external_id)
@@ -615,7 +619,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 215
+const schemaVersion = 217
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3598,6 +3602,37 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 217: workspace policies ---
+	if version < 217 {
+		// Workspace permissions an administrator sets. A workspace without a
+		// row follows Slack's defaults, which is what every workspace did.
+		if _, err := db.ExecContext(ctx, workspacePolicySchema); err != nil {
+			return fmt.Errorf("migrate workspace policies: %w", err)
+		}
+	}
+	// --- end schema 217 ---
+	// --- schema 216: huddle state ---
+	if version < 216 {
+		// A member's profile carries the huddle they are in. Members already
+		// in a running huddle take it as their state, so the upgrade does not
+		// report them out of the huddle they are talking in.
+		columns, err := s.tableColumns(ctx, db, "users")
+		if err != nil {
+			return err
+		}
+		if !columns["huddle_call_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN huddle_call_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate huddle state: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS call_participants_user ON call_participants(user_id, call_id)`); err != nil {
+			return fmt.Errorf("index huddle participants by member: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE users SET huddle_call_id = COALESCE((SELECT c.id FROM call_participants cp JOIN calls c ON c.id = cp.call_id WHERE cp.user_id = users.id AND c.workspace_id = users.workspace_id AND c.kind = 'huddle' AND c.ended_at = 0 ORDER BY c.started_at DESC, c.id LIMIT 1), '') WHERE huddle_call_id = '' AND id IN (SELECT user_id FROM call_participants)`); err != nil {
+			return fmt.Errorf("migrate huddle state: %w", err)
+		}
+	}
+	// --- end schema 216 ---
 	// --- schema 215: canvas presence ---
 	if version < 215 {
 		if _, err := db.ExecContext(ctx, canvasPresenceSchema); err != nil {
@@ -7071,6 +7106,11 @@ func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.Workspace
 	}
 	for _, recorded := range append([]events.Event{event}, guestEvent...) {
 		if err := insertOutbox(ctx, tx, recorded); err != nil {
+			return err
+		}
+	}
+	if deleted {
+		if err := releaseFromHuddlesTx(ctx, tx, workspaceID, userID, event.ActorID, event.CreatedAt); err != nil {
 			return err
 		}
 	}
@@ -11316,10 +11356,10 @@ const qualifiedConversationColumns = `c.id, c.workspace_id, c.name, c.topic, c.p
 // them left active_scheduled_status_id out, so the same member read back with
 // and without the scheduled status that fences their current one depending on
 // which method loaded them.
-const userColumns = `id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at, updated_at, title, pronouns, tz, first_name, last_name, phone, connected_until`
+const userColumns = `id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence, last_active_at, updated_at, title, pronouns, tz, first_name, last_name, phone, connected_until, huddle_call_id`
 
 // qualifiedUserColumns is userColumns for a query that aliases the table as u.
-const qualifiedUserColumns = `u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.active_scheduled_status_id, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at, u.updated_at, u.title, u.pronouns, u.tz, u.first_name, u.last_name, u.phone, u.connected_until`
+const qualifiedUserColumns = `u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.status_expiration, u.active_scheduled_status_id, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, u.last_active_at, u.updated_at, u.title, u.pronouns, u.tz, u.first_name, u.last_name, u.phone, u.connected_until, u.huddle_call_id`
 
 // scanUserRow reads one user selected with userColumns, optionally followed by
 // extra columns into the given destinations.
@@ -11330,7 +11370,7 @@ func scanUserRow(row rowScanner, extra ...any) (domain.User, error) {
 	destinations := append([]any{&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName,
 		&user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.ActiveScheduledStatusID,
 		&user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024,
-		&deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}, &updated, &user.Profile.Title, &user.Profile.Pronouns, &user.Profile.Timezone, &user.Profile.FirstName, &user.Profile.LastName, &user.Profile.Phone, &connectedUntil}, extra...)
+		&deleted, &user.Presence, lastActiveScan{&user.LastActiveAt}, &updated, &user.Profile.Title, &user.Profile.Pronouns, &user.Profile.Timezone, &user.Profile.FirstName, &user.Profile.LastName, &user.Profile.Phone, &connectedUntil, &user.HuddleCallID}, extra...)
 	if err := row.Scan(destinations...); err != nil {
 		return domain.User{}, err
 	}
@@ -20246,6 +20286,9 @@ func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joi
 			if err := insertOutbox(ctx, tx, joined); err != nil {
 				return domain.Call{}, false, err
 			}
+			if err := refreshHuddleStateTx(ctx, tx, value.WorkspaceID, value.CreatedBy, existing.ID, value.CreatedBy, joined.CreatedAt); err != nil {
+				return domain.Call{}, false, err
+			}
 		}
 		err = fillCallParticipants(ctx, tx, &existing)
 		if err != nil {
@@ -20273,6 +20316,9 @@ func (s *Store) StartHuddle(ctx context.Context, value domain.Call, started, joi
 		return domain.Call{}, false, err
 	}
 	if err := insertOutbox(ctx, tx, started); err != nil {
+		return domain.Call{}, false, err
+	}
+	if err := refreshHuddleStateTx(ctx, tx, value.WorkspaceID, value.CreatedBy, value.ID, value.CreatedBy, started.CreatedAt); err != nil {
 		return domain.Call{}, false, err
 	}
 	value.Participants = []domain.UserID{value.CreatedBy}
@@ -20326,6 +20372,11 @@ func (s *Store) JoinCall(ctx context.Context, workspace domain.WorkspaceID, id d
 	if joined {
 		if err := insertOutbox(ctx, tx, event); err != nil {
 			return domain.Call{}, err
+		}
+		if value.Kind == domain.CallKindHuddle {
+			if err := refreshHuddleStateTx(ctx, tx, workspace, user, id, user, event.CreatedAt); err != nil {
+				return domain.Call{}, err
+			}
 		}
 	}
 	err = fillCallParticipants(ctx, tx, &value)
@@ -20386,6 +20437,11 @@ func (s *Store) LeaveCall(ctx context.Context, workspace domain.WorkspaceID, id 
 			return domain.Call{}, err
 		}
 		value.EndedAt, value.DurationSeconds = endedAt, duration
+	}
+	if value.Kind == domain.CallKindHuddle {
+		if err := refreshHuddleStateTx(ctx, tx, workspace, user, "", user, left.CreatedAt); err != nil {
+			return domain.Call{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.Call{}, err
@@ -20464,6 +20520,22 @@ func (s *Store) EndCall(ctx context.Context, workspace domain.WorkspaceID, id do
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
+	var kind domain.CallKind
+	if err := tx.QueryRowContext(ctx, `SELECT kind FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id).Scan(&kind); err != nil {
+		return err
+	}
+	if kind == domain.CallKindHuddle {
+		// Ending a huddle takes everyone still in it out of it.
+		participants, err := callParticipants(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		for _, participant := range participants {
+			if err := refreshHuddleStateTx(ctx, tx, workspace, participant, "", event.ActorID, event.CreatedAt); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -20473,8 +20545,11 @@ func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.Worksp
 		return err
 	}
 	defer tx.Rollback()
+	// A huddle's participants move one at a time through StartHuddle,
+	// JoinCall and LeaveCall, which keep each member's huddle state with them;
+	// it is not an app-registered call whose list an app replaces.
 	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id).Scan(&exists); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM calls WHERE workspace_id = ? AND id = ? AND kind <> ?`, workspace, id, domain.CallKindHuddle).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return store.ErrNotFound
 		}

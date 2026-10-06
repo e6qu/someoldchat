@@ -110,7 +110,7 @@ type Service interface {
 	StartMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamStart) (domain.Message, error)
 	AppendMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
 	StopMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
-	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID, domain.MessageTimestamp) (domain.EphemeralMessage, error)
+	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID, domain.MessageTimestamp, bool) (domain.EphemeralMessage, error)
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
 	RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) (domain.AccessLogPage, error)
@@ -128,6 +128,10 @@ type Service interface {
 	ConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationRetention, int, error)
 	SetConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) error
 	RemoveConversationRetention(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error
+	// Workspace permissions. Any member reads them, because the composer and
+	// the create-channel dialog follow them; only an administrator sets them.
+	WorkspacePolicy(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspacePolicy, error)
+	SetWorkspacePolicy(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspacePolicy) (domain.WorkspacePolicy, error)
 	InviteShared(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.WorkspaceID, string) (domain.SharedInvite, error)
 	ApproveSharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)
 	DenySharedInvite(context.Context, domain.WorkspaceID, domain.UserID, domain.SharedInviteID) (domain.SharedInvite, error)

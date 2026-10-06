@@ -2634,7 +2634,7 @@ func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
 	if err != nil || updated.Attachments != `[{"text":"updated"}]` {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
-	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "", "")
+	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "", "", false)
 	if err != nil || ephemeral.Attachments != `[{"text":"attachment"}]` {
 		t.Fatalf("ephemeral=%+v err=%v", ephemeral, err)
 	}
@@ -2754,7 +2754,7 @@ func TestEveryMessageWriteUsesOneStructuredBodyLimit(t *testing.T) {
 	if _, err := messages.ScheduleMessageWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, domain.ErrInvalidMessage) {
 		t.Fatalf("schedule oversized body err=%v", err)
 	}
-	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", ""); !errors.Is(err, domain.ErrInvalidEphemeral) {
+	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", "", false); !errors.Is(err, domain.ErrInvalidEphemeral) {
 		t.Fatalf("ephemeral oversized body err=%v", err)
 	}
 	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{

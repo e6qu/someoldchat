@@ -227,11 +227,22 @@ a private channel, and cannot be converted a second time.
   group-DM opening. Add-history and conversion are first-party Slack journeys,
   not invented Web API methods. Where the help text leaves a history option or
   transition unspecified, the product choice recorded under DM-03 applies.
-- Workspace owner restrictions on private-channel creation and on converting
-  Slack Connect group DMs are published
-  ([Manage settings and permissions for Slack Connect direct messages](https://slack.com/help/articles/360060326994-Manage-settings-and-permissions-for-Slack-Connect-direct-messages))
-  but not implemented: conversion refuses only Single-Channel Guests. The
-  product gap audit tracks it.
+- The workspace's "who can create private channels" policy
+  ([Manage settings and permissions for Slack Connect direct messages](https://slack.com/help/articles/360060326994-Manage-settings-and-permissions-for-Slack-Connect-direct-messages)),
+  set by an administrator on the workspace settings page (everyone, workspace
+  admins and owners, or owners only), governs conversion as it governs
+  creation: conversion makes a private channel. A member it leaves out is not
+  offered the action and, asked directly, is refused with a 403 that names the
+  policy and leaves the group DM unchanged; Single-Channel Guests are refused
+  whatever the policy. Service, web and cross-composition parity tests cover
+  both outcomes, and the `[ADMIN-02 COMP-01 DM-05]` browser journey shows a
+  plain member the private choice as unavailable with the reason. A one-to-one
+  DM is refused as not convertible before any permission is asked.
+- The restriction on converting a *Slack Connect* group DM has nothing to
+  govern: a group DM here only holds members of its own workspace and
+  `conversations.inviteShared` refuses a DM, so no group DM includes external
+  people. The settings page names it as absent, and the product gap audit
+  tracks Slack Connect DMs.
 ## Journey-source map
 
 | Journey | Official source | Behavior established |

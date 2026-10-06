@@ -26,7 +26,7 @@ fetch() {
 	sed -e 's/<[^>]*>/ /g' -e 's/&nbsp;/ /g' -e 's/&#160;/ /g' -e "s/&#39;/'/g" -e 's/&amp;/\\&/g' "$raw" |
 		tr '\n\r\t\302\240' '     ' |
 		sed -e 's/  */ /g' >"$2"
-	rm -f "$raw"
+	mv "$raw" "$2.page"
 }
 
 # closest_sentences prints the three sentences of a fetched page that share the
@@ -66,10 +66,22 @@ assert_contains() {
 		echo "source: $4" >&2
 		echo "expected: $2" >&2
 		closest_sentences "$1" "$2"
+		keep_changed_page "$1"
 		failures=$((failures + 1))
 		return 0
 	fi
 	assertions=$((assertions + 1))
+}
+
+# keep_changed_page saves the page an assertion no longer finds its text in,
+# so the change is adopted from Slack's current wording, printed by the CI job
+# as article text, rather than from the three closest sentences alone. A page
+# is saved once however many of its assertions fail.
+keep_changed_page() {
+	[ -n "${SAMEOLDCHAT_REFERENCE_CAPTURE:-}" ] && [ -f "$1.page" ] || return 0
+	mkdir -p "$SAMEOLDCHAT_REFERENCE_CAPTURE/help"
+	kept="$SAMEOLDCHAT_REFERENCE_CAPTURE/help/$(basename "$1")"
+	[ -f "$kept" ] || cp "$1.page" "$kept"
 }
 
 assertions=0
@@ -358,7 +370,7 @@ assert_contains "$work/notifications.html" 'only exact matches will trigger noti
 	'[NOTIFY-01] channel keywords use exact case-insensitive matching' "$notification_url"
 assert_contains "$work/notifications.html" "Keywords in messages sent in threads you're not following won't trigger a notification" \
 	'[NOTIFY-01] channel keywords trigger only from threads the member follows' "$notification_url"
-assert_contains "$work/notifications.html" 'Channels with notifications set to "All new posts"' \
+assert_contains "$work/notifications.html" 'Channels with notifications set to “All new posts”' \
 	'[NOTIFY-01 ACTIVITY-01] all-post channels can be included in Activity' "$notification_url"
 assert_contains "$work/conversation-notifications.html" 'All new posts' \
 	'[NOTIFY-02] channels and group DMs expose all-post conversation overrides' "$conversation_notification_url"
@@ -451,19 +463,19 @@ assert_contains "$work/accessibility.html" 'keyboard' \
 assert_contains "$work/screen-reader.html" 'screen reader' \
 	'[A11Y-02] Slack documents a dedicated screen-reader journey' "$screen_reader_url"
 
-assert_contains "$work/reminders.html" 'Later tab in your sidebar.' \
-	'[REMIND-02] personal reminder creation starts in Later' "$reminder_help_url"
+assert_contains "$work/reminders.html" 'Click the To-dos tab in your sidebar.' \
+	'[REMIND-02] personal reminder creation starts in To-dos, which the product still calls Later' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'Remind me about this' \
 	'[REMIND-01] message and file reminders use the message action' "$reminder_help_url"
 assert_contains "$work/reminders.html" '/remind [#channel] [what] [when]' \
 	'[REMIND-03] channel reminder slash-command grammar' "$reminder_help_url"
-assert_contains "$work/reminders.html" "Channel reminders can’t be edited" \
+assert_contains "$work/reminders.html" "Reminders in channels can’t be edited, but you can delete and recreate them" \
 	'[REMIND-03] channel reminders are delete-and-recreate' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'A message that is only visible to you will appear' \
 	'[REMIND-03] /remind list is private to the caller' "$reminder_help_url"
 assert_contains "$work/reminders.html" '9 a.m. in your time zone' \
 	'[REMIND-02] date-only reminder default is local 9 AM' "$reminder_help_url"
-assert_contains "$work/reminders.html" 'guests can only set reminders for themselves' \
+assert_contains "$work/reminders.html" "Guests can't create channel reminders" \
 	'[REMIND-02] guest reminder boundary' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'see a badge on the' \
 	'[REMIND-04] due personal reminders badge Later and Activity' "$reminder_help_url"
@@ -506,9 +518,16 @@ assert_contains "$work/keyboard-navigation.html" 'Ctrl 3' \
 assert_contains "$work/keyboard-navigation.html" 'Ctrl Shift 3' \
 	'[ACTIVITY-01] Slack web on Windows and Linux opens Activity with the third navigation-tab shortcut' "$keyboard_navigation_url"
 
-for section in 'In progress' 'Archived' 'Completed' 'Show upcoming reminders'; do
-	assert_contains "$work/later.html" "$section" "[LATER-02] Later exposes $section" "$later_help_url"
-done
+# Slack is rolling out To-dos and Saved in place of Later; the product still has
+# the Later it replaces (see the LATER-02 row of specs/product-gap-audit.md).
+# These hold the gap to Slack's current wording, so the row is revisited when
+# Slack's articles change again.
+assert_contains "$work/later.html" 'Saved items have moved out of Later (which is now To-dos' \
+	'[LATER-02] Slack is replacing Later with To-dos and Saved' "$later_help_url"
+assert_contains "$work/later.html" 'access them from the Saved section of Home' \
+	'[LATER-01] saved items live in the Saved section of Home' "$later_help_url"
+assert_contains "$work/reminders.html" 'Overdue to-dos with reminders in the past' \
+	'[LATER-02] To-dos filter reminders by overdue, upcoming and none' "$reminder_help_url"
 
 assert_contains "$work/reminders-add.html" 'natural language description (Ex. "in 15 minutes," or "every Thursday")' \
 	'[REMIND-API-01] reminders.add natural-language argument' "$reminder_api_url"

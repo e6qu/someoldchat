@@ -3365,7 +3365,7 @@ if(before)return between===''?'':between.slice(0,2)===gap?between.slice(2):null;
 if(after)return between===''?'':between.slice(-2)===gap?between.slice(0,-2):null;
 return between}
 function reconcile(){var target=doc.text();var parts=topParts();var texts=parts.map(function(part){return part.text});
-if(texts.join('\n\n')===target){written=target;return}
+if(texts.join('\n\n')===target){written=target;return false}
 var kept=0;var prefix='';
 while(kept<parts.length){var next=kept?prefix+'\n\n'+texts[kept]:texts[kept];if(target===next||target.indexOf(next+'\n\n')===0){prefix=next;kept++}else break}
 var middle=middleOf(target,kept?prefix.length:0,target.length,kept>0,false);var tail=0;var suffix='';
@@ -3376,7 +3376,7 @@ var caret=caretOffset(removed);var made=middle?plainBlock(middle):null;
 if(made)editor.insertBefore(made,stop);removed.forEach(function(node){node.remove()});if(made&&caret>=0)placeCaret(made,caret);
 written=serialize();
 if(written!==target){editor.textContent='';if(target){made=plainBlock(target);editor.appendChild(made)}written=serialize()}
-if(made)upgrade(made);redrawn()}
+if(made)upgrade(made);redrawn();return true}
 function upgrade(part){var markdown=part.getAttribute('data-markdown');var body=new URLSearchParams();body.set('_csrf',csrfField?csrfField.value:'');body.set('markdown',markdown);
 fetch(blocksURL,{method:'POST',body:body,credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){return response.ok?response.json():null}).then(function(data){if(!data||!Array.isArray(data.blocks))return;if(data.blocks.map(function(view){return view.markdown}).join('\n\n')!==markdown)return;part.liveBlocks=data.blocks;swap(part)}).catch(function(){})}
 function swap(part){if(!part.isConnected||!part.liveBlocks)return;var known=initial.get(part);if(!known||block(part)!==known.text)return;
@@ -3385,19 +3385,24 @@ var before=serialize();var made=part.liveBlocks.map(renderedBlock);made.forEach(
 if(serialize()!==before){editor.insertBefore(part,made[0]);made.forEach(function(view){view.remove()})}redrawn()}
 document.addEventListener('selectionchange',function(){if(!liveDeferred.length)return;var waiting=liveDeferred;liveDeferred=[];waiting.forEach(swap)});
 function resync(){if(liveSyncing||stopped)return;liveSyncing=true;var again=false;capture();
-fetch(textURL,{credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){if(!response.ok)throw new Error('unavailable');return response.json()}).then(function(data){capture();var fresh=window.sameoldchatCanvasText.load(JSON.parse(data.text_state||'[]'));queue.forEach(function(op){fresh.apply(op)});
+fetch(textURL,{credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){if(!response.ok)throw new Error('unavailable');return response.json()}).then(function(data){capture();var held=holdCaret();var fresh=window.sameoldchatCanvasText.load(JSON.parse(data.text_state||'[]'));queue.forEach(function(op){fresh.apply(op)});
 if(fresh.pendingCount()>0)throw new Error('out of step');
 var buffered=liveBuffer;liveBuffer=[];buffered.forEach(function(change){if(change.resync||!Array.isArray(change.ops)){again=true;return}change.ops.forEach(function(op){fresh.apply(op)})});
-if(fresh.pendingCount()>0)again=true;doc=fresh;reconcile();liveAttempts=again?liveAttempts+1:0;if(liveAttempts>3)throw new Error('out of step')}).catch(function(){stopped=true;again=false;say('This canvas changed in a way this page cannot follow. Reload the canvas to keep writing.')}).finally(function(){liveSyncing=false;if(again)resync()})}
+if(fresh.pendingCount()>0)again=true;doc=fresh;if(reconcile())putCaret(held);liveAttempts=again?liveAttempts+1:0;if(liveAttempts>3)throw new Error('out of step')}).catch(function(){stopped=true;again=false;say('This canvas changed in a way this page cannot follow. Reload the canvas to keep writing.')}).finally(function(){liveSyncing=false;if(again)resync()})}
 function receive(change){if(stopped||!change)return;if(liveSyncing){liveBuffer.push(change);return}if(change.resync||!Array.isArray(change.ops)){resync();return}
-capture();try{change.ops.forEach(function(op){doc.apply(op)})}catch(error){resync();return}
-if(doc.pendingCount()>0){resync();return}reconcile();if(queue.length&&!sending)schedule(600)}
+capture();var held=holdCaret();try{change.ops.forEach(function(op){doc.apply(op)})}catch(error){resync();return}
+if(doc.pendingCount()>0){resync();return}if(reconcile())putCaret(held);if(queue.length&&!sending)schedule(600)}
 function visibleText(node){return Array.from(node.textContent.replace(/ /g,' ').replace(/​/g,''))}
 function alignment(markdown,visible){var source=Array.from(markdown);var map=[];var index=0;for(var position=0;position<visible.length;position++){var at=index;while(at<source.length&&source[at]!==visible[position])at++;if(at<source.length){map.push(at);index=at+1}else map.push(Math.min(index,source.length))}map.push(source.length);return map}
-function idFor(node,at){var parts=topParts();var offset=0;
+function positionFor(node,at){var parts=topParts();var offset=0;
 for(var index=0;index<parts.length;index++){var part=parts[index];if(part.nodes.some(function(candidate){return candidate.contains(node)})){var block=part.nodes[0];var inBlock=0;
-if(block.nodeType===1){var range=document.createRange();range.setStart(block,0);try{range.setEnd(node,at)}catch(error){return null}var shown=Array.from(range.toString().replace(/ /g,' ').replace(/​/g,'')).length;var visible=visibleText(block);inBlock=alignment(part.text,visible)[Math.min(shown,visible.length)]}
-var position=offset+inBlock;return position>0?doc.idAt(position-1):doc.idAt(0)}offset+=Array.from(part.text).length+2}return null}
+if(block.nodeType===1){var range=document.createRange();range.setStart(block,0);try{range.setEnd(node,at)}catch(error){return -1}var shown=Array.from(range.toString().replace(/ /g,' ').replace(/​/g,'')).length;var visible=visibleText(block);inBlock=alignment(part.text,visible)[Math.min(shown,visible.length)]}
+return offset+inBlock}offset+=Array.from(part.text).length+2}return -1}
+function idFor(node,at){var position=positionFor(node,at);if(position<0)return null;return position>0?doc.idAt(position-1):doc.idAt(0)}
+function holdEnd(node,at){if(!editor.contains(node))return null;var position=positionFor(node,at);if(position<0)return null;return position>0?{id:doc.idAt(position-1)}:{start:true}}
+function holdCaret(){var selection=window.getSelection();if(!selection.rangeCount||!editor.contains(selection.focusNode))return null;var focus=holdEnd(selection.focusNode,selection.focusOffset);if(!focus)return null;return{focus:focus,anchor:selection.isCollapsed?focus:holdEnd(selection.anchorNode,selection.anchorOffset)||focus}}
+function endAt(held){if(held.start){var first=topParts()[0];if(!first||first.nodes[0].nodeType!==1)return null;var walker=document.createTreeWalker(first.nodes[0],NodeFilter.SHOW_TEXT);var text=walker.nextNode();return text?{node:text,offset:0}:{node:first.nodes[0],offset:0}}return held.id?spot(held.id):null}
+function putCaret(held){if(!held)return;var focus=endAt(held.focus);var anchor=held.anchor===held.focus?focus:endAt(held.anchor);if(!focus||!anchor)return;window.getSelection().setBaseAndExtent(anchor.node,anchor.offset,focus.node,focus.offset)}
 function caretID(){var selection=window.getSelection();if(!selection.rangeCount||!editor.contains(selection.focusNode))return null;capture();var caret=idFor(selection.focusNode,selection.focusOffset);if(!caret)return null;
 var anchor=selection.isCollapsed||!editor.contains(selection.anchorNode)?null:idFor(selection.anchorNode,selection.anchorOffset);if(anchor&&anchor.r===caret.r&&anchor.c===caret.c)anchor=null;return{caret:caret,anchor:anchor}}
 function spot(id){var position=doc.positionOf(id);if(position<0)return null;var caret=position+1;var parts=topParts();var offset=0;
@@ -3412,6 +3417,7 @@ function stretch(anchor,caret){var from=spot(anchor);var to=spot(caret);if(!from
 var end=document.createRange();end.setStart(to.node,to.offset);if(range.compareBoundaryPoints(Range.START_TO_START,end)<=0)range.setEnd(to.node,to.offset);else{range.setStart(to.node,to.offset);range.setEnd(from.node,from.offset)}
 return Array.prototype.filter.call(range.getClientRects(),function(rect){return rect.width>0&&rect.height>0}).map(frameOf)}
 var caretLayer=document.createElement('div');caretLayer.className='canvas-carets';caretLayer.setAttribute('aria-hidden','true');form.appendChild(caretLayer);
+function redrawn(){document.dispatchEvent(new Event('sameoldchat-canvas-redrawn'))}
 var redrawPending=false;editor.addEventListener('input',function(){if(redrawPending)return;redrawPending=true;window.requestAnimationFrame(function(){redrawPending=false;redrawn()})});
 window.addEventListener('resize',function(){redrawn()});
 window.sameoldchatCanvasEditor={cursor:caretID,point:point,stretch:stretch,layer:caretLayer};
@@ -4303,6 +4309,7 @@ func (h Handler) Register(serveMux *http.ServeMux) {
 	mux.HandleFunc("POST /app/admin/settings/discoverability", h.workspaceDiscoverabilitySet)
 	mux.HandleFunc("POST /app/admin/settings/disconnect", h.workspaceDisconnectTeam)
 	mux.HandleFunc("POST /app/admin/settings/retention", h.workspaceRetentionSet)
+	mux.HandleFunc("POST /app/admin/settings/permissions", h.workspacePermissionsSet)
 	mux.HandleFunc("POST /app/admin/settings/profile-fields", h.workspaceProfileFieldSet)
 	mux.HandleFunc("POST /app/admin/settings/profile-fields/delete", h.workspaceProfileFieldDelete)
 	mux.HandleFunc("POST /app/admin/settings/default-channels", h.workspaceDefaultChannelsSet)
@@ -6860,7 +6867,13 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		if err != nil {
 			return nil, err
 		}
-		canConvert = !membership.UltraRestricted
+		// Converting makes a private channel, so a member the workspace's
+		// private-channel policy leaves out is not offered it.
+		policy, err := h.Messages.WorkspacePolicy(ctx, principal.WorkspaceID, principal.UserID)
+		if err != nil {
+			return nil, err
+		}
+		canConvert = !membership.UltraRestricted && policy.PrivateChannelCreators.Admits(membership.Role)
 	}
 	// Changing a channel's visibility belongs to a workspace administrator, not
 	// to whoever can manage the channel: it decides who in the whole workspace
@@ -11790,6 +11803,12 @@ func (h Handler) redirectMutation(w http.ResponseWriter, r *http.Request, target
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
+// sentViewRefreshHeader marks a send that committed but whose message could
+// not be rendered for the response. The answer is still the composer's
+// success (204), and the composer's catch-up refresh draws the message; the
+// header lets it say so rather than leave the member wondering.
+const sentViewRefreshHeader = "X-SameOldChat-Sent-View"
+
 func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
@@ -11990,14 +12009,24 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Header.Get("HX-Request") == "true" {
+		// The message is stored. Everything below only renders it, so a
+		// failure here must not be reported as the send failing: the
+		// composer would file a delivered message under "Not sent". Answer
+		// the success it treats as sent instead; its catch-up refresh draws
+		// the message from the conversation.
+		sentButNotRendered := func() {
+			w.Header().Set(sentViewRefreshHeader, "pending")
+			w.WriteHeader(http.StatusNoContent)
+		}
 		sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName)
 		if cookieErr != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-			h.writeAuthError(w, r, auth.ErrNotAuthenticated)
+			// No session means no CSRF token for the fragment's controls.
+			sentButNotRendered()
 			return
 		}
 		conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
 		if conversationErr != nil {
-			h.writeFragmentError(w, conversationErr, "the conversation is temporarily unavailable")
+			sentButNotRendered()
 			return
 		}
 		thread := strings.TrimSpace(fields["thread_ts"])
@@ -12633,13 +12662,14 @@ func (h Handler) channelReminderRequest(ctx context.Context, principal auth.Prin
 	if err != nil {
 		return domain.LaterReminderRequest{}, domain.ErrInvalidLaterReminder
 	}
-	text, due, recurrence, err := domain.ParseReminderExpression(expression, now, location)
+	text, occurrence, err := domain.ParseReminderExpression(expression, now, location)
 	if err != nil {
 		return domain.LaterReminderRequest{}, err
 	}
 	return domain.LaterReminderRequest{
 		Target: domain.LaterReminderChannel, Channel: target.ID, Text: text,
-		DueAt: due.UTC(), TimeZone: location.String(), Recurrence: recurrence,
+		DueAt: occurrence.Due.UTC(), TimeZone: location.String(), Recurrence: occurrence.Recurrence,
+		RecurrenceAnchor: occurrence.Anchor.UTC(),
 	}, nil
 }
 
@@ -13544,6 +13574,8 @@ func (h Handler) convertGroupDirectToPrivate(w http.ResponseWriter, r *http.Requ
 			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this group DM", "Nothing was converted.")
 		case errors.Is(err, domain.ErrNotWorkspaceAdmin):
 			h.writeMutationError(w, r, http.StatusForbidden, "Your guest role cannot create this private channel", "Ask a full member or multi-channel guest in the group DM to convert it.")
+		case errors.Is(err, domain.ErrPrivateChannelCreationRestricted):
+			h.writeMutationError(w, r, http.StatusForbidden, "Your workspace limits who can create private channels", "Ask a workspace administrator, or someone in this group DM who may create private channels, to convert it. The group DM was not changed.")
 		case errors.Is(err, domain.ErrInvalidConversation), errors.Is(err, store.ErrInvalidConversationType):
 			h.writeMutationError(w, r, http.StatusBadRequest, "That group DM cannot be converted", "Only a group direct message can become a private channel, and it needs a valid channel name.")
 		case errors.Is(err, store.ErrAlreadyExists):
@@ -13581,6 +13613,14 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, store.ErrAlreadyExists):
 			status = http.StatusConflict
 			reason = "A channel with that name already exists."
+		case errors.Is(err, domain.ErrPrivateChannelCreationRestricted):
+			status = http.StatusForbidden
+			reason = "Your workspace limits who can create private channels. Create a public channel, or ask a workspace administrator."
+		case errors.Is(err, domain.ErrUserIsRestricted), errors.Is(err, domain.ErrUserIsUltraRestricted):
+			// A guest was told the store was unavailable, which sent them to
+			// retry something their account type never allows.
+			status = http.StatusForbidden
+			reason = "Guests cannot create channels. Ask a member of the workspace to create it."
 		}
 		h.writeMutationError(w, r, status, heading, reason)
 		return

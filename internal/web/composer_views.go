@@ -101,6 +101,14 @@ func (h Handler) composerViews(ctx context.Context, request composerPageRequest)
 	if request.Member && !conversation.Archived {
 		recentFiles = h.composerRecentFiles(ctx, principal)
 	}
+	// A policy that cannot be read keeps the confirmation: asking once too
+	// often is recoverable, notifying a whole channel unasked is not.
+	broadcastWarningOff := false
+	if !conversation.IsDirectOrGroup() {
+		if policy, err := h.Messages.WorkspacePolicy(ctx, principal.WorkspaceID, principal.UserID); err == nil {
+			broadcastWarningOff = policy.BroadcastWarningOff
+		}
+	}
 	base := func(thread string) composerView {
 		view := composerView{
 			CSRFToken: request.CSRFToken, Channel: channel, ChannelLabel: request.ChannelName,
@@ -116,6 +124,7 @@ func (h Handler) composerViews(ctx context.Context, request composerPageRequest)
 		}
 		if !view.IsDirect {
 			view.MemberCount = request.MemberCount
+			view.BroadcastWarningOff = broadcastWarningOff
 		}
 		if canInvite {
 			view.CanInvite = true

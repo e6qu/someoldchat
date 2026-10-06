@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -1334,8 +1335,42 @@ func TestCurrentWorkflowPermissionFeaturedAndStepMethodsAreDurable(t *testing.T)
 	functionID := fmt.Sprintf("Fn%X", sum[:8])
 	steps := call("/api/functions.workflows.steps.list", url.Values{"function_id": {functionID}, "workflow_id": {"WfHTTP"}})
 	versions, ok := steps["steps_versions"].([]any)
-	if steps["ok"] != true || !ok || len(versions) != 1 {
+	if steps["ok"] != true || !ok || len(versions) != 1 || versions[0].(map[string]any)["is_deleted"] != false {
 		t.Fatalf("workflow steps=%v", steps)
+	}
+	// A step is deleted when the workflow's live revision no longer has it,
+	// judged by the step's identity rather than its position: revision 2
+	// moves the triage step behind a new one, so revision 1's occurrence is
+	// still the live step; revision 3 removes it, so every occurrence is
+	// deleted.
+	publish := func(version uint64, stepsJSON string) {
+		t.Helper()
+		workflow.Version, workflow.PublishedVersion, workflow.Steps = version, version, stepsJSON
+		workflow.UpdatedAt = now.Add(time.Duration(version) * time.Second)
+		if err := repository.UpdateWorkflow(ctx, workflow, events.Event{ID: domain.EventID(fmt.Sprintf("workflow-http-v%d", version)), WorkspaceID: "T1", Topic: "workflow.updated", CreatedAt: workflow.UpdatedAt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deletedFlags := func() []any {
+		t.Helper()
+		listed := call("/api/functions.workflows.steps.list", url.Values{"function_id": {functionID}, "workflow_id": {"WfHTTP"}})
+		values, ok := listed["steps_versions"].([]any)
+		if listed["ok"] != true || !ok {
+			t.Fatalf("workflow steps=%v", listed)
+		}
+		flags := make([]any, 0, len(values))
+		for _, value := range values {
+			flags = append(flags, value.(map[string]any)["is_deleted"])
+		}
+		return flags
+	}
+	publish(2, `[{"function_id":"notify","title":"Notify"},{"function_id":"triage","title":"Triage step"}]`)
+	if flags := deletedFlags(); !reflect.DeepEqual(flags, []any{false, false}) {
+		t.Fatalf("moved step is_deleted=%v, want [false false]", flags)
+	}
+	publish(3, `[{"function_id":"notify","title":"Notify"}]`)
+	if flags := deletedFlags(); !reflect.DeepEqual(flags, []any{true, true}) {
+		t.Fatalf("removed step is_deleted=%v, want [true true]", flags)
 	}
 	missingFunctionSteps := call("/api/functions.workflows.steps.list", url.Values{
 		"function_id": {"FnMissing"}, "workflow_id": {"WfHTTP"},

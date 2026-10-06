@@ -18,8 +18,13 @@ returned to apps.
 
 ## LATER-02 — Review Later
 
-Later presents Slack's current In progress, Archived, and Completed organization
-and available filters such as upcoming reminders. Each item preserves source
+Later presents the In progress, Archived, and Completed organization and the
+upcoming-reminders filter Slack documented for Later. Slack is rolling out its
+replacement: Later becomes To-dos, which filters reminders by overdue, upcoming
+and none and sorts them by due or created date, and saved items move to a Saved
+section of Home ("Saved items have moved out of Later (which is now To-dos)").
+The product has not followed; the gap is the LATER-02 row of
+`specs/product-gap-audit.md`. Each item preserves source
 identity, destination, time, content preview, reminder/due state, and an action
 to jump to the source. Missing or no-longer-accessible sources remain
 intelligible without leaking content.
@@ -140,8 +145,11 @@ being marked done as if it were a one-off.
   No SDK suite is cited as Later evidence because Slack exposes no current
   Later Web API.
 - Later organization (In progress, Archived, and Completed, with reminders
-  and newly saved items in In progress) follows
-  [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later),
+  and newly saved items in In progress) follows what
+  [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later)
+  documented before Slack began replacing Later with To-dos and Saved; the
+  external gate now asserts the replacement, which the product does not yet
+  have,
   as do source navigation, removal, and the due-reminder badges asserted by
   `make external-contract-qualification`. The `/remind` grammar is judged
   against the examples in
@@ -150,7 +158,15 @@ being marked done as if it were a one-off.
   `reminders.add` ledger entry lists the phrasings it reads.
 - Product choices where Slack publishes nothing: a monthly reminder anchored
   on the 29th–31st fires on the last day of a shorter month and returns to its
-  anchored day afterwards (`TestNextReminderDueMonthlyClampsToMonthEndWithoutDrifting`);
+  anchored day afterwards (`TestNextReminderDueMonthlyClampsToMonthEndWithoutDrifting`).
+  This holds from the first occurrence: `/remind … every month` (or
+  `reminders.add` with that phrase) set on such a day after its time has
+  passed first falls on the next month's last day, and the series keeps the
+  day it was set on, so October 31st recurs on November 30th and then
+  December 31st, and "every year" set on February 29th falls on the 28th in
+  common years (`TestEveryMonthPhraseClampsFirstOccurrenceAndKeepsItsDay`).
+  The anchor travels beside the due instant through the service and the gRPC
+  seam;
   deleting a Later reminder while delivery holds its lease answers not found,
   so delivery and deletion have one outcome
   (`TestLaterReminderCannotBeDeletedWhileDeliveryOwnsTheLease`); and a
@@ -164,10 +180,10 @@ being marked done as if it were a one-off.
 | Journey | Official source | Behavior established |
 | --- | --- | --- |
 | LATER-01 | [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later) | Slack saves and removes private Later items from source actions. |
-| LATER-02 | [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later) | Later exposes In progress, Archived, Completed, and upcoming reminder organization. |
+| LATER-02 | [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later) | Slack is replacing Later with To-dos (reminders filtered by overdue, upcoming and none) and a Saved section of Home; the product keeps Later's In progress, Archived and Completed (gap). |
 | LATER-03 | [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later) | Later items can be completed, restored, archived, and removed. |
 | REMIND-01 | [Set a reminder](https://slack.com/help/articles/208423427-Set-a-reminder) | Message and file actions create private reminders associated with the source. |
-| REMIND-02 | [Set a reminder](https://slack.com/help/articles/208423427-Set-a-reminder) | Personal reminders are created and managed from Later in local time. |
+| REMIND-02 | [Set a reminder](https://slack.com/help/articles/208423427-Set-a-reminder) | Personal reminders are created and managed from To-dos in local time; the product's surface for them is still Later (LATER-02 gap). |
 | REMIND-03 | [Set a reminder](https://slack.com/help/articles/208423427-Set-a-reminder) | The built-in remind command creates and privately lists channel reminders. |
 | REMIND-04 | [Introducing the new Activity view](https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack/) | Due personal reminders appear in Activity while retaining their Later lifecycle. |
 | REMIND-API-01 | [Stars and reminders changelog](https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/) | Deprecated reminder APIs are separate from current Later and remain degraded. |

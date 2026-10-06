@@ -42,7 +42,9 @@ package web
 //     only afterwards is the view caught up with a forced refresh. A refresh
 //     that fails is the view being behind, announced as such; it used to be
 //     reported as the send failing, putting a committed message in the outbox
-//     as "Not sent".
+//     as "Not sent". A committed send the server could not render answers 204
+//     with X-SameOldChat-Sent-View: pending, the same success, and the
+//     refresh draws the message.
 //   - Suggestions are one listbox per composer, anchored above that composer,
 //     for @ (people, including workspace members outside the conversation
 //     labelled "Not in channel", apps, user groups and @here/@channel/
@@ -51,7 +53,9 @@ package web
 //   - After a message mentioning someone outside the channel commits, the
 //     outbox offers Slack's "Add them" / "Do nothing". A broadcast mention in
 //     a channel of at least six members asks first, the threshold Slack's
-//     "Manage who can notify a channel or workspace" help article publishes.
+//     "Manage who can notify a channel or workspace" help article publishes,
+//     unless the workspace has turned the warning off (the form's
+//     data-broadcast-warning-off), as that article lets an administrator do.
 //   - Up in an empty composer edits the member's own last message in that
 //     composer's conversation or thread, in place, through the message
 //     layer's window.sameoldchatEditLastMessage; when there is no message of
@@ -229,6 +233,7 @@ var csrfInput=form.querySelector('input[name=_csrf]');
 var csrf=csrfInput?csrfInput.value:'';
 var channelLabel=form.getAttribute('data-channel-label')||'this channel';
 var memberCount=parseInt(form.getAttribute('data-member-count')||'0',10)||0;
+var broadcastWarningOff=form.hasAttribute('data-broadcast-warning-off');
 var inviteURL=form.getAttribute('data-invite-url')||'';
 var direct=form.hasAttribute('data-direct');
 var draftKey='sameoldchat-draft:'+(form.getAttribute('data-draft-url')||form.getAttribute('action'));
@@ -632,7 +637,7 @@ if(uploadForm)uploadForm.addEventListener('submit',function(event){event.prevent
 form.addEventListener('dragover',function(event){if(uploadFile&&event.dataTransfer&&event.dataTransfer.types&&Array.prototype.indexOf.call(event.dataTransfer.types,'Files')!==-1){event.preventDefault();form.classList.add('is-dragging')}});
 form.addEventListener('dragleave',function(){form.classList.remove('is-dragging')});
 form.addEventListener('drop',function(event){form.classList.remove('is-dragging');var files=event.dataTransfer&&event.dataTransfer.files;if(files&&files.length&&stageFiles(files))event.preventDefault()});
-function needsConfirmation(text){var match=/<!(channel|here|everyone)>/.exec(text);if(!match||direct||memberCount<6)return null;return match[1]}
+function needsConfirmation(text){var match=/<!(channel|here|everyone)>/.exec(text);if(!match||direct||broadcastWarningOff||memberCount<6)return null;return match[1]}
 function outboxItem(className,state,text){var item=doc.createElement('div');item.className='composer-outbox-item '+className;item.setAttribute('role','group');var copy=doc.createElement('p');copy.className='composer-outbox-text';copy.textContent=text;var label=doc.createElement('p');label.className='composer-outbox-state';label.textContent=state;var actions=doc.createElement('div');actions.className='composer-outbox-actions';item.appendChild(copy);item.appendChild(label);item.appendChild(actions);return{item:item,copy:copy,state:label,actions:actions}}
 function actionButton(actions,label,handler){var button=doc.createElement('button');button.type='button';button.textContent=label;button.addEventListener('click',handler);actions.appendChild(button);return button}
 function previewText(text){var holder=doc.createElement('div');renderMarkup(holder,text);return cleanText(holder.textContent)||'(files)'}
@@ -671,7 +676,7 @@ if(retrying)retrying.remove();
 if(response.headers.get('X-SameOldChat-Draft-Cleanup')==='failed')announce('Your message was sent, but its old draft could not be cleared. Delete it from Drafts & sent.');
 var redirect=response.headers.get('HX-Redirect');
 if(redirect){clearSent(text);if(ownPath(redirect)){var next=new URL(redirect,window.location.href);if(next.pathname+next.search===window.location.pathname+window.location.search){window.location.hash=next.hash;window.location.reload()}else window.location.assign(redirect)}return null}
-if(response.status===204){clearSent(text);committed=true;return null}
+if(response.status===204){clearSent(text);committed=true;if(response.headers.get('X-SameOldChat-Sent-View')==='pending')announce('Sent. The conversation is refreshing to show it.');return null}
 return response.text().then(function(html){
 clearSent(text);
 var newest=form.getAttribute('data-newest');if(!api.thread&&newest&&ownPath(newest)){window.location.assign(newest);return null}

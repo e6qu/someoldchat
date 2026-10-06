@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,5 +275,70 @@ func TestSocketModeDeliversLinkSharedToTheClaimingApp(t *testing.T) {
 			t.Fatal("the socket never received link_shared")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// An explicit unfurl_links decides whether a message hands its links to
+// apps; a message that omits it does, whoever posted it, as before the flag
+// was applied. The scheduled path carries the flag to delivery, and an edit
+// keeps the choice the message was posted with.
+func TestUnfurlLinksDecidesWhetherAppsAreAskedToUnfurl(t *testing.T) {
+	ctx := context.Background()
+	state, messages := linkSharedFixture(t)
+	yes, no := true, false
+	for _, test := range []struct {
+		name    string
+		request domain.MessagePostRequest
+		author  domain.UserID
+		shared  bool
+	}{
+		{"bot default", domain.MessagePostRequest{AppID: "A1", BotID: "BA1"}, "UB1", true},
+		{"bot unfurl_links", domain.MessagePostRequest{AppID: "A1", BotID: "BA1", UnfurlLinks: &yes}, "UB1", true},
+		{"bot unfurl_links=false", domain.MessagePostRequest{AppID: "A1", BotID: "BA1", UnfurlLinks: &no}, "UB1", false},
+		{"bot unfurl_media=false", domain.MessagePostRequest{AppID: "A1", BotID: "BA1", UnfurlMedia: &no}, "UB1", true},
+		{"person default", domain.MessagePostRequest{}, "U1", true},
+		{"person through an app's user token", domain.MessagePostRequest{AppID: "A1"}, "U1", true},
+		{"person unfurl_links=false", domain.MessagePostRequest{UnfurlLinks: &no}, "U1", false},
+	} {
+		request := test.request
+		request.Conversation, request.Text = "CPUB", "see https://example.com/"+strings.ReplaceAll(test.name, " ", "-")
+		mark := len(state.Outbox())
+		posted, err := messages.PostMessageAs(ctx, "T1", test.author, request)
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		shared, next := linkSharedRecords(state, mark)
+		if (len(shared) == 1) != test.shared || len(shared) > 1 {
+			t.Fatalf("%s: link.shared records=%d, want shared=%v", test.name, len(shared), test.shared)
+		}
+		text := posted.Text + " https://example.com/added"
+		if _, err := messages.UpdateMessage(ctx, "T1", test.author, "CPUB", domain.NewMessageTimestamp(posted.CreatedAt), domain.MessagePatch{Text: &text}); err != nil {
+			t.Fatalf("%s edit: %v", test.name, err)
+		}
+		if edited, _ := linkSharedRecords(state, next); (len(edited) == 1) != test.shared || len(edited) > 1 {
+			t.Fatalf("%s: edit link.shared records=%d, want shared=%v", test.name, len(edited), test.shared)
+		}
+	}
+
+	// Deferred delivery keeps the flag the message was scheduled with.
+	for _, unfurl := range []*bool{nil, &no} {
+		streamState := ""
+		if unfurl != nil {
+			streamState = `{"unfurl_links":false}`
+		}
+		scheduled, err := messages.ScheduleMessageAs(ctx, "T1", "UB1", domain.ScheduledMessageRequest{
+			Channel: "CPUB", Text: "later https://example.com/scheduled", StreamState: streamState,
+			PostAt: time.Now().Add(time.Hour), AppID: "A1", BotID: "BA1", CredentialHash: "xoxb-A1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mark := len(state.Outbox())
+		if _, err := messages.PostScheduledMessage(ctx, "T1", scheduled.ID); err != nil {
+			t.Fatal(err)
+		}
+		if shared, _ := linkSharedRecords(state, mark); (len(shared) == 1) != (unfurl == nil) {
+			t.Fatalf("scheduled bot message unfurl_links=false given=%v: link.shared records=%d", unfurl != nil, len(shared))
+		}
 	}
 }

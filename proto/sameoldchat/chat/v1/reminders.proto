@@ -31,6 +31,9 @@ message AddReminderRequest {
   string recurrence = 6;
   string time_zone = 7;
   repeated string weekdays = 8;
+  // recurrence_anchor positions a recurring series when it differs from
+  // time; zero means the series starts at time.
+  int64 recurrence_anchor = 9;
 }
 
 message ReminderRequest {
@@ -87,6 +90,9 @@ message CreateLaterReminderRequest {
   int64 due_at = 8;
   string timezone = 9;
   string recurrence = 10;
+  // recurrence_anchor positions a recurring series when it differs from
+  // due_at; zero means the series starts at due_at.
+  int64 recurrence_anchor = 11;
 }
 
 message LaterReminderRequest {
@@ -119,6 +125,9 @@ message UpdateLaterReminderRequest {
   int64 due_at = 7;
   string timezone = 8;
   string recurrence = 9;
+  // recurrence_anchor positions a recurring series when it differs from
+  // due_at; zero means the series starts at due_at.
+  int64 recurrence_anchor = 10;
 }
 
 message LaterReminderPage {

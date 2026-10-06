@@ -17,8 +17,12 @@ hashes and suite paths are recorded in [`../../specs/sdk-compatibility.yaml`](..
 The fixture registers the Slack handler exactly as the production server does
 with its default `-api-rate-limit`, limiter included, so a route the limited
 registration fails to serve fails qualification. The suites stay inside the
-limiter's budgets: the Tier 4 floor per method and five posts in a burst per
-channel.
+limiter's budgets: each method's published tier (Tier 1 admits a burst of
+three, then one call a minute; Tier 2 twenty a minute) and five posts in a
+burst per channel. The Java suite's `RateLimitTable` prints the pinned
+`slack-api-client`'s `MethodsRateLimits` table, and `qualify.sh` fails when
+`specs/upstream/java-slack-sdk/methods-rate-limits.json`, which the server's
+tiers are tested against, differs from it.
 
 The Node, Python, and Java Web API suites exercise presence-sensitive rich-message
 updates through the SDKs' own array encoders: omitted blocks and attachments
