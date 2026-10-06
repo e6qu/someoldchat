@@ -3365,7 +3365,7 @@ if(before)return between===''?'':between.slice(0,2)===gap?between.slice(2):null;
 if(after)return between===''?'':between.slice(-2)===gap?between.slice(0,-2):null;
 return between}
 function reconcile(){var target=doc.text();var parts=topParts();var texts=parts.map(function(part){return part.text});
-if(texts.join('\n\n')===target){written=target;return}
+if(texts.join('\n\n')===target){written=target;return false}
 var kept=0;var prefix='';
 while(kept<parts.length){var next=kept?prefix+'\n\n'+texts[kept]:texts[kept];if(target===next||target.indexOf(next+'\n\n')===0){prefix=next;kept++}else break}
 var middle=middleOf(target,kept?prefix.length:0,target.length,kept>0,false);var tail=0;var suffix='';
@@ -3376,7 +3376,7 @@ var caret=caretOffset(removed);var made=middle?plainBlock(middle):null;
 if(made)editor.insertBefore(made,stop);removed.forEach(function(node){node.remove()});if(made&&caret>=0)placeCaret(made,caret);
 written=serialize();
 if(written!==target){editor.textContent='';if(target){made=plainBlock(target);editor.appendChild(made)}written=serialize()}
-if(made)upgrade(made);redrawn()}
+if(made)upgrade(made);redrawn();return true}
 function upgrade(part){var markdown=part.getAttribute('data-markdown');var body=new URLSearchParams();body.set('_csrf',csrfField?csrfField.value:'');body.set('markdown',markdown);
 fetch(blocksURL,{method:'POST',body:body,credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){return response.ok?response.json():null}).then(function(data){if(!data||!Array.isArray(data.blocks))return;if(data.blocks.map(function(view){return view.markdown}).join('\n\n')!==markdown)return;part.liveBlocks=data.blocks;swap(part)}).catch(function(){})}
 function swap(part){if(!part.isConnected||!part.liveBlocks)return;var known=initial.get(part);if(!known||block(part)!==known.text)return;
@@ -3388,10 +3388,10 @@ function resync(){if(liveSyncing||stopped)return;liveSyncing=true;var again=fals
 fetch(textURL,{credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(response){if(!response.ok)throw new Error('unavailable');return response.json()}).then(function(data){capture();var held=holdCaret();var fresh=window.sameoldchatCanvasText.load(JSON.parse(data.text_state||'[]'));queue.forEach(function(op){fresh.apply(op)});
 if(fresh.pendingCount()>0)throw new Error('out of step');
 var buffered=liveBuffer;liveBuffer=[];buffered.forEach(function(change){if(change.resync||!Array.isArray(change.ops)){again=true;return}change.ops.forEach(function(op){fresh.apply(op)})});
-if(fresh.pendingCount()>0)again=true;doc=fresh;reconcile();putCaret(held);liveAttempts=again?liveAttempts+1:0;if(liveAttempts>3)throw new Error('out of step')}).catch(function(){stopped=true;again=false;say('This canvas changed in a way this page cannot follow. Reload the canvas to keep writing.')}).finally(function(){liveSyncing=false;if(again)resync()})}
+if(fresh.pendingCount()>0)again=true;doc=fresh;if(reconcile())putCaret(held);liveAttempts=again?liveAttempts+1:0;if(liveAttempts>3)throw new Error('out of step')}).catch(function(){stopped=true;again=false;say('This canvas changed in a way this page cannot follow. Reload the canvas to keep writing.')}).finally(function(){liveSyncing=false;if(again)resync()})}
 function receive(change){if(stopped||!change)return;if(liveSyncing){liveBuffer.push(change);return}if(change.resync||!Array.isArray(change.ops)){resync();return}
 capture();var held=holdCaret();try{change.ops.forEach(function(op){doc.apply(op)})}catch(error){resync();return}
-if(doc.pendingCount()>0){resync();return}reconcile();putCaret(held);if(queue.length&&!sending)schedule(600)}
+if(doc.pendingCount()>0){resync();return}if(reconcile())putCaret(held);if(queue.length&&!sending)schedule(600)}
 function visibleText(node){return Array.from(node.textContent.replace(/ /g,' ').replace(/​/g,''))}
 function alignment(markdown,visible){var source=Array.from(markdown);var map=[];var index=0;for(var position=0;position<visible.length;position++){var at=index;while(at<source.length&&source[at]!==visible[position])at++;if(at<source.length){map.push(at);index=at+1}else map.push(Math.min(index,source.length))}map.push(source.length);return map}
 function positionFor(node,at){var parts=topParts();var offset=0;
