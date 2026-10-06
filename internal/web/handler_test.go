@@ -2777,6 +2777,19 @@ func TestSavedJourneySavesOpensMovesAndCleansUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The item's More actions menu names it in the query rather than the body;
+	// the query is part of the form, so it must be moved once, not twice.
+	menuMove := postForm(t, mux, "/app/saved/move?channel=Cdev&return=saved&id="+url.QueryEscape(string(again.ID)), "", false)
+	if menuMove.Code != http.StatusSeeOther || !strings.Contains(menuMove.Header().Get("Location"), "changed=moved") {
+		t.Fatalf("menu move status=%d location=%q body=%s", menuMove.Code, menuMove.Header().Get("Location"), menuMove.Body)
+	}
+	if _, err := chat.AddToSaved(context.Background(), "T1", "U1", "Cdev", domain.MessageTimestamp(timestamp)); err != nil {
+		t.Fatal(err)
+	}
+	again, err = chat.SavedItemForMessage(context.Background(), "T1", "U1", message.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	removed := postForm(t, mux, "/app/saved/remove?channel=Cdev&return=saved&id="+url.QueryEscape(string(again.ID)), "", false)
 	if removed.Code != http.StatusSeeOther || !strings.Contains(removed.Header().Get("Location"), "changed=removed") {
 		t.Fatalf("remove status=%d location=%q", removed.Code, removed.Header().Get("Location"))

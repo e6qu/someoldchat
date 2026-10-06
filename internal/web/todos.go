@@ -1053,13 +1053,16 @@ func (h Handler) moveSavedItemsToTodos(w http.ResponseWriter, r *http.Request) {
 	if !h.requireCSRF(w, r) {
 		return
 	}
-	ids := make([]domain.SavedItemID, 0, len(selected)+1)
-	if id := strings.TrimSpace(r.URL.Query().Get("id")); id != "" {
-		ids = append(ids, domain.SavedItemID(id))
-	}
+	// The form values include the query string, so the one item a More
+	// actions menu names arrives here as well as every item clean-up
+	// selected. Each is moved once: moving it again would find it gone.
+	ids := make([]domain.SavedItemID, 0, len(selected))
+	seen := make(map[domain.SavedItemID]bool, len(selected))
 	for _, value := range selected {
-		if value = strings.TrimSpace(value); value != "" {
-			ids = append(ids, domain.SavedItemID(value))
+		id := domain.SavedItemID(strings.TrimSpace(value))
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
 		}
 	}
 	if len(ids) == 0 {

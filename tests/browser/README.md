@@ -46,11 +46,13 @@ The suite exercises behavior that server-side tests cannot observe:
   autocomplete, private channel creation and duplicate-name errors, reviewed
   DM participant expansion with selected history, in-place group-DM conversion
   to a private channel, and navigation to workspace members.
-- **Activity, Later, and reminders:** a private channel created through the
-  Slack-compatible API produces a durable, source-linked Invitations item;
-  focused-message `A` saves for Later, with In progress, Completed, Archived,
-  restore, source navigation, and removal; message-reminder `M` with preset and
-  custom local times; personal reminder editing, completion, and deletion;
+- **Activity, Saved, To-dos, and reminders:** a private channel created
+  through the Slack-compatible API produces a durable, source-linked
+  Invitations item; focused-message `A` adds to Saved in Home, with Open in
+  Home, the clear icon, Move to To-dos, and clean-up (move a selection, remove
+  all); message-reminder `M` creates a to-do with a reminder; Add To-do, the
+  reminder filter and sort, Edit reminder with a custom local time, Clear due
+  date, renaming, Done, and deletion; `/app/later` redirecting to To-dos;
   `/remind` channel creation and the private `/remind list` projection.
 - **Scheduled messages:** scheduling in the browser's local time zone, absence
   from channel history while pending, review on the Scheduled surface, and
