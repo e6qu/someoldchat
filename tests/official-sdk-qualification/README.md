@@ -10,8 +10,8 @@ The Node Web API suite uses `@slack/web-api` 8.2.0 and `@slack/oauth` 4.0.0, the
 The Python Web API, Socket Mode, and Real Time Messaging (`slack_sdk.rtm_v2`)
 suites use `slack-sdk` 3.45.0, the
 Python Bolt suite uses `slack-bolt` 1.28.0, the Java Web API and Socket Mode
-suites use `com.slack.api:slack-api-client` 1.49.0, the Java Bolt suite uses
-`com.slack.api:bolt` 1.49.0, and the Deno suite uses `deno-slack-runtime` 1.1.3. Their immutable artifact
+suites use `com.slack.api:slack-api-client` 1.52.0, the Java Bolt suite uses
+`com.slack.api:bolt` 1.52.0, and the Deno suite uses `deno-slack-runtime` 1.1.3. Their immutable artifact
 hashes and suite paths are recorded in [`../../specs/sdk-compatibility.yaml`](../../specs/sdk-compatibility.yaml).
 
 The fixture registers the Slack handler exactly as the production server does

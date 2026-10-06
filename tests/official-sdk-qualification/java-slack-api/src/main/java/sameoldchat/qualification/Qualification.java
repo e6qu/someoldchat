@@ -68,6 +68,19 @@ public final class Qualification {
             ApiTestResponse api = methods.apiTest(com.slack.api.methods.request.api.ApiTestRequest.builder().build());
             require(api.isOk(), "api.test failed: " + api.getError());
 
+            // blocks.validate is called without a token, as the SDK's own
+            // blocksValidate sends it: its rate-limit table notes it
+            // "requires no token".
+            MethodsClient tokenless = slack.methods();
+            com.slack.api.methods.response.blocks.BlocksValidateResponse validBlocks = tokenless.blocksValidate(r -> r
+                    .blocksAsString("[{\"type\":\"section\",\"text\":{\"type\":\"plain_text\",\"text\":\"Hello\"}}]"));
+            require(validBlocks.isOk(), "tokenless blocks.validate failed: " + validBlocks.getError());
+            com.slack.api.methods.response.blocks.BlocksValidateResponse invalidBlocks = tokenless.blocksValidate(r -> r
+                    .blocksAsString("[{\"type\":\"section\"}]"));
+            require(!invalidBlocks.isOk() && "invalid_blocks".equals(invalidBlocks.getError())
+                    && invalidBlocks.getErrors() != null && !invalidBlocks.getErrors().isEmpty(),
+                    "blocks.validate accepted a section without text: " + invalidBlocks);
+
             AuthTestResponse auth = methods.authTest(com.slack.api.methods.request.auth.AuthTestRequest.builder().build());
             require(auth.isOk(), "auth.test failed: " + auth.getError());
             require("T1".equals(auth.getTeamId()), "auth.test team_id mismatch");
@@ -1190,6 +1203,101 @@ public final class Qualification {
                     com.slack.api.methods.request.admin.users.AdminUsersRemoveRequest.builder()
                             .teamId("T1").userId("U2").build()).isOk(),
                     "admin.users.remove failed");
+
+            // agents.sessions.*: a thread session is created by its first
+            // setStatus, keeps the title it was created with, and is renamed.
+            // Slack allows one message a second to a channel, and the fixture
+            // enforces it; this client has no retry handler for a 429.
+            Thread.sleep(1100);
+            ChatPostMessageResponse sessionRoot = methods.chatPostMessage(r -> r.channel("C1").text("Java agent session"));
+            require(sessionRoot.isOk(), "agent session root failed: " + sessionRoot.getError());
+            com.slack.api.methods.response.agents.sessions.AgentsSessionsSetStatusResponse agentSession = methods.agentsSessionsSetStatus(r -> r
+                    .channelId("C1").threadTs(sessionRoot.getTs()).status("processing").title("Trip research").initiatorUserId("U1"));
+            require(agentSession.isOk() && "processing".equals(agentSession.getStatus()) && "Trip research".equals(agentSession.getTitle()),
+                    "agents.sessions.setStatus failed: " + agentSession);
+            com.slack.api.methods.response.agents.sessions.AgentsSessionsSetStatusResponse agentSessionAgain = methods.agentsSessionsSetStatus(r -> r
+                    .channelId("C1").threadTs(sessionRoot.getTs()).status("active").title("Ignored once the session exists"));
+            require("active".equals(agentSessionAgain.getStatus()) && "Trip research".equals(agentSessionAgain.getTitle()),
+                    "agents.sessions.setStatus renamed an existing session: " + agentSessionAgain);
+            com.slack.api.methods.response.agents.sessions.AgentsSessionsRenameResponse renamedSession = methods.agentsSessionsRename(r -> r
+                    .channelId("C1").threadTs(sessionRoot.getTs()).title("Scuba trip"));
+            require(renamedSession.isOk(), "agents.sessions.rename failed: " + renamedSession.getError());
+            com.slack.api.methods.response.agents.sessions.AgentsSessionsRenameResponse unthreaded = methods.agentsSessionsRename(r -> r
+                    .channelId("C1").title("No thread"));
+            require(!unthreaded.isOk() && "thread_ts_required".equals(unthreaded.getError()),
+                    "agents.sessions.rename without thread_ts: " + unthreaded);
+
+            // agents.conversations.* (Slack Code): a code channel created from a
+            // message is described, given views, commands and a canvas, and
+            // archived with its summary shared back on the origin message.
+            // Slack allows one message a second to a channel, and the fixture
+            // enforces it; this client has no retry handler for a 429.
+            Thread.sleep(1100);
+            ChatPostMessageResponse codeOrigin = methods.chatPostMessage(r -> r.channel("C1").text("Java code channel task"));
+            require(codeOrigin.isOk(), "code channel origin failed: " + codeOrigin.getError());
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsCreateResponse codeChannel = methods.agentsConversationsCreate(r -> r
+                    .name("Java code channel").originChannelId("C1").originMessageTs(codeOrigin.getTs()).sessionId("java-session"));
+            require(codeChannel.isOk() && codeChannel.getChannelId() != null, "agents.conversations.create failed: " + codeChannel);
+            String codeChannelId = codeChannel.getChannelId();
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsCreateResponse codeChannelAgain = methods.agentsConversationsCreate(r -> r
+                    .name("Ignored").sessionId("java-session"));
+            require(codeChannelId.equals(codeChannelAgain.getChannelId()), "agents.conversations.create did not reuse the session's channel: " + codeChannelAgain);
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsSetPropertiesResponse codeProperties = methods.agentsConversationsSetProperties(r -> r
+                    .channelId(codeChannelId)
+                    .codeChannel(com.slack.api.methods.request.agents.conversations.AgentsConversationsSetPropertiesRequest.CodeChannel.builder()
+                            .contextBarItems(java.util.List.of(com.slack.api.methods.request.agents.conversations.AgentsConversationsSetPropertiesRequest.ContextBarItem.builder()
+                                    .key("branch").label("agent/fix").icon("branch").build()))
+                            .build())
+                    .agentResource(com.slack.api.methods.request.agents.conversations.AgentsConversationsSetPropertiesRequest.AgentResource.builder()
+                            .title("Fix").provider("github").build()));
+            require(codeProperties.isOk(), "agents.conversations.setProperties failed: " + codeProperties.getError());
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsSetViewResponse codeView = methods.agentsConversationsSetView(r -> r
+                    .channelId(codeChannelId).viewKey("reports/coverage.html").content("<!doctype html><p>81%</p>")
+                    .csp(com.slack.api.methods.request.agents.conversations.AgentsConversationsSetViewRequest.Csp.builder()
+                            .resourceDomains(java.util.List.of("https://cdn.jsdelivr.net")).build()));
+            require(codeView.isOk() && Integer.valueOf(1).equals(codeView.getContentVersion()), "agents.conversations.setView failed: " + codeView);
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsSetViewResponse codeViewAgain = methods.agentsConversationsSetView(r -> r
+                    .channelId(codeChannelId).viewKey("reports/coverage.html").content("<!doctype html><p>84%</p>"));
+            require(codeView.getViewId().equals(codeViewAgain.getViewId()) && Integer.valueOf(2).equals(codeViewAgain.getContentVersion()),
+                    "agents.conversations.setView did not update the keyed view: " + codeViewAgain);
+            require(methods.agentsConversationsSetView(r -> r
+                    .channelId(codeChannelId).type("diff").content("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n").baseBranch("main").headBranch("fix")).isOk(),
+                    "agents.conversations.setView diff failed");
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsListViewsResponse codeViews = methods.agentsConversationsListViews(r -> r.channelId(codeChannelId));
+            require(codeViews.isOk() && codeViews.getViews().size() == 2 && "coverage".equals(codeViews.getViews().get(0).getLabel())
+                    && "Diff".equals(codeViews.getViews().get(1).getLabel()), "agents.conversations.listViews failed: " + codeViews);
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsRemoveViewResponse codeViewRemoved = methods.agentsConversationsRemoveView(r -> r
+                    .channelId(codeChannelId).viewId(codeView.getViewId()));
+            require(codeViewRemoved.isOk(), "agents.conversations.removeView failed: " + codeViewRemoved.getError());
+            require(methods.agentsConversationsListViews(r -> r.channelId(codeChannelId)).getViews().size() == 1,
+                    "agents.conversations.removeView left the view");
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsSetCommandsResponse codeCommands = methods.agentsConversationsSetCommands(r -> r
+                    .channelId(codeChannelId)
+                    .commands(java.util.List.of(com.slack.api.methods.request.agents.conversations.AgentsConversationsSetCommandsRequest.Command.builder()
+                            .name("review").description("Review the diff").argumentHint("[path]").shouldEscape(true).build())));
+            require(codeCommands.isOk() && Integer.valueOf(1).equals(codeCommands.getCommandCount()), "agents.conversations.setCommands failed: " + codeCommands);
+            com.slack.api.methods.response.canvases.CanvasesCreateResponse codeCanvas = methods.canvasesCreate(r -> r
+                    .title("Java plan")
+                    .documentContent(com.slack.api.model.canvas.CanvasDocumentContent.builder().markdown("# Plan\n\nPort the cron.").build()));
+            require(codeCanvas.isOk(), "canvases.create failed: " + codeCanvas.getError());
+            require(methods.agentsConversationsSetView(r -> r
+                    .channelId(codeChannelId).type("canvas").viewKey("plan").canvasId(codeCanvas.getCanvasId())).isOk(),
+                    "agents.conversations.setView canvas failed");
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsGetCanvasResponse codeCanvasRead = methods.agentsConversationsGetCanvas(r -> r
+                    .channel(codeChannelId).canvasId(codeCanvas.getCanvasId()));
+            require(codeCanvasRead.isOk() && "Java plan".equals(codeCanvasRead.getTitle()) && "# Plan\n\nPort the cron.\n".equals(codeCanvasRead.getContent()),
+                    "agents.conversations.getCanvas failed: " + codeCanvasRead);
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsSetCanvasContentResponse codeCanvasSet = methods.agentsConversationsSetCanvasContent(r -> r
+                    .channel(codeChannelId).canvasId(codeCanvas.getCanvasId()).content("# Plan\n\nShip it."));
+            require(codeCanvasSet.isOk() && Integer.valueOf(1).equals(codeCanvasSet.getSectionsChangedCount()),
+                    "agents.conversations.setCanvasContent failed: " + codeCanvasSet);
+            ChatPostMessageResponse codeSummary = methods.chatPostMessage(r -> r.channel(codeChannelId).text("Java summary"));
+            require(codeSummary.isOk(), "code channel summary failed: " + codeSummary.getError());
+            com.slack.api.methods.response.agents.conversations.AgentsConversationsArchiveResponse codeArchived = methods.agentsConversationsArchive(r -> r
+                    .channelId(codeChannelId).summaryMessageTs(codeSummary.getTs()));
+            require(codeArchived.isOk(), "agents.conversations.archive failed: " + codeArchived.getError());
+            require(methods.conversationsReplies(r -> r.channel("C1").ts(codeOrigin.getTs())).getMessages().stream()
+                    .anyMatch(message -> "Java summary".equals(message.getText())), "the code channel summary was not shared on its origin");
 
             ApiTestResponse synthetic = methods.apiTest(
                     com.slack.api.methods.request.api.ApiTestRequest.builder().error("synthetic").build());

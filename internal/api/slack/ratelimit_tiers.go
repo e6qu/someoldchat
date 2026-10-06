@@ -6,7 +6,8 @@ package slack
 
 // publishedMethodTiers is the tier the pinned official Java SDK's table
 // (specs/upstream/java-slack-sdk/methods-rate-limits.json) publishes for each
-// ledger method it lists. The four special tiers it names are tierHundreds.
+// ledger method it lists. The four "hundreds of requests per minute" special
+// tiers it names are tierHundreds; blocks.validate's is tierBlocksValidate.
 var publishedMethodTiers = map[string]rateTier{
 	"admin.analytics.getFile":                                  tier2,
 	"admin.apps.activities.list":                               tier3,
@@ -104,6 +105,17 @@ var publishedMethodTiers = map[string]rateTier{
 	"admin.workflows.permissions.lookup":                       tier2,
 	"admin.workflows.search":                                   tier2,
 	"admin.workflows.unpublish":                                tier2,
+	"agents.conversations.archive":                             tier2,
+	"agents.conversations.create":                              tier2,
+	"agents.conversations.getCanvas":                           tier3,
+	"agents.conversations.listViews":                           tier3,
+	"agents.conversations.removeView":                          tier3,
+	"agents.conversations.setCanvasContent":                    tier3,
+	"agents.conversations.setCommands":                         tier1,
+	"agents.conversations.setProperties":                       tier3,
+	"agents.conversations.setView":                             tier3,
+	"agents.sessions.rename":                                   tier3,
+	"agents.sessions.setStatus":                                tier3,
 	"api.test":                                                 tier4,
 	"apps.connections.open":                                    tier1,
 	"apps.event.authorizations.list":                           tier4,
@@ -126,6 +138,7 @@ var publishedMethodTiers = map[string]rateTier{
 	"auth.revoke":                                              tier3,
 	"auth.teams.list":                                          tier2,
 	"auth.test":                                                tierHundreds,
+	"blocks.validate":                                          tierBlocksValidate,
 	"bookmarks.add":                                            tier2,
 	"bookmarks.edit":                                           tier2,
 	"bookmarks.list":                                           tier3,
@@ -307,17 +320,6 @@ var referenceMethodTiers = map[string]rateTier{
 	"admin.usergroups.removeUsers":            tier2,
 	"admin.usergroups.update":                 tier1,
 	"admin.usergroups.uploadUsers":            tier2,
-	"agents.conversations.archive":            tier2,
-	"agents.conversations.create":             tier2,
-	"agents.conversations.getCanvas":          tier3,
-	"agents.conversations.listViews":          tier3,
-	"agents.conversations.removeView":         tier3,
-	"agents.conversations.setCanvasContent":   tier3,
-	"agents.conversations.setCommands":        tier1,
-	"agents.conversations.setProperties":      tier3,
-	"agents.conversations.setView":            tier3,
-	"agents.sessions.rename":                  tier3,
-	"agents.sessions.setStatus":               tier3,
 	"apps.managed.permissions.set":            tier2,
 	"functions.workflows.steps.list":          tier3,
 }
@@ -352,7 +354,6 @@ var uncitedTierMethods = map[string]struct{}{
 	"apps.icon.set":                                     {},
 	"assistant.search.context":                          {},
 	"assistant.search.info":                             {},
-	"blocks.validate":                                   {},
 	"canvases.getContent":                               {},
 	"entity.acknowledgeCommentAction":                   {},
 	"entity.presentComments":                            {},

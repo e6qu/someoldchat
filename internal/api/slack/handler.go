@@ -855,11 +855,10 @@ func (h Handler) registerSurfaces(mux *http.ServeMux) {
 	mux.HandleFunc("POST /internal/files/external/{upload}", h.externalFileUpload)
 }
 
+// blocksValidate checks blocks, a message or a view without a token: the
+// official Java SDK calls it without one, its rate-limit table noting that
+// blocks.validate "requires no token". Nothing it answers depends on who asks.
 func (h Handler) blocksValidate(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.authenticate(r, ""); err != nil {
-		writeAuthError(w, err)
-		return
-	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)

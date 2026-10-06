@@ -192,10 +192,10 @@ sdks:
     ecosystem: maven
     package: com.slack.api:slack-api-client
     upstream: https://github.com/slackapi/java-slack-sdk
-    release: 1.49.0
-    revision: 06f512b9d2741ed38573915528c9f66cee90df48
-    artifact: slack-api-client-1.49.0.jar
-    sha256: eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f
+    release: 1.52.0
+    revision: b2f13ecbfe63a198f9fbea4beaf34624693a5cf6
+    artifact: slack-api-client-1.52.0.jar
+    sha256: a146a48e823e95932c828d6f455d5b269bd0d4ba8f9d3648474d3b8611a7764f
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
@@ -203,10 +203,10 @@ sdks:
     ecosystem: maven
     package: com.slack.api:slack-api-client
     upstream: https://github.com/slackapi/java-slack-sdk
-    release: 1.49.0
-    revision: 06f512b9d2741ed38573915528c9f66cee90df48
-    artifact: slack-api-client-1.49.0.jar
-    sha256: eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f
+    release: 1.52.0
+    revision: b2f13ecbfe63a198f9fbea4beaf34624693a5cf6
+    artifact: slack-api-client-1.52.0.jar
+    sha256: a146a48e823e95932c828d6f455d5b269bd0d4ba8f9d3648474d3b8611a7764f
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/SocketModeQualification.java
@@ -268,10 +268,10 @@ bolt:
   - id: bolt-java
     ecosystem: maven
     package: com.slack.api:bolt
-    release: 1.49.0
-    revision: 06f512b9d2741ed38573915528c9f66cee90df48
-    artifact: bolt-1.49.0.jar
-    sha256: 9c298264096ba9343e55260361fcc54035a673ecc03ce5dfcee32899a6e9eca0
+    release: 1.52.0
+    revision: b2f13ecbfe63a198f9fbea4beaf34624693a5cf6
+    artifact: bolt-1.52.0.jar
+    sha256: b8f6f61f06d3bf050df9aedf2dbaed8b79123661d9d8e3632e8fed334e91c393
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/BoltQualification.java
     note: >-

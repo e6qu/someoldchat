@@ -38,6 +38,23 @@ func testHandler() http.Handler {
 	return handler
 }
 
+// The official Java SDK calls blocks.validate without a token (its table: the
+// method "requires no token"), so a request carrying none is answered.
+func TestBlocksValidateNeedsNoToken(t *testing.T) {
+	for body, want := range map[string]string{
+		`blocks=[{"type":"section","text":{"type":"plain_text","text":"Hello"}}]`: `{"ok":true}`,
+		`blocks=[{"type":"section"}]`: `"error":"invalid_blocks"`,
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/api/blocks.validate", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		testHandler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), want) {
+			t.Fatalf("%s: status=%d body=%s, want %s", body, response.Code, response.Body, want)
+		}
+	}
+}
+
 func TestBlocksValidateMatchesCurrentSlackResponseShapes(t *testing.T) {
 	call := func(body string) map[string]any {
 		t.Helper()

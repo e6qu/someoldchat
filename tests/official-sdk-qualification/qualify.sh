@@ -143,11 +143,11 @@ stop_fixture
 start_fixture
 
 mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" dependency:go-offline compile
-java_api_jar="$HOME/.m2/repository/com/slack/api/slack-api-client/1.49.0/slack-api-client-1.49.0.jar"
-java_bolt_jar="$HOME/.m2/repository/com/slack/api/bolt/1.49.0/bolt-1.49.0.jar"
+java_api_jar="$HOME/.m2/repository/com/slack/api/slack-api-client/1.52.0/slack-api-client-1.52.0.jar"
+java_bolt_jar="$HOME/.m2/repository/com/slack/api/bolt/1.52.0/bolt-1.52.0.jar"
 java_websocket_jar="$HOME/.m2/repository/org/java-websocket/Java-WebSocket/1.6.0/Java-WebSocket-1.6.0.jar"
-require_hash "$java_api_jar" eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f
-require_hash "$java_bolt_jar" 9c298264096ba9343e55260361fcc54035a673ecc03ce5dfcee32899a6e9eca0
+require_hash "$java_api_jar" a146a48e823e95932c828d6f455d5b269bd0d4ba8f9d3648474d3b8611a7764f
+require_hash "$java_bolt_jar" b8f6f61f06d3bf050df9aedf2dbaed8b79123661d9d8e3632e8fed334e91c393
 require_hash "$java_websocket_jar" eae29213e4f16515639c28957200f011b3967fffcada1962cf0255d24919c22f
 mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" dependency:build-classpath -Dmdep.outputFile="$work/java-classpath"
 # The server's per-method tiers are tested against the vendored copy of the

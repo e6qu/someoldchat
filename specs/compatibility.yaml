@@ -55,16 +55,16 @@ sources:
     retrieved_at: 2026-07-12T19:00:00Z
   - id: java-slack-sdk-methods-rate-limits
     kind: sdk-table
-    upstream: https://github.com/slackapi/java-slack-sdk/blob/v1.49.0/slack-api-client/src/main/java/com/slack/api/methods/MethodsRateLimits.java
-    revision: 06f512b9d2741ed38573915528c9f66cee90df48
+    upstream: https://github.com/slackapi/java-slack-sdk/blob/v1.52.0/slack-api-client/src/main/java/com/slack/api/methods/MethodsRateLimits.java
+    revision: b2f13ecbfe63a198f9fbea4beaf34624693a5cf6
     path: specs/upstream/java-slack-sdk/methods-rate-limits.json
-    sha256: 372aaf0dca1e59f5f8e8e2e6c375f7789f515d93362aac0bd466c794ac8bc242
+    sha256: 1d64a058b736b8f2603f5757bb1aeffbcf55d6835dc9da308bdb6db5afb7153f
     license: MIT
-    retrieved_at: 2026-10-05T00:00:00Z
+    retrieved_at: 2026-10-06T00:00:00Z
     note: >-
       com.slack.api.methods.MethodsRateLimits.toMap() of the pinned
-      slack-api-client-1.49.0.jar (sha256
-      eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f),
+      slack-api-client-1.52.0.jar (sha256
+      a146a48e823e95932c828d6f455d5b269bd0d4ba8f9d3648474d3b8611a7764f),
       printed by tests/official-sdk-qualification/java-slack-api RateLimitTable,
       which make sdk-qualification re-runs and compares with this file.
   - id: slack-current-method-reference
@@ -2295,10 +2295,12 @@ operations:
     reference: https://docs.slack.dev/reference/methods/blocks.validate/
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestBlocksValidateMatchesCurrentSlackResponseShapes
+      - go-test:internal/api/slack:TestBlocksValidateNeedsNoToken
       - go-test:internal/blockkit:TestValidateBlocksCoversSlackFileImagesCallsAndSectionFields
     deviations:
-      - SameOldChat validates the current catalog it renders; its validation messages are not asserted against the reference's wording. The pinned SDK tier table predates the method and its reference page's tier is not yet cited, so it is held to Tier 4's floor, the laxest published tier (rate-limit-tiers decision).
+      - SameOldChat validates the current catalog it renders; its validation messages are not asserted against the reference's wording. No token is needed, as the official Java SDK calls it without one; it is enforced at that SDK's special tier for the method, 60 a minute, counted per client address when no token is presented (rate-limit-tiers decision).
   - method: chat.appendStream
     status: behavior-compatible
     provenance: slack-reference
@@ -2863,6 +2865,7 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestAgentsSessionsRenameAnswersTheReferenceShapes
       - go-test:internal/service:TestAgentSessionRenameIsTheAgentsOwn
       - go-test:internal/store/memory:TestAgentSessionsKeepTheSharedContract
@@ -2880,6 +2883,7 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestAgentsSessionsSetStatusAnswersTheReferenceShapes
       - go-test:internal/service:TestAgentSessionSetStatusFollowsTheReference
       - go-test:internal/service:TestAgentSessionIdentityOverridesTravelAsOneSet
@@ -2904,10 +2908,11 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
     deviations:
       - With summary_message_ts, the summary message's text and blocks are posted by the agent's bot as a reply on the origin message before the channel is archived; Slack shares the message itself. The bot must be able to post in the origin channel. A channel created without an origin answers invalid_arguments, and an archived one already_archived.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.archive/
@@ -2916,11 +2921,12 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
     deviations:
       - The channel name is the friendly name folded to a channel name (lowercase, hyphens for spaces and punctuation, at most 80 characters), or the start of the origin message when no name is given; a taken name is numbered (-2, -3, ...). A code channel is not re-titled automatically after it is created; agents.sessions.rename renames it.
       - The creating agent's bot and the origin message's author are its members. An origin channel the bot cannot read is channel_not_found, one shared with another organization invalid_arguments, and a missing origin message message_not_found. team_id may name only the token's own workspace.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
       - A private code channel is a private channel, so the workspace's "who can create private channels" policy governs it as it governs conversations.create, and a refusal is the general restricted_action.
     provenance: slack-reference
@@ -2930,11 +2936,12 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelCommandsAndCanvasesBelongToTheirAgents
     deviations:
       - The canvas must be one a canvas view of the channel shows, or the channel's own canvas (canvas_not_found otherwise), and the agent must hold access to it as any member would; a canvas view shares it with the channel, so every agent in the channel can use it.
       - content_format is markdown (the default) or html, rendered as canvases.getContent renders them. Comments are this deployment's canvas comments, oldest first, at most 100 with has_more_comments for the rest; each quotes the text of the section it is anchored to. Canvas comments here have no replies and are never resolved, so replies is always empty, is_resolved always false, and include_resolved changes nothing.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.getCanvas/
@@ -2943,11 +2950,12 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelViewsAreTabsAnAgentKeepsCurrent
       - go-test:internal/web:TestCodeChannelShowsItsAgentsViews
     deviations:
       - Each view reports view_id, view_key, file_id, label, content_version and date_added, oldest first. Any member who can read the channel sees the same tabs in the web client; the method itself answers the agent's token.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.listViews/
@@ -2956,10 +2964,11 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelViewsAreTabsAnAgentKeepsCurrent
     deviations:
       - Exactly one of view_id or view_key names the view (invalid_arguments otherwise), and a view the channel does not have is not_found.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.removeView/
@@ -2968,12 +2977,13 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelCommandsAndCanvasesBelongToTheirAgents
       - go-test:internal/domain:TestMergeCanvasSectionsKeepsUnchangedSectionsAndCountsEdits
     deviations:
       - The canvas must be one a canvas view of the channel shows, or the channel's own canvas (canvas_not_found otherwise), and the agent must hold access to it as any member would; a canvas view shares it with the channel, so every agent in the channel can use it.
       - content is split into sections as canvases.create splits markdown, and laid over the current sections in order. A section whose kind and text are unchanged keeps its identity and its comments; sections_changed_count counts, within each run of edits between unchanged sections, the larger of the sections removed and added. Content that changes nothing writes nothing and answers 0.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setCanvasContent/
@@ -2982,12 +2992,13 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelCommandsAndCanvasesBelongToTheirAgents
       - go-test:internal/service:TestCodeChannelCommandsReachTheirAgentInTheirChannel
     deviations:
       - Names are folded to lowercase; one with a slash or whitespace, one longer than 31 characters, a duplicate within the set, one another agent of the channel holds, one of Slack's own commands (whether or not this deployment implements it), or more than 10 in the channel is invalid_arguments. description and argument_hint are at most 255 characters each.
       - A member typing an agent's command in its channel reaches that agent as a slash command, ahead of a workspace app command of the same name; the web client's command menu lists the channel's commands under each agent's name. It is delivered over Socket Mode, or otherwise to the agent's interactivity request URL, since no manifest names a URL for it; an agent with neither cannot be reached. Outside its channel the name is not a command.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setCommands/
@@ -2996,11 +3007,12 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelsAreCreatedDescribedAndArchived
     deviations:
       - context_bar_items replaces the calling agent's own items, each stamped with its bot_user_id, and the whole bar holds at most 5 items; keys must be unique within the agent's set. The web client shows the bar under the channel's tabs, with the agent resource first and each item as a link or a label. An item_type of action is stored, reported and shown, but the client does not yet make it a control, so no code_channel_action event is ever sent.
       - summary_message must name a live message of the channel (thread_ts, when given, must be its thread). agent_resource writes each field given and keeps the rest.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setProperties/
@@ -3009,13 +3021,14 @@ operations:
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - go-test:internal/api/slack:TestCodeChannelViewsAreTabsAnAgentKeepsCurrent
       - go-test:internal/web:TestCodeChannelShowsItsAgentsViews
     deviations:
       - view_key names the view, so setting a key again updates the same tab (same view_id and file_id) and advances content_version; a diff view is the channel's one diff whatever key is given. The tab is labelled with name, or the key's last path segment without .html. file_id identifies the view's published content but is not a file that files.* lists or reads.
       - html and diff content is capped at 1,000,000 bytes (content_too_large); block_kit blocks are validated as message blocks (invalid_blocks); a canvas the agent cannot share is canvas_not_found, and access_level comment grants the channel read access, so the agent stays its only author.
       - The web client renders an html view in a frame sandboxed to an opaque origin, under a policy that allows inline script and loads from a curated CDN list (cdnjs, jsDelivr, unpkg and Google Fonts; Slack does not publish its own) plus resource_domains. connect_domains is validated (https only, never a private or internal host) and stored, but, as the SDK documents, not honored, so the view may not connect anywhere. A diff renders with added and removed lines marked, block_kit as read-only blocks, canvas and pull_request as links.
-      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, java-slack-sdk's samples), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
+      - The method page could not be read from this deployment's network; arguments, bounds and response fields follow the official SDKs' declarations (@slack/web-api 8.2.0, slack_sdk 3.45.0, slack-api-client 1.52.0), and refusals use the general Web API codes for each condition (invalid_arguments, not_in_channel, channel_not_found, not_allowed_token_type).
       - Slack Code is a partner beta on Slack. The app manifest's features.code_channels.enabled is accepted but not required; any app holding code_channels:manage may call the method.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/agents.conversations.setView/
@@ -3190,7 +3203,7 @@ decisions:
     evidence: https://docs.slack.dev/apis/web-api/rate-limits/
     decision: >-
       Every Web API method's rate-limit tier is published: its reference page
-      names it, and the pinned official Java SDK (slack-api-client 1.49.0,
+      names it, and the pinned official Java SDK (slack-api-client 1.52.0,
       com.slack.api.methods.MethodsRateLimits) carries the same table, which
       that client uses to pace its own calls. The tier is therefore decided by
       the published sources; no observation of Slack is needed or planned.
@@ -3206,10 +3219,13 @@ decisions:
       as the 600 a minute the SDK paces them at, chat.postMessage's
       one-per-second-per-channel allowance on top; assistant.threads.setStatus's
       per-conversation allowance is not enforced separately, which is laxer
-      than Slack and refuses no conforming client. Methods the pinned table
-      predates take the tier their reference page names: 27 are cited
-      (admin.usergroups.*, admin.apps.permissions.*, agents.*, among others).
-      The other 43 (apps.datastore.*, blocks.validate, oauth.v2.user.access,
+      than Slack and refuses no conforming client. blocks.validate's special
+      tier, which the table sets apart because the method "requires no
+      token", is enforced as the 60 a minute the SDK paces it at, per client
+      address when no token is presented. Methods the pinned table
+      predates take the tier their reference page names: 16 are cited
+      (admin.usergroups.*, admin.apps.permissions.*, among others).
+      The other 42 (apps.datastore.*, oauth.v2.user.access,
       the short-token rotation methods, entity.*, and other recent
       additions, listed as uncitedTierMethods) are held to Tier 4's floor,
       the laxest published tier, until their reference tier is cited: the
