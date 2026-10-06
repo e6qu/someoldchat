@@ -354,6 +354,10 @@ message IncomingWebhookPostRequest {
   string idempotency_key = 6;
   string blocks = 7;
   string attachments = 8;
+  // unfurl_links and unfurl_media are the payload's own choice, absent when
+  // it made none, so the message keeps its default.
+  optional bool unfurl_links = 9;
+  optional bool unfurl_media = 10;
 }
 
 // SlackbotPostRequest is domain.SlackbotPost: a message Slackbot posts for a

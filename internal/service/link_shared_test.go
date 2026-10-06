@@ -342,3 +342,38 @@ func TestUnfurlLinksDecidesWhetherAppsAreAskedToUnfurl(t *testing.T) {
 		}
 	}
 }
+
+// An incoming webhook's payload chooses unfurl_links as a bot's chat.postMessage
+// does: the official SDKs' webhook clients send it (Python WebhookClient.send,
+// Java com.slack.api.webhook.Payload). false keeps the hook's links from apps;
+// left out, they are handed over as any message's are.
+func TestIncomingWebhookUnfurlLinksDecidesWhetherAppsAreAskedToUnfurl(t *testing.T) {
+	ctx := context.Background()
+	state, messages := linkSharedFixture(t)
+	if err := state.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	_, secret, err := messages.AdminCreateIncomingWebhook(ctx, "T1", "U1", "A1", "CPUB", "UB1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	no := false
+	for _, test := range []struct {
+		name   string
+		unfurl *bool
+		shared bool
+	}{
+		{"omitted", nil, true},
+		{"unfurl_links=false", &no, false},
+	} {
+		mark := len(state.Outbox())
+		if _, err := messages.PostIncomingWebhookWithAttachments(ctx, "T1", "A1", secret, domain.IncomingWebhookPost{
+			Text: "hook https://example.com/" + strings.ReplaceAll(test.name, "=", "-"), UnfurlLinks: test.unfurl,
+		}); err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		if shared, _ := linkSharedRecords(state, mark); (len(shared) == 1) != test.shared || len(shared) > 1 {
+			t.Fatalf("%s: link.shared records=%d, want shared=%v", test.name, len(shared), test.shared)
+		}
+	}
+}

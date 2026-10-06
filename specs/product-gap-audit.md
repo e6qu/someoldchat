@@ -64,9 +64,9 @@ deviations). A message that omits `unfurl_links` keeps the prior behaviour:
 its links are handed to apps whether a person or a bot posted it, because no
 published source in the repository (the pinned OpenAPI document, the
 reference lists, or the SDK fixtures) states a different default for bot and
-person messages. Incoming webhooks do not yet read `link_names`,
-`unfurl_links` or `unfurl_media` from their payload
-([Incoming Webhooks](../docs/incoming-webhooks.md)).
+person messages. Incoming webhooks read `unfurl_links` and `unfurl_media`
+from their payload, the formatting fields the official SDKs' webhook clients
+send ([Incoming Webhooks](../docs/incoming-webhooks.md)).
 
 ## Qualification gaps
 

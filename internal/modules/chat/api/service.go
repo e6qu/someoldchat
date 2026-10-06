@@ -57,7 +57,7 @@ type Service interface {
 	AdminCreateIncomingWebhook(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, domain.UserID) (domain.IncomingWebhook, string, error)
 	AdminSetIncomingWebhookEnabled(context.Context, domain.WorkspaceID, domain.UserID, domain.IncomingWebhookID, bool) error
 	PostIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
-	PostIncomingWebhookWithAttachments(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
+	PostIncomingWebhookWithAttachments(context.Context, domain.WorkspaceID, domain.AppID, string, domain.IncomingWebhookPost) (domain.Message, error)
 	PostAsSlackbot(context.Context, domain.WorkspaceID, domain.UserID, domain.SlackbotPost) (domain.Message, error)
 	// SlackbotResponses, AddSlackbotResponse and DeleteSlackbotResponse are
 	// the workspace's Slackbot custom responses.

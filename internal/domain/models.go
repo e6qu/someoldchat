@@ -3865,6 +3865,21 @@ type AppCredentials struct {
 	VerificationToken string
 }
 
+// IncomingWebhookPost is what an incoming webhook's payload asks to post:
+// its text, blocks and attachments, the thread it replies in, and whether its
+// links and media are handed to apps to unfurl. The official SDKs' webhook
+// clients send unfurl_links and unfurl_media (Python WebhookClient.send, Java
+// com.slack.api.webhook.Payload); left out, they keep a message's default.
+type IncomingWebhookPost struct {
+	Text            string
+	Blocks          string
+	Attachments     string
+	ThreadTimestamp MessageTimestamp
+	IdempotencyKey  string
+	UnfurlLinks     *bool
+	UnfurlMedia     *bool
+}
+
 type IncomingWebhook struct {
 	ID             IncomingWebhookID
 	WorkspaceID    WorkspaceID

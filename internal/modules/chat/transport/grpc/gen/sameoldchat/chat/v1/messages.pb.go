@@ -2984,8 +2984,12 @@ type IncomingWebhookPostRequest struct {
 	IdempotencyKey  string                 `protobuf:"bytes,6,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
 	Blocks          string                 `protobuf:"bytes,7,opt,name=blocks,proto3" json:"blocks,omitempty"`
 	Attachments     string                 `protobuf:"bytes,8,opt,name=attachments,proto3" json:"attachments,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// unfurl_links and unfurl_media are the payload's own choice, absent when
+	// it made none, so the message keeps its default.
+	UnfurlLinks   *bool `protobuf:"varint,9,opt,name=unfurl_links,json=unfurlLinks,proto3,oneof" json:"unfurl_links,omitempty"`
+	UnfurlMedia   *bool `protobuf:"varint,10,opt,name=unfurl_media,json=unfurlMedia,proto3,oneof" json:"unfurl_media,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *IncomingWebhookPostRequest) Reset() {
@@ -3072,6 +3076,20 @@ func (x *IncomingWebhookPostRequest) GetAttachments() string {
 		return x.Attachments
 	}
 	return ""
+}
+
+func (x *IncomingWebhookPostRequest) GetUnfurlLinks() bool {
+	if x != nil && x.UnfurlLinks != nil {
+		return *x.UnfurlLinks
+	}
+	return false
+}
+
+func (x *IncomingWebhookPostRequest) GetUnfurlMedia() bool {
+	if x != nil && x.UnfurlMedia != nil {
+		return *x.UnfurlMedia
+	}
+	return false
 }
 
 // SlackbotPostRequest is domain.SlackbotPost: a message Slackbot posts for a
@@ -3496,7 +3514,7 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"webhook_id\x18\x03 \x01(\tR\twebhookId\x12\x18\n" +
-	"\aenabled\x18\x04 \x01(\bR\aenabled\"\x90\x02\n" +
+	"\aenabled\x18\x04 \x01(\bR\aenabled\"\x82\x03\n" +
 	"\x1aIncomingWebhookPostRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x15\n" +
 	"\x06app_id\x18\x02 \x01(\tR\x05appId\x12\x16\n" +
@@ -3505,7 +3523,12 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x10thread_timestamp\x18\x05 \x01(\tR\x0fthreadTimestamp\x12'\n" +
 	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\x12\x16\n" +
 	"\x06blocks\x18\a \x01(\tR\x06blocks\x12 \n" +
-	"\vattachments\x18\b \x01(\tR\vattachments\"\xf0\x01\n" +
+	"\vattachments\x18\b \x01(\tR\vattachments\x12&\n" +
+	"\funfurl_links\x18\t \x01(\bH\x00R\vunfurlLinks\x88\x01\x01\x12&\n" +
+	"\funfurl_media\x18\n" +
+	" \x01(\bH\x01R\vunfurlMedia\x88\x01\x01B\x0f\n" +
+	"\r_unfurl_linksB\x0f\n" +
+	"\r_unfurl_media\"\xf0\x01\n" +
 	"\x13SlackbotPostRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1b\n" +
 	"\tmember_id\x18\x02 \x01(\tR\bmemberId\x12'\n" +
@@ -3673,6 +3696,7 @@ func file_sameoldchat_chat_v1_messages_proto_init() {
 	file_sameoldchat_chat_v1_conversation_mutations_proto_init()
 	file_sameoldchat_chat_v1_files_proto_init()
 	file_sameoldchat_chat_v1_messages_proto_msgTypes[12].OneofWrappers = []any{}
+	file_sameoldchat_chat_v1_messages_proto_msgTypes[33].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
