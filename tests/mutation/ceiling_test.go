@@ -87,4 +87,8 @@ package mutation
 // non-manager reading a step's responses, an outsider listing a private
 // channel's featured workflows) and runWorkflow, refused for a private channel
 // its runner is not in.
-const survivingGuardCeiling = 68
+//
+// 68 to 60: measured after Later became To-dos and Saved. The deactivated
+// fixture user now owns its own to-do, channel reminder and saved item, so
+// the guards, not ownership alone, are what refuse it, and their mutants die.
+const survivingGuardCeiling = 60
