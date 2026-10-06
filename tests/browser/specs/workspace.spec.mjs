@@ -2008,6 +2008,10 @@ test('[COMP-01 A11Y-01] a broadcast mention to a channel of six or more asks bef
   await page.goto(`/app?channel=${CHANNEL}`);
   const composer = composerEditor(page);
   const stamp = `broadcast ${Date.now()}`;
+  // The channel's draft follows the member, so an earlier journey's words
+  // can be waiting in the composer: start from an empty one.
+  await composer.fill('');
+  await expect(composerField(page)).toHaveValue('');
   await composer.pressSequentially('@chann');
   await page.getByRole('listbox', { name: 'Mention suggestions' }).getByRole('option', { name: /@channel/ }).click();
   // Choosing the suggestion leaves a space after it, as typing would.
