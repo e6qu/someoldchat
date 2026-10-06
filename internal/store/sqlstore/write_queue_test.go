@@ -23,8 +23,13 @@ import (
 // writer can lose repeatedly; Go's own pool is no fairer, handing a freed
 // connection to connRequests.TakeRandom() rather than to the longest waiter.
 //
-// So this reports the slowest single write beside the median. A queue should
-// pull the tail in hard while leaving the middle where it was.
+// So this asks how often a write was overtaken: how many writes that began
+// after it had finished before it did. A queue serves waiters in order, so a
+// write is passed over only by the few that raced it to the queue; without one
+// a loser is passed over again and again. The slowest write against the median
+// is reported beside it but not asserted: a stall that holds every writer at
+// once, a slow fsync on a loaded runner, stretches the tail of a fair queue as
+// much as an unfair one, and a ratio cannot tell them apart.
 func TestConcurrentWritersAreServedFairly(t *testing.T) {
 	if testing.Short() {
 		t.Skip("writes several thousand rows")
@@ -51,7 +56,9 @@ func TestConcurrentWritersAreServedFairly(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	type span struct{ began, ended time.Time }
 	latencies := make([][]time.Duration, writers)
+	spans := make([][]span, writers)
 	start := make(chan struct{})
 	var group sync.WaitGroup
 	group.Add(writers)
@@ -60,6 +67,7 @@ func TestConcurrentWritersAreServedFairly(t *testing.T) {
 		go func(writer int) {
 			defer group.Done()
 			latencies[writer] = make([]time.Duration, 0, eachWrites)
+			spans[writer] = make([]span, 0, eachWrites)
 			<-start
 			for index := 0; index < eachWrites; index++ {
 				at := time.Now()
@@ -82,7 +90,9 @@ func TestConcurrentWritersAreServedFairly(t *testing.T) {
 					t.Errorf("writer %d write %d: %v", writer, index, err)
 					return
 				}
-				latencies[writer] = append(latencies[writer], time.Since(at))
+				done := time.Now()
+				latencies[writer] = append(latencies[writer], done.Sub(at))
+				spans[writer] = append(spans[writer], span{began: at, ended: done})
 			}
 		}(writer)
 	}
@@ -103,12 +113,27 @@ func TestConcurrentWritersAreServedFairly(t *testing.T) {
 		len(all), writers, total.Round(time.Millisecond), float64(len(all))/total.Seconds(),
 		median.Round(time.Microsecond), all[len(all)*99/100].Round(time.Microsecond), worst.Round(time.Microsecond))
 
-	// The tail is the assertion. Without ordering a loser can be passed over
-	// again and again, and the worst write runs orders of magnitude behind the
-	// median; with a queue its wait is bounded by the writers already ahead of
-	// it. Sixteen writers cannot make one wait a hundred times the median
-	// unless something is starving it.
-	if ratio := float64(worst) / float64(median); ratio > 100 {
-		t.Fatalf("the slowest write took %.0f times the median (%s against %s); writers are not being served fairly", ratio, worst.Round(time.Microsecond), median.Round(time.Microsecond))
+	// Overtaking is the assertion. A write that joins the queue behind another
+	// cannot finish first, so a write is overtaken only by those that took the
+	// clock after it but reached the queue before it, which is a handful at
+	// most; one writer per other writer is a generous bound. Without ordering a
+	// loser is overtaken by dozens.
+	var every []span
+	for _, batch := range spans {
+		every = append(every, batch...)
+	}
+	most := 0
+	for _, write := range every {
+		overtaken := 0
+		for _, other := range every {
+			if other.began.After(write.began) && other.ended.Before(write.ended) {
+				overtaken++
+			}
+		}
+		most = max(most, overtaken)
+	}
+	t.Logf("the most-overtaken write was passed by %d writes begun after it", most)
+	if most > writers {
+		t.Fatalf("a write was overtaken by %d writes that began after it, more than the %d writers could account for; writers are not being served in order", most, writers)
 	}
 }
