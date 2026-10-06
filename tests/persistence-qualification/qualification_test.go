@@ -192,6 +192,7 @@ func runQualification(t *testing.T, open opener) {
 		{"member preferences are kept per member", memberPreferencesAreKeptPerMember},
 		{"OAuth installs reuse their bot and redeem every grant shape", oauthInstallsReuseTheirBotAndRedeemEveryGrantShape},
 		{"file shares name their carrying messages", fileSharesNameTheirCarryingMessages},
+		{"what SDKs send to chat.update, chat.postEphemeral and upload tickets is durable", sdkMessageArgumentsAreDurable},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
@@ -1614,9 +1615,26 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 	if _, err := repository.SetRemoteFileShares(ctx, workspaceID, domain.RemoteFileLookup{ID: remote.ID}, []domain.ConversationID{conversationID}, event("remote-share", "remote_file.shared", string(remote.ID))); err != nil {
 		t.Fatal(err)
 	}
-	remotePage, err := repository.ListRemoteFiles(ctx, workspaceID, domain.PageRequest{Limit: 1})
+	remotePage, err := repository.ListRemoteFiles(ctx, workspaceID, domain.RemoteFileFilter{}, domain.PageRequest{Limit: 1})
 	if err != nil || len(remotePage.Files) != 1 || len(remotePage.Files[0].SharedChannels) != 1 {
 		t.Fatalf("remote files=%+v err=%v", remotePage, err)
+	}
+	// files.remote.list's channel, ts_from and ts_to narrow the read in every
+	// profile alike; both bounds are inclusive.
+	for _, filtered := range []struct {
+		filter domain.RemoteFileFilter
+		want   int
+	}{
+		{domain.RemoteFileFilter{Channel: conversationID}, 1},
+		{domain.RemoteFileFilter{Channel: "C-elsewhere"}, 0},
+		{domain.RemoteFileFilter{From: remote.CreatedAt, To: remote.CreatedAt}, 1},
+		{domain.RemoteFileFilter{From: remote.CreatedAt.Add(time.Second)}, 0},
+		{domain.RemoteFileFilter{To: remote.CreatedAt.Add(-time.Second)}, 0},
+	} {
+		page, err := repository.ListRemoteFiles(ctx, workspaceID, filtered.filter, domain.PageRequest{Limit: 10})
+		if err != nil || len(page.Files) != filtered.want {
+			t.Fatalf("remote files filtered by %+v=%+v err=%v, want %d", filtered.filter, page, err, filtered.want)
+		}
 	}
 	remote.Title = "Updated remote"
 	updatedRemote, err := repository.UpdateRemoteFile(ctx, workspaceID, remote, event("remote-update", "remote_file.updated", string(remote.ID)))

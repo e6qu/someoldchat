@@ -1326,6 +1326,7 @@ func (h Handler) history(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
+	withholdOtherAppsMetadata(messages, page.Messages, principal.AppID, request.IncludeAllMetadata)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": messages, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
@@ -1365,6 +1366,7 @@ func (h Handler) replies(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "thread_not_found"))
 		return
 	}
+	withholdOtherAppsMetadata(messages, page.Messages, principal.AppID, request.IncludeAllMetadata)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": messages, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
@@ -1372,6 +1374,27 @@ type historyRequest struct {
 	Channel domain.ConversationID
 	Page    domain.PageRequest
 	Window  domain.MessageWindow
+	// IncludeAllMetadata is include_all_metadata, which both reads take.
+	IncludeAllMetadata bool
+}
+
+// withholdOtherAppsMetadata applies include_all_metadata to a projected page.
+// @slack/web-api 8.2.0 describes the argument as "Return all metadata
+// associated with messages. Defaults to `false`."; the pinned OpenAPI does not
+// declare it. "All" is read against what is returned without it: the metadata
+// the calling app attached itself, so an app reading back its own messages
+// still sees what it posted, while another app's event payloads are returned
+// only on request. A token with no app attached no metadata. They used to be
+// returned to every reader whatever it asked.
+func withholdOtherAppsMetadata(projected []map[string]any, messages []domain.Message, appID domain.AppID, includeAll bool) {
+	if includeAll {
+		return
+	}
+	for index, message := range messages {
+		if index < len(projected) && (appID == "" || message.AppID != appID) {
+			delete(projected[index], "metadata")
+		}
+	}
 }
 
 // normalizeHistoryRequest decodes the window /conversations.history and
@@ -1418,7 +1441,11 @@ func normalizeHistoryRequest(fields map[string]string, invalidOldest, invalidLat
 		return historyRequest{}, decodeFailure("invalid_arg_name", "inclusive must be a boolean")
 	}
 	window.Inclusive = inclusive
-	return historyRequest{Channel: domain.ConversationID(channel), Page: domain.PageRequest{Limit: limit, Cursor: cursor}, Window: window}, nil
+	includeAllMetadata, err := parseBoolField(fields["include_all_metadata"])
+	if err != nil {
+		return historyRequest{}, decodeFailure("invalid_arg_name", "include_all_metadata must be a boolean")
+	}
+	return historyRequest{Channel: domain.ConversationID(channel), Page: domain.PageRequest{Limit: limit, Cursor: cursor}, Window: window, IncludeAllMetadata: includeAllMetadata}, nil
 }
 
 // unboundedAtEpoch reads a bound of 0 as no bound. Slack documents 0 as the
@@ -9301,7 +9328,24 @@ func (h Handler) remoteFilesList(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.RemoteFiles(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	// channel, ts_from and ts_to are declared by the pinned operation and sent
+	// by every official SDK. They used to be ignored, so a filtered request
+	// was answered with every remote file in the workspace.
+	filter := domain.RemoteFileFilter{Channel: domain.ConversationID(strings.TrimSpace(fields["channel"]))}
+	for _, bound := range []struct {
+		name string
+		into *time.Time
+	}{{"ts_from", &filter.From}, {"ts_to", &filter.To}} {
+		micros, present, boundErr := optionalEpoch(fields[bound.name])
+		if boundErr != nil {
+			writeDecodeError(w, boundErr)
+			return
+		}
+		if present {
+			*bound.into = time.UnixMicro(micros).UTC()
+		}
+	}
+	page, err := h.Messages.RemoteFiles(r.Context(), principal.WorkspaceID, principal.UserID, filter, request)
 	if err != nil {
 		writeError(w, mapServiceError(err, "remote_files_unavailable"))
 		return
@@ -10597,18 +10641,38 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 	}
 	// /chat.unfurl declares missing_unfurls for an absent `unfurls` and
 	// invalid_arg_name only for a malformed one; the two used to be collapsed.
-	if strings.TrimSpace(fields["unfurls"]) == "" {
+	// @slack/web-api 8.2.0 takes Work Object `metadata` in place of `unfurls`
+	// (ChatUnfurlUnfurls | ChatUnfurlMetadata), so either one is the preview;
+	// a metadata-only unfurl used to be refused missing_unfurls.
+	hasUnfurls, hasMetadata := strings.TrimSpace(fields["unfurls"]) != "", strings.TrimSpace(fields["metadata"]) != ""
+	if !hasUnfurls && !hasMetadata {
 		writeError(w, "missing_unfurls")
 		return
 	}
-	var rawUnfurls map[string]json.RawMessage
-	if json.Unmarshal([]byte(fields["unfurls"]), &rawUnfurls) != nil || rawUnfurls == nil {
-		writeError(w, "invalid_arg_name")
-		return
+	unfurls := make(map[string]string)
+	if hasUnfurls {
+		var rawUnfurls map[string]json.RawMessage
+		if json.Unmarshal([]byte(fields["unfurls"]), &rawUnfurls) != nil || rawUnfurls == nil {
+			writeError(w, "invalid_arg_name")
+			return
+		}
+		for key, raw := range rawUnfurls {
+			unfurls[key] = string(raw)
+		}
 	}
-	unfurls := make(map[string]string, len(rawUnfurls))
-	for key, raw := range rawUnfurls {
-		unfurls[key] = string(raw)
+	if hasMetadata {
+		entities, err := domain.UnfurlEntities(fields["metadata"])
+		if err != nil {
+			writeError(w, "invalid_arg_name")
+			return
+		}
+		for link, entity := range entities {
+			if _, both := unfurls[link]; both {
+				writeError(w, "invalid_arg_name")
+				return
+			}
+			unfurls[link] = entity
+		}
 	}
 	// A message is named either by channel and ts or, as a link_shared event
 	// hands it to the app, by source and unfurl_id. A composer unfurl names a
@@ -10719,6 +10783,30 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	// markdown_text, parse, username, icon_emoji and icon_url are sent by
+	// every pinned SDK's chat.postEphemeral and are read as chat.postMessage
+	// reads them. They used to be ignored: a markdown-only message was refused
+	// no_text and a custom identity was dropped without the scope it needs
+	// ever being asked for.
+	markdownText, err := messageMarkdownText(fields)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	parse, err := messageParse(fields, "invalid_arg_name")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	username, iconEmoji, iconURL, err := messageAuthorship(principal, fields)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	text := fields["text"]
+	if markdownText != "" {
+		text = markdownText
+	}
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
 	switch {
@@ -10734,7 +10822,7 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 	case attachmentErr != nil:
 		writeError(w, "invalid_arg_name")
 		return
-	case strings.TrimSpace(fields["text"]) == "" && domain.NoStructuredContent(blocks) && domain.NoStructuredContent(attachments):
+	case strings.TrimSpace(text) == "" && domain.NoStructuredContent(blocks) && domain.NoStructuredContent(attachments):
 		// /chat.postEphemeral declares no_text for a message with nothing to show.
 		writeError(w, "no_text")
 		return
@@ -10747,7 +10835,11 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks, attachments, principal.AppID, domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])), linkNames)
+	presentation := domain.EphemeralPresentation{
+		LinkNames: linkNames, MarkdownText: markdownText != "", Parse: parse,
+		Username: username, IconEmoji: iconEmoji, IconURL: iconURL,
+	}
+	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), text, blocks, attachments, principal.AppID, domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])), presentation)
 	switch {
 	case errors.Is(err, domain.ErrRecipientNotInConversation):
 		writeError(w, "user_not_in_channel")
@@ -10809,6 +10901,61 @@ func checkMessageLength(fields map[string]string) error {
 	return nil
 }
 
+// messageMarkdownText reads markdown_text, which chat.postMessage,
+// chat.postEphemeral and chat.update all take: Markdown in place of text,
+// which may not be combined with text or blocks and is limited to 12,000
+// characters (@slack/web-api 8.2.0 MarkdownText).
+func messageMarkdownText(fields map[string]string) (string, error) {
+	markdownText := fields["markdown_text"]
+	if markdownText == "" {
+		return "", nil
+	}
+	if fields["text"] != "" || strings.TrimSpace(fields["blocks"]) != "" {
+		return "", decodeFailure("markdown_text_conflict", "markdown_text cannot be combined with text or blocks")
+	}
+	if utf8.RuneCountInString(markdownText) > 12000 {
+		return "", decodeFailure("msg_too_long", "markdown_text exceeds the maximum length")
+	}
+	return markdownText, nil
+}
+
+// messageMetadataSender refuses message metadata from a token with no app:
+// metadata is an app's, so only an app may attach it.
+func messageMetadataSender(principal auth.Principal, fields map[string]string) error {
+	if strings.TrimSpace(fields["metadata"]) != "" && principal.AppID == "" {
+		return decodeFailure("metadata_must_be_sent_from_app", "message metadata requires an app token")
+	}
+	return nil
+}
+
+// messageParse reads parse, which accepts none or full on every message
+// write; invalid names the argument code the calling operation declares.
+func messageParse(fields map[string]string, invalid string) (string, error) {
+	parse := strings.TrimSpace(fields["parse"])
+	if parse != "" && parse != "none" && parse != "full" {
+		return "", decodeFailure(invalid, "parse must be none or full")
+	}
+	return parse, nil
+}
+
+// messageAuthorship reads username, icon_emoji and icon_url, the custom
+// identity chat.postMessage and chat.postEphemeral take. Only an app holding
+// chat:write.customize may present one, and icon_emoji overrides icon_url.
+func messageAuthorship(principal auth.Principal, fields map[string]string) (string, string, string, error) {
+	username := strings.TrimSpace(fields["username"])
+	iconEmoji := strings.TrimSpace(fields["icon_emoji"])
+	iconURL := strings.TrimSpace(fields["icon_url"])
+	if username != "" || iconEmoji != "" || iconURL != "" {
+		if principal.AppID == "" || !principal.HasScope(auth.ScopeChatWriteCustomize) {
+			return "", "", "", decodeFailure("missing_scope", "message customization requires chat:write.customize")
+		}
+	}
+	if iconEmoji != "" {
+		iconURL = ""
+	}
+	return username, iconEmoji, iconURL, nil
+}
+
 func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fields map[string]string, subtype domain.MessageSubtype) (domain.Message, error) {
 	// The service rejects an empty channel as ErrInvalidMessage, which
 	// postMessageError renames `no_text` — so a request with text and no channel
@@ -10821,21 +10968,16 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 	if err := checkMessageLength(fields); err != nil {
 		return domain.Message{}, err
 	}
-	markdownText := fields["markdown_text"]
-	if markdownText != "" {
-		if fields["text"] != "" || strings.TrimSpace(fields["blocks"]) != "" {
-			return domain.Message{}, decodeFailure("markdown_text_conflict", "markdown_text cannot be combined with text or blocks")
-		}
-		if utf8.RuneCountInString(markdownText) > 12000 {
-			return domain.Message{}, decodeFailure("msg_too_long", "markdown_text exceeds the maximum length")
-		}
+	markdownText, err := messageMarkdownText(fields)
+	if err != nil {
+		return domain.Message{}, err
 	}
-	if strings.TrimSpace(fields["metadata"]) != "" && principal.AppID == "" {
-		return domain.Message{}, decodeFailure("metadata_must_be_sent_from_app", "message metadata requires an app token")
+	if err := messageMetadataSender(principal, fields); err != nil {
+		return domain.Message{}, err
 	}
-	parse := strings.TrimSpace(fields["parse"])
-	if parse != "" && parse != "none" && parse != "full" {
-		return domain.Message{}, decodeFailure("invalid_arguments", "parse must be none or full")
+	parse, err := messageParse(fields, "invalid_arguments")
+	if err != nil {
+		return domain.Message{}, err
 	}
 	optionalBool := func(name string) (*bool, error) {
 		raw := strings.TrimSpace(fields[name])
@@ -10875,16 +11017,9 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 	if _, err := optionalBool("as_user"); err != nil {
 		return domain.Message{}, err
 	}
-	username := strings.TrimSpace(fields["username"])
-	iconEmoji := strings.TrimSpace(fields["icon_emoji"])
-	iconURL := strings.TrimSpace(fields["icon_url"])
-	if username != "" || iconEmoji != "" || iconURL != "" {
-		if principal.AppID == "" || !principal.HasScope(auth.ScopeChatWriteCustomize) {
-			return domain.Message{}, decodeFailure("missing_scope", "message customization requires chat:write.customize")
-		}
-	}
-	if iconEmoji != "" {
-		iconURL = ""
+	username, iconEmoji, iconURL, err := messageAuthorship(principal, fields)
+	if err != nil {
+		return domain.Message{}, err
 	}
 	blocks, err := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	if err != nil {
@@ -10987,7 +11122,37 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	if !hasText && !hasBlocks && !hasAttachments {
+	// markdown_text, metadata, parse, reply_broadcast and file_ids are sent by
+	// every pinned SDK's chat.update and used to be ignored: a markdown-only
+	// edit was refused no_text, and the others changed nothing. Each is read
+	// as chat.postMessage reads it.
+	markdownText, err := messageMarkdownText(fields)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if err := messageMetadataSender(principal, fields); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	parse, err := messageParse(fields, "invalid_arg_name")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	replyBroadcast, err := parseBoolField(fields["reply_broadcast"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	fileIDs, hasFileIDs, err := fileIDsArgument(fields["file_ids"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	metadata, hasMetadata := fields["metadata"]
+	hasMetadata = hasMetadata && strings.TrimSpace(metadata) != ""
+	if !hasText && !hasBlocks && !hasAttachments && markdownText == "" && !hasMetadata && !replyBroadcast && !hasFileIDs {
 		// /chat.update declares no_text for an update that carries no content.
 		writeError(w, "no_text")
 		return
@@ -11004,9 +11169,12 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	patch := domain.MessagePatch{LinkNames: linkNames}
+	patch := domain.MessagePatch{LinkNames: linkNames, Parse: parse, AppID: principal.AppID, ReplyBroadcast: replyBroadcast}
 	if hasText {
 		patch.Text = &text
+	}
+	if markdownText != "" {
+		patch.Text, patch.MarkdownText = &markdownText, true
 	}
 	if hasBlocks {
 		patch.Blocks = &blocks
@@ -11014,12 +11182,22 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 	if hasAttachments {
 		patch.Attachments = &attachments
 	}
+	if hasMetadata {
+		patch.Metadata = &metadata
+	}
+	if hasFileIDs {
+		patch.FileIDs = &fileIDs
+	}
 	message, err := h.Messages.UpdateMessage(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp), patch)
 	switch {
 	case errors.Is(err, domain.ErrMessageNotOwned):
 		// Slack's own code for editing somebody else's message; no_permission
 		// named a scope problem the caller does not have.
 		writeError(w, "cant_update_message")
+		return
+	case errors.Is(err, domain.ErrInvalidFile):
+		// A file_ids list that is not a list of files.
+		writeError(w, "invalid_arg_name")
 		return
 	case errors.Is(err, domain.ErrInvalidMessage):
 		// An edit that would leave the message with nothing to show.
@@ -11036,6 +11214,25 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	ts := slackTimestamp(message.CreatedAt)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": ts, "text": message.Text, "message": projected})
+}
+
+// fileIDsArgument reads chat.update's file_ids: a comma-separated list, the
+// form python slack_sdk sends, or a JSON array, which the list-field decoding
+// has already joined. An empty value is an absent one.
+func fileIDsArgument(raw string) ([]domain.FileID, bool, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, false, nil
+	}
+	values := strings.Split(raw, ",")
+	ids := make([]domain.FileID, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, false, decodeFailure("invalid_arg_name", "file_ids must name files")
+		}
+		ids = append(ids, domain.FileID(value))
+	}
+	return ids, true, nil
 }
 
 func (h Handler) startMessageStream(w http.ResponseWriter, r *http.Request) {
@@ -11240,20 +11437,16 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	textValue := strings.TrimSpace(fields["text"])
-	markdownText := fields["markdown_text"]
+	markdownText, err := messageMarkdownText(fields)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	if markdownText != "" {
-		if fields["text"] != "" || strings.TrimSpace(fields["blocks"]) != "" {
-			writeError(w, "markdown_text_conflict")
-			return
-		}
-		if utf8.RuneCountInString(markdownText) > 12000 {
-			writeError(w, "msg_too_long")
-			return
-		}
 		textValue = markdownText
 	}
-	if strings.TrimSpace(fields["metadata"]) != "" && principal.AppID == "" {
-		writeError(w, "metadata_must_be_sent_from_app")
+	if err := messageMetadataSender(principal, fields); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
@@ -13112,7 +13305,7 @@ func jsonStartsWith(value json.RawMessage, first byte) bool {
 
 func isListField(name string) bool {
 	switch name {
-	case "channel_ids", "leaving_team_ids", "target_team_ids", "team_ids", "user_ids", "ids":
+	case "channel_ids", "leaving_team_ids", "target_team_ids", "team_ids", "user_ids", "ids", "file_ids":
 		return true
 	default:
 		return false
@@ -14343,7 +14536,22 @@ func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Reques
 	if mimeType == "" {
 		mimeType = domain.InferMIMEType(name)
 	}
-	upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, size, 15*time.Minute)
+	// alt_txt describes the file for a reader who cannot see it, and
+	// snippet_type uploads the bytes as a snippet in that syntax. Python
+	// slack_sdk 3.45.0 and the Java client 1.52.0 send alt_txt; @slack/web-api
+	// 8.2.0 sends the same value as alt_text. Both used to be dropped.
+	description := fields["alt_txt"]
+	if strings.TrimSpace(description) == "" {
+		description = fields["alt_text"]
+	}
+	upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalUploadRequest{
+		Name: name, MIMEType: mimeType, Size: size, TTL: 15 * time.Minute,
+		Description: description, FileType: fields["snippet_type"],
+	})
+	if errors.Is(err, domain.ErrInvalidExternalUpload) {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	if err != nil {
 		writeError(w, mapServiceError(err, "team_not_found"))
 		return

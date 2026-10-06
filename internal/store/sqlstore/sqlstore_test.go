@@ -731,7 +731,7 @@ func TestSQLiteRemoteFileLifecycle(t *testing.T) {
 	if err != nil || loaded.ID != value.ID {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
-	page, err := s.ListRemoteFiles(ctx, "T1", domain.PageRequest{Limit: 10})
+	page, err := s.ListRemoteFiles(ctx, "T1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Files) != 1 {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
@@ -742,7 +742,7 @@ func TestSQLiteRemoteFileLifecycle(t *testing.T) {
 	if err := s.RemoveRemoteFile(ctx, "T1", domain.RemoteFileLookup{ID: value.ID}, events.Event{ID: "evt_remote_2", WorkspaceID: "T1", Topic: "remote_file.removed", Payload: string(value.ID), CreatedAt: created}); err != nil {
 		t.Fatal(err)
 	}
-	page, err = s.ListRemoteFiles(ctx, "T1", domain.PageRequest{Limit: 10})
+	page, err = s.ListRemoteFiles(ctx, "T1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Files) != 0 {
 		t.Fatalf("after remove page=%+v err=%v", page, err)
 	}

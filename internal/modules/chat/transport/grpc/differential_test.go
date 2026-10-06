@@ -1577,7 +1577,24 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				_, sharedNowhere := chat.ShareRemoteFile(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "ext-1"}, []domain.ConversationID{"C-nobody"})
-				listed, err := chat.RemoteFiles(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				listed, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				// files.remote.list's channel, ts_from and ts_to cross the seam.
+				inChannel, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{Channel: "C1"}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				elsewhere, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{Channel: "C2"}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				future, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{From: added.CreatedAt.Add(time.Hour)}, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				past, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{To: added.CreatedAt.Add(-time.Hour)}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -1585,7 +1602,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				removedTwice := chat.RemoveRemoteFile(ctx, "T1", "U1", domain.RemoteFileLookup{ExternalID: "ext-1"})
-				after, err := chat.RemoteFiles(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				after, err := chat.RemoteFiles(ctx, "T1", "U1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -1593,6 +1610,7 @@ func parityCases() []parityCase {
 					added.Title, byExternal.ID == added.ID, byID.ExternalID,
 					updated.Title, updated.FileType, updated.ExternalURL,
 					shared.SharedChannels, len(listed.Files), len(after.Files),
+					len(inChannel.Files), len(elsewhere.Files), len(future.Files), len(past.Files),
 					duplicate, missing != nil, unaddressed != nil, sharedNowhere != nil, removedTwice != nil,
 				}, nil
 			},
@@ -3607,10 +3625,16 @@ func parityCases() []parityCase {
 				if _, err := chat.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", "", `[{"type":"divider"}]`); err != nil {
 					return nil, err
 				}
-				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1", "", false); err != nil {
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1", "", domain.EphemeralPresentation{}); err != nil {
 					return nil, err
 				}
-				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "linked for @bob", "", "", "A1", "", true); err != nil {
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "linked for @bob", "", "", "A1", "", domain.EphemeralPresentation{LinkNames: true}); err != nil {
+					return nil, err
+				}
+				// chat.postEphemeral's markdown_text, parse and custom identity
+				// cross the seam and come back on the stored message.
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "**styled**", "", "", "A1", "",
+					domain.EphemeralPresentation{MarkdownText: true, Parse: "full", Username: "Helper", IconEmoji: ":robot_face:"}); err != nil {
 					return nil, err
 				}
 				values, err := chat.ListEphemeralMessages(ctx, "T1", "U2", "C1", 10)
@@ -3619,7 +3643,7 @@ func parityCases() []parityCase {
 				}
 				result := make([]any, 0, len(values))
 				for _, value := range values {
-					result = append(result, []any{value.Text, value.Blocks, value.Attachments, value.AppID, value.ID != "", !value.CreatedAt.IsZero()})
+					result = append(result, []any{value.Text, value.Blocks, value.Attachments, value.AppID, value.ID != "", !value.CreatedAt.IsZero(), value.StreamState})
 				}
 				return result, nil
 			},
@@ -4183,6 +4207,37 @@ func parityCases() []parityCase {
 					repatched.Text, repatched.Blocks, repatched.Attachments,
 					permalink == wantPermalink, stored, thread.HasMore,
 				}, nil
+			},
+		},
+		{
+			// chat.update's markdown_text, parse, metadata, reply_broadcast and
+			// file_ids are fields of the patch; a converter that dropped any
+			// of them leaves one composition's message unchanged.
+			name: "every chat.update argument crosses the seam",
+			seed: seedFileParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				root, err := chat.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{Conversation: "C1", Text: "root", AppID: "A1"})
+				if err != nil {
+					return nil, err
+				}
+				reply, err := chat.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{Conversation: "C1", Text: "reply", AppID: "A1", ThreadTimestamp: domain.NewMessageTimestamp(root.CreatedAt)})
+				if err != nil {
+					return nil, err
+				}
+				markdown, metadata := "**edited**", `{"event_type":"edited","event_payload":{"n":1}}`
+				files := []domain.FileID{"Fparity-description"}
+				edited, err := chat.UpdateMessage(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(reply.CreatedAt), domain.MessagePatch{
+					Text: &markdown, MarkdownText: true, Parse: "full", Metadata: &metadata, AppID: "A1", ReplyBroadcast: true, FileIDs: &files,
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, notTheirs := chat.UpdateMessage(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(reply.CreatedAt), domain.MessagePatch{Metadata: &metadata})
+				fileIDs := make([]domain.FileID, 0, len(edited.Files))
+				for _, file := range edited.Files {
+					fileIDs = append(fileIDs, file.ID)
+				}
+				return []any{edited.Text, edited.StreamState, edited.Metadata, edited.ReplyBroadcast, fileIDs, notTheirs != nil}, nil
 			},
 		},
 		{
@@ -5132,7 +5187,7 @@ func parityCases() []parityCase {
 				// An external upload is a ticket, bytes, then a completion that
 				// turns both into a shared file. The completion is the seam
 				// method under test; the first two set it up.
-				upload, err := chat.CreateExternalUpload(ctx, "T1", "U1", "report.txt", "text/plain", 6, time.Minute)
+				upload, err := chat.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "report.txt", MIMEType: "text/plain", Size: 6, TTL: time.Minute, Description: "The quarterly numbers", FileType: "text"})
 				if err != nil {
 					return nil, err
 				}
@@ -5147,7 +5202,7 @@ func parityCases() []parityCase {
 				}
 				completed := make([]string, 0, len(files))
 				for _, file := range files {
-					completed = append(completed, file.Name+"|"+file.Title+"|"+strconv.FormatInt(file.Size, 10))
+					completed = append(completed, file.Name+"|"+file.Title+"|"+strconv.FormatInt(file.Size, 10)+"|"+file.Description+"|"+file.FileType)
 				}
 				sort.Strings(completed)
 				// A public link is a token that anyone holding it may read, so
@@ -5542,7 +5597,7 @@ func parityCases() []parityCase {
 			name:  "external upload ticket",
 			blobs: true,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				upload, err := chat.CreateExternalUpload(ctx, "T1", "U1", "external.txt", "text/plain", 5, time.Minute)
+				upload, err := chat.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "external.txt", MIMEType: "text/plain", Size: 5, TTL: time.Minute})
 				if err != nil {
 					return nil, err
 				}

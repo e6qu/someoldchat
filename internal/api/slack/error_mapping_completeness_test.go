@@ -523,6 +523,9 @@ func perOperationExemptions() map[string]map[string]string {
 			"invalid_arguments": "current mutually exclusive rich-message arguments have no precise legacy error",
 			"missing_scope":     "customized authorship requires chat:write.customize in addition to chat:write",
 		},
+		"/chat.postEphemeral": {
+			"missing_scope": "customized authorship requires chat:write.customize in addition to chat:write, as on chat.postMessage",
+		},
 		"/chat.meMessage": {
 			"invalid_arguments": "the shared modern posting decoder validates mutually exclusive fields",
 			"missing_scope":     "the shared modern posting decoder enforces customized-authorship scope",

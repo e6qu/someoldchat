@@ -49,7 +49,7 @@ func TestConcurrentExternalUploadCompletionYieldsOneFile(t *testing.T) {
 
 	tickets := make([]domain.ExternalUpload, 0, uploads)
 	for index := 0; index < uploads; index++ {
-		ticket, err := messages.CreateExternalUpload(ctx, "T1", "U1", fmt.Sprintf("file-%d.txt", index), "text/plain", int64(len(blobBytes)), time.Minute)
+		ticket, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: fmt.Sprintf("file-%d.txt", index), MIMEType: "text/plain", Size: int64(len(blobBytes)), TTL: time.Minute})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +115,7 @@ func TestConcurrentExternalUploadCompletionPostsOneComment(t *testing.T) {
 	const attempts = 12
 	messages, ctx := uploadService(t)
 
-	ticket, err := messages.CreateExternalUpload(ctx, "T1", "U1", "shared.txt", "text/plain", 4, time.Minute)
+	ticket, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "shared.txt", MIMEType: "text/plain", Size: 4, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

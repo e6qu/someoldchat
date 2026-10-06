@@ -835,7 +835,11 @@ func (m Messages) AddRemoteFile(ctx context.Context, workspaceID domain.Workspac
 	if err != nil {
 		return domain.RemoteFile{}, err
 	}
-	value.CreatedAt = time.Now().UTC()
+	// A remote file's creation instant is whole seconds: the SQL profiles
+	// store it so and the file object reports it so. Keeping the fraction in
+	// memory made files.remote.list's inclusive ts_from/ts_to bounds disagree
+	// between profiles for a bound inside the creation second.
+	value.CreatedAt = time.Now().UTC().Truncate(time.Second)
 	event, err := newEvent(workspaceID, userID, events.NewPayload("remote_file.created", events.String("file_id", string(value.ID)), events.String("external_id", value.ExternalID)), value.CreatedAt)
 	if err != nil {
 		return domain.RemoteFile{}, err
@@ -861,11 +865,11 @@ func (m Messages) RemoteFileInfo(ctx context.Context, workspaceID domain.Workspa
 	return m.Store.GetRemoteFile(ctx, workspaceID, lookup)
 }
 
-func (m Messages) RemoteFiles(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.RemoteFilePage, error) {
+func (m Messages) RemoteFiles(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, filter domain.RemoteFileFilter, request domain.PageRequest) (domain.RemoteFilePage, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.RemoteFilePage{}, err
 	}
-	return m.Store.ListRemoteFiles(ctx, workspaceID, request)
+	return m.Store.ListRemoteFiles(ctx, workspaceID, filter, request)
 }
 
 func (m Messages) RemoveRemoteFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, lookup domain.RemoteFileLookup) error {
@@ -9014,7 +9018,7 @@ func (m Messages) Permalink(ctx context.Context, workspaceID domain.WorkspaceID,
 }
 
 func (m Messages) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "", "", "", false)
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "", "", "", domain.EphemeralPresentation{})
 }
 
 func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ip, userAgent string) error {
@@ -10068,7 +10072,7 @@ func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID dom
 }
 
 func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "", "", "", false)
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "", "", "", domain.EphemeralPresentation{})
 }
 
 func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
@@ -10267,18 +10271,35 @@ func normalizeScheduledMessageState(raw, text, blocks string, threadTimestamp do
 	return string(encoded), nil
 }
 
-// PostEphemeralWithBlocksAndAttachments is chat.postEphemeral. linkNames is
-// its link_names, applied to text as chat.postMessage applies it.
-func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp, linkNames bool) (domain.EphemeralMessage, error) {
-	return m.postEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, attachments, appID, "", threadTimestamp, linkNames)
+// PostEphemeralWithBlocksAndAttachments is chat.postEphemeral. presentation
+// is its link_names, markdown_text, parse and custom identity, each applied
+// and validated as chat.postMessage applies and validates it.
+func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp, presentation domain.EphemeralPresentation) (domain.EphemeralMessage, error) {
+	return m.postEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, attachments, appID, "", threadTimestamp, presentation)
 }
 
-func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, idempotencyKey string, threadTimestamp domain.MessageTimestamp, linkNames bool) (domain.EphemeralMessage, error) {
+func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, idempotencyKey string, threadTimestamp domain.MessageTimestamp, presentation domain.EphemeralPresentation) (domain.EphemeralMessage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
+	// A custom identity belongs to an app, as on chat.postMessage, where
+	// the handler also requires chat:write.customize.
+	if (presentation.MarkdownText && utf8.RuneCountInString(text) > 12000) ||
+		(presentation.Parse != "" && presentation.Parse != "none" && presentation.Parse != "full") ||
+		((presentation.Username != "" || presentation.IconEmoji != "" || presentation.IconURL != "") && appID == "") ||
+		!validMessageAuthorship(presentation.Username, presentation.IconEmoji, presentation.IconURL) {
+		return domain.EphemeralMessage{}, domain.ErrInvalidEphemeral
+	}
+	streamState, err := encodePresentation(domain.MessageStreamState{
+		Username: presentation.Username, IconEmoji: presentation.IconEmoji, IconURL: presentation.IconURL,
+		MarkdownText: presentation.MarkdownText, Parse: presentation.Parse, LinkNames: presentation.LinkNames,
+	})
+	if err != nil {
+		return domain.EphemeralMessage{}, err
+	}
 	text = strings.TrimSpace(text)
-	if linkNames {
+	// link_names does not apply to markdown_text, which is not Slack markup.
+	if presentation.LinkNames && !presentation.MarkdownText {
 		linked, err := m.linkMessageNames(ctx, workspaceID, authorID, text)
 		if err != nil {
 			return domain.EphemeralMessage{}, err
@@ -10343,7 +10364,7 @@ func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 		)[:40])
 	}
 	now := domain.MessageInstant(time.Now().UTC())
-	value := domain.EphemeralMessage{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, AppID: appID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Timestamp: domain.NewMessageTimestamp(now), ThreadTimestamp: threadTimestamp, CreatedAt: now}
+	value := domain.EphemeralMessage{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, AppID: appID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Timestamp: domain.NewMessageTimestamp(now), ThreadTimestamp: threadTimestamp, StreamState: streamState, CreatedAt: now}
 	if err := m.createEphemeralMessage(ctx, value); err != nil {
 		if idempotencyKey != "" && errors.Is(err, store.ErrAlreadyExists) {
 			return value, nil
@@ -10440,9 +10461,7 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 			return domain.Message{}, domain.ErrInvalidMessage
 		}
 	}
-	if utf8.RuneCountInString(request.Username) > 80 ||
-		(request.IconURL != "" && !validMessageIconURL(request.IconURL)) ||
-		(request.IconEmoji != "" && (!strings.HasPrefix(request.IconEmoji, ":") || !strings.HasSuffix(request.IconEmoji, ":"))) {
+	if !validMessageAuthorship(request.Username, request.IconEmoji, request.IconURL) {
 		return domain.Message{}, domain.ErrInvalidMessage
 	}
 	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
@@ -10537,6 +10556,29 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	return m.createMessage(ctx, message, request.IdempotencyKey, scheduledID)
 }
 
+// validMessageAuthorship checks a custom identity a message is posted under:
+// a username of at most 80 characters, an icon_emoji written :name:, and an
+// icon_url a browser can load.
+func validMessageAuthorship(username, iconEmoji, iconURL string) bool {
+	return utf8.RuneCountInString(username) <= 80 &&
+		(iconURL == "" || validMessageIconURL(iconURL)) &&
+		(iconEmoji == "" || (strings.HasPrefix(iconEmoji, ":") && strings.HasSuffix(iconEmoji, ":")))
+}
+
+// encodePresentation encodes a message's stream state: the presentation an
+// edit or an ephemeral message carries, as a posted message's stream state
+// encodes it. A state that says nothing is empty.
+func encodePresentation(state domain.MessageStreamState) (string, error) {
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	if string(encoded) == `{"active":false}` {
+		return "", nil
+	}
+	return string(encoded), nil
+}
+
 // createMessage stores a new message the caller has validated and authorized,
 // with its message.created event.
 func (m Messages) createMessage(ctx context.Context, message domain.Message, idempotencyKey string, scheduledID domain.ScheduledMessageID) (domain.Message, error) {
@@ -10611,8 +10653,21 @@ func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceI
 // don't include this field, the message's previous blocks will be retained" —
 // so a text-only edit no longer wipes the blocks an app posted.
 func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, patch domain.MessagePatch) (domain.Message, error) {
-	if patch.Text == nil && patch.Blocks == nil && patch.Attachments == nil {
+	if patch.Empty() || (patch.Parse != "" && patch.Parse != "none" && patch.Parse != "full") ||
+		(patch.MarkdownText && (patch.Text == nil || patch.Blocks != nil || utf8.RuneCountInString(*patch.Text) > 12000)) {
 		return domain.Message{}, domain.ErrInvalidMessage
+	}
+	metadata := ""
+	if patch.Metadata != nil {
+		// As on chat.postMessage, only an app attaches metadata.
+		if patch.AppID == "" {
+			return domain.Message{}, domain.ErrInvalidMessage
+		}
+		normalized, normalizeErr := normalizeMessageMetadata(*patch.Metadata)
+		if normalizeErr != nil {
+			return domain.Message{}, domain.ErrInvalidMessage
+		}
+		metadata = normalized
 	}
 	message, err := m.messageForMutation(ctx, workspaceID, userID, conversation, timestamp)
 	if err != nil {
@@ -10622,6 +10677,34 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 		return domain.Message{}, domain.ErrMessageAlreadyDeleted
 	}
 	previous := message
+	// The presentation chat.postMessage records — markdown_text, parse and
+	// link_names — describes the text, so an edit that replaces the text
+	// replaces it, and parse and link_names describe every edit.
+	state := domain.MessageStreamState{}
+	if message.StreamState != "" {
+		if err := json.Unmarshal([]byte(message.StreamState), &state); err != nil {
+			return domain.Message{}, err
+		}
+	}
+	if patch.Text != nil {
+		state.MarkdownText = patch.MarkdownText
+	}
+	state.Parse, state.LinkNames = patch.Parse, patch.LinkNames
+	if message.StreamState, err = encodePresentation(state); err != nil {
+		return domain.Message{}, err
+	}
+	if patch.Metadata != nil {
+		message.Metadata = metadata
+	}
+	if patch.ReplyBroadcast && message.ThreadTimestamp != "" {
+		message.ReplyBroadcast = true
+	}
+	if patch.FileIDs != nil {
+		message.Files, err = m.messageFilesForEdit(ctx, workspaceID, userID, conversation, *patch.FileIDs)
+		if err != nil {
+			return domain.Message{}, err
+		}
+	}
 	if patch.Text != nil {
 		message.Text = *patch.Text
 		if patch.LinkNames && message.TextIsMarkup() {
@@ -10643,9 +10726,10 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 			return domain.Message{}, domain.ErrInvalidMessage
 		}
 	}
+	// A message that carries files has something to show without text.
 	if messagePayloadTooLong(message.Blocks, message.Attachments) ||
 		messageTextTooLong(message.Text) ||
-		(strings.TrimSpace(message.Text) == "" && domain.NoStructuredContent(message.Blocks) && domain.NoStructuredContent(message.Attachments)) {
+		(strings.TrimSpace(message.Text) == "" && domain.NoStructuredContent(message.Blocks) && domain.NoStructuredContent(message.Attachments) && len(message.Files) == 0) {
 		return domain.Message{}, domain.ErrInvalidMessage
 	}
 	if patch.Blocks != nil {
@@ -10670,10 +10754,87 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 	if err != nil {
 		return domain.Message{}, err
 	}
-	if err := m.Store.UpdateMessage(ctx, message, event, shared...); err != nil {
+	if patch.FileIDs == nil {
+		if err := m.Store.UpdateMessage(ctx, message, event, shared...); err != nil {
+			return domain.Message{}, err
+		}
+		return message, nil
+	}
+	grants, unshares, err := fileShareChanges(workspaceID, userID, previous.Files, message.Files, conversation, event.CreatedAt)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if err := m.Store.UpdateMessageFiles(ctx, message, event, grants, unshares, shared...); err != nil {
 		return domain.Message{}, err
 	}
 	return message, nil
+}
+
+// messageFilesForEdit reads the files chat.update's file_ids names. They are
+// shared into the message's conversation as ShareFile shares an upload: each
+// must be a live file of this workspace that the editing member uploaded.
+// Any other id is an invalid argument, whether or not it names a file.
+func (m Messages) messageFilesForEdit(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, ids []domain.FileID) ([]domain.File, error) {
+	// The composer holds a message to ten attachments (SaveDraftWithAttachments).
+	if len(ids) > 10 {
+		return nil, domain.ErrInvalidFile
+	}
+	files := make([]domain.File, 0, len(ids))
+	for _, id := range ids {
+		if id == "" || slices.ContainsFunc(files, func(file domain.File) bool { return file.ID == id }) {
+			return nil, domain.ErrInvalidFile
+		}
+		file, err := m.Store.GetFile(ctx, id)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		if err != nil || file.WorkspaceID != workspaceID || file.Uploader != userID || file.Deleted || file.IsExternal() {
+			return nil, domain.ErrInvalidFile
+		}
+		// The edit shares the file here, so the message reports it shared.
+		if !slices.Contains(file.SharedChannels, conversation) {
+			file.SharedChannels = append(append([]domain.ConversationID(nil), file.SharedChannels...), conversation)
+		}
+		files = append(files, file)
+	}
+	return files, nil
+}
+
+// fileShareChanges names what an edit that replaces a message's files does to
+// the conversation's shares: a file the message now carries is shared into it
+// (journaled only when the share is new), and a file it no longer carries is
+// unshared (journaled only when no other message still carries it). The store
+// decides both conditions inside the write.
+func fileShareChanges(workspaceID domain.WorkspaceID, userID domain.UserID, before, after []domain.File, conversation domain.ConversationID, at time.Time) ([]store.FileShareGrant, []store.FileUnshare, error) {
+	carries := func(files []domain.File, id domain.FileID) bool {
+		return slices.ContainsFunc(files, func(file domain.File) bool { return file.ID == id })
+	}
+	grants := make([]store.FileShareGrant, 0, len(after))
+	for _, file := range after {
+		if carries(before, file.ID) {
+			continue
+		}
+		event, err := fileEventAt(workspaceID, userID, "file.shared", file, conversation, at)
+		if err != nil {
+			return nil, nil, err
+		}
+		grants = append(grants, store.FileShareGrant{FileID: file.ID, Event: event})
+	}
+	unshares := make([]store.FileUnshare, 0, len(before))
+	for _, file := range before {
+		if carries(after, file.ID) {
+			continue
+		}
+		unshared := file
+		unshared.SharedChannels = slices.DeleteFunc(append([]domain.ConversationID(nil), file.SharedChannels...),
+			func(channel domain.ConversationID) bool { return channel == conversation })
+		event, err := fileEventAt(workspaceID, userID, "file.unshared", unshared, conversation, at)
+		if err != nil {
+			return nil, nil, err
+		}
+		unshares = append(unshares, store.FileUnshare{FileID: file.ID, Event: event})
+	}
+	return grants, unshares, nil
 }
 
 func messageTextTooLong(text string) bool {
@@ -10699,13 +10860,19 @@ func messageUnfurlsTooLong(unfurls map[string]string) bool {
 	return false
 }
 
-func (m Messages) CreateExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, mimeType string, size int64, ttl time.Duration) (domain.ExternalUpload, error) {
+func (m Messages) CreateExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.ExternalUploadRequest) (domain.ExternalUpload, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.ExternalUpload{}, err
 	}
-	name = strings.TrimSpace(name)
-	mimeType = strings.TrimSpace(mimeType)
-	if name == "" || mimeType == "" || size <= 0 || ttl <= 0 {
+	name := strings.TrimSpace(request.Name)
+	mimeType := strings.TrimSpace(request.MIMEType)
+	description := strings.TrimSpace(request.Description)
+	fileType := strings.TrimSpace(request.FileType)
+	// The description is held to the bound a member's own description is
+	// (SetFileDescription), and a snippet's language to the bound a remote
+	// file's filetype is.
+	if name == "" || mimeType == "" || request.Size <= 0 || request.TTL <= 0 ||
+		utf8.RuneCountInString(description) > FileDescriptionLimit || len(fileType) > 100 {
 		return domain.ExternalUpload{}, domain.ErrInvalidExternalUpload
 	}
 	id, err := domain.NewExternalUploadID()
@@ -10713,7 +10880,7 @@ func (m Messages) CreateExternalUpload(ctx context.Context, workspaceID domain.W
 		return domain.ExternalUpload{}, err
 	}
 	now := time.Now().UTC()
-	value := domain.ExternalUpload{ID: id, WorkspaceID: workspaceID, Uploader: userID, Name: name, Title: name, MIMEType: mimeType, BlobKey: string(workspaceID) + "/external/" + string(id), Size: size, Status: domain.ExternalUploadPending, CreatedAt: now, ExpiresAt: now.Add(ttl)}
+	value := domain.ExternalUpload{ID: id, WorkspaceID: workspaceID, Uploader: userID, Name: name, Title: name, MIMEType: mimeType, BlobKey: string(workspaceID) + "/external/" + string(id), Size: request.Size, Description: description, FileType: fileType, Status: domain.ExternalUploadPending, CreatedAt: now, ExpiresAt: now.Add(request.TTL)}
 	if err := m.Store.CreateExternalUpload(ctx, value); err != nil {
 		return domain.ExternalUpload{}, err
 	}
@@ -10916,7 +11083,7 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 			title = value.Title
 		}
 		createdAt := time.Now().UTC()
-		files[index] = domain.File{ID: fileID, WorkspaceID: value.WorkspaceID, Uploader: value.Uploader, Name: value.Name, Title: title, MIMEType: value.MIMEType, BlobKey: value.BlobKey, Size: value.Size, CreatedAt: createdAt, SharedChannels: append([]domain.ConversationID(nil), channels...)}
+		files[index] = domain.File{ID: fileID, WorkspaceID: value.WorkspaceID, Uploader: value.Uploader, Name: value.Name, Title: title, MIMEType: value.MIMEType, BlobKey: value.BlobKey, Size: value.Size, Description: value.Description, FileType: value.FileType, CreatedAt: createdAt, SharedChannels: append([]domain.ConversationID(nil), channels...)}
 		emitted, err := fileEventAt(workspaceID, userID, "file.created", files[index], "", createdAt)
 		if err != nil {
 			return nil, err

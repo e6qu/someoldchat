@@ -1520,6 +1520,16 @@ func newMessageAttachmentView(value map[string]any, sourceURL string) (messageAt
 		ImageURL:  strings.TrimSpace(stringValue(value["image_url"])),
 		ImageAlt:  strings.TrimSpace(stringValue(value["alt_text"])),
 	}
+	// A Work Object unfurl (chat.unfurl's metadata entities) is an entity, not
+	// an attachment: its title is entity_payload.attributes.title.text, it
+	// links to the entity's url, and it names the product it comes from.
+	if payload, ok := value["entity_payload"].(map[string]any); ok && attachment.Title == "" {
+		attributes, _ := payload["attributes"].(map[string]any)
+		title, _ := attributes["title"].(map[string]any)
+		attachment.Title = strings.TrimSpace(stringValue(title["text"]))
+		attachment.TitleURL = strings.TrimSpace(stringValue(value["url"]))
+		attachment.Footer = strings.TrimSpace(stringValue(attributes["product_name"]))
+	}
 	if attachment.Title == "" && attachment.Text == "" {
 		attachment.Text = strings.TrimSpace(stringValue(value["fallback"]))
 	}

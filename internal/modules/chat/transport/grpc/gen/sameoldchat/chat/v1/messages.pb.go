@@ -764,8 +764,11 @@ type EphemeralMessage struct {
 	AppId           string                 `protobuf:"bytes,10,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	CreatedAt       string                 `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	ThreadTimestamp string                 `protobuf:"bytes,12,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// stream_state is the presentation the message was posted with, encoded as
+	// a posted message's stream state is.
+	StreamState   string `protobuf:"bytes,13,opt,name=stream_state,json=streamState,proto3" json:"stream_state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EphemeralMessage) Reset() {
@@ -882,6 +885,13 @@ func (x *EphemeralMessage) GetThreadTimestamp() string {
 	return ""
 }
 
+func (x *EphemeralMessage) GetStreamState() string {
+	if x != nil {
+		return x.StreamState
+	}
+	return ""
+}
+
 type PostEphemeralRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -895,7 +905,14 @@ type PostEphemeralRequest struct {
 	ThreadTimestamp string                 `protobuf:"bytes,9,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
 	// link_names links the @names and #names of text, as chat.postMessage's
 	// link_names does.
-	LinkNames     bool `protobuf:"varint,10,opt,name=link_names,json=linkNames,proto3" json:"link_names,omitempty"`
+	LinkNames bool `protobuf:"varint,10,opt,name=link_names,json=linkNames,proto3" json:"link_names,omitempty"`
+	// markdown_text, parse, username, icon_emoji and icon_url are
+	// chat.postEphemeral's, as chat.postMessage takes them.
+	MarkdownText  bool   `protobuf:"varint,11,opt,name=markdown_text,json=markdownText,proto3" json:"markdown_text,omitempty"`
+	Parse         string `protobuf:"bytes,12,opt,name=parse,proto3" json:"parse,omitempty"`
+	Username      string `protobuf:"bytes,13,opt,name=username,proto3" json:"username,omitempty"`
+	IconEmoji     string `protobuf:"bytes,14,opt,name=icon_emoji,json=iconEmoji,proto3" json:"icon_emoji,omitempty"`
+	IconUrl       string `protobuf:"bytes,15,opt,name=icon_url,json=iconUrl,proto3" json:"icon_url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -998,6 +1015,41 @@ func (x *PostEphemeralRequest) GetLinkNames() bool {
 		return x.LinkNames
 	}
 	return false
+}
+
+func (x *PostEphemeralRequest) GetMarkdownText() bool {
+	if x != nil {
+		return x.MarkdownText
+	}
+	return false
+}
+
+func (x *PostEphemeralRequest) GetParse() string {
+	if x != nil {
+		return x.Parse
+	}
+	return ""
+}
+
+func (x *PostEphemeralRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *PostEphemeralRequest) GetIconEmoji() string {
+	if x != nil {
+		return x.IconEmoji
+	}
+	return ""
+}
+
+func (x *PostEphemeralRequest) GetIconUrl() string {
+	if x != nil {
+		return x.IconUrl
+	}
+	return ""
 }
 
 type EphemeralMessagesRequest struct {
@@ -1291,7 +1343,21 @@ type UpdateMessageRequest struct {
 	Attachments    *string                `protobuf:"bytes,7,opt,name=attachments,proto3,oneof" json:"attachments,omitempty"`
 	// link_names links the @names and #names of the new text, as
 	// chat.update's link_names does. It describes this edit only.
-	LinkNames     bool `protobuf:"varint,8,opt,name=link_names,json=linkNames,proto3" json:"link_names,omitempty"`
+	LinkNames bool `protobuf:"varint,8,opt,name=link_names,json=linkNames,proto3" json:"link_names,omitempty"`
+	// markdown_text marks text as chat.update's markdown_text; parse is its
+	// parse, which, like link_names, describes this edit only.
+	MarkdownText bool   `protobuf:"varint,9,opt,name=markdown_text,json=markdownText,proto3" json:"markdown_text,omitempty"`
+	Parse        string `protobuf:"bytes,10,opt,name=parse,proto3" json:"parse,omitempty"`
+	// metadata, when present, replaces the message's metadata; app_id names
+	// the app making the edit, which only an app may attach.
+	Metadata *string `protobuf:"bytes,11,opt,name=metadata,proto3,oneof" json:"metadata,omitempty"`
+	AppId    string  `protobuf:"bytes,12,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	// reply_broadcast broadcasts a thread reply to its channel.
+	ReplyBroadcast bool `protobuf:"varint,13,opt,name=reply_broadcast,json=replyBroadcast,proto3" json:"reply_broadcast,omitempty"`
+	// file_ids, when file_ids_set, are the files the message carries after the
+	// edit (chat.update's file_ids).
+	FileIds       []string `protobuf:"bytes,14,rep,name=file_ids,json=fileIds,proto3" json:"file_ids,omitempty"`
+	FileIdsSet    bool     `protobuf:"varint,15,opt,name=file_ids_set,json=fileIdsSet,proto3" json:"file_ids_set,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1378,6 +1444,55 @@ func (x *UpdateMessageRequest) GetAttachments() string {
 func (x *UpdateMessageRequest) GetLinkNames() bool {
 	if x != nil {
 		return x.LinkNames
+	}
+	return false
+}
+
+func (x *UpdateMessageRequest) GetMarkdownText() bool {
+	if x != nil {
+		return x.MarkdownText
+	}
+	return false
+}
+
+func (x *UpdateMessageRequest) GetParse() string {
+	if x != nil {
+		return x.Parse
+	}
+	return ""
+}
+
+func (x *UpdateMessageRequest) GetMetadata() string {
+	if x != nil && x.Metadata != nil {
+		return *x.Metadata
+	}
+	return ""
+}
+
+func (x *UpdateMessageRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *UpdateMessageRequest) GetReplyBroadcast() bool {
+	if x != nil {
+		return x.ReplyBroadcast
+	}
+	return false
+}
+
+func (x *UpdateMessageRequest) GetFileIds() []string {
+	if x != nil {
+		return x.FileIds
+	}
+	return nil
+}
+
+func (x *UpdateMessageRequest) GetFileIdsSet() bool {
+	if x != nil {
+		return x.FileIdsSet
 	}
 	return false
 }
@@ -3311,7 +3426,7 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x0finitial_comment\x18\x05 \x01(\tR\x0einitialComment\x12)\n" +
 	"\x10thread_timestamp\x18\x06 \x01(\tR\x0fthreadTimestamp\"7\n" +
 	"\x19ShareUploadedFileResponse\x12\x1a\n" +
-	"\bchannels\x18\x01 \x03(\tR\bchannels\"\xfb\x02\n" +
+	"\bchannels\x18\x01 \x03(\tR\bchannels\"\x9e\x03\n" +
 	"\x10EphemeralMessage\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12'\n" +
 	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\x12\x1b\n" +
@@ -3326,7 +3441,8 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	" \x01(\tR\x05appId\x12\x1d\n" +
 	"\n" +
 	"created_at\x18\v \x01(\tR\tcreatedAt\x12)\n" +
-	"\x10thread_timestamp\x18\f \x01(\tR\x0fthreadTimestamp\"\xcd\x02\n" +
+	"\x10thread_timestamp\x18\f \x01(\tR\x0fthreadTimestamp\x12!\n" +
+	"\fstream_state\x18\r \x01(\tR\vstreamState\"\xde\x03\n" +
 	"\x14PostEphemeralRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -3339,7 +3455,13 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x10thread_timestamp\x18\t \x01(\tR\x0fthreadTimestamp\x12\x1d\n" +
 	"\n" +
 	"link_names\x18\n" +
-	" \x01(\bR\tlinkNames\"\x95\x01\n" +
+	" \x01(\bR\tlinkNames\x12#\n" +
+	"\rmarkdown_text\x18\v \x01(\bR\fmarkdownText\x12\x14\n" +
+	"\x05parse\x18\f \x01(\tR\x05parse\x12\x1a\n" +
+	"\busername\x18\r \x01(\tR\busername\x12\x1d\n" +
+	"\n" +
+	"icon_emoji\x18\x0e \x01(\tR\ticonEmoji\x12\x19\n" +
+	"\bicon_url\x18\x0f \x01(\tR\aiconUrl\"\x95\x01\n" +
 	"\x18EphemeralMessagesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -3360,7 +3482,7 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\x12\x12\n" +
 	"\x04text\x18\x05 \x01(\tR\x04text\x12\x16\n" +
 	"\x06blocks\x18\x06 \x01(\tR\x06blocks\x12 \n" +
-	"\vattachments\x18\a \x01(\tR\vattachments\"\xb9\x02\n" +
+	"\vattachments\x18\a \x01(\tR\vattachments\"\x9f\x04\n" +
 	"\x14UpdateMessageRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -3370,10 +3492,20 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x06blocks\x18\x06 \x01(\tH\x01R\x06blocks\x88\x01\x01\x12%\n" +
 	"\vattachments\x18\a \x01(\tH\x02R\vattachments\x88\x01\x01\x12\x1d\n" +
 	"\n" +
-	"link_names\x18\b \x01(\bR\tlinkNamesB\a\n" +
+	"link_names\x18\b \x01(\bR\tlinkNames\x12#\n" +
+	"\rmarkdown_text\x18\t \x01(\bR\fmarkdownText\x12\x14\n" +
+	"\x05parse\x18\n" +
+	" \x01(\tR\x05parse\x12\x1f\n" +
+	"\bmetadata\x18\v \x01(\tH\x03R\bmetadata\x88\x01\x01\x12\x15\n" +
+	"\x06app_id\x18\f \x01(\tR\x05appId\x12'\n" +
+	"\x0freply_broadcast\x18\r \x01(\bR\x0ereplyBroadcast\x12\x19\n" +
+	"\bfile_ids\x18\x0e \x03(\tR\afileIds\x12 \n" +
+	"\ffile_ids_set\x18\x0f \x01(\bR\n" +
+	"fileIdsSetB\a\n" +
 	"\x05_textB\t\n" +
 	"\a_blocksB\x0e\n" +
-	"\f_attachments\"\xf0\x03\n" +
+	"\f_attachmentsB\v\n" +
+	"\t_metadata\"\xf0\x03\n" +
 	"\x19StartMessageStreamRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +

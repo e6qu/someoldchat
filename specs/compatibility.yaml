@@ -204,6 +204,11 @@ operations:
         no link or media previews of its own, so unfurl_media is validated and
         recorded but has no media unfurl to suppress, and chat.unfurl called
         directly still attaches previews to any message.
+      - >-
+        container_id is sent by python slack_sdk 3.45.0 alone (neither the Java
+        client 1.52.0's RequestFormBuilder nor @slack/web-api 8.2.0 carries
+        it, and the pinned OpenAPI does not declare it), with no description
+        of what it names or does. It is accepted and has no effect.
       - The Web API now enforces the documented posting allowance — one message per second per channel with a short burst — and a per-method budget, answering 429 with Retry-After. Every method is held to the tier Slack publishes for it (rate-limit-tiers decision); chat.postMessage's method budget is the special tier's several hundred a minute, enforced as the pinned SDK's 600. A method budget answers Slack's ratelimited and the per-channel posting allowance answers the pinned rate_limited (provenance under rate-limit-codes). Every web replica of a deployment draws from one budget, held in the chat module's store wherever more than one replica can run.
     audit:
       downgraded_from: behavior-compatible
@@ -228,6 +233,36 @@ operations:
       - go-test:internal/api/slack:TestEditingSomebodyElsesMessageUsesSlacksCodes
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
       - go-test:internal/api/slack:TestChatUpdateLinkNamesDescribesTheEdit
+      - go-test:internal/api/slack:TestChatUpdateTakesEverySDKArgument
+      - go-test:tests/persistence-qualification:sdkMessageArgumentsAreDurable
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - >-
+        markdown_text, metadata, parse, reply_broadcast and file_ids (sent by
+        python slack_sdk 3.45.0, the Java client 1.52.0 and @slack/web-api
+        8.2.0; absent from the pinned OpenAPI) are read as chat.postMessage
+        reads them. An edit carrying only metadata, reply_broadcast or file_ids
+        is an edit; the message keeps the content it already had.
+        markdown_text may not be combined with text or blocks
+        (markdown_text_conflict), and a text edit replaces the markdown
+        presentation. parse, like link_names, describes the edit: an omitted
+        parse is overwritten with the default. A malformed metadata object is
+        refused with no_text, as chat.postMessage refuses it.
+      - >-
+        reply_broadcast ("Broadcast an existing thread reply to make it visible
+        to everyone in the channel", @slack/web-api 8.2.0) cannot be
+        withdrawn: reply_broadcast=false leaves a broadcast reply broadcast,
+        and on a message outside a thread, which is already in its channel, it
+        changes nothing. The SDK sources define neither case.
+      - >-
+        file_ids ("Array of new file ids that will be sent with this message")
+        replaces the files the message carries, in order. Each must be a live,
+        hosted file the editing member uploaded, and at most ten, the bound the
+        composer holds a message to; anything else is invalid_arg_name. A file
+        the edit adds is shared into the conversation (file_shared when the
+        share is new) and a file it drops is unshared when no other message
+        still carries it there. An empty file_ids is an absent one, so an edit
+        cannot remove every file.
   - method: chat.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -290,7 +325,18 @@ operations:
       - go-test:internal/api/slack:TestLimitZeroIsTheDefault
       - go-test:internal/api/slack:TestChannelNoticesCarryTheirSlackFieldsInHistory
       - go-test:internal/api/slack:TestHuddleMessageCarriesTheHuddleChat
+      - go-test:internal/api/slack:TestConversationReadsReturnOtherAppsMetadataOnlyOnRequest
     deviations:
+      - >-
+        include_all_metadata is absent from the pinned OpenAPI; python
+        slack_sdk 3.45.0, the Java client 1.52.0 and @slack/web-api 8.2.0
+        send it, and the last describes it only as "Return all metadata
+        associated with messages. Defaults to false." No source says what
+        "not all" is, so it is read as the metadata the calling app attached:
+        without the flag a message carries its metadata only when the calling
+        token's app posted it (a token with no app sees none), and with it every
+        message carries its metadata. Metadata used to be returned to every
+        reader whatever it asked.
       - >-
         A huddle posts a huddle_thread message, as Slack's do, whose thread is
         the huddle's chat. Slack's current reference does not document that
@@ -307,6 +353,12 @@ operations:
       - go-test:internal/api/slack:TestThreadParentsCarryTheirSummary
       - go-test:internal/api/slack:TestHistoryWindowIsPartOfTheRead
       - go-test:internal/api/slack:TestHuddleMessageCarriesTheHuddleChat
+      - go-test:internal/api/slack:TestConversationReadsReturnOtherAppsMetadataOnlyOnRequest
+    deviations:
+      - >-
+        include_all_metadata is read as conversations.history reads it: without
+        it a message carries its metadata only when the calling token's app
+        posted it; with it every message carries its metadata.
   - method: reactions.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -632,6 +684,17 @@ operations:
       - go-test:internal/api/slack:TestExternalUploadURLRefusesWithHTTPStatus
       - go-test:internal/api/slack:TestUploadsInferTheirMediaTypeFromTheName
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/api/slack:TestUploadURLExternalCarriesAltTextAndSnippetType
+      - go-test:tests/persistence-qualification:sdkMessageArgumentsAreDurable
+    deviations:
+      - >-
+        alt_txt (python slack_sdk 3.45.0, the Java client 1.52.0) or alt_text
+        (@slack/web-api 8.2.0) becomes the file's description, the file
+        object's alt_txt and the first-party image's alt text, held to the
+        1,000 characters a member's own description is. snippet_type uploads
+        the bytes as a snippet in that syntax (the file's filetype, editable),
+        held to 100 bytes as a remote file's filetype is. Either over its bound
+        is invalid_arg_name.
   - method: files.completeUploadExternal
     status: behavior-compatible
     provenance: slack-reference
@@ -1154,6 +1217,18 @@ operations:
       - go-test:internal/api/slack:TestPostEphemeralContract
       - go-test:internal/api/slack:TestMessageMethodsAnswerInvalidBlocks
       - go-test:internal/api/slack:TestChatPostEphemeralLinkNames
+      - go-test:internal/api/slack:TestChatPostEphemeralTakesEverySDKArgument
+      - go-test:tests/persistence-qualification:sdkMessageArgumentsAreDurable
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - >-
+        markdown_text, parse, username, icon_emoji and icon_url are read as
+        chat.postMessage reads them: markdown_text may not be combined with
+        text or blocks (markdown_text_conflict), and a custom identity needs an
+        app token holding chat:write.customize (missing_scope, which the pinned
+        enum omits). The ephemeral message keeps the presentation and the
+        first-party client shows it; the message.ephemeral record, which no
+        pinned event schema describes, carries the text without it.
   - method: chat.scheduleMessage
     status: behavior-compatible
     provenance: slack-reference
@@ -1205,8 +1280,26 @@ operations:
       - go-test:internal/slackapp:TestEventProcessorDeliversLinkSharedForTheAppsUnfurlDomains
       - go-test:internal/service:TestUnfurlLinksDecidesWhetherAppsAreAskedToUnfurl
       - official-sdk:tests/official-sdk-qualification/node-bolt/qualification.mjs
+      - go-test:internal/api/slack:TestChatUnfurlTakesWorkObjectMetadata
+      - go-test:internal/web:TestWorkObjectUnfurlShowsTheEntity
     deviations:
       - link_shared always carries source=conversations_history; source=composer is answered cannot_unfurl_url because the first-party client previews no unsent draft, so no composer unfurl_id exists.
+      - >-
+        metadata (@slack/web-api 8.2.0 ChatUnfurlMetadata, python slack_sdk
+        EventAndEntityMetadata) is taken in place of or beside unfurls. Each of
+        its Work Object entities must carry the fields @slack/types'
+        EntityMetadata requires (entity_type, url, external_ref.id,
+        entity_payload.attributes.title.text) and app_unfurl_url, a link of the
+        message; it is held as that link's app unfurl, under the same domain
+        and membership rules, and an entity and an unfurls entry for one link
+        are refused with invalid_arg_name. No source defines how an unfurled
+        Work Object reads back, so the message's attachments carry the entity
+        object itself, marked is_app_unfurl with its app_unfurl_url, and the
+        first-party client shows its title, url and product name. The
+        flexpane, entity actions and entity.presentDetails round trip of a
+        unfurled entity are not modelled, and an event_type/event_payload
+        beside the entities is not stored, because no source says what it
+        does on an unfurl.
   - method: dialog.open
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1287,6 +1380,17 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestRemoteFileLifecycle
+      - go-test:internal/api/slack:TestRemoteFilesListFiltersByChannelAndTime
+      - go-test:tests/persistence-qualification:publishedWaveOneRepositoryContract
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - >-
+        channel, ts_from and ts_to filter inside the keyset read, so a page is
+        never emptied by a filter applied after it. A remote file's creation
+        time is whole seconds, as its created field reports it, and both bounds
+        are inclusive. A channel the caller cannot see filters to the files
+        shared there, as the unfiltered list already names every file's
+        channels.
   - method: files.remote.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -2326,6 +2430,14 @@ operations:
     reference: https://docs.slack.dev/reference/methods/chat.stopStream/
     evidence:
       - go-test:internal/api/slack:TestChatStreamMethodsFollowOfficialBotTokenLifecycle
+    deviations:
+      - >-
+        session_status is sent by python slack_sdk 3.45.0, the Java client
+        1.52.0 and @slack/web-api 8.2.0, which describes it only as "The
+        session status to set after stopping the stream", a free string. No
+        source names its values or the session it sets, so it is accepted and
+        not applied; an agent session's status is set by
+        agents.sessions.setStatus.
   - method: conversations.acceptSharedInvite
     status: behavior-compatible
     provenance: slack-reference

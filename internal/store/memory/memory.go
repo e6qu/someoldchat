@@ -11136,7 +11136,7 @@ func (s *Store) GetRemoteFile(_ context.Context, workspace domain.WorkspaceID, l
 	return domain.RemoteFile{}, store.ErrNotFound
 }
 
-func (s *Store) ListRemoteFiles(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.RemoteFilePage, error) {
+func (s *Store) ListRemoteFiles(_ context.Context, workspace domain.WorkspaceID, filter domain.RemoteFileFilter, request domain.PageRequest) (domain.RemoteFilePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.RemoteFilePage{}, err
 	}
@@ -11149,6 +11149,9 @@ func (s *Store) ListRemoteFiles(_ context.Context, workspace domain.WorkspaceID,
 	for _, value := range s.remoteFiles {
 		if value.WorkspaceID == workspace && !value.Deleted && (after == "" || string(value.ID) > after) {
 			value.SharedChannels = append([]domain.ConversationID(nil), s.remoteFileShares[value.ID]...)
+			if !filter.Matches(value) {
+				continue
+			}
 			values = appendSorted(values, value, request.Limit+1, func(left, right domain.RemoteFile) bool { return left.ID < right.ID })
 		}
 	}
@@ -11248,6 +11251,60 @@ func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event e
 	return store.ErrNotFound
 }
 
+func (s *Store) UpdateMessageFiles(_ context.Context, message domain.Message, event events.Event, grants []store.FileShareGrant, unshares []store.FileUnshare, companions ...events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values := s.messages[message.Conversation]
+	index := slices.IndexFunc(values, func(value domain.Message) bool { return value.ID == message.ID })
+	if index < 0 {
+		return store.ErrNotFound
+	}
+	seen := make(map[domain.FileID]struct{}, len(message.Files))
+	for _, carried := range message.Files {
+		file, exists := s.files[carried.ID]
+		if _, duplicate := seen[carried.ID]; duplicate || !exists || file.Deleted || file.WorkspaceID != message.WorkspaceID {
+			return store.ErrNotFound
+		}
+		seen[carried.ID] = struct{}{}
+	}
+	message.Unfurls = copyUnfurls(message.Unfurls)
+	message.Files = append([]domain.File(nil), message.Files...)
+	values[index] = message
+	s.messages[message.Conversation] = values
+	s.outbox = append(s.outbox, event)
+	for _, grant := range grants {
+		if slices.Contains(s.fileShares[grant.FileID], message.Conversation) {
+			continue
+		}
+		s.fileShares[grant.FileID] = append(s.fileShares[grant.FileID], message.Conversation)
+		slices.Sort(s.fileShares[grant.FileID])
+		s.outbox = append(s.outbox, grant.Event)
+	}
+	s.endFileSharesLocked(message, unshares)
+	s.outbox = append(s.outbox, companions...)
+	return nil
+}
+
+// endFileSharesLocked ends each candidate file's share into the message's
+// conversation unless another live message still carries the file there, and
+// journals the candidate's event only for a share it ended.
+func (s *Store) endFileSharesLocked(message domain.Message, unshares []store.FileUnshare) {
+	for _, unshare := range unshares {
+		if s.fileIsCarriedElsewhereLocked(unshare.FileID, message.Conversation, message.ID) {
+			continue
+		}
+		channels := s.fileShares[unshare.FileID]
+		retained := slices.DeleteFunc(append([]domain.ConversationID(nil), channels...), func(channel domain.ConversationID) bool {
+			return channel == message.Conversation
+		})
+		if len(retained) == len(channels) {
+			continue
+		}
+		s.fileShares[unshare.FileID] = retained
+		s.outbox = append(s.outbox, unshare.Event)
+	}
+}
+
 func (s *Store) DeleteMessage(_ context.Context, message domain.Message, event events.Event, unshares []store.FileUnshare) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -11260,20 +11317,7 @@ func (s *Store) DeleteMessage(_ context.Context, message domain.Message, event e
 		values[index] = message
 		s.messages[message.Conversation] = values
 		s.outbox = append(s.outbox, event)
-		for _, unshare := range unshares {
-			if s.fileIsCarriedElsewhereLocked(unshare.FileID, message.Conversation, message.ID) {
-				continue
-			}
-			channels := s.fileShares[unshare.FileID]
-			retained := slices.DeleteFunc(append([]domain.ConversationID(nil), channels...), func(channel domain.ConversationID) bool {
-				return channel == message.Conversation
-			})
-			if len(retained) == len(channels) {
-				continue
-			}
-			s.fileShares[unshare.FileID] = retained
-			s.outbox = append(s.outbox, unshare.Event)
-		}
+		s.endFileSharesLocked(message, unshares)
 		return nil
 	}
 	return store.ErrNotFound

@@ -1599,8 +1599,11 @@ func (r Remote) RemoteFileInfo(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoRemoteFile(out)
 }
 
-func (r Remote) RemoteFiles(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.RemoteFilePage, error) {
-	out, err := r.files.RemoteFiles(ctx, &chatv1.RemoteFilesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+func (r Remote) RemoteFiles(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, filter domain.RemoteFileFilter, request domain.PageRequest) (domain.RemoteFilePage, error) {
+	out, err := r.files.RemoteFiles(ctx, &chatv1.RemoteFilesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor),
+		Channel: string(filter.Channel), CreatedFrom: string(domain.NewStoredTime(filter.From)), CreatedTo: string(domain.NewStoredTime(filter.To)),
+	})
 	if err != nil {
 		return domain.RemoteFilePage{}, err
 	}
@@ -8898,7 +8901,9 @@ func (s *Server) PromptUnfurlAuthentication(ctx context.Context, input *chatv1.U
 }
 
 func (s *Server) PostEphemeral(ctx context.Context, input *chatv1.PostEphemeralRequest) (*chatv1.EphemeralMessage, error) {
-	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.AppID(input.GetAppId()), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetLinkNames())
+	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.AppID(input.GetAppId()), domain.MessageTimestamp(input.GetThreadTimestamp()), domain.EphemeralPresentation{
+		LinkNames: input.GetLinkNames(), MarkdownText: input.GetMarkdownText(), Parse: input.GetParse(), Username: input.GetUsername(), IconEmoji: input.GetIconEmoji(), IconURL: input.GetIconUrl(),
+	})
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -9448,7 +9453,15 @@ func (s *Server) RemoteFileInfo(ctx context.Context, input *chatv1.RemoteFileReq
 
 func (s *Server) RemoteFiles(ctx context.Context, input *chatv1.RemoteFilesRequest) (*chatv1.RemoteFilePage, error) {
 	request := protoPageRequest(input.GetLimit(), input.GetCursor())
-	value, err := s.implementation.RemoteFiles(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
+	filter := domain.RemoteFileFilter{Channel: domain.ConversationID(input.GetChannel())}
+	var err error
+	if filter.From, err = domain.ParseStoredTime(input.GetCreatedFrom()); err != nil {
+		return nil, mapError(storepkg.InvalidArgument("invalid remote file created_from bound"))
+	}
+	if filter.To, err = domain.ParseStoredTime(input.GetCreatedTo()); err != nil {
+		return nil, mapError(storepkg.InvalidArgument("invalid remote file created_to bound"))
+	}
+	value, err := s.implementation.RemoteFiles(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), filter, request)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -12341,7 +12354,7 @@ func decodeProtoRTMConnection(value *chatv1.RTMConnection) domain.RTMConnection 
 }
 
 func encodeProtoEphemeralMessage(value domain.EphemeralMessage) *chatv1.EphemeralMessage {
-	return &chatv1.EphemeralMessage{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), AuthorId: string(value.AuthorID), AppId: string(value.AppID), RecipientId: string(value.RecipientID), Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, Timestamp: string(value.Timestamp), CreatedAt: string(domain.NewStoredTime(value.CreatedAt)), ThreadTimestamp: string(value.ThreadTimestamp)}
+	return &chatv1.EphemeralMessage{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), AuthorId: string(value.AuthorID), AppId: string(value.AppID), RecipientId: string(value.RecipientID), Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, Timestamp: string(value.Timestamp), CreatedAt: string(domain.NewStoredTime(value.CreatedAt)), ThreadTimestamp: string(value.ThreadTimestamp), StreamState: value.StreamState}
 }
 func decodeProtoEphemeralMessage(value *chatv1.EphemeralMessage) (domain.EphemeralMessage, error) {
 	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetConversationId() == "" || value.GetAuthorId() == "" || value.GetRecipientId() == "" || (value.GetText() == "" && value.GetBlocks() == "" && value.GetAttachments() == "") || value.GetTimestamp() == "" || value.GetCreatedAt() == "" {
@@ -12354,7 +12367,7 @@ func decodeProtoEphemeralMessage(value *chatv1.EphemeralMessage) (domain.Ephemer
 	if _, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(value.GetTimestamp())); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
-	return domain.EphemeralMessage{ID: domain.MessageID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()), AppID: domain.AppID(value.GetAppId()), RecipientID: domain.UserID(value.GetRecipientId()), Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), Timestamp: domain.MessageTimestamp(value.GetTimestamp()), CreatedAt: createdAt, ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp())}, nil
+	return domain.EphemeralMessage{ID: domain.MessageID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()), AppID: domain.AppID(value.GetAppId()), RecipientID: domain.UserID(value.GetRecipientId()), Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), Timestamp: domain.MessageTimestamp(value.GetTimestamp()), CreatedAt: createdAt, ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp()), StreamState: value.GetStreamState()}, nil
 }
 
 func encodeProtoAccessLog(value domain.AccessLog) *chatv1.AccessLog {
@@ -13621,7 +13634,11 @@ func (s *Server) UpdateWithBlocks(ctx context.Context, input *chatv1.UpdateWithB
 }
 
 func (s *Server) UpdateMessage(ctx context.Context, input *chatv1.UpdateMessageRequest) (*chatv1.Message, error) {
-	patch := domain.MessagePatch{Text: input.Text, Blocks: input.Blocks, Attachments: input.Attachments, LinkNames: input.GetLinkNames()}
+	patch := domain.MessagePatch{
+		Text: input.Text, Blocks: input.Blocks, Attachments: input.Attachments, LinkNames: input.GetLinkNames(),
+		MarkdownText: input.GetMarkdownText(), Parse: input.GetParse(), Metadata: input.Metadata, AppID: domain.AppID(input.GetAppId()),
+		ReplyBroadcast: input.GetReplyBroadcast(), FileIDs: decodeFileIDs(input.GetFileIds(), input.GetFileIdsSet()),
+	}
 	value, err := s.implementation.UpdateMessage(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), patch)
 	if err != nil {
 		return nil, mapError(err)
@@ -13672,7 +13689,7 @@ func (r Remote) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domai
 }
 
 func (r Remote) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "", "", "", false)
+	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "", "", "", domain.EphemeralPresentation{})
 }
 
 func (r Remote) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string, appID domain.AppID) (domain.Message, error) {
@@ -13766,8 +13783,11 @@ func (r Remote) PostAsSlackbot(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoMessage(out)
 }
 
-func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp, linkNames bool) (domain.EphemeralMessage, error) {
-	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments, AppId: string(appID), ThreadTimestamp: string(threadTimestamp), LinkNames: linkNames})
+func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, threadTimestamp domain.MessageTimestamp, presentation domain.EphemeralPresentation) (domain.EphemeralMessage, error) {
+	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments, AppId: string(appID), ThreadTimestamp: string(threadTimestamp),
+		LinkNames: presentation.LinkNames, MarkdownText: presentation.MarkdownText, Parse: presentation.Parse, Username: presentation.Username, IconEmoji: presentation.IconEmoji, IconUrl: presentation.IconURL,
+	})
 	if err != nil {
 		return domain.EphemeralMessage{}, err
 	}
@@ -13808,11 +13828,42 @@ func (r Remote) UpdateMessage(ctx context.Context, workspaceID domain.WorkspaceI
 		Blocks:         patch.Blocks,
 		Attachments:    patch.Attachments,
 		LinkNames:      patch.LinkNames,
+		MarkdownText:   patch.MarkdownText,
+		Parse:          patch.Parse,
+		Metadata:       patch.Metadata,
+		AppId:          string(patch.AppID),
+		ReplyBroadcast: patch.ReplyBroadcast,
+		FileIds:        encodeFileIDs(patch.FileIDs),
+		FileIdsSet:     patch.FileIDs != nil,
 	})
 	if err != nil {
 		return domain.Message{}, err
 	}
 	return decodeProtoMessage(out)
+}
+
+// encodeFileIDs and decodeFileIDs carry an optional file list: a nil list is
+// absent, which a repeated field cannot say on its own.
+func encodeFileIDs(ids *[]domain.FileID) []string {
+	if ids == nil {
+		return nil
+	}
+	result := make([]string, len(*ids))
+	for index, id := range *ids {
+		result[index] = string(id)
+	}
+	return result
+}
+
+func decodeFileIDs(ids []string, set bool) *[]domain.FileID {
+	if !set {
+		return nil
+	}
+	result := make([]domain.FileID, len(ids))
+	for index, id := range ids {
+		result[index] = domain.FileID(id)
+	}
+	return &result
 }
 
 func (r Remote) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
@@ -13836,8 +13887,11 @@ func (r Remote) ScheduleMessageAs(ctx context.Context, workspaceID domain.Worksp
 	return decodeProtoScheduledMessage(out)
 }
 
-func (r Remote) CreateExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, mimeType string, size int64, ttl time.Duration) (domain.ExternalUpload, error) {
-	out, err := r.files.CreateExternalUpload(ctx, &chatv1.ExternalUploadRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, MimeType: mimeType, Size: size, TtlSeconds: int64(ttl / time.Second)})
+func (r Remote) CreateExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.ExternalUploadRequest) (domain.ExternalUpload, error) {
+	out, err := r.files.CreateExternalUpload(ctx, &chatv1.ExternalUploadRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Name: request.Name, MimeType: request.MIMEType, Size: request.Size,
+		TtlSeconds: int64(request.TTL / time.Second), Description: request.Description, FileType: request.FileType,
+	})
 	if err != nil {
 		return domain.ExternalUpload{}, err
 	}
@@ -13873,7 +13927,10 @@ func (r Remote) CompleteExternalUpload(ctx context.Context, workspaceID domain.W
 }
 
 func (s *Server) CreateExternalUpload(ctx context.Context, input *chatv1.ExternalUploadRequest) (*chatv1.ExternalUpload, error) {
-	value, err := s.implementation.CreateExternalUpload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetMimeType(), input.GetSize(), time.Duration(input.GetTtlSeconds())*time.Second)
+	value, err := s.implementation.CreateExternalUpload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ExternalUploadRequest{
+		Name: input.GetName(), MIMEType: input.GetMimeType(), Size: input.GetSize(), TTL: time.Duration(input.GetTtlSeconds()) * time.Second,
+		Description: input.GetDescription(), FileType: input.GetFileType(),
+	})
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -13947,7 +14004,7 @@ func (s *Server) CompleteExternalUpload(ctx context.Context, input *chatv1.Compl
 // running outside UTC emitted offset-bearing timestamps where the rest of the
 // surface emits Z.
 func encodeProtoExternalUpload(value domain.ExternalUpload) *chatv1.ExternalUpload {
-	result := &chatv1.ExternalUpload{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Uploader: string(value.Uploader), Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size, Status: string(value.Status), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano)}
+	result := &chatv1.ExternalUpload{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Uploader: string(value.Uploader), Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size, Description: value.Description, FileType: value.FileType, Status: string(value.Status), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano)}
 	if !value.UploadedAt.IsZero() {
 		result.UploadedAt = value.UploadedAt.UTC().Format(time.RFC3339Nano)
 	}
@@ -13982,7 +14039,7 @@ func decodeProtoExternalUpload(value *chatv1.ExternalUpload) (domain.ExternalUpl
 	if err != nil {
 		return domain.ExternalUpload{}, err
 	}
-	return domain.ExternalUpload{ID: domain.ExternalUploadID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), Status: domain.ExternalUploadStatus(value.GetStatus()), CreatedAt: created, ExpiresAt: expires, UploadedAt: uploaded, CompletedAt: completed}, nil
+	return domain.ExternalUpload{ID: domain.ExternalUploadID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), Description: value.GetDescription(), FileType: value.GetFileType(), Status: domain.ExternalUploadStatus(value.GetStatus()), CreatedAt: created, ExpiresAt: expires, UploadedAt: uploaded, CompletedAt: completed}, nil
 }
 
 // decodeOptionalProtoTime decodes an RFC3339Nano timestamp that the sender omits

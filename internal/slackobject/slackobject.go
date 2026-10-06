@@ -327,6 +327,12 @@ func File(origin string, file domain.File) map[string]any {
 	if file.PublicToken != "" {
 		result["permalink_public"] = urls.Public(file.PublicToken)
 	}
+	// The file's description is the file object's alt_txt, as the pinned
+	// SDKs read it (FilesInfoResponse and the message file of
+	// ConversationsHistoryResponse in @slack/web-api 8.2.0).
+	if file.Description != "" {
+		result["alt_txt"] = file.Description
+	}
 	if thumbnail.Supported(file.MIMEType) {
 		for _, size := range ThumbSizes {
 			result["thumb_"+strconv.Itoa(size)] = urls.Thumb(string(file.ID), size)

@@ -498,7 +498,7 @@ func externalUploadDriver() driver {
 				t.Fatal(err)
 			}
 			messages := service.Messages{Store: repository, Blob: objects}
-			ticket, err := messages.CreateExternalUpload(ctx, workspace, member, "fixture.txt", "text/plain", int64(len(payload)), time.Hour)
+			ticket, err := messages.CreateExternalUpload(ctx, workspace, member, domain.ExternalUploadRequest{Name: "fixture.txt", MIMEType: "text/plain", Size: int64(len(payload)), TTL: time.Hour})
 			if err != nil {
 				t.Fatal(err)
 			}

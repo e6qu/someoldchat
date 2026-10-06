@@ -1064,7 +1064,7 @@ func TestRemoteFileLifecycleIsDurableAndBounded(t *testing.T) {
 	if err != nil || value.Title != "Remote document" || value.ID == "" {
 		t.Fatalf("value=%+v err=%v", value, err)
 	}
-	page, err := messages.RemoteFiles(context.Background(), "T1", "U1", domain.PageRequest{Limit: 10})
+	page, err := messages.RemoteFiles(context.Background(), "T1", "U1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Files) != 1 || page.Files[0].ExternalID != "external-1" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
@@ -1086,7 +1086,7 @@ func TestRemoteFileLifecycleIsDurableAndBounded(t *testing.T) {
 	if err := messages.RemoveRemoteFile(context.Background(), "T1", "U1", domain.RemoteFileLookup{ID: value.ID}); err != nil {
 		t.Fatal(err)
 	}
-	page, err = messages.RemoteFiles(context.Background(), "T1", "U1", domain.PageRequest{Limit: 10})
+	page, err = messages.RemoteFiles(context.Background(), "T1", "U1", domain.RemoteFileFilter{}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Files) != 0 {
 		t.Fatalf("after remove page=%+v err=%v", page, err)
 	}
@@ -2634,7 +2634,7 @@ func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
 	if err != nil || updated.Attachments != `[{"text":"updated"}]` {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
-	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "", "", false)
+	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "", "", domain.EphemeralPresentation{})
 	if err != nil || ephemeral.Attachments != `[{"text":"attachment"}]` {
 		t.Fatalf("ephemeral=%+v err=%v", ephemeral, err)
 	}
@@ -2754,7 +2754,7 @@ func TestEveryMessageWriteUsesOneStructuredBodyLimit(t *testing.T) {
 	if _, err := messages.ScheduleMessageWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, domain.ErrInvalidMessage) {
 		t.Fatalf("schedule oversized body err=%v", err)
 	}
-	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", "", false); !errors.Is(err, domain.ErrInvalidEphemeral) {
+	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", "", "", domain.EphemeralPresentation{}); !errors.Is(err, domain.ErrInvalidEphemeral) {
 		t.Fatalf("ephemeral oversized body err=%v", err)
 	}
 	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{
@@ -2786,7 +2786,7 @@ func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 	}
 	messages := Messages{Store: s, Blob: objects}
 	ctx := context.Background()
-	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "notes.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2848,7 +2848,7 @@ func TestDeletingTheSharingMessageEndsTheShareAndAnnouncesIt(t *testing.T) {
 	}
 	messages := Messages{Store: s, Blob: objects}
 	ctx := context.Background()
-	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "notes.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2903,7 +2903,7 @@ func TestExternalUploadUsesTicketSizeForMultipartParts(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := Messages{Store: s, Blob: objects}
-	upload, err := messages.CreateExternalUpload(context.Background(), "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	upload, err := messages.CreateExternalUpload(context.Background(), "T1", "U1", domain.ExternalUploadRequest{Name: "notes.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2929,11 +2929,11 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	}
 	messages := Messages{Store: s, Blob: objects}
 	ctx := context.Background()
-	first, err := messages.CreateExternalUpload(ctx, "T1", "U1", "first.txt", "text/plain", 5, time.Minute)
+	first, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "first.txt", MIMEType: "text/plain", Size: 5, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := messages.CreateExternalUpload(ctx, "T1", "U1", "second.txt", "text/plain", 6, time.Minute)
+	second, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "second.txt", MIMEType: "text/plain", Size: 6, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3020,7 +3020,7 @@ func TestExternalUploadKeepsItsIdentifierThroughCompletion(t *testing.T) {
 	messages := Messages{Store: s, Blob: objects}
 	ctx := context.Background()
 
-	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "notes.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3063,7 +3063,7 @@ func TestExternalUploadBatchKeepsEveryIdentifier(t *testing.T) {
 
 	completions := make([]domain.ExternalUploadCompletion, 0, 3)
 	for index := 0; index < 3; index++ {
-		upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "batch.txt", "text/plain", 7, time.Minute)
+		upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "batch.txt", MIMEType: "text/plain", Size: 7, TTL: time.Minute})
 		if err != nil {
 			t.Fatal(err)
 		}

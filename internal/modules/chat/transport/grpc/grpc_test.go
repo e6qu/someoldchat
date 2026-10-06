@@ -412,7 +412,7 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	remote := servedRemote(t, service.Messages{Store: store, Blob: blobs}, store)
 	ctx := context.Background()
 	content := []byte("external bytes")
-	upload, err := remote.CreateExternalUpload(ctx, "T1", "U1", "external.txt", "text/plain", int64(len(content)), time.Minute)
+	upload, err := remote.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "external.txt", MIMEType: "text/plain", Size: int64(len(content)), TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,11 +431,11 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks != "" {
 		t.Fatalf("published messages=%+v err=%v", page.Messages, err)
 	}
-	firstBatch, err := remote.CreateExternalUpload(ctx, "T1", "U1", "first-batch.txt", "text/plain", 5, time.Minute)
+	firstBatch, err := remote.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "first-batch.txt", MIMEType: "text/plain", Size: 5, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondBatch, err := remote.CreateExternalUpload(ctx, "T1", "U1", "second-batch.txt", "text/plain", 6, time.Minute)
+	secondBatch, err := remote.CreateExternalUpload(ctx, "T1", "U1", domain.ExternalUploadRequest{Name: "second-batch.txt", MIMEType: "text/plain", Size: 6, TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

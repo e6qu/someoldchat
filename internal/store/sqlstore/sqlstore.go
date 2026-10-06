@@ -326,7 +326,7 @@ CREATE TABLE IF NOT EXISTS ephemeral_messages (
  conversation_id TEXT NOT NULL REFERENCES conversations(id), author_id TEXT NOT NULL REFERENCES users(id),
  app_id TEXT NOT NULL DEFAULT '', recipient_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL,
  blocks TEXT NOT NULL DEFAULT '', attachments TEXT NOT NULL DEFAULT '[]', timestamp TEXT NOT NULL,
- created_at TEXT NOT NULL, thread_ts TEXT NOT NULL DEFAULT ''
+ created_at TEXT NOT NULL, thread_ts TEXT NOT NULL DEFAULT '', stream_state TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS ephemeral_messages_recipient_conversation_created ON ephemeral_messages(workspace_id, recipient_id, conversation_id, created_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS reactions (
@@ -347,7 +347,8 @@ CREATE TABLE IF NOT EXISTS files (
 CREATE TABLE IF NOT EXISTS external_uploads (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), uploader_id TEXT NOT NULL REFERENCES users(id),
  name TEXT NOT NULL, title TEXT NOT NULL, mime_type TEXT NOT NULL, blob_key TEXT NOT NULL UNIQUE, size INTEGER NOT NULL,
- status TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, uploaded_at TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT ''
+ status TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, uploaded_at TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT '',
+ description TEXT NOT NULL DEFAULT '', file_type TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS file_comments (
  id TEXT PRIMARY KEY, file_id TEXT NOT NULL REFERENCES files(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -610,7 +611,7 @@ func (s lastActiveScan) Scan(value any) error {
 	return nil
 }
 
-const schemaVersion = 219
+const schemaVersion = 220
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -3604,6 +3605,31 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate assistant threads: %w", err)
 		}
 	}
+	// --- schema 220: upload descriptions and ephemeral presentation ---
+	if version < 220 {
+		// files.getUploadURLExternal's alt_txt and snippet_type are held on the
+		// upload ticket until completion makes the file, and an ephemeral
+		// message keeps the presentation chat.postEphemeral was given
+		// (markdown_text, parse, username and icon), as a posted message keeps
+		// it in messages.stream_state.
+		for _, column := range []struct{ table, name, statement string }{
+			{"external_uploads", "description", `ALTER TABLE external_uploads ADD COLUMN description TEXT NOT NULL DEFAULT ''`},
+			{"external_uploads", "file_type", `ALTER TABLE external_uploads ADD COLUMN file_type TEXT NOT NULL DEFAULT ''`},
+			{"ephemeral_messages", "stream_state", `ALTER TABLE ephemeral_messages ADD COLUMN stream_state TEXT NOT NULL DEFAULT ''`},
+		} {
+			columns, err := s.tableColumns(ctx, db, column.table)
+			if err != nil {
+				return err
+			}
+			if columns[column.name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, column.statement); err != nil {
+				return fmt.Errorf("migrate %s.%s: %w", column.table, column.name, err)
+			}
+		}
+	}
+	// --- end schema 220 ---
 	// --- schema 219: assistant status identity ---
 	if version < 219 {
 		// assistant.threads.setStatus records who set the status and the
@@ -16298,8 +16324,8 @@ func (s *Store) CreateEphemeralMessage(ctx context.Context, value domain.Ephemer
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO ephemeral_messages(id, workspace_id, conversation_id, author_id, app_id, recipient_id, text, blocks, attachments, timestamp, created_at, thread_ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		value.ID, value.WorkspaceID, value.Conversation, value.AuthorID, value.AppID, value.RecipientID, value.Text, value.Blocks, value.Attachments, value.Timestamp, domain.NewStoredTime(value.CreatedAt), value.ThreadTimestamp); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO ephemeral_messages(id, workspace_id, conversation_id, author_id, app_id, recipient_id, text, blocks, attachments, timestamp, created_at, thread_ts, stream_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.WorkspaceID, value.Conversation, value.AuthorID, value.AppID, value.RecipientID, value.Text, value.Blocks, value.Attachments, value.Timestamp, domain.NewStoredTime(value.CreatedAt), value.ThreadTimestamp, value.StreamState); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -16312,7 +16338,7 @@ func (s *Store) ListEphemeralMessages(ctx context.Context, workspaceID domain.Wo
 	if workspaceID == "" || recipientID == "" || conversationID == "" || limit <= 0 || limit > 1000 {
 		return nil, store.InvalidArgument("invalid ephemeral message page")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, conversation_id, author_id, app_id, recipient_id, text, blocks, attachments, timestamp, created_at, thread_ts
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, conversation_id, author_id, app_id, recipient_id, text, blocks, attachments, timestamp, created_at, thread_ts, stream_state
 		FROM ephemeral_messages WHERE workspace_id = ? AND recipient_id = ? AND conversation_id = ?
 		ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, recipientID, conversationID, limit)
 	if err != nil {
@@ -16321,12 +16347,7 @@ func (s *Store) ListEphemeralMessages(ctx context.Context, workspaceID domain.Wo
 	defer rows.Close()
 	result := make([]domain.EphemeralMessage, 0, limit)
 	for rows.Next() {
-		var value domain.EphemeralMessage
-		var createdAt string
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.RecipientID, &value.Text, &value.Blocks, &value.Attachments, &value.Timestamp, &createdAt, &value.ThreadTimestamp); err != nil {
-			return nil, err
-		}
-		value.CreatedAt, err = domain.ParseStoredTime(createdAt)
+		value, err := scanEphemeralMessage(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -16342,7 +16363,7 @@ func (s *Store) ListEphemeralMessages(ctx context.Context, workspaceID domain.Wo
 func scanEphemeralMessage(scanner interface{ Scan(...any) error }) (domain.EphemeralMessage, error) {
 	var value domain.EphemeralMessage
 	var createdAt string
-	if err := scanner.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.RecipientID, &value.Text, &value.Blocks, &value.Attachments, &value.Timestamp, &createdAt, &value.ThreadTimestamp); err != nil {
+	if err := scanner.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.RecipientID, &value.Text, &value.Blocks, &value.Attachments, &value.Timestamp, &createdAt, &value.ThreadTimestamp, &value.StreamState); err != nil {
 		return domain.EphemeralMessage{}, translateNotFound(err)
 	}
 	parsed, err := domain.ParseStoredTime(createdAt)
@@ -16357,7 +16378,7 @@ func (s *Store) GetEphemeralMessage(ctx context.Context, workspaceID domain.Work
 	if workspaceID == "" || recipientID == "" || id == "" {
 		return domain.EphemeralMessage{}, store.InvalidArgument("invalid ephemeral message key")
 	}
-	return scanEphemeralMessage(s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation_id, author_id, app_id, recipient_id, text, blocks, attachments, timestamp, created_at, thread_ts
+	return scanEphemeralMessage(s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation_id, author_id, app_id, recipient_id, text, blocks, attachments, timestamp, created_at, thread_ts, stream_state
 		FROM ephemeral_messages WHERE workspace_id = ? AND recipient_id = ? AND id = ?`, workspaceID, recipientID, id))
 }
 
@@ -16469,6 +16490,61 @@ func (s *Store) DeleteMessage(ctx context.Context, message domain.Message, event
 	if err := updateMessageTx(ctx, tx, message, event); err != nil {
 		return err
 	}
+	if err := endFileSharesTx(ctx, tx, message, unshares); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) UpdateMessageFiles(ctx context.Context, message domain.Message, event events.Event, grants []store.FileShareGrant, unshares []store.FileUnshare, companions ...events.Event) error {
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := updateMessageTx(ctx, tx, message, event); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM message_files WHERE message_id = ?`, message.ID); err != nil {
+		return err
+	}
+	for _, grant := range grants {
+		result, err := tx.ExecContext(ctx, `INSERT INTO file_shares(file_id, conversation_id) SELECT id, ? FROM files WHERE id = ? AND workspace_id = ? AND deleted = 0 ON CONFLICT(file_id, conversation_id) DO NOTHING`, message.Conversation, grant.FileID, message.WorkspaceID)
+		if err != nil {
+			return classify(err)
+		}
+		added, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if added == 0 {
+			continue
+		}
+		if err := insertOutbox(ctx, tx, grant.Event); err != nil {
+			return err
+		}
+	}
+	// insertMessageFiles refuses a file that is not live in the workspace or
+	// not shared into the conversation, so a grant the INSERT above skipped
+	// for a missing file fails the edit here.
+	if err := insertMessageFiles(ctx, tx, message); err != nil {
+		return err
+	}
+	if err := endFileSharesTx(ctx, tx, message, unshares); err != nil {
+		return err
+	}
+	for _, companion := range companions {
+		if err := insertOutbox(ctx, tx, companion); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// endFileSharesTx ends each candidate file's share into the message's
+// conversation unless another live message still carries the file there, and
+// journals the candidate's event only for a share it ended.
+func endFileSharesTx(ctx context.Context, tx txRunner, message domain.Message, unshares []store.FileUnshare) error {
 	for _, unshare := range unshares {
 		// A share ends only with the last live message carrying the file into
 		// this conversation, so the delete is conditional on there being none.
@@ -16493,7 +16569,7 @@ func (s *Store) DeleteMessage(ctx context.Context, message domain.Message, event
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func updateMessageTx(ctx context.Context, tx txRunner, message domain.Message, event events.Event) error {
@@ -16516,7 +16592,14 @@ func updateMessageTx(ctx context.Context, tx txRunner, message domain.Message, e
 	if message.Deleted {
 		deleted = 1
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE messages SET text = ?, text_folded = ?, blocks = ?, attachments = ?, metadata = ?, stream_state = ?, deleted = ?, unfurls = ?, edited_at = ?, edited_by = ?, subtype = ? WHERE id = ? AND workspace_id = ? AND conversation = ?`, message.Text, domain.FoldSearchText(message.Text), blocks, attachments, message.Metadata, message.StreamState, deleted, unfurls, storedEditedAt(message.EditedAt), message.EditedBy, message.Subtype, message.ID, message.WorkspaceID, message.Conversation)
+	// chat.update's reply_broadcast sends an existing reply to its channel,
+	// so the flag is part of what an update writes; the memory profile
+	// already stored it with the rest of the message.
+	replyBroadcast := 0
+	if message.ReplyBroadcast {
+		replyBroadcast = 1
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE messages SET text = ?, text_folded = ?, blocks = ?, attachments = ?, metadata = ?, stream_state = ?, deleted = ?, unfurls = ?, edited_at = ?, edited_by = ?, subtype = ?, reply_broadcast = ? WHERE id = ? AND workspace_id = ? AND conversation = ?`, message.Text, domain.FoldSearchText(message.Text), blocks, attachments, message.Metadata, message.StreamState, deleted, unfurls, storedEditedAt(message.EditedAt), message.EditedBy, message.Subtype, replyBroadcast, message.ID, message.WorkspaceID, message.Conversation)
 	if err != nil {
 		return err
 	}
@@ -19989,14 +20072,14 @@ func (s *Store) CreateFile(ctx context.Context, file domain.File, event events.E
 }
 
 func (s *Store) CreateExternalUpload(ctx context.Context, value domain.ExternalUpload) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO external_uploads(id, workspace_id, uploader_id, name, title, mime_type, blob_key, file_id, size, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Uploader, value.Name, value.Title, value.MIMEType, value.BlobKey, value.FileID, value.Size, value.Status, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.ExpiresAt))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO external_uploads(id, workspace_id, uploader_id, name, title, mime_type, blob_key, file_id, size, description, file_type, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Uploader, value.Name, value.Title, value.MIMEType, value.BlobKey, value.FileID, value.Size, value.Description, value.FileType, value.Status, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.ExpiresAt))
 	return classify(err)
 }
 
 func (s *Store) GetExternalUpload(ctx context.Context, id domain.ExternalUploadID) (domain.ExternalUpload, error) {
 	var value domain.ExternalUpload
 	var created, expires, uploaded, completed string
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, file_id, size, status, created_at, expires_at, uploaded_at, completed_at FROM external_uploads WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.Uploader, &value.Name, &value.Title, &value.MIMEType, &value.BlobKey, &value.FileID, &value.Size, &value.Status, &created, &expires, &uploaded, &completed)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, file_id, size, description, file_type, status, created_at, expires_at, uploaded_at, completed_at FROM external_uploads WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.Uploader, &value.Name, &value.Title, &value.MIMEType, &value.BlobKey, &value.FileID, &value.Size, &value.Description, &value.FileType, &value.Status, &created, &expires, &uploaded, &completed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.ExternalUpload{}, store.ErrNotFound
 	}
@@ -20702,7 +20785,7 @@ func (s *Store) remoteFileShares(ctx context.Context, db queryExecutor, id domai
 	return values, rows.Err()
 }
 
-func (s *Store) ListRemoteFiles(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.RemoteFilePage, error) {
+func (s *Store) ListRemoteFiles(ctx context.Context, workspace domain.WorkspaceID, filter domain.RemoteFileFilter, request domain.PageRequest) (domain.RemoteFilePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.RemoteFilePage{}, err
 	}
@@ -20712,6 +20795,24 @@ func (s *Store) ListRemoteFiles(ctx context.Context, workspace domain.WorkspaceI
 	}
 	query := `SELECT id, workspace_id, external_id, title, file_type, external_url, preview_image, indexable_contents, created_at, deleted FROM remote_files WHERE workspace_id = ? AND deleted = 0`
 	args := []any{workspace}
+	if filter.Channel != "" {
+		query += ` AND EXISTS (SELECT 1 FROM remote_file_shares WHERE remote_file_id = remote_files.id AND conversation_id = ?)`
+		args = append(args, filter.Channel)
+	}
+	// created_at holds whole seconds, and both bounds are inclusive: a file
+	// at second N is at or after a bound inside N only when the bound is N.
+	if !filter.From.IsZero() {
+		from := filter.From.Unix()
+		if filter.From.Nanosecond() != 0 {
+			from++
+		}
+		query += ` AND created_at >= ?`
+		args = append(args, from)
+	}
+	if !filter.To.IsZero() {
+		query += ` AND created_at <= ?`
+		args = append(args, filter.To.Unix())
+	}
 	if after != "" {
 		query += ` AND id > ?`
 		args = append(args, after)

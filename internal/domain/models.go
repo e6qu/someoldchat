@@ -2439,15 +2439,16 @@ type File struct {
 	PublicToken string
 	Size        int64
 	// Description is what the file is, in words, for a reader who cannot see
-	// it. Slack calls it an image description and shows a control for it; the
-	// pinned Web API snapshot predates the alt_txt parameter that carries it,
-	// so this is first-party durable state rather than an invented API field —
-	// the same standing as recent searches, saved items and to-dos.
+	// it. Slack calls it an image description and shows a control for it. The
+	// pinned OpenAPI snapshot predates it, but the pinned SDKs carry it: it is
+	// files.getUploadURLExternal's alt_txt (alt_text in @slack/web-api 8.2.0)
+	// and the alt_txt of the file object those SDKs read back.
 	Description string
-	// FileType is the syntax language of a snippet — the text a member typed
-	// inline rather than a file they uploaded. It is empty for an ordinary hosted
-	// upload and non-empty (defaulting to "text") for a snippet, which is what
-	// makes it the discriminator: only the content= path ever sets it.
+	// FileType is the syntax language of a snippet: text uploaded as a snippet
+	// rather than a file. It is empty for an ordinary hosted upload and
+	// non-empty for a snippet, which is what makes it the discriminator. The
+	// classic content= upload sets it (defaulting to "text"), and so does the
+	// snippet_type of files.getUploadURLExternal.
 	FileType       string
 	CreatedAt      time.Time
 	Deleted        bool
@@ -4236,6 +4237,27 @@ type RemoteFilePage struct {
 	HasMore    bool
 }
 
+// RemoteFileFilter is files.remote.list's channel, ts_from and ts_to: the
+// files shared into one channel, created within inclusive bounds. A zero
+// field does not narrow the list. It is applied by the store, inside the
+// keyset read, so a page is never emptied by a filter applied after it.
+type RemoteFileFilter struct {
+	Channel ConversationID
+	From    time.Time
+	To      time.Time
+}
+
+// Matches reports whether a remote file passes the filter.
+func (f RemoteFileFilter) Matches(file RemoteFile) bool {
+	if f.Channel != "" && !slices.Contains(file.SharedChannels, f.Channel) {
+		return false
+	}
+	if !f.From.IsZero() && file.CreatedAt.Before(f.From) {
+		return false
+	}
+	return f.To.IsZero() || !file.CreatedAt.After(f.To)
+}
+
 type List struct {
 	ID                ListID
 	WorkspaceID       WorkspaceID
@@ -4710,6 +4732,29 @@ type MessagePatch struct {
 	// says an omitted link_names is overwritten with the default, none — so
 	// an edit without it is not linked, whatever the message was posted with.
 	LinkNames bool
+	// MarkdownText marks Text as chat.update's markdown_text rather than
+	// Slack markup, as chat.postMessage's markdown_text does.
+	MarkdownText bool
+	// Parse is chat.update's parse ("", "none" or "full"). Like link_names it
+	// describes this edit: the pinned reference says an omitted parse is
+	// overwritten with the default.
+	Parse string
+	// Metadata, when set, replaces the message's metadata. Only an app may
+	// attach metadata, so AppID names the app making the edit.
+	Metadata *string
+	AppID    AppID
+	// ReplyBroadcast broadcasts a thread reply to its channel, as
+	// chat.update's reply_broadcast does. It cannot be withdrawn, and a
+	// message outside a thread is already in its channel.
+	ReplyBroadcast bool
+	// FileIDs, when set, are the files the message carries after the edit,
+	// in order: chat.update's file_ids.
+	FileIDs *[]FileID
+}
+
+// Empty reports an edit that changes nothing.
+func (p MessagePatch) Empty() bool {
+	return p.Text == nil && p.Blocks == nil && p.Attachments == nil && p.Metadata == nil && !p.ReplyBroadcast && p.FileIDs == nil
 }
 
 // NoStructuredContent reports whether a normalized blocks or attachments value
@@ -4801,6 +4846,54 @@ func NormalizeUnfurls(values map[string]string) (map[string]string, error) {
 	return result, nil
 }
 
+// UnfurlEntities reads the Work Object entities of chat.unfurl's metadata
+// argument as unfurls keyed by the link each one previews. The shape is
+// @slack/types' EntityMetadata, which @slack/web-api 8.2.0's ChatUnfurlMetadata
+// requires: entity_type, url, external_ref.id, entity_payload.attributes.title
+// .text, and app_unfurl_url, "the exact URL posted in the source message.
+// Required in metadata passed to chat.unfurl." Each entity is kept whole, as
+// an unfurl's attachment is. Two entities for one link are refused rather than
+// one silently replacing the other.
+func UnfurlEntities(raw string) (map[string]string, error) {
+	var metadata struct {
+		Entities []json.RawMessage `json:"entities"`
+	}
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || len(metadata.Entities) == 0 {
+		return nil, errors.New("unfurl metadata names no entities")
+	}
+	result := make(map[string]string, len(metadata.Entities))
+	for _, entity := range metadata.Entities {
+		var shape struct {
+			EntityType   string `json:"entity_type"`
+			URL          string `json:"url"`
+			AppUnfurlURL string `json:"app_unfurl_url"`
+			ExternalRef  *struct {
+				ID string `json:"id"`
+			} `json:"external_ref"`
+			EntityPayload *struct {
+				Attributes *struct {
+					Title *struct {
+						Text string `json:"text"`
+					} `json:"title"`
+				} `json:"attributes"`
+			} `json:"entity_payload"`
+		}
+		if err := json.Unmarshal(entity, &shape); err != nil ||
+			strings.TrimSpace(shape.EntityType) == "" || strings.TrimSpace(shape.URL) == "" ||
+			strings.TrimSpace(shape.AppUnfurlURL) == "" || shape.ExternalRef == nil || strings.TrimSpace(shape.ExternalRef.ID) == "" ||
+			shape.EntityPayload == nil || shape.EntityPayload.Attributes == nil || shape.EntityPayload.Attributes.Title == nil ||
+			strings.TrimSpace(shape.EntityPayload.Attributes.Title.Text) == "" {
+			return nil, errors.New("unfurl metadata entity is incomplete")
+		}
+		link := strings.TrimSpace(shape.AppUnfurlURL)
+		if _, duplicate := result[link]; duplicate {
+			return nil, errors.New("two unfurl metadata entities name one link")
+		}
+		result[link] = string(entity)
+	}
+	return result, nil
+}
+
 type EphemeralMessage struct {
 	ID           MessageID
 	WorkspaceID  WorkspaceID
@@ -4815,7 +4908,24 @@ type EphemeralMessage struct {
 	// ThreadTimestamp places the ephemeral message in a thread, as
 	// chat.postEphemeral's thread_ts does; empty is the channel.
 	ThreadTimestamp MessageTimestamp
-	CreatedAt       time.Time
+	// StreamState is the presentation the message was posted with, encoded
+	// as Message.StreamState encodes a posted message's: markdown_text,
+	// parse, link_names and the custom username and icon. Empty is none.
+	StreamState string
+	CreatedAt   time.Time
+}
+
+// EphemeralPresentation is how chat.postEphemeral asks its text to be shown
+// and who it is shown as from: link_names, markdown_text, parse, and the
+// username, icon_emoji and icon_url of a custom identity. It is what
+// chat.postMessage records in MessageStreamState for a posted message.
+type EphemeralPresentation struct {
+	LinkNames    bool
+	MarkdownText bool
+	Parse        string
+	Username     string
+	IconEmoji    string
+	IconURL      string
 }
 
 // WorkspaceAnalytics is the shape of the administration dashboard: counts a
@@ -5023,11 +5133,28 @@ type ExternalUpload struct {
 	BlobKey     string
 	FileID      FileID
 	Size        int64
+	// Description and FileType are files.getUploadURLExternal's alt_txt and
+	// snippet_type, held on the ticket until completion makes the file they
+	// describe; see File.Description and File.FileType.
+	Description string
+	FileType    string
 	Status      ExternalUploadStatus
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
 	UploadedAt  time.Time
 	CompletedAt time.Time
+}
+
+// ExternalUploadRequest asks for an upload ticket: the file's name, media
+// type and exact length, how long the ticket lives, and the alt_txt and
+// snippet_type files.getUploadURLExternal takes.
+type ExternalUploadRequest struct {
+	Name        string
+	MIMEType    string
+	Size        int64
+	TTL         time.Duration
+	Description string
+	FileType    string
 }
 
 const (

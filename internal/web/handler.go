@@ -5899,6 +5899,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 				ID: value.ID, WorkspaceID: value.WorkspaceID, Conversation: value.Conversation,
 				AuthorID: value.AuthorID, AppID: value.AppID, Text: value.Text, Blocks: value.Blocks,
 				Attachments: value.Attachments, ThreadTimestamp: value.ThreadTimestamp, CreatedAt: value.CreatedAt,
+				StreamState: value.StreamState,
 			})
 		}
 		sort.Slice(messages, func(left, right int) bool {
@@ -11904,7 +11905,7 @@ func (h Handler) stageDraftFiles(w http.ResponseWriter, r *http.Request) {
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
 		}
-		upload, createErr := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, header.Size, draftAttachmentTTL)
+		upload, createErr := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalUploadRequest{Name: name, MIMEType: mimeType, Size: header.Size, TTL: draftAttachmentTTL})
 		if createErr != nil {
 			h.writeMutationError(w, r, http.StatusBadRequest, "That file was not staged", "Choose non-empty files with valid names and try again.")
 			return
@@ -11994,7 +11995,7 @@ func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
 		}
-		upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, header.Size, 15*time.Minute)
+		upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalUploadRequest{Name: name, MIMEType: mimeType, Size: header.Size, TTL: 15 * time.Minute})
 		if err != nil {
 			h.writeMutationError(w, r, http.StatusBadRequest, "That file was not staged", "Choose non-empty files with valid names and try again.")
 			return

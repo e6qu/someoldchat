@@ -110,7 +110,7 @@ type Service interface {
 	StartMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamStart) (domain.Message, error)
 	AppendMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
 	StopMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
-	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID, domain.MessageTimestamp, bool) (domain.EphemeralMessage, error)
+	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID, domain.MessageTimestamp, domain.EphemeralPresentation) (domain.EphemeralMessage, error)
 	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
 	RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) (domain.AccessLogPage, error)
@@ -557,7 +557,7 @@ type Service interface {
 	RecordSearch(context.Context, domain.WorkspaceID, domain.UserID, string) error
 	RecentSearches(context.Context, domain.WorkspaceID, domain.UserID, int) ([]domain.SearchHistoryEntry, error)
 	UploadFile(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, int64, io.Reader) (domain.File, error)
-	CreateExternalUpload(context.Context, domain.WorkspaceID, domain.UserID, string, string, int64, time.Duration) (domain.ExternalUpload, error)
+	CreateExternalUpload(context.Context, domain.WorkspaceID, domain.UserID, domain.ExternalUploadRequest) (domain.ExternalUpload, error)
 	UploadExternalFile(context.Context, domain.ExternalUploadID, int64, io.Reader) error
 	CompleteExternalUpload(context.Context, domain.WorkspaceID, domain.UserID, domain.ExternalUploadID, string, []domain.ConversationID, string, string, domain.MessageTimestamp) (domain.File, error)
 	CompleteExternalUploads(context.Context, domain.WorkspaceID, domain.UserID, []domain.ExternalUploadCompletion, []domain.ConversationID, string, string, domain.MessageTimestamp, bool) ([]domain.File, error)
@@ -572,7 +572,7 @@ type Service interface {
 	Files(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FilePage, error)
 	AddRemoteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFile) (domain.RemoteFile, error)
 	RemoteFileInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFileLookup) (domain.RemoteFile, error)
-	RemoteFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.RemoteFilePage, error)
+	RemoteFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFileFilter, domain.PageRequest) (domain.RemoteFilePage, error)
 	RemoveRemoteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFileLookup) error
 	ShareRemoteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFileLookup, []domain.ConversationID) (domain.RemoteFile, error)
 	UpdateRemoteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFileUpdate) (domain.RemoteFile, error)

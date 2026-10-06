@@ -147,6 +147,15 @@ type FileUnshare struct {
 	Event  events.Event
 }
 
+// FileShareGrant pairs a file an edit adds to a message with the file.shared
+// event to journal if the file was not already shared into the message's
+// conversation. Like FileUnshare's, the event is a candidate the store
+// decides on inside the write. See Store.UpdateMessageFiles.
+type FileShareGrant struct {
+	FileID domain.FileID
+	Event  events.Event
+}
+
 // BetterAccessGrant reports whether one grant should replace another as the
 // grant that decided a resolved access level.
 //
@@ -1126,6 +1135,14 @@ type Store interface {
 	// edit adds - so it can neither be lost nor journalled for a change that
 	// did not commit.
 	UpdateMessage(context.Context, domain.Message, events.Event, ...events.Event) error
+	// UpdateMessageFiles is UpdateMessage for an edit that also replaces the
+	// files the message carries (chat.update's file_ids) with message.Files,
+	// in order. Each file must be a live file of the message's workspace. A
+	// grant shares its file into the conversation and journals its event
+	// only if that share is new; an unshare ends its file's share and
+	// journals its event only if no other live message still carries the
+	// file there, as DeleteMessage decides. It is one transaction.
+	UpdateMessageFiles(context.Context, domain.Message, events.Event, []FileShareGrant, []FileUnshare, ...events.Event) error
 	// DeleteMessage marks one message deleted and retracts the file shares that
 	// message was carrying. A file is visible to whoever can see a conversation
 	// it is shared into, and the share is a row of its own: without this, the
@@ -1441,7 +1458,7 @@ type Store interface {
 	WalkBlobReferences(context.Context, domain.WorkspaceID, func(string) error) error
 	AddRemoteFile(context.Context, domain.RemoteFile, events.Event) error
 	GetRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFileLookup) (domain.RemoteFile, error)
-	ListRemoteFiles(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.RemoteFilePage, error)
+	ListRemoteFiles(context.Context, domain.WorkspaceID, domain.RemoteFileFilter, domain.PageRequest) (domain.RemoteFilePage, error)
 	RemoveRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFileLookup, events.Event) error
 	SetRemoteFileShares(context.Context, domain.WorkspaceID, domain.RemoteFileLookup, []domain.ConversationID, events.Event) (domain.RemoteFile, error)
 	UpdateRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFile, events.Event) (domain.RemoteFile, error)
