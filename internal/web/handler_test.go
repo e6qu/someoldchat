@@ -3232,6 +3232,14 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	}
 	// An agent session's status, both renames and a stop.
 	emitAgentSessionTopics(t, s, messages, "Cdev", "U1")
+	// An assistant's status on a thread.
+	assistantRoot, err := messages.Post(ctx, "T1", "U1", "Cdev", "assistant thread", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SetAssistantThreadStatus(ctx, "T1", "U1", "Cdev", domain.NewMessageTimestamp(assistantRoot.CreatedAt), "is thinking...", nil, domain.AgentIdentity{}); err != nil {
+		t.Fatal(err)
+	}
 	records, err := s.ListEventsAfter(ctx, "T1", 0, 200)
 	if err != nil {
 		t.Fatal(err)
@@ -3239,7 +3247,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	emitted := map[string]bool{}
 	for _, record := range records {
 		topic := record.Event.Topic
-		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") || strings.HasPrefix(topic, "dialog.") || strings.HasPrefix(topic, "huddle.") || strings.HasPrefix(topic, "agent_session.") {
+		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") || strings.HasPrefix(topic, "dialog.") || strings.HasPrefix(topic, "huddle.") || strings.HasPrefix(topic, "agent_session.") || strings.HasPrefix(topic, "assistant.") {
 			emitted[topic] = true
 		}
 	}

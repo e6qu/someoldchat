@@ -175,7 +175,7 @@ func runQualification(t *testing.T, open opener) {
 		{"the OpenID signing key is one key for every replica", openIDSigningKeyIsSingular},
 		{"a workspace's primary owner is one owner who cannot be removed", primaryOwnerIsOneProtectedOwner},
 		{"never being asked again by an app outlives the prompt", unfurlAuthDeclineIsDurable},
-		{"an assistant's loading messages travel with its status", assistantLoadingMessagesTravelWithTheStatus},
+		{"an assistant's loading messages and identity travel with its status", assistantStatusStateTravelsWithTheStatus},
 		{"a profile's name parts and phone are durable", profileNamePartsAndPhoneAreDurable},
 		{"a weekly reminder's weekdays are durable", reminderWeekdaysAreDurable},
 		{"canvas and list retention deletes what went unedited", documentRetentionDeletesWhatWentUnedited},
@@ -1125,10 +1125,12 @@ func unfurlAuthDeclineIsDurable(t *testing.T, open opener) {
 	}
 }
 
-// assistantLoadingMessagesTravelWithTheStatus holds assistant.threads.setStatus
-// loading_messages on every profile: written with the status, read back in
-// order, and cleared when the status is.
-func assistantLoadingMessagesTravelWithTheStatus(t *testing.T, open opener) {
+// assistantStatusStateTravelsWithTheStatus holds what assistant.threads.setStatus
+// writes beside the status on every profile — its loading_messages, who set
+// it, and the icon_emoji, icon_url and username override it was set with:
+// written with the status, read back as written, left alone by a title write,
+// and cleared when the status is.
+func assistantStatusStateTravelsWithTheStatus(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	repository, closeRepository := open(t, ctx)
@@ -1142,21 +1144,25 @@ func assistantLoadingMessagesTravelWithTheStatus(t *testing.T, open opener) {
 		t.Fatal(err)
 	}
 	thread := domain.MessageTimestamp("1700000000.000100")
-	write := func(status string, loading []string) {
+	write := func(field domain.AssistantThreadField, value domain.AssistantThread) {
 		t.Helper()
-		value := domain.AssistantThread{WorkspaceID: workspaceID, Conversation: conversationID, ThreadTimestamp: thread, Status: status, LoadingMessages: loading, UpdatedAt: time.Now().UTC()}
-		event := events.Event{ID: domain.EventID("E-assistant-" + suffix + status), WorkspaceID: workspaceID, Topic: "assistant.thread_updated", Payload: "{}", CreatedAt: time.Now().UTC()}
-		if err := repository.SetAssistantThread(ctx, value, domain.AssistantThreadStatus, event); err != nil {
+		value.WorkspaceID, value.Conversation, value.ThreadTimestamp, value.UpdatedAt = workspaceID, conversationID, thread, time.Now().UTC()
+		event := events.Event{ID: domain.EventID("E-assistant-" + suffix + string(field) + value.Status + value.Title), WorkspaceID: workspaceID, Topic: events.AssistantThreadUpdatedTopic, Payload: "{}", CreatedAt: time.Now().UTC()}
+		if err := repository.SetAssistantThread(ctx, value, field, event); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write("is thinking", []string{"Reading", "Writing"})
+	identity := domain.AgentIdentity{Username: "Deploy bot", IconEmoji: ":robot_face:", IconURL: "https://example.test/bot.png"}
+	write(domain.AssistantThreadStatus, domain.AssistantThread{Status: "is thinking", LoadingMessages: []string{"Reading", "Writing"}, StatusUserID: "U-assistant", StatusIdentity: identity})
+	write(domain.AssistantThreadTitle, domain.AssistantThread{Title: "Deploy help"})
 	value, err := repository.GetAssistantThread(ctx, workspaceID, conversationID, thread)
-	if err != nil || value.Status != "is thinking" || fmt.Sprint(value.LoadingMessages) != "[Reading Writing]" {
+	if err != nil || value.Status != "is thinking" || fmt.Sprint(value.LoadingMessages) != "[Reading Writing]" ||
+		value.StatusUserID != "U-assistant" || value.StatusIdentity != identity || value.Title != "Deploy help" {
 		t.Fatalf("assistant thread = %+v err=%v", value, err)
 	}
-	write("", nil)
-	if value, err = repository.GetAssistantThread(ctx, workspaceID, conversationID, thread); err != nil || value.Status != "" || len(value.LoadingMessages) != 0 {
+	write(domain.AssistantThreadStatus, domain.AssistantThread{})
+	if value, err = repository.GetAssistantThread(ctx, workspaceID, conversationID, thread); err != nil || value.Status != "" || len(value.LoadingMessages) != 0 ||
+		value.StatusUserID != "" || !value.StatusIdentity.Empty() || value.Title != "Deploy help" {
 		t.Fatalf("cleared assistant thread = %+v err=%v", value, err)
 	}
 }

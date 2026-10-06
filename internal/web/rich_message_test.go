@@ -155,7 +155,8 @@ func TestCurrentAlertCardAndCarouselBlocksRenderTheirDocumentedStructureSafely(t
 	}
 	carousel := string(blocks[2].HTML)
 	if blocks[2].Kind != "carousel" || !strings.Contains(carousel, "First") ||
-		!strings.Contains(carousel, "Second") || strings.Contains(carousel, "javascript:") {
+		!strings.Contains(carousel, "Second") || strings.Contains(carousel, "javascript:") ||
+		!strings.Contains(carousel, `<div class="block-carousel-track" role="group" aria-label="Carousel" tabindex="0">`) {
 		t.Fatalf("carousel=%+v html=%q", blocks[2], carousel)
 	}
 }

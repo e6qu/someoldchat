@@ -455,6 +455,8 @@ var topicRules = []topicRule{
 		note: "current agent_session_stopped reference: a member pressed stop on a processing session; chat:write, Events API only, one record per stopped agent routed by target_app_id"},
 	{topic: AgentSessionTitleChangedTopic, slack: translated("agent_session_title_changed", appSurfaces, agentSessionTitleChanged),
 		note: "current agent_session_title_changed reference: a member retitled a session; chat:write, Events API only, one record per agent of the session routed by target_app_id"},
+	{topic: AssistantThreadUpdatedTopic,
+		note: "not a Slack event: assistant.threads.* answer the app itself, and the record exists so an open client re-renders the thread's assistant state"},
 	{topic: AgentSessionStatusSetTopic,
 		note: "not a Slack event: agents.sessions.setStatus answers the app itself, and the record exists so an open client re-renders the session"},
 	{topic: AgentSessionRenamedTopic,

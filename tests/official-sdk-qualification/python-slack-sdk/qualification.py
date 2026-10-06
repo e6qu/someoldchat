@@ -841,6 +841,33 @@ try:
 except SlackApiError as error:
     assert error.response["error"] == "thread_ts_required", error.response
 
+# assistant.threads.setStatus with the identity override this SDK sends since
+# 3.45 (icon_emoji, icon_url, username). The fixture bot holds
+# chat:write.customize; a bot with chat:write alone may set a bare status but
+# is answered missing_scope for the override, as on agents.sessions.setStatus.
+assistant_status = client.assistant_threads_setStatus(
+    channel_id="C1",
+    thread_ts=root["ts"],
+    status="is thinking...",
+    loading_messages=["Reading the thread"],
+    icon_emoji=":robot_face:",
+    icon_url="https://example.com/assistant.png",
+    username="SDK assistant",
+)
+assert assistant_status["ok"] is True
+chat_write_only = WebClient(
+    token="xoxb-qualification-legacy",
+    base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
+)
+try:
+    chat_write_only.assistant_threads_setStatus(channel_id="C1", thread_ts=root["ts"], status="is thinking...", username="Uncustomized")
+    raise AssertionError("assistant.threads.setStatus customized without chat:write.customize")
+except SlackApiError as error:
+    assert error.response["error"] == "missing_scope", error.response
+    assert error.response["needed"] == "chat:write.customize", error.response
+cleared_status = chat_write_only.assistant_threads_setStatus(channel_id="C1", thread_ts=root["ts"], status="")
+assert cleared_status["ok"] is True
+
 reaction = client.reactions_add(channel="C1", timestamp=root["ts"], name="thumbsup")
 assert reaction["ok"] is True
 reactions = client.reactions_get(channel="C1", timestamp=root["ts"])

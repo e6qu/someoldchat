@@ -12811,9 +12811,12 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 }
 
 // decodeArguments is decodeFields with the JSON member decoding supplied by the
-// caller. api.test is the one caller that needs another: it echoes whatever a
-// JSON body carried, nested values included, where every other method refuses
-// a non-scalar in a scalar argument.
+// caller, for the methods whose JSON arguments decode differently: api.test
+// echoes whatever a JSON body carried, nested values included; the admin user
+// group methods take `users` as an array; and the two setStatus methods
+// (agents.sessions and assistant.threads) take a JSON null identity override
+// as absent (identityOverrideJSONMember). Every other method refuses a
+// non-scalar, or a null, in a scalar argument.
 func decodeArguments(w http.ResponseWriter, r *http.Request, jsonMember func(name string, value json.RawMessage) (string, error)) (map[string]string, error) {
 	fields := make(map[string]string)
 	if err := collectFormValues(fields, r.URL.Query()); err != nil {

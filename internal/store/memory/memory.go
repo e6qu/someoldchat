@@ -7771,6 +7771,7 @@ func (s *Store) SetAssistantThread(_ context.Context, value domain.AssistantThre
 	case domain.AssistantThreadStatus:
 		current.Status = value.Status
 		current.LoadingMessages = append([]string(nil), value.LoadingMessages...)
+		current.StatusUserID, current.StatusIdentity = value.StatusUserID, value.StatusIdentity
 	case domain.AssistantThreadPrompts:
 		current.PromptsTitle = value.PromptsTitle
 		current.Prompts = append([]domain.AssistantPrompt(nil), value.Prompts...)

@@ -2251,12 +2251,19 @@ operations:
     status: sdk-compatible
     evidence:
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - go-test:internal/service:TestAssistantWritesTouchOneFieldEach
+      - go-test:internal/service:TestAssistantStatusIdentityTravelsWithTheStatus
       - go-test:internal/api/slack:TestAssistantThreadWritesAcceptTheSDKsJSONArrays
+      - go-test:internal/api/slack:TestAssistantThreadsSetStatusTakesAnIdentityOverride
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
       - go-test:internal/web:TestThreadShowsTheAssistantStatusWithItsLoadingMessages
-      - go-test:tests/persistence-qualification:assistantLoadingMessagesTravelWithTheStatus
+      - go-test:internal/web:TestTheAssistantStatusShowsTheIdentityItWasSetWith
+      - go-test:tests/persistence-qualification:assistantStatusStateTravelsWithTheStatus
     deviations:
-      - Argument names are taken from the pinned @slack/web-api type definitions; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
+      - Argument names are taken from the pinned @slack/web-api type definitions and python-slack-sdk 3.45.0's assistant_threads_setStatus; Slack publishes no per-method schema in the pinned reference, so the response body beyond {ok} is unqualified.
+      - icon_emoji, icon_url and username (sent by python-slack-sdk 3.45.0 and slack-bolt 1.30.0's SetStatus) take the contract agents.sessions.setStatus documents for the same three, since this method's page does not describe them; chat:write.customize is required on top of chat:write (missing_scope naming it otherwise), and a JSON null is the same as leaving one out. A username over 200 characters or an icon_url that is not an absolute http(s) URL is invalid_arguments.
+      - The override belongs to the status it was sent with; each call replaces it (a call without it shows the status under the setting app's own name again), and clearing the status clears it. The first-party thread pane shows the status, live, under the override's username, or the app's name, with the icon_emoji drawn or the icon_url as a decorative image beside it; the override does not restyle the app's messages.
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/assistant.threads.setStatus/
   - method: assistant.threads.setSuggestedPrompts

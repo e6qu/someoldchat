@@ -33,15 +33,8 @@ func (h Handler) setAgentSessionStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arguments")
 		return
 	}
-	identity := domain.AgentIdentity{
-		Username:  strings.TrimSpace(fields["username"]),
-		IconEmoji: strings.TrimSpace(fields["icon_emoji"]),
-		IconURL:   strings.TrimSpace(fields["icon_url"]),
-	}
-	// The identity override needs chat:write.customize on top of chat:write,
-	// as it does on chat.postMessage.
-	if !identity.Empty() && !principal.HasScope(auth.ScopeChatWriteCustomize) {
-		writeAuthError(w, missingScopeError{needed: []auth.Scope{auth.ScopeChatWriteCustomize}, provided: permissionScopes(principal)})
+	identity, ok := identityOverride(w, principal, fields)
+	if !ok {
 		return
 	}
 	result, err := h.Messages.SetAgentSessionStatus(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, channel, thread, domain.AgentSessionStatusRequest{
@@ -97,7 +90,7 @@ func (h Handler) agentSessionRequest(w http.ResponseWriter, r *http.Request) (au
 		writeError(w, "not_allowed_token_type")
 		return auth.Principal{}, nil, "", "", false
 	}
-	fields, err := decodeArguments(w, r, agentSessionJSONMember)
+	fields, err := decodeArguments(w, r, identityOverrideJSONMember)
 	if err != nil {
 		writeDecodeError(w, err)
 		return auth.Principal{}, nil, "", "", false
@@ -111,11 +104,29 @@ func (h Handler) agentSessionRequest(w http.ResponseWriter, r *http.Request) (au
 	return principal, fields, channel, thread, true
 }
 
-// agentSessionJSONMember accepts the JSON null the setStatus reference
-// documents for clearing icon_emoji, icon_url and username. A null there is
-// the same as leaving the argument out — the page treats both alike — where
+// identityOverride reads the icon_emoji, icon_url and username a setStatus
+// call — agents.sessions' or assistant.threads' — shows its status with. The
+// override needs chat:write.customize on top of the method's own scope, as it
+// does on chat.postMessage; a call without it is answered missing_scope.
+func identityOverride(w http.ResponseWriter, principal auth.Principal, fields map[string]string) (domain.AgentIdentity, bool) {
+	identity := domain.AgentIdentity{
+		Username:  strings.TrimSpace(fields["username"]),
+		IconEmoji: strings.TrimSpace(fields["icon_emoji"]),
+		IconURL:   strings.TrimSpace(fields["icon_url"]),
+	}
+	if !identity.Empty() && !principal.HasScope(auth.ScopeChatWriteCustomize) {
+		writeAuthError(w, missingScopeError{needed: []auth.Scope{auth.ScopeChatWriteCustomize}, provided: permissionScopes(principal)})
+		return domain.AgentIdentity{}, false
+	}
+	return identity, true
+}
+
+// identityOverrideJSONMember accepts the JSON null the agents.sessions.setStatus
+// reference documents for clearing icon_emoji, icon_url and username, and
+// assistant.threads.setStatus takes the same three the same way. A null there
+// is the same as leaving the argument out — the page treats both alike — where
 // every other argument still refuses a null as no value at all.
-func agentSessionJSONMember(name string, value json.RawMessage) (string, error) {
+func identityOverrideJSONMember(name string, value json.RawMessage) (string, error) {
 	switch name {
 	case "icon_emoji", "icon_url", "username":
 		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {

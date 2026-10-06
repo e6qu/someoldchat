@@ -6091,7 +6091,10 @@ func parityCases() []parityCase {
 				if err := chat.SetAssistantThreadTitle(ctx, "T1", "U1", "C1", thread, "Deploy help"); err != nil {
 					return nil, err
 				}
-				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", nil); err != nil {
+				// The status carries its loading messages and identity override
+				// across the seam; both are part of the compared value.
+				identity := domain.AgentIdentity{Username: "Deploy bot", IconEmoji: ":robot_face:", IconURL: "https://example.test/bot.png"}
+				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", []string{"Reading the runbook"}, identity); err != nil {
 					return nil, err
 				}
 				if err := chat.SetAssistantThreadSuggestedPrompts(ctx, "T1", "U1", "C1", thread, "Try", []domain.AssistantPrompt{{Title: "Roll back", Message: "How do I roll back?"}}); err != nil {
@@ -6102,14 +6105,21 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				// Clearing the status must leave the title and prompts alone.
-				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "", nil); err != nil {
+				if err := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "", nil, domain.AgentIdentity{}); err != nil {
 					return nil, err
 				}
 				after, err := chat.AssistantThread(ctx, "T1", "U1", "C1", thread)
 				if err != nil {
 					return nil, err
 				}
-				return []any{value.Title, value.Status, value.PromptsTitle, len(value.Prompts), after.Title, after.Status, len(after.Prompts)}, nil
+				// An icon_url that is not an absolute http(s) address is the
+				// same error class on both compositions.
+				invalid := chat.SetAssistantThreadStatus(ctx, "T1", "U1", "C1", thread, "is thinking...", nil, domain.AgentIdentity{IconURL: "javascript:alert(1)"})
+				return []any{
+					value.Title, value.Status, value.PromptsTitle, len(value.Prompts), value.LoadingMessages, value.StatusUserID, value.StatusIdentity,
+					after.Title, after.Status, len(after.Prompts), len(after.LoadingMessages), after.StatusUserID, after.StatusIdentity,
+					errors.Is(invalid, domain.ErrInvalidAssistantThread),
+				}, nil
 			},
 		},
 		{

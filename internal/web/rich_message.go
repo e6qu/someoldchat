@@ -960,7 +960,10 @@ func carouselBlockContent(value map[string]any) (string, template.HTML, []messag
 	var textParts []string
 	var actions []messageActionView
 	var output strings.Builder
-	output.WriteString(`<div class="block-carousel-track">`)
+	// The track is what scrolls sideways, so it takes keyboard focus: a
+	// reader without a pointer reaches the cards past the first by scrolling
+	// it with the arrow keys, and axe's scrollable-region-focusable holds.
+	output.WriteString(`<div class="block-carousel-track" role="group" aria-label="Carousel" tabindex="0">`)
 	for _, raw := range elements {
 		card, _ := raw.(map[string]any)
 		if strings.TrimSpace(stringValue(card["type"])) != "card" {

@@ -614,9 +614,15 @@ type AssistantThread struct {
 	// LoadingMessages are the lines a client rotates through while the
 	// status is shown; they are set and cleared with it.
 	LoadingMessages []string
-	PromptsTitle    string
-	Prompts         []AssistantPrompt
-	UpdatedAt       time.Time
+	// StatusUserID is who set the status, and StatusIdentity the
+	// icon_emoji, icon_url and username it was set with; a client shows the
+	// identity in place of that user's own name. Both are set and cleared
+	// with the status.
+	StatusUserID   UserID
+	StatusIdentity AgentIdentity
+	PromptsTitle   string
+	Prompts        []AssistantPrompt
+	UpdatedAt      time.Time
 }
 
 // AssistantLoadingMessageLimit is Slack's documented maximum for
