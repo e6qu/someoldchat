@@ -173,6 +173,11 @@ message AdminWorkflowListRequest {
   string cursor = 4;
   bool descending = 5;
   string query = 6;
+  // The admin.workflows.search filters; see domain.WorkflowSearch.
+  string app_id = 7;
+  repeated string collaborator_ids = 8;
+  bool no_collaborators = 9;
+  string source = 10;
 }
 
 message WorkflowCollaboratorsRequest {

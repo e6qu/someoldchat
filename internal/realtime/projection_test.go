@@ -54,7 +54,7 @@ func TestEventStreamWithholdsConversationsTheReaderIsNotIn(t *testing.T) {
 	}
 	messages := service.Messages{Store: state, AppCredentialKey: []byte(strings.Repeat("k", 32))}
 	ctx := context.Background()
-	private, err := messages.CreateConversation(ctx, "T1", "U1", "acquisition-of-acme", true)
+	private, err := messages.CreateConversation(ctx, "T1", "U1", "acquisition-of-acme", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5120,7 +5120,7 @@ func (h Handler) recordTimezone(r *http.Request, principal auth.Principal, zone 
 	}
 	profile := current.Profile
 	profile.Timezone = zone
-	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
+	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, profile); err != nil {
 		log.Printf("web: the time zone of %s was not recorded: %v", principal.UserID, err)
 	}
 }
@@ -11016,7 +11016,7 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 		profile.Image512 = avatarURL
 		profile.Image1024 = avatarURL
 	}
-	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
+	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, profile); err != nil {
 		// A rejected save keeps every submitted value and says which limit it
 		// crossed, instead of answering with a bare status line.
 		if errors.Is(err, domain.ErrInvalidProfile) {
@@ -12878,7 +12878,7 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	private := strings.EqualFold(strings.TrimSpace(fields["is_private"]), "true")
-	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
+	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private, "")
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		heading := "The channel was not created"

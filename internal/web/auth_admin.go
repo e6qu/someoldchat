@@ -405,7 +405,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_pagination", Title: "Request rejected", Message: requestErr.Error()})
 			return
 		}
-		page, pageErr := h.Login.service.AdminListUsers(r.Context(), h.Login.workspace, principal.UserID, request)
+		page, pageErr := h.Login.service.AdminListUsers(r.Context(), h.Login.workspace, principal.UserID, domain.MemberActivityAny, request)
 		if pageErr != nil {
 			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusServiceUnavailable, Code: "users_unavailable", Title: "Temporarily unavailable", Message: "The workspace user list could not be read."})
 			return
@@ -585,7 +585,7 @@ func (h Handler) authUsersList(w http.ResponseWriter, r *http.Request) {
 		writeAuthAdminJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_pagination"})
 		return
 	}
-	page, err := h.Login.service.AdminListUsers(r.Context(), h.Login.workspace, principal.UserID, request)
+	page, err := h.Login.service.AdminListUsers(r.Context(), h.Login.workspace, principal.UserID, domain.MemberActivityAny, request)
 	if err != nil {
 		writeAuthAdminJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "users_unavailable"})
 		return
@@ -620,13 +620,13 @@ func (h Handler) authUserSet(w http.ResponseWriter, r *http.Request) {
 	case "disable":
 		operationErr = h.Login.service.RemoveUser(r.Context(), h.Login.workspace, principal.UserID, target)
 	case "enable":
-		operationErr = h.Login.service.AdminAssignUser(r.Context(), h.Login.workspace, principal.UserID, target, []domain.ConversationID{})
+		operationErr = h.Login.service.AdminAssignUser(r.Context(), h.Login.workspace, principal.UserID, target, domain.GuestTierUnchanged, []domain.ConversationID{})
 	case "sessions":
 		// Ending sessions is not deactivation: the member keeps their account
 		// and can sign in again. Slack separates them, and so does this page,
 		// because "sign them out" is the safe first move when a device is lost
 		// and disabling the account is not.
-		operationErr = h.Login.service.ResetUserSessionsBulk(r.Context(), h.Login.workspace, principal.UserID, []domain.UserID{target})
+		operationErr = h.Login.service.ResetUserSessionsBulk(r.Context(), h.Login.workspace, principal.UserID, []domain.UserID{target}, domain.SessionClientsAll)
 	case "primary_owner":
 		operationErr = h.Login.service.TransferPrimaryOwnership(r.Context(), h.Login.workspace, principal.UserID, target)
 	case "role":

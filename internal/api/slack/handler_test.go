@@ -2147,7 +2147,7 @@ func TestUserGroupLifecycle(t *testing.T) {
 		t.Fatalf("create body=%s err=%v", created.Body, err)
 	}
 	id := createdBody.UserGroup.ID
-	private := form("/api/admin.conversations.create", "name=Access%20controlled&is_private=true")
+	private := form("/api/admin.conversations.create", "name=Access%20controlled&is_private=true&team_id=T1")
 	if private.Code != http.StatusOK {
 		t.Fatalf("private conversation status=%d body=%s", private.Code, private.Body)
 	}
@@ -2396,21 +2396,48 @@ func TestAdminRoleAssignments(t *testing.T) {
 	if added := call(t, http.MethodPost, "admin.roles.addAssignments", "role_id=Rl0A&entity_ids=C2,C1&user_ids=U1,U2"); added["ok"] != true {
 		t.Fatalf("added=%v", added)
 	}
-	listed := call(t, http.MethodPost, "admin.roles.listAssignments", "role_id=Rl0A")
-	assignments, ok := listed["role_assignments"].([]any)
-	if !ok || len(assignments) != 4 {
-		t.Fatalf("listed=%v", listed)
-	}
-	order := make([]string, 0, len(assignments))
-	for _, value := range assignments {
-		assignment, isMap := value.(map[string]any)
-		if !isMap {
-			t.Fatalf("assignment=%v", value)
+	// listAssignments takes the plural role_ids and entity_ids every
+	// published client sends, plus sort_dir, limit and cursor.
+	orderOf := func(t *testing.T, payload map[string]any) string {
+		t.Helper()
+		assignments, ok := payload["role_assignments"].([]any)
+		if !ok {
+			t.Fatalf("listed=%v", payload)
 		}
-		order = append(order, assignment["user_id"].(string)+"/"+assignment["entity_id"].(string))
+		order := make([]string, 0, len(assignments))
+		for _, value := range assignments {
+			assignment, isMap := value.(map[string]any)
+			if !isMap {
+				t.Fatalf("assignment=%v", value)
+			}
+			order = append(order, assignment["user_id"].(string)+"/"+assignment["entity_id"].(string))
+		}
+		return strings.Join(order, ",")
 	}
-	if want := "U1/C1,U1/C2,U2/C1,U2/C2"; strings.Join(order, ",") != want {
-		t.Fatalf("order=%v want=%v", order, want)
+	if got := orderOf(t, call(t, http.MethodPost, "admin.roles.listAssignments", "role_ids=Rl0A")); got != "U1/C1,U1/C2,U2/C1,U2/C2" {
+		t.Fatalf("order=%v", got)
+	}
+	if got := orderOf(t, call(t, http.MethodPost, "admin.roles.listAssignments", "role_ids=Rl0A&entity_ids=C2&sort_dir=desc")); got != "U2/C2,U1/C2" {
+		t.Fatalf("entity filter, descending=%v", got)
+	}
+	// Neither filter is every assignment.
+	if got := orderOf(t, call(t, http.MethodGet, "admin.roles.listAssignments", "")); got != "U1/C1,U1/C2,U2/C1,U2/C2" {
+		t.Fatalf("unfiltered=%v", got)
+	}
+	// The cursor of a page reaches the next one. The shared list-cursor check
+	// used to refuse every cursor this method minted.
+	first := call(t, http.MethodPost, "admin.roles.listAssignments", "role_ids=Rl0A&limit=3")
+	next, _ := first["response_metadata"].(map[string]any)["next_cursor"].(string)
+	if orderOf(t, first) != "U1/C1,U1/C2,U2/C1" || next == "" {
+		t.Fatalf("first page=%v", first)
+	}
+	if got := orderOf(t, call(t, http.MethodPost, "admin.roles.listAssignments", "role_ids=Rl0A&limit=3&cursor="+next)); got != "U2/C2" {
+		t.Fatalf("second page=%v", got)
+	}
+	for body, code := range map[string]string{"sort_dir=sideways": "invalid_arg_name", "cursor=not-a-cursor": "invalid_cursor"} {
+		if refused := call(t, http.MethodPost, "admin.roles.listAssignments", body); refused["error"] != code {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
 	}
 	// A member the workspace does not hold is refused, and the refusal is not
 	// a partial write: the rows the same request named must not appear.
@@ -2418,7 +2445,7 @@ func TestAdminRoleAssignments(t *testing.T) {
 	if stranger["error"] != "user_not_found" {
 		t.Fatalf("stranger=%v", stranger)
 	}
-	if empty := call(t, http.MethodPost, "admin.roles.listAssignments", "role_id=Rl0B"); len(empty["role_assignments"].([]any)) != 0 {
+	if empty := call(t, http.MethodPost, "admin.roles.listAssignments", "role_ids=Rl0B"); len(empty["role_assignments"].([]any)) != 0 {
 		t.Fatalf("partial write survived: %v", empty)
 	}
 	for _, body := range []string{"entity_ids=C1&user_ids=U1", "role_id=Rl0A&user_ids=U1", "role_id=Rl0A&entity_ids=C1"} {
@@ -2429,7 +2456,7 @@ func TestAdminRoleAssignments(t *testing.T) {
 	if removed := call(t, http.MethodPost, "admin.roles.removeAssignments", "role_id=Rl0A&entity_ids=C1&user_ids=U1,U2"); removed["ok"] != true {
 		t.Fatalf("removed=%v", removed)
 	}
-	left := call(t, http.MethodGet, "admin.roles.listAssignments?role_id=Rl0A", "")
+	left := call(t, http.MethodGet, "admin.roles.listAssignments?role_ids=Rl0A", "")
 	if remaining := left["role_assignments"].([]any); len(remaining) != 2 {
 		t.Fatalf("left=%v", left)
 	}
@@ -2813,17 +2840,33 @@ func TestAdminConversationAdministration(t *testing.T) {
 	if linked := call(t, http.MethodPost, "admin.conversations.linkObjects", "channel=C1&salesforce_org_id=00D000&record_id=a01,a02"); linked["ok"] != true {
 		t.Fatalf("linked=%v", linked)
 	}
-	if unlinked := call(t, http.MethodPost, "admin.conversations.unlinkObjects", "channels=C1"); unlinked["ok"] != true {
+	// unlinkObjects takes the channel and the name it carries afterwards, as
+	// every published client sends them; the old plural channels is none.
+	for _, body := range []string{"channels=C1&new_name=x", "channel=C1", "new_name=x"} {
+		if refused := call(t, http.MethodPost, "admin.conversations.unlinkObjects", body); refused["error"] != "invalid_arguments" {
+			t.Fatalf("body=%q refused=%v", body, refused)
+		}
+	}
+	if unlinked := call(t, http.MethodPost, "admin.conversations.unlinkObjects", "channel=C1&new_name=No%20Longer%20Linked"); unlinked["ok"] != true {
 		t.Fatalf("unlinked=%v", unlinked)
 	}
-	made := call(t, http.MethodPost, "admin.conversations.createForObjects", "channel_name=record-channel&salesforce_org_id=00D000&object_id=a03")
+	if info := call(t, http.MethodPost, "conversations.info", "channel=C1"); info["channel"].(map[string]any)["name"] != "no-longer-linked" {
+		t.Fatalf("new_name was not applied: %v", info)
+	}
+	// createForObjects takes the record, its organisation and
+	// invite_object_team; the channel is named after the record.
+	made := call(t, http.MethodPost, "admin.conversations.createForObjects", "salesforce_org_id=00D000&object_id=a03&invite_object_team=true")
 	if made["ok"] != true || made["channel_id"] == "" {
 		t.Fatalf("made=%v", made)
 	}
-	for _, body := range []string{"channel_name=other&salesforce_org_id=00D000", "salesforce_org_id=00D000&object_id=a04", "channel_name=other&object_id=a04"} {
+	for _, body := range []string{"salesforce_org_id=00D000", "object_id=a04", "salesforce_org_id=00D000&object_id=a04&invite_object_team=maybe"} {
 		if refused := call(t, http.MethodPost, "admin.conversations.createForObjects", body); refused["error"] != "invalid_arguments" {
 			t.Fatalf("body=%q refused=%v", body, refused)
 		}
+	}
+	// A new_name another channel holds is refused, and the links stay.
+	if taken := call(t, http.MethodPost, "admin.conversations.unlinkObjects", "channel="+made["channel_id"].(string)+"&new_name=no-longer-linked"); taken["error"] != "name_taken" {
+		t.Fatalf("taken=%v", taken)
 	}
 	if noTarget := call(t, http.MethodPost, "admin.conversations.bulkMove", "channel_ids=C1"); noTarget["error"] != "invalid_arguments" {
 		t.Fatalf("noTarget=%v", noTarget)
@@ -3205,7 +3248,7 @@ func TestAdminConversationDeleteRemovesPublicChannel(t *testing.T) {
 }
 
 func TestAdminConversationCreateUsesDurableConversationBoundary(t *testing.T) {
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.create", strings.NewReader("name=admin-created&is_private=true"))
+	request := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.create", strings.NewReader("name=admin-created&is_private=true&team_id=T1"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()

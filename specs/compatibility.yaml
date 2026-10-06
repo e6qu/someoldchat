@@ -472,6 +472,18 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestTeamInfo
       - go-test:internal/api/slack:TestTeamInfoReportsDomainAndFetchableIcons
+      - go-test:internal/api/slack:TestTeamInfoAnswersOnlyTheTeamItNames
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        team or domain naming this workspace answers it; naming any other
+        answers team_not_found (recorded as a per-operation exemption, since
+        the pinned enum declares no not-found code). Slack also answers teams
+        the token sees through externally shared channels; this deployment does
+        not serve another organization's details. The handler used to ignore
+        both arguments and answer the caller's own workspace for any team.
   - method: team.profile.get
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -802,12 +814,13 @@ operations:
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
       - journey:specs/journeys/09-profile-presence-and-notifications.md
+      - go-test:internal/api/slack:TestUsersProfileSetEditsTheMemberItNames
     deviations:
       - Display name, full name (real_name, first_name, last_name), phone, title, pronouns, status, expiration, image URL, and workspace-defined custom fields are settable through both the profile object and the single-field name/value form. real_name sets both parts, split at its first space, and a full name cannot be cleared. Standard Slack profile fields this deployment does not store (skype, start date) and email, which only an administrator may change in Slack, are refused rather than silently dropped.
-      - Admin editing of another user (the reference's user argument) and the reference's token-type rules are not yet asserted; this deployment has no plan tiers, so the paid-team restriction on user is not applied.
+      - user names whose profile changes. An administrator or owner may name another member; a member naming someone else is refused with not_admin, and an administrator naming an administrator or owner is refused with cannot_update_admin_user unless they are the primary owner (both codes are in the pinned enum). This deployment has no plan tiers, so the paid-team restriction on user is not applied, and the reference's token-type rules are not asserted.
     audit:
       downgraded_from: behavior-compatible
-      reason: The editable profile including custom fields and the name/value form is implemented and tested, but admin editing of another user, rate limits, and token-type rules are not qualified.
+      reason: The editable profile including custom fields, the name/value form and administrator editing through user are implemented and tested, but rate limits and token-type rules are not qualified.
       evidence:
         - source:internal/api/slack/handler.go
         - go-test:internal/api/slack:TestUserProfileSetSingleFieldNameValueForm
@@ -856,11 +869,21 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestAdminConversationCreateUsesDurableConversationBoundary
       - go-test:internal/api/slack:TestPrivateChannelCreationAnswersRestrictedActionUnderTheWorkspacePolicy
+      - go-test:internal/api/slack:TestAdminConversationsCreateHonoursDescriptionAndWorkspace
+      - go-test:tests/persistence-qualification:aCreatedChannelKeepsItsDescription
     deviations:
       - >-
         A private channel follows the workspace's "who can create private channels" policy as
         conversations.create does, so an administrator under an owners-only policy is answered
         restricted_action, the code this method declares.
+      - >-
+        description is written with the channel as its purpose, atomically.
+        team_id is required unless org_wide=true (team_id_or_org_required) and
+        must name this workspace (team_not_found). org_wide=true creates the
+        channel in this deployment's one workspace; it is not marked as an
+        org-wide channel, so admin.conversations.getTeams reports it as an
+        ordinary channel. A malformed name answers invalid_name and an
+        over-long description invalid_arg_name.
   - method: admin.conversations.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -896,6 +919,12 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminConversationRenameArchiveAndUnarchiveTakeEffect
+      - go-test:internal/api/slack:TestAdminConversationsRenameNormalizesTheName
+    deviations:
+      - >-
+        The name is normalized by the rule every channel name follows (lower
+        case, whitespace runs to one hyphen, at most 80 characters); it used to
+        be stored exactly as sent. A direct conversation is not renamed.
   - method: admin.conversations.restrictAccess.addGroup
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -916,6 +945,25 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminConversationSearchIsRegistered
+      - go-test:internal/api/slack:TestAdminConversationsSearchHonoursQueryTypesAndSort
+      - go-test:tests/persistence-qualification:administratorChannelSearchAgreesOnEveryProfile
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - >-
+        query is optional (every channel when absent; the handler used to
+        answer invalid_form_data) and direct conversations are never results.
+        sort is relevant, name, member_count (the default, per @slack/web-api
+        8.2.0) or created, and sort_dir asc (the default; no source names one)
+        or desc; relevant ranks an exact name, then a name prefix, then a name
+        containing the query, then a topic or purpose match.
+        search_channel_types applies private, private_exclude, archived and
+        exclude_archived; the Enterprise Grid and Slack Connect types
+        (multi_workspace, org_wide, external_shared*, exclude_org_shared,
+        private_exclude_archived) are refused with invalid_search_channel_type
+        rather than ignored. team_ids may name only this workspace
+        (team_not_found otherwise). limit is 1-20, default 10, as the pinned
+        schema states. total_count is the size of the page, not of the whole
+        result.
   - method: admin.conversations.setConversationPrefs
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1060,6 +1108,19 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminUsersAssignReactivatesAndJoinsChannels
+      - go-test:internal/api/slack:TestAdminUsersAssignAddsTheGuestTierItNames
+      - go-test:tests/persistence-qualification:assigningAMemberSetsTheGuestTierItNames
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        is_restricted and is_ultra_restricted set the guest tier the member is
+        assigned with (both false is a full member; both true is refused with
+        invalid_arg_name). A request that sends neither keeps the tier the
+        membership already has rather than promoting a deactivated guest to a
+        full member. An administrator or owner cannot be made a guest and is
+        refused with invalid_arg_name.
   - method: admin.users.invite
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1070,6 +1131,17 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminUsersListReturnsTheAdminProjection
+      - go-test:internal/api/slack:TestAdminUsersListHonoursIsActive
+      - go-test:tests/persistence-qualification:adminUserListingsFilterByActivity
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - >-
+        is_active defaults to true, as @slack/web-api 8.2.0 documents: only
+        active members unless is_active=false asks for the deactivated ones.
+        include_deactivated_user_workspaces is validated and changes nothing,
+        because it chooses which workspaces an org-token listing reports and
+        this deployment has one.
   - method: admin.users.remove
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1085,6 +1157,17 @@ operations:
     provenance: slack-api-specs-openapi
     evidence:
       - go-test:internal/api/slack:TestAdminUsersSessionResetIsIdempotentButStillFindsTheMember
+      - go-test:internal/api/slack:TestAdminUsersSessionResetHonoursMobileAndWebOnly
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        Sessions here carry no client kind because there is no mobile client:
+        every session is a browser session. web_only therefore ends every
+        session, mobile_only ends none (after confirming the member exists),
+        and both together name no session and are refused with
+        invalid_arg_name.
   - method: admin.users.setAdmin
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1590,8 +1673,17 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestAccessLogsRequireAdminAndExposeRecordedAccess
       - go-test:internal/store/sqlstore:TestSchema185FoldsPerRequestAccessLogs
+      - go-test:internal/api/slack:TestTeamAccessLogsPagesByLimitAndCursor
     deviations:
       - country, region and isp are null because no geolocation database is bundled.
+      - >-
+        Besides the pinned count and page, the cursor and limit every current
+        client sends are served: limit is the page size when count is absent,
+        and response_metadata.next_cursor names the next page of that size, so
+        a cursor resumes the same page-numbered walk (and shares its
+        sensitivity to logins recorded between pages). A limit-only call used
+        to be answered with 100 rows and no cursor. team_id may name only this
+        workspace.
   - method: team.billableInfo
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1886,6 +1978,16 @@ operations:
     reference: https://docs.slack.dev/reference/methods/admin.apps.uninstall/
     evidence:
       - go-test:internal/api/slack:TestAdminAppUninstallAndRequestCancelTakeEffect
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        The published clients send one app as app_id (the handler read only
+        app_ids, so every typed call failed). team_ids and enterprise_id say
+        where to uninstall from; this deployment is one workspace, so team_ids
+        may name only it and is otherwise refused with invalid_arg_name, and
+        enterprise_id is accepted as the whole deployment.
   - method: admin.audit.anomaly.allow.getItem
     status: behavior-compatible
     provenance: slack-reference
@@ -2015,6 +2117,16 @@ operations:
       - go-test:internal/api/slack:TestAdminConversationAdministration
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - >-
+        slack_sdk 3.45.0 sends object_id, salesforce_org_id and
+        invite_object_team, and no channel name or visibility; the handler used
+        to require channel_name, so every typed call failed. Slack names the
+        channel after the Salesforce record, which this deployment cannot read,
+        so the channel is public and named after object_id, and
+        invite_object_team is validated but has no Salesforce record team to
+        invite.
   - method: admin.conversations.getCustomRetention
     status: behavior-compatible
     provenance: slack-reference
@@ -2072,12 +2184,30 @@ operations:
       - go-test:internal/api/slack:TestAdminConversationAdministration
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:administrativeChannelBatchesAreAllOrNothing
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - go-test:internal/modules/chat/transport/grpc:TestCompositionsAgreeOnEveryErrorClassAndValue
+    deviations:
+      - >-
+        slack_sdk 3.45.0 is the only pinned client with this method and sends
+        channel and new_name, both required; @slack/web-api 8.2.0 and
+        slack-api-client 1.52.0 do not expose it, so the Node walk issues it
+        through apiCall with those names. new_name is applied with the
+        channel-name rules every rename uses, before the links are removed, so
+        a taken name (name_taken) leaves the links in place. The old plural
+        channels is not accepted.
   - method: admin.functions.list
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/admin.functions.list/
     evidence:
       - go-test:internal/api/slack:TestAdminFunctionsListReadsTheManifest
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+    deviations:
+      - >-
+        app_ids is required, as every published client sends it, and scopes the
+        answer; limit and cursor page the (app, callback) ordered list, and
+        team_id may name only this workspace. The handler used to ignore all of
+        them and answer every installed app's functions with an empty cursor.
   - method: admin.functions.permissions.lookup
     status: behavior-compatible
     provenance: slack-reference
@@ -2109,6 +2239,16 @@ operations:
       - go-test:internal/api/slack:TestAdminRoleAssignments
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - go-test:tests/persistence-qualification:roleAssignmentsAgreeOnEveryProfile
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        role_ids and entity_ids scope the listing in any combination (every
+        assignment when neither is sent), and sort_dir, limit and cursor page
+        it. The published clients name no sort key, so assignments are ordered
+        by member, entity and role; sort_dir reverses that order. The handler
+        used to require a singular role_id no client sends and to check the
+        cursor as a list cursor, which refused every cursor the method minted.
   - method: admin.roles.removeAssignments
     status: behavior-compatible
     provenance: slack-reference
@@ -2151,6 +2291,14 @@ operations:
     reference: https://docs.slack.dev/reference/methods/admin.users.session.resetBulk/
     evidence:
       - go-test:internal/api/slack:TestAdminSessionListShowsSessionsWithoutTheirTokens
+      - go-test:internal/api/slack:TestAdminUsersSessionResetHonoursMobileAndWebOnly
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - >-
+        mobile_only and web_only are read as admin.users.session.reset reads
+        them: every session here is a web session, so web_only ends them all,
+        mobile_only ends none, and both are refused with invalid_arg_name.
   - method: admin.users.session.setSettings
     status: behavior-compatible
     provenance: slack-reference
@@ -2201,11 +2349,20 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestAdminWorkflowSearchAndUnpublishReachWhatMembersCannot
       - go-test:internal/api/slack:TestAdminWorkflowSearchFindsAMembersOwnWorkflow
+      - go-test:internal/api/slack:TestAdminWorkflowsSearchHonoursItsFilters
     deviations:
       - >-
         A member's own workflow, built in Workflow Builder with no developer
         app, reports app_id as an empty string. Slack's reference does not say
         what app a Workflow Builder workflow names, so none is invented.
+      - >-
+        app_id, collaborator_ids (any of them managing the workflow),
+        no_collaborators and source filter the search; source code is a
+        workflow a developer app defines and workflow_builder one with no app.
+        sort accepts its one published value, premium_runs, but this deployment
+        meters no premium runs, so every workflow ties and the order stays the
+        listing's own whatever sort_dir says; num_trigger_ids sizes a
+        trigger_ids list this response does not carry.
   - method: admin.workflows.triggers.types.permissions.lookup
     status: behavior-compatible
     provenance: slack-reference
@@ -2671,6 +2828,16 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestDiscoverableContactsLookupFollowsTheWorkspaceSetting
       - go-test:internal/service:TestAMemberCanOptOutOfBeingFoundByEmail
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - >-
+        Every published client (slack_sdk 3.45.0, slack-api-client 1.52.0,
+        @slack/web-api 8.2.0) sends one address as email and reads
+        is_discoverable; the handler used to read a comma-separated emails and
+        answer a contacts array no client decodes. The old emails argument is
+        not accepted, since no published source names it.
   - method: workflows.featured.add
     status: sdk-compatible
     provenance: slack-reference

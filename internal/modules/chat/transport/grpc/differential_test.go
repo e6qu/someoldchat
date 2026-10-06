@@ -1337,7 +1337,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 
-				found, err := chat.AdminSearchConversations(ctx, "T1", "UA", "admin-renamed", domain.PageRequest{Limit: 10})
+				found, err := chat.AdminSearchConversations(ctx, "T1", "UA", domain.ConversationSearch{Query: "admin-renamed", Sort: domain.ConversationSortName}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -2444,7 +2444,9 @@ func parityCases() []parityCase {
 				for _, object := range linked {
 					records = append(records, object.OrgID+"/"+object.RecordID)
 				}
-				if err := chat.AdminUnlinkConversationObjects(ctx, "T1", "UA", []domain.ConversationID{"C1"}); err != nil {
+				// Unlinking renames the channel to new_name, normalized as every
+				// channel name is.
+				if err := chat.AdminUnlinkConversationObjects(ctx, "T1", "UA", "C1", "Unlinked Records"); err != nil {
 					return nil, err
 				}
 				after, err := chat.AdminConversationObjects(ctx, "T1", "UA", "C1")
@@ -2466,8 +2468,14 @@ func parityCases() []parityCase {
 					madeRecords = append(madeRecords, object.OrgID+"/"+object.RecordID)
 				}
 				_, unnamedRecord := chat.AdminCreateConversationForObjects(ctx, "T1", "UA", "no-record-channel", "00D000", "", false)
+				// A new_name another channel holds is refused before the links go.
+				takenName := chat.AdminUnlinkConversationObjects(ctx, "T1", "UA", made.ID, "unlinked-records")
+				stillLinked, err := chat.AdminConversationObjects(ctx, "T1", "UA", made.ID)
+				if err != nil {
+					return nil, err
+				}
 				return []any{
-					made.Name, madeRecords, unnamedRecord != nil,
+					made.Name, madeRecords, unnamedRecord != nil, takenName != nil, len(stillLinked),
 					len(everything.Conversations) > 0, len(quiet.Conversations) <= len(everything.Conversations),
 					excluded, len(stillExcluded), records, len(after),
 					missingChannel != nil, missingTarget != nil,
@@ -2878,7 +2886,7 @@ func parityCases() []parityCase {
 				}
 				repeat := chat.AdminAddRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U1"})
 				stranger := chat.AdminAddRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U-nobody"})
-				page, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 1})
+				page, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 1})
 				if err != nil {
 					return nil, err
 				}
@@ -2886,7 +2894,7 @@ func parityCases() []parityCase {
 				for _, assignment := range page.Assignments {
 					first = append(first, string(assignment.UserID)+"/"+assignment.EntityID)
 				}
-				rest, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 10, Cursor: page.NextCursor})
+				rest, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 10, Cursor: page.NextCursor})
 				if err != nil {
 					return nil, err
 				}
@@ -2897,7 +2905,7 @@ func parityCases() []parityCase {
 				if err := chat.AdminRemoveRoleAssignments(ctx, "T1", "UA", "Rl0A", []string{"C1"}, []domain.UserID{"U1"}); err != nil {
 					return nil, err
 				}
-				left, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", "Rl0A", domain.PageRequest{Limit: 10})
+				left, err := chat.AdminListRoleAssignments(ctx, "T1", "UA", domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -3072,7 +3080,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				// The administrator does not own it and is not a manager.
-				found, _, _, err := chat.AdminWorkflows(ctx, "T1", "UA", "nightly", domain.PageRequest{Limit: 10})
+				found, _, _, err := chat.AdminWorkflows(ctx, "T1", "UA", domain.WorkflowSearch{Query: "nightly"}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
@@ -3081,12 +3089,12 @@ func parityCases() []parityCase {
 					titles = append(titles, value.Title+":"+string(value.Status))
 				}
 				// A query nobody matches is an empty answer rather than everything.
-				missing, _, _, err := chat.AdminWorkflows(ctx, "T1", "UA", "nothing-is-called-this", domain.PageRequest{Limit: 10})
+				missing, _, _, err := chat.AdminWorkflows(ctx, "T1", "UA", domain.WorkflowSearch{Query: "nothing-is-called-this"}, domain.PageRequest{Limit: 10})
 				if err != nil {
 					return nil, err
 				}
 				// A member cannot search the workspace or stop anything.
-				_, _, _, memberErr := chat.AdminWorkflows(ctx, "T1", "U2", "", domain.PageRequest{Limit: 10})
+				_, _, _, memberErr := chat.AdminWorkflows(ctx, "T1", "U2", domain.WorkflowSearch{Query: ""}, domain.PageRequest{Limit: 10})
 				memberStop := chat.AdminUnpublishWorkflows(ctx, "T1", "U2", []domain.WorkflowID{published.ID}) != nil
 				// A workflow that is not here stops the whole request.
 				strangerStop := chat.AdminUnpublishWorkflows(ctx, "T1", "UA", []domain.WorkflowID{published.ID, "Wf-not-here"}) != nil
@@ -3474,7 +3482,7 @@ func parityCases() []parityCase {
 			name:         "a member cannot list the workspace directory administratively",
 			wantSentinel: domain.ErrNotWorkspaceAdmin,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.AdminListUsers(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				_, err := chat.AdminListUsers(ctx, "T1", "U1", domain.MemberActivityAny, domain.PageRequest{Limit: 10})
 				return nil, err
 			},
 		},
@@ -3792,7 +3800,7 @@ func parityCases() []parityCase {
 			name:         "profile rejects an oversized display name",
 			wantSentinel: domain.ErrInvalidProfile,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.SetUserProfile(ctx, "T1", "U1", domain.UserProfile{DisplayName: string(bytes.Repeat([]byte("a"), 81))})
+				_, err := chat.SetUserProfile(ctx, "T1", "U1", "U1", domain.UserProfile{DisplayName: string(bytes.Repeat([]byte("a"), 81))})
 				return nil, err
 			},
 		},
@@ -3800,7 +3808,7 @@ func parityCases() []parityCase {
 			name:         "conversation rejects an empty name",
 			wantSentinel: domain.ErrInvalidConversation,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				_, err := chat.CreateConversation(ctx, "T1", "U1", "   ", false)
+				_, err := chat.CreateConversation(ctx, "T1", "U1", "   ", false, "")
 				return nil, err
 			},
 		},
@@ -4299,8 +4307,8 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				_, restrictedErr := chat.CreateConversation(ctx, "T1", "U1", "member-private", true)
-				admitted, err := chat.CreateConversation(ctx, "T1", "UA", "admin-private", true)
+				_, restrictedErr := chat.CreateConversation(ctx, "T1", "U1", "member-private", true, "")
+				admitted, err := chat.CreateConversation(ctx, "T1", "UA", "admin-private", true, "")
 				if err != nil {
 					return nil, err
 				}
@@ -4793,7 +4801,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.AdminAssignUser(ctx, "T1", "U1", accepted.ID, []domain.ConversationID{"C2"}); err != nil {
+				if err := chat.AdminAssignUser(ctx, "T1", "U1", accepted.ID, domain.GuestTierUnchanged, []domain.ConversationID{"C2"}); err != nil {
 					return nil, err
 				}
 				// Only the two authority roles are listable: the routes that
@@ -4868,7 +4876,7 @@ func parityCases() []parityCase {
 				// Resetting sessions and removing the account are the two ways
 				// an administrator ends someone's access, and they are not the
 				// same: the first leaves the member in the workspace.
-				if err := chat.ResetUserSessions(ctx, "T1", "U1", member.ID); err != nil {
+				if err := chat.ResetUserSessions(ctx, "T1", "U1", member.ID, domain.SessionClientsAll); err != nil {
 					return nil, err
 				}
 				stillHere, err := chat.UserInfo(ctx, "T1", "U1", member.ID)
@@ -5687,7 +5695,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				updated, err := chat.SetUserProfile(ctx, "T1", "U1", domain.UserProfile{DisplayName: "alice2", StatusText: "Focusing", StatusEmoji: ":dart:"})
+				updated, err := chat.SetUserProfile(ctx, "T1", "U1", "U1", domain.UserProfile{DisplayName: "alice2", StatusText: "Focusing", StatusEmoji: ":dart:"})
 				if err != nil {
 					return nil, err
 				}
@@ -6458,13 +6466,13 @@ func parityCases() []parityCase {
 				}
 				// A member cannot read another member's sessions, nor end them.
 				_, memberErr := chat.UserSessions(ctx, "T1", "U1", "U1")
-				memberBulk := chat.ResetUserSessionsBulk(ctx, "T1", "U1", []domain.UserID{"U1"}) != nil
+				memberBulk := chat.ResetUserSessionsBulk(ctx, "T1", "U1", []domain.UserID{"U1"}, domain.SessionClientsAll) != nil
 				// A stranger in the list stops the whole request, so an
 				// administrator acting on a pasted list finds out they were
 				// wrong instead of signing out an arbitrary prefix of it.
-				mixed := chat.ResetUserSessionsBulk(ctx, "T1", "UA", []domain.UserID{"U1", "U-not-here"}) != nil
-				empty := chat.ResetUserSessionsBulk(ctx, "T1", "UA", nil) != nil
-				bulk := chat.ResetUserSessionsBulk(ctx, "T1", "UA", []domain.UserID{"U1", "U2"})
+				mixed := chat.ResetUserSessionsBulk(ctx, "T1", "UA", []domain.UserID{"U1", "U-not-here"}, domain.SessionClientsAll) != nil
+				empty := chat.ResetUserSessionsBulk(ctx, "T1", "UA", nil, domain.SessionClientsAll) != nil
+				bulk := chat.ResetUserSessionsBulk(ctx, "T1", "UA", []domain.UserID{"U1", "U2"}, domain.SessionClientsAll)
 				after, err := chat.UserSessions(ctx, "T1", "UA", "U1")
 				if err != nil {
 					return nil, err

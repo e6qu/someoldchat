@@ -64,21 +64,18 @@ func (m Messages) DeleteWorkspaceProfileField(ctx context.Context, workspaceID d
 	return m.Store.DeleteWorkspaceProfileField(ctx, workspaceID, id)
 }
 
-// SetUserProfileFields sets a member's own custom profile field values. A member
-// edits only their own profile fields here; Slack's admin editing of another
-// member's profile is a separate, paid-plan surface this does not claim. Each
-// value is validated against its field's declared type, so a date field never
-// holds prose and an options_list never holds a value it does not offer, and an
-// empty value clears the field.
+// SetUserProfileFields sets a member's custom profile field values. Whose
+// profile the actor may change is SetUserProfile's rule (authorizeProfileEdit):
+// their own, or as an administrator another member's. Each value is validated
+// against its field's declared type, so a date field never holds prose and an
+// options_list never holds a value it does not offer, and an empty value clears
+// the field.
 func (m Messages) SetUserProfileFields(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, values []domain.UserProfileFieldValue) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
-		return err
-	}
 	if targetID == "" {
 		targetID = actorID
 	}
-	if targetID != actorID {
-		return domain.ErrInvalidProfile
+	if err := m.authorizeProfileEdit(ctx, workspaceID, actorID, targetID); err != nil {
+		return err
 	}
 	if len(values) == 0 {
 		return nil

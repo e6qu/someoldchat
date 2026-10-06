@@ -36,7 +36,7 @@ func TestUserEventPageReportsHowFarItExamined(t *testing.T) {
 	state.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "eve"})
 	key := []byte(strings.Repeat("k", 32))
 	messages := Messages{Store: state, AppCredentialKey: key}
-	busy, err := messages.CreateConversation(ctx, "T1", "U1", "busy-private", true)
+	busy, err := messages.CreateConversation(ctx, "T1", "U1", "busy-private", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}

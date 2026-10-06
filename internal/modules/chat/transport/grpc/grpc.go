@@ -2327,8 +2327,15 @@ func (r Remote) AdminRemoveRoleAssignments(ctx context.Context, workspaceID doma
 	return nil
 }
 
-func (r Remote) AdminListRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, roleID string, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
-	out, err := r.directory.AdminListRoleAssignments(ctx, &chatv1.RoleAssignmentsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), RoleId: roleID, Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+func (r Remote) AdminListRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query domain.RoleAssignmentQuery, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
+	in := &chatv1.RoleAssignmentsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), RoleIds: query.RoleIDs, EntityIds: query.EntityIDs,
+		Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending}
+	// A peer that predates role_ids reads role_id alone; naming the one role
+	// there too keeps that request meaning what it says across a rollout.
+	if len(query.RoleIDs) == 1 {
+		in.RoleId = query.RoleIDs[0]
+	}
+	out, err := r.directory.AdminListRoleAssignments(ctx, in)
 	if err != nil {
 		return domain.RoleAssignmentPage{}, err
 	}
@@ -2400,12 +2407,12 @@ func (r Remote) UserSessions(ctx context.Context, workspaceID domain.WorkspaceID
 	return decodeProtoWorkspaceSessions(out.GetSessions()), nil
 }
 
-func (r Remote) ResetUserSessionsBulk(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID) error {
+func (r Remote) ResetUserSessionsBulk(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targets []domain.UserID, clients domain.SessionClients) error {
 	ids := make([]string, 0, len(targets))
 	for _, target := range targets {
 		ids = append(ids, string(target))
 	}
-	out, err := r.directory.ResetUserSessionsBulk(ctx, &chatv1.ResetUserSessionsBulkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserIds: ids})
+	out, err := r.directory.ResetUserSessionsBulk(ctx, &chatv1.ResetUserSessionsBulkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserIds: ids, Clients: string(clients)})
 	if err != nil {
 		return err
 	}
@@ -2415,8 +2422,8 @@ func (r Remote) ResetUserSessionsBulk(ctx context.Context, workspaceID domain.Wo
 	return nil
 }
 
-func (r Remote) ResetUserSessions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID) error {
-	out, err := r.directory.ResetUserSessions(ctx, &chatv1.ResetUserSessionsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID)})
+func (r Remote) ResetUserSessions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, clients domain.SessionClients) error {
+	out, err := r.directory.ResetUserSessions(ctx, &chatv1.ResetUserSessionsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Clients: string(clients)})
 	if err != nil {
 		return err
 	}
@@ -2574,15 +2581,16 @@ func (r Remote) SearchPeople(ctx context.Context, workspaceID domain.WorkspaceID
 }
 
 func (r Remote) SearchChannels(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.ConversationPage, error) {
-	out, err := r.directory.SearchChannels(ctx, &chatv1.SearchConversationsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Query: query, Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	out, err := r.directory.SearchChannels(ctx, &chatv1.SearchConversationsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Query: query, Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending})
 	if err != nil {
 		return domain.ConversationPage{}, err
 	}
 	return decodeProtoConversationPage(out)
 }
 
-func (r Remote) AdminSearchConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.ConversationPage, error) {
-	out, err := r.directory.SearchConversations(ctx, &chatv1.SearchConversationsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Query: query, Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+func (r Remote) AdminSearchConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, search domain.ConversationSearch, request domain.PageRequest) (domain.ConversationPage, error) {
+	out, err := r.directory.SearchConversations(ctx, &chatv1.SearchConversationsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Query: search.Query,
+		Limit: int32(request.Limit), Cursor: string(request.Cursor), ChannelTypes: search.ChannelTypes(), Sort: string(search.Sort), Descending: request.Descending})
 	if err != nil {
 		return domain.ConversationPage{}, err
 	}
@@ -2769,7 +2777,7 @@ func (r Remote) WorkspaceMembership(ctx context.Context, workspaceID domain.Work
 func (r Remote) workspaceMembershipByScan(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) (domain.WorkspaceMembership, error) {
 	request := domain.PageRequest{Limit: workspaceScanPageSize}
 	for {
-		page, err := r.AdminListUsers(ctx, workspaceID, actorID, request)
+		page, err := r.AdminListUsers(ctx, workspaceID, actorID, domain.MemberActivityAny, request)
 		if err != nil {
 			return domain.WorkspaceMembership{}, err
 		}
@@ -2836,20 +2844,20 @@ func skewFailure(method string, err error) error {
 	return fmt.Errorf("the chat service does not implement %s: it is older than this build, and a rolling deployment must update the chat process first: %w", method, err)
 }
 
-func (r Remote) AdminListUsers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.AdminUserPage, error) {
-	out, err := r.directory.AdminListUsers(ctx, &chatv1.AdminUsersRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+func (r Remote) AdminListUsers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, activity domain.MemberActivity, request domain.PageRequest) (domain.AdminUserPage, error) {
+	out, err := r.directory.AdminListUsers(ctx, &chatv1.AdminUsersRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Activity: string(activity)})
 	if err != nil {
 		return domain.AdminUserPage{}, err
 	}
 	return decodeProtoAdminUserPage(out)
 }
 
-func (r Remote) AdminAssignUser(ctx context.Context, workspaceID domain.WorkspaceID, userID, targetID domain.UserID, channels []domain.ConversationID) error {
+func (r Remote) AdminAssignUser(ctx context.Context, workspaceID domain.WorkspaceID, userID, targetID domain.UserID, tier domain.GuestTier, channels []domain.ConversationID) error {
 	channelIDs := make([]string, 0, len(channels))
 	for _, channel := range channels {
 		channelIDs = append(channelIDs, string(channel))
 	}
-	out, err := r.directory.AdminAssignUser(ctx, &chatv1.AdminAssignUserRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), ChannelIds: channelIDs})
+	out, err := r.directory.AdminAssignUser(ctx, &chatv1.AdminAssignUserRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), ChannelIds: channelIDs, GuestTier: int32(tier)})
 	if err != nil {
 		return err
 	}
@@ -3264,8 +3272,8 @@ func (r Remote) UserByEmail(ctx context.Context, workspaceID domain.WorkspaceID,
 	return decodeProtoUser(out)
 }
 
-func (r Remote) SetUserProfile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, profile domain.UserProfile) (domain.User, error) {
-	in := &chatv1.SetUserProfileRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Profile: encodeProtoProfile(profile)}
+func (r Remote) SetUserProfile(ctx context.Context, workspaceID domain.WorkspaceID, userID, targetID domain.UserID, profile domain.UserProfile) (domain.User, error) {
+	in := &chatv1.SetUserProfileRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Profile: encodeProtoProfile(profile)}
 	out, err := r.presence.SetUserProfile(ctx, in)
 	if err != nil {
 		return domain.User{}, err
@@ -4095,10 +4103,15 @@ func (r Remote) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspace
 	return decodeWorkflowDefinition(out), err
 }
 
-func (r Remote) AdminWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
+func (r Remote) AdminWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, search domain.WorkflowSearch, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
+	collaborators := make([]string, 0, len(search.CollaboratorIDs))
+	for _, id := range search.CollaboratorIDs {
+		collaborators = append(collaborators, string(id))
+	}
 	out, err := r.workflows.AdminWorkflows(ctx, &chatv1.AdminWorkflowListRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit),
-		Cursor: string(request.Cursor), Descending: request.Descending, Query: query,
+		Cursor: string(request.Cursor), Descending: request.Descending, Query: search.Query,
+		AppId: string(search.AppID), CollaboratorIds: collaborators, NoCollaborators: search.NoCollaborators, Source: string(search.Source),
 	})
 	if err != nil {
 		return nil, false, "", err
@@ -4757,8 +4770,8 @@ func (r Remote) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID dom
 	return decodeProtoConversation(out)
 }
 
-func (r Remote) CreateConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string, private bool) (domain.Conversation, error) {
-	in := &chatv1.CreateConversationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, Private: private}
+func (r Remote) CreateConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string, private bool, purpose string) (domain.Conversation, error) {
+	in := &chatv1.CreateConversationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, Private: private, Purpose: purpose}
 	out, err := r.mutations.CreateConversation(ctx, in)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -6978,7 +6991,13 @@ func (s *Server) AdminRemoveRoleAssignments(ctx context.Context, input *chatv1.R
 }
 
 func (s *Server) AdminListRoleAssignments(ctx context.Context, input *chatv1.RoleAssignmentsRequest) (*chatv1.RoleAssignmentPage, error) {
-	page, err := s.implementation.AdminListRoleAssignments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetRoleId(), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	query := domain.RoleAssignmentQuery{RoleIDs: input.GetRoleIds(), EntityIDs: input.GetEntityIds()}
+	if len(query.RoleIDs) == 0 && input.GetRoleId() != "" {
+		query.RoleIDs = []string{input.GetRoleId()}
+	}
+	request := protoPageRequest(input.GetLimit(), input.GetCursor())
+	request.Descending = input.GetDescending()
+	page, err := s.implementation.AdminListRoleAssignments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), query, request)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -7021,7 +7040,7 @@ func (s *Server) SetUserExpiration(ctx context.Context, input *chatv1.SetUserExp
 }
 
 func (s *Server) ResetUserSessions(ctx context.Context, input *chatv1.ResetUserSessionsRequest) (*chatv1.MutationResponse, error) {
-	if err := s.implementation.ResetUserSessions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId())); err != nil {
+	if err := s.implementation.ResetUserSessions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), domain.SessionClients(input.GetClients())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
@@ -7040,7 +7059,7 @@ func (s *Server) ResetUserSessionsBulk(ctx context.Context, input *chatv1.ResetU
 	for _, target := range input.GetTargetUserIds() {
 		targets = append(targets, domain.UserID(target))
 	}
-	if err := s.implementation.ResetUserSessionsBulk(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), targets); err != nil {
+	if err := s.implementation.ResetUserSessionsBulk(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), targets, domain.SessionClients(input.GetClients())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
@@ -7261,7 +7280,17 @@ func (s *Server) RenameEmoji(ctx context.Context, input *chatv1.EmojiMutationReq
 
 func (s *Server) SearchConversations(ctx context.Context, input *chatv1.SearchConversationsRequest) (*chatv1.ConversationPage, error) {
 	request := protoPageRequest(input.GetLimit(), input.GetCursor())
-	value, err := s.implementation.AdminSearchConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(), request)
+	request.Descending = input.GetDescending()
+	search := domain.ConversationSearch{Query: input.GetQuery(), Sort: domain.ConversationSearchSort(input.GetSort())}
+	// A peer that predates sort sends none; member_count is the method's
+	// default, which is what that caller's request means.
+	if search.Sort == "" {
+		search.Sort = domain.ConversationSortMemberCount
+	}
+	if !search.ApplyChannelTypes(input.GetChannelTypes()) {
+		return nil, mapError(domain.ErrInvalidConversation)
+	}
+	value, err := s.implementation.AdminSearchConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), search, request)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -7277,7 +7306,9 @@ func (s *Server) SearchPeople(ctx context.Context, input *chatv1.SearchPeopleReq
 }
 
 func (s *Server) SearchChannels(ctx context.Context, input *chatv1.SearchConversationsRequest) (*chatv1.ConversationPage, error) {
-	value, err := s.implementation.SearchChannels(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(), protoPageRequest(input.GetLimit(), input.GetCursor()))
+	request := protoPageRequest(input.GetLimit(), input.GetCursor())
+	request.Descending = input.GetDescending()
+	value, err := s.implementation.SearchChannels(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(), request)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -7457,7 +7488,7 @@ func (s *Server) SynchronizeExternalUserRole(ctx context.Context, input *chatv1.
 
 func (s *Server) AdminListUsers(ctx context.Context, input *chatv1.AdminUsersRequest) (*chatv1.AdminUserPage, error) {
 	request := protoPageRequest(input.GetLimit(), input.GetCursor())
-	value, err := s.implementation.AdminListUsers(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
+	value, err := s.implementation.AdminListUsers(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.MemberActivity(input.GetActivity()), request)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -7469,7 +7500,7 @@ func (s *Server) AdminAssignUser(ctx context.Context, input *chatv1.AdminAssignU
 	for _, channel := range input.GetChannelIds() {
 		channels = append(channels, domain.ConversationID(channel))
 	}
-	if err := s.implementation.AdminAssignUser(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), channels); err != nil {
+	if err := s.implementation.AdminAssignUser(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), domain.GuestTier(input.GetGuestTier()), channels); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
@@ -8303,8 +8334,13 @@ func (s *Server) UpdateWorkflow(ctx context.Context, input *chatv1.WorkflowMutat
 }
 
 func (s *Server) AdminWorkflows(ctx context.Context, input *chatv1.AdminWorkflowListRequest) (*chatv1.WorkflowListResponse, error) {
+	search := domain.WorkflowSearch{Query: input.GetQuery(), AppID: domain.AppID(input.GetAppId()),
+		NoCollaborators: input.GetNoCollaborators(), Source: domain.WorkflowSource(input.GetSource())}
+	for _, id := range input.GetCollaboratorIds() {
+		search.CollaboratorIDs = append(search.CollaboratorIDs, domain.UserID(id))
+	}
 	values, more, next, err := s.implementation.AdminWorkflows(ctx,
-		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(),
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), search,
 		domain.PageRequest{Limit: int(input.GetLimit()), Cursor: domain.Cursor(input.GetCursor()), Descending: input.GetDescending()},
 	)
 	if err != nil {
@@ -11001,7 +11037,7 @@ func (s *Server) setUserProfileProto(ctx context.Context, input *chatv1.SetUserP
 	if p.GetStatusExpiration() != 0 {
 		profile.StatusExpiration = time.Unix(p.GetStatusExpiration(), 0).UTC()
 	}
-	result, err := s.implementation.SetUserProfile(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), profile)
+	result, err := s.implementation.SetUserProfile(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), profile)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -11126,7 +11162,7 @@ func (s *Server) createConversationProto(ctx context.Context, input *chatv1.Crea
 	// store.ErrNotFound — so the caller derived a different HTTP status depending
 	// on the composition. Delegating makes the two identical for every input
 	// rather than for the inputs a test happens to cover.
-	conversation, err := s.implementation.CreateConversation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetPrivate())
+	conversation, err := s.implementation.CreateConversation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetPrivate(), input.GetPurpose())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -12002,9 +12038,9 @@ func (r Remote) AdminLinkConversationObjects(ctx context.Context, workspaceID do
 	return nil
 }
 
-func (r Remote) AdminUnlinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ConversationID) error {
+func (r Remote) AdminUnlinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ConversationID, newName string) error {
 	out, err := r.mutations.AdminUnlinkConversationObjects(ctx, &chatv1.UnlinkConversationObjectsRequest{
-		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: conversationStrings(ids),
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationIds: []string{string(id)}, NewName: newName,
 	})
 	if err != nil {
 		return err
@@ -12091,8 +12127,14 @@ func (s *Server) AdminLinkConversationObjects(ctx context.Context, input *chatv1
 }
 
 func (s *Server) AdminUnlinkConversationObjects(ctx context.Context, input *chatv1.UnlinkConversationObjectsRequest) (*chatv1.MutationResponse, error) {
+	// The request carries a list because it once took several channels; the
+	// operation takes one, so any other count is a malformed request.
+	ids := input.GetConversationIds()
+	if len(ids) != 1 {
+		return nil, mapError(domain.ErrInvalidConversation)
+	}
 	if err := s.implementation.AdminUnlinkConversationObjects(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
-		conversationIDs(input.GetConversationIds())); err != nil {
+		domain.ConversationID(ids[0]), input.GetNewName()); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil

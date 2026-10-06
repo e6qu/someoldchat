@@ -429,9 +429,15 @@ func (m Messages) AdminFunctions(ctx context.Context, workspaceID domain.Workspa
 	}
 	functions := make([]domain.AppFunction, 0, len(installed))
 	for _, app := range installed {
+		// An app removed since the listing has no functions to report; any
+		// other failure to read it is a failure of this read, not an app with
+		// no functions, and is not hidden as one.
 		_, revision, err := m.Store.GetApp(ctx, app.ID)
-		if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
 			continue
+		}
+		if err != nil {
+			return nil, err
 		}
 		parsed, problems := appmanifest.Parse(revision.Manifest)
 		if len(problems) != 0 {

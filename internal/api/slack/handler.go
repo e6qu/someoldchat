@@ -3101,15 +3101,32 @@ func (h Handler) migrationExchange(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team_id": value.WorkspaceID, "user_id_map": mapping, "invalid_user_ids": invalid})
 }
 
+// team.info answers the caller's workspace, or the one `team` or `domain`
+// names. Naming another workspace used to answer the caller's own as though it
+// were the one asked for; it is now refused, because this deployment serves no
+// other workspace's details (see the compatibility ledger).
 func (h Handler) teamInfo(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeTeamRead)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	team, err := h.Messages.WorkspaceInfo(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
 		writeError(w, mapServiceError(err, "team_not_found"))
+		return
+	}
+	if named := strings.TrimSpace(fields["team"]); named != "" && domain.WorkspaceID(named) != team.ID {
+		writeError(w, "team_not_found")
+		return
+	}
+	if named := strings.TrimSpace(fields["domain"]); named != "" && !strings.EqualFold(named, team.SlackDomain()) {
+		writeError(w, "team_not_found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": teamResponse(h.origin(r), team)})
@@ -3369,15 +3386,33 @@ func (h Handler) accessLogs(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	// Two paginations reach this method. The pinned schema's count and page,
+	// and the cursor and limit every current client sends: a limit-only call
+	// used to be answered with the first 100 rows and no cursor, so it never
+	// learned the rest existed. A cursor names a page of a given size, which
+	// is the position the access log's (date_last DESC, ...) order has.
 	limit, err := clampLimit(fields["count"], 100, 1000)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
+	if strings.TrimSpace(fields["count"]) == "" {
+		if limit, err = clampLimit(fields["limit"], 100, 1000); err != nil {
+			writeDecodeError(w, err)
+			return
+		}
+	}
 	page, err := pageNumber(fields["page"])
 	if err != nil {
 		writeDecodeError(w, err)
 		return
+	}
+	if raw := strings.TrimSpace(fields["cursor"]); raw != "" {
+		var ok bool
+		if page, limit, ok = decodeAccessLogCursor(domain.Cursor(raw)); !ok {
+			writeError(w, "invalid_arg_name")
+			return
+		}
 	}
 	before := time.Time{}
 	if raw := strings.TrimSpace(fields["before"]); raw != "" {
@@ -3402,7 +3437,31 @@ func (h Handler) accessLogs(w http.ResponseWriter, r *http.Request) {
 	for _, login := range value.Logins {
 		logins = append(logins, map[string]any{"count": login.Count, "country": nil, "date_first": login.FirstAt.Unix(), "date_last": login.CreatedAt.Unix(), "ip": login.IP, "isp": nil, "region": nil, "user_agent": login.UserAgent, "user_id": login.UserID, "username": login.Username})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logins": logins, "paging": legacyPaging(limit, page, value.Total)})
+	nextCursor := domain.Cursor("")
+	if value.HasMore && page < domain.MaxAccessLogPages {
+		if nextCursor, err = domain.NewListCursor(strconv.Itoa(page+1) + ":" + strconv.Itoa(limit)); err != nil {
+			writeError(w, "fatal_error")
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logins": logins, "paging": legacyPaging(limit, page, value.Total),
+		"response_metadata": map[string]any{"next_cursor": string(nextCursor)}})
+}
+
+// decodeAccessLogCursor reads team.accessLogs' next_cursor: the page it
+// names and the page size it was minted for.
+func decodeAccessLogCursor(cursor domain.Cursor) (page, size int, ok bool) {
+	raw, err := domain.DecodeListCursor(cursor)
+	if err != nil {
+		return 0, 0, false
+	}
+	pagePart, sizePart, found := strings.Cut(raw, ":")
+	page, pageErr := strconv.Atoi(pagePart)
+	size, sizeErr := strconv.Atoi(sizePart)
+	if !found || pageErr != nil || sizeErr != nil || page < 1 || page > maxPageNumber || size < 1 || size > 1000 {
+		return 0, 0, false
+	}
+	return page, size, true
 }
 
 // legacyPaging is the page-numbered `paging` object: count is the page size
@@ -3477,6 +3536,26 @@ func (h Handler) adminUsersList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
+	// is_active defaults to true: only active members unless the caller asks
+	// for the deactivated ones. include_deactivated_user_workspaces chooses
+	// which workspaces an org-token listing reports per member; with one
+	// workspace there is no other to report, so it is validated and otherwise
+	// changes nothing.
+	activity := domain.MemberActivityActive
+	if raw := strings.TrimSpace(fields["is_active"]); raw != "" {
+		active, parseErr := parseBoolField(raw)
+		if parseErr != nil {
+			writeError(w, "invalid_arg_name")
+			return
+		}
+		if !active {
+			activity = domain.MemberActivityDeactivated
+		}
+	}
+	if _, parseErr := parseBoolField(fields["include_deactivated_user_workspaces"]); parseErr != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
 	// decodeListRequestFields reads the already-decoded map. Calling decodeFields a
 	// second time (which is what decodeListRequest did) saw an exhausted JSON body
 	// and returned an empty map with no error, so a JSON admin.users.list silently
@@ -3491,7 +3570,7 @@ func (h Handler) adminUsersList(w http.ResponseWriter, r *http.Request) {
 	// returns the plain projection, so admin.users.list used to omit every one of
 	// those fields even though the admin projection already existed and was already
 	// used by the web UI.
-	page, err := h.Messages.AdminListUsers(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	page, err := h.Messages.AdminListUsers(r.Context(), principal.WorkspaceID, principal.UserID, activity, request)
 	if err != nil {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
@@ -3575,15 +3654,21 @@ func (h Handler) adminUsersSessionReset(w http.ResponseWriter, r *http.Request) 
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	if err := h.Messages.ResetUserSessions(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
+	clients, ok := sessionResetClients(fields)
+	if !ok {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	if err := h.Messages.ResetUserSessions(r.Context(), principal.WorkspaceID, principal.UserID, targetID, clients); err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// users.discoverableContacts.lookup reports which addresses belong to a member
-// this workspace lets others find. A workspace that hides itself answers none.
+// users.discoverableContacts.lookup reports whether one address belongs to a
+// member this workspace lets others find. Every published client sends `email`
+// and reads `is_discoverable`; a workspace that hides itself answers false.
 func (h Handler) usersDiscoverableContacts(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersReadEmail)
 	if err != nil {
@@ -3595,29 +3680,48 @@ func (h Handler) usersDiscoverableContacts(w http.ResponseWriter, r *http.Reques
 		writeDecodeError(w, err)
 		return
 	}
-	emails := parseIDList[string](fields["emails"])
-	if len(emails) == 0 {
+	email := strings.TrimSpace(fields["email"])
+	if email == "" {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	users, err := h.Messages.DiscoverableContacts(r.Context(), principal.WorkspaceID, principal.UserID, emails)
+	users, err := h.Messages.DiscoverableContacts(r.Context(), principal.WorkspaceID, principal.UserID, []string{email})
 	if err != nil {
 		writeError(w, mapServiceError(err, "invalid_arg_name"))
 		return
 	}
-	contacts := make([]map[string]any, 0, len(users))
-	for _, user := range users {
-		contacts = append(contacts, map[string]any{"email": user.Email, "user_id": string(user.ID), "team_id": string(user.WorkspaceID)})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "contacts": contacts})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "is_discoverable": len(users) > 0})
 }
 
-// admin.functions.list reports the functions the installed apps declare. A
-// function lives in a manifest, so the read parses the manifests.
+// admin.functions.list reports the functions the named apps declare. A
+// function lives in a manifest, so the read parses the manifests; the page is
+// cut from that sorted list, keyed by app and callback so a cursor names the
+// same place however many apps were installed since.
 func (h Handler) adminFunctionsList(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeAdminAppsRead)
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	appIDs := parseIDList[domain.AppID](fields["app_ids"])
+	teamID := strings.TrimSpace(fields["team_id"])
+	if len(appIDs) == 0 || (teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID) {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		writeError(w, "invalid_cursor")
 		return
 	}
 	functions, err := h.Messages.AdminFunctions(r.Context(), principal.WorkspaceID, principal.UserID)
@@ -3625,8 +3729,30 @@ func (h Handler) adminFunctionsList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "not_an_admin"))
 		return
 	}
-	payload := make([]map[string]any, 0, len(functions))
+	named := make(map[domain.AppID]struct{}, len(appIDs))
+	for _, appID := range appIDs {
+		named[appID] = struct{}{}
+	}
+	page := make([]domain.AppFunction, 0, request.Limit+1)
 	for _, function := range functions {
+		if _, ok := named[function.AppID]; !ok || (after != "" && functionPosition(function) <= after) {
+			continue
+		}
+		page = append(page, function)
+		if len(page) > request.Limit {
+			break
+		}
+	}
+	nextCursor := domain.Cursor("")
+	if len(page) > request.Limit {
+		page = page[:request.Limit]
+		if nextCursor, err = domain.NewListCursor(functionPosition(page[len(page)-1])); err != nil {
+			writeError(w, "invalid_cursor")
+			return
+		}
+	}
+	payload := make([]map[string]any, 0, len(page))
+	for _, function := range page {
 		payload = append(payload, map[string]any{
 			"app_id": string(function.AppID), "app_name": function.AppName,
 			"callback_id": function.CallbackID, "title": function.Title,
@@ -3635,8 +3761,15 @@ func (h Handler) adminFunctionsList(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "functions": payload,
-		"response_metadata": map[string]any{"next_cursor": ""},
+		"response_metadata": map[string]any{"next_cursor": string(nextCursor)},
 	})
+}
+
+// functionPosition is a function's place in AdminFunctions' (app, callback)
+// order as one string. NUL sorts before every other byte and appears in
+// neither identifier, so comparing positions compares the pairs.
+func functionPosition(function domain.AppFunction) string {
+	return string(function.AppID) + "\x00" + function.CallbackID
 }
 
 // admin.apps.requests.cancel withdraws a request nobody has decided.
@@ -3679,16 +3812,30 @@ func (h Handler) adminAppsUninstall(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	ids := parseIDList[domain.AppID](fields["app_ids"])
-	if len(ids) == 0 {
+	// Every published client sends one app as app_id. team_ids and
+	// enterprise_id say where to uninstall it from; this deployment is one
+	// workspace, so either may name only it.
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	if appID == "" || !namesOnlyThisWorkspace(parseIDList[domain.WorkspaceID](fields["team_ids"]), principal.WorkspaceID) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	if err := h.Messages.AdminUninstallApps(r.Context(), principal.WorkspaceID, principal.UserID, ids); err != nil {
+	if err := h.Messages.AdminUninstallApps(r.Context(), principal.WorkspaceID, principal.UserID, []domain.AppID{appID}); err != nil {
 		writeError(w, mapServiceError(err, "app_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// namesOnlyThisWorkspace reports whether a list of workspaces a request
+// targets names this one and no other. An empty list targets the token's own.
+func namesOnlyThisWorkspace(teams []domain.WorkspaceID, workspaceID domain.WorkspaceID) bool {
+	for _, team := range teams {
+		if team != workspaceID {
+			return false
+		}
+	}
+	return true
 }
 
 // admin.workflows.search lists every workflow in the workspace, including the
@@ -3710,7 +3857,29 @@ func (h Handler) adminWorkflowsSearch(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	values, more, next, err := h.Messages.AdminWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, fields["query"], request)
+	// The filters every published client sends. sort's one published value is
+	// premium_runs; this deployment meters no premium runs, so every workflow
+	// ties at zero and the order is the listing's own (see the ledger), and
+	// num_trigger_ids sizes a trigger_ids list this response does not carry.
+	noCollaborators, err := parseBoolField(fields["no_collaborators"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	search := domain.WorkflowSearch{
+		Query: fields["query"], AppID: domain.AppID(strings.TrimSpace(fields["app_id"])),
+		CollaboratorIDs: parseIDList[domain.UserID](fields["collaborator_ids"]),
+		NoCollaborators: noCollaborators, Source: domain.WorkflowSource(strings.TrimSpace(fields["source"])),
+	}
+	if sort := strings.TrimSpace(fields["sort"]); !search.Valid() || (sort != "" && sort != "premium_runs") {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	if _, ok := sortDirection(fields["sort_dir"]); !ok {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	values, more, next, err := h.Messages.AdminWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, search, request)
 	if err != nil {
 		writeError(w, mapServiceError(err, "not_an_admin"))
 		return
@@ -4527,13 +4696,16 @@ func (h Handler) adminConversationsUnlinkObjects(w http.ResponseWriter, r *http.
 		writeDecodeError(w, err)
 		return
 	}
-	ids := parseIDList[domain.ConversationID](fields["channels"])
-	if len(ids) == 0 {
+	// The published clients send one channel and the name it takes once it is
+	// no longer linked; both are required.
+	id := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	newName := strings.TrimSpace(fields["new_name"])
+	if id == "" || newName == "" {
 		writeError(w, "invalid_arguments")
 		return
 	}
-	if err := h.Messages.AdminUnlinkConversationObjects(r.Context(), principal.WorkspaceID, principal.UserID, ids); err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+	if err := h.Messages.AdminUnlinkConversationObjects(r.Context(), principal.WorkspaceID, principal.UserID, id, newName); err != nil {
+		writeError(w, mapServiceErrorExists(err, "channel_not_found", "name_taken"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -4543,6 +4715,13 @@ func (h Handler) adminConversationsUnlinkObjects(w http.ResponseWriter, r *http.
 // external record. A link that cannot be stored leaves no channel behind: a
 // half-made channel is worse than none, because nobody would know it is not
 // linked.
+//
+// The published client sends the record (object_id), its organisation
+// (salesforce_org_id) and invite_object_team, and no channel name or
+// visibility. Slack names the channel after the record, which lives in
+// Salesforce; this deployment has no Salesforce record to read, so the channel
+// is a public one named after the record id, and there is no record team to
+// invite (see the compatibility ledger).
 func (h Handler) adminConversationsCreateForObjects(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
 	if err != nil {
@@ -4554,17 +4733,15 @@ func (h Handler) adminConversationsCreateForObjects(w http.ResponseWriter, r *ht
 		writeDecodeError(w, err)
 		return
 	}
-	name := strings.TrimSpace(fields["channel_name"])
 	orgID := strings.TrimSpace(fields["salesforce_org_id"])
 	recordID := strings.TrimSpace(fields["object_id"])
-	private, err := parseBoolField(fields["is_private"])
-	if name == "" || orgID == "" || recordID == "" || err != nil {
+	if _, err := parseBoolField(fields["invite_object_team"]); orgID == "" || recordID == "" || err != nil {
 		writeError(w, "invalid_arguments")
 		return
 	}
-	conversation, err := h.Messages.AdminCreateConversationForObjects(r.Context(), principal.WorkspaceID, principal.UserID, name, orgID, recordID, private)
+	conversation, err := h.Messages.AdminCreateConversationForObjects(r.Context(), principal.WorkspaceID, principal.UserID, recordID, orgID, recordID, false)
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		writeError(w, mapServiceErrorExists(err, "channel_not_found", "name_taken"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": string(conversation.ID)})
@@ -5222,7 +5399,10 @@ func (h Handler) changeRoleAssignments(w http.ResponseWriter, r *http.Request, a
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// admin.roles.listAssignments reports who holds one role.
+// admin.roles.listAssignments reports role assignments scoped by any
+// combination of role_ids and entity_ids, every assignment when it names
+// neither. sort_dir orders them; the published clients name no sort key, so
+// the order is member, entity, role (domain.RoleAssignmentPosition).
 func (h Handler) adminRolesListAssignments(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeAdminRolesRead)
 	if err != nil {
@@ -5234,17 +5414,27 @@ func (h Handler) adminRolesListAssignments(w http.ResponseWriter, r *http.Reques
 		writeDecodeError(w, err)
 		return
 	}
-	roleID := strings.TrimSpace(fields["role_id"])
-	if roleID == "" {
+	query := domain.RoleAssignmentQuery{RoleIDs: parseIDList[string](fields["role_ids"]), EntityIDs: parseIDList[string](fields["entity_ids"])}
+	descending, ok := sortDirection(fields["sort_dir"])
+	if !ok {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	request, err := decodeListRequestFields(fields, "invalid_cursor")
+	limit, err := clampLimit(fields["limit"], 100, 200)
 	if err != nil {
-		writeError(w, err.Error())
+		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.AdminListRoleAssignments(r.Context(), principal.WorkspaceID, principal.UserID, roleID, request)
+	// The cursor names an assignment, not a list position, so it is checked
+	// with its own decoder: the shared list-cursor check refused every cursor
+	// this method minted, and page two was unreachable.
+	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
+	if _, _, err := domain.DecodeRoleAssignmentCursor(cursor); err != nil {
+		writeError(w, "invalid_cursor")
+		return
+	}
+	request := domain.PageRequest{Limit: limit, Cursor: cursor, Descending: descending}
+	page, err := h.Messages.AdminListRoleAssignments(r.Context(), principal.WorkspaceID, principal.UserID, query, request)
 	if err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
@@ -5260,6 +5450,18 @@ func (h Handler) adminRolesListAssignments(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "role_assignments": assignments,
 		"response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+}
+
+// sortDirection reads a sort_dir: asc (the default) or desc.
+func sortDirection(raw string) (descending, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "asc":
+		return false, true
+	case "desc":
+		return true, true
+	default:
+		return false, false
+	}
 }
 
 // admin.users.getExpiration reports when a guest account lapses. An account
@@ -5336,6 +5538,26 @@ func (h Handler) adminUsersSessionList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// sessionResetClients reads admin.users.session.reset's mobile_only and
+// web_only. Each narrows the reset to one kind of session, so asking for both
+// at once names no session at all and is refused rather than guessed at.
+func sessionResetClients(fields map[string]string) (domain.SessionClients, bool) {
+	flags, err := parseBoolFields(fields, "mobile_only", "web_only")
+	if err != nil {
+		return domain.SessionClientsAll, false
+	}
+	switch mobileOnly, webOnly := flags[0], flags[1]; {
+	case mobileOnly && webOnly:
+		return domain.SessionClientsAll, false
+	case mobileOnly:
+		return domain.SessionClientsMobile, true
+	case webOnly:
+		return domain.SessionClientsWeb, true
+	default:
+		return domain.SessionClientsAll, true
+	}
+}
+
 // admin.users.session.resetBulk signs several members out at once. A member
 // named in the request who is not a member of this workspace stops the whole
 // thing before anything is revoked.
@@ -5355,11 +5577,12 @@ func (h Handler) adminUsersSessionResetBulk(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	targets := parseIDList[domain.UserID](fields["user_ids"])
-	if len(targets) == 0 {
+	clients, ok := sessionResetClients(fields)
+	if len(targets) == 0 || !ok {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	if err := h.Messages.ResetUserSessionsBulk(r.Context(), principal.WorkspaceID, principal.UserID, targets); err != nil {
+	if err := h.Messages.ResetUserSessionsBulk(r.Context(), principal.WorkspaceID, principal.UserID, targets, clients); err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
@@ -5472,11 +5695,42 @@ func (h Handler) adminUsersAssign(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(fields["channel_ids"]) != "" {
 		channels = parseIDList[domain.ConversationID](fields["channel_ids"])
 	}
-	if err := h.Messages.AdminAssignUser(r.Context(), principal.WorkspaceID, principal.UserID, targetID, channels); err != nil {
+	tier, ok := assignGuestTier(fields)
+	if !ok {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	if err := h.Messages.AdminAssignUser(r.Context(), principal.WorkspaceID, principal.UserID, targetID, tier, channels); err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// assignGuestTier reads admin.users.assign's is_restricted and
+// is_ultra_restricted. A request that sends neither keeps the membership's
+// tier, so reactivating a guest does not quietly promote them; one that sends
+// either says what the member becomes, and both true names two tiers at once.
+func assignGuestTier(fields map[string]string) (domain.GuestTier, bool) {
+	_, restrictedSent := fields["is_restricted"]
+	_, ultraSent := fields["is_ultra_restricted"]
+	if !restrictedSent && !ultraSent {
+		return domain.GuestTierUnchanged, true
+	}
+	flags, err := parseBoolFields(fields, "is_restricted", "is_ultra_restricted")
+	if err != nil {
+		return domain.GuestTierUnchanged, false
+	}
+	switch restricted, ultraRestricted := flags[0], flags[1]; {
+	case restricted && ultraRestricted:
+		return domain.GuestTierUnchanged, false
+	case restricted:
+		return domain.GuestTierMultiChannel, true
+	case ultraRestricted:
+		return domain.GuestTierSingleChannel, true
+	default:
+		return domain.GuestTierNone, true
+	}
 }
 
 func (h Handler) adminInviteRequestApprove(w http.ResponseWriter, r *http.Request) {
@@ -5726,15 +5980,38 @@ func (h Handler) adminConversationCreate(w http.ResponseWriter, r *http.Request)
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	private, err := parseBoolField(fields["is_private"])
+	flags, err := parseBoolFields(fields, "is_private", "org_wide")
 	if err != nil {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
+	private, orgWide := flags[0], flags[1]
+	// The pinned schema: team_id "is required unless you set org_wide=true",
+	// and team_id_or_org_required is the code for neither. A team_id naming a
+	// workspace this deployment does not hold is team_not_found.
+	teamID := domain.WorkspaceID(strings.TrimSpace(fields["team_id"]))
+	switch {
+	case teamID == "" && !orgWide:
+		writeError(w, "team_id_or_org_required")
+		return
+	case teamID != "" && teamID != principal.WorkspaceID:
+		writeError(w, "team_not_found")
+		return
+	}
+	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private, fields["description"])
 	if err != nil {
 		// The collision code belongs to the operation, not to the shared mapper:
-		// a taken name reaches here as store.ErrAlreadyExists.
+		// a taken name reaches here as store.ErrAlreadyExists. A name the
+		// channel cannot carry is invalid_name; the enum names no code for a
+		// description that is too long, so that is the rejected argument.
+		switch {
+		case errors.Is(err, domain.ErrInvalidConversation):
+			writeError(w, "invalid_name")
+			return
+		case errors.Is(err, domain.ErrConversationTextTooLong):
+			writeError(w, "invalid_arg_name")
+			return
+		}
 		writeError(w, mapServiceErrorExists(err, "name_taken", "name_taken"))
 		return
 	}
@@ -6002,6 +6279,10 @@ func (h Handler) adminConversationConvertToPrivate(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
 }
 
+// admin.conversations.search finds channels. query is optional (every
+// channel when it is absent); search_channel_types, sort and sort_dir narrow
+// and order the result with the codes the pinned enum declares for each.
+// limit is "between 1 - 20 both inclusive. Default is 10."
 func (h Handler) adminConversationSearch(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeAdminConversationsRead)
 	if err != nil {
@@ -6013,12 +6294,39 @@ func (h Handler) adminConversationSearch(w http.ResponseWriter, r *http.Request)
 		writeDecodeError(w, err)
 		return
 	}
-	request, err := decodeListRequestFields(fields, "invalid_cursor")
-	if err != nil || strings.TrimSpace(fields["query"]) == "" {
+	if !namesOnlyThisWorkspace(parseIDList[domain.WorkspaceID](fields["team_ids"]), principal.WorkspaceID) {
+		writeError(w, "team_not_found")
+		return
+	}
+	search := domain.ConversationSearch{Query: fields["query"], Sort: domain.ConversationSortMemberCount}
+	if raw := strings.TrimSpace(fields["sort"]); raw != "" {
+		search.Sort = domain.ConversationSearchSort(raw)
+	}
+	if !search.Sort.Valid() {
+		writeError(w, "invalid_sort")
+		return
+	}
+	descending, ok := sortDirection(fields["sort_dir"])
+	if !ok {
+		writeError(w, "invalid_sort_dir")
+		return
+	}
+	if !search.ApplyChannelTypes(parseIDList[string](fields["search_channel_types"])) {
+		writeError(w, "invalid_search_channel_type")
+		return
+	}
+	limit, err := clampLimit(fields["limit"], 10, 20)
+	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.AdminSearchConversations(r.Context(), principal.WorkspaceID, principal.UserID, fields["query"], request)
+	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
+	if _, _, err := domain.DecodeConversationSearchCursor(cursor, search.Sort); err != nil {
+		writeError(w, "invalid_cursor")
+		return
+	}
+	request := domain.PageRequest{Limit: limit, Cursor: cursor, Descending: descending}
+	page, err := h.Messages.AdminSearchConversations(r.Context(), principal.WorkspaceID, principal.UserID, search, request)
 	if err != nil {
 		writeError(w, mapAdminError(err, "fatal_error"))
 		return
@@ -7032,7 +7340,14 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	// user names whose profile changes: "This argument may only be specified by
+	// team admins" (pinned schema). It used to be ignored, so an administrator
+	// editing a member changed their own profile and was told it worked.
+	targetID := principal.UserID
+	if named := domain.UserID(strings.TrimSpace(fields["user"])); named != "" {
+		targetID = named
+	}
+	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, targetID)
 	if err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
@@ -7087,22 +7402,14 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 			profile.StatusExpiration = time.Unix(*profileFields.StatusExpiration, 0).UTC()
 		}
 	}
-	user, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile)
+	user, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, targetID, profile)
 	if err != nil {
-		if errors.Is(err, domain.ErrInvalidProfile) {
-			writeError(w, "invalid_profile")
-			return
-		}
-		writeError(w, mapServiceError(err, "user_not_found"))
+		writeError(w, profileSetError(err))
 		return
 	}
 	if profileFields.HasFields {
-		if err := h.Messages.SetUserProfileFields(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, profileFields.Fields); err != nil {
-			if errors.Is(err, domain.ErrInvalidProfile) {
-				writeError(w, "invalid_profile")
-				return
-			}
-			writeError(w, mapServiceError(err, "user_not_found"))
+		if err := h.Messages.SetUserProfileFields(r.Context(), principal.WorkspaceID, principal.UserID, targetID, profileFields.Fields); err != nil {
+			writeError(w, profileSetError(err))
 			return
 		}
 	}
@@ -7110,13 +7417,29 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 	if !principal.HasScope(auth.ScopeUsersReadEmail) {
 		delete(responseProfile, "email")
 	}
-	customFields, err := h.profileFieldValues(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, false)
+	customFields, err := h.profileFieldValues(r.Context(), principal.WorkspaceID, principal.UserID, targetID, false)
 	if err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	responseProfile["fields"] = customFields
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": responseProfile})
+}
+
+// profileSetError names a users.profile.set failure with the codes its pinned
+// enum declares: not_admin for a member naming someone else, and
+// cannot_update_admin_user for an administrator naming an administrator.
+func profileSetError(err error) string {
+	switch {
+	case errors.Is(err, domain.ErrInvalidProfile):
+		return "invalid_profile"
+	case errors.Is(err, domain.ErrNotWorkspaceAdmin):
+		return "not_admin"
+	case errors.Is(err, domain.ErrCannotUpdateAdminUser):
+		return "cannot_update_admin_user"
+	default:
+		return mapServiceError(err, "user_not_found")
+	}
 }
 
 func (h Handler) deleteUserPhoto(w http.ResponseWriter, r *http.Request) {
@@ -7390,7 +7713,7 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
+	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private, "")
 	if err != nil {
 		// The collision code belongs to the operation, not to the shared mapper:
 		// a taken name reaches here as store.ErrAlreadyExists.

@@ -1542,15 +1542,20 @@ func (x *WorkflowListRequest) GetDescending() bool {
 }
 
 type AdminWorkflowListRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
-	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
-	Descending    bool                   `protobuf:"varint,5,opt,name=descending,proto3" json:"descending,omitempty"`
-	Query         string                 `protobuf:"bytes,6,opt,name=query,proto3" json:"query,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit       int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor      string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Descending  bool                   `protobuf:"varint,5,opt,name=descending,proto3" json:"descending,omitempty"`
+	Query       string                 `protobuf:"bytes,6,opt,name=query,proto3" json:"query,omitempty"`
+	// The admin.workflows.search filters; see domain.WorkflowSearch.
+	AppId           string   `protobuf:"bytes,7,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	CollaboratorIds []string `protobuf:"bytes,8,rep,name=collaborator_ids,json=collaboratorIds,proto3" json:"collaborator_ids,omitempty"`
+	NoCollaborators bool     `protobuf:"varint,9,opt,name=no_collaborators,json=noCollaborators,proto3" json:"no_collaborators,omitempty"`
+	Source          string   `protobuf:"bytes,10,opt,name=source,proto3" json:"source,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *AdminWorkflowListRequest) Reset() {
@@ -1621,6 +1626,34 @@ func (x *AdminWorkflowListRequest) GetDescending() bool {
 func (x *AdminWorkflowListRequest) GetQuery() string {
 	if x != nil {
 		return x.Query
+	}
+	return ""
+}
+
+func (x *AdminWorkflowListRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *AdminWorkflowListRequest) GetCollaboratorIds() []string {
+	if x != nil {
+		return x.CollaboratorIds
+	}
+	return nil
+}
+
+func (x *AdminWorkflowListRequest) GetNoCollaborators() bool {
+	if x != nil {
+		return x.NoCollaborators
+	}
+	return false
+}
+
+func (x *AdminWorkflowListRequest) GetSource() string {
+	if x != nil {
+		return x.Source
 	}
 	return ""
 }
@@ -4381,7 +4414,7 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x1e\n" +
 	"\n" +
 	"descending\x18\x05 \x01(\bR\n" +
-	"descending\"\xba\x01\n" +
+	"descending\"\xbf\x02\n" +
 	"\x18AdminWorkflowListRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
@@ -4390,7 +4423,12 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"\n" +
 	"descending\x18\x05 \x01(\bR\n" +
 	"descending\x12\x14\n" +
-	"\x05query\x18\x06 \x01(\tR\x05query\"\xc0\x01\n" +
+	"\x05query\x18\x06 \x01(\tR\x05query\x12\x15\n" +
+	"\x06app_id\x18\a \x01(\tR\x05appId\x12)\n" +
+	"\x10collaborator_ids\x18\b \x03(\tR\x0fcollaboratorIds\x12)\n" +
+	"\x10no_collaborators\x18\t \x01(\bR\x0fnoCollaborators\x12\x16\n" +
+	"\x06source\x18\n" +
+	" \x01(\tR\x06source\"\xc0\x01\n" +
 	"\x1cWorkflowCollaboratorsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +

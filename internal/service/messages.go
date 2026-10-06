@@ -353,13 +353,22 @@ func (m Messages) RevokeSession(ctx context.Context, token string) error {
 	return m.Store.RevokeSession(ctx, token)
 }
 
-func (m Messages) ResetUserSessions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) error {
+// ResetUserSessions signs a member out. clients narrows it to the web or the
+// mobile sessions, as admin.users.session.reset's web_only and mobile_only do;
+// see domain.SessionClients for what each ends here.
+func (m Messages) ResetUserSessions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, clients domain.SessionClients) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
+	}
+	if !clients.Valid() {
+		return store.InvalidArgument("invalid session clients")
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
 	if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
 		return store.ErrNotFound
+	}
+	if !clients.EndsWebSessions() {
+		return nil
 	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.sessions_reset", events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
@@ -389,18 +398,24 @@ func (m Messages) UserSessions(ctx context.Context, workspaceID domain.Workspace
 // the request who is not a member of this workspace stops the whole thing
 // before anything is revoked, so an administrator acting on a list they pasted
 // finds out they were wrong instead of signing out an arbitrary prefix of it.
-func (m Messages) ResetUserSessionsBulk(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targets []domain.UserID) error {
+func (m Messages) ResetUserSessionsBulk(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targets []domain.UserID, clients domain.SessionClients) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
 	if len(targets) == 0 {
 		return store.InvalidArgument("at least one member is required")
 	}
+	if !clients.Valid() {
+		return store.InvalidArgument("invalid session clients")
+	}
 	for _, targetID := range targets {
 		target, err := m.Store.GetUser(ctx, targetID)
 		if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
 			return store.ErrNotFound
 		}
+	}
+	if !clients.EndsWebSessions() {
+		return nil
 	}
 	for _, targetID := range targets {
 		event, err := newEvent(workspaceID, actorID, events.NewPayload("user.sessions_reset", events.String("user_id", string(targetID))), time.Now().UTC())
@@ -1854,6 +1869,24 @@ func (m Messages) AdminRenameConversation(ctx context.Context, workspaceID domai
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
+	return m.renameChannelAsAdministrator(ctx, workspaceID, actorID, conversation, name)
+}
+
+// renameChannelAsAdministrator is the rename behind admin.conversations.rename
+// and admin.conversations.unlinkObjects's new_name, for a caller that has
+// already established the actor is an administrator and read the channel.
+func (m Messages) renameChannelAsAdministrator(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversation domain.Conversation, name string) (domain.Conversation, error) {
+	conversationID := conversation.ID
+	// admin.conversations.rename renames a channel. It wrote the name exactly as
+	// sent, so an administrator could store "Q3 Plans" or a name with a line
+	// break that no member-facing rename would accept, and could rename a DM.
+	if conversation.IsDirectOrGroup() {
+		return domain.Conversation{}, domain.ErrInvalidConversation
+	}
+	name, err := domain.NormalizeChannelName(name)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
 	event, err := newEvent(workspaceID, actorID, conversationPayload("conversation.renamed_by_admin", conversationID), time.Now().UTC())
 	if err != nil {
 		return domain.Conversation{}, err
@@ -2311,9 +2344,15 @@ func (m Messages) createWorkspaceUser(ctx context.Context, workspaceID domain.Wo
 	return user, nil
 }
 
-func (m Messages) AdminAssignUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID, channels []domain.ConversationID) error {
+// AdminAssignUser adds a member back to the workspace as admin.users.assign
+// does: active, with the guest tier the request names (a full member when it
+// names none), and in the channels it lists.
+func (m Messages) AdminAssignUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID, tier domain.GuestTier, channels []domain.ConversationID) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
+	}
+	if !tier.Valid() {
+		return store.InvalidArgument("invalid guest tier")
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
 	if err != nil || target.WorkspaceID != workspaceID {
@@ -2336,7 +2375,7 @@ func (m Messages) AdminAssignUser(ctx context.Context, workspaceID domain.Worksp
 	if err != nil {
 		return err
 	}
-	return m.Store.AssignUser(ctx, workspaceID, targetID, normalized, event)
+	return m.Store.AssignUser(ctx, workspaceID, targetID, tier, normalized, event)
 }
 
 // AdminUninstallApps removes apps from the workspace.
@@ -3445,8 +3484,14 @@ func (m Messages) UserByEmail(ctx context.Context, workspaceID domain.WorkspaceI
 	return m.describedUser(ctx)(m.Store.FindUserByEmail(ctx, workspaceID, email))
 }
 
-func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, profile domain.UserProfile) (domain.User, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+// SetUserProfile replaces targetID's editable profile on behalf of actorID.
+// A member edits their own; editing someone else's is the administrator
+// editing users.profile.set's user argument describes (authorizeProfileEdit).
+func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID, profile domain.UserProfile) (domain.User, error) {
+	if targetID == "" {
+		targetID = actorID
+	}
+	if err := m.authorizeProfileEdit(ctx, workspaceID, actorID, targetID); err != nil {
 		return domain.User{}, err
 	}
 	profile.DisplayName = strings.TrimSpace(profile.DisplayName)
@@ -3491,7 +3536,7 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 	if err := m.validateStatusEmoji(ctx, workspaceID, profile.StatusEmoji, domain.ErrInvalidProfile); err != nil {
 		return domain.User{}, err
 	}
-	current, err := m.Store.GetUser(ctx, userID)
+	current, err := m.Store.GetUser(ctx, targetID)
 	if err != nil || current.WorkspaceID != workspaceID {
 		return domain.User{}, store.ErrNotFound
 	}
@@ -3514,11 +3559,43 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return domain.User{}, err
 	}
-	event, err := newEvent(workspaceID, userID, payload, now)
+	event, err := newEvent(workspaceID, actorID, payload, now)
 	if err != nil {
 		return domain.User{}, err
 	}
-	return m.Store.UpdateUserProfile(ctx, workspaceID, userID, profile, event)
+	return m.Store.UpdateUserProfile(ctx, workspaceID, targetID, profile, event)
+}
+
+// authorizeProfileEdit decides whether actorID may change targetID's profile.
+// Everyone may change their own. Changing another member's is an
+// administrator's act, and an administrator's or owner's profile is changed
+// only by the primary owner, so one administrator cannot rewrite another's
+// identity.
+func (m Messages) authorizeProfileEdit(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	if targetID == actorID {
+		return nil
+	}
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	target, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, targetID)
+	if err != nil {
+		return store.ErrNotFound
+	}
+	if target.Role == domain.WorkspaceRoleMember {
+		return nil
+	}
+	actor, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, actorID)
+	if err != nil {
+		return err
+	}
+	if !actor.PrimaryOwner {
+		return domain.ErrCannotUpdateAdminUser
+	}
+	return nil
 }
 
 func (m Messages) validateStatusEmoji(ctx context.Context, workspaceID domain.WorkspaceID, value string, invalid error) error {
@@ -4057,11 +4134,14 @@ func (m Messages) SearchChannels(ctx context.Context, workspaceID domain.Workspa
 	})
 }
 
-func (m Messages) AdminListUsers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, request domain.PageRequest) (domain.AdminUserPage, error) {
+func (m Messages) AdminListUsers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, activity domain.MemberActivity, request domain.PageRequest) (domain.AdminUserPage, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.AdminUserPage{}, err
 	}
-	return m.Store.ListAdminUsers(ctx, workspaceID, request)
+	if !activity.Valid() {
+		return domain.AdminUserPage{}, store.InvalidArgument("invalid member activity filter")
+	}
+	return m.Store.ListAdminUsers(ctx, workspaceID, activity, request)
 }
 
 // ConversationMemberCount reports how many people are in a conversation the
@@ -4543,20 +4623,41 @@ func (m Messages) AdminLinkConversationObjects(ctx context.Context, workspaceID 
 	return m.Store.LinkConversationObjects(ctx, objects, event)
 }
 
-// AdminUnlinkConversationObjects removes every link the named channels hold.
-func (m Messages) AdminUnlinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, ids []domain.ConversationID) error {
+// AdminUnlinkConversationObjects removes every link one channel holds and
+// gives it the name it carries from then on, which is what
+// admin.conversations.unlinkObjects takes: a channel and its new_name. The
+// rename comes first because it is the step a request can fail (a taken or
+// malformed name); a refused name then leaves the links where they were
+// instead of half-doing the request.
+func (m Messages) AdminUnlinkConversationObjects(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.ConversationID, newName string) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
-	if len(ids) == 0 {
+	if id == "" {
 		return domain.ErrInvalidConversation
 	}
-	event, err := newEvent(workspaceID, actorID, events.NewPayload("channel.objects_unlinked",
-		events.Int("channels", int64(len(ids)))), time.Now().UTC())
+	conversation, err := m.Store.GetConversation(ctx, id)
+	if err != nil || conversation.WorkspaceID != workspaceID {
+		return store.ErrNotFound
+	}
+	if conversation.IsDirectOrGroup() {
+		return domain.ErrInvalidConversation
+	}
+	name, err := domain.NormalizeChannelName(newName)
 	if err != nil {
 		return err
 	}
-	return m.Store.UnlinkConversationObjects(ctx, workspaceID, ids, event)
+	if name != conversation.Name {
+		if _, err := m.renameChannelAsAdministrator(ctx, workspaceID, actorID, conversation, name); err != nil {
+			return err
+		}
+	}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("channel.objects_unlinked",
+		events.String("channel", string(id))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.UnlinkConversationObjects(ctx, workspaceID, []domain.ConversationID{id}, event)
 }
 
 // AdminConversationObjects reports the records one channel is linked to.
@@ -4581,7 +4682,7 @@ func (m Messages) AdminCreateConversationForObjects(ctx context.Context, workspa
 	if orgID == "" || recordID == "" {
 		return domain.Conversation{}, domain.ErrInvalidConversation
 	}
-	conversation, err := m.CreateConversation(ctx, workspaceID, actorID, name, private)
+	conversation, err := m.CreateConversation(ctx, workspaceID, actorID, name, private, "")
 	if err != nil {
 		return domain.Conversation{}, err
 	}
@@ -5060,12 +5161,29 @@ func (m Messages) AdminRemoveRoleAssignments(ctx context.Context, workspaceID do
 	return m.Store.DeleteRoleAssignments(ctx, assignments, event)
 }
 
-// AdminListRoleAssignments reports who holds one role.
-func (m Messages) AdminListRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, roleID string, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
+// AdminListRoleAssignments reports the role assignments the query names: any
+// combination of roles and entities, or every assignment for an empty query.
+func (m Messages) AdminListRoleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, query domain.RoleAssignmentQuery, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.RoleAssignmentPage{}, err
 	}
-	return m.Store.ListRoleAssignments(ctx, workspaceID, strings.TrimSpace(roleID), request)
+	normalized := domain.RoleAssignmentQuery{RoleIDs: trimmedIDs(query.RoleIDs), EntityIDs: trimmedIDs(query.EntityIDs)}
+	if len(normalized.RoleIDs) != len(query.RoleIDs) || len(normalized.EntityIDs) != len(query.EntityIDs) {
+		return domain.RoleAssignmentPage{}, store.InvalidArgument("a role or entity id is empty")
+	}
+	return m.Store.ListRoleAssignments(ctx, workspaceID, normalized, request)
+}
+
+// trimmedIDs is values with surrounding space removed and empty entries
+// dropped, so a caller can tell an empty entry was named by the length.
+func trimmedIDs(values []string) []string {
+	trimmed := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			trimmed = append(trimmed, value)
+		}
+	}
+	return trimmed
 }
 
 func (m Messages) roleAssignments(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, roleID string, entityIDs []string, userIDs []domain.UserID) ([]domain.RoleAssignment, error) {
@@ -5641,9 +5759,9 @@ func (m Messages) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID d
 	if err := m.requirePrivateChannelCreator(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
 	}
-	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
-	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
-		return domain.Conversation{}, domain.ErrInvalidConversation
+	name, err = domain.NormalizeChannelName(name)
+	if err != nil {
+		return domain.Conversation{}, err
 	}
 	now := time.Now().UTC()
 	noticeID, err := domain.NewMessageID()
@@ -5673,7 +5791,10 @@ func (m Messages) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID d
 	return m.described(ctx, userID)(m.Store.ConvertGroupDirectToPrivate(ctx, domain.GroupDirectConversion{Conversation: conversationID, Name: name, Notice: notice}, []events.Event{convertedEvent, noticeEvent}))
 }
 
-func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string, private bool) (domain.Conversation, error) {
+// CreateConversation creates a channel the creator joins. purpose is its
+// description, which admin.conversations.create takes; it is written with the
+// channel, so a channel never exists without the description it was asked for.
+func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string, private bool, purpose string) (domain.Conversation, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
 	}
@@ -5685,9 +5806,9 @@ func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.Wor
 			return domain.Conversation{}, err
 		}
 	}
-	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
-	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
-		return domain.Conversation{}, domain.ErrInvalidConversation
+	name, err := domain.NormalizeChannelName(name)
+	if err != nil {
+		return domain.Conversation{}, err
 	}
 	id, err := domain.NewConversationID()
 	if err != nil {
@@ -5695,6 +5816,12 @@ func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.Wor
 	}
 	conversation := domain.Conversation{ID: id, WorkspaceID: workspaceID, Name: name, Kind: domain.ConversationKindFor(private, false, false),
 		Created: conversationInstant(time.Now()), CreatorID: userID}
+	if purpose = strings.TrimSpace(purpose); purpose != "" {
+		if utf8.RuneCountInString(purpose) > domain.MaxConversationTextLength {
+			return domain.Conversation{}, domain.ErrConversationTextTooLong
+		}
+		conversation.Purpose, conversation.PurposeSetBy, conversation.PurposeSetAt = purpose, userID, conversation.Created
+	}
 	event, err := conversationLifecycleEvent(workspaceID, "conversation.created", conversation, userID)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -5718,11 +5845,11 @@ func (m Messages) RenameConversation(ctx context.Context, workspaceID domain.Wor
 	}
 	if conversation.Kind == domain.ConversationTypeMPIM {
 		name = strings.Join(strings.Fields(strings.TrimSpace(name)), " ")
-	} else {
-		name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
-	}
-	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
-		return domain.Conversation{}, domain.ErrInvalidConversation
+		if name == "" || len(name) > 80 {
+			return domain.Conversation{}, domain.ErrInvalidConversation
+		}
+	} else if name, err = domain.NormalizeChannelName(name); err != nil {
+		return domain.Conversation{}, err
 	}
 	renamed := conversation
 	renamed.Name = name
@@ -6128,15 +6255,17 @@ func normalizeConversationPreferenceList(value domain.ConversationPreferenceList
 	return domain.ConversationPreferenceList{Types: types, Users: users}, nil
 }
 
-func (m Messages) AdminSearchConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.ConversationPage, error) {
+// AdminSearchConversations is admin.conversations.search. An empty query is
+// every channel, which is what Slack's method answers when it names none.
+func (m Messages) AdminSearchConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, search domain.ConversationSearch, request domain.PageRequest) (domain.ConversationPage, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return domain.ConversationPage{}, err
 	}
-	query = strings.Join(strings.Fields(strings.ToLower(query)), " ")
-	if query == "" || len(query) > 200 {
+	search.Query = strings.Join(strings.Fields(strings.ToLower(search.Query)), " ")
+	if len(search.Query) > 200 || !search.Sort.Valid() {
 		return domain.ConversationPage{}, domain.ErrInvalidConversation
 	}
-	return m.Store.SearchConversations(ctx, workspaceID, query, request)
+	return m.Store.SearchConversations(ctx, workspaceID, search, request)
 }
 
 func (m Messages) AdminConversationTeams(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, request domain.PageRequest) ([]domain.WorkspaceID, bool, domain.Cursor, error) {

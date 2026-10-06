@@ -663,7 +663,7 @@ func TestCreatingAConversationMakesTheCreatorAMemberOfIt(t *testing.T) {
 			}
 			messages := Messages{Store: repository}
 
-			conversation, err := messages.CreateConversation(ctx, "T1", "U1", "qualification-"+name, private)
+			conversation, err := messages.CreateConversation(ctx, "T1", "U1", "qualification-"+name, private, "")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -436,9 +436,10 @@ type Store interface {
 	SetRoleAssignments(context.Context, []domain.RoleAssignment, events.Event) error
 	// DeleteRoleAssignments removes those rows.
 	DeleteRoleAssignments(context.Context, []domain.RoleAssignment, events.Event) error
-	// ListRoleAssignments reports the members who hold one role, in a stable
-	// order so two reads agree.
-	ListRoleAssignments(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.RoleAssignmentPage, error)
+	// ListRoleAssignments reports the assignments the query names (every one
+	// for an empty query) ordered by member, entity and role, ascending or
+	// descending as the request asks, so two reads agree.
+	ListRoleAssignments(context.Context, domain.WorkspaceID, domain.RoleAssignmentQuery, domain.PageRequest) (domain.RoleAssignmentPage, error)
 	// SetAuthPolicyEntities puts entities under one authentication policy. The
 	// same entity twice adds no row.
 	// SetAppIcon records what a client draws beside an app's messages.
@@ -584,7 +585,10 @@ type Store interface {
 	// deactivates an active guest, because a guest becoming a deactivated
 	// guest is a guest status change.
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error
-	AssignUser(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, events.Event) error
+	// AssignUser (re)activates a member with the guest tier asked for and adds
+	// them to the channels. A guest tier for an administrator or owner is
+	// refused with store.ErrInvalidArgument: a guest cannot hold either role.
+	AssignUser(context.Context, domain.WorkspaceID, domain.UserID, domain.GuestTier, []domain.ConversationID, events.Event) error
 	SetWorkspaceRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole, events.Event) error
 	// TransferPrimaryOwnership moves the primary owner's role from fromID, who
 	// must hold it, to toID, an active full member, who becomes an owner if
@@ -1068,7 +1072,7 @@ type Store interface {
 	// listing's scan rather than introducing a second one that could page
 	// differently or handle deleted members differently.
 	SearchUsers(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.UserPage, error)
-	ListAdminUsers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.AdminUserPage, error)
+	ListAdminUsers(context.Context, domain.WorkspaceID, domain.MemberActivity, domain.PageRequest) (domain.AdminUserPage, error)
 	ListUsersByRole(context.Context, domain.WorkspaceID, domain.WorkspaceRole, domain.PageRequest) (domain.UserPage, error)
 	ListConversationMembers(context.Context, domain.ConversationID, domain.PageRequest) (domain.UserPage, error)
 	// CountConversationMembers reports how many members ListConversationMembers
@@ -1082,7 +1086,10 @@ type Store interface {
 	// NumMembers, which a listing has to compute per row anyway and which would
 	// otherwise cost two more round trips per row.
 	ListConversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
-	SearchConversations(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.ConversationPage, error)
+	// SearchConversations is the administrator's channel search: the channels
+	// (never a direct or group direct conversation) the search matches, in its
+	// sort, ascending or descending as the request asks.
+	SearchConversations(context.Context, domain.WorkspaceID, domain.ConversationSearch, domain.PageRequest) (domain.ConversationPage, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
 	// DirectParticipants lists everyone in a direct conversation, deactivated
 	// accounts included, in identifier order. ListConversationMembers leaves a

@@ -584,6 +584,10 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 // honest about the probe not knowing that argument's meaning.
 func fixtureStringArgument(method string) reflect.Value {
 	switch method {
+	case "AdminRenameConversation", "AdminUnlinkConversationObjects":
+		// A channel name the holder may give the seeded channel; both now
+		// refuse an empty name, which would answer every tier alike.
+		return reflect.ValueOf("matrix-renamed")
 	case "AddReaction":
 		// A name the holder has not used, so adding it succeeds rather than
 		// colliding with the holder's own seeded reaction.

@@ -603,7 +603,7 @@ func conversationSearchTreatsMetacharactersLiterally(t *testing.T, open opener) 
 		t.Fatal(err)
 	}
 	for query, want := range map[string]domain.ConversationID{"%": literal.ID, "_": underscore.ID} {
-		page, err := f.repository.SearchConversations(ctx, f.workspaceID, query, domain.PageRequest{Limit: 10})
+		page, err := f.repository.SearchConversations(ctx, f.workspaceID, domain.ConversationSearch{Query: query, Sort: domain.ConversationSortName}, domain.PageRequest{Limit: 10})
 		if err != nil {
 			t.Fatalf("search %q: %v", query, err)
 		}
@@ -700,7 +700,7 @@ func searchFoldsUnicodeIdentically(t *testing.T, open opener) {
 	}
 	assertConversation := func(query string) {
 		t.Helper()
-		page, err := f.repository.SearchConversations(ctx, f.workspaceID, query, domain.PageRequest{Limit: 10})
+		page, err := f.repository.SearchConversations(ctx, f.workspaceID, domain.ConversationSearch{Query: query, Sort: domain.ConversationSortName}, domain.PageRequest{Limit: 10})
 		if err != nil {
 			t.Fatalf("conversation search %q: %v", query, err)
 		}

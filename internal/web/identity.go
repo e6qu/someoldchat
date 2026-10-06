@@ -793,7 +793,7 @@ func (h LoginHandler) resolveExternalUser(ctx context.Context, provider string, 
 	}
 	profile := user.Profile
 	profile.DisplayName = username
-	user, err = h.service.SetUserProfile(ctx, h.workspace, user.ID, profile)
+	user, err = h.service.SetUserProfile(ctx, h.workspace, user.ID, user.ID, profile)
 	return user, role, err
 }
 

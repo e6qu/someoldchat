@@ -168,6 +168,10 @@ func runQualification(t *testing.T, open opener) {
 		{"information barriers keep their groups and subjects", informationBarriersKeepTheirGroupsAndSubjects},
 		{"app configuration and resolution survive on every profile", appConfigurationAndResolutionSurvive},
 		{"administrative channel batches are all or nothing", administrativeChannelBatchesAreAllOrNothing},
+		{"administrator channel search agrees on every profile", administratorChannelSearchAgreesOnEveryProfile},
+		{"assigning a member sets the guest tier it names", assigningAMemberSetsTheGuestTierItNames},
+		{"admin user listings filter by activity", adminUserListingsFilterByActivity},
+		{"a created channel keeps its description", aCreatedChannelKeepsItsDescription},
 		{"app activity filters by rank on every profile", appActivityFiltersByRank},
 		{"analytics count one day and not another", analyticsCountOneDayAndNotAnother},
 		{"an unset anomaly allow list is empty and not missing", anomalyAllowListIsEmptyNotMissing},
@@ -2359,7 +2363,7 @@ func roleAssignmentsAgreeOnEveryProfile(t *testing.T, open opener) {
 	if err := repository.SetRoleAssignments(ctx, assignments, event("roles-again", "role.assignments_added")); err != nil {
 		t.Fatal(err)
 	}
-	page, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 10})
+	page, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Assignments) != 3 || page.HasMore {
 		t.Fatalf("assignments=%+v err=%v", page, err)
 	}
@@ -2372,22 +2376,61 @@ func roleAssignmentsAgreeOnEveryProfile(t *testing.T, open opener) {
 		t.Fatalf("order=%v want=%v", ordered, want)
 	}
 	// A page boundary must resume without repeating or dropping a row.
-	head, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 2})
+	head, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 2})
 	if err != nil || len(head.Assignments) != 2 || !head.HasMore || head.NextCursor == "" {
 		t.Fatalf("head=%+v err=%v", head, err)
 	}
-	tail, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 2, Cursor: head.NextCursor})
+	tail, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 2, Cursor: head.NextCursor})
 	if err != nil || len(tail.Assignments) != 1 || tail.Assignments[0].UserID != second {
 		t.Fatalf("tail=%+v err=%v", tail, err)
 	}
 	// Another role is a different set entirely.
-	if other, otherErr := repository.ListRoleAssignments(ctx, workspaceID, "Rl0B", domain.PageRequest{Limit: 10}); otherErr != nil || len(other.Assignments) != 0 {
+	if other, otherErr := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0B"}}, domain.PageRequest{Limit: 10}); otherErr != nil || len(other.Assignments) != 0 {
 		t.Fatalf("other role=%+v err=%v", other, otherErr)
+	}
+	// One member can hold two roles over one entity, so the order needs the
+	// role as well; role and entity filters combine; an empty query is every
+	// assignment; and a descending walk resumes from its cursor.
+	extra := []domain.RoleAssignment{{RoleID: "Rl0B", EntityID: "C1", UserID: first, WorkspaceID: workspaceID, CreatedAt: now}}
+	if err := repository.SetRoleAssignments(ctx, extra, event("roles-extra", "role.assignments_added")); err != nil {
+		t.Fatal(err)
+	}
+	keys := func(page domain.RoleAssignmentPage) string {
+		values := make([]string, 0, len(page.Assignments))
+		for _, assignment := range page.Assignments {
+			values = append(values, string(assignment.UserID)+"/"+assignment.EntityID+"/"+assignment.RoleID)
+		}
+		return strings.Join(values, ",")
+	}
+	f, s := string(first), string(second)
+	for _, check := range []struct {
+		query domain.RoleAssignmentQuery
+		want  string
+	}{
+		{domain.RoleAssignmentQuery{}, f + "/C1/Rl0A," + f + "/C1/Rl0B," + f + "/C2/Rl0A," + s + "/C1/Rl0A"},
+		{domain.RoleAssignmentQuery{EntityIDs: []string{"C1"}}, f + "/C1/Rl0A," + f + "/C1/Rl0B," + s + "/C1/Rl0A"},
+		{domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0B", "Rl0Z"}, EntityIDs: []string{"C1", "C2"}}, f + "/C1/Rl0B"},
+	} {
+		got, err := repository.ListRoleAssignments(ctx, workspaceID, check.query, domain.PageRequest{Limit: 10})
+		if err != nil || keys(got) != check.want {
+			t.Fatalf("query=%+v got %q err=%v want %q", check.query, keys(got), err, check.want)
+		}
+	}
+	descending, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{}, domain.PageRequest{Limit: 3, Descending: true})
+	if err != nil || keys(descending) != s+"/C1/Rl0A,"+f+"/C2/Rl0A,"+f+"/C1/Rl0B" || !descending.HasMore {
+		t.Fatalf("descending head=%q err=%v", keys(descending), err)
+	}
+	descendingTail, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{}, domain.PageRequest{Limit: 3, Descending: true, Cursor: descending.NextCursor})
+	if err != nil || keys(descendingTail) != f+"/C1/Rl0A" || descendingTail.HasMore {
+		t.Fatalf("descending tail=%q err=%v", keys(descendingTail), err)
+	}
+	if err := repository.DeleteRoleAssignments(ctx, extra, event("roles-extra-remove", "role.assignments_removed")); err != nil {
+		t.Fatal(err)
 	}
 	if err := repository.DeleteRoleAssignments(ctx, assignments[:1], event("roles-remove", "role.assignments_removed")); err != nil {
 		t.Fatal(err)
 	}
-	remaining, err := repository.ListRoleAssignments(ctx, workspaceID, "Rl0A", domain.PageRequest{Limit: 10})
+	remaining, err := repository.ListRoleAssignments(ctx, workspaceID, domain.RoleAssignmentQuery{RoleIDs: []string{"Rl0A"}}, domain.PageRequest{Limit: 10})
 	if err != nil || len(remaining.Assignments) != 2 {
 		t.Fatalf("remaining=%+v err=%v", remaining, err)
 	}

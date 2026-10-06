@@ -478,7 +478,7 @@ func (h Handler) workflows(w http.ResponseWriter, r *http.Request) {
 	var next domain.Cursor
 	var err error
 	if everything {
-		values, more, next, err = h.Messages.AdminWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, query, request)
+		values, more, next, err = h.Messages.AdminWorkflows(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowSearch{Query: query}, request)
 		if errors.Is(err, store.ErrNotFound) {
 			// Not an administrator. The page says so rather than pretending the
 			// workspace has no workflows.

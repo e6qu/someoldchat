@@ -5843,7 +5843,7 @@ func TestForwardAndMarkUnreadFromAMessage(t *testing.T) {
 	store, mux := browserWorkspace(t, auth.AllScopes())
 	messages := service.Messages{Store: store}
 	ctx := context.Background()
-	if _, err := messages.CreateConversation(ctx, "T1", "U1", "elsewhere", false); err != nil {
+	if _, err := messages.CreateConversation(ctx, "T1", "U1", "elsewhere", false, ""); err != nil {
 		t.Fatal(err)
 	}
 	target, err := messages.Post(ctx, "T1", "U1", "Cdev", "worth forwarding", "", "")

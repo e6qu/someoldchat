@@ -231,6 +231,7 @@ type CreateConversationRequest struct {
 	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	Private       bool                   `protobuf:"varint,4,opt,name=private,proto3" json:"private,omitempty"`
+	Purpose       string                 `protobuf:"bytes,5,opt,name=purpose,proto3" json:"purpose,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -291,6 +292,13 @@ func (x *CreateConversationRequest) GetPrivate() bool {
 		return x.Private
 	}
 	return false
+}
+
+func (x *CreateConversationRequest) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
 }
 
 type ConversationRequest struct {
@@ -1749,8 +1757,10 @@ type UnlinkConversationObjectsRequest struct {
 	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	ConversationIds []string               `protobuf:"bytes,3,rep,name=conversation_ids,json=conversationIds,proto3" json:"conversation_ids,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// new_name is the name the channel takes once its links are removed.
+	NewName       string `protobuf:"bytes,4,opt,name=new_name,json=newName,proto3" json:"new_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UnlinkConversationObjectsRequest) Reset() {
@@ -1802,6 +1812,13 @@ func (x *UnlinkConversationObjectsRequest) GetConversationIds() []string {
 		return x.ConversationIds
 	}
 	return nil
+}
+
+func (x *UnlinkConversationObjectsRequest) GetNewName() string {
+	if x != nil {
+		return x.NewName
+	}
+	return ""
 }
 
 type ConversationObjectsRequest struct {
@@ -2011,12 +2028,13 @@ const file_sameoldchat_chat_v1_conversation_mutations_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x12\n" +
-	"\x04name\x18\x04 \x01(\tR\x04name\"\x85\x01\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\"\x9f\x01\n" +
 	"\x19CreateConversationRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x18\n" +
-	"\aprivate\x18\x04 \x01(\bR\aprivate\"z\n" +
+	"\aprivate\x18\x04 \x01(\bR\aprivate\x12\x18\n" +
+	"\apurpose\x18\x05 \x01(\tR\apurpose\"z\n" +
 	"\x13ConversationRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -2124,11 +2142,12 @@ const file_sameoldchat_chat_v1_conversation_mutations_proto_rawDesc = "" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x15\n" +
 	"\x06org_id\x18\x04 \x01(\tR\x05orgId\x12\x1d\n" +
 	"\n" +
-	"record_ids\x18\x05 \x03(\tR\trecordIds\"\x89\x01\n" +
+	"record_ids\x18\x05 \x03(\tR\trecordIds\"\xa4\x01\n" +
 	" UnlinkConversationObjectsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12)\n" +
-	"\x10conversation_ids\x18\x03 \x03(\tR\x0fconversationIds\"\x81\x01\n" +
+	"\x10conversation_ids\x18\x03 \x03(\tR\x0fconversationIds\x12\x19\n" +
+	"\bnew_name\x18\x04 \x01(\tR\anewName\"\x81\x01\n" +
 	"\x1aConversationObjectsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +

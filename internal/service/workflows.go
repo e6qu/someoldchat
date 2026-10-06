@@ -1166,14 +1166,16 @@ func decodeWorkflowStepFunctions(raw string) []workflowFunctionDefinition {
 // with the same look-ahead the visibility filter uses, because filtering one
 // store page could otherwise answer an empty page with more=true, or under-fill
 // every page when unmatched workflows sit between matches.
-func (m Messages) AdminWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, query string, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
+func (m Messages) AdminWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, search domain.WorkflowSearch, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return nil, false, "", err
 	}
 	if err := store.CheckAscendingPage(request); err != nil {
 		return nil, false, "", err
 	}
-	needle := strings.ToLower(strings.TrimSpace(query))
+	if !search.Valid() {
+		return nil, false, "", store.InvalidArgument("invalid workflow search")
+	}
 	matched := make([]domain.WorkflowDefinition, 0, request.Limit+1)
 	cursor := request.Cursor
 	batchSize := max(100, request.Limit+1)
@@ -1183,7 +1185,7 @@ func (m Messages) AdminWorkflows(ctx context.Context, workspaceID domain.Workspa
 			return nil, false, "", err
 		}
 		for _, value := range values {
-			if needle != "" && !strings.Contains(strings.ToLower(value.Title), needle) {
+			if !search.Matches(value) {
 				continue
 			}
 			matched = append(matched, value)
@@ -1202,7 +1204,10 @@ func (m Messages) AdminWorkflows(ctx context.Context, workspaceID domain.Workspa
 	}
 	nextCursor := domain.Cursor("")
 	if hasMore && len(matched) > 0 {
-		nextCursor, _ = domain.NewListCursor(string(matched[len(matched)-1].ID))
+		var err error
+		if nextCursor, err = domain.NewListCursor(string(matched[len(matched)-1].ID)); err != nil {
+			return nil, false, "", err
+		}
 	}
 	return matched, hasMore, nextCursor, nil
 }

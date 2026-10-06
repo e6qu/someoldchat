@@ -1041,6 +1041,9 @@ public final class Qualification {
             TeamInfoResponse team = methods.teamInfo(
                     com.slack.api.methods.request.team.TeamInfoRequest.builder().build());
             require(team.isOk() && team.getTeam() != null && "T1".equals(team.getTeam().getId()), "team.info failed");
+            TeamInfoResponse otherTeam = methods.teamInfo(r -> r.team("T-not-here"));
+            require(!otherTeam.isOk() && "team_not_found".equals(otherTeam.getError()),
+                    "team.info answered for a workspace it does not hold: " + otherTeam.getError());
             require(team.getTeam().getDomain() != null && !team.getTeam().getDomain().isEmpty()
                             && team.getTeam().getIcon() != null && team.getTeam().getIcon().getImage34() != null,
                     "team.info did not decode into the typed team model");
@@ -1197,8 +1200,30 @@ public final class Qualification {
                     "admin.users.session.invalidate failed");
             require(adminMethods.adminUsersSessionReset(
                     com.slack.api.methods.request.admin.users.AdminUsersSessionResetRequest.builder()
-                            .userId("U2").build()).isOk(),
+                            .userId("U2").webOnly(true).build()).isOk(),
                     "admin.users.session.reset failed");
+            // The arguments each typed method sends are the ones the handlers
+            // read: the singular email and app_id, and the plural role_ids.
+            com.slack.api.methods.response.users.discoverable_contacts.UsersDiscoverableContactsLookupResponse contact =
+                    methods.usersDiscoverableContactsLookup(r -> r.email("alice@example.com"));
+            require(contact.isOk() && contact.getIsDiscoverable() != null,
+                    "users.discoverableContacts.lookup failed: " + contact.getError());
+            com.slack.api.methods.response.admin.apps.AdminAppsUninstallResponse missingApp =
+                    adminMethods.adminAppsUninstall(r -> r.appId("A-not-here").teamIds(java.util.List.of("T1")));
+            require(!missingApp.isOk() && "app_not_found".equals(missingApp.getError()),
+                    "admin.apps.uninstall of an unknown app answered " + missingApp.getError());
+            require(adminMethods.adminRolesAddAssignments(r -> r.roleId("Rl0A")
+                            .entityIds(java.util.List.of("C1", "C2")).userIds(java.util.List.of("U2"))).isOk(),
+                    "admin.roles.addAssignments failed");
+            com.slack.api.methods.response.admin.roles.AdminRolesListAssignmentsResponse roleAssignments =
+                    adminMethods.adminRolesListAssignments(r -> r.roleIds(java.util.List.of("Rl0A"))
+                            .entityIds(java.util.List.of("C2")).sortDir("desc").limit(10));
+            require(roleAssignments.isOk() && roleAssignments.getRoleAssignments().size() == 1
+                            && "C2".equals(roleAssignments.getRoleAssignments().get(0).getEntityId()),
+                    "admin.roles.listAssignments failed: " + roleAssignments.getError());
+            require(adminMethods.adminRolesRemoveAssignments(r -> r.roleId("Rl0A")
+                            .entityIds(java.util.List.of("C1", "C2")).userIds(java.util.List.of("U2"))).isOk(),
+                    "admin.roles.removeAssignments failed");
             require(adminMethods.adminUsersRemove(
                     com.slack.api.methods.request.admin.users.AdminUsersRemoveRequest.builder()
                             .teamId("T1").userId("U2").build()).isOk(),

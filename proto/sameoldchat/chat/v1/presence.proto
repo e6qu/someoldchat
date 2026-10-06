@@ -113,6 +113,8 @@ message SetUserProfileRequest {
   string workspace_id = 1;
   string user_id = 2;
   UserProfile profile = 3;
+  // target_user_id is the member whose profile changes; empty is user_id.
+  string target_user_id = 4;
 }
 
 message ScheduledStatus {

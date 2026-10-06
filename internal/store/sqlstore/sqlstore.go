@@ -6217,18 +6217,41 @@ func (s *Store) DeleteRoleAssignments(ctx context.Context, assignments []domain.
 	return tx.Commit()
 }
 
-func (s *Store) ListRoleAssignments(ctx context.Context, workspace domain.WorkspaceID, roleID string, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+func (s *Store) ListRoleAssignments(ctx context.Context, workspace domain.WorkspaceID, filter domain.RoleAssignmentQuery, request domain.PageRequest) (domain.RoleAssignmentPage, error) {
+	if err := store.CheckPage(request); err != nil {
 		return domain.RoleAssignmentPage{}, err
 	}
-	after, err := domain.DecodePairCursor(request.Cursor)
+	after, positioned, err := domain.DecodeRoleAssignmentCursor(request.Cursor)
 	if err != nil {
 		return domain.RoleAssignmentPage{}, err
 	}
-	query := `SELECT role_id, entity_id, user_id, workspace_id, created_at FROM role_assignments
-		WHERE workspace_id = ? AND role_id = ? AND (? = '' OR user_id > ? OR (user_id = ? AND entity_id > ?))
-		ORDER BY user_id, entity_id LIMIT ?`
-	rows, err := s.db.QueryContext(ctx, query, workspace, roleID, after.First, after.First, after.First, after.Second, request.Limit+1)
+	query := `SELECT role_id, entity_id, user_id, workspace_id, created_at FROM role_assignments WHERE workspace_id = ?`
+	args := []any{workspace}
+	if len(filter.RoleIDs) > 0 {
+		query += ` AND role_id IN (` + placeholders(len(filter.RoleIDs)) + `)`
+		for _, roleID := range filter.RoleIDs {
+			args = append(args, roleID)
+		}
+	}
+	if len(filter.EntityIDs) > 0 {
+		query += ` AND entity_id IN (` + placeholders(len(filter.EntityIDs)) + `)`
+		for _, entityID := range filter.EntityIDs {
+			args = append(args, entityID)
+		}
+	}
+	// The (user, entity, role) tuple compared column by column, so both
+	// profiles read the same boundary; see domain.RoleAssignmentPosition.
+	direction, beyond := "ASC", ">"
+	if request.Descending {
+		direction, beyond = "DESC", "<"
+	}
+	if positioned {
+		query += ` AND (user_id ` + beyond + ` ? OR (user_id = ? AND (entity_id ` + beyond + ` ? OR (entity_id = ? AND role_id ` + beyond + ` ?))))`
+		args = append(args, after.UserID, after.UserID, after.EntityID, after.EntityID, after.RoleID)
+	}
+	query += ` ORDER BY user_id ` + direction + `, entity_id ` + direction + `, role_id ` + direction + ` LIMIT ?`
+	args = append(args, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return domain.RoleAssignmentPage{}, err
 	}
@@ -6252,8 +6275,7 @@ func (s *Store) ListRoleAssignments(ctx context.Context, workspace domain.Worksp
 	}
 	page := domain.RoleAssignmentPage{Assignments: assignments, HasMore: hasMore}
 	if hasMore && len(assignments) > 0 {
-		last := assignments[len(assignments)-1]
-		page.NextCursor, err = domain.NewPairCursor(string(last.UserID), last.EntityID)
+		page.NextCursor, err = domain.NewRoleAssignmentCursor(assignments[len(assignments)-1])
 	}
 	return page, err
 }
@@ -7177,12 +7199,25 @@ func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.Workspace
 	return tx.Commit()
 }
 
-func (s *Store) AssignUser(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channels []domain.ConversationID, event events.Event) error {
+func (s *Store) AssignUser(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, tier domain.GuestTier, channels []domain.ConversationID, event events.Event) error {
+	if !tier.Valid() {
+		return store.InvalidArgument("invalid guest tier")
+	}
 	tx, err := s.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	var membership domain.WorkspaceMembership
+	var restricted, ultraRestricted int
+	if err := tx.QueryRowContext(ctx, `SELECT role, restricted, ultra_restricted FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID).
+		Scan(&membership.Role, &restricted, &ultraRestricted); err != nil {
+		return translateNotFound(err)
+	}
+	membership.Restricted, membership.UltraRestricted = restricted != 0, ultraRestricted != 0
+	if tier.Guest() && membership.Role != domain.WorkspaceRoleMember {
+		return store.InvalidArgument("an administrator or owner cannot be added as a guest")
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE users SET deleted = 0, updated_at = ? WHERE id = ? AND workspace_id = ?`, unixSeconds(event.CreatedAt), userID, workspaceID)
 	if err != nil {
 		return err
@@ -7194,7 +7229,9 @@ func (s *Store) AssignUser(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	result, err = tx.ExecContext(ctx, `UPDATE workspace_members SET active = 1 WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID)
+	membership = tier.Apply(membership)
+	result, err = tx.ExecContext(ctx, `UPDATE workspace_members SET active = 1, restricted = ?, ultra_restricted = ? WHERE workspace_id = ? AND user_id = ?`,
+		boolInt(membership.Restricted), boolInt(membership.UltraRestricted), workspaceID, userID)
 	if err != nil {
 		return err
 	}
@@ -7426,9 +7463,12 @@ func (s *Store) listUsers(ctx context.Context, workspace domain.WorkspaceID, sea
 	return page, err
 }
 
-func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.AdminUserPage, error) {
+func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID, activity domain.MemberActivity, request domain.PageRequest) (domain.AdminUserPage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.AdminUserPage{}, err
+	}
+	if !activity.Valid() {
+		return domain.AdminUserPage{}, store.InvalidArgument("invalid member activity filter")
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -7436,6 +7476,12 @@ func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID
 	}
 	query := `SELECT ` + qualifiedUserColumns + `, m.role, m.active, m.restricted, m.ultra_restricted, m.primary_owner FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = u.workspace_id WHERE u.workspace_id = ?`
 	args := []any{workspace}
+	switch activity {
+	case domain.MemberActivityActive:
+		query += ` AND m.active = 1`
+	case domain.MemberActivityDeactivated:
+		query += ` AND m.active = 0`
+	}
 	if after != "" {
 		query += ` AND u.id > ?`
 		args = append(args, after)
@@ -8399,7 +8445,9 @@ func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conv
 	if conversation.PrivateFlag() {
 		private = 1
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO conversations(id, workspace_id, name, is_private, name_folded, created_at, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, conversation.ID, conversation.WorkspaceID, conversation.Name, private, domain.FoldSearchText(conversation.Name), unixSeconds(conversation.Created), conversation.CreatorID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversations(id, workspace_id, name, is_private, name_folded, created_at, creator_id, purpose, purpose_folded, purpose_set_by, purpose_set_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		conversation.ID, conversation.WorkspaceID, conversation.Name, private, domain.FoldSearchText(conversation.Name), unixSeconds(conversation.Created), conversation.CreatorID,
+		conversation.Purpose, domain.FoldSearchText(conversation.Purpose), conversation.PurposeSetBy, unixSeconds(conversation.PurposeSetAt)); err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_teams(conversation_id, team_id, org_channel) VALUES (?, ?, 0)`, conversation.ID, conversation.WorkspaceID); err != nil {
@@ -15691,30 +15739,70 @@ func (s *Store) ListConversations(ctx context.Context, workspace domain.Workspac
 	return page, err
 }
 
-func (s *Store) SearchConversations(ctx context.Context, workspace domain.WorkspaceID, query string, request domain.PageRequest) (domain.ConversationPage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+func (s *Store) SearchConversations(ctx context.Context, workspace domain.WorkspaceID, search domain.ConversationSearch, request domain.PageRequest) (domain.ConversationPage, error) {
+	if err := store.CheckPage(request); err != nil {
 		return domain.ConversationPage{}, err
 	}
-	after, err := domain.DecodeListCursor(request.Cursor)
+	if !search.Sort.Valid() {
+		return domain.ConversationPage{}, store.InvalidArgument("invalid conversation search sort")
+	}
+	search.Query = domain.FoldSearchText(strings.TrimSpace(search.Query))
+	after, positioned, err := domain.DecodeConversationSearchCursor(request.Cursor, search.Sort)
 	if err != nil {
 		return domain.ConversationPage{}, err
-	}
-	query = domain.FoldSearchText(strings.TrimSpace(query))
-	if query == "" {
-		return domain.ConversationPage{}, store.InvalidArgument("conversation search query is required")
 	}
 	// escapeLikeTerm plus an explicit ESCAPE clause: without them "%" matched
 	// every conversation in the workspace, "_" matched any single character, and
 	// a backslash was a literal on SQLite but the default escape character on
 	// PostgreSQL, so one query returned three different result sets.
-	sqlQuery := `SELECT ` + conversationColumns + ` FROM conversations WHERE workspace_id = ? AND (name_folded LIKE ? ESCAPE '\' OR topic_folded LIKE ? ESCAPE '\' OR purpose_folded LIKE ? ESCAPE '\')`
-	pattern := "%" + escapeLikeTerm(query) + "%"
-	args := []any{workspace, pattern, pattern, pattern}
-	if after != "" {
-		sqlQuery += ` AND id > ?`
-		args = append(args, after)
+	escaped := escapeLikeTerm(search.Query)
+	contains, prefix := "%"+escaped+"%", escaped+"%"
+	sqlQuery := `SELECT ` + conversationColumns + `, ` + memberCountColumn + ` FROM conversations WHERE workspace_id = ? AND is_direct = 0 AND is_group_direct = 0`
+	args := []any{workspace}
+	if search.Query != "" {
+		sqlQuery += ` AND (name_folded LIKE ? ESCAPE '\' OR topic_folded LIKE ? ESCAPE '\' OR purpose_folded LIKE ? ESCAPE '\')`
+		args = append(args, contains, contains, contains)
 	}
-	sqlQuery += ` ORDER BY id LIMIT ?`
+	if search.Private != nil {
+		sqlQuery += ` AND is_private = ?`
+		args = append(args, boolInt(*search.Private))
+	}
+	if search.Archived != nil {
+		sqlQuery += ` AND archived = ?`
+		args = append(args, boolInt(*search.Archived))
+	}
+	// The sort key, written out where it is compared and where it orders, so
+	// both profiles rank by the same expression domain.ConversationSearch
+	// computes in memory.
+	key, keyArgs := "", []any(nil)
+	switch search.Sort {
+	case domain.ConversationSortName:
+		key = `name`
+	case domain.ConversationSortCreated:
+		key = `created_at`
+	case domain.ConversationSortMemberCount:
+		key = memberCountColumn
+	default:
+		key = `(CASE WHEN name_folded = ? THEN 0 WHEN name_folded LIKE ? ESCAPE '\' THEN 1 WHEN name_folded LIKE ? ESCAPE '\' THEN 2 ELSE 3 END)`
+		keyArgs = []any{search.Query, prefix, contains}
+	}
+	direction, beyond := "ASC", ">"
+	if request.Descending {
+		direction, beyond = "DESC", "<"
+	}
+	if positioned {
+		var mark any = after.Number
+		if search.Sort == domain.ConversationSortName {
+			mark = after.Text
+		}
+		sqlQuery += ` AND (` + key + ` ` + beyond + ` ? OR (` + key + ` = ? AND id ` + beyond + ` ?))`
+		args = append(args, keyArgs...)
+		args = append(args, mark)
+		args = append(args, keyArgs...)
+		args = append(args, mark, after.ID)
+	}
+	sqlQuery += ` ORDER BY ` + key + ` ` + direction + `, id ` + direction + ` LIMIT ?`
+	args = append(args, keyArgs...)
 	args = append(args, request.Limit+1)
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
@@ -15722,12 +15810,15 @@ func (s *Store) SearchConversations(ctx context.Context, workspace domain.Worksp
 	}
 	defer rows.Close()
 	values := make([]domain.Conversation, 0, request.Limit+1)
+	counts := make([]int, 0, request.Limit+1)
 	for rows.Next() {
-		value, err := scanConversationRow(rows)
+		var count int
+		value, err := scanConversationRow(rows, &count)
 		if err != nil {
 			return domain.ConversationPage{}, err
 		}
 		values = append(values, value)
+		counts = append(counts, count)
 	}
 	if err := rows.Err(); err != nil {
 		return domain.ConversationPage{}, err
@@ -15738,10 +15829,15 @@ func (s *Store) SearchConversations(ctx context.Context, workspace domain.Worksp
 	}
 	page.Conversations = values
 	if page.HasMore {
-		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+		last := len(values) - 1
+		page.NextCursor, err = domain.NewConversationSearchCursor(search.Sort, search.PositionIn(values[last], counts[last]))
 	}
 	return page, err
 }
+
+// memberCountColumn is a conversation's member count as a correlated
+// subquery over conversation_members, the same set the in-memory store counts.
+const memberCountColumn = `(SELECT COUNT(*) FROM conversation_members cm WHERE cm.conversation_id = conversations.id)`
 
 func (s *Store) unreadCount(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) (int, error) {
 	var lastRead domain.StoredTime

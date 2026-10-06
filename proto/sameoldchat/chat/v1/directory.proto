@@ -34,6 +34,9 @@ message AdminUsersRequest {
   string user_id = 2;
   int32 limit = 3;
   string cursor = 4;
+  // activity is the admin.users.list is_active filter: "" lists every member,
+  // "active" only active ones and "deactivated" only deactivated ones.
+  string activity = 5;
 }
 
 message UsersRequest {
@@ -166,6 +169,9 @@ message ResetUserSessionsRequest {
   string workspace_id = 1;
   string user_id = 2;
   string target_user_id = 3;
+  // clients is which sessions a reset ends: "" every one, "web" the web
+  // sessions and "mobile" the mobile ones. UserSessions ignores it.
+  string clients = 4;
 }
 
 message AdminUninstallAppsRequest {
@@ -189,6 +195,7 @@ message ResetUserSessionsBulkRequest {
   string workspace_id = 1;
   string user_id = 2;
   repeated string target_user_ids = 3;
+  string clients = 4;
 }
 
 message Emoji {
@@ -245,6 +252,9 @@ message SearchConversationsRequest {
   string query = 3;
   int32 limit = 4;
   string cursor = 5;
+  repeated string channel_types = 6;
+  string sort = 7;
+  bool descending = 8;
 }
 
 message SearchPeopleRequest {
@@ -403,6 +413,10 @@ message AdminAssignUserRequest {
   string user_id = 2;
   string target_user_id = 3;
   repeated string channel_ids = 4;
+  // guest_tier is domain.GuestTier: 0 keeps the membership's tier (what a
+  // peer that predates the field meant), 1 a full member, 2 a multi-channel
+  // guest and 3 a single-channel guest.
+  int32 guest_tier = 5;
 }
 
 message InviteRequest {
@@ -559,9 +573,15 @@ message RoleAssignmentMutationRequest {
 message RoleAssignmentsRequest {
   string workspace_id = 1;
   string user_id = 2;
+  // role_id is the single role an older caller names. A current caller sends
+  // role_ids, and also role_id when it names exactly one role, so a process
+  // that predates role_ids still answers that request correctly.
   string role_id = 3;
   int32 limit = 4;
   string cursor = 5;
+  repeated string role_ids = 6;
+  repeated string entity_ids = 7;
+  bool descending = 8;
 }
 
 message RoleAssignmentPage {

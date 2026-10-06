@@ -45,7 +45,7 @@ func (h Handler) setTimezone(w http.ResponseWriter, r *http.Request) {
 	}
 	profile := current.Profile
 	profile.Timezone = zone
-	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
+	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID, profile); err != nil {
 		if errors.Is(err, domain.ErrInvalidProfile) {
 			h.writeMutationError(w, r, http.StatusBadRequest, "That time zone is not recognised", "Pick a time zone from the list, such as Europe/Berlin.")
 			return

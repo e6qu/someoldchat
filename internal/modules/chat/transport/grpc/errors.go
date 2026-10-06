@@ -285,6 +285,7 @@ var errorClasses = []errorClass{
 	// because renaming the fallback would change what a peer that sends no detail
 	// means, and only one class per code may hold it.
 	{key: "service.not_workspace_admin", code: codes.PermissionDenied, sentinel: domain.ErrNotWorkspaceAdmin},
+	{key: "service.cannot_update_admin_user", code: codes.PermissionDenied, sentinel: domain.ErrCannotUpdateAdminUser},
 	{key: "service.user_is_restricted", code: codes.PermissionDenied, sentinel: domain.ErrUserIsRestricted},
 	{key: "service.user_is_ultra_restricted", code: codes.PermissionDenied, sentinel: domain.ErrUserIsUltraRestricted},
 	{key: "service.workflow_permission_denied", code: codes.PermissionDenied, sentinel: domain.ErrWorkflowPermissionDenied},

@@ -908,10 +908,12 @@ func (x *UserByEmailRequest) GetEmail() string {
 }
 
 type SetUserProfileRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Profile       *UserProfile           `protobuf:"bytes,3,opt,name=profile,proto3" json:"profile,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Profile     *UserProfile           `protobuf:"bytes,3,opt,name=profile,proto3" json:"profile,omitempty"`
+	// target_user_id is the member whose profile changes; empty is user_id.
+	TargetUserId  string `protobuf:"bytes,4,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -965,6 +967,13 @@ func (x *SetUserProfileRequest) GetProfile() *UserProfile {
 		return x.Profile
 	}
 	return nil
+}
+
+func (x *SetUserProfileRequest) GetTargetUserId() string {
+	if x != nil {
+		return x.TargetUserId
+	}
+	return ""
 }
 
 type ScheduledStatus struct {
@@ -2315,11 +2324,12 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\x12UserByEmailRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
-	"\x05email\x18\x03 \x01(\tR\x05email\"\x8f\x01\n" +
+	"\x05email\x18\x03 \x01(\tR\x05email\"\xb5\x01\n" +
 	"\x15SetUserProfileRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12:\n" +
-	"\aprofile\x18\x03 \x01(\v2 .sameoldchat.chat.v1.UserProfileR\aprofile\"\xb9\x02\n" +
+	"\aprofile\x18\x03 \x01(\v2 .sameoldchat.chat.v1.UserProfileR\aprofile\x12$\n" +
+	"\x0etarget_user_id\x18\x04 \x01(\tR\ftargetUserId\"\xb9\x02\n" +
 	"\x0fScheduledStatus\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
