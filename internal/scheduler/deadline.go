@@ -104,7 +104,7 @@ func PublishEarliestProductWakeDeadline(ctx context.Context, scheduled Source, r
 		if scheduledErr != nil {
 			return scheduledErr
 		}
-		reminderAt, reminderErr := reminders.EarliestLaterReminder(ctx, workspace)
+		reminderAt, reminderErr := earliestFirstPartyReminder(ctx, reminders, workspace)
 		if reminderErr != nil {
 			return reminderErr
 		}
@@ -138,7 +138,7 @@ func PublishEarliestProductWakeDeadlineWithStatuses(ctx context.Context, schedul
 		if scheduledErr != nil {
 			return scheduledErr
 		}
-		reminderAt, reminderErr := reminders.EarliestLaterReminder(ctx, workspace)
+		reminderAt, reminderErr := earliestFirstPartyReminder(ctx, reminders, workspace)
 		if reminderErr != nil {
 			return reminderErr
 		}
@@ -177,7 +177,7 @@ func PublishEarliestProductWakeDeadlineComplete(ctx context.Context, scheduled S
 		candidates := make([]time.Time, 0, 6)
 		for _, read := range []func() (time.Time, error){
 			func() (time.Time, error) { return scheduled.EarliestScheduledMessage(ctx, workspace) },
-			func() (time.Time, error) { return reminders.EarliestLaterReminder(ctx, workspace) },
+			func() (time.Time, error) { return earliestFirstPartyReminder(ctx, reminders, workspace) },
 			func() (time.Time, error) { return statuses.EarliestUserStatusExpiration(ctx, workspace) },
 			func() (time.Time, error) { return futureStatuses.EarliestScheduledStatusStart(ctx, workspace) },
 			func() (time.Time, error) { return triggers.EarliestScheduledWorkflowTrigger(ctx, workspace) },

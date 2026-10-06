@@ -14,14 +14,18 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
-func TestReminderWorkerDeliversPersonalReminderPrivately(t *testing.T) {
+// "Reminders attach a due date to your to-dos": the reminder coming due is
+// a notification and a badge, not the member finishing the work. Delivery
+// used to complete a one-time reminder, which made an overdue to-do
+// impossible to express.
+func TestReminderWorkerDeliversATodoReminderPrivatelyAndLeavesItOverdue(t *testing.T) {
 	ctx := context.Background()
 	source := reminderStore(t)
 	due := time.Date(2026, time.July, 29, 9, 0, 0, 0, time.UTC)
-	seedLaterReminder(t, source, domain.LaterReminder{
-		ID: "later_reminder_personal", WorkspaceID: "T1", Creator: "U1", UserID: "U1",
-		Target: domain.LaterReminderPersonal, Text: "submit expenses", DueAt: due,
-		TimeZone: "Europe/Bucharest", CreatedAt: due.Add(-time.Hour), UpdatedAt: due.Add(-time.Hour),
+	seedTodo(t, source, domain.Todo{
+		ID: "todo_personal", WorkspaceID: "T1", UserID: "U1", Title: "submit expenses",
+		Reminder:  domain.ReminderTiming{DueAt: due, TimeZone: "Europe/Bucharest", RecurrenceAnchor: due},
+		CreatedAt: due.Add(-time.Hour), UpdatedAt: due.Add(-time.Hour),
 	})
 	now := due.Add(time.Minute)
 	worker, err := NewReminderWorker(source, service.Messages{Store: source}, "reminder-worker", 10, time.Minute, func() time.Time { return now })
@@ -29,21 +33,55 @@ func TestReminderWorkerDeliversPersonalReminderPrivately(t *testing.T) {
 		t.Fatal(err)
 	}
 	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 1 {
-		t.Fatalf("deliver personal reminder count=%d err=%v", count, err)
+		t.Fatalf("deliver to-do reminder count=%d err=%v", count, err)
 	}
-	delivered, err := source.GetLaterReminder(ctx, "T1", "U1", "later_reminder_personal")
+	delivered, err := source.GetTodo(ctx, "T1", "U1", "todo_personal")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !delivered.CompletedAt.Equal(now) || !delivered.LastDeliveredAt.Equal(now) {
-		t.Fatalf("personal reminder delivery state = %+v", delivered)
+	if delivered.Done() || !delivered.Delivery.LastDeliveredAt.Equal(now) || !delivered.Reminder.DueAt.Equal(due) ||
+		delivered.ReminderGroup(now) != domain.TodoOverdue || !delivered.Badged() {
+		t.Fatalf("to-do after its reminder came due = %+v", delivered)
+	}
+	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 0 {
+		t.Fatalf("a delivered one-time reminder fired again: count=%d err=%v", count, err)
+	}
+	activity, err := source.ListActivity(ctx, "T1", "U1", domain.ActivityQuery{Page: domain.PageRequest{Limit: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(activity.Items) != 1 || activity.Items[0].TodoID != "todo_personal" || activity.Items[0].Todo.Title != "submit expenses" {
+		t.Fatalf("Activity after the reminder = %+v", activity.Items)
 	}
 	page, err := source.ListMessages(ctx, "C1", domain.HistoryRequest{Page: domain.PageRequest{Limit: 10}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page.Messages) != 0 {
-		t.Fatalf("personal reminder leaked into a channel: %+v", page.Messages)
+		t.Fatalf("a to-do reminder leaked into a channel: %+v", page.Messages)
+	}
+}
+
+// A done to-do's reminder does not fire: finishing the work is the member's
+// answer to it.
+func TestReminderWorkerSkipsADoneTodo(t *testing.T) {
+	ctx := context.Background()
+	source := reminderStore(t)
+	due := time.Date(2026, time.July, 29, 9, 0, 0, 0, time.UTC)
+	seedTodo(t, source, domain.Todo{
+		ID: "todo_done", WorkspaceID: "T1", UserID: "U1", Title: "already done",
+		Reminder:  domain.ReminderTiming{DueAt: due, TimeZone: "UTC", RecurrenceAnchor: due},
+		CreatedAt: due.Add(-time.Hour), UpdatedAt: due.Add(-time.Hour), CompletedAt: due.Add(-time.Minute),
+	})
+	worker, err := NewReminderWorker(source, service.Messages{Store: source}, "reminder-worker", 10, time.Minute, func() time.Time { return due.Add(time.Minute) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 0 {
+		t.Fatalf("done to-do reminder count=%d err=%v", count, err)
+	}
+	if earliest, err := source.EarliestTodoReminder(ctx, "T1"); err != nil || !earliest.IsZero() {
+		t.Fatalf("a done to-do still wakes the workspace at %s (err %v)", earliest, err)
 	}
 }
 
@@ -51,10 +89,10 @@ func TestReminderWorkerAdvancesMonthEndRecurrenceToTheClampedDay(t *testing.T) {
 	ctx := context.Background()
 	source := reminderStore(t)
 	anchor := time.Date(2026, time.January, 31, 9, 0, 0, 0, time.UTC)
-	seedLaterReminder(t, source, domain.LaterReminder{
-		ID: "later_reminder_monthly", WorkspaceID: "T1", Creator: "U1", UserID: "U1",
-		Target: domain.LaterReminderPersonal, Text: "rent", DueAt: anchor, RecurrenceAnchor: anchor,
-		Recurrence: domain.ReminderMonthly, TimeZone: "UTC", CreatedAt: anchor.Add(-time.Hour), UpdatedAt: anchor.Add(-time.Hour),
+	seedTodo(t, source, domain.Todo{
+		ID: "todo_monthly", WorkspaceID: "T1", UserID: "U1", Title: "rent",
+		Reminder:  domain.ReminderTiming{DueAt: anchor, RecurrenceAnchor: anchor, Recurrence: domain.ReminderMonthly, TimeZone: "UTC"},
+		CreatedAt: anchor.Add(-time.Hour), UpdatedAt: anchor.Add(-time.Hour),
 	})
 	now := anchor.Add(time.Minute)
 	worker, err := NewReminderWorker(source, service.Messages{Store: source}, "reminder-worker", 10, time.Minute, func() time.Time { return now })
@@ -64,21 +102,21 @@ func TestReminderWorkerAdvancesMonthEndRecurrenceToTheClampedDay(t *testing.T) {
 	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 1 {
 		t.Fatalf("deliver monthly reminder count=%d err=%v", count, err)
 	}
-	delivered, err := source.GetLaterReminder(ctx, "T1", "U1", "later_reminder_monthly")
+	delivered, err := source.GetTodo(ctx, "T1", "U1", "todo_monthly")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// February has no 31st, so the next occurrence clamps to the 28th rather than
 	// overflowing to March 3rd, and the reminder stays recurring rather than
 	// completing. The anchor survived the store round-trip to make that possible.
-	if want := time.Date(2026, time.February, 28, 9, 0, 0, 0, time.UTC); !delivered.DueAt.Equal(want) {
-		t.Fatalf("next due = %s, want %s", delivered.DueAt.UTC(), want)
+	if want := time.Date(2026, time.February, 28, 9, 0, 0, 0, time.UTC); !delivered.Reminder.DueAt.Equal(want) {
+		t.Fatalf("next due = %s, want %s", delivered.Reminder.DueAt.UTC(), want)
 	}
-	if !delivered.CompletedAt.IsZero() {
+	if delivered.Done() {
 		t.Fatalf("recurring reminder was completed instead of rescheduled: %+v", delivered)
 	}
-	if !delivered.RecurrenceAnchor.Equal(anchor) {
-		t.Fatalf("anchor changed on delivery: got %s, want %s", delivered.RecurrenceAnchor.UTC(), anchor)
+	if !delivered.Reminder.RecurrenceAnchor.Equal(anchor) {
+		t.Fatalf("anchor changed on delivery: got %s, want %s", delivered.Reminder.RecurrenceAnchor.UTC(), anchor)
 	}
 }
 
@@ -86,10 +124,10 @@ func TestReminderWorkerChannelRetryUsesOneMessageForTheOccurrence(t *testing.T) 
 	ctx := context.Background()
 	base := reminderStore(t)
 	due := time.Date(2026, time.July, 29, 9, 0, 0, 0, time.UTC)
-	seedLaterReminder(t, base, domain.LaterReminder{
-		ID: "later_reminder_channel", WorkspaceID: "T1", Creator: "U1", Channel: "C1",
-		Target: domain.LaterReminderChannel, Text: "stand-up", DueAt: due,
-		TimeZone: "UTC", CreatedAt: due.Add(-time.Hour), UpdatedAt: due.Add(-time.Hour),
+	seedChannelReminder(t, base, domain.ChannelReminder{
+		ID: "channel_reminder_retry", WorkspaceID: "T1", Creator: "U1", Channel: "C1", Text: "stand-up",
+		Reminder:  domain.ReminderTiming{DueAt: due, TimeZone: "UTC", RecurrenceAnchor: due},
+		CreatedAt: due.Add(-time.Hour), UpdatedAt: due.Add(-time.Hour),
 	})
 	source := &failFirstReminderAcknowledgement{Store: base}
 	now := due.Add(time.Minute)
@@ -111,29 +149,37 @@ func TestReminderWorkerChannelRetryUsesOneMessageForTheOccurrence(t *testing.T) 
 	if len(page.Messages) != 1 || page.Messages[0].Text != "Reminder: stand-up." || page.Messages[0].AuthorID != domain.SlackbotUserID {
 		t.Fatalf("channel reminder messages = %+v", page.Messages)
 	}
+	posted, err := base.GetChannelReminder(ctx, "T1", "U1", "channel_reminder_retry")
+	if err != nil || !posted.Finished() {
+		t.Fatalf("posted channel reminder = %+v err=%v", posted, err)
+	}
+	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 0 {
+		t.Fatalf("a posted one-time channel reminder fired again: count=%d err=%v", count, err)
+	}
 }
 
-func TestLaterReminderCannotBeDeletedWhileDeliveryOwnsTheLease(t *testing.T) {
+func TestTodoCannotBeDeletedWhileDeliveryOwnsTheLease(t *testing.T) {
 	ctx := context.Background()
 	source := reminderStore(t)
 	now := time.Now().UTC()
-	seedLaterReminder(t, source, domain.LaterReminder{
-		ID: "later_reminder_race", WorkspaceID: "T1", Creator: "U1", UserID: "U1",
-		Target: domain.LaterReminderPersonal, Text: "race", DueAt: now.Add(-time.Minute),
-		TimeZone: "UTC", CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	due := now.Add(-time.Minute)
+	seedTodo(t, source, domain.Todo{
+		ID: "todo_race", WorkspaceID: "T1", UserID: "U1", Title: "race",
+		Reminder:  domain.ReminderTiming{DueAt: due, TimeZone: "UTC", RecurrenceAnchor: due},
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
 	})
-	claimed, err := source.ClaimDueLaterReminders(ctx, "T1", "worker", 1, time.Minute, now)
+	claimed, err := source.ClaimDueTodoReminders(ctx, "T1", "worker", 1, time.Minute, now)
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claim=%+v err=%v", claimed, err)
 	}
-	event := events.Event{ID: "delete-race", WorkspaceID: "T1", Topic: "later_reminder.deleted", Payload: "{}", CreatedAt: now}
-	if err := source.DeleteLaterReminder(ctx, "T1", "U1", "later_reminder_race", event); !errors.Is(err, store.ErrNotFound) {
+	event := events.Event{ID: "delete-race", WorkspaceID: "T1", Topic: "todo.deleted", Payload: "{}", CreatedAt: now}
+	if err := source.DeleteTodo(ctx, "T1", "U1", "todo_race", event); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("delete during delivery = %v, want not found", err)
 	}
-	if err := source.ReleaseLaterReminder(ctx, "worker", "later_reminder_race", now.Add(time.Minute), now); err != nil {
+	if err := source.ReleaseTodoReminder(ctx, "worker", "todo_race", now.Add(time.Minute), now); err != nil {
 		t.Fatal(err)
 	}
-	if err := source.DeleteLaterReminder(ctx, "T1", "U1", "later_reminder_race", event); err != nil {
+	if err := source.DeleteTodo(ctx, "T1", "U1", "todo_race", event); err != nil {
 		t.Fatalf("delete after release: %v", err)
 	}
 }
@@ -144,7 +190,7 @@ func TestNextReminderDuePreservesLocalWallClockAcrossDST(t *testing.T) {
 		t.Fatal(err)
 	}
 	due := time.Date(2026, time.March, 28, 9, 30, 0, 0, bucharest)
-	next, err := NextReminderDue(domain.LaterReminder{
+	next, err := NextReminderDue(domain.ReminderTiming{
 		DueAt: due.UTC(), TimeZone: "Europe/Bucharest", Recurrence: domain.ReminderDaily,
 	}, due.Add(12*time.Hour))
 	if err != nil {
@@ -169,7 +215,7 @@ func TestNextReminderDueMonthlyClampsToMonthEndWithoutDrifting(t *testing.T) {
 	}
 	due := anchor
 	for i, expected := range want {
-		next, err := NextReminderDue(domain.LaterReminder{
+		next, err := NextReminderDue(domain.ReminderTiming{
 			DueAt: due.UTC(), RecurrenceAnchor: anchor.UTC(), TimeZone: "UTC", Recurrence: domain.ReminderMonthly,
 		}, due)
 		if err != nil {
@@ -236,22 +282,23 @@ func TestEveryMonthPhraseClampsFirstOccurrenceAndKeepsItsDay(t *testing.T) {
 			}
 			// What the service stores is what delivery steps from.
 			chat := service.Messages{Store: reminderStore(t)}
-			stored, err := chat.CreateLaterReminder(context.Background(), "T1", "U1", domain.LaterReminderRequest{
-				Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: occurrence.Due,
-				TimeZone: testCase.location.String(), Recurrence: occurrence.Recurrence, RecurrenceAnchor: occurrence.Anchor,
+			stored, err := chat.CreateTodo(context.Background(), "T1", "U1", domain.TodoRequest{
+				Title: "pay rent", Reminder: domain.ReminderTiming{
+					DueAt: occurrence.Due, TimeZone: testCase.location.String(), Recurrence: occurrence.Recurrence, RecurrenceAnchor: occurrence.Anchor,
+				},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			for i, expected := range testCase.want[1:] {
-				next, err := NextReminderDue(stored, stored.DueAt)
+				next, err := NextReminderDue(stored.Reminder, stored.Reminder.DueAt)
 				if err != nil {
 					t.Fatalf("step %d: %v", i+1, err)
 				}
 				if !next.Equal(expected) {
 					t.Fatalf("step %d: next = %s, want %s", i+1, next.In(testCase.location), expected)
 				}
-				stored.DueAt = next
+				stored.Reminder.DueAt = next
 			}
 		})
 	}
@@ -267,7 +314,7 @@ func TestNextReminderDueYearlyKeepsLeapDayAnchor(t *testing.T) {
 	}
 	due := anchor
 	for i, expected := range want {
-		next, err := NextReminderDue(domain.LaterReminder{
+		next, err := NextReminderDue(domain.ReminderTiming{
 			DueAt: due.UTC(), RecurrenceAnchor: anchor.UTC(), TimeZone: "UTC", Recurrence: domain.ReminderYearly,
 		}, due)
 		if err != nil {
@@ -284,7 +331,7 @@ func TestNextReminderDueYearlyKeepsLeapDayAnchor(t *testing.T) {
 // recurrence must still advance, falling back to the due instant.
 func TestNextReminderDueWithoutAnchorFallsBackToDueInstant(t *testing.T) {
 	due := time.Date(2026, time.January, 15, 9, 0, 0, 0, time.UTC)
-	next, err := NextReminderDue(domain.LaterReminder{
+	next, err := NextReminderDue(domain.ReminderTiming{
 		DueAt: due.UTC(), TimeZone: "UTC", Recurrence: domain.ReminderMonthly,
 	}, due)
 	if err != nil {
@@ -323,20 +370,30 @@ func TestProductWakeDeadlineUsesRemindersAndEveryWorkspace(t *testing.T) {
 	if err := source.CreateScheduledMessage(ctx, scheduled, events.Event{ID: "scheduled-wake", WorkspaceID: "T1", Topic: "message.scheduled", Payload: "{}", CreatedAt: early}); err != nil {
 		t.Fatal(err)
 	}
-	reminder := domain.LaterReminder{
-		ID: "later_reminder_wake", WorkspaceID: "T2", Creator: "U-T2", UserID: "U-T2",
-		Target: domain.LaterReminderPersonal, Text: "wake first", DueAt: early,
-		TimeZone: "UTC", CreatedAt: early.Add(-time.Hour), UpdatedAt: early.Add(-time.Hour),
+	todo := domain.Todo{
+		ID: "todo_wake", WorkspaceID: "T2", UserID: "U-T2", Title: "wake first",
+		Reminder:  domain.ReminderTiming{DueAt: early, TimeZone: "UTC", RecurrenceAnchor: early},
+		CreatedAt: early.Add(-time.Hour), UpdatedAt: early.Add(-time.Hour),
 	}
-	if err := source.CreateLaterReminder(ctx, reminder, events.Event{ID: "reminder-wake", WorkspaceID: "T2", Topic: "later_reminder.created", Payload: "{}", CreatedAt: reminder.CreatedAt}); err != nil {
+	if err := source.CreateTodo(ctx, todo, events.Event{ID: "reminder-wake", WorkspaceID: "T2", Topic: "todo.created", Payload: "{}", CreatedAt: todo.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	// A channel reminder is a timer too, and an earlier one wins.
+	channelDue := early.Add(-30 * time.Minute)
+	channelReminder := domain.ChannelReminder{
+		ID: "channel_reminder_wake", WorkspaceID: "T1", Creator: "U-T1", Channel: "C-T1", Text: "wake earliest",
+		Reminder:  domain.ReminderTiming{DueAt: channelDue, TimeZone: "UTC", RecurrenceAnchor: channelDue},
+		CreatedAt: early.Add(-time.Hour), UpdatedAt: early.Add(-time.Hour),
+	}
+	if err := source.CreateChannelReminder(ctx, channelReminder, events.Event{ID: "channel-wake", WorkspaceID: "T1", Topic: "channel_reminder.created", Payload: "{}", CreatedAt: channelReminder.CreatedAt}); err != nil {
 		t.Fatal(err)
 	}
 	publisher := &recordingProductDeadline{fence: 7}
 	if err := PublishEarliestProductWakeDeadline(ctx, source, source, publisher); err != nil {
 		t.Fatal(err)
 	}
-	if publisher.publishedFence != 7 || !publisher.deadline.Equal(early) {
-		t.Fatalf("published fence=%d deadline=%s, want fence 7 and %s", publisher.publishedFence, publisher.deadline, early)
+	if publisher.publishedFence != 7 || !publisher.deadline.Equal(channelDue) {
+		t.Fatalf("published fence=%d deadline=%s, want fence 7 and %s", publisher.publishedFence, publisher.deadline, channelDue)
 	}
 }
 
@@ -372,13 +429,24 @@ func reminderStore(t *testing.T) *memory.Store {
 	return source
 }
 
-func seedLaterReminder(t *testing.T, source *memory.Store, reminder domain.LaterReminder) {
+func seedTodo(t *testing.T, source *memory.Store, todo domain.Todo) {
+	t.Helper()
+	event := events.Event{
+		ID: domain.EventID("created_" + todo.ID), WorkspaceID: todo.WorkspaceID,
+		ActorID: todo.UserID, Topic: "todo.created", Payload: "{}", CreatedAt: todo.CreatedAt,
+	}
+	if err := source.CreateTodo(context.Background(), todo, event); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func seedChannelReminder(t *testing.T, source *memory.Store, reminder domain.ChannelReminder) {
 	t.Helper()
 	event := events.Event{
 		ID: domain.EventID("created_" + reminder.ID), WorkspaceID: reminder.WorkspaceID,
-		ActorID: reminder.Creator, Topic: "later_reminder.created", Payload: "{}", CreatedAt: reminder.CreatedAt,
+		ActorID: reminder.Creator, Topic: "channel_reminder.created", Payload: "{}", CreatedAt: reminder.CreatedAt,
 	}
-	if err := source.CreateLaterReminder(context.Background(), reminder, event); err != nil {
+	if err := source.CreateChannelReminder(context.Background(), reminder, event); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -390,12 +458,12 @@ type failFirstReminderAcknowledgement struct {
 	failed bool
 }
 
-func (s *failFirstReminderAcknowledgement) MarkLaterReminderDelivered(ctx context.Context, owner string, id domain.LaterReminderID, deliveredAt, nextDue time.Time, event events.Event) error {
+func (s *failFirstReminderAcknowledgement) MarkChannelReminderDelivered(ctx context.Context, owner string, id domain.ChannelReminderID, deliveredAt, nextDue time.Time, event events.Event) error {
 	if !s.failed {
 		s.failed = true
 		return errReminderAcknowledgement
 	}
-	return s.Store.MarkLaterReminderDelivered(ctx, owner, id, deliveredAt, nextDue, event)
+	return s.Store.MarkChannelReminderDelivered(ctx, owner, id, deliveredAt, nextDue, event)
 }
 
 // A weekly reminder that names its weekdays steps from one named day to the

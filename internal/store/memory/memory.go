@@ -136,9 +136,10 @@ type Store struct {
 	bookmarks                     map[domain.BookmarkID]domain.Bookmark
 	reminders                     map[domain.ReminderID]domain.Reminder
 	reminderDelivery              map[domain.ReminderID]time.Time
-	laterReminders                map[domain.LaterReminderID]domain.LaterReminder
-	laterReminderLeases           map[domain.LaterReminderID]memoryLease
-	laterReminderNextAttempt      map[domain.LaterReminderID]time.Time
+	todos                         map[domain.TodoID]domain.Todo
+	todoQueue                     memoryReminderQueue[domain.TodoID]
+	channelReminders              map[domain.ChannelReminderID]domain.ChannelReminder
+	channelReminderQueue          memoryReminderQueue[domain.ChannelReminderID]
 	scheduled                     map[domain.ScheduledMessageID]domain.ScheduledMessage
 	scheduledLeases               map[domain.ScheduledMessageID]memoryLease
 	scheduledDelivered            map[domain.ScheduledMessageID]bool
@@ -422,9 +423,10 @@ func New() *Store {
 		savedItems:                    make(map[domain.SavedItemID]domain.SavedItem),
 		reminders:                     make(map[domain.ReminderID]domain.Reminder),
 		reminderDelivery:              make(map[domain.ReminderID]time.Time),
-		laterReminders:                make(map[domain.LaterReminderID]domain.LaterReminder),
-		laterReminderLeases:           make(map[domain.LaterReminderID]memoryLease),
-		laterReminderNextAttempt:      make(map[domain.LaterReminderID]time.Time),
+		todos:                         make(map[domain.TodoID]domain.Todo),
+		todoQueue:                     newMemoryReminderQueue[domain.TodoID](),
+		channelReminders:              make(map[domain.ChannelReminderID]domain.ChannelReminder),
+		channelReminderQueue:          newMemoryReminderQueue[domain.ChannelReminderID](),
 		scheduled:                     make(map[domain.ScheduledMessageID]domain.ScheduledMessage),
 		scheduledLeases:               make(map[domain.ScheduledMessageID]memoryLease),
 		scheduledDelivered:            make(map[domain.ScheduledMessageID]bool),
@@ -4120,13 +4122,20 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 	delete(s.conversationAccess, conversation)
 	// Everything else the conversation owns, mirroring the sqlstore cascade so
 	// the two profiles agree on what deleting a channel removes. A record that
-	// only names the conversation without owning it — a member's later reminder
-	// made from one of its messages, a workflow run's audit trail — is kept in
-	// both stores, exactly as the SQL side keeps it.
+	// only names the conversation without owning it — a member's to-do made
+	// from one of its messages, a workflow run's audit trail — is kept in both
+	// stores, exactly as the SQL side keeps it. A channel reminder posts into
+	// the conversation, so it goes with it.
 	delete(s.conversationRetention, conversation)
 	delete(s.retentionSweptAt, conversation)
 	delete(s.externalInvitePermissions, conversation)
 	delete(s.aiExcludedConversations, conversation)
+	for id, reminder := range s.channelReminders {
+		if reminder.Channel == conversation {
+			delete(s.channelReminders, id)
+			s.channelReminderQueue.forget(id)
+		}
+	}
 	for id, item := range s.savedItems {
 		if item.Conversation == conversation {
 			delete(s.savedItems, id)
@@ -8133,9 +8142,9 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 		}
 		item := stored
 		item.Kinds = append([]domain.ActivityKind(nil), stored.Kinds...)
-		if item.ReminderID != "" {
-			if reminder, ok := s.laterReminders[item.ReminderID]; ok && laterReminderOwnedBy(reminder, workspace, user) {
-				item.Reminder = reminder
+		if item.TodoID != "" {
+			if todo, ok := s.todos[item.TodoID]; ok && todo.WorkspaceID == workspace && todo.UserID == user {
+				item.Todo = todo
 				item.SourceAvailable = true
 			}
 		}
@@ -8199,7 +8208,7 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 				item.SourceAvailable = allowed
 			}
 		}
-		if item.CanvasID == "" && item.ListItemID == "" && item.SharedInviteID == "" && item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+		if item.CanvasID == "" && item.ListItemID == "" && item.SharedInviteID == "" && item.MessageID == "" && item.TodoID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
 			if conversation, ok := s.conversations[item.Conversation]; ok && s.canViewActivitySourceLocked(workspace, user, conversation) {
 				item.SourceAvailable = true
 			}
@@ -9508,143 +9517,6 @@ func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user 
 	return page, nil
 }
 
-func savedItemKey(value domain.SavedItem) string {
-	return string(domain.NewStoredTime(value.UpdatedAt)) + "\x00" + string(value.ID)
-}
-
-func (s *Store) CreateSavedItem(_ context.Context, item domain.SavedItem, event events.Event) (domain.SavedItem, bool, error) {
-	if !item.State.Valid() {
-		return domain.SavedItem{}, false, store.InvalidArgument("saved item state is invalid")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	message, err := s.messageLocked(item.MessageID)
-	if err != nil || message.WorkspaceID != item.WorkspaceID || message.Conversation != item.Conversation {
-		return domain.SavedItem{}, false, store.ErrNotFound
-	}
-	for _, existing := range s.savedItems {
-		if existing.WorkspaceID == item.WorkspaceID && existing.UserID == item.UserID && existing.MessageID == item.MessageID {
-			return existing, false, nil
-		}
-	}
-	if _, exists := s.savedItems[item.ID]; exists {
-		return domain.SavedItem{}, false, store.ErrAlreadyExists
-	}
-	item.Message = domain.Message{}
-	item.SourceAvailable = false
-	s.savedItems[item.ID] = item
-	s.outbox = append(s.outbox, event)
-	return item, true, nil
-}
-
-func (s *Store) GetSavedItem(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SavedItemID) (domain.SavedItem, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	item, exists := s.savedItems[id]
-	if !exists || item.WorkspaceID != workspace || item.UserID != user {
-		return domain.SavedItem{}, store.ErrNotFound
-	}
-	return item, nil
-}
-
-func (s *Store) GetSavedItemByMessage(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, message domain.MessageID) (domain.SavedItem, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, item := range s.savedItems {
-		if item.WorkspaceID == workspace && item.UserID == user && item.MessageID == message {
-			return item, nil
-		}
-	}
-	return domain.SavedItem{}, store.ErrNotFound
-}
-
-func (s *Store) ListSavedItemsForMessages(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, messages []domain.MessageID) ([]domain.SavedItem, error) {
-	wanted := make(map[domain.MessageID]struct{}, len(messages))
-	for _, message := range messages {
-		wanted[message] = struct{}{}
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	items := make([]domain.SavedItem, 0, len(messages))
-	for _, item := range s.savedItems {
-		if item.WorkspaceID != workspace || item.UserID != user {
-			continue
-		}
-		if _, ok := wanted[item.MessageID]; ok {
-			items = append(items, item)
-		}
-	}
-	return items, nil
-}
-
-func (s *Store) ListSavedItems(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, state domain.SavedItemState, request domain.PageRequest) (domain.SavedItemPage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
-		return domain.SavedItemPage{}, err
-	}
-	if !state.Valid() {
-		return domain.SavedItemPage{}, store.InvalidArgument("saved item state is invalid")
-	}
-	after, err := domain.DecodeListCursor(request.Cursor)
-	if err != nil {
-		return domain.SavedItemPage{}, err
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	values := make([]domain.SavedItem, 0, request.Limit+1)
-	for _, item := range s.savedItems {
-		if item.WorkspaceID != workspace || item.UserID != user || item.State != state || after != "" && savedItemKey(item) <= after {
-			continue
-		}
-		values = appendSorted(values, item, request.Limit+1, func(left, right domain.SavedItem) bool {
-			return savedItemKey(left) < savedItemKey(right)
-		})
-	}
-	more := len(values) > request.Limit
-	if more {
-		values = values[:request.Limit]
-	}
-	var next domain.Cursor
-	if more {
-		next, err = domain.NewListCursor(savedItemKey(values[len(values)-1]))
-		if err != nil {
-			return domain.SavedItemPage{}, err
-		}
-	}
-	return domain.SavedItemPage{Items: values, NextCursor: next, HasMore: more}, nil
-}
-
-func (s *Store) UpdateSavedItem(_ context.Context, item domain.SavedItem, event events.Event) (domain.SavedItem, error) {
-	if !item.State.Valid() {
-		return domain.SavedItem{}, store.InvalidArgument("saved item state is invalid")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	existing, exists := s.savedItems[item.ID]
-	if !exists || existing.WorkspaceID != item.WorkspaceID || existing.UserID != item.UserID {
-		return domain.SavedItem{}, store.ErrNotFound
-	}
-	if existing.MessageID != item.MessageID || existing.Conversation != item.Conversation || existing.CreatedAt != item.CreatedAt {
-		return domain.SavedItem{}, store.ErrConflict
-	}
-	existing.State = item.State
-	existing.UpdatedAt = item.UpdatedAt
-	s.savedItems[item.ID] = existing
-	s.outbox = append(s.outbox, event)
-	return existing, nil
-}
-
-func (s *Store) DeleteSavedItem(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SavedItemID, event events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	item, exists := s.savedItems[id]
-	if !exists || item.WorkspaceID != workspace || item.UserID != user {
-		return store.ErrNotFound
-	}
-	delete(s.savedItems, id)
-	s.outbox = append(s.outbox, event)
-	return nil
-}
-
 func (s *Store) CreateBookmark(_ context.Context, bookmark domain.Bookmark, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -9889,315 +9761,6 @@ func (s *Store) EarliestReminder(_ context.Context, workspace domain.WorkspaceID
 		}
 	}
 	return earliest, nil
-}
-
-func (s *Store) CreateLaterReminder(_ context.Context, reminder domain.LaterReminder, event events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !reminder.Target.Valid() || !reminder.Recurrence.Valid() || reminder.ID == "" || reminder.WorkspaceID == "" || reminder.Creator == "" || reminder.Text == "" || reminder.DueAt.IsZero() {
-		return store.InvalidArgument("later reminder is incomplete")
-	}
-	creator, ok := s.users[reminder.Creator]
-	if !ok || creator.WorkspaceID != reminder.WorkspaceID || creator.Deleted {
-		return store.ErrNotFound
-	}
-	switch reminder.Target {
-	case domain.LaterReminderPersonal:
-		user, ok := s.users[reminder.UserID]
-		if !ok || user.WorkspaceID != reminder.WorkspaceID || user.Deleted || reminder.Channel != "" {
-			return store.ErrNotFound
-		}
-	case domain.LaterReminderChannel:
-		conversation, ok := s.conversations[reminder.Channel]
-		if !ok || conversation.WorkspaceID != reminder.WorkspaceID || reminder.UserID != "" {
-			return store.ErrNotFound
-		}
-	}
-	if reminder.SourceMessageID != "" {
-		message, ok := memoryMessageByID(s.messages[reminder.SourceConversation], reminder.SourceMessageID)
-		if !ok || message.WorkspaceID != reminder.WorkspaceID || domain.NewMessageTimestamp(message.CreatedAt) != reminder.SourceTimestamp {
-			return store.ErrNotFound
-		}
-	}
-	if _, exists := s.laterReminders[reminder.ID]; exists {
-		return store.ErrAlreadyExists
-	}
-	s.laterReminders[reminder.ID] = reminder
-	s.outbox = append(s.outbox, event)
-	return nil
-}
-
-func (s *Store) GetLaterReminder(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID) (domain.LaterReminder, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	reminder, ok := s.laterReminders[id]
-	if !ok || !laterReminderOwnedBy(reminder, workspace, user) {
-		return domain.LaterReminder{}, store.ErrNotFound
-	}
-	return reminder, nil
-}
-
-func (s *Store) ListLaterReminders(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, target domain.LaterReminderTarget, request domain.PageRequest) (domain.LaterReminderPage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
-		return domain.LaterReminderPage{}, err
-	}
-	if !target.Valid() {
-		return domain.LaterReminderPage{}, store.InvalidArgument("later reminder target is invalid")
-	}
-	after, err := domain.DecodeListCursor(request.Cursor)
-	if err != nil {
-		return domain.LaterReminderPage{}, err
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	values := make([]domain.LaterReminder, 0, request.Limit+1)
-	for _, reminder := range s.laterReminders {
-		if reminder.Target != target || !laterReminderOwnedBy(reminder, workspace, user) || string(reminder.ID) <= after {
-			continue
-		}
-		values = appendSorted(values, reminder, request.Limit+1, func(left, right domain.LaterReminder) bool { return left.ID < right.ID })
-	}
-	page := domain.LaterReminderPage{Items: values, HasMore: len(values) > request.Limit}
-	if page.HasMore {
-		page.Items = page.Items[:request.Limit]
-		page.NextCursor, err = domain.NewListCursor(string(page.Items[len(page.Items)-1].ID))
-	}
-	return page, err
-}
-
-func (s *Store) UpdateLaterReminder(_ context.Context, reminder domain.LaterReminder, event events.Event) (domain.LaterReminder, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	current, ok := s.laterReminders[reminder.ID]
-	activeLease, leased := s.laterReminderLeases[reminder.ID]
-	if !ok || !laterReminderOwnedBy(current, reminder.WorkspaceID, reminder.Creator) || current.Target != domain.LaterReminderPersonal ||
-		(leased && activeLease.Expires.After(time.Now().UTC())) {
-		return domain.LaterReminder{}, store.ErrNotFound
-	}
-	if reminder.Target != current.Target || reminder.UserID != current.UserID || reminder.SourceMessageID != current.SourceMessageID || reminder.SourceConversation != current.SourceConversation || reminder.SourceTimestamp != current.SourceTimestamp || reminder.Text == "" || reminder.DueAt.IsZero() || !reminder.Recurrence.Valid() {
-		return domain.LaterReminder{}, store.InvalidArgument("later reminder update is invalid")
-	}
-	reminder.CreatedAt = current.CreatedAt
-	reminder.LastDeliveredAt = time.Time{}
-	reminder.AcknowledgedAt = time.Time{}
-	reminder.FailedAt = time.Time{}
-	reminder.FailureCode = ""
-	s.laterReminders[reminder.ID] = reminder
-	delete(s.laterReminderLeases, reminder.ID)
-	delete(s.laterReminderNextAttempt, reminder.ID)
-	s.outbox = append(s.outbox, event)
-	return reminder, nil
-}
-
-func (s *Store) AcknowledgeLaterReminders(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, acknowledged time.Time, event events.Event) error {
-	if workspace == "" || user == "" || acknowledged.IsZero() {
-		return store.InvalidArgument("Later reminder acknowledgement is incomplete")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	found := false
-	for id, reminder := range s.laterReminders {
-		if reminder.WorkspaceID != workspace || reminder.Target != domain.LaterReminderPersonal || reminder.UserID != user || reminder.LastDeliveredAt.IsZero() || !reminder.LastDeliveredAt.After(reminder.AcknowledgedAt) {
-			continue
-		}
-		reminder.AcknowledgedAt = reminder.LastDeliveredAt
-		reminder.UpdatedAt = acknowledged.UTC()
-		s.laterReminders[id] = reminder
-		activityID := domain.ActivityIDFor(user, "reminder:"+string(id)+":"+string(domain.NewStoredTime(reminder.LastDeliveredAt)))
-		if item, ok := s.activityItems[activityID]; ok && item.ReadAt.IsZero() {
-			item.ReadAt = acknowledged.UTC()
-			s.activityItems[activityID] = item
-		}
-		found = true
-	}
-	if found {
-		s.outbox = append(s.outbox, event)
-	}
-	return nil
-}
-
-func (s *Store) CompleteLaterReminder(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID, completed time.Time, event events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	reminder, ok := s.laterReminders[id]
-	activeLease, leased := s.laterReminderLeases[id]
-	if !ok || !laterReminderOwnedBy(reminder, workspace, user) || reminder.Target != domain.LaterReminderPersonal ||
-		(leased && activeLease.Expires.After(time.Now().UTC())) {
-		return store.ErrNotFound
-	}
-	if reminder.CompletedAt.IsZero() {
-		reminder.CompletedAt = completed
-		reminder.UpdatedAt = completed
-		s.laterReminders[id] = reminder
-		s.outbox = append(s.outbox, event)
-	}
-	return nil
-}
-
-func (s *Store) DeleteLaterReminder(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID, event events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	reminder, ok := s.laterReminders[id]
-	activeLease, leased := s.laterReminderLeases[id]
-	if !ok || !laterReminderOwnedBy(reminder, workspace, user) || (leased && activeLease.Expires.After(time.Now().UTC())) {
-		return store.ErrNotFound
-	}
-	delete(s.laterReminders, id)
-	for activityID, item := range s.activityItems {
-		if item.ReminderID == id {
-			delete(s.activityItems, activityID)
-		}
-	}
-	delete(s.laterReminderLeases, id)
-	delete(s.laterReminderNextAttempt, id)
-	s.outbox = append(s.outbox, event)
-	return nil
-}
-
-func (s *Store) EarliestLaterReminder(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var earliest time.Time
-	for id, reminder := range s.laterReminders {
-		if (workspace != "" && reminder.WorkspaceID != workspace) || !reminder.CompletedAt.IsZero() || !reminder.FailedAt.IsZero() {
-			continue
-		}
-		deadline := reminder.DueAt.UTC()
-		if next := s.laterReminderNextAttempt[id]; next.After(deadline) {
-			deadline = next
-		}
-		if earliest.IsZero() || deadline.Before(earliest) {
-			earliest = deadline
-		}
-	}
-	return earliest, nil
-}
-
-func (s *Store) ClaimDueLaterReminders(_ context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration, now time.Time) ([]domain.LaterReminder, error) {
-	if owner == "" || limit <= 0 || lease <= 0 || now.IsZero() {
-		return nil, store.InvalidArgument("Later reminder claim requires owner, positive limit, lease, and current time")
-	}
-	now = now.UTC()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	values := make([]domain.LaterReminder, 0, len(s.laterReminders))
-	for id, reminder := range s.laterReminders {
-		if (workspace != "" && reminder.WorkspaceID != workspace) || reminder.DueAt.After(now) ||
-			!reminder.CompletedAt.IsZero() || !reminder.FailedAt.IsZero() || s.laterReminderNextAttempt[id].After(now) {
-			continue
-		}
-		active, exists := s.laterReminderLeases[id]
-		if exists && active.Expires.After(now) {
-			continue
-		}
-		values = append(values, reminder)
-	}
-	sort.Slice(values, func(left, right int) bool {
-		return values[left].DueAt.Before(values[right].DueAt) ||
-			(values[left].DueAt.Equal(values[right].DueAt) && values[left].ID < values[right].ID)
-	})
-	if len(values) > limit {
-		values = values[:limit]
-	}
-	for _, reminder := range values {
-		s.laterReminderLeases[reminder.ID] = memoryLease{Owner: owner, Expires: now.Add(lease)}
-	}
-	return values, nil
-}
-
-func (s *Store) RenewLaterReminder(_ context.Context, owner string, id domain.LaterReminderID, lease time.Duration, now time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	active, ok := s.laterReminderLeases[id]
-	if owner == "" || lease <= 0 || now.IsZero() || !ok || active.Owner != owner || !active.Expires.After(now.UTC()) {
-		return store.ErrLeaseConflict
-	}
-	active.Expires = now.UTC().Add(lease)
-	s.laterReminderLeases[id] = active
-	return nil
-}
-
-func (s *Store) MarkLaterReminderDelivered(_ context.Context, owner string, id domain.LaterReminderID, deliveredAt, nextDue time.Time, event events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	active, ok := s.laterReminderLeases[id]
-	reminder, exists := s.laterReminders[id]
-	deliveredAt = deliveredAt.UTC()
-	if !ok || !exists || active.Owner != owner || !active.Expires.After(deliveredAt) || !reminder.CompletedAt.IsZero() || !reminder.FailedAt.IsZero() {
-		return store.ErrLeaseConflict
-	}
-	if reminder.Recurrence == domain.ReminderOnce {
-		if !nextDue.IsZero() {
-			return store.InvalidArgument("one-time Later reminder cannot have a next delivery")
-		}
-		reminder.CompletedAt = deliveredAt
-	} else {
-		if nextDue.IsZero() || !nextDue.After(reminder.DueAt) {
-			return store.InvalidArgument("recurring Later reminder requires a later delivery")
-		}
-		reminder.DueAt = nextDue.UTC()
-	}
-	reminder.LastDeliveredAt = deliveredAt
-	reminder.UpdatedAt = deliveredAt
-	s.laterReminders[id] = reminder
-	notificationPreferences := domain.DefaultWorkspaceNotificationPreferences(reminder.WorkspaceID, reminder.UserID)
-	if stored, ok := s.workspaceNotificationPrefs[workspaceNotificationKey(reminder.WorkspaceID, reminder.UserID)]; ok {
-		notificationPreferences = stored
-	}
-	if reminder.Target == domain.LaterReminderPersonal && reminder.UserID != "" && notificationPreferences.ActivityReminders {
-		activityID := domain.ActivityIDFor(reminder.UserID, "reminder:"+string(id)+":"+string(domain.NewStoredTime(deliveredAt)))
-		s.activityItems[activityID] = domain.ActivityItem{
-			ID: activityID, WorkspaceID: reminder.WorkspaceID, UserID: reminder.UserID,
-			Kinds: []domain.ActivityKind{domain.ActivityReminder}, ReminderID: id,
-			Conversation: reminder.SourceConversation, MessageID: reminder.SourceMessageID,
-			OccurredAt: deliveredAt,
-		}
-	}
-	delete(s.laterReminderLeases, id)
-	delete(s.laterReminderNextAttempt, id)
-	s.outbox = append(s.outbox, event)
-	return nil
-}
-
-func (s *Store) MarkLaterReminderFailed(_ context.Context, owner string, id domain.LaterReminderID, failureCode string, failedAt time.Time, event events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	active, ok := s.laterReminderLeases[id]
-	reminder, exists := s.laterReminders[id]
-	failedAt = failedAt.UTC()
-	if failureCode == "" || !ok || !exists || active.Owner != owner || !active.Expires.After(failedAt) || !reminder.CompletedAt.IsZero() || !reminder.FailedAt.IsZero() {
-		return store.ErrLeaseConflict
-	}
-	reminder.FailedAt = failedAt
-	reminder.FailureCode = failureCode
-	reminder.UpdatedAt = failedAt
-	s.laterReminders[id] = reminder
-	delete(s.laterReminderLeases, id)
-	delete(s.laterReminderNextAttempt, id)
-	s.outbox = append(s.outbox, event)
-	return nil
-}
-
-func (s *Store) ReleaseLaterReminder(_ context.Context, owner string, id domain.LaterReminderID, next, now time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	active, ok := s.laterReminderLeases[id]
-	if owner == "" || next.IsZero() || now.IsZero() || !ok || active.Owner != owner || !active.Expires.After(now.UTC()) {
-		return store.ErrLeaseConflict
-	}
-	delete(s.laterReminderLeases, id)
-	s.laterReminderNextAttempt[id] = next.UTC()
-	return nil
-}
-
-func laterReminderOwnedBy(reminder domain.LaterReminder, workspace domain.WorkspaceID, user domain.UserID) bool {
-	if reminder.WorkspaceID != workspace {
-		return false
-	}
-	if reminder.Target == domain.LaterReminderPersonal {
-		return reminder.UserID == user
-	}
-	return reminder.Target == domain.LaterReminderChannel && reminder.Creator == user
 }
 
 func memoryMessageByID(messages []domain.Message, id domain.MessageID) (domain.Message, bool) {

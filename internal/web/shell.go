@@ -17,7 +17,7 @@ import (
 // The workspace shell: the frame every signed-in workspace page shares.
 //
 // Slack's client is one frame — a rail of destinations on the left (the
-// workspace, Home, DMs, Activity, Later, More, Create and the member's own
+// workspace, Home, DMs, Activity, To-dos, More, Create and the member's own
 // avatar), a top bar holding search and help, and the destination's own panes
 // beside the rail. SameOldChat used to draw that frame only on the conversation
 // page; every other destination was a separate document with a "← Back to chat"
@@ -31,7 +31,7 @@ const (
 	destinationHome     = "home"
 	destinationDMs      = "dms"
 	destinationActivity = "activity"
-	destinationLater    = "later"
+	destinationTodos    = "todos"
 	destinationMore     = "more"
 )
 

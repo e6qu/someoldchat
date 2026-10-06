@@ -19,24 +19,26 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SavedItemsService_SaveForLater_FullMethodName          = "/sameoldchat.chat.v1.SavedItemsService/SaveForLater"
+	SavedItemsService_AddToSaved_FullMethodName            = "/sameoldchat.chat.v1.SavedItemsService/AddToSaved"
 	SavedItemsService_SavedItemForMessage_FullMethodName   = "/sameoldchat.chat.v1.SavedItemsService/SavedItemForMessage"
 	SavedItemsService_SavedItemsForMessages_FullMethodName = "/sameoldchat.chat.v1.SavedItemsService/SavedItemsForMessages"
 	SavedItemsService_SavedItems_FullMethodName            = "/sameoldchat.chat.v1.SavedItemsService/SavedItems"
-	SavedItemsService_SetSavedItemState_FullMethodName     = "/sameoldchat.chat.v1.SavedItemsService/SetSavedItemState"
 	SavedItemsService_RemoveSavedItem_FullMethodName       = "/sameoldchat.chat.v1.SavedItemsService/RemoveSavedItem"
+	SavedItemsService_ClearSavedItems_FullMethodName       = "/sameoldchat.chat.v1.SavedItemsService/ClearSavedItems"
+	SavedItemsService_MoveSavedItemToTodo_FullMethodName   = "/sameoldchat.chat.v1.SavedItemsService/MoveSavedItemToTodo"
 )
 
 // SavedItemsServiceClient is the client API for SavedItemsService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SavedItemsServiceClient interface {
-	SaveForLater(ctx context.Context, in *SaveForLaterRequest, opts ...grpc.CallOption) (*SavedItem, error)
+	AddToSaved(ctx context.Context, in *AddToSavedRequest, opts ...grpc.CallOption) (*SavedItem, error)
 	SavedItemForMessage(ctx context.Context, in *SavedItemForMessageRequest, opts ...grpc.CallOption) (*SavedItem, error)
 	SavedItemsForMessages(ctx context.Context, in *SavedItemsForMessagesRequest, opts ...grpc.CallOption) (*SavedItemsForMessagesResponse, error)
 	SavedItems(ctx context.Context, in *SavedItemsRequest, opts ...grpc.CallOption) (*SavedItemPage, error)
-	SetSavedItemState(ctx context.Context, in *SetSavedItemStateRequest, opts ...grpc.CallOption) (*SavedItem, error)
 	RemoveSavedItem(ctx context.Context, in *RemoveSavedItemRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	ClearSavedItems(ctx context.Context, in *ClearSavedItemsRequest, opts ...grpc.CallOption) (*ClearSavedItemsResponse, error)
+	MoveSavedItemToTodo(ctx context.Context, in *MoveSavedItemToTodoRequest, opts ...grpc.CallOption) (*Todo, error)
 }
 
 type savedItemsServiceClient struct {
@@ -47,10 +49,10 @@ func NewSavedItemsServiceClient(cc grpc.ClientConnInterface) SavedItemsServiceCl
 	return &savedItemsServiceClient{cc}
 }
 
-func (c *savedItemsServiceClient) SaveForLater(ctx context.Context, in *SaveForLaterRequest, opts ...grpc.CallOption) (*SavedItem, error) {
+func (c *savedItemsServiceClient) AddToSaved(ctx context.Context, in *AddToSavedRequest, opts ...grpc.CallOption) (*SavedItem, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SavedItem)
-	err := c.cc.Invoke(ctx, SavedItemsService_SaveForLater_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, SavedItemsService_AddToSaved_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,16 +89,6 @@ func (c *savedItemsServiceClient) SavedItems(ctx context.Context, in *SavedItems
 	return out, nil
 }
 
-func (c *savedItemsServiceClient) SetSavedItemState(ctx context.Context, in *SetSavedItemStateRequest, opts ...grpc.CallOption) (*SavedItem, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SavedItem)
-	err := c.cc.Invoke(ctx, SavedItemsService_SetSavedItemState_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *savedItemsServiceClient) RemoveSavedItem(ctx context.Context, in *RemoveSavedItemRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
@@ -107,16 +99,37 @@ func (c *savedItemsServiceClient) RemoveSavedItem(ctx context.Context, in *Remov
 	return out, nil
 }
 
+func (c *savedItemsServiceClient) ClearSavedItems(ctx context.Context, in *ClearSavedItemsRequest, opts ...grpc.CallOption) (*ClearSavedItemsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClearSavedItemsResponse)
+	err := c.cc.Invoke(ctx, SavedItemsService_ClearSavedItems_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *savedItemsServiceClient) MoveSavedItemToTodo(ctx context.Context, in *MoveSavedItemToTodoRequest, opts ...grpc.CallOption) (*Todo, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Todo)
+	err := c.cc.Invoke(ctx, SavedItemsService_MoveSavedItemToTodo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SavedItemsServiceServer is the server API for SavedItemsService service.
 // All implementations should embed UnimplementedSavedItemsServiceServer
 // for forward compatibility.
 type SavedItemsServiceServer interface {
-	SaveForLater(context.Context, *SaveForLaterRequest) (*SavedItem, error)
+	AddToSaved(context.Context, *AddToSavedRequest) (*SavedItem, error)
 	SavedItemForMessage(context.Context, *SavedItemForMessageRequest) (*SavedItem, error)
 	SavedItemsForMessages(context.Context, *SavedItemsForMessagesRequest) (*SavedItemsForMessagesResponse, error)
 	SavedItems(context.Context, *SavedItemsRequest) (*SavedItemPage, error)
-	SetSavedItemState(context.Context, *SetSavedItemStateRequest) (*SavedItem, error)
 	RemoveSavedItem(context.Context, *RemoveSavedItemRequest) (*MutationResponse, error)
+	ClearSavedItems(context.Context, *ClearSavedItemsRequest) (*ClearSavedItemsResponse, error)
+	MoveSavedItemToTodo(context.Context, *MoveSavedItemToTodoRequest) (*Todo, error)
 }
 
 // UnimplementedSavedItemsServiceServer should be embedded to have
@@ -126,8 +139,8 @@ type SavedItemsServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedSavedItemsServiceServer struct{}
 
-func (UnimplementedSavedItemsServiceServer) SaveForLater(context.Context, *SaveForLaterRequest) (*SavedItem, error) {
-	return nil, status.Error(codes.Unimplemented, "method SaveForLater not implemented")
+func (UnimplementedSavedItemsServiceServer) AddToSaved(context.Context, *AddToSavedRequest) (*SavedItem, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddToSaved not implemented")
 }
 func (UnimplementedSavedItemsServiceServer) SavedItemForMessage(context.Context, *SavedItemForMessageRequest) (*SavedItem, error) {
 	return nil, status.Error(codes.Unimplemented, "method SavedItemForMessage not implemented")
@@ -138,11 +151,14 @@ func (UnimplementedSavedItemsServiceServer) SavedItemsForMessages(context.Contex
 func (UnimplementedSavedItemsServiceServer) SavedItems(context.Context, *SavedItemsRequest) (*SavedItemPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method SavedItems not implemented")
 }
-func (UnimplementedSavedItemsServiceServer) SetSavedItemState(context.Context, *SetSavedItemStateRequest) (*SavedItem, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetSavedItemState not implemented")
-}
 func (UnimplementedSavedItemsServiceServer) RemoveSavedItem(context.Context, *RemoveSavedItemRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveSavedItem not implemented")
+}
+func (UnimplementedSavedItemsServiceServer) ClearSavedItems(context.Context, *ClearSavedItemsRequest) (*ClearSavedItemsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClearSavedItems not implemented")
+}
+func (UnimplementedSavedItemsServiceServer) MoveSavedItemToTodo(context.Context, *MoveSavedItemToTodoRequest) (*Todo, error) {
+	return nil, status.Error(codes.Unimplemented, "method MoveSavedItemToTodo not implemented")
 }
 func (UnimplementedSavedItemsServiceServer) testEmbeddedByValue() {}
 
@@ -164,20 +180,20 @@ func RegisterSavedItemsServiceServer(s grpc.ServiceRegistrar, srv SavedItemsServ
 	s.RegisterService(&SavedItemsService_ServiceDesc, srv)
 }
 
-func _SavedItemsService_SaveForLater_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SaveForLaterRequest)
+func _SavedItemsService_AddToSaved_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddToSavedRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SavedItemsServiceServer).SaveForLater(ctx, in)
+		return srv.(SavedItemsServiceServer).AddToSaved(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SavedItemsService_SaveForLater_FullMethodName,
+		FullMethod: SavedItemsService_AddToSaved_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SavedItemsServiceServer).SaveForLater(ctx, req.(*SaveForLaterRequest))
+		return srv.(SavedItemsServiceServer).AddToSaved(ctx, req.(*AddToSavedRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -236,24 +252,6 @@ func _SavedItemsService_SavedItems_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SavedItemsService_SetSavedItemState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetSavedItemStateRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SavedItemsServiceServer).SetSavedItemState(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: SavedItemsService_SetSavedItemState_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SavedItemsServiceServer).SetSavedItemState(ctx, req.(*SetSavedItemStateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _SavedItemsService_RemoveSavedItem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RemoveSavedItemRequest)
 	if err := dec(in); err != nil {
@@ -272,6 +270,42 @@ func _SavedItemsService_RemoveSavedItem_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SavedItemsService_ClearSavedItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClearSavedItemsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SavedItemsServiceServer).ClearSavedItems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SavedItemsService_ClearSavedItems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SavedItemsServiceServer).ClearSavedItems(ctx, req.(*ClearSavedItemsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SavedItemsService_MoveSavedItemToTodo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MoveSavedItemToTodoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SavedItemsServiceServer).MoveSavedItemToTodo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SavedItemsService_MoveSavedItemToTodo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SavedItemsServiceServer).MoveSavedItemToTodo(ctx, req.(*MoveSavedItemToTodoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SavedItemsService_ServiceDesc is the grpc.ServiceDesc for SavedItemsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -280,8 +314,8 @@ var SavedItemsService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*SavedItemsServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "SaveForLater",
-			Handler:    _SavedItemsService_SaveForLater_Handler,
+			MethodName: "AddToSaved",
+			Handler:    _SavedItemsService_AddToSaved_Handler,
 		},
 		{
 			MethodName: "SavedItemForMessage",
@@ -296,12 +330,16 @@ var SavedItemsService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _SavedItemsService_SavedItems_Handler,
 		},
 		{
-			MethodName: "SetSavedItemState",
-			Handler:    _SavedItemsService_SetSavedItemState_Handler,
-		},
-		{
 			MethodName: "RemoveSavedItem",
 			Handler:    _SavedItemsService_RemoveSavedItem_Handler,
+		},
+		{
+			MethodName: "ClearSavedItems",
+			Handler:    _SavedItemsService_ClearSavedItems_Handler,
+		},
+		{
+			MethodName: "MoveSavedItemToTodo",
+			Handler:    _SavedItemsService_MoveSavedItemToTodo_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

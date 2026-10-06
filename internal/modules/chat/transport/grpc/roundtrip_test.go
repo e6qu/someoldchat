@@ -517,9 +517,7 @@ func conversionCases() map[string]conversionCase {
 			sample:  &domain.SavedItem{},
 			omitted: map[string]string{"BlobKey": "storage-internal file location"},
 			prepare: func(filled any) {
-				item := filled.(*domain.SavedItem)
-				item.State = domain.SavedItemInProgress
-				item.SourceAvailable = true
+				filled.(*domain.SavedItem).SourceAvailable = true
 			},
 			through: through(encodeProtoSavedItem, decodeProtoSavedItem),
 		},
@@ -529,7 +527,6 @@ func conversionCases() map[string]conversionCase {
 			prepare: func(filled any) {
 				page := filled.(*domain.SavedItemPage)
 				for index := range page.Items {
-					page.Items[index].State = domain.SavedItemInProgress
 					page.Items[index].SourceAvailable = true
 				}
 			},
@@ -543,15 +540,25 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoReminder, decodeProtoReminder),
 		},
-		"LaterReminder": {
-			sample: &domain.LaterReminder{},
+		"Todo": {
+			sample: &domain.Todo{},
 			prepare: func(filled any) {
-				reminder := filled.(*domain.LaterReminder)
-				reminder.Target = domain.LaterReminderPersonal
-				reminder.Channel = ""
-				reminder.Recurrence = domain.ReminderMonthly
+				filled.(*domain.Todo).Reminder.Recurrence = domain.ReminderMonthly
 			},
-			through: through(encodeProtoLaterReminder, decodeProtoLaterReminder),
+			through: through(encodeProtoTodo, decodeProtoTodo),
+		},
+		"ReminderTiming":   {sample: &domain.ReminderTiming{}, through: throughInfallible(encodeProtoReminderTiming, decodeProtoReminderTiming)},
+		"ReminderDelivery": {sample: &domain.ReminderDelivery{}, through: throughInfallible(encodeProtoReminderDelivery, decodeProtoReminderDelivery)},
+		"ChannelReminder": {
+			sample: &domain.ChannelReminder{},
+			prepare: func(filled any) {
+				reminder := filled.(*domain.ChannelReminder)
+				reminder.Reminder.Recurrence = domain.ReminderWeekly
+				// A channel reminder has no badge: nobody acknowledges a
+				// message Slackbot posted in a channel.
+				reminder.Delivery.AcknowledgedAt = time.Time{}
+			},
+			through: through(encodeProtoChannelReminder, decodeProtoChannelReminder),
 		},
 		"ActivityItem": {
 			sample:  &domain.ActivityItem{},
@@ -560,9 +567,7 @@ func conversionCases() map[string]conversionCase {
 				item := filled.(*domain.ActivityItem)
 				item.Kinds = []domain.ActivityKind{domain.ActivityDM, domain.ActivityMention}
 				item.SourceAvailable = true
-				item.Reminder.Target = domain.LaterReminderPersonal
-				item.Reminder.Channel = ""
-				item.Reminder.Recurrence = domain.ReminderMonthly
+				item.Todo.Reminder.Recurrence = domain.ReminderMonthly
 				// A weekday set is a sorted set of real days; arbitrary
 				// integers are not a set anyone could have named.
 				item.AppReminder.Weekdays = []time.Weekday{time.Monday, time.Thursday}

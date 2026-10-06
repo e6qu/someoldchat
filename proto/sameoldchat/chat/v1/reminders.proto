@@ -55,85 +55,56 @@ message ReminderPage {
   bool has_more = 3;
 }
 
-message LaterReminder {
+// ChannelReminder is a reminder /remind set for a channel; Slackbot posts it
+// there when it comes due. It is not a to-do.
+message ChannelReminder {
   string id = 1;
   string workspace_id = 2;
   string creator_id = 3;
-  string user_id = 4;
-  string channel_id = 5;
-  string source_message_id = 6;
-  string source_conversation_id = 7;
-  string target = 8;
-  string text = 9;
-  int64 due_at = 10;
-  string timezone = 11;
-  string recurrence = 12;
-  int64 created_at = 13;
-  int64 updated_at = 14;
-  int64 completed_at = 15;
-  int64 last_delivered_at = 16;
-  int64 failed_at = 17;
-  string failure_code = 18;
-  string source_timestamp = 19;
-  int64 acknowledged_at = 20;
-  int64 recurrence_anchor = 21;
-}
-
-message CreateLaterReminderRequest {
-  string workspace_id = 1;
-  string user_id = 2;
-  string target = 3;
   string channel_id = 4;
-  string source_channel_id = 5;
-  string source_timestamp = 6;
-  string text = 7;
-  int64 due_at = 8;
-  string timezone = 9;
-  string recurrence = 10;
-  // recurrence_anchor positions a recurring series when it differs from
-  // due_at; zero means the series starts at due_at.
-  int64 recurrence_anchor = 11;
+  string text = 5;
+  int64 due_at_unix_nano = 6;
+  string timezone = 7;
+  string recurrence = 8;
+  int64 recurrence_anchor_unix_nano = 9;
+  int64 created_at_unix_nano = 10;
+  int64 updated_at_unix_nano = 11;
+  int64 last_delivered_at_unix_nano = 12;
+  int64 failed_at_unix_nano = 13;
+  string failure_code = 14;
 }
 
-message LaterReminderRequest {
+message CreateChannelReminderRequest {
   string workspace_id = 1;
   string user_id = 2;
-  string reminder_id = 3;
+  string channel_id = 3;
+  string text = 4;
+  int64 due_at_unix_nano = 5;
+  string timezone = 6;
+  string recurrence = 7;
+  // recurrence_anchor_unix_nano positions a recurring series when it differs
+  // from due_at_unix_nano; zero means the series starts there.
+  int64 recurrence_anchor_unix_nano = 8;
 }
 
-message LaterRemindersRequest {
+message ChannelRemindersRequest {
   string workspace_id = 1;
   string user_id = 2;
-  string target = 3;
-  int32 limit = 4;
-  string cursor = 5;
-  bool descending = 6;
+  int32 limit = 3;
+  string cursor = 4;
+  bool descending = 5;
 }
 
-message AcknowledgeLaterRemindersRequest {
-  string workspace_id = 1;
-  string user_id = 2;
-}
-
-message UpdateLaterReminderRequest {
-  string workspace_id = 1;
-  string user_id = 2;
-  string reminder_id = 3;
-  string target = 4;
-  string channel_id = 5;
-  string text = 6;
-  int64 due_at = 7;
-  string timezone = 8;
-  string recurrence = 9;
-  // recurrence_anchor positions a recurring series when it differs from
-  // due_at; zero means the series starts at due_at.
-  int64 recurrence_anchor = 10;
-}
-
-message LaterReminderPage {
-  repeated LaterReminder reminders = 1;
+message ChannelReminderPage {
+  repeated ChannelReminder reminders = 1;
   string next_cursor = 2;
   bool has_more = 3;
+}
+
+message DeleteChannelReminderRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string reminder_id = 3;
 }
 
 service RemindersService {
@@ -142,11 +113,7 @@ service RemindersService {
   rpc Reminders(RemindersRequest) returns (ReminderPage);
   rpc CompleteReminder(ReminderRequest) returns (MutationResponse);
   rpc DeleteReminder(ReminderRequest) returns (MutationResponse);
-  rpc CreateLaterReminder(CreateLaterReminderRequest) returns (LaterReminder);
-  rpc LaterReminderInfo(LaterReminderRequest) returns (LaterReminder);
-  rpc LaterReminders(LaterRemindersRequest) returns (LaterReminderPage);
-  rpc UpdateLaterReminder(UpdateLaterReminderRequest) returns (LaterReminder);
-  rpc AcknowledgeLaterReminders(AcknowledgeLaterRemindersRequest) returns (MutationResponse);
-  rpc CompleteLaterReminder(LaterReminderRequest) returns (MutationResponse);
-  rpc DeleteLaterReminder(LaterReminderRequest) returns (MutationResponse);
+  rpc CreateChannelReminder(CreateChannelReminderRequest) returns (ChannelReminder);
+  rpc ChannelReminders(ChannelRemindersRequest) returns (ChannelReminderPage);
+  rpc DeleteChannelReminder(DeleteChannelReminderRequest) returns (MutationResponse);
 }

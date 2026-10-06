@@ -32,7 +32,8 @@ type FileCommentID string
 type CanvasCommentID string
 type ExternalUploadID string
 type ReminderID string
-type LaterReminderID string
+type TodoID string
+type ChannelReminderID string
 type ActivityID string
 type ActivitySavedViewID string
 type SidebarSectionID string
@@ -259,9 +260,18 @@ func NewReminderID() (ReminderID, error) {
 	return ReminderID(value), err
 }
 
-func NewLaterReminderID() (LaterReminderID, error) {
-	value, err := PublicID("later_reminder_")
-	return LaterReminderID(value), err
+// NewTodoID mints a to-do identifier. To-dos that were personal Later
+// reminders before schema 218 keep their later_reminder_ identifiers, and
+// saved items completed in Later became to-dos named todo_<saved item>; the
+// identifier is opaque, so all three shapes are valid.
+func NewTodoID() (TodoID, error) {
+	value, err := PublicID("todo_")
+	return TodoID(value), err
+}
+
+func NewChannelReminderID() (ChannelReminderID, error) {
+	value, err := PublicID("channel_reminder_")
+	return ChannelReminderID(value), err
 }
 
 // NewProfileFieldID mints a custom-profile-field identifier. Slack names these

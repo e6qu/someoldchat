@@ -89,7 +89,12 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_presence", code: codes.InvalidArgument, sentinel: domain.ErrInvalidPresence},
 	{key: "service.invalid_snooze", code: codes.InvalidArgument, sentinel: domain.ErrInvalidSnooze},
 	{key: "service.invalid_reminder", code: codes.InvalidArgument, sentinel: domain.ErrInvalidReminder},
+	// Deprecated with To-dos: an older chat process still sends this key for
+	// an invalid reminder, and the sentinel it restores wraps
+	// ErrInvalidReminderRequest. Remove both once no such process can run.
 	{key: "service.invalid_later_reminder", code: codes.InvalidArgument, sentinel: domain.ErrInvalidLaterReminder},
+	{key: "service.invalid_reminder_request", code: codes.InvalidArgument, sentinel: domain.ErrInvalidReminderRequest},
+	{key: "service.invalid_todo", code: codes.InvalidArgument, sentinel: domain.ErrInvalidTodo},
 	{key: "service.invalid_activity_saved_view", code: codes.InvalidArgument, sentinel: domain.ErrInvalidActivitySavedView},
 	{key: "service.invalid_sidebar_section", code: codes.InvalidArgument, sentinel: domain.ErrInvalidSidebarSection},
 	{key: "service.reminder_time_in_past", code: codes.InvalidArgument, sentinel: domain.ErrReminderTimeInPast},

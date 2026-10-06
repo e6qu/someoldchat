@@ -113,8 +113,8 @@ func (h Handler) dispatchBuiltInSlashCommand(ctx context.Context, principal auth
 			return domain.Message{}, "", true, domain.ErrSlashCommandInThread
 		}
 		if strings.EqualFold(text, "list") {
-			values := url.Values{"channel": {string(channel)}, "filter": {"channel-reminders"}}
-			return domain.Message{}, "/app/later?" + values.Encode(), true, nil
+			values := url.Values{"channel": {string(channel)}, "view": {"channel-reminders"}}
+			return domain.Message{}, "/app/todos?" + values.Encode(), true, nil
 		}
 		// A channel chosen from the composer's suggestions arrives as <#C…>;
 		// the reminder grammar names it as #name.
@@ -127,11 +127,11 @@ func (h Handler) dispatchBuiltInSlashCommand(ctx context.Context, principal auth
 		if parseErr != nil {
 			return domain.Message{}, "", true, parseErr
 		}
-		if _, createErr := h.Messages.CreateLaterReminder(ctx, principal.WorkspaceID, principal.UserID, request); createErr != nil {
+		if _, createErr := h.Messages.CreateChannelReminder(ctx, principal.WorkspaceID, principal.UserID, request); createErr != nil {
 			return domain.Message{}, "", true, createErr
 		}
-		values := url.Values{"channel": {string(channel)}, "filter": {"channel-reminders"}, "changed": {"reminder"}}
-		return domain.Message{}, "/app/later?" + values.Encode(), true, nil
+		values := url.Values{"channel": {string(channel)}, "view": {"channel-reminders"}, "changed": {"channel-reminder"}}
+		return domain.Message{}, "/app/todos?" + values.Encode(), true, nil
 	case "/away":
 		redirect, err := h.toggleAway(ctx, principal, channel, thread)
 		return domain.Message{}, redirect, true, err

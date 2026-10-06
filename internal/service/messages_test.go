@@ -51,7 +51,7 @@ func TestPostMessageRejectsForeignUser(t *testing.T) {
 	}
 }
 
-func TestGuestCanCreatePersonalButNotChannelReminder(t *testing.T) {
+func TestGuestCanCreateATodoReminderButNotAChannelReminder(t *testing.T) {
 	ctx := context.Background()
 	s := memory.New()
 	if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
@@ -73,15 +73,15 @@ func TestGuestCanCreatePersonalButNotChannelReminder(t *testing.T) {
 	}
 	messages := Messages{Store: s}
 	due := time.Now().UTC().Add(time.Hour)
-	if _, err := messages.CreateLaterReminder(ctx, "T1", guest.ID, domain.LaterReminderRequest{
-		Target: domain.LaterReminderPersonal, Text: "private", DueAt: due, TimeZone: "UTC",
+	if _, err := messages.CreateTodo(ctx, "T1", guest.ID, domain.TodoRequest{
+		Title: "private", Reminder: domain.ReminderTiming{DueAt: due, TimeZone: "UTC"},
 	}); err != nil {
-		t.Fatalf("personal reminder: %v", err)
+		t.Fatalf("to-do with a reminder: %v", err)
 	}
-	if _, err := messages.CreateLaterReminder(ctx, "T1", guest.ID, domain.LaterReminderRequest{
-		Target: domain.LaterReminderChannel, Channel: "C1", Text: "public", DueAt: due, TimeZone: "UTC",
-	}); !errors.Is(err, domain.ErrInvalidLaterReminder) {
-		t.Fatalf("channel reminder error=%v, want %v", err, domain.ErrInvalidLaterReminder)
+	if _, err := messages.CreateChannelReminder(ctx, "T1", guest.ID, domain.ChannelReminderRequest{
+		Channel: "C1", Text: "public", Reminder: domain.ReminderTiming{DueAt: due, TimeZone: "UTC"},
+	}); !errors.Is(err, domain.ErrInvalidReminderRequest) {
+		t.Fatalf("channel reminder error=%v, want %v", err, domain.ErrInvalidReminderRequest)
 	}
 }
 

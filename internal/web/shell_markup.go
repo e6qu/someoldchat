@@ -16,7 +16,9 @@ const iconSprite = `<svg class="icon-sprite" aria-hidden="true" focusable="false
 <symbol id="i-home" viewBox="0 0 20 20"><path d="M3.5 9 10 3.8 16.5 9v7a1 1 0 0 1-1 1h-3.3v-4.6H7.8V17H4.5a1 1 0 0 1-1-1z"/></symbol>
 <symbol id="i-dms" viewBox="0 0 20 20"><path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h6A2.5 2.5 0 0 1 14 5.5v3a2.5 2.5 0 0 1-2.5 2.5H8.2L5 13.4V11A2 2 0 0 1 3 9z"/><path d="M14 7.2h.6A2.4 2.4 0 0 1 17 9.6V12a2 2 0 0 1-1.8 2v2.2L12.4 14h-1.9a2.4 2.4 0 0 1-2.1-1.3"/></symbol>
 <symbol id="i-activity" viewBox="0 0 20 20"><path d="M10 3.2a4.5 4.5 0 0 0-4.5 4.5v2.8L4 13.5h12l-1.5-3V7.7A4.5 4.5 0 0 0 10 3.2z"/><path d="M8.2 15.8a1.9 1.9 0 0 0 3.6 0"/></symbol>
-<symbol id="i-later" viewBox="0 0 20 20"><path d="M6 3.5h8a1 1 0 0 1 1 1v12.3l-5-3.2-5 3.2V4.5a1 1 0 0 1 1-1z"/></symbol>
+<symbol id="i-saved" viewBox="0 0 20 20"><path d="M6 3.5h8a1 1 0 0 1 1 1v12.3l-5-3.2-5 3.2V4.5a1 1 0 0 1 1-1z"/></symbol>
+<symbol id="i-todos" viewBox="0 0 20 20"><rect x="3.5" y="3.5" width="13" height="13" rx="2.5"/><path d="m6.8 10.2 2.3 2.3 4.2-4.6"/></symbol>
+<symbol id="i-clock" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 6v4.3l2.8 1.7"/></symbol>
 <symbol id="i-more" viewBox="0 0 20 20"><circle cx="4.8" cy="10" r="1.3" class="fill"/><circle cx="10" cy="10" r="1.3" class="fill"/><circle cx="15.2" cy="10" r="1.3" class="fill"/></symbol>
 <symbol id="i-kebab" viewBox="0 0 20 20"><circle cx="10" cy="4.8" r="1.3" class="fill"/><circle cx="10" cy="10" r="1.3" class="fill"/><circle cx="10" cy="15.2" r="1.3" class="fill"/></symbol>
 <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
@@ -149,14 +151,15 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
   <a class="rail-item" href="{{.HomeURL}}"{{if eq .Destination "home"}} aria-current="page"{{end}}>{{icon "home"}}<span class="rail-label">Home</span></a>
   <a class="rail-item" data-rail="dms" href="{{.With "/app/dms"}}"{{if eq .Destination "dms"}} aria-current="page"{{end}} {{ariaKeyshortcuts "Direct messages"}}>{{icon "dms"}}<span class="rail-label">DMs</span></a>
   <a class="rail-item" data-rail="activity" id="activity-link" href="{{.With "/app/activity"}}"{{if eq .Destination "activity"}} aria-current="page"{{end}} aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Activity"}}>{{icon "activity"}}<span class="rail-label">Activity</span>{{if .ReminderUnread}}<span class="rail-dot" aria-hidden="true"></span>{{end}}</a>
-  <a class="rail-item" data-rail="later" id="later-link" href="{{.With "/app/later"}}"{{if eq .Destination "later"}} aria-current="page"{{end}} aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}" {{ariaKeyshortcuts "Later"}}>{{icon "later"}}<span class="rail-label">Later</span></a>
+  <a class="rail-item" data-rail="todos" id="todos-link" href="{{.With "/app/todos"}}"{{if eq .Destination "todos"}} aria-current="page"{{end}} aria-label="To-dos{{if .ReminderUnread}}, reminder due{{end}}">{{icon "todos"}}<span class="rail-label">To-dos</span>{{if .ReminderUnread}}<span class="rail-dot" aria-hidden="true"></span>{{end}}</a>
+  {{if and .ReminderUnread .CSRFToken}}<form id="reminder-acknowledge" method="post" action="/app/todos/acknowledge" hidden><input type="hidden" name="_csrf" value="{{.CSRFToken}}"></form>{{end}}
   <a class="rail-item" data-rail="files" href="{{.With "/app/files"}}">{{icon "files"}}<span class="rail-label">Files</span></a>
   <details class="menu rail-more" data-menu>
     <summary class="rail-item" role="button" aria-haspopup="menu" aria-expanded="false"{{if eq .Destination "more"}} aria-current="page"{{end}}>{{icon "more"}}<span class="rail-label">More</span></summary>
     <div class="menu-list" role="menu" aria-label="More">
       <a role="menuitem" data-more-tab="dms" href="{{.With "/app/dms"}}">{{icon "dms"}}<span>DMs</span></a>
       <a role="menuitem" data-more-tab="activity" href="{{.With "/app/activity"}}">{{icon "activity"}}<span>Activity</span></a>
-      <a role="menuitem" data-more-tab="later" href="{{.With "/app/later"}}">{{icon "later"}}<span>Later</span></a>
+      <a role="menuitem" data-more-tab="todos" href="{{.With "/app/todos"}}">{{icon "todos"}}<span>To-dos</span></a>
       <a role="menuitem" data-more-tab="files" href="{{.With "/app/files"}}">{{icon "files"}}<span>Files</span></a>
       <a role="menuitem" href="{{.With "/app/canvases"}}">{{icon "canvas"}}<span>Canvases</span></a>
       <a role="menuitem" href="{{.With "/app/lists"}}">{{icon "list"}}<span>Lists</span></a>
@@ -298,7 +301,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
     <button type="button" role="tab" id="pref-tab-navigation" aria-controls="pref-navigation" aria-selected="false" tabindex="-1">{{icon "sidebar"}}<span>{{t "prefs.tab.navigation"}}</span></button>
     <button type="button" role="tab" id="pref-tab-read" aria-controls="pref-read" aria-selected="false" tabindex="-1">{{icon "check"}}<span>{{t "prefs.tab.read"}}</span></button>
     <button type="button" role="tab" id="pref-tab-media" aria-controls="pref-media" aria-selected="false" tabindex="-1">{{icon "files"}}<span>{{t "prefs.tab.media"}}</span></button>
-    <button type="button" role="tab" id="pref-tab-region" aria-controls="pref-region" aria-selected="false" tabindex="-1">{{icon "later"}}<span>{{t "prefs.tab.region"}}</span></button>
+    <button type="button" role="tab" id="pref-tab-region" aria-controls="pref-region" aria-selected="false" tabindex="-1">{{icon "clock"}}<span>{{t "prefs.tab.region"}}</span></button>
     <button type="button" role="tab" id="pref-tab-av" aria-controls="pref-av" aria-selected="false" tabindex="-1">{{icon "huddle"}}<span>{{t "prefs.tab.av"}}</span></button>
     <button type="button" role="tab" id="pref-tab-privacy" aria-controls="pref-privacy" aria-selected="false" tabindex="-1">{{icon "lock"}}<span>{{t "prefs.tab.privacy"}}</span></button>
     <button type="button" role="tab" id="pref-tab-advanced" aria-controls="pref-advanced" aria-selected="false" tabindex="-1">{{icon "gear"}}<span>{{t "prefs.tab.advanced"}}</span></button>
@@ -325,6 +328,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
         <label><input type="checkbox" data-preference="sidebar-unreads"> Unreads</label>
         <label><input type="checkbox" data-preference="sidebar-threads" data-default="true"> Threads</label>
         <label><input type="checkbox" data-preference="sidebar-drafts" data-default="true"> Drafts &amp; sent</label>
+        <label><input type="checkbox" data-preference="sidebar-saved" data-default="true"> Saved</label>
         <label><input type="checkbox" data-preference="sidebar-apps" data-default="true"> Apps</label>
       </fieldset>
       <fieldset><legend>Show</legend>
@@ -372,7 +376,7 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
         <label><input type="checkbox" checked disabled> Home</label>
         <label><input type="checkbox" data-preference="nav-dms" data-default="true"> DMs</label>
         <label><input type="checkbox" data-preference="nav-activity" data-default="true"> Activity</label>
-        <label><input type="checkbox" data-preference="nav-later" data-default="true"> Later</label>
+        <label><input type="checkbox" data-preference="nav-todos" data-default="true"> To-dos</label>
         <label><input type="checkbox" data-preference="nav-files"> Files</label>
       </fieldset>
       <label><input type="checkbox" data-preference="nav-labels" data-default="true"> Show tab names</label>

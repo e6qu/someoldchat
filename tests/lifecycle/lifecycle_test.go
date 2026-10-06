@@ -108,11 +108,6 @@ func machines() map[string]machine {
 			transitions: map[string][]string{"pending": {"approved", "revoked"}, "approved": {"accepted", "declined", "revoked"}},
 			why:         "acceptance creates the shared channel and is not undone by this machine; declining and revoking end the invitation. Expiry is a deadline read against the clock rather than a stored state, which is why fourteen days is enforced at approval and acceptance instead of appearing here",
 		},
-		"SavedItemState": {
-			terminal:    []string{},
-			transitions: map[string][]string{"in_progress": {"completed", "archived"}, "completed": {"in_progress", "archived"}, "archived": {"in_progress", "completed"}},
-			why:         "a member's own saved item moves freely; marking something done is not a promise it stays done",
-		},
 		"InviteRequestStatus": {
 			terminal: []string{"accepted", "denied", "revoked"},
 			// Denied and revoked are not interchangeable, and this machine had

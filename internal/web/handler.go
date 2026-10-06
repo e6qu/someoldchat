@@ -164,8 +164,8 @@ var liveEventTopics = []string{
 	"pin.added",
 	"pin.removed",
 	"saved_item.created",
-	"saved_item.changed",
 	"saved_item.removed",
+	"saved_item.cleared",
 	"view.opened",
 	"view.pushed",
 	"view.updated",
@@ -1499,79 +1499,6 @@ type draftsAndSentData struct {
 	Notice    string
 }
 
-type laterItemView struct {
-	ID string
-	// Text is the saved message as the timeline renders it; AuthorID,
-	// AvatarURL and Initial are its author's face and profile.
-	Text           template.HTML
-	AuthorID       string
-	AvatarURL      string
-	Initial        string
-	ChannelPrivate bool
-	RemindURL      string
-	MarkUnreadURL  string
-	// Reminder is the reminder set on this saved message, shown as a due
-	// chip on the item rather than as a second card for the same message.
-	Reminder        *laterReminderView
-	AuthorName      string
-	MachineTime     string
-	DisplayTime     string
-	ChannelName     string
-	ChannelPrefix   string
-	SourceURL       string
-	SourceAvailable bool
-	CompleteURL     string
-	ArchiveURL      string
-	RestoreURL      string
-	RemoveURL       string
-}
-
-type laterData struct {
-	// Shell is the workspace frame the page renders inside.
-	Shell shellView
-	// InProgressCount, ArchivedCount and CompletedCount label the tabs.
-	InProgressCount   int
-	ArchivedCount     int
-	CompletedCount    int
-	Channel           string
-	CSRFToken         string
-	State             domain.SavedItemState
-	StateTitle        string
-	InProgressCurrent bool
-	ArchivedCurrent   bool
-	CompletedCurrent  bool
-	Items             []laterItemView
-	Reminders         []laterReminderView
-	RemindersOnly     bool
-	ChannelReminders  bool
-	MoreURL           string
-	Notice            string
-}
-
-type laterReminderView struct {
-	ID string
-	// Overdue colours the due chip; Delete is offered from the item's menu.
-	Overdue     bool
-	Text        string
-	MachineTime string
-	DisplayTime string
-	Recurrence  string
-	SourceURL   string
-	SourceLabel string
-	Delivered   bool
-	Completed   bool
-	Failed      bool
-	FailureCode string
-	UpdateURL   string
-	CompleteURL string
-	DeleteURL   string
-	CanEdit     bool
-	CanComplete bool
-	DateValue   string
-	TimeValue   string
-	TimeZone    string
-}
-
 type identityData struct {
 	Heading   string
 	Username  string
@@ -1722,7 +1649,7 @@ const layoutMarkup = `<!doctype html>
 // an aria-keyshortcuts value by hand. Every advertised chord is looked up in
 // keyboardSections, which is what keeps the announced binding, the documented
 // binding and the implemented binding the same thing.
-var templateFunctions = withFunctions(template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts, "icon": icon, "laterRemind": laterRemind, "emojiSkinTones": emojiSkinTones, "emojiCategoryTabs": emojiCategoryTabs}, localeFunctions(l10n.Default))
+var templateFunctions = withFunctions(template.FuncMap{"ariaKeyshortcuts": ariaKeyshortcuts, "icon": icon, "reminderMenu": reminderMenu, "emojiSkinTones": emojiSkinTones, "emojiCategoryTabs": emojiCategoryTabs}, localeFunctions(l10n.Default))
 
 // withFunctions is base with extra added: the source locale's t and tn, which
 // a page's clone for another locale rebinds (see localizedPages).
@@ -1733,16 +1660,16 @@ func withFunctions(base, extra template.FuncMap) template.FuncMap {
 	return base
 }
 
-// laterRemindView is what Later's Remind me menu needs for one item: where
+// reminderMenuView is what a row's "Remind me about this" menu needs: where
 // to post, the page's CSRF token, and what the menu is about.
-type laterRemindView struct {
+type reminderMenuView struct {
 	URL       string
 	CSRFToken string
 	Label     string
 }
 
-func laterRemind(address, csrf, label string) laterRemindView {
-	return laterRemindView{URL: address, CSRFToken: csrf, Label: label}
+func reminderMenu(address, csrf, label string) reminderMenuView {
+	return reminderMenuView{URL: address, CSRFToken: csrf, Label: label}
 }
 
 var layoutTemplate = template.Must(template.New("layout").Funcs(templateFunctions).Parse(layoutMarkup))
@@ -2779,8 +2706,8 @@ var activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
 .activity-reaction-dialog{width:min(520px,calc(100% - 24px));border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);padding:0;box-shadow:0 18px 55px #0005}.activity-reaction-dialog::backdrop{background:#0007}.activity-reaction-shell{padding:16px}.activity-reaction-head{display:flex;align-items:center;gap:10px}.activity-reaction-head h3{margin:0 auto 0 0}.activity-reaction-head button{border:0;background:transparent;color:var(--text);font-size:22px}.activity-reaction-controls{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;margin:13px 0}.activity-reaction-controls input,.activity-reaction-controls select{min-width:0;padding:8px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.activity-reaction-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:5px;margin:0;padding:0;list-style:none;max-height:310px;overflow:auto}.activity-reaction-results button{width:100%;min-height:58px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text);display:grid;place-items:center;padding:4px}.activity-reaction-results button:hover,.activity-reaction-results button:focus{background:var(--hover);border-color:var(--action)}.activity-reaction-results img{width:24px;height:24px;object-fit:contain}.activity-reaction-results small{max-width:100%;overflow:hidden;text-overflow:ellipsis}.activity-reaction-status{min-height:20px;color:var(--muted);font-size:13px}
 @media(max-width:650px){.activity-list.dense .v-row-text{display:block;margin:2px 0 0}}
 </style>{{end}}
-{{define "scripts"}}` + shellScript + searchSuggestionsScript + localTimeScript + rowLinkScript + profilePanelScript + `<script>(function(){
-var activityTopics=` + liveEventTopicsLiteral() + `.concat(['later_reminder.delivered','later_reminder.failed']);
+{{define "scripts"}}` + shellScript + searchSuggestionsScript + localTimeScript + rowLinkScript + profilePanelScript + reminderAcknowledgeScript + `<script>(function(){
+var activityTopics=` + liveEventTopicsLiteral() + `.concat(['todo.reminder_delivered','todo.reminder_failed']);
 var feed=document.getElementById('activity-feed');var liveStatus=document.getElementById('activity-live-status');var rows=[];var current=0;var refreshing=false;var refreshQueued=false;var refreshTimer=0;
 function syncRows(preferredID){rows=Array.prototype.slice.call(document.querySelectorAll('[data-activity-row]'));current=0;if(preferredID){var preferred=rows.findIndex(function(row){return row.getAttribute('data-activity-id')===preferredID});if(preferred>=0)current=preferred}rows.forEach(function(row,index){row.tabIndex=index===current?0:-1})}
 syncRows('');
@@ -2954,68 +2881,6 @@ var notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end}}
 const notificationPauseScript = `<script>(function(){var preset=document.querySelector('[data-pause-preset]');var custom=document.querySelector('[data-pause-custom]');if(!preset||!custom)return;var input=custom.querySelector('input');function sync(){var on=preset.value==='custom';custom.hidden=!on;input.required=on;input.disabled=!on}preset.addEventListener('change',function(){sync();if(preset.value==='custom')input.focus()});sync()})();</script>`
 
 var notificationsTemplate = mustPage(notificationsMarkup)
-
-const laterMarkup = `{{define "title"}}Later · SameOldChat{{end}}
-{{define "styles"}}` + shellStyle + shellPageStyle + viewStyle + `<style>
-.later-actions-head{display:flex;align-items:center;gap:4px}
-.later-author{display:inline-block;min-height:24px;line-height:24px;color:var(--text);font-weight:800;text-decoration:none}.later-author:hover{text-decoration:underline}
-.later-source-link{display:inline-block;min-height:24px;line-height:24px;color:inherit;text-decoration:none}.later-source-link:hover{text-decoration:underline}
-.due-chip{display:inline-flex;align-items:center;gap:5px;margin-top:6px;padding:2px 8px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);font-size:12px;font-weight:700}
-.due-chip.overdue{border-color:var(--danger);background:var(--danger-bg);color:var(--danger)}
-.due-chip.done{color:var(--muted)}
-.later-unavailable{margin:0;color:var(--muted);font-weight:700}
-.reminder-status{color:var(--muted);font-size:12px;font-weight:700}.reminder-status.failed{color:var(--danger)}
-.later-menu-form{display:grid;gap:8px;min-width:260px;padding:6px}
-.later-menu-form label{display:grid;gap:4px;font-size:12px;font-weight:700;color:var(--muted)}
-.later-menu-form input,.later-menu-form select{min-height:32px;padding:4px 8px;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);font:inherit}
-.later-menu-form .v-btn{justify-self:start}
-.v-menu-list .later-menu-form label:hover,.v-menu-list .later-menu-form:hover{background:transparent;color:var(--muted)}
-.channel-reminder-note{margin:0 0 12px;color:var(--muted);font-size:13px}
-@media(max-width:600px){}
-</style>{{end}}
-{{define "scripts"}}` + shellScript + searchSuggestionsScript + localTimeScript + laterLiveScript + rowLinkScript + profilePanelScript + `{{end}}
-{{define "remindMenu"}}<details class="v-menu"><summary class="v-icon" role="button" aria-label="Remind me about {{.Label}}" title="Remind me"><span aria-hidden="true">⏰</span></summary><div class="v-menu-list"><span class="v-menu-label">Remind me</span><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="20m">In 20 minutes</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="1h">In 1 hour</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="3h">In 3 hours</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="tomorrow">Tomorrow</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="next_week">Next week</button></form><hr><form class="later-menu-form" method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><input type="hidden" name="preset" value="custom"><label>Custom date<input type="date" name="date" required></label><label>Time<input type="time" name="time" value="09:00"></label><button class="v-btn primary" type="submit">Set reminder</button></form></div></details>{{end}}
-{{define "content"}}{{template "shell-open" .Shell}}{{template "later-view" .}}{{template "shell-close" .Shell}}{{end}}
-{{define "later-view"}}<main class="v-page later-page">
-<div class="v-head"><h1>Later</h1><div class="later-actions-head">
-<details class="v-menu"><summary class="v-icon" role="button" aria-label="Add a reminder" title="Add a reminder"><span aria-hidden="true">＋</span></summary><div class="v-menu-list"><form class="later-menu-form reminder-fields" method="post" action="/app/reminders/create?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><label>Description<input name="text" maxlength="3000" required></label><label>Date<input type="date" name="date" required></label><label>Time (defaults to 9:00 AM)<input type="time" name="time"></label><label>Repeat<select name="recurrence"><option value="">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><button class="v-btn primary" type="submit">Create reminder</button></form></div></details>
-<details class="v-menu"><summary class="v-icon" role="button" aria-label="Later options"><span aria-hidden="true">⋮</span></summary><div class="v-menu-list"><a href="/app/later?channel={{.Channel}}&amp;filter=channel-reminders"{{if .ChannelReminders}} aria-current="page"{{end}}>Channel reminders you created</a></div></details>
-</div></div>
-<p class="v-sub">Saved messages and reminders are private to you.</p>
-{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-<nav class="v-tabs" aria-label="Later sections"><a href="/app/later?channel={{.Channel}}&amp;state=in_progress"{{if and .InProgressCurrent (not .RemindersOnly)}} aria-current="page"{{end}}>In progress <span class="v-count">{{.InProgressCount}}</span></a><a href="/app/later?channel={{.Channel}}&amp;state=archived"{{if and .ArchivedCurrent (not .RemindersOnly)}} aria-current="page"{{end}}>Archived <span class="v-count">{{.ArchivedCount}}</span></a><a href="/app/later?channel={{.Channel}}&amp;state=completed"{{if and .CompletedCurrent (not .RemindersOnly)}} aria-current="page"{{end}}>Completed <span class="v-count">{{.CompletedCount}}</span></a></nav>
-{{if .ChannelReminders}}<p class="channel-reminder-note">Channel reminders you created. They post to the channel when they come due.</p>{{end}}
-<ul class="v-list later-list" aria-label="{{if .ChannelReminders}}Channel reminders{{else}}{{.StateTitle}}{{end}}">
-{{range .Reminders}}<li class="v-row later-item reminder-item"><span class="v-avatar glyph" aria-hidden="true">⏰</span><div class="v-row-main"><div class="v-row-meta"><strong>Reminder</strong>{{if .SourceURL}}<span aria-hidden="true">·</span><a class="later-source-link" href="{{.SourceURL}}">{{.SourceLabel}}</a>{{end}}{{if .Recurrence}}<span aria-hidden="true">·</span><span>Repeats {{.Recurrence}}</span>{{end}}</div><p class="v-row-text">{{.Text}}</p><span class="due-chip{{if .Overdue}} overdue{{end}}{{if .Completed}} done{{end}}"><span aria-hidden="true">⏰</span>{{if .Completed}}Completed · {{else if .Overdue}}Overdue · {{else}}Due {{end}}<time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span>{{if .Failed}} <span class="reminder-status failed">Delivery failed: {{.FailureCode}}</span>{{else if and .Delivered (not .Completed)}} <span class="reminder-status">Delivered</span>{{end}}</div>
-<div class="v-row-side"><div class="v-hover-actions">{{if .CanComplete}}<form method="post" action="{{.CompleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="v-icon" type="submit" aria-label="Mark complete" title="Mark complete"><span aria-hidden="true">✓</span></button></form>{{end}}<details class="v-menu"><summary class="v-icon" role="button" aria-label="More actions for this reminder"><span aria-hidden="true">⋮</span></summary><div class="v-menu-list">{{if .CanEdit}}<form class="later-menu-form reminder-edit" method="post" action="{{.UpdateURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="{{.TimeZone}}"><span class="v-menu-label">Edit reminder</span><label>Description<input name="text" maxlength="3000" value="{{.Text}}" required></label><label>Date<input type="date" name="date" value="{{.DateValue}}" required></label><label>Time<input type="time" name="time" value="{{.TimeValue}}" required></label><label>Repeat<select name="recurrence"><option value="">Does not repeat</option><option value="daily"{{if eq .Recurrence "daily"}} selected{{end}}>Daily</option><option value="weekly"{{if eq .Recurrence "weekly"}} selected{{end}}>Weekly</option><option value="monthly"{{if eq .Recurrence "monthly"}} selected{{end}}>Monthly</option><option value="yearly"{{if eq .Recurrence "yearly"}} selected{{end}}>Yearly</option></select></label><button class="v-btn primary" type="submit">Save changes</button></form><hr>{{end}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger" type="submit">Delete reminder</button></form></div></details></div></div>
-</li>{{end}}
-{{if not .RemindersOnly}}{{range .Items}}<li class="v-row later-item"{{if .SourceAvailable}} data-row-href="{{.SourceURL}}"{{end}}><span class="v-avatar" aria-hidden="true">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else if .Initial}}{{.Initial}}{{else}}?{{end}}</span>
-<div class="v-row-main">{{if .SourceAvailable}}<div class="v-row-meta"><a class="later-source-link" href="{{.SourceURL}}">{{if .ChannelPrivate}}🔒 {{end}}{{.ChannelPrefix}}{{.ChannelName}}</a></div><p class="v-row-title">{{if .AuthorID}}<a class="later-author" href="/app/members?user={{.AuthorID}}" data-profile-user="{{.AuthorID}}">{{.AuthorName}}</a>{{else}}{{.AuthorName}}{{end}} <time class="v-row-time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></p><div class="v-row-text v-text clamp">{{.Text}}</div>{{with .Reminder}}<span class="due-chip{{if .Overdue}} overdue{{end}}{{if .Completed}} done{{end}}"><span aria-hidden="true">⏰</span>{{if .Completed}}Reminder completed · {{else if .Overdue}}Overdue · {{else}}Due {{end}}<time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span>{{end}}{{else}}<p class="later-unavailable">This message is no longer available.</p>{{end}}</div>
-<div class="v-row-side"><div class="v-hover-actions">
-{{if $.InProgressCurrent}}<form method="post" action="{{.CompleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="v-icon" type="submit" aria-label="Mark complete" title="Mark complete"><span aria-hidden="true">✓</span></button></form>{{if .RemindURL}}{{template "remindMenu" (laterRemind .RemindURL $.CSRFToken .AuthorName)}}{{end}}<form method="post" action="{{.ArchiveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="v-icon" type="submit" aria-label="Archive" title="Archive"><span aria-hidden="true">🗄</span></button></form>{{else}}<form method="post" action="{{.RestoreURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="v-icon" type="submit" aria-label="Move to in progress" title="Move to in progress"><span aria-hidden="true">↺</span></button></form>{{end}}
-<details class="v-menu"><summary class="v-icon" role="button" aria-label="More actions for this saved item"><span aria-hidden="true">⋮</span></summary><div class="v-menu-list">{{if .SourceAvailable}}<button type="button" data-copy-text="{{.SourceURL}}" data-copy-done="Link copied.">Copy link</button><form method="post" action="{{.MarkUnreadURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Mark unread</button></form>{{end}}{{with .Reminder}}{{if .CanComplete}}<form method="post" action="{{.CompleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Complete reminder</button></form>{{end}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Delete reminder</button></form>{{end}}<hr><form method="post" action="{{.RemoveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger remove" type="submit">Remove from Later</button></form></div></details>
-</div></div></li>{{end}}{{end}}
-{{if and (not .Reminders) (or .RemindersOnly (not .Items))}}<li class="v-empty">{{if $.ChannelReminders}}You have not created any channel reminders.{{else if .RemindersOnly}}You have no upcoming reminders.{{else if .InProgressCurrent}}<strong>Nothing saved for later</strong>Save a message or set a reminder and it appears here.{{else}}No items in {{.StateTitle}}.{{end}}</li>{{end}}
-</ul>
-<p class="visually-hidden" id="view-status" aria-live="polite"></p>
-{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more saved items</a></p>{{end}}
-</main>{{end}}`
-
-var laterTemplate = mustPage(laterMarkup)
-
-// laterLiveScript reloads the Later views when their records change. It skips
-// the reload while any <details> editor is open: a reload re-renders the
-// editor closed, so a live event arriving mid-edit silently destroyed the
-// person's unsaved changes. Saving navigates anyway, which refreshes the page.
-const laterLiveScript = `<script>(function(){
-if(!window.EventSource)return;
-var stream=` + liveStreamOpen + `;
-['saved_item.created','saved_item.changed','saved_item.removed','later_reminder.created','later_reminder.changed','later_reminder.completed','later_reminder.deleted','later_reminder.delivered','later_reminder.failed'].forEach(function(topic){
-stream.addEventListener(topic,function(){
-if(document.querySelector('details[open]'))return;
-window.location.reload()});
-});
-})();</script>`
 
 const draftsAndSentMarkup = `{{define "title"}}Drafts &amp; sent · SameOldChat{{end}}
 {{define "styles"}}` + shellStyle + shellPageStyle + `<style>
@@ -4389,7 +4254,9 @@ func (h Handler) Register(serveMux *http.ServeMux) {
 	mux.HandleFunc("POST /app/notifications/dnd", h.setNotificationSnooze)
 	mux.HandleFunc("POST /app/notifications/schedule", h.setNotificationSchedule)
 	mux.HandleFunc("POST /app/notifications/vips", h.setNotificationVIP)
-	mux.HandleFunc("GET /app/later", h.later)
+	mux.HandleFunc("GET /app/later", h.laterMoved)
+	mux.HandleFunc("GET /app/todos", h.todos)
+	mux.HandleFunc("GET /app/saved", h.saved)
 	mux.HandleFunc("GET /app/threads", h.threadsPage)
 	mux.HandleFunc("GET /app/unreads", h.unreadsPage)
 	mux.HandleFunc("GET /app/drafts", h.draftsAndSent)
@@ -4537,13 +4404,17 @@ func (h Handler) Register(serveMux *http.ServeMux) {
 	mux.HandleFunc("POST /app/reaction/remove", h.removeReaction)
 	mux.HandleFunc("POST /app/pin", h.addPin)
 	mux.HandleFunc("POST /app/pin/remove", h.removePin)
-	mux.HandleFunc("POST /app/later/save", h.saveForLater)
-	mux.HandleFunc("POST /app/later/state", h.setSavedItemState)
-	mux.HandleFunc("POST /app/later/remove", h.removeSavedItem)
-	mux.HandleFunc("POST /app/reminders/create", h.createLaterReminder)
-	mux.HandleFunc("POST /app/reminders/update", h.updateLaterReminder)
-	mux.HandleFunc("POST /app/reminders/complete", h.completeLaterReminder)
-	mux.HandleFunc("POST /app/reminders/delete", h.deleteLaterReminder)
+	mux.HandleFunc("POST /app/saved/add", h.addToSaved)
+	mux.HandleFunc("POST /app/saved/remove", h.removeSavedItem)
+	mux.HandleFunc("POST /app/saved/clear", h.clearSavedItems)
+	mux.HandleFunc("POST /app/saved/move", h.moveSavedItemsToTodos)
+	mux.HandleFunc("POST /app/todos/create", h.createTodo)
+	mux.HandleFunc("POST /app/todos/edit", h.editTodo)
+	mux.HandleFunc("POST /app/todos/reminder", h.setTodoReminder)
+	mux.HandleFunc("POST /app/todos/done", h.setTodoDone)
+	mux.HandleFunc("POST /app/todos/delete", h.deleteTodo)
+	mux.HandleFunc("POST /app/todos/acknowledge", h.acknowledgeTodoReminders)
+	mux.HandleFunc("POST /app/reminders/channel/delete", h.deleteChannelReminder)
 	mux.HandleFunc("POST /app/session/revoke", h.revokeSession)
 	mux.HandleFunc("POST /logout", h.revokeSession)
 }
@@ -6252,8 +6123,8 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			UnreactURL:    mutationURL("/app/reaction/remove", channel, timestamp, threadTimestamp, before),
 			PinURL:        mutationURL("/app/pin", channel, timestamp, threadTimestamp, before),
 			UnpinURL:      mutationURL("/app/pin/remove", channel, timestamp, threadTimestamp, before),
-			SaveURL:       mutationURL("/app/later/save", channel, timestamp, threadTimestamp, before),
-			RemindURL:     mutationURL("/app/reminders/create", channel, timestamp, threadTimestamp, before),
+			SaveURL:       mutationURL("/app/saved/add", channel, timestamp, threadTimestamp, before),
+			RemindURL:     mutationURL("/app/todos/create", channel, timestamp, threadTimestamp, before),
 			UpdateURL:     mutationURL("/app/message/update", channel, timestamp, threadTimestamp, before),
 			DeleteURL:     mutationURL("/app/message/delete", channel, timestamp, threadTimestamp, before),
 			// The first-party editor currently writes plain text. Offering it on
@@ -6354,7 +6225,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		if item, ok := saved[message.ID]; ok {
 			view.Saved = true
 			view.SavedItemID = string(item.ID)
-			view.UnsaveURL = mutationURL("/app/later/remove", channel, timestamp, threadTimestamp, before) + "&id=" + url.QueryEscape(string(item.ID))
+			view.UnsaveURL = mutationURL("/app/saved/remove", channel, timestamp, threadTimestamp, before) + "&id=" + url.QueryEscape(string(item.ID))
 		}
 		for _, file := range message.Files {
 			title := strings.TrimSpace(file.Title)
@@ -6935,285 +6806,6 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 // Search
 // ---------------------------------------------------------------------------
 
-func parseLaterState(value string) (domain.SavedItemState, bool) {
-	switch domain.SavedItemState(strings.TrimSpace(value)) {
-	case "", domain.SavedItemInProgress:
-		return domain.SavedItemInProgress, true
-	case domain.SavedItemArchived:
-		return domain.SavedItemArchived, true
-	case domain.SavedItemCompleted:
-		return domain.SavedItemCompleted, true
-	default:
-		return "", false
-	}
-}
-
-func laterActionURL(path string, id domain.SavedItemID, state, returnState domain.SavedItemState, channel string) string {
-	query := url.Values{"id": {string(id)}, "channel": {channel}}
-	if state != "" {
-		query.Set("state", string(state))
-	}
-	if returnState != "" {
-		query.Set("return_state", string(returnState))
-	}
-	return path + "?" + query.Encode()
-}
-
-func reminderActionURL(path string, id domain.LaterReminderID, state domain.SavedItemState, channel string) string {
-	query := url.Values{"id": {string(id)}, "channel": {channel}, "return_state": {string(state)}}
-	return path + "?" + query.Encode()
-}
-
-func (h Handler) later(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
-	if err != nil {
-		h.writeAuthError(w, r, err)
-		return
-	}
-	sessionCookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		h.writeAuthError(w, r, auth.ErrNotAuthenticated)
-		return
-	}
-	state, ok := parseLaterState(r.URL.Query().Get("state"))
-	if !ok {
-		h.writePageError(w, http.StatusBadRequest, "That Later link is not valid", "Open Later from the workspace and choose a section.")
-		return
-	}
-	head, err := h.readLiveHead(r.Context(), principal)
-	if err != nil {
-		h.writeStoreError(w, err, "Later is temporarily unavailable.")
-		return
-	}
-	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
-	if channel == "" {
-		channel = string(h.Channel)
-	}
-	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
-	page, err := h.Messages.SavedItems(r.Context(), principal.WorkspaceID, principal.UserID, state, domain.PageRequest{Limit: scheduledWindow, Cursor: cursor})
-	if err != nil {
-		if errors.Is(err, domain.ErrInvalidCursor) || errors.Is(err, store.ErrInvalidArgument) {
-			h.writePageError(w, http.StatusBadRequest, "That Later link is not valid", "Open Later from the workspace and try again.")
-			return
-		}
-		h.writeStoreError(w, err, "Later is temporarily unavailable.")
-		return
-	}
-	title := map[domain.SavedItemState]string{
-		domain.SavedItemInProgress: "In progress",
-		domain.SavedItemArchived:   "Archived",
-		domain.SavedItemCompleted:  "Completed",
-	}[state]
-	data := laterData{
-		Channel: channel, CSRFToken: auth.CSRFToken(sessionCookie.Value), State: state, StateTitle: title,
-		InProgressCurrent: state == domain.SavedItemInProgress,
-		ArchivedCurrent:   state == domain.SavedItemArchived,
-		CompletedCurrent:  state == domain.SavedItemCompleted,
-		Items:             make([]laterItemView, 0, len(page.Items)),
-		RemindersOnly:     r.URL.Query().Get("filter") == "reminders",
-		ChannelReminders:  r.URL.Query().Get("filter") == "channel-reminders",
-	}
-	if data.ChannelReminders {
-		data.RemindersOnly = true
-	}
-	switch r.URL.Query().Get("changed") {
-	case "saved":
-		data.Notice = "Message saved for later."
-	case "removed":
-		data.Notice = "Message removed from Later."
-	case "state":
-		data.Notice = "Saved item moved."
-	case "reminder":
-		data.Notice = "Reminder saved."
-	case "reminder-completed":
-		data.Notice = "Reminder completed."
-	case "reminder-deleted":
-		data.Notice = "Reminder deleted."
-	}
-	reminderTarget := domain.LaterReminderPersonal
-	if data.ChannelReminders {
-		reminderTarget = domain.LaterReminderChannel
-	}
-	reminderPage, reminderErr := h.Messages.LaterReminders(r.Context(), principal.WorkspaceID, principal.UserID, reminderTarget, domain.PageRequest{Limit: scheduledWindow})
-	if reminderErr != nil {
-		h.writeStoreError(w, reminderErr, "Reminders are temporarily unavailable.")
-		return
-	}
-	// A reminder on a saved message is shown on that message, as its due
-	// chip, rather than as a second card for the same message.
-	savedKeys := map[string]int{}
-	for index, item := range page.Items {
-		if item.SourceAvailable {
-			savedKeys[string(item.Conversation)+"\x00"+string(domain.NewMessageTimestamp(item.Message.CreatedAt))] = index
-		}
-	}
-	attached := map[int]laterReminderView{}
-	now := time.Now()
-	for _, reminder := range reminderPage.Items {
-		completed := !reminder.CompletedAt.IsZero()
-		if !data.ChannelReminders && (state == domain.SavedItemArchived || (state == domain.SavedItemCompleted) != completed) {
-			if state != domain.SavedItemArchived {
-				continue
-			}
-			// An archived message keeps its reminder chip: the chip belongs
-			// to the item, whatever tab the item is on.
-			if _, onItem := savedKeys[string(reminder.SourceConversation)+"\x00"+string(reminder.SourceTimestamp)]; !onItem {
-				continue
-			}
-		}
-		view := laterReminderView{
-			ID: string(reminder.ID), Text: reminder.Text, Overdue: !completed && reminder.DueAt.Before(now),
-			MachineTime: reminder.DueAt.UTC().Format(time.RFC3339), DisplayTime: formatTime(reminder.DueAt),
-			Recurrence: string(reminder.Recurrence), Delivered: !reminder.LastDeliveredAt.IsZero(), Completed: completed,
-			Failed: !reminder.FailedAt.IsZero(), FailureCode: reminder.FailureCode,
-			UpdateURL:   reminderActionURL("/app/reminders/update", reminder.ID, state, channel),
-			CompleteURL: reminderActionURL("/app/reminders/complete", reminder.ID, state, channel),
-			DeleteURL:   reminderActionURL("/app/reminders/delete", reminder.ID, state, channel),
-			CanEdit:     reminder.Target == domain.LaterReminderPersonal && !completed,
-			CanComplete: reminder.Target == domain.LaterReminderPersonal && !completed, TimeZone: reminder.TimeZone,
-		}
-		if reminder.Target == domain.LaterReminderChannel {
-			view.SourceLabel = "Channel reminder"
-			if conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, reminder.Channel); conversationErr == nil {
-				view.SourceLabel = "#" + conversationName(conversation)
-				view.SourceURL = "/app?channel=" + url.QueryEscape(string(reminder.Channel))
-			}
-		}
-		if location, locationErr := time.LoadLocation(reminder.TimeZone); locationErr == nil {
-			localDue := reminder.DueAt.In(location)
-			view.DateValue = localDue.Format("2006-01-02")
-			view.TimeValue = localDue.Format("15:04")
-		}
-		if reminder.SourceTimestamp != "" {
-			sourceTime, parseErr := domain.ParseMessageTimestamp(reminder.SourceTimestamp)
-			if parseErr == nil {
-				boundary := domain.Message{ID: reminder.SourceMessageID, CreatedAt: sourceTime.Add(time.Nanosecond)}
-				before := ""
-				if cursor, cursorErr := domain.NewMessageCursor(boundary); cursorErr == nil {
-					before = string(cursor)
-				}
-				view.SourceURL = appURL(string(reminder.SourceConversation), "", before, messageAnchor(reminder.SourceMessageID), "")
-				view.SourceLabel = "View source message"
-			}
-		}
-		if index, onItem := savedKeys[string(reminder.SourceConversation)+"\x00"+string(reminder.SourceTimestamp)]; onItem && reminder.SourceTimestamp != "" && !data.ChannelReminders {
-			attached[index] = view
-			continue
-		}
-		if state == domain.SavedItemArchived && !data.ChannelReminders {
-			continue
-		}
-		data.Reminders = append(data.Reminders, view)
-	}
-	names := h.newUserNames(r.Context(), principal)
-	for index, item := range page.Items {
-		view := laterItemView{
-			ID:              string(item.ID),
-			SourceAvailable: item.SourceAvailable,
-			CompleteURL:     laterActionURL("/app/later/state", item.ID, domain.SavedItemCompleted, state, channel),
-			ArchiveURL:      laterActionURL("/app/later/state", item.ID, domain.SavedItemArchived, state, channel),
-			RestoreURL:      laterActionURL("/app/later/state", item.ID, domain.SavedItemInProgress, state, channel),
-			RemoveURL:       laterActionURL("/app/later/remove", item.ID, "", state, channel),
-		}
-		if reminder, onItem := attached[index]; onItem {
-			view.Reminder = &reminder
-		}
-		if item.SourceAvailable {
-			timestamp := string(domain.NewMessageTimestamp(item.Message.CreatedAt))
-			if rendered := h.newResultViews(r.Context(), principal, []domain.Message{item.Message}, names); len(rendered) == 1 {
-				view.Text = rendered[0].DisplayText
-				view.ChannelPrivate = rendered[0].ChannelPrivate
-			}
-			if strings.TrimSpace(item.Message.Text) == "" {
-				view.Text = "File or rich message"
-			}
-			view.AvatarURL = names.avatarURL(item.Message.AuthorID)
-			if item.Message.AppID == "" && item.Message.AuthorID != "" {
-				view.AuthorID = string(item.Message.AuthorID)
-			}
-			reminderQuery := url.Values{"channel": {string(item.Conversation)}, "ts": {timestamp}, "return_state": {string(state)}}
-			view.RemindURL = "/app/reminders/create?" + reminderQuery.Encode()
-			view.MarkUnreadURL = "/app/read/unread?" + url.Values{"channel": {string(item.Conversation)}, "ts": {timestamp}}.Encode()
-			view.MachineTime = item.Message.CreatedAt.UTC().Format(time.RFC3339Nano)
-			view.DisplayTime = formatTime(item.Message.CreatedAt)
-			boundary := item.Message
-			boundary.CreatedAt = boundary.CreatedAt.Add(time.Nanosecond)
-			before := ""
-			if cursor, cursorErr := domain.NewMessageCursor(boundary); cursorErr == nil {
-				before = string(cursor)
-			}
-			view.SourceURL = appURL(string(item.Conversation), string(item.Message.ThreadTimestamp), before, messageAnchor(item.Message.ID), "")
-			view.AuthorName = "Unknown member"
-			if author, authorErr := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Message.AuthorID); authorErr == nil {
-				view.AuthorName = displayName(author)
-			}
-			view.Initial = initial(view.AuthorName)
-			view.ChannelName = "Conversation"
-			if conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Conversation); conversationErr == nil {
-				view.ChannelName = conversationName(conversation)
-				view.ChannelPrefix = "#"
-				if conversation.IsDirectOrGroup() {
-					view.ChannelPrefix = ""
-					if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
-						view.ChannelName = participants
-					}
-				}
-			}
-		}
-		data.Items = append(data.Items, view)
-	}
-	if page.HasMore && page.NextCursor != "" {
-		query := url.Values{"channel": {channel}, "state": {string(state)}, "cursor": {string(page.NextCursor)}}
-		data.MoreURL = "/app/later?" + query.Encode()
-	}
-	data.Shell = h.newShell(r, principal, shellRequest{Destination: destinationLater})
-	data.InProgressCount, data.ArchivedCount, data.CompletedCount = h.laterCounts(r, principal, reminderPage.Items)
-	h.writeLivePage(w, head, laterTemplate, data, http.StatusOK, "Later rendering unavailable")
-}
-
-// laterCounts are the numbers on Later's tabs: saved items in each state,
-// plus the personal reminders that are not already shown on a saved item
-// (open ones under In progress, completed ones under Completed). Each count
-// stops at laterCountLimit, which the page shows as "999+" rather than
-// reading an unbounded history on every load.
-func (h Handler) laterCounts(r *http.Request, principal auth.Principal, reminders []domain.LaterReminder) (int, int, int) {
-	counts := map[domain.SavedItemState]int{}
-	saved := map[string]bool{}
-	for _, state := range []domain.SavedItemState{domain.SavedItemInProgress, domain.SavedItemArchived, domain.SavedItemCompleted} {
-		request := domain.PageRequest{Limit: 200}
-		for counts[state] < laterCountLimit {
-			page, err := h.Messages.SavedItems(r.Context(), principal.WorkspaceID, principal.UserID, state, request)
-			if err != nil {
-				break
-			}
-			counts[state] += len(page.Items)
-			for _, item := range page.Items {
-				if item.SourceAvailable {
-					saved[string(item.Conversation)+"\x00"+string(domain.NewMessageTimestamp(item.Message.CreatedAt))] = true
-				}
-			}
-			if !page.HasMore || page.NextCursor == "" || page.NextCursor == request.Cursor {
-				break
-			}
-			request.Cursor = page.NextCursor
-		}
-	}
-	for _, reminder := range reminders {
-		if reminder.Target != domain.LaterReminderPersonal || saved[string(reminder.SourceConversation)+"\x00"+string(reminder.SourceTimestamp)] {
-			continue
-		}
-		if reminder.CompletedAt.IsZero() {
-			counts[domain.SavedItemInProgress]++
-		} else {
-			counts[domain.SavedItemCompleted]++
-		}
-	}
-	clamp := func(value int) int { return min(value, laterCountLimit) }
-	return clamp(counts[domain.SavedItemInProgress]), clamp(counts[domain.SavedItemArchived]), clamp(counts[domain.SavedItemCompleted])
-}
-
-const laterCountLimit = 999
-
 func (h Handler) scheduledMessages(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	query.Set("tab", "scheduled")
@@ -7480,12 +7072,12 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 				view.groupKey = string(item.MessageID) + "\x00" + item.ReactionName
 			}
 		}
-		if item.ReminderID != "" {
+		if item.TodoID != "" {
 			view.ActorName = "Reminder"
 			view.Glyph = "⏰"
-			if item.Reminder.ID != "" {
-				view.Text = template.HTML(template.HTMLEscapeString(item.Reminder.Text))
-				view.SourceURL = "/app/later?channel=" + url.QueryEscape(channel) + "&state=completed"
+			if item.Todo.ID != "" {
+				view.Text = template.HTML(template.HTMLEscapeString(item.Todo.Title))
+				view.SourceURL = "/app/todos?channel=" + url.QueryEscape(channel)
 			}
 		}
 		// A reminders.add reminder carries its own text and no source message,
@@ -7502,7 +7094,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 			messageViews := h.newResultViews(r.Context(), principal, []domain.Message{item.Message}, names)
 			if len(messageViews) == 1 {
 				message := messageViews[0]
-				if item.ReminderID == "" {
+				if item.TodoID == "" {
 					view.Text = message.DisplayText
 				}
 				view.SourceURL = message.Permalink
@@ -7524,7 +7116,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 				// The actor is who caused the item — the reactor of a reaction,
 				// the inviter of an invitation — and only falls back to the
 				// message's author when the item names nobody.
-				if item.ReminderID == "" && item.ActorID == "" {
+				if item.TodoID == "" && item.ActorID == "" {
 					view.ActorName = message.AuthorName
 				}
 			}
@@ -8250,7 +7842,7 @@ func (h Handler) acknowledgeActivityReminders(w http.ResponseWriter, r *http.Req
 	if _, ok := h.decodeMutation(w, r, "The reminder read marker could not be read. Reload Activity and try again."); !ok {
 		return
 	}
-	if err := h.Messages.AcknowledgeLaterReminders(r.Context(), principal.WorkspaceID, principal.UserID); err != nil {
+	if err := h.Messages.AcknowledgeTodoReminders(r.Context(), principal.WorkspaceID, principal.UserID); err != nil {
 		h.writeMutationError(w, r, http.StatusServiceUnavailable, "Reminder badges are temporarily unavailable", "The reminder read marker could not be saved. No reminder was changed.")
 		return
 	}
@@ -8594,15 +8186,19 @@ func notificationPauseEnd(preset, custom string, location *time.Location, now ti
 	return time.Time{}, false
 }
 
+// hasUnacknowledgedReminder reports whether a to-do's reminder has come due
+// since the member last opened To-dos or acknowledged it in Activity: the
+// badge Slack puts on both tabs. Done to-dos never badge.
 func (h Handler) hasUnacknowledgedReminder(ctx context.Context, principal auth.Principal) (bool, error) {
 	var cursor domain.Cursor
+	now := time.Now().UTC()
 	for {
-		page, err := h.Messages.LaterReminders(ctx, principal.WorkspaceID, principal.UserID, domain.LaterReminderPersonal, domain.PageRequest{Limit: scheduledWindow, Cursor: cursor})
+		page, err := h.Messages.Todos(ctx, principal.WorkspaceID, principal.UserID, domain.TodoQuery{Sort: domain.TodoSortEarliestFirst, Now: now, Page: domain.PageRequest{Limit: scheduledWindow, Cursor: cursor}})
 		if err != nil {
 			return false, err
 		}
-		for _, reminder := range page.Items {
-			if reminder.LastDeliveredAt.After(reminder.AcknowledgedAt) {
+		for _, todo := range page.Items {
+			if todo.Badged() {
 				return true, nil
 			}
 		}
@@ -11899,7 +11495,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusBadRequest
 			reason = "Add something to search for after /search."
 		}
-		if errors.Is(err, domain.ErrInvalidLaterReminder) {
+		if errors.Is(err, domain.ErrInvalidReminderRequest) || errors.Is(err, domain.ErrInvalidLaterReminder) {
 			status = http.StatusBadRequest
 			reason = "Use /remind #channel what when, for example /remind #general stand-up tomorrow at 9am. Use /remind list to review channel reminders."
 		}
@@ -12631,45 +12227,47 @@ func slashCommandInput(text string) (string, string, bool) {
 	return text[:end], strings.TrimSpace(text[end:]), true
 }
 
-func (h Handler) channelReminderRequest(ctx context.Context, principal auth.Principal, currentChannel domain.ConversationID, input, timeZone string, now time.Time) (domain.LaterReminderRequest, error) {
+func (h Handler) channelReminderRequest(ctx context.Context, principal auth.Principal, currentChannel domain.ConversationID, input, timeZone string, now time.Time) (domain.ChannelReminderRequest, error) {
 	input = strings.TrimSpace(input)
 	targetEnd := strings.IndexAny(input, " \t\r\n")
 	if targetEnd <= 1 || input[0] != '#' {
-		return domain.LaterReminderRequest{}, domain.ErrInvalidLaterReminder
+		return domain.ChannelReminderRequest{}, domain.ErrInvalidReminderRequest
 	}
 	targetName := strings.TrimSpace(input[1:targetEnd])
 	expression := strings.TrimSpace(input[targetEnd:])
 	if targetName == "" || expression == "" {
-		return domain.LaterReminderRequest{}, domain.ErrInvalidLaterReminder
+		return domain.ChannelReminderRequest{}, domain.ErrInvalidReminderRequest
 	}
 	target, err := h.joinedChannelByName(ctx, principal, targetName)
 	if err != nil {
-		return domain.LaterReminderRequest{}, err
+		return domain.ChannelReminderRequest{}, err
 	}
 	if target.ID == "" {
-		return domain.LaterReminderRequest{}, store.ErrNotFound
+		return domain.ChannelReminderRequest{}, store.ErrNotFound
 	}
 	if target.ID != currentChannel {
 		member, memberErr := h.Messages.IsConversationMember(ctx, principal.WorkspaceID, principal.UserID, target.ID)
 		if memberErr != nil {
-			return domain.LaterReminderRequest{}, memberErr
+			return domain.ChannelReminderRequest{}, memberErr
 		}
 		if !member {
-			return domain.LaterReminderRequest{}, domain.ErrNotInConversation
+			return domain.ChannelReminderRequest{}, domain.ErrNotInConversation
 		}
 	}
 	location, err := time.LoadLocation(strings.TrimSpace(timeZone))
 	if err != nil {
-		return domain.LaterReminderRequest{}, domain.ErrInvalidLaterReminder
+		return domain.ChannelReminderRequest{}, domain.ErrInvalidReminderRequest
 	}
 	text, occurrence, err := domain.ParseReminderExpression(expression, now, location)
 	if err != nil {
-		return domain.LaterReminderRequest{}, err
+		return domain.ChannelReminderRequest{}, err
 	}
-	return domain.LaterReminderRequest{
-		Target: domain.LaterReminderChannel, Channel: target.ID, Text: text,
-		DueAt: occurrence.Due.UTC(), TimeZone: location.String(), Recurrence: occurrence.Recurrence,
-		RecurrenceAnchor: occurrence.Anchor.UTC(),
+	return domain.ChannelReminderRequest{
+		Channel: target.ID, Text: text,
+		Reminder: domain.ReminderTiming{
+			DueAt: occurrence.Due.UTC(), TimeZone: location.String(), Recurrence: occurrence.Recurrence,
+			RecurrenceAnchor: occurrence.Anchor.UTC(),
+		},
 	}, nil
 }
 
@@ -13107,281 +12705,6 @@ func (h Handler) mutatePin(w http.ResponseWriter, r *http.Request, add bool) {
 		return
 	}
 	h.completeMutation(w, r)
-}
-
-func (h Handler) createLaterReminder(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
-	if err != nil {
-		h.writeAuthError(w, r, err)
-		return
-	}
-	fields, ok := h.decodeMutation(w, r, "The reminder could not be read from the form. Reload the page and try again.")
-	if !ok {
-		return
-	}
-	request, err := personalReminderRequest(fields, time.Now().UTC())
-	if err != nil {
-		h.writeMutationError(w, r, http.StatusBadRequest, "That reminder time is not valid", err.Error())
-		return
-	}
-	if sourceTimestamp := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("ts"))); sourceTimestamp != "" {
-		if _, parseErr := domain.ParseMessageTimestamp(sourceTimestamp); parseErr != nil {
-			h.writeMutationError(w, r, http.StatusBadRequest, "That message link is not valid", "Open the message menu again and choose a reminder time.")
-			return
-		}
-		request.SourceChannel = h.requestChannel(r)
-		request.SourceTimestamp = sourceTimestamp
-		if request.Text == "" {
-			request.Text = "Message reminder"
-		}
-	}
-	if _, err := h.Messages.CreateLaterReminder(r.Context(), principal.WorkspaceID, principal.UserID, request); err != nil {
-		h.writeLaterReminderError(w, r, err, "The reminder was not created")
-		return
-	}
-	// A reminder set from a message's menu is confirmed where the member is,
-	// as Slack does, rather than by taking them to Later.
-	if request.SourceTimestamp != "" && r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("Vary", "HX-Request")
-		setMutationNotice(w, reminderConfirmation(request.DueAt, request.TimeZone, time.Now()))
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	h.redirectReminderMutation(w, r, "reminder")
-}
-
-func (h Handler) updateLaterReminder(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
-	if err != nil {
-		h.writeAuthError(w, r, err)
-		return
-	}
-	fields, ok := h.decodeMutation(w, r, "The reminder changes could not be read from the form. Reload Later and try again.")
-	if !ok {
-		return
-	}
-	request, err := personalReminderRequest(fields, time.Now().UTC())
-	if err != nil {
-		h.writeMutationError(w, r, http.StatusBadRequest, "That reminder time is not valid", err.Error())
-		return
-	}
-	id := domain.LaterReminderID(strings.TrimSpace(r.URL.Query().Get("id")))
-	if id == "" {
-		h.writeMutationError(w, r, http.StatusBadRequest, "That reminder link is not valid", "Open Later and edit the reminder again.")
-		return
-	}
-	if _, err := h.Messages.UpdateLaterReminder(r.Context(), principal.WorkspaceID, principal.UserID, id, request); err != nil {
-		h.writeLaterReminderError(w, r, err, "The reminder was not updated")
-		return
-	}
-	h.redirectReminderMutation(w, r, "reminder")
-}
-
-func (h Handler) completeLaterReminder(w http.ResponseWriter, r *http.Request) {
-	h.mutateLaterReminder(w, r, true)
-}
-
-func (h Handler) deleteLaterReminder(w http.ResponseWriter, r *http.Request) {
-	h.mutateLaterReminder(w, r, false)
-}
-
-func (h Handler) mutateLaterReminder(w http.ResponseWriter, r *http.Request, complete bool) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
-	if err != nil {
-		h.writeAuthError(w, r, err)
-		return
-	}
-	if _, ok := h.decodeMutation(w, r, "The reminder action could not be read from the form. Reload Later and try again."); !ok {
-		return
-	}
-	id := domain.LaterReminderID(strings.TrimSpace(r.URL.Query().Get("id")))
-	if id == "" {
-		h.writeMutationError(w, r, http.StatusBadRequest, "That reminder link is not valid", "Open Later and try again.")
-		return
-	}
-	if complete {
-		err = h.Messages.CompleteLaterReminder(r.Context(), principal.WorkspaceID, principal.UserID, id)
-	} else {
-		err = h.Messages.DeleteLaterReminder(r.Context(), principal.WorkspaceID, principal.UserID, id)
-	}
-	if err != nil {
-		heading := "The reminder was not deleted"
-		if complete {
-			heading = "The reminder was not completed"
-		}
-		h.writeLaterReminderError(w, r, err, heading)
-		return
-	}
-	changed := "reminder-deleted"
-	if complete {
-		changed = "reminder-completed"
-	}
-	h.redirectReminderMutation(w, r, changed)
-}
-
-func personalReminderRequest(fields map[string]string, now time.Time) (domain.LaterReminderRequest, error) {
-	timeZone := strings.TrimSpace(fields["timezone"])
-	if timeZone == "" {
-		timeZone = "UTC"
-	}
-	location, err := time.LoadLocation(timeZone)
-	if err != nil {
-		return domain.LaterReminderRequest{}, errors.New("Choose a valid time zone and try again.")
-	}
-	preset := strings.TrimSpace(fields["preset"])
-	var due time.Time
-	switch preset {
-	case "20m", "1h", "3h", "tomorrow", "nextweek":
-		due, _ = presetLocalTime(preset, now, location)
-	case "next_week":
-		// Slack's "Next week" is 9:00 on the coming Monday.
-		due, _ = presetLocalTime("monday", now, location)
-	case "", "custom":
-		date := strings.TrimSpace(fields["date"])
-		clock := strings.TrimSpace(fields["time"])
-		if clock == "" {
-			clock = "09:00"
-		}
-		due, err = time.ParseInLocation("2006-01-02 15:04", date+" "+clock, location)
-		if err != nil || due.In(location).Format("2006-01-02 15:04") != date+" "+clock {
-			return domain.LaterReminderRequest{}, errors.New("Choose a real calendar date and time.")
-		}
-	default:
-		return domain.LaterReminderRequest{}, errors.New("Choose one of the available reminder times.")
-	}
-	return domain.LaterReminderRequest{
-		Target: domain.LaterReminderPersonal, Text: strings.TrimSpace(fields["text"]),
-		DueAt: due.UTC(), TimeZone: timeZone,
-		Recurrence: domain.ReminderRecurrence(strings.TrimSpace(fields["recurrence"])),
-	}, nil
-}
-
-func (h Handler) writeLaterReminderError(w http.ResponseWriter, r *http.Request, err error, heading string) {
-	status := http.StatusServiceUnavailable
-	reason := "The reminder could not be changed because the workspace store is temporarily unavailable."
-	switch {
-	case errors.Is(err, domain.ErrInvalidLaterReminder):
-		status, reason = http.StatusBadRequest, "Add a description, a valid date and time, and a supported repeat option."
-	case errors.Is(err, domain.ErrReminderTimeInPast):
-		status, reason = http.StatusBadRequest, "Choose a reminder time in the future."
-	case errors.Is(err, domain.ErrNotInConversation):
-		status, reason = http.StatusForbidden, "You cannot create a reminder for a conversation you have not joined."
-	case errors.Is(err, store.ErrNotFound):
-		status, reason = http.StatusNotFound, "That reminder or source message is no longer available, belongs to another member, or is being delivered now."
-	}
-	h.writeMutationError(w, r, status, heading, reason)
-}
-
-func (h Handler) redirectReminderMutation(w http.ResponseWriter, r *http.Request, changed string) {
-	state, ok := parseLaterState(r.URL.Query().Get("return_state"))
-	if !ok {
-		state = domain.SavedItemInProgress
-	}
-	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
-	if channel == "" {
-		channel = string(h.Channel)
-	}
-	query := url.Values{"channel": {channel}, "state": {string(state)}, "changed": {changed}}
-	h.redirectMutation(w, r, "/app/later?"+query.Encode())
-}
-
-func (h Handler) saveForLater(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
-	if err != nil {
-		h.writeAuthError(w, r, err)
-		return
-	}
-	if _, ok := h.decodeMutation(w, r, "The save request could not be read from the form. Reload the page and try again."); !ok {
-		return
-	}
-	timestamp := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("ts")))
-	if _, err := domain.ParseMessageTimestamp(timestamp); err != nil {
-		h.writeMutationError(w, r, http.StatusBadRequest, "That message link is not valid", "The message was not saved because the link does not identify a message in this conversation.")
-		return
-	}
-	if _, err := h.Messages.SaveForLater(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), timestamp); err != nil {
-		status, reason := http.StatusServiceUnavailable, "The message could not be saved because the workspace store is temporarily unavailable."
-		switch {
-		case errors.Is(err, domain.ErrInvalidTimestamp):
-			status, reason = http.StatusBadRequest, "That message link is not valid."
-		case errors.Is(err, store.ErrNotFound):
-			status, reason = http.StatusNotFound, "That message is no longer available or you can no longer read it."
-		}
-		h.writeMutationError(w, r, status, "The message was not saved", reason)
-		return
-	}
-	h.completeMutation(w, r)
-}
-
-func (h Handler) setSavedItemState(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
-	if err != nil {
-		h.writeAuthError(w, r, err)
-		return
-	}
-	if _, ok := h.decodeMutation(w, r, "The Later action could not be read from the form. Reload Later and try again."); !ok {
-		return
-	}
-	id := domain.SavedItemID(strings.TrimSpace(r.URL.Query().Get("id")))
-	rawState := strings.TrimSpace(r.URL.Query().Get("state"))
-	state, ok := parseLaterState(rawState)
-	if id == "" || rawState == "" || !ok {
-		h.writeMutationError(w, r, http.StatusBadRequest, "That Later action is not valid", "Open Later from the workspace and try again.")
-		return
-	}
-	if _, err := h.Messages.SetSavedItemState(r.Context(), principal.WorkspaceID, principal.UserID, id, state); err != nil {
-		status, reason := http.StatusServiceUnavailable, "The saved item could not be moved because the workspace store is temporarily unavailable."
-		if errors.Is(err, store.ErrNotFound) {
-			status, reason = http.StatusNotFound, "That saved item is no longer available."
-		} else if errors.Is(err, store.ErrInvalidArgument) {
-			status, reason = http.StatusBadRequest, "That Later destination is not valid."
-		}
-		h.writeMutationError(w, r, status, "The saved item was not moved", reason)
-		return
-	}
-	h.redirectLaterMutation(w, r, "state")
-}
-
-func (h Handler) removeSavedItem(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
-	if err != nil {
-		h.writeAuthError(w, r, err)
-		return
-	}
-	if _, ok := h.decodeMutation(w, r, "The remove request could not be read from the form. Reload the page and try again."); !ok {
-		return
-	}
-	id := domain.SavedItemID(strings.TrimSpace(r.URL.Query().Get("id")))
-	if id == "" {
-		h.writeMutationError(w, r, http.StatusBadRequest, "That saved item link is not valid", "Open Later from the workspace and try again.")
-		return
-	}
-	if err := h.Messages.RemoveSavedItem(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
-		status, reason := http.StatusServiceUnavailable, "The saved item could not be removed because the workspace store is temporarily unavailable."
-		if errors.Is(err, store.ErrNotFound) {
-			status, reason = http.StatusNotFound, "That saved item was already removed or belongs to another member."
-		}
-		h.writeMutationError(w, r, status, "The saved item was not removed", reason)
-		return
-	}
-	if strings.TrimSpace(r.URL.Query().Get("return_state")) != "" {
-		h.redirectLaterMutation(w, r, "removed")
-		return
-	}
-	h.completeMutation(w, r)
-}
-
-func (h Handler) redirectLaterMutation(w http.ResponseWriter, r *http.Request, changed string) {
-	state, ok := parseLaterState(r.URL.Query().Get("return_state"))
-	if !ok {
-		state = domain.SavedItemInProgress
-	}
-	query := url.Values{
-		"channel": {string(h.requestChannel(r))},
-		"state":   {string(state)},
-		"changed": {changed},
-	}
-	h.redirectMutation(w, r, "/app/later?"+query.Encode())
 }
 
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
@@ -14253,7 +13576,7 @@ func (h Handler) writeAuthError(w http.ResponseWriter, r *http.Request, err erro
 	}
 	// A person navigating to a page without a session belongs on the sign-in
 	// flow. Only GET /app used to redirect, so every deeper page — /app/members,
-	// /app/later, a link a teammate shared — answered a bare text 401 to a
+	// /app/todos, a link a teammate shared — answered a bare text 401 to a
 	// browser. Fragment fetches (the app's own requests, marked HX-Request)
 	// keep the 401: redirecting them would inject the sign-in page into a
 	// fragment swap instead of navigating.

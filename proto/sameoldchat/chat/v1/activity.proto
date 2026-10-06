@@ -7,8 +7,12 @@ option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/tr
 import "sameoldchat/chat/v1/conversation_mutations.proto";
 import "sameoldchat/chat/v1/messages.proto";
 import "sameoldchat/chat/v1/reminders.proto";
+import "sameoldchat/chat/v1/todos.proto";
 
 message ActivityItem {
+  // reminder was the Later reminder that came due; the to-do is todo (27).
+  reserved 14;
+  reserved "reminder";
   string id = 1;
   string workspace_id = 2;
   string user_id = 3;
@@ -16,13 +20,13 @@ message ActivityItem {
   string actor_id = 5;
   string conversation_id = 6;
   string message_id = 7;
+  // reminder_id names the to-do whose reminder came due.
   string reminder_id = 8;
   string reaction_name = 9;
   int64 occurred_at = 10;
   int64 read_at = 11;
   int64 cleared_at = 12;
   Message message = 13;
-  LaterReminder reminder = 14;
   bool source_available = 15;
   string canvas_id = 16;
   string canvas_title = 17;
@@ -35,6 +39,7 @@ message ActivityItem {
   string app_reminder_id = 24;
   Reminder app_reminder = 25;
   string call_id = 26;
+  Todo todo = 27;
 }
 
 // ListItemSummary is what an Activity row needs to name assigned work without

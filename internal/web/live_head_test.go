@@ -55,7 +55,7 @@ func TestLivePagesOpenTheirStreamAtTheRenderedHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	want = strconv.FormatUint(head, 10)
-	for _, target := range []string{"/app?channel=Cdev", "/app/later", "/app/activity", "/app/apps", "/app/canvases/" + string(canvas.ID)} {
+	for _, target := range []string{"/app?channel=Cdev", "/app/todos", "/app/saved", "/app/activity", "/app/apps", "/app/canvases/" + string(canvas.ID)} {
 		if got := renderedEventHead(t, target, get(t, mux, target)); got != want {
 			t.Fatalf("%s rendered head %s, want %s", target, got, want)
 		}

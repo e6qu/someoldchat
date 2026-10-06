@@ -158,7 +158,7 @@ func TestMessageMenuActionsCompleteInPlace(t *testing.T) {
 	requireOrdered(t, "More actions", body, ">Mark unread<", ">Remind me about this<", ">Copy link<", ">Pin to channel<", ">Edit message<", ">Delete message…<")
 
 	for _, preset := range []string{"3h", "nextweek"} {
-		response := postForm(t, mux, "/app/reminders/create?channel=Cdev&ts="+timestamp, url.Values{"_csrf": {auth.CSRFToken("session")}, "preset": {preset}, "timezone": {"UTC"}}.Encode(), true)
+		response := postForm(t, mux, "/app/todos/create?channel=Cdev&ts="+timestamp, url.Values{"_csrf": {auth.CSRFToken("session")}, "preset": {preset}, "timezone": {"UTC"}}.Encode(), true)
 		if response.Code != http.StatusNoContent {
 			t.Fatalf("%s reminder=%d: %s", preset, response.Code, response.Body)
 		}
@@ -179,17 +179,36 @@ func TestMessageMenuActionsCompleteInPlace(t *testing.T) {
 
 func TestNextWeekIsTheComingMondayMorning(t *testing.T) {
 	sunday := time.Date(2026, 9, 27, 15, 0, 0, 0, time.UTC)
-	request, err := personalReminderRequest(map[string]string{"preset": "nextweek", "timezone": "UTC"}, sunday)
-	if err != nil {
-		t.Fatal(err)
+	timing, reason, ok := reminderTimingFromForm(map[string]string{"preset": "nextweek", "timezone": "UTC"}, sunday)
+	if !ok {
+		t.Fatal(reason)
 	}
-	if want := time.Date(2026, 9, 28, 9, 0, 0, 0, time.UTC); !request.DueAt.Equal(want) {
-		t.Fatalf("next week from Sunday=%s want %s", request.DueAt, want)
+	if want := time.Date(2026, 9, 28, 9, 0, 0, 0, time.UTC); !timing.DueAt.Equal(want) {
+		t.Fatalf("next week from Sunday=%s want %s", timing.DueAt, want)
 	}
 	monday := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
-	request, _ = personalReminderRequest(map[string]string{"preset": "nextweek", "timezone": "UTC"}, monday)
-	if want := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC); !request.DueAt.Equal(want) {
-		t.Fatalf("next week from Monday=%s want %s", request.DueAt, want)
+	timing, _, _ = reminderTimingFromForm(map[string]string{"preset": "next_week", "timezone": "UTC"}, monday)
+	if want := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC); !timing.DueAt.Equal(want) {
+		t.Fatalf("next week from Monday=%s want %s", timing.DueAt, want)
+	}
+	// A Custom date with no time is 9 a.m. in the member's zone, as Slack's
+	// default reminder time is.
+	timing, _, ok = reminderTimingFromForm(map[string]string{"preset": "custom", "date": "2026-10-07", "timezone": "Europe/Bucharest"}, sunday)
+	if want := time.Date(2026, 10, 7, 6, 0, 0, 0, time.UTC); !ok || !timing.DueAt.Equal(want) || timing.TimeZone != "Europe/Bucharest" {
+		t.Fatalf("custom date without a time=%+v ok=%v, want %s", timing, ok, want)
+	}
+	if timing, _, ok := reminderTimingFromForm(map[string]string{"preset": "none"}, sunday); !ok || timing.Scheduled() {
+		t.Fatalf("no reminder=%+v ok=%v", timing, ok)
+	}
+	for _, fields := range []map[string]string{
+		{"preset": "custom", "date": "2026-02-30"},
+		{"preset": "sometime"},
+		{"preset": "1h", "timezone": "Mars/Olympus"},
+		{"preset": "1h", "recurrence": "hourly"},
+	} {
+		if _, reason, ok := reminderTimingFromForm(fields, sunday); ok || reason == "" {
+			t.Fatalf("%v was accepted (reason %q)", fields, reason)
+		}
 	}
 }
 
@@ -212,7 +231,7 @@ func TestReactionPillsNameReactorsAndToolbarLeadsWithRecentEmoji(t *testing.T) {
 	requireOrdered(t, "pills in first-use order", article, `title="Grace Hopper reacted with :zap:"`, `title="Grace Hopper and you reacted with :eyes:"`)
 	// The member's own reactions lead, as Slack's follow the account; this
 	// browser's recent emoji come after them.
-	requireOrdered(t, "toolbar", article[strings.Index(article, `class="message-actions"`):], `data-quick-reaction aria-label="React with :eyes:"`, `aria-label="React with :rocket:"`, `aria-label="React with :thumbsup:"`, `aria-label="Add reaction"`, `aria-label="Reply in thread"`, `aria-label="Forward message"`, `aria-label="Save for later"`, `aria-label="More actions"`)
+	requireOrdered(t, "toolbar", article[strings.Index(article, `class="message-actions"`):], `data-quick-reaction aria-label="React with :eyes:"`, `aria-label="React with :rocket:"`, `aria-label="React with :thumbsup:"`, `aria-label="Add reaction"`, `aria-label="Reply in thread"`, `aria-label="Forward message"`, `aria-label="Add to saved"`, `aria-label="More actions"`)
 	requireContains(t, "add reaction pill", article, `class="chip add-reaction-chip"`)
 }
 

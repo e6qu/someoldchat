@@ -13,6 +13,7 @@ const homePanePartial = `{{define "home-pane"}}<div class="sidebar-head">
     <a class="side-link" href="{{.Shell.With "/app/unreads"}}" data-pref-row="sidebar-unreads" aria-label="Unreads" {{ariaKeyshortcuts "Unreads"}}><span class="side-icon" aria-hidden="true">{{icon "unreads"}}</span><span class="side-text">Unreads</span></a>
     <a class="side-link" href="{{.Shell.With "/app/threads"}}" data-pref-row="sidebar-threads" data-default="true" aria-label="Threads" {{ariaKeyshortcuts "Threads"}}><span class="side-icon" aria-hidden="true">{{icon "threads"}}</span><span class="side-text">Threads</span></a>
     {{if .CanSchedule}}<a class="side-link" href="{{.Shell.With "/app/drafts"}}" data-pref-row="sidebar-drafts" data-default="true" aria-label="Drafts and sent"><span class="side-icon" aria-hidden="true">{{icon "send"}}</span><span class="side-text">Drafts &amp; sent</span></a>{{end}}
+    <a class="side-link" href="{{.Shell.With "/app/saved"}}" data-pref-row="sidebar-saved" data-default="true" aria-label="Saved" {{ariaKeyshortcuts "Saved items"}}><span class="side-icon" aria-hidden="true">{{icon "saved"}}</span><span class="side-text">Saved</span></a>
   </nav>
   {{range $section := .HomeSections}}
   <nav class="side-section{{if $section.Custom}} side-section-custom{{end}}" aria-label="{{$section.Label}}" data-section-key="{{$section.Key}}"{{if $section.DropTarget}} data-drop-section="{{$section.DropTarget}}"{{end}}>

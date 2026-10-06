@@ -157,24 +157,24 @@ func TestSQLiteActivityReactionReadCursorAndReminderDeliveryAreAtomic(t *testing
 		t.Fatalf("read cursor left activity unread=%+v err=%v", unread, err)
 	}
 
-	reminder := domain.LaterReminder{
-		ID: "later-1", WorkspaceID: "T1", Creator: "U2", UserID: "U2",
-		Target: domain.LaterReminderPersonal, Text: "remember", DueAt: created,
-		TimeZone: "UTC", CreatedAt: created.Add(-time.Hour), UpdatedAt: created.Add(-time.Hour),
+	todo := domain.Todo{
+		ID: "todo-1", WorkspaceID: "T1", UserID: "U2", Title: "remember",
+		Reminder:  domain.ReminderTiming{DueAt: created, TimeZone: "UTC", RecurrenceAnchor: created},
+		CreatedAt: created.Add(-time.Hour), UpdatedAt: created.Add(-time.Hour),
 	}
-	if err := s.CreateLaterReminder(ctx, reminder, events.Event{ID: "E5", WorkspaceID: "T1", Topic: "later_reminder.created"}); err != nil {
+	if err := s.CreateTodo(ctx, todo, events.Event{ID: "E5", WorkspaceID: "T1", Topic: "todo.created"}); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := s.ClaimDueLaterReminders(ctx, "T1", "worker", 1, time.Minute, created.Add(time.Minute))
+	claimed, err := s.ClaimDueTodoReminders(ctx, "T1", "worker", 1, time.Minute, created.Add(time.Minute))
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claimed=%+v err=%v", claimed, err)
 	}
 	delivered := created.Add(90 * time.Second)
-	if err := s.MarkLaterReminderDelivered(ctx, "worker", reminder.ID, delivered, time.Time{}, events.Event{ID: "E6", WorkspaceID: "T1", Topic: "later_reminder.delivered"}); err != nil {
+	if err := s.MarkTodoReminderDelivered(ctx, "worker", todo.ID, delivered, time.Time{}, events.Event{ID: "E6", WorkspaceID: "T1", Topic: "todo.reminder_delivered"}); err != nil {
 		t.Fatal(err)
 	}
 	reminders, err := s.ListActivity(ctx, "T1", "U2", domain.ActivityQuery{Kinds: []domain.ActivityKind{domain.ActivityReminder}, Page: domain.PageRequest{Limit: 20}})
-	if err != nil || len(reminders.Items) != 1 || reminders.Items[0].Reminder.Text != "remember" {
+	if err != nil || len(reminders.Items) != 1 || reminders.Items[0].Todo.Title != "remember" {
 		t.Fatalf("reminder activity=%+v err=%v", reminders, err)
 	}
 }

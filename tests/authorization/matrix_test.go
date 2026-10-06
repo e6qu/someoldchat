@@ -353,8 +353,10 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureCallID)
 	case reflect.TypeOf(domain.ReminderID("")):
 		return reflect.ValueOf(fixtureReminderID)
-	case reflect.TypeOf(domain.LaterReminderID("")):
-		return reflect.ValueOf(fixtureLaterReminderID)
+	case reflect.TypeOf(domain.TodoID("")):
+		return reflect.ValueOf(fixtureTodoID)
+	case reflect.TypeOf(domain.ChannelReminderID("")):
+		return reflect.ValueOf(fixtureChannelReminderID)
 	case reflect.TypeOf(domain.BookmarkID("")):
 		return reflect.ValueOf(fixtureBookmarkID)
 	case reflect.TypeOf(domain.UserGroupID("")):
@@ -390,9 +392,10 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 	case reflect.TypeOf(domain.WorkflowRunID("")):
 		return reflect.ValueOf(fixtureWorkflowRunID)
 	case reflect.TypeOf(domain.SavedItemID("")):
-		// RemoveSavedItem acts on the caller's own saved item, so the holder is
-		// handed its own; other operations that name one keep the member's.
-		if method == "RemoveSavedItem" {
+		// RemoveSavedItem and MoveSavedItemToTodo act on the caller's own saved
+		// item, so the holder is handed its own; other operations that name one
+		// keep the member's.
+		if method == "RemoveSavedItem" || method == "MoveSavedItemToTodo" {
 			return reflect.ValueOf(fixtureHolderSavedItemID)
 		}
 		return reflect.ValueOf(fixtureSavedItemID)
@@ -466,13 +469,23 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureSlackbotResponseID)
 	case reflect.TypeOf(domain.ClientConnectionID("")):
 		return reflect.ValueOf(fixtureClientConnectionID)
-	case reflect.TypeOf(domain.LaterReminderRequest{}):
-		// A valid personal reminder edit, so UpdateLaterReminder — acting on the
-		// holder's own seeded reminder after authorizeWorkspace — reaches success
-		// while a caller below membership is refused for standing.
-		return reflect.ValueOf(domain.LaterReminderRequest{
-			Target: domain.LaterReminderPersonal, Text: "updated fixture reminder",
-			Recurrence: domain.ReminderOnce, DueAt: time.Now().Add(24 * time.Hour).UTC(),
+	case reflect.TypeOf(domain.TodoRequest{}):
+		// A valid to-do with a reminder, so CreateTodo reaches success for the
+		// holder while a caller below membership is refused for standing.
+		return reflect.ValueOf(domain.TodoRequest{
+			Title: "fixture to-do", Reminder: domain.ReminderTiming{DueAt: time.Now().Add(24 * time.Hour).UTC(), TimeZone: "UTC"},
+		})
+	case reflect.TypeOf(domain.TodoEdit{}):
+		// A valid edit of the holder's own seeded to-do.
+		return reflect.ValueOf(domain.TodoEdit{Title: "edited fixture to-do"})
+	case reflect.TypeOf(domain.ReminderTiming{}):
+		// A real reminder, so SetTodoReminder sets one on the holder's to-do
+		// rather than only clearing its due date.
+		return reflect.ValueOf(domain.ReminderTiming{DueAt: time.Now().Add(48 * time.Hour).UTC(), TimeZone: "UTC"})
+	case reflect.TypeOf(domain.ChannelReminderRequest{}):
+		// A channel reminder in the channel the holder belongs to.
+		return reflect.ValueOf(domain.ChannelReminderRequest{
+			Channel: "C1", Text: "fixture channel reminder", Reminder: domain.ReminderTiming{DueAt: time.Now().Add(24 * time.Hour).UTC(), TimeZone: "UTC"},
 		})
 	case reflect.TypeOf(domain.WorkspaceRole("")):
 		// A real role, so SetUserRole reaches success promoting the seeded member
@@ -752,7 +765,7 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		JoinURL: "https://example.test/call", Title: "fixture call", CreatedBy: "U-member",
 		Participants: []domain.UserID{"U-member"}, StartedAt: at,
 	}, event("E-call", "call.created")))
-	// A reminder and a Later reminder belong to the HOLDER the differential asks
+	// A reminder, a to-do and a channel reminder belong to the HOLDER the differential asks
 	// (U-owner), because these operations act on the caller's own reminder:
 	// owned by anyone else, the holder is refused "not found" exactly as a
 	// stranger is, which is the blindness this fixture removes rather than a
@@ -761,11 +774,16 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		WorkspaceID: "T1", ID: fixtureReminderID, Creator: "U-owner", User: "U-owner",
 		Text: "fixture reminder", Time: at.Add(time.Hour),
 	}, event("E-reminder", "reminder.created")))
-	seed("later reminder", repository.CreateLaterReminder(ctx, domain.LaterReminder{
-		ID: fixtureLaterReminderID, WorkspaceID: "T1", Creator: "U-owner", UserID: "U-owner",
-		Text: "fixture later reminder", Target: domain.LaterReminderPersonal, Recurrence: domain.ReminderOnce,
-		DueAt: at.Add(time.Hour), CreatedAt: at,
-	}, event("E-later-reminder", "later_reminder.created")))
+	seed("to-do", repository.CreateTodo(ctx, domain.Todo{
+		ID: fixtureTodoID, WorkspaceID: "T1", UserID: "U-owner", Title: "fixture to-do",
+		Reminder:  domain.ReminderTiming{DueAt: at.Add(time.Hour), TimeZone: "UTC", RecurrenceAnchor: at.Add(time.Hour)},
+		CreatedAt: at, UpdatedAt: at,
+	}, event("E-todo", "todo.created")))
+	seed("channel reminder", repository.CreateChannelReminder(ctx, domain.ChannelReminder{
+		ID: fixtureChannelReminderID, WorkspaceID: "T1", Creator: "U-owner", Channel: "C1", Text: "fixture channel reminder",
+		Reminder:  domain.ReminderTiming{DueAt: at.Add(time.Hour), TimeZone: "UTC", RecurrenceAnchor: at.Add(time.Hour)},
+		CreatedAt: at, UpdatedAt: at,
+	}, event("E-channel-reminder", "channel_reminder.created")))
 	seed("bookmark", repository.CreateBookmark(ctx, domain.Bookmark{
 		ID: fixtureBookmarkID, WorkspaceID: "T1", Conversation: "C1", Title: "fixture bookmark",
 		Type: "link", Link: "https://example.test/bookmark", UpdatedBy: "U-member",
@@ -960,7 +978,7 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	}, event("E-holder-star", "star.added")))
 	if _, _, err := repository.CreateSavedItem(ctx, domain.SavedItem{
 		ID: fixtureSavedItemID, WorkspaceID: "T1", UserID: "U-member", MessageID: fixtureMessageID,
-		Conversation: "C1", State: domain.SavedItemInProgress, CreatedAt: at, UpdatedAt: at,
+		Conversation: "C1", CreatedAt: at,
 	}, event("E-saved", "saved_item.created")); err != nil {
 		t.Fatalf("seed saved item: %v", err)
 	}
@@ -971,7 +989,7 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	// standing. Each belongs to U-owner, the caller the differential asks.
 	if _, _, err := repository.CreateSavedItem(ctx, domain.SavedItem{
 		ID: fixtureHolderSavedItemID, WorkspaceID: "T1", UserID: "U-owner", MessageID: fixtureMessageID,
-		Conversation: "C1", State: domain.SavedItemInProgress, CreatedAt: at, UpdatedAt: at,
+		Conversation: "C1", CreatedAt: at,
 	}, event("E-holder-saved", "saved_item.created")); err != nil {
 		t.Fatalf("seed holder saved item: %v", err)
 	}
@@ -1049,17 +1067,18 @@ const fixtureHolderReaction = "clap"
 // that distinguishes "mine" from "anybody's" is asked the question it actually
 // answers.
 const (
-	fixtureCanvasID        domain.CanvasID        = "F-canvas"
-	fixtureListID          domain.ListID          = "F-list"
-	fixtureCallID          domain.CallID          = "F-call"
-	fixtureReminderID      domain.ReminderID      = "F-reminder"
-	fixtureLaterReminderID domain.LaterReminderID = "F-later-reminder"
-	fixtureBookmarkID      domain.BookmarkID      = "F-bookmark"
-	fixtureUserGroupID     domain.UserGroupID     = "F-usergroup"
-	fixtureFileID          domain.FileID          = "F-file"
-	fixtureWorkflowID      domain.WorkflowID      = "F-workflow"
-	fixtureAppID           domain.AppID           = "F-app"
-	fixtureDialogID        domain.DialogID        = "F-dialog"
+	fixtureCanvasID          domain.CanvasID          = "F-canvas"
+	fixtureListID            domain.ListID            = "F-list"
+	fixtureCallID            domain.CallID            = "F-call"
+	fixtureReminderID        domain.ReminderID        = "F-reminder"
+	fixtureTodoID            domain.TodoID            = "F-todo"
+	fixtureChannelReminderID domain.ChannelReminderID = "F-channel-reminder"
+	fixtureBookmarkID        domain.BookmarkID        = "F-bookmark"
+	fixtureUserGroupID       domain.UserGroupID       = "F-usergroup"
+	fixtureFileID            domain.FileID            = "F-file"
+	fixtureWorkflowID        domain.WorkflowID        = "F-workflow"
+	fixtureAppID             domain.AppID             = "F-app"
+	fixtureDialogID          domain.DialogID          = "F-dialog"
 	// fixtureDeactivatedDialogID is the deactivated tier's own dialog.
 	fixtureDeactivatedDialogID domain.DialogID = "F-deactivated-dialog"
 	fixtureHuddleID            domain.CallID   = "F-huddle"

@@ -65,7 +65,7 @@ func keyboardSections() []keyboardSection {
 			{Action: "Unreads", Apple: "Meta+Shift+A", Other: "Control+Shift+A"},
 			{Action: "Threads", Apple: "Meta+Shift+T", Other: "Control+Shift+T"},
 			{Action: "Direct messages", Apple: "Meta+Shift+K", Other: "Control+Shift+K"},
-			{Action: "Later", Apple: "Meta+Shift+S", Other: "Control+Shift+S"},
+			{Action: "Saved items", Apple: "Meta+Shift+S", Other: "Control+Shift+S"},
 			{Action: "Conversation details", Apple: "Meta+Shift+I", Other: "Control+Shift+I"},
 			{Action: "Browse channels", Apple: "Meta+Shift+L", Other: "Control+Shift+L"},
 			{Action: "People", Apple: "Meta+Shift+E", Other: "Control+Shift+E"},
@@ -90,7 +90,7 @@ func keyboardSections() []keyboardSection {
 		{Title: "Message actions", Shortcuts: []keyboardShortcut{
 			{Action: "React to the focused message", Apple: "R", Other: "R"},
 			{Action: "Edit the focused message", Apple: "E", Other: "E"},
-			{Action: "Save the focused message for later", Apple: "A", Other: "A"},
+			{Action: "Add the focused message to saved items", Apple: "A", Other: "A"},
 			{Action: "Remind me about the focused message", Apple: "M", Other: "M"},
 			{Action: "Forward the focused message", Apple: "F", Other: "F"},
 			{Action: "Pin or unpin the focused message", Apple: "P", Other: "P"},
