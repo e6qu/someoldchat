@@ -684,61 +684,95 @@ test('[DRAFT-01 DRAFT-02 A11Y-01] drafts persist on the server and Drafts & sent
   await expectNoSeriousAccessibilityViolations(page);
 });
 
-test('[LATER-01 LATER-02 LATER-03 A11Y-01] Later saves privately and supports every current state', async ({ page, context, request }) => {
+test('[LATER-01 LATER-02 LATER-03 A11Y-01] Saved keeps messages privately in Home, opens them, and cleans up into To-dos', async ({ page, context, request }) => {
   await signIn(context);
-  const text = `later browser qualification ${Date.now()}`;
+  // Saved and To-dos reload themselves on their own events; this journey is
+  // the CRUD contract, so the stream is held shut and every change observed is
+  // one this test made.
+  await page.route('**/events*', (route) => route.abort());
+  const text = `saved browser qualification ${Date.now()}`;
   await postThroughTheAPI(request, text);
   await page.goto('/app');
 
   const message = page.locator('.message', { hasText: text });
   await message.focus();
   await page.keyboard.press('a');
-  await expect(message.getByRole('button', { name: 'Remove from Later' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(message.getByRole('button', { name: 'Remove from saved items' })).toHaveAttribute('aria-pressed', 'true');
   await expect(message).toBeFocused();
 
-  await page.getByRole('link', { name: 'Later' }).click();
-  await expect(page.getByRole('heading', { name: 'Later', exact: true, level: 1 })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'In progress' })).toHaveAttribute('aria-current', 'page');
-  let item = page.locator('.later-item', { hasText: text });
+  await page.getByRole('link', { name: 'Saved', exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/saved/);
+  await expect(page.getByRole('heading', { name: 'Saved', exact: true, level: 1 })).toBeVisible();
+  let item = page.locator('.saved-item', { hasText: text });
   await expect(item.getByRole('link', { name: '#general' })).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
-  await item.getByRole('link', { name: '#general' }).click();
-  await expect(page.locator('.message', { hasText: text })).toBeVisible();
-  await page.getByRole('link', { name: 'Later' }).click();
-  item = page.locator('.later-item', { hasText: text });
 
-  await item.getByRole('button', { name: 'Mark complete' }).click();
-  await expect(page.getByRole('status')).toHaveText('Saved item moved.');
-  await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
-  await page.getByRole('link', { name: 'Completed' }).click();
-  item = page.locator('.later-item', { hasText: text });
-  await expect(item).toBeVisible();
-
-  await item.getByRole('button', { name: 'Move to in progress' }).click();
-  await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
-  await page.getByRole('link', { name: 'In progress' }).click();
-  item = page.locator('.later-item', { hasText: text });
-  await item.getByRole('button', { name: 'Archive' }).click();
-  await page.getByRole('link', { name: 'Archived' }).click();
-  item = page.locator('.later-item', { hasText: text });
-  await expect(item).toBeVisible();
-
-  // Remove lives in the item's More actions menu, beside Copy link and Mark
-  // unread, as in Slack's Later.
+  // Open in Home lives in the item's More actions menu.
   await item.hover();
   await item.getByRole('button', { name: 'More actions for this saved item' }).click();
-  await item.getByRole('button', { name: 'Remove from Later' }).click();
-  await expect(page.getByRole('status')).toHaveText('Message removed from Later.');
-  await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
+  await item.getByRole('link', { name: 'Open in Home' }).click();
+  await expect(page.locator('.message', { hasText: text })).toBeVisible();
+
+  // Move to To-dos turns the saved message into a to-do titled after it and
+  // takes it out of Saved in the same step.
+  await page.goto(`/app/saved?channel=${CHANNEL}`);
+  item = page.locator('.saved-item', { hasText: text });
+  await item.hover();
+  await item.getByRole('button', { name: 'More actions for this saved item' }).click();
+  await item.getByRole('button', { name: 'Move to To-dos' }).click();
+  await expect(page.getByRole('status')).toHaveText('Moved to To-dos.');
+  await expect(page.locator('.saved-item', { hasText: text })).toHaveCount(0);
+  await page.getByRole('link', { name: 'To-dos', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'To-dos', exact: true, level: 1 })).toBeVisible();
+  const todo = page.locator('.todo-item', { hasText: text });
+  await expect(todo.getByRole('link', { name: 'View message in #general' })).toBeVisible();
+  await todo.getByRole('button', { name: `Mark done: ${text}` }).click();
+  await expect(page.getByRole('status')).toHaveText('To-do marked done.');
+  await expect(page.locator('.todo-item', { hasText: text })).toHaveCount(0);
+
+  // The clear icon removes one item; clean-up moves a selection to To-dos or
+  // removes every saved item at once.
+  await page.goto('/app');
+  await page.locator('.message', { hasText: text }).focus();
+  await page.keyboard.press('a');
+  await page.goto(`/app/saved?channel=${CHANNEL}`);
+  item = page.locator('.saved-item', { hasText: text });
+  await item.hover();
+  await item.locator('.v-hover-actions > form').getByRole('button', { name: 'Remove from saved items' }).click();
+  await expect(page.getByRole('status')).toHaveText('Removed from saved items.');
+  await expect(page.locator('.saved-item', { hasText: text })).toHaveCount(0);
+
+  const second = `saved clean-up ${Date.now()}`;
+  await postThroughTheAPI(request, second);
+  for (const body of [text, second]) {
+    await page.goto('/app');
+    await page.locator('.message', { hasText: body }).focus();
+    await page.keyboard.press('a');
+    await expect(page.locator('.message', { hasText: body }).getByRole('button', { name: 'Remove from saved items' })).toHaveAttribute('aria-pressed', 'true');
+  }
+  await page.goto(`/app/saved?channel=${CHANNEL}`);
+  await page.getByRole('link', { name: 'Clean up saved items' }).click();
+  await expect(page.getByRole('group', { name: 'Clean up saved items' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.locator('.saved-item', { hasText: second }).getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Move selected to To-dos' }).click();
+  await expect(page.getByRole('status')).toHaveText('Moved to To-dos.');
+  await expect(page.locator('.saved-item', { hasText: second })).toHaveCount(0);
+  await expect(page.locator('.saved-item', { hasText: text })).toBeVisible();
+  await page.getByRole('link', { name: 'Clean up saved items' }).click();
+  await page.getByRole('button', { name: 'Remove all saved items' }).click();
+  await expect(page.getByRole('status')).toHaveText('Your saved items were removed.');
+  await expect(page.locator('.saved-item')).toHaveCount(0);
+  await expect(page.getByText('No saved items')).toBeVisible();
+  await page.goto(`/app/todos?channel=${CHANNEL}`);
+  await expect(page.locator('.todo-item', { hasText: second })).toBeVisible();
 });
 
-test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut, Later lifecycle, and built-in slash command', async ({ page, context, request }) => {
+test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] To-dos take reminders from a message, Add To-do, filters, sorts, edits, and /remind', async ({ page, context, request }) => {
   await signIn(context);
-  // The Later pages reload themselves on reminder events. This journey is the
-  // CRUD contract, not live delivery, and the reminders it creates fire those
-  // very events — an EventSource replay right after landing reloads the page
-  // under an open editor or a running axe scan, which is the WebKit flake.
-  // Hold the stream shut so every state change observed is one this test made.
+  // To-dos reload on to-do and reminder events; the reminders this journey
+  // sets fire those very events, and a reload under an open editor or a
+  // running axe scan is the WebKit flake. Hold the stream shut.
   await page.route('**/events*', (route) => route.abort());
   const sourceText = `reminder source ${Date.now()}`;
   await postThroughTheAPI(request, sourceText);
@@ -756,58 +790,104 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   // conversation.
   await expect(page.locator('#message-toast')).toContainText("Got it! We'll remind you about this message");
   await expect(page).toHaveURL(/\/app(\?|$)/);
-  await page.goto(`/app/later?channel=${CHANNEL}`);
-  let reminder = page.locator('.later-item', { hasText: 'Message reminder' });
-  await expect(reminder.getByRole('link', { name: 'View source message' })).toBeVisible();
-  await expect(reminder.getByRole('button', { name: 'Mark complete' })).toBeVisible();
 
-  // A reminder is edited from its More actions menu.
-  await reminder.hover();
-  await reminder.getByRole('button', { name: 'More actions for this reminder' }).click();
+  // The links people kept to Later open To-dos.
+  await page.goto(`/app/later?channel=${CHANNEL}`);
+  await expect(page).toHaveURL(/\/app\/todos\?channel=/);
+  await expect(page.getByRole('heading', { name: 'To-dos', exact: true, level: 1 })).toBeVisible();
+  let todo = page.locator('.todo-item', { hasText: sourceText });
+  await expect(todo.getByRole('link', { name: 'View message in #general' })).toBeVisible();
+  await expect(todo.locator('.due-chip')).toContainText('Due');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  // Edit reminder offers the same suggested times plus Custom.
   const tomorrow = await page.evaluate(() => {
     const value = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const pad = (part) => String(part).padStart(2, '0');
     return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
   });
-  const description = `weekly reminder ${Date.now()}`;
-  await reminder.getByLabel('Description').fill(description);
-  await reminder.getByLabel('Date').fill(tomorrow);
-  await reminder.getByLabel('Time').fill('12:30');
-  await reminder.getByLabel('Repeat').selectOption('weekly');
-  await reminder.getByRole('button', { name: 'Save changes' }).click();
+  await todo.hover();
+  await todo.getByRole('button', { name: `Edit reminder for ${sourceText}` }).click();
+  await todo.getByLabel('Date').fill(tomorrow);
+  await todo.getByLabel('Time').fill('12:30');
+  await todo.getByLabel('Repeat').selectOption('weekly');
+  await todo.getByRole('button', { name: 'Set reminder' }).click();
   await expect(page.getByRole('status')).toHaveText('Reminder saved.');
-  reminder = page.locator('.later-item', { hasText: description });
-  await expect(reminder).toContainText('Repeats weekly');
-  await expectNoSeriousAccessibilityViolations(page);
+  todo = page.locator('.todo-item', { hasText: sourceText });
+  await expect(todo).toContainText('Repeats weekly');
 
-  await reminder.getByRole('button', { name: 'Mark complete' }).click();
-  await expect(page.getByRole('status')).toHaveText('Reminder completed.');
-  await page.getByRole('link', { name: 'Completed' }).click();
-  await expect(page).toHaveURL(/\/app\/later\?.*state=completed/);
-  reminder = page.locator('.later-item', { hasText: description });
-  await expect(reminder).toContainText('Completed');
-  await reminder.hover();
-  await reminder.getByRole('button', { name: 'More actions for this reminder' }).click();
-  await reminder.getByRole('button', { name: 'Delete reminder' }).click();
-  await expect(page.getByRole('status')).toHaveText('Reminder deleted.');
-  await expect(page.locator('.later-item', { hasText: description })).toHaveCount(0);
+  // A to-do is renamed from its More actions menu.
+  const title = `weekly to-do ${Date.now()}`;
+  await todo.hover();
+  await todo.getByRole('button', { name: 'More actions for this to-do' }).click();
+  await todo.getByLabel('To-do', { exact: true }).fill(title);
+  await todo.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByRole('status')).toHaveText('To-do saved.');
+  todo = page.locator('.todo-item', { hasText: title });
+  await expect(todo).toBeVisible();
+
+  // The filter narrows by reminder; the to-do is upcoming, not unscheduled.
+  await page.getByRole('button', { name: 'Filter and sort to-dos' }).click();
+  await page.getByLabel('No reminder scheduled').check();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page).toHaveURL(/reminders=none/);
+  await expect(page.locator('.todo-item', { hasText: title })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Filter and sort to-dos, filtered' }).click();
+  await page.getByLabel('No reminder scheduled').uncheck();
+  await page.getByLabel('Upcoming').check();
+  await page.getByLabel('Latest date created').check();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page).toHaveURL(/reminders=upcoming/);
+  await expect(page).toHaveURL(/sort=created_desc/);
+  await expect(page.locator('.todo-item', { hasText: title })).toBeVisible();
+  await page.goto(`/app/todos?channel=${CHANNEL}`);
+
+  // Clear due date leaves the to-do without a reminder.
+  todo = page.locator('.todo-item', { hasText: title });
+  await todo.hover();
+  await todo.getByRole('button', { name: `Edit reminder for ${title}` }).click();
+  await todo.getByRole('button', { name: 'Clear due date' }).click();
+  await expect(page.getByRole('status')).toHaveText('Due date cleared.');
+  todo = page.locator('.todo-item', { hasText: title });
+  await expect(todo.locator('.due-chip')).toHaveCount(0);
+
+  // Add To-do makes one directly, with or without a reminder.
+  const added = `added to-do ${Date.now()}`;
+  await page.getByRole('button', { name: 'Add To-do' }).click();
+  await page.getByLabel('To-do', { exact: true }).first().fill(added);
+  await page.getByLabel('Remind me').selectOption('1h');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(page.getByRole('status')).toHaveText('To-do added.');
+  await expect(page.locator('.todo-item', { hasText: added }).locator('.due-chip')).toContainText('Due');
+
+  // Done moves a to-do to the Done tab, where it can be deleted.
+  await page.locator('.todo-item', { hasText: title }).getByRole('button', { name: `Mark done: ${title}` }).click();
+  await expect(page.getByRole('status')).toHaveText('To-do marked done.');
+  await page.getByRole('navigation', { name: 'To-dos sections' }).getByRole('link', { name: 'Done' }).click();
+  await expect(page).toHaveURL(/view=done/);
+  todo = page.locator('.todo-item', { hasText: title });
+  await expect(todo.getByRole('button', { name: `Mark not done: ${title}` })).toHaveAttribute('aria-pressed', 'true');
+  await todo.hover();
+  await todo.getByRole('button', { name: 'More actions for this to-do' }).click();
+  await todo.getByRole('button', { name: 'Delete to-do' }).click();
+  await expect(page.getByRole('status')).toHaveText('To-do deleted.');
+  await expect(page.locator('.todo-item', { hasText: title })).toHaveCount(0);
 
   await goHome(page);
   await expect(page).toHaveURL(/\/app(\?|$)/);
   const channelReminder = `channel reminder ${Date.now()}`;
   const composer = composerEditor(page);
-  const composerValue = composerField(page);
   await composer.fill(`/remind #general ${channelReminder} every Thursday at 9am`);
   await page.getByRole('button', { name: 'Send now' }).click();
-  await expect(page).toHaveURL(/\/app\/later\?.*filter=channel-reminders/);
-  const channelItem = page.locator('.later-item', { hasText: channelReminder });
+  await expect(page).toHaveURL(/\/app\/todos\?.*view=channel-reminders/);
+  const channelItem = page.locator('.channel-reminder-item', { hasText: channelReminder });
   await expect(channelItem.getByRole('link', { name: '#general' })).toBeVisible();
   await channelItem.hover();
   await channelItem.getByRole('button', { name: 'More actions for this reminder' }).click();
   await expect(channelItem.getByRole('button', { name: 'Delete reminder' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(channelItem).toContainText('Repeats weekly');
-  await expect(channelItem.getByRole('button', { name: 'Mark complete' })).toHaveCount(0);
+  await expect(channelItem.getByRole('button', { name: /^Mark done/ })).toHaveCount(0);
   await expect(channelItem.getByText('Edit', { exact: true })).toHaveCount(0);
 
   await goHome(page);
@@ -815,8 +895,8 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await expect(page.locator('.message-text', { hasText: channelReminder })).toHaveCount(0);
   await composer.fill('/remind list');
   await page.getByRole('button', { name: 'Send now' }).click();
-  await expect(page).toHaveURL(/\/app\/later\?.*filter=channel-reminders/);
-  await expect(page.locator('.later-item', { hasText: channelReminder })).toBeVisible();
+  await expect(page).toHaveURL(/\/app\/todos\?.*view=channel-reminders/);
+  await expect(page.locator('.channel-reminder-item', { hasText: channelReminder })).toBeVisible();
 });
 
 test('[A11Y-01 A11Y-02 A11Y-03] workspace and command discovery pass WCAG AA automation', async ({ page, context }) => {
@@ -2061,6 +2141,32 @@ test('[COMP-01 NAV-06] a preference chosen in one browser follows the member to 
   }
 });
 
+// Slack's "Set a reminder": a reminder set for a day arrives at 9 a.m. unless
+// the member picks another time under "Set a default time for reminder
+// notifications". The preference follows the member, so it is put back.
+test('[REMIND-02] the default reminder time moves a reminder set for tomorrow', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app/preferences');
+  const choice = page.getByLabel('Set a default time for reminder notifications');
+  await expect(choice).toHaveValue('09:00');
+  await choice.selectOption('07:30');
+  await expect.poll(async () => (await (await page.request.get('/app')).text()).includes('reminder-default-time&#34;:&#34;07:30')).toBe(true);
+  try {
+    await page.goto('/app/todos');
+    const added = `early to-do ${Date.now()}`;
+    await page.getByRole('button', { name: 'Add To-do' }).click();
+    await page.getByLabel('To-do', { exact: true }).first().fill(added);
+    await page.getByLabel('Remind me').selectOption('tomorrow');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await expect(page.getByRole('status')).toHaveText('To-do added.');
+    await expect(page.locator('.todo-item', { hasText: added }).locator('.due-chip')).toContainText('7:30');
+  } finally {
+    await page.goto('/app/preferences');
+    await page.getByLabel('Set a default time for reminder notifications').selectOption('09:00');
+    await expect.poll(async () => (await (await page.request.get('/app')).text()).includes('reminder-default-time&#34;:&#34;09:00')).toBe(true);
+  }
+});
+
 test('[SCHED-01] the schedule menu offers Slack\'s suggested times in the member\'s zone', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
@@ -2817,7 +2923,7 @@ for (const viewport of [{ width: 320, height: 640, label: '320px' }, { width: 64
   test(`[RESPONSIVE-01 A11Y-01] the shell reflows without sideways scrolling at ${viewport.label}`, async ({ page, context }) => {
     await signIn(context);
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    for (const path of ['/app', '/app?details=1', '/app/activity', '/app/later', '/app/dms', '/app/channels', '/app/preferences']) {
+    for (const path of ['/app', '/app?details=1', '/app/activity', '/app/todos', '/app/saved', '/app/dms', '/app/channels', '/app/preferences']) {
       await page.goto(path);
       const [scrollWidth, innerWidth] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
       expect(scrollWidth, `${path} scrolls sideways`).toBeLessThanOrEqual(innerWidth);
@@ -2894,7 +3000,7 @@ test('[RESPONSIVE-01 A11Y-01 THREAD-01] the narrow layout exposes named navigati
   // The rail becomes a tab bar along the bottom edge, so every destination
   // stays one tap away.
   const rail = page.getByRole('navigation', { name: 'Workspace' });
-  for (const destination of ['Home', 'DMs', 'Activity', 'Later']) {
+  for (const destination of ['Home', 'DMs', 'Activity', 'To-dos']) {
     await expect(rail.getByRole('link', { name: destination, exact: true })).toBeVisible();
   }
 
@@ -4262,7 +4368,7 @@ test('[NAV-01 A11Y-01] the workspace shell names its regions and marks the curre
   await expect(page.getByRole('navigation', { name: 'Channels' })).toBeVisible();
   // The rail carries Slack's destinations; Home is current in a conversation.
   const rail = page.getByRole('navigation', { name: 'Workspace' });
-  for (const destination of ['Home', 'DMs', 'Activity', 'Later']) {
+  for (const destination of ['Home', 'DMs', 'Activity', 'To-dos']) {
     await expect(rail.getByRole('link', { name: destination, exact: true })).toHaveCount(1);
   }
   await expect(rail.getByRole('link', { name: 'Home', exact: true })).toHaveAttribute('aria-current', 'page');

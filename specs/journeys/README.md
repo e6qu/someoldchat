@@ -121,7 +121,7 @@ for one journey lend external evidence to another.
 - [Composer, drafts, and scheduled messages](03-composer-drafts-and-scheduled.md)
 - [Messages, threads, and actions](04-messages-threads-and-actions.md)
 - [Search and Activity](05-search-and-activity.md)
-- [Later and reminders](06-later-and-reminders.md)
+- [Saved, To-dos and reminders](06-saved-todos-and-reminders.md)
 - [Files and media](07-files-and-media.md)
 - [Apps, bots, commands, and interactions](08-apps-bots-and-interactions.md)
 - [Profile, presence, and notifications](09-profile-presence-and-notifications.md)

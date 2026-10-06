@@ -823,6 +823,30 @@ func TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse(t *testing.
 	}
 }
 
+// reminders.add reads a phrase set for a day ("tomorrow") at the member's
+// default reminder time, as Slack's reminders do; 9 a.m. unless they set one.
+func TestReminderAddPhraseUsesTheMemberDefaultReminderTime(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	if err := repository.SetMemberPreference(context.Background(), "T1", "U1", domain.ReminderDefaultTimePreference, "07:30", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now().UTC()
+	response := callAPI(t, handler, http.MethodPost, "/api/reminders.add", "text=stretch&time=tomorrow")
+	var created struct {
+		OK       bool `json:"ok"`
+		Reminder struct {
+			Time int64 `json:"time"`
+		} `json:"reminder"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil || !created.OK {
+		t.Fatalf("reminders.add status=%d body=%s", response.Code, response.Body)
+	}
+	day := before.AddDate(0, 0, 1)
+	if want := time.Date(day.Year(), day.Month(), day.Day(), 7, 30, 0, 0, time.UTC); created.Reminder.Time != want.Unix() {
+		t.Fatalf("time=tomorrow stored %s, want %s", time.Unix(created.Reminder.Time, 0).UTC(), want)
+	}
+}
+
 func TestReminderUserTokenRejectsObsoleteOtherUserAndReturnsCompleteTimestamp(t *testing.T) {
 	_, repository := testHandlerWithStore()
 	granted := make(map[auth.Scope]struct{})

@@ -67,7 +67,7 @@ An eligible author opens Delete from the menu or Slack's documented shortcut
 and receives Slack's applicable confirmation: a "Delete message" dialog
 reading "Are you sure you want to delete this message? This cannot be
 undone.", quoting the message, with Cancel and Delete. Success removes or tombstones the
-message consistently across timeline, thread, search, Activity, Later, pins,
+message consistently across timeline, thread, search, Activity, Saved, pins,
 files, API history, and events. It does not delete an entire thread or shared
 file unless Slack does. Already-deleted, retained, legal-hold, unauthorized,
 and concurrent cases are handled.
@@ -117,9 +117,10 @@ focus. They MUST not fire while editing text.
 The hover toolbar leads with three one-click reactions: the emoji the member
 most recently reacted with, from their account so they follow the member to
 any client, then the emoji this browser used, then Slack's defaults (white
-check mark, eyes, raised hands), none twice. Then Add reaction, Reply in thread, Forward message, Save for later and
+check mark, eyes, raised hands), none twice. Then Add reaction, Reply in thread, Forward message, Add to saved (Remove from saved items once saved) and
 More actions. More actions lists, with separators and key hints: the thread
-notification toggle; Mark unread (`U`); Remind me about this, a submenu of In
+notification toggle; Mark unread (`U`); Add to saved / Remove from saved
+items; Remind me about this, which makes a to-do with a reminder and is a submenu of In
 20 minutes, In 1 hour, In 3 hours, Tomorrow, Next week and Custom…; Copy link;
 Pin to channel / Un-pin from channel (`P`); Edit message (`E`); Delete
 message… (`delete`); then app message shortcuts. Right-clicking a message

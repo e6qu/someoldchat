@@ -452,47 +452,42 @@ func (x *ReminderPage) GetHasMore() bool {
 	return false
 }
 
-type LaterReminder struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	Id                   string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WorkspaceId          string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	CreatorId            string                 `protobuf:"bytes,3,opt,name=creator_id,json=creatorId,proto3" json:"creator_id,omitempty"`
-	UserId               string                 `protobuf:"bytes,4,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	ChannelId            string                 `protobuf:"bytes,5,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	SourceMessageId      string                 `protobuf:"bytes,6,opt,name=source_message_id,json=sourceMessageId,proto3" json:"source_message_id,omitempty"`
-	SourceConversationId string                 `protobuf:"bytes,7,opt,name=source_conversation_id,json=sourceConversationId,proto3" json:"source_conversation_id,omitempty"`
-	Target               string                 `protobuf:"bytes,8,opt,name=target,proto3" json:"target,omitempty"`
-	Text                 string                 `protobuf:"bytes,9,opt,name=text,proto3" json:"text,omitempty"`
-	DueAt                int64                  `protobuf:"varint,10,opt,name=due_at,json=dueAt,proto3" json:"due_at,omitempty"`
-	Timezone             string                 `protobuf:"bytes,11,opt,name=timezone,proto3" json:"timezone,omitempty"`
-	Recurrence           string                 `protobuf:"bytes,12,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
-	CreatedAt            int64                  `protobuf:"varint,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt            int64                  `protobuf:"varint,14,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	CompletedAt          int64                  `protobuf:"varint,15,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
-	LastDeliveredAt      int64                  `protobuf:"varint,16,opt,name=last_delivered_at,json=lastDeliveredAt,proto3" json:"last_delivered_at,omitempty"`
-	FailedAt             int64                  `protobuf:"varint,17,opt,name=failed_at,json=failedAt,proto3" json:"failed_at,omitempty"`
-	FailureCode          string                 `protobuf:"bytes,18,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
-	SourceTimestamp      string                 `protobuf:"bytes,19,opt,name=source_timestamp,json=sourceTimestamp,proto3" json:"source_timestamp,omitempty"`
-	AcknowledgedAt       int64                  `protobuf:"varint,20,opt,name=acknowledged_at,json=acknowledgedAt,proto3" json:"acknowledged_at,omitempty"`
-	RecurrenceAnchor     int64                  `protobuf:"varint,21,opt,name=recurrence_anchor,json=recurrenceAnchor,proto3" json:"recurrence_anchor,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+// ChannelReminder is a reminder /remind set for a channel; Slackbot posts it
+// there when it comes due. It is not a to-do.
+type ChannelReminder struct {
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	Id                       string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId              string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	CreatorId                string                 `protobuf:"bytes,3,opt,name=creator_id,json=creatorId,proto3" json:"creator_id,omitempty"`
+	ChannelId                string                 `protobuf:"bytes,4,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Text                     string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
+	DueAtUnixNano            int64                  `protobuf:"varint,6,opt,name=due_at_unix_nano,json=dueAtUnixNano,proto3" json:"due_at_unix_nano,omitempty"`
+	Timezone                 string                 `protobuf:"bytes,7,opt,name=timezone,proto3" json:"timezone,omitempty"`
+	Recurrence               string                 `protobuf:"bytes,8,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
+	RecurrenceAnchorUnixNano int64                  `protobuf:"varint,9,opt,name=recurrence_anchor_unix_nano,json=recurrenceAnchorUnixNano,proto3" json:"recurrence_anchor_unix_nano,omitempty"`
+	CreatedAtUnixNano        int64                  `protobuf:"varint,10,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
+	UpdatedAtUnixNano        int64                  `protobuf:"varint,11,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
+	LastDeliveredAtUnixNano  int64                  `protobuf:"varint,12,opt,name=last_delivered_at_unix_nano,json=lastDeliveredAtUnixNano,proto3" json:"last_delivered_at_unix_nano,omitempty"`
+	FailedAtUnixNano         int64                  `protobuf:"varint,13,opt,name=failed_at_unix_nano,json=failedAtUnixNano,proto3" json:"failed_at_unix_nano,omitempty"`
+	FailureCode              string                 `protobuf:"bytes,14,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
-func (x *LaterReminder) Reset() {
-	*x = LaterReminder{}
+func (x *ChannelReminder) Reset() {
+	*x = ChannelReminder{}
 	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LaterReminder) String() string {
+func (x *ChannelReminder) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LaterReminder) ProtoMessage() {}
+func (*ChannelReminder) ProtoMessage() {}
 
-func (x *LaterReminder) ProtoReflect() protoreflect.Message {
+func (x *ChannelReminder) ProtoReflect() protoreflect.Message {
 	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -504,191 +499,139 @@ func (x *LaterReminder) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LaterReminder.ProtoReflect.Descriptor instead.
-func (*LaterReminder) Descriptor() ([]byte, []int) {
+// Deprecated: Use ChannelReminder.ProtoReflect.Descriptor instead.
+func (*ChannelReminder) Descriptor() ([]byte, []int) {
 	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *LaterReminder) GetId() string {
+func (x *ChannelReminder) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *LaterReminder) GetWorkspaceId() string {
+func (x *ChannelReminder) GetWorkspaceId() string {
 	if x != nil {
 		return x.WorkspaceId
 	}
 	return ""
 }
 
-func (x *LaterReminder) GetCreatorId() string {
+func (x *ChannelReminder) GetCreatorId() string {
 	if x != nil {
 		return x.CreatorId
 	}
 	return ""
 }
 
-func (x *LaterReminder) GetUserId() string {
-	if x != nil {
-		return x.UserId
-	}
-	return ""
-}
-
-func (x *LaterReminder) GetChannelId() string {
+func (x *ChannelReminder) GetChannelId() string {
 	if x != nil {
 		return x.ChannelId
 	}
 	return ""
 }
 
-func (x *LaterReminder) GetSourceMessageId() string {
-	if x != nil {
-		return x.SourceMessageId
-	}
-	return ""
-}
-
-func (x *LaterReminder) GetSourceConversationId() string {
-	if x != nil {
-		return x.SourceConversationId
-	}
-	return ""
-}
-
-func (x *LaterReminder) GetTarget() string {
-	if x != nil {
-		return x.Target
-	}
-	return ""
-}
-
-func (x *LaterReminder) GetText() string {
+func (x *ChannelReminder) GetText() string {
 	if x != nil {
 		return x.Text
 	}
 	return ""
 }
 
-func (x *LaterReminder) GetDueAt() int64 {
+func (x *ChannelReminder) GetDueAtUnixNano() int64 {
 	if x != nil {
-		return x.DueAt
+		return x.DueAtUnixNano
 	}
 	return 0
 }
 
-func (x *LaterReminder) GetTimezone() string {
+func (x *ChannelReminder) GetTimezone() string {
 	if x != nil {
 		return x.Timezone
 	}
 	return ""
 }
 
-func (x *LaterReminder) GetRecurrence() string {
+func (x *ChannelReminder) GetRecurrence() string {
 	if x != nil {
 		return x.Recurrence
 	}
 	return ""
 }
 
-func (x *LaterReminder) GetCreatedAt() int64 {
+func (x *ChannelReminder) GetRecurrenceAnchorUnixNano() int64 {
 	if x != nil {
-		return x.CreatedAt
+		return x.RecurrenceAnchorUnixNano
 	}
 	return 0
 }
 
-func (x *LaterReminder) GetUpdatedAt() int64 {
+func (x *ChannelReminder) GetCreatedAtUnixNano() int64 {
 	if x != nil {
-		return x.UpdatedAt
+		return x.CreatedAtUnixNano
 	}
 	return 0
 }
 
-func (x *LaterReminder) GetCompletedAt() int64 {
+func (x *ChannelReminder) GetUpdatedAtUnixNano() int64 {
 	if x != nil {
-		return x.CompletedAt
+		return x.UpdatedAtUnixNano
 	}
 	return 0
 }
 
-func (x *LaterReminder) GetLastDeliveredAt() int64 {
+func (x *ChannelReminder) GetLastDeliveredAtUnixNano() int64 {
 	if x != nil {
-		return x.LastDeliveredAt
+		return x.LastDeliveredAtUnixNano
 	}
 	return 0
 }
 
-func (x *LaterReminder) GetFailedAt() int64 {
+func (x *ChannelReminder) GetFailedAtUnixNano() int64 {
 	if x != nil {
-		return x.FailedAt
+		return x.FailedAtUnixNano
 	}
 	return 0
 }
 
-func (x *LaterReminder) GetFailureCode() string {
+func (x *ChannelReminder) GetFailureCode() string {
 	if x != nil {
 		return x.FailureCode
 	}
 	return ""
 }
 
-func (x *LaterReminder) GetSourceTimestamp() string {
-	if x != nil {
-		return x.SourceTimestamp
-	}
-	return ""
+type CreateChannelReminderRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ChannelId     string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Text          string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
+	DueAtUnixNano int64                  `protobuf:"varint,5,opt,name=due_at_unix_nano,json=dueAtUnixNano,proto3" json:"due_at_unix_nano,omitempty"`
+	Timezone      string                 `protobuf:"bytes,6,opt,name=timezone,proto3" json:"timezone,omitempty"`
+	Recurrence    string                 `protobuf:"bytes,7,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
+	// recurrence_anchor_unix_nano positions a recurring series when it differs
+	// from due_at_unix_nano; zero means the series starts there.
+	RecurrenceAnchorUnixNano int64 `protobuf:"varint,8,opt,name=recurrence_anchor_unix_nano,json=recurrenceAnchorUnixNano,proto3" json:"recurrence_anchor_unix_nano,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
-func (x *LaterReminder) GetAcknowledgedAt() int64 {
-	if x != nil {
-		return x.AcknowledgedAt
-	}
-	return 0
-}
-
-func (x *LaterReminder) GetRecurrenceAnchor() int64 {
-	if x != nil {
-		return x.RecurrenceAnchor
-	}
-	return 0
-}
-
-type CreateLaterReminderRequest struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Target          string                 `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`
-	ChannelId       string                 `protobuf:"bytes,4,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	SourceChannelId string                 `protobuf:"bytes,5,opt,name=source_channel_id,json=sourceChannelId,proto3" json:"source_channel_id,omitempty"`
-	SourceTimestamp string                 `protobuf:"bytes,6,opt,name=source_timestamp,json=sourceTimestamp,proto3" json:"source_timestamp,omitempty"`
-	Text            string                 `protobuf:"bytes,7,opt,name=text,proto3" json:"text,omitempty"`
-	DueAt           int64                  `protobuf:"varint,8,opt,name=due_at,json=dueAt,proto3" json:"due_at,omitempty"`
-	Timezone        string                 `protobuf:"bytes,9,opt,name=timezone,proto3" json:"timezone,omitempty"`
-	Recurrence      string                 `protobuf:"bytes,10,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
-	// recurrence_anchor positions a recurring series when it differs from
-	// due_at; zero means the series starts at due_at.
-	RecurrenceAnchor int64 `protobuf:"varint,11,opt,name=recurrence_anchor,json=recurrenceAnchor,proto3" json:"recurrence_anchor,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *CreateLaterReminderRequest) Reset() {
-	*x = CreateLaterReminderRequest{}
+func (x *CreateChannelReminderRequest) Reset() {
+	*x = CreateChannelReminderRequest{}
 	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CreateLaterReminderRequest) String() string {
+func (x *CreateChannelReminderRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CreateLaterReminderRequest) ProtoMessage() {}
+func (*CreateChannelReminderRequest) ProtoMessage() {}
 
-func (x *CreateLaterReminderRequest) ProtoReflect() protoreflect.Message {
+func (x *CreateChannelReminderRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -700,89 +643,204 @@ func (x *CreateLaterReminderRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CreateLaterReminderRequest.ProtoReflect.Descriptor instead.
-func (*CreateLaterReminderRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use CreateChannelReminderRequest.ProtoReflect.Descriptor instead.
+func (*CreateChannelReminderRequest) Descriptor() ([]byte, []int) {
 	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *CreateLaterReminderRequest) GetWorkspaceId() string {
+func (x *CreateChannelReminderRequest) GetWorkspaceId() string {
 	if x != nil {
 		return x.WorkspaceId
 	}
 	return ""
 }
 
-func (x *CreateLaterReminderRequest) GetUserId() string {
+func (x *CreateChannelReminderRequest) GetUserId() string {
 	if x != nil {
 		return x.UserId
 	}
 	return ""
 }
 
-func (x *CreateLaterReminderRequest) GetTarget() string {
-	if x != nil {
-		return x.Target
-	}
-	return ""
-}
-
-func (x *CreateLaterReminderRequest) GetChannelId() string {
+func (x *CreateChannelReminderRequest) GetChannelId() string {
 	if x != nil {
 		return x.ChannelId
 	}
 	return ""
 }
 
-func (x *CreateLaterReminderRequest) GetSourceChannelId() string {
-	if x != nil {
-		return x.SourceChannelId
-	}
-	return ""
-}
-
-func (x *CreateLaterReminderRequest) GetSourceTimestamp() string {
-	if x != nil {
-		return x.SourceTimestamp
-	}
-	return ""
-}
-
-func (x *CreateLaterReminderRequest) GetText() string {
+func (x *CreateChannelReminderRequest) GetText() string {
 	if x != nil {
 		return x.Text
 	}
 	return ""
 }
 
-func (x *CreateLaterReminderRequest) GetDueAt() int64 {
+func (x *CreateChannelReminderRequest) GetDueAtUnixNano() int64 {
 	if x != nil {
-		return x.DueAt
+		return x.DueAtUnixNano
 	}
 	return 0
 }
 
-func (x *CreateLaterReminderRequest) GetTimezone() string {
+func (x *CreateChannelReminderRequest) GetTimezone() string {
 	if x != nil {
 		return x.Timezone
 	}
 	return ""
 }
 
-func (x *CreateLaterReminderRequest) GetRecurrence() string {
+func (x *CreateChannelReminderRequest) GetRecurrence() string {
 	if x != nil {
 		return x.Recurrence
 	}
 	return ""
 }
 
-func (x *CreateLaterReminderRequest) GetRecurrenceAnchor() int64 {
+func (x *CreateChannelReminderRequest) GetRecurrenceAnchorUnixNano() int64 {
 	if x != nil {
-		return x.RecurrenceAnchor
+		return x.RecurrenceAnchorUnixNano
 	}
 	return 0
 }
 
-type LaterReminderRequest struct {
+type ChannelRemindersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Descending    bool                   `protobuf:"varint,5,opt,name=descending,proto3" json:"descending,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChannelRemindersRequest) Reset() {
+	*x = ChannelRemindersRequest{}
+	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChannelRemindersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChannelRemindersRequest) ProtoMessage() {}
+
+func (x *ChannelRemindersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChannelRemindersRequest.ProtoReflect.Descriptor instead.
+func (*ChannelRemindersRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ChannelRemindersRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ChannelRemindersRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ChannelRemindersRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ChannelRemindersRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+func (x *ChannelRemindersRequest) GetDescending() bool {
+	if x != nil {
+		return x.Descending
+	}
+	return false
+}
+
+type ChannelReminderPage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Reminders     []*ChannelReminder     `protobuf:"bytes,1,rep,name=reminders,proto3" json:"reminders,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChannelReminderPage) Reset() {
+	*x = ChannelReminderPage{}
+	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChannelReminderPage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChannelReminderPage) ProtoMessage() {}
+
+func (x *ChannelReminderPage) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChannelReminderPage.ProtoReflect.Descriptor instead.
+func (*ChannelReminderPage) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ChannelReminderPage) GetReminders() []*ChannelReminder {
+	if x != nil {
+		return x.Reminders
+	}
+	return nil
+}
+
+func (x *ChannelReminderPage) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+func (x *ChannelReminderPage) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
+type DeleteChannelReminderRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
@@ -791,163 +849,20 @@ type LaterReminderRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *LaterReminderRequest) Reset() {
-	*x = LaterReminderRequest{}
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *LaterReminderRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*LaterReminderRequest) ProtoMessage() {}
-
-func (x *LaterReminderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use LaterReminderRequest.ProtoReflect.Descriptor instead.
-func (*LaterReminderRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *LaterReminderRequest) GetWorkspaceId() string {
-	if x != nil {
-		return x.WorkspaceId
-	}
-	return ""
-}
-
-func (x *LaterReminderRequest) GetUserId() string {
-	if x != nil {
-		return x.UserId
-	}
-	return ""
-}
-
-func (x *LaterReminderRequest) GetReminderId() string {
-	if x != nil {
-		return x.ReminderId
-	}
-	return ""
-}
-
-type LaterRemindersRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Target        string                 `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`
-	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
-	Cursor        string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
-	Descending    bool                   `protobuf:"varint,6,opt,name=descending,proto3" json:"descending,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *LaterRemindersRequest) Reset() {
-	*x = LaterRemindersRequest{}
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *LaterRemindersRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*LaterRemindersRequest) ProtoMessage() {}
-
-func (x *LaterRemindersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use LaterRemindersRequest.ProtoReflect.Descriptor instead.
-func (*LaterRemindersRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *LaterRemindersRequest) GetWorkspaceId() string {
-	if x != nil {
-		return x.WorkspaceId
-	}
-	return ""
-}
-
-func (x *LaterRemindersRequest) GetUserId() string {
-	if x != nil {
-		return x.UserId
-	}
-	return ""
-}
-
-func (x *LaterRemindersRequest) GetTarget() string {
-	if x != nil {
-		return x.Target
-	}
-	return ""
-}
-
-func (x *LaterRemindersRequest) GetLimit() int32 {
-	if x != nil {
-		return x.Limit
-	}
-	return 0
-}
-
-func (x *LaterRemindersRequest) GetCursor() string {
-	if x != nil {
-		return x.Cursor
-	}
-	return ""
-}
-
-func (x *LaterRemindersRequest) GetDescending() bool {
-	if x != nil {
-		return x.Descending
-	}
-	return false
-}
-
-type AcknowledgeLaterRemindersRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AcknowledgeLaterRemindersRequest) Reset() {
-	*x = AcknowledgeLaterRemindersRequest{}
+func (x *DeleteChannelReminderRequest) Reset() {
+	*x = DeleteChannelReminderRequest{}
 	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AcknowledgeLaterRemindersRequest) String() string {
+func (x *DeleteChannelReminderRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AcknowledgeLaterRemindersRequest) ProtoMessage() {}
+func (*DeleteChannelReminderRequest) ProtoMessage() {}
 
-func (x *AcknowledgeLaterRemindersRequest) ProtoReflect() protoreflect.Message {
+func (x *DeleteChannelReminderRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -959,201 +874,30 @@ func (x *AcknowledgeLaterRemindersRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AcknowledgeLaterRemindersRequest.ProtoReflect.Descriptor instead.
-func (*AcknowledgeLaterRemindersRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use DeleteChannelReminderRequest.ProtoReflect.Descriptor instead.
+func (*DeleteChannelReminderRequest) Descriptor() ([]byte, []int) {
 	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *AcknowledgeLaterRemindersRequest) GetWorkspaceId() string {
+func (x *DeleteChannelReminderRequest) GetWorkspaceId() string {
 	if x != nil {
 		return x.WorkspaceId
 	}
 	return ""
 }
 
-func (x *AcknowledgeLaterRemindersRequest) GetUserId() string {
+func (x *DeleteChannelReminderRequest) GetUserId() string {
 	if x != nil {
 		return x.UserId
 	}
 	return ""
 }
 
-type UpdateLaterReminderRequest struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId      string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	ReminderId  string                 `protobuf:"bytes,3,opt,name=reminder_id,json=reminderId,proto3" json:"reminder_id,omitempty"`
-	Target      string                 `protobuf:"bytes,4,opt,name=target,proto3" json:"target,omitempty"`
-	ChannelId   string                 `protobuf:"bytes,5,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	Text        string                 `protobuf:"bytes,6,opt,name=text,proto3" json:"text,omitempty"`
-	DueAt       int64                  `protobuf:"varint,7,opt,name=due_at,json=dueAt,proto3" json:"due_at,omitempty"`
-	Timezone    string                 `protobuf:"bytes,8,opt,name=timezone,proto3" json:"timezone,omitempty"`
-	Recurrence  string                 `protobuf:"bytes,9,opt,name=recurrence,proto3" json:"recurrence,omitempty"`
-	// recurrence_anchor positions a recurring series when it differs from
-	// due_at; zero means the series starts at due_at.
-	RecurrenceAnchor int64 `protobuf:"varint,10,opt,name=recurrence_anchor,json=recurrenceAnchor,proto3" json:"recurrence_anchor,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *UpdateLaterReminderRequest) Reset() {
-	*x = UpdateLaterReminderRequest{}
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UpdateLaterReminderRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UpdateLaterReminderRequest) ProtoMessage() {}
-
-func (x *UpdateLaterReminderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UpdateLaterReminderRequest.ProtoReflect.Descriptor instead.
-func (*UpdateLaterReminderRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *UpdateLaterReminderRequest) GetWorkspaceId() string {
-	if x != nil {
-		return x.WorkspaceId
-	}
-	return ""
-}
-
-func (x *UpdateLaterReminderRequest) GetUserId() string {
-	if x != nil {
-		return x.UserId
-	}
-	return ""
-}
-
-func (x *UpdateLaterReminderRequest) GetReminderId() string {
+func (x *DeleteChannelReminderRequest) GetReminderId() string {
 	if x != nil {
 		return x.ReminderId
 	}
 	return ""
-}
-
-func (x *UpdateLaterReminderRequest) GetTarget() string {
-	if x != nil {
-		return x.Target
-	}
-	return ""
-}
-
-func (x *UpdateLaterReminderRequest) GetChannelId() string {
-	if x != nil {
-		return x.ChannelId
-	}
-	return ""
-}
-
-func (x *UpdateLaterReminderRequest) GetText() string {
-	if x != nil {
-		return x.Text
-	}
-	return ""
-}
-
-func (x *UpdateLaterReminderRequest) GetDueAt() int64 {
-	if x != nil {
-		return x.DueAt
-	}
-	return 0
-}
-
-func (x *UpdateLaterReminderRequest) GetTimezone() string {
-	if x != nil {
-		return x.Timezone
-	}
-	return ""
-}
-
-func (x *UpdateLaterReminderRequest) GetRecurrence() string {
-	if x != nil {
-		return x.Recurrence
-	}
-	return ""
-}
-
-func (x *UpdateLaterReminderRequest) GetRecurrenceAnchor() int64 {
-	if x != nil {
-		return x.RecurrenceAnchor
-	}
-	return 0
-}
-
-type LaterReminderPage struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Reminders     []*LaterReminder       `protobuf:"bytes,1,rep,name=reminders,proto3" json:"reminders,omitempty"`
-	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
-	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *LaterReminderPage) Reset() {
-	*x = LaterReminderPage{}
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *LaterReminderPage) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*LaterReminderPage) ProtoMessage() {}
-
-func (x *LaterReminderPage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use LaterReminderPage.ProtoReflect.Descriptor instead.
-func (*LaterReminderPage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *LaterReminderPage) GetReminders() []*LaterReminder {
-	if x != nil {
-		return x.Reminders
-	}
-	return nil
-}
-
-func (x *LaterReminderPage) GetNextCursor() string {
-	if x != nil {
-		return x.NextCursor
-	}
-	return ""
-}
-
-func (x *LaterReminderPage) GetHasMore() bool {
-	if x != nil {
-		return x.HasMore
-	}
-	return false
 }
 
 var File_sameoldchat_chat_v1_reminders_proto protoreflect.FileDescriptor
@@ -1205,103 +949,66 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\treminders\x18\x01 \x03(\v2\x1d.sameoldchat.chat.v1.ReminderR\treminders\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xc8\x05\n" +
-	"\rLaterReminder\x12\x0e\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xac\x04\n" +
+	"\x0fChannelReminder\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1d\n" +
 	"\n" +
-	"creator_id\x18\x03 \x01(\tR\tcreatorId\x12\x17\n" +
-	"\auser_id\x18\x04 \x01(\tR\x06userId\x12\x1d\n" +
+	"creator_id\x18\x03 \x01(\tR\tcreatorId\x12\x1d\n" +
 	"\n" +
-	"channel_id\x18\x05 \x01(\tR\tchannelId\x12*\n" +
-	"\x11source_message_id\x18\x06 \x01(\tR\x0fsourceMessageId\x124\n" +
-	"\x16source_conversation_id\x18\a \x01(\tR\x14sourceConversationId\x12\x16\n" +
-	"\x06target\x18\b \x01(\tR\x06target\x12\x12\n" +
-	"\x04text\x18\t \x01(\tR\x04text\x12\x15\n" +
-	"\x06due_at\x18\n" +
-	" \x01(\x03R\x05dueAt\x12\x1a\n" +
-	"\btimezone\x18\v \x01(\tR\btimezone\x12\x1e\n" +
+	"channel_id\x18\x04 \x01(\tR\tchannelId\x12\x12\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\x12'\n" +
+	"\x10due_at_unix_nano\x18\x06 \x01(\x03R\rdueAtUnixNano\x12\x1a\n" +
+	"\btimezone\x18\a \x01(\tR\btimezone\x12\x1e\n" +
 	"\n" +
-	"recurrence\x18\f \x01(\tR\n" +
-	"recurrence\x12\x1d\n" +
-	"\n" +
-	"created_at\x18\r \x01(\x03R\tcreatedAt\x12\x1d\n" +
-	"\n" +
-	"updated_at\x18\x0e \x01(\x03R\tupdatedAt\x12!\n" +
-	"\fcompleted_at\x18\x0f \x01(\x03R\vcompletedAt\x12*\n" +
-	"\x11last_delivered_at\x18\x10 \x01(\x03R\x0flastDeliveredAt\x12\x1b\n" +
-	"\tfailed_at\x18\x11 \x01(\x03R\bfailedAt\x12!\n" +
-	"\ffailure_code\x18\x12 \x01(\tR\vfailureCode\x12)\n" +
-	"\x10source_timestamp\x18\x13 \x01(\tR\x0fsourceTimestamp\x12'\n" +
-	"\x0facknowledged_at\x18\x14 \x01(\x03R\x0eacknowledgedAt\x12+\n" +
-	"\x11recurrence_anchor\x18\x15 \x01(\x03R\x10recurrenceAnchor\"\xfa\x02\n" +
-	"\x1aCreateLaterReminderRequest\x12!\n" +
+	"recurrence\x18\b \x01(\tR\n" +
+	"recurrence\x12=\n" +
+	"\x1brecurrence_anchor_unix_nano\x18\t \x01(\x03R\x18recurrenceAnchorUnixNano\x12/\n" +
+	"\x14created_at_unix_nano\x18\n" +
+	" \x01(\x03R\x11createdAtUnixNano\x12/\n" +
+	"\x14updated_at_unix_nano\x18\v \x01(\x03R\x11updatedAtUnixNano\x12<\n" +
+	"\x1blast_delivered_at_unix_nano\x18\f \x01(\x03R\x17lastDeliveredAtUnixNano\x12-\n" +
+	"\x13failed_at_unix_nano\x18\r \x01(\x03R\x10failedAtUnixNano\x12!\n" +
+	"\ffailure_code\x18\x0e \x01(\tR\vfailureCode\"\xb1\x02\n" +
+	"\x1cCreateChannelReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
-	"\x06target\x18\x03 \x01(\tR\x06target\x12\x1d\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
-	"channel_id\x18\x04 \x01(\tR\tchannelId\x12*\n" +
-	"\x11source_channel_id\x18\x05 \x01(\tR\x0fsourceChannelId\x12)\n" +
-	"\x10source_timestamp\x18\x06 \x01(\tR\x0fsourceTimestamp\x12\x12\n" +
-	"\x04text\x18\a \x01(\tR\x04text\x12\x15\n" +
-	"\x06due_at\x18\b \x01(\x03R\x05dueAt\x12\x1a\n" +
-	"\btimezone\x18\t \x01(\tR\btimezone\x12\x1e\n" +
+	"channel_id\x18\x03 \x01(\tR\tchannelId\x12\x12\n" +
+	"\x04text\x18\x04 \x01(\tR\x04text\x12'\n" +
+	"\x10due_at_unix_nano\x18\x05 \x01(\x03R\rdueAtUnixNano\x12\x1a\n" +
+	"\btimezone\x18\x06 \x01(\tR\btimezone\x12\x1e\n" +
 	"\n" +
-	"recurrence\x18\n" +
-	" \x01(\tR\n" +
-	"recurrence\x12+\n" +
-	"\x11recurrence_anchor\x18\v \x01(\x03R\x10recurrenceAnchor\"s\n" +
-	"\x14LaterReminderRequest\x12!\n" +
+	"recurrence\x18\a \x01(\tR\n" +
+	"recurrence\x12=\n" +
+	"\x1brecurrence_anchor_unix_nano\x18\b \x01(\x03R\x18recurrenceAnchorUnixNano\"\xa3\x01\n" +
+	"\x17ChannelRemindersRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
-	"\vreminder_id\x18\x03 \x01(\tR\n" +
-	"reminderId\"\xb9\x01\n" +
-	"\x15LaterRemindersRequest\x12!\n" +
-	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
-	"\x06target\x18\x03 \x01(\tR\x06target\x12\x14\n" +
-	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12\x1e\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x1e\n" +
 	"\n" +
-	"descending\x18\x06 \x01(\bR\n" +
-	"descending\"^\n" +
-	" AcknowledgeLaterRemindersRequest\x12!\n" +
-	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\"\xc4\x02\n" +
-	"\x1aUpdateLaterReminderRequest\x12!\n" +
-	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
-	"\vreminder_id\x18\x03 \x01(\tR\n" +
-	"reminderId\x12\x16\n" +
-	"\x06target\x18\x04 \x01(\tR\x06target\x12\x1d\n" +
-	"\n" +
-	"channel_id\x18\x05 \x01(\tR\tchannelId\x12\x12\n" +
-	"\x04text\x18\x06 \x01(\tR\x04text\x12\x15\n" +
-	"\x06due_at\x18\a \x01(\x03R\x05dueAt\x12\x1a\n" +
-	"\btimezone\x18\b \x01(\tR\btimezone\x12\x1e\n" +
-	"\n" +
-	"recurrence\x18\t \x01(\tR\n" +
-	"recurrence\x12+\n" +
-	"\x11recurrence_anchor\x18\n" +
-	" \x01(\x03R\x10recurrenceAnchor\"\x91\x01\n" +
-	"\x11LaterReminderPage\x12@\n" +
-	"\treminders\x18\x01 \x03(\v2\".sameoldchat.chat.v1.LaterReminderR\treminders\x12\x1f\n" +
+	"descending\x18\x05 \x01(\bR\n" +
+	"descending\"\x95\x01\n" +
+	"\x13ChannelReminderPage\x12B\n" +
+	"\treminders\x18\x01 \x03(\v2$.sameoldchat.chat.v1.ChannelReminderR\treminders\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore2\xc6\t\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"{\n" +
+	"\x1cDeleteChannelReminderRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
+	"\vreminder_id\x18\x03 \x01(\tR\n" +
+	"reminderId2\xa6\x06\n" +
 	"\x10RemindersService\x12U\n" +
 	"\vAddReminder\x12'.sameoldchat.chat.v1.AddReminderRequest\x1a\x1d.sameoldchat.chat.v1.Reminder\x12S\n" +
 	"\fReminderInfo\x12$.sameoldchat.chat.v1.ReminderRequest\x1a\x1d.sameoldchat.chat.v1.Reminder\x12U\n" +
 	"\tReminders\x12%.sameoldchat.chat.v1.RemindersRequest\x1a!.sameoldchat.chat.v1.ReminderPage\x12_\n" +
 	"\x10CompleteReminder\x12$.sameoldchat.chat.v1.ReminderRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12]\n" +
-	"\x0eDeleteReminder\x12$.sameoldchat.chat.v1.ReminderRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12j\n" +
-	"\x13CreateLaterReminder\x12/.sameoldchat.chat.v1.CreateLaterReminderRequest\x1a\".sameoldchat.chat.v1.LaterReminder\x12b\n" +
-	"\x11LaterReminderInfo\x12).sameoldchat.chat.v1.LaterReminderRequest\x1a\".sameoldchat.chat.v1.LaterReminder\x12d\n" +
-	"\x0eLaterReminders\x12*.sameoldchat.chat.v1.LaterRemindersRequest\x1a&.sameoldchat.chat.v1.LaterReminderPage\x12j\n" +
-	"\x13UpdateLaterReminder\x12/.sameoldchat.chat.v1.UpdateLaterReminderRequest\x1a\".sameoldchat.chat.v1.LaterReminder\x12y\n" +
-	"\x19AcknowledgeLaterReminders\x125.sameoldchat.chat.v1.AcknowledgeLaterRemindersRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12i\n" +
-	"\x15CompleteLaterReminder\x12).sameoldchat.chat.v1.LaterReminderRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12g\n" +
-	"\x13DeleteLaterReminder\x12).sameoldchat.chat.v1.LaterReminderRequest\x1a%.sameoldchat.chat.v1.MutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x0eDeleteReminder\x12$.sameoldchat.chat.v1.ReminderRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12p\n" +
+	"\x15CreateChannelReminder\x121.sameoldchat.chat.v1.CreateChannelReminderRequest\x1a$.sameoldchat.chat.v1.ChannelReminder\x12j\n" +
+	"\x10ChannelReminders\x12,.sameoldchat.chat.v1.ChannelRemindersRequest\x1a(.sameoldchat.chat.v1.ChannelReminderPage\x12q\n" +
+	"\x15DeleteChannelReminder\x121.sameoldchat.chat.v1.DeleteChannelReminderRequest\x1a%.sameoldchat.chat.v1.MutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_reminders_proto_rawDescOnce sync.Once
@@ -1315,51 +1022,41 @@ func file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_reminders_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_reminders_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_sameoldchat_chat_v1_reminders_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_sameoldchat_chat_v1_reminders_proto_goTypes = []any{
-	(*Reminder)(nil),                         // 0: sameoldchat.chat.v1.Reminder
-	(*AddReminderRequest)(nil),               // 1: sameoldchat.chat.v1.AddReminderRequest
-	(*ReminderRequest)(nil),                  // 2: sameoldchat.chat.v1.ReminderRequest
-	(*RemindersRequest)(nil),                 // 3: sameoldchat.chat.v1.RemindersRequest
-	(*ReminderPage)(nil),                     // 4: sameoldchat.chat.v1.ReminderPage
-	(*LaterReminder)(nil),                    // 5: sameoldchat.chat.v1.LaterReminder
-	(*CreateLaterReminderRequest)(nil),       // 6: sameoldchat.chat.v1.CreateLaterReminderRequest
-	(*LaterReminderRequest)(nil),             // 7: sameoldchat.chat.v1.LaterReminderRequest
-	(*LaterRemindersRequest)(nil),            // 8: sameoldchat.chat.v1.LaterRemindersRequest
-	(*AcknowledgeLaterRemindersRequest)(nil), // 9: sameoldchat.chat.v1.AcknowledgeLaterRemindersRequest
-	(*UpdateLaterReminderRequest)(nil),       // 10: sameoldchat.chat.v1.UpdateLaterReminderRequest
-	(*LaterReminderPage)(nil),                // 11: sameoldchat.chat.v1.LaterReminderPage
-	(*MutationResponse)(nil),                 // 12: sameoldchat.chat.v1.MutationResponse
+	(*Reminder)(nil),                     // 0: sameoldchat.chat.v1.Reminder
+	(*AddReminderRequest)(nil),           // 1: sameoldchat.chat.v1.AddReminderRequest
+	(*ReminderRequest)(nil),              // 2: sameoldchat.chat.v1.ReminderRequest
+	(*RemindersRequest)(nil),             // 3: sameoldchat.chat.v1.RemindersRequest
+	(*ReminderPage)(nil),                 // 4: sameoldchat.chat.v1.ReminderPage
+	(*ChannelReminder)(nil),              // 5: sameoldchat.chat.v1.ChannelReminder
+	(*CreateChannelReminderRequest)(nil), // 6: sameoldchat.chat.v1.CreateChannelReminderRequest
+	(*ChannelRemindersRequest)(nil),      // 7: sameoldchat.chat.v1.ChannelRemindersRequest
+	(*ChannelReminderPage)(nil),          // 8: sameoldchat.chat.v1.ChannelReminderPage
+	(*DeleteChannelReminderRequest)(nil), // 9: sameoldchat.chat.v1.DeleteChannelReminderRequest
+	(*MutationResponse)(nil),             // 10: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_reminders_proto_depIdxs = []int32{
 	0,  // 0: sameoldchat.chat.v1.ReminderPage.reminders:type_name -> sameoldchat.chat.v1.Reminder
-	5,  // 1: sameoldchat.chat.v1.LaterReminderPage.reminders:type_name -> sameoldchat.chat.v1.LaterReminder
+	5,  // 1: sameoldchat.chat.v1.ChannelReminderPage.reminders:type_name -> sameoldchat.chat.v1.ChannelReminder
 	1,  // 2: sameoldchat.chat.v1.RemindersService.AddReminder:input_type -> sameoldchat.chat.v1.AddReminderRequest
 	2,  // 3: sameoldchat.chat.v1.RemindersService.ReminderInfo:input_type -> sameoldchat.chat.v1.ReminderRequest
 	3,  // 4: sameoldchat.chat.v1.RemindersService.Reminders:input_type -> sameoldchat.chat.v1.RemindersRequest
 	2,  // 5: sameoldchat.chat.v1.RemindersService.CompleteReminder:input_type -> sameoldchat.chat.v1.ReminderRequest
 	2,  // 6: sameoldchat.chat.v1.RemindersService.DeleteReminder:input_type -> sameoldchat.chat.v1.ReminderRequest
-	6,  // 7: sameoldchat.chat.v1.RemindersService.CreateLaterReminder:input_type -> sameoldchat.chat.v1.CreateLaterReminderRequest
-	7,  // 8: sameoldchat.chat.v1.RemindersService.LaterReminderInfo:input_type -> sameoldchat.chat.v1.LaterReminderRequest
-	8,  // 9: sameoldchat.chat.v1.RemindersService.LaterReminders:input_type -> sameoldchat.chat.v1.LaterRemindersRequest
-	10, // 10: sameoldchat.chat.v1.RemindersService.UpdateLaterReminder:input_type -> sameoldchat.chat.v1.UpdateLaterReminderRequest
-	9,  // 11: sameoldchat.chat.v1.RemindersService.AcknowledgeLaterReminders:input_type -> sameoldchat.chat.v1.AcknowledgeLaterRemindersRequest
-	7,  // 12: sameoldchat.chat.v1.RemindersService.CompleteLaterReminder:input_type -> sameoldchat.chat.v1.LaterReminderRequest
-	7,  // 13: sameoldchat.chat.v1.RemindersService.DeleteLaterReminder:input_type -> sameoldchat.chat.v1.LaterReminderRequest
-	0,  // 14: sameoldchat.chat.v1.RemindersService.AddReminder:output_type -> sameoldchat.chat.v1.Reminder
-	0,  // 15: sameoldchat.chat.v1.RemindersService.ReminderInfo:output_type -> sameoldchat.chat.v1.Reminder
-	4,  // 16: sameoldchat.chat.v1.RemindersService.Reminders:output_type -> sameoldchat.chat.v1.ReminderPage
-	12, // 17: sameoldchat.chat.v1.RemindersService.CompleteReminder:output_type -> sameoldchat.chat.v1.MutationResponse
-	12, // 18: sameoldchat.chat.v1.RemindersService.DeleteReminder:output_type -> sameoldchat.chat.v1.MutationResponse
-	5,  // 19: sameoldchat.chat.v1.RemindersService.CreateLaterReminder:output_type -> sameoldchat.chat.v1.LaterReminder
-	5,  // 20: sameoldchat.chat.v1.RemindersService.LaterReminderInfo:output_type -> sameoldchat.chat.v1.LaterReminder
-	11, // 21: sameoldchat.chat.v1.RemindersService.LaterReminders:output_type -> sameoldchat.chat.v1.LaterReminderPage
-	5,  // 22: sameoldchat.chat.v1.RemindersService.UpdateLaterReminder:output_type -> sameoldchat.chat.v1.LaterReminder
-	12, // 23: sameoldchat.chat.v1.RemindersService.AcknowledgeLaterReminders:output_type -> sameoldchat.chat.v1.MutationResponse
-	12, // 24: sameoldchat.chat.v1.RemindersService.CompleteLaterReminder:output_type -> sameoldchat.chat.v1.MutationResponse
-	12, // 25: sameoldchat.chat.v1.RemindersService.DeleteLaterReminder:output_type -> sameoldchat.chat.v1.MutationResponse
-	14, // [14:26] is the sub-list for method output_type
-	2,  // [2:14] is the sub-list for method input_type
+	6,  // 7: sameoldchat.chat.v1.RemindersService.CreateChannelReminder:input_type -> sameoldchat.chat.v1.CreateChannelReminderRequest
+	7,  // 8: sameoldchat.chat.v1.RemindersService.ChannelReminders:input_type -> sameoldchat.chat.v1.ChannelRemindersRequest
+	9,  // 9: sameoldchat.chat.v1.RemindersService.DeleteChannelReminder:input_type -> sameoldchat.chat.v1.DeleteChannelReminderRequest
+	0,  // 10: sameoldchat.chat.v1.RemindersService.AddReminder:output_type -> sameoldchat.chat.v1.Reminder
+	0,  // 11: sameoldchat.chat.v1.RemindersService.ReminderInfo:output_type -> sameoldchat.chat.v1.Reminder
+	4,  // 12: sameoldchat.chat.v1.RemindersService.Reminders:output_type -> sameoldchat.chat.v1.ReminderPage
+	10, // 13: sameoldchat.chat.v1.RemindersService.CompleteReminder:output_type -> sameoldchat.chat.v1.MutationResponse
+	10, // 14: sameoldchat.chat.v1.RemindersService.DeleteReminder:output_type -> sameoldchat.chat.v1.MutationResponse
+	5,  // 15: sameoldchat.chat.v1.RemindersService.CreateChannelReminder:output_type -> sameoldchat.chat.v1.ChannelReminder
+	8,  // 16: sameoldchat.chat.v1.RemindersService.ChannelReminders:output_type -> sameoldchat.chat.v1.ChannelReminderPage
+	10, // 17: sameoldchat.chat.v1.RemindersService.DeleteChannelReminder:output_type -> sameoldchat.chat.v1.MutationResponse
+	10, // [10:18] is the sub-list for method output_type
+	2,  // [2:10] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
 	2,  // [2:2] is the sub-list for extension extendee
 	0,  // [0:2] is the sub-list for field type_name
@@ -1377,7 +1074,7 @@ func file_sameoldchat_chat_v1_reminders_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_reminders_proto_rawDesc), len(file_sameoldchat_chat_v1_reminders_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

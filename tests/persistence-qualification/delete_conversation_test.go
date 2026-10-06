@@ -72,7 +72,7 @@ func deletingAConversationRemovesEverythingItOwns(t *testing.T, open opener) {
 	}
 	if _, _, err := f.repository.CreateSavedItem(ctx, domain.SavedItem{
 		ID: domain.SavedItemID("SV-" + f.suffix), WorkspaceID: f.workspaceID, UserID: f.userID, MessageID: message.ID,
-		Conversation: f.channelID, State: domain.SavedItemInProgress, CreatedAt: now, UpdatedAt: now,
+		Conversation: f.channelID, CreatedAt: now,
 	}, f.event("saved", "saved_item.created", string(message.ID))); err != nil {
 		t.Fatalf("seed saved item: %v", err)
 	}
@@ -112,7 +112,7 @@ func deletingAConversationRemovesEverythingItOwns(t *testing.T, open opener) {
 	if bookmarks, err := f.repository.ListBookmarks(ctx, f.workspaceID, f.channelID); err != nil || len(bookmarks) != 0 {
 		t.Fatalf("bookmarks after delete: %d (err %v), want none", len(bookmarks), err)
 	}
-	saved, err := f.repository.ListSavedItems(ctx, f.workspaceID, f.userID, domain.SavedItemInProgress, domain.PageRequest{Limit: 50})
+	saved, err := f.repository.ListSavedItems(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: 50})
 	if err != nil || len(saved.Items) != 0 {
 		t.Fatalf("saved items after delete: %d (err %v), want none", len(saved.Items), err)
 	}

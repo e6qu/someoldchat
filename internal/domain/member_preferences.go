@@ -38,6 +38,14 @@ func NormalizeMemberPreference(name, value string) (string, string, error) {
 			return "", "", ErrInvalidMemberPreference
 		}
 	}
+	// The reminder default time is read by the server when it parses a
+	// reminder, so a value it could not read is refused rather than stored
+	// and silently ignored.
+	if name == ReminderDefaultTimePreference && value != "" {
+		if _, ok := ParseReminderClock(value); !ok {
+			return "", "", ErrInvalidMemberPreference
+		}
+	}
 	return name, value, nil
 }
 

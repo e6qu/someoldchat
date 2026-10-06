@@ -12,6 +12,7 @@ import (
 	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -2149,27 +2150,28 @@ type ActivityItem struct {
 	// CallID is set when the item is an invitation to a huddle. Conversation
 	// carries where the huddle is; this tells "you were added to #general"
 	// from "you were invited to the huddle in #general".
-	CallID     CallID
-	MessageID  MessageID
-	ReminderID LaterReminderID
+	CallID    CallID
+	MessageID MessageID
+	// TodoID is a to-do whose reminder came due.
+	TodoID TodoID
 	// AppReminderID is a reminders.add reminder coming due. It sits beside
-	// ReminderID rather than replacing it because the two are different
-	// identifiers for different things: Later is where a member puts something
-	// to come back to, and reminders.add is the deprecated app surface Slack
-	// keeps for compatibility. One column holding either would make every
-	// reader guess which it was holding.
+	// TodoID rather than replacing it because the two are different
+	// identifiers for different things: a to-do is where a member puts
+	// something to come back to, and reminders.add is the deprecated app
+	// surface Slack keeps for compatibility. One column holding either would
+	// make every reader guess which it was holding.
 	AppReminderID ReminderID
 	ReactionName  string
 	OccurredAt    time.Time
 	ReadAt        time.Time
 	ClearedAt     time.Time
 	Message       Message
-	Reminder      LaterReminder
-	// AppReminder is resolved when the item is read, like Reminder. Without it
+	Todo          Todo
+	// AppReminder is resolved when the item is read, like Todo. Without it
 	// the row says a reminder came due and not which one, which reminds the
 	// member of nothing.
 	AppReminder Reminder
-	// CanvasTitle is resolved when the item is read, like Message and Reminder,
+	// CanvasTitle is resolved when the item is read, like Message and Todo,
 	// so a row can name what was shared without the reader following the link.
 	CanvasTitle string
 	// ListItem is what an Activity row needs to describe assigned work: enough
@@ -2354,21 +2356,14 @@ type StarPage struct {
 	Total      int
 }
 
-type SavedItemState string
-
-const (
-	SavedItemInProgress SavedItemState = "in_progress"
-	SavedItemArchived   SavedItemState = "archived"
-	SavedItemCompleted  SavedItemState = "completed"
-)
-
-func (state SavedItemState) Valid() bool {
-	return state == SavedItemInProgress || state == SavedItemArchived || state == SavedItemCompleted
-}
-
-// SavedItem is the private first-party state behind Slack's current Later
-// surface. It is intentionally distinct from Star: Slack does not expose
-// current Later items through the deprecated stars.* API.
+// SavedItem is a member's private bookmark on a message or file: Slack's
+// Saved section of Home ("Your saved items are only visible to you"). It has
+// no state of its own. Slack moved the In progress / Archived / Completed
+// organization out of saved items when Later became To-dos, so a saved item
+// is either saved or not, and work with a due date or a done state is a Todo.
+//
+// It is intentionally distinct from Star: Slack does not expose saved items
+// through the deprecated stars.* API.
 //
 // Message is populated only when the requesting member can still read the
 // source. SourceAvailable is explicit so a deleted or inaccessible source is
@@ -2379,13 +2374,12 @@ type SavedItem struct {
 	UserID          UserID
 	MessageID       MessageID
 	Conversation    ConversationID
-	State           SavedItemState
 	CreatedAt       time.Time
-	UpdatedAt       time.Time
 	Message         Message
 	SourceAvailable bool
 }
 
+// SavedItemPage lists saved items newest first, as the Saved section does.
 type SavedItemPage struct {
 	Items      []SavedItem
 	NextCursor Cursor
@@ -2442,7 +2436,7 @@ type File struct {
 	// it. Slack calls it an image description and shows a control for it; the
 	// pinned Web API snapshot predates the alt_txt parameter that carries it,
 	// so this is first-party durable state rather than an invented API field —
-	// the same standing as recent searches and Later.
+	// the same standing as recent searches, saved items and to-dos.
 	Description string
 	// FileType is the syntax language of a snippet — the text a member typed
 	// inline rather than a file they uploaded. It is empty for an ordinary hosted
@@ -2920,17 +2914,6 @@ type ReminderPage struct {
 	HasMore    bool
 }
 
-type LaterReminderTarget string
-
-const (
-	LaterReminderPersonal LaterReminderTarget = "personal"
-	LaterReminderChannel  LaterReminderTarget = "channel"
-)
-
-func (target LaterReminderTarget) Valid() bool {
-	return target == LaterReminderPersonal || target == LaterReminderChannel
-}
-
 type ReminderRecurrence string
 
 const (
@@ -2950,27 +2933,13 @@ func (recurrence ReminderRecurrence) Valid() bool {
 	}
 }
 
-// LaterReminder is SameOldChat's private first-party reminder state. It is
-// deliberately separate from Reminder, which preserves Slack's deprecated
-// reminders.* app contract. Slack exposes no app API for current Later.
-//
-// Personal reminders are visible only to UserID. Channel reminders have a
-// Channel and no UserID, and are listed by Creator. SourceMessageID is optional
-// and retains the message selected by "Remind me about this".
-type LaterReminder struct {
-	ID                 LaterReminderID
-	WorkspaceID        WorkspaceID
-	Creator            UserID
-	UserID             UserID
-	Channel            ConversationID
-	SourceMessageID    MessageID
-	SourceConversation ConversationID
-	SourceTimestamp    MessageTimestamp
-	Target             LaterReminderTarget
-	Text               string
-	DueAt              time.Time
-	TimeZone           string
-	Recurrence         ReminderRecurrence
+// ReminderTiming is when a first-party reminder comes due and how it recurs.
+// The zero value is "no reminder": a to-do can have none, while a channel
+// reminder always has one.
+type ReminderTiming struct {
+	DueAt      time.Time
+	TimeZone   string
+	Recurrence ReminderRecurrence
 	// RecurrenceAnchor positions the series, fixed at creation (or edit) and
 	// never advanced. It is the first due instant, or, when that first
 	// occurrence was already clamped ("every month" set on the 31st after its
@@ -2980,33 +2949,316 @@ type LaterReminder struct {
 	// last day and returns to the 31st afterwards, instead of drifting earlier
 	// every time it meets a February. For one-time reminders it equals DueAt.
 	RecurrenceAnchor time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	CompletedAt      time.Time
-	LastDeliveredAt  time.Time
-	AcknowledgedAt   time.Time
-	FailedAt         time.Time
-	FailureCode      string
 }
 
-type LaterReminderPage struct {
-	Items      []LaterReminder
+// Scheduled reports whether there is a reminder at all.
+func (timing ReminderTiming) Scheduled() bool { return !timing.DueAt.IsZero() }
+
+// ReminderDelivery is what the delivery worker has recorded about a reminder.
+// An occurrence is delivered once LastDeliveredAt has reached its DueAt: a
+// one-time reminder keeps its due date after it fires (so a to-do reads as
+// overdue rather than done), and a recurring one moves DueAt to the next
+// occurrence.
+type ReminderDelivery struct {
+	LastDeliveredAt time.Time
+	AcknowledgedAt  time.Time
+	FailedAt        time.Time
+	FailureCode     string
+}
+
+// Pending reports whether the occurrence at the timing's due instant has
+// still to be delivered.
+func (delivery ReminderDelivery) Pending(timing ReminderTiming) bool {
+	return timing.Scheduled() && delivery.FailedAt.IsZero() && delivery.LastDeliveredAt.Before(timing.DueAt)
+}
+
+// TodoSource is the message a to-do was made from: "Remind me about this" on
+// a message, or a saved item moved to To-dos. The zero value is a to-do the
+// member wrote themselves.
+type TodoSource struct {
+	MessageID    MessageID
+	Conversation ConversationID
+	Timestamp    MessageTimestamp
+}
+
+func (source TodoSource) Set() bool { return source.MessageID != "" }
+
+// TodoTitleLimit and TodoDetailsLimit bound what a member types into Add
+// To-do. Slack publishes no limit; these are product choices sized like the
+// reminder text Later accepted.
+const (
+	TodoTitleLimit   = 3000
+	TodoDetailsLimit = 4000
+)
+
+// Todo is an item in a member's private To-dos tab, Slack's replacement for
+// Later. "Reminders attach a due date to your to-dos": Reminder is optional,
+// and its delivery never marks the to-do done — an overdue to-do is one whose
+// reminder has fired and that the member has not finished. Done is the
+// member's own decision, recorded in CompletedAt.
+type Todo struct {
+	ID          TodoID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	Title       string
+	Details     string
+	Source      TodoSource
+	Reminder    ReminderTiming
+	Delivery    ReminderDelivery
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	CompletedAt time.Time
+}
+
+func (todo Todo) Done() bool { return !todo.CompletedAt.IsZero() }
+
+// Valid is the shape every storage profile requires of a stored to-do: a
+// title, an owner, a complete source or none, and a recurrence only on a
+// reminder that exists.
+func (todo Todo) Valid() bool {
+	return todo.ID != "" && todo.WorkspaceID != "" && todo.UserID != "" &&
+		strings.TrimSpace(todo.Title) != "" && len(todo.Title) <= TodoTitleLimit && len(todo.Details) <= TodoDetailsLimit &&
+		todo.Source.Set() == (todo.Source.Conversation != "" && todo.Source.Timestamp != "") &&
+		todo.Reminder.Valid()
+}
+
+// Valid allows the zero timing (no reminder) and otherwise requires a known
+// recurrence and zone.
+func (timing ReminderTiming) Valid() bool {
+	if !timing.Scheduled() {
+		return timing.Recurrence == ReminderOnce && timing.RecurrenceAnchor.IsZero()
+	}
+	return timing.Recurrence.Valid() && timing.TimeZone != ""
+}
+
+// ReminderGroup places the to-do in one of the To-dos filter's three
+// reminder groups at now.
+func (todo Todo) ReminderGroup(now time.Time) TodoReminderGroup {
+	switch {
+	case !todo.Reminder.Scheduled():
+		return TodoNoReminder
+	case todo.Reminder.DueAt.After(now):
+		return TodoUpcoming
+	default:
+		return TodoOverdue
+	}
+}
+
+// Badged reports whether this to-do's reminder has come due since the member
+// last opened To-dos, which is what puts a badge on To-dos and Activity.
+func (todo Todo) Badged() bool {
+	return !todo.Done() && todo.Delivery.LastDeliveredAt.After(todo.Delivery.AcknowledgedAt)
+}
+
+// TodoTitleFromMessage is the title a to-do made from a message takes when
+// nobody typed one (moving a saved item to To-dos, or a saved item completed
+// in Later before schema 218): the message's first line, shortened, or a
+// plain description of a message with no text of its own, such as a file.
+// Slack publishes nothing on this; it is a product choice.
+func TodoTitleFromMessage(text string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "Saved message"
+	}
+	const limit = 150
+	runes := []rune(line)
+	if len(runes) <= limit {
+		return line
+	}
+	return strings.TrimSpace(string(runes[:limit-1])) + "…"
+}
+
+// TodoReminderGroup is one of the reminder groups Slack's To-dos filter
+// offers. It is derived from the due date and the present, not stored, so it
+// is a grouping rather than a lifecycle a to-do moves through: "Overdue to-dos with reminders in the past, Upcoming reminders with
+// due dates in the future, and No reminder scheduled for to-dos with no
+// reminder."
+type TodoReminderGroup string
+
+const (
+	TodoOverdue    TodoReminderGroup = "overdue"
+	TodoUpcoming   TodoReminderGroup = "upcoming"
+	TodoNoReminder TodoReminderGroup = "none"
+)
+
+func (status TodoReminderGroup) Valid() bool {
+	return status == TodoOverdue || status == TodoUpcoming || status == TodoNoReminder
+}
+
+// TodoSort is the To-dos "Sort by" choice: "Due date, Earliest date created,
+// or Latest date created."
+type TodoSort string
+
+const (
+	TodoSortDueDate       TodoSort = "due"
+	TodoSortEarliestFirst TodoSort = "created"
+	TodoSortLatestFirst   TodoSort = "created_desc"
+)
+
+func (sort TodoSort) Valid() bool {
+	return sort == TodoSortDueDate || sort == TodoSortEarliestFirst || sort == TodoSortLatestFirst
+}
+
+// TodoQuery selects a page of a member's to-dos. Reminders empty means every
+// group; Now is the instant that divides overdue from upcoming, fixed by the
+// caller so one page and the next agree on it.
+type TodoQuery struct {
+	Done      bool
+	Reminders []TodoReminderGroup
+	Sort      TodoSort
+	Now       time.Time
+	Page      PageRequest
+}
+
+func (query TodoQuery) Valid() bool {
+	if !query.Sort.Valid() || query.Now.IsZero() {
+		return false
+	}
+	for _, status := range query.Reminders {
+		if !status.Valid() {
+			return false
+		}
+	}
+	return true
+}
+
+// Includes reports whether a to-do in this reminder group belongs on the page.
+func (query TodoQuery) Includes(status TodoReminderGroup) bool {
+	return len(query.Reminders) == 0 || slices.Contains(query.Reminders, status)
+}
+
+// TodoPosition is where a to-do falls in a To-dos sort, in the units every
+// storage profile keeps: whole seconds and the identifier that breaks ties.
+// Due-date order puts to-dos with no reminder after every dated one.
+type TodoPosition struct {
+	DueAt     int64
+	CreatedAt int64
+	ID        TodoID
+}
+
+func PositionOf(todo Todo) TodoPosition {
+	position := TodoPosition{CreatedAt: todo.CreatedAt.Unix(), ID: todo.ID}
+	if todo.Reminder.Scheduled() {
+		position.DueAt = todo.Reminder.DueAt.Unix()
+	}
+	return position
+}
+
+// Precedes reports whether position comes before other under sort.
+func (position TodoPosition) Precedes(other TodoPosition, sort TodoSort) bool {
+	switch sort {
+	case TodoSortDueDate:
+		if (position.DueAt == 0) != (other.DueAt == 0) {
+			return other.DueAt == 0
+		}
+		if position.DueAt != other.DueAt {
+			return position.DueAt < other.DueAt
+		}
+		return position.ID < other.ID
+	case TodoSortLatestFirst:
+		if position.CreatedAt != other.CreatedAt {
+			return position.CreatedAt > other.CreatedAt
+		}
+		return position.ID > other.ID
+	default:
+		if position.CreatedAt != other.CreatedAt {
+			return position.CreatedAt < other.CreatedAt
+		}
+		return position.ID < other.ID
+	}
+}
+
+// NewTodoCursor names the last to-do of a page under its sort. The sort is
+// part of the cursor, so a cursor from one sort is refused by another rather
+// than silently skipping or repeating to-dos.
+func NewTodoCursor(todo Todo, sort TodoSort) (Cursor, error) {
+	position := PositionOf(todo)
+	return NewListCursor(fmt.Sprintf("%s|%d|%d|%s", sort, position.DueAt, position.CreatedAt, position.ID))
+}
+
+// DecodeTodoCursor reads a NewTodoCursor cursor for sort. ok is false for the
+// empty cursor, which starts at the beginning.
+func DecodeTodoCursor(cursor Cursor, sort TodoSort) (TodoPosition, bool, error) {
+	raw, err := DecodeListCursor(cursor)
+	if err != nil || raw == "" {
+		return TodoPosition{}, false, err
+	}
+	parts := strings.SplitN(raw, "|", 4)
+	if len(parts) != 4 || TodoSort(parts[0]) != sort || parts[3] == "" {
+		return TodoPosition{}, false, ErrInvalidCursor
+	}
+	due, dueErr := strconv.ParseInt(parts[1], 10, 64)
+	created, createdErr := strconv.ParseInt(parts[2], 10, 64)
+	if dueErr != nil || createdErr != nil || due < 0 {
+		return TodoPosition{}, false, ErrInvalidCursor
+	}
+	return TodoPosition{DueAt: due, CreatedAt: created, ID: TodoID(parts[3])}, true, nil
+}
+
+type TodoPage struct {
+	Items      []Todo
 	NextCursor Cursor
 	HasMore    bool
 }
 
-type LaterReminderRequest struct {
-	Target          LaterReminderTarget
-	Channel         ConversationID
+// TodoRequest is what Add To-do, "Remind me about this" and moving a saved
+// item to To-dos ask for. SourceChannel and SourceTimestamp name a message
+// the member can read; both or neither.
+type TodoRequest struct {
+	Title           string
+	Details         string
 	SourceChannel   ConversationID
 	SourceTimestamp MessageTimestamp
-	Text            string
-	DueAt           time.Time
-	TimeZone        string
-	Recurrence      ReminderRecurrence
-	// RecurrenceAnchor positions a recurring series when it differs from
-	// DueAt (see ReminderOccurrence); zero means the series starts at DueAt.
-	RecurrenceAnchor time.Time
+	Reminder        ReminderTiming
+}
+
+// TodoEdit replaces a to-do's text. Its reminder is changed separately (Edit
+// reminder, Clear due date), so editing one cannot disturb the other.
+type TodoEdit struct {
+	Title   string
+	Details string
+}
+
+// ChannelReminder is a reminder /remind sets for a channel: Slackbot posts it
+// there when it comes due. It is not a to-do: it has no done state, never
+// appears in To-dos, and "can't be edited, but you can delete and recreate"
+// it. /remind list privately lists the ones a member created.
+type ChannelReminder struct {
+	ID          ChannelReminderID
+	WorkspaceID WorkspaceID
+	Creator     UserID
+	Channel     ConversationID
+	Text        string
+	Reminder    ReminderTiming
+	Delivery    ReminderDelivery
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// Valid is the shape every storage profile requires of a stored channel
+// reminder: unlike a to-do, it always has a due date.
+func (reminder ChannelReminder) Valid() bool {
+	return reminder.ID != "" && reminder.WorkspaceID != "" && reminder.Creator != "" && reminder.Channel != "" &&
+		strings.TrimSpace(reminder.Text) != "" && len(reminder.Text) <= TodoTitleLimit &&
+		reminder.Reminder.Scheduled() && reminder.Reminder.Valid()
+}
+
+// Finished reports whether a one-time channel reminder has been posted.
+func (reminder ChannelReminder) Finished() bool {
+	return reminder.Reminder.Recurrence == ReminderOnce && reminder.Delivery.FailedAt.IsZero() && !reminder.Delivery.Pending(reminder.Reminder)
+}
+
+type ChannelReminderPage struct {
+	Items      []ChannelReminder
+	NextCursor Cursor
+	HasMore    bool
+}
+
+type ChannelReminderRequest struct {
+	Channel  ConversationID
+	Text     string
+	Reminder ReminderTiming
 }
 
 type ScheduledMessage struct {

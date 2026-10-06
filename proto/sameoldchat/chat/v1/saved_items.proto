@@ -6,21 +6,25 @@ option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/tr
 
 import "sameoldchat/chat/v1/conversation_mutations.proto";
 import "sameoldchat/chat/v1/messages.proto";
+import "sameoldchat/chat/v1/todos.proto";
 
+// SavedItem is a member's private bookmark in the Saved section of Home.
 message SavedItem {
+  // A saved item had a Later state (in progress, archived, completed) and the
+  // instant it last changed; Slack's Saved has neither (schema 218).
+  reserved 6, 8;
+  reserved "state", "updated_at_unix_nano";
   string id = 1;
   string workspace_id = 2;
   string user_id = 3;
   string message_id = 4;
   string conversation_id = 5;
-  string state = 6;
   int64 created_at_unix_nano = 7;
-  int64 updated_at_unix_nano = 8;
   Message message = 9;
   bool source_available = 10;
 }
 
-message SaveForLaterRequest {
+message AddToSavedRequest {
   string workspace_id = 1;
   string user_id = 2;
   string conversation_id = 3;
@@ -44,9 +48,10 @@ message SavedItemsForMessagesResponse {
 }
 
 message SavedItemsRequest {
+  reserved 3;
+  reserved "state";
   string workspace_id = 1;
   string user_id = 2;
-  string state = 3;
   int32 limit = 4;
   string cursor = 5;
   bool descending = 6;
@@ -58,24 +63,33 @@ message SavedItemPage {
   bool has_more = 3;
 }
 
-message SetSavedItemStateRequest {
-  string workspace_id = 1;
-  string user_id = 2;
-  string saved_item_id = 3;
-  string state = 4;
-}
-
 message RemoveSavedItemRequest {
   string workspace_id = 1;
   string user_id = 2;
   string saved_item_id = 3;
 }
 
+message ClearSavedItemsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message ClearSavedItemsResponse {
+  int32 cleared = 1;
+}
+
+message MoveSavedItemToTodoRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string saved_item_id = 3;
+}
+
 service SavedItemsService {
-  rpc SaveForLater(SaveForLaterRequest) returns (SavedItem);
+  rpc AddToSaved(AddToSavedRequest) returns (SavedItem);
   rpc SavedItemForMessage(SavedItemForMessageRequest) returns (SavedItem);
   rpc SavedItemsForMessages(SavedItemsForMessagesRequest) returns (SavedItemsForMessagesResponse);
   rpc SavedItems(SavedItemsRequest) returns (SavedItemPage);
-  rpc SetSavedItemState(SetSavedItemStateRequest) returns (SavedItem);
   rpc RemoveSavedItem(RemoveSavedItemRequest) returns (MutationResponse);
+  rpc ClearSavedItems(ClearSavedItemsRequest) returns (ClearSavedItemsResponse);
+  rpc MoveSavedItemToTodo(MoveSavedItemToTodoRequest) returns (Todo);
 }

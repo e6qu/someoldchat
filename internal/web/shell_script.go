@@ -44,7 +44,7 @@ function writePref(key,value){try{window.localStorage.setItem(storageKey(key),va
 window.sameoldchatPreferences={get:readPref,set:writePref};
 var darkQuery=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
 function applyTheme(){var theme=readPref('theme','system');var dark=theme==='dark'||(theme!=='light'&&!!(darkQuery&&darkQuery.matches));root.setAttribute('data-theme',dark?'dark':'light');root.setAttribute('data-theme-explicit','')}
-var displayDefaults={'underline-links':'false','reduce-motion':'false','inline-media':'true','link-previews':'true','emoji-as-text':'false','jumbomoji':'true','message-theme':'clean','name-display':'full','nav-dms':'true','nav-activity':'true','nav-later':'true','nav-files':'false','nav-labels':'true','zoom':'100'};
+var displayDefaults={'underline-links':'false','reduce-motion':'false','inline-media':'true','link-previews':'true','emoji-as-text':'false','jumbomoji':'true','message-theme':'clean','name-display':'full','nav-dms':'true','nav-activity':'true','nav-todos':'true','nav-files':'false','nav-labels':'true','zoom':'100'};
 function applyDisplay(){Object.keys(displayDefaults).forEach(function(key){var value=readPref(key,displayDefaults[key]);if(value===displayDefaults[key])root.removeAttribute('data-pref-'+key);else root.setAttribute('data-pref-'+key,value)})}
 applyDisplay();
 if(darkQuery){if(typeof darkQuery.addEventListener==='function')darkQuery.addEventListener('change',applyTheme);else if(typeof darkQuery.addListener==='function')darkQuery.addListener(applyTheme)}
@@ -189,7 +189,7 @@ if(key===','){var preferences=dialogByID('preferences');if(openDialog(preference
 if(key==='n'){event.preventDefault();go(withChannel('/app/dms')+'#new-dm');return}
 if(key==='.'){if(toggleRightPane())event.preventDefault();return}}
 if(primary(event)&&!event.altKey&&event.shiftKey){
-var destinations={k:'/app/dms',a:'/app/unreads',t:'/app/threads',s:'/app/later',l:'/app/channels',e:'/app/members'};
+var destinations={k:'/app/dms',a:'/app/unreads',t:'/app/threads',s:'/app/saved',l:'/app/channels',e:'/app/members'};
 if(destinations[key]){event.preventDefault();go(withChannel(destinations[key]));return}
 if(key==='y'){var status=dialogByID('status-dialog');if(openDialog(status,document.activeElement))event.preventDefault();return}
 if(key==='d'){if(toggleSidebar())event.preventDefault();return}}

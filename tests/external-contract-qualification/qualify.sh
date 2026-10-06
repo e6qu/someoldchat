@@ -464,7 +464,7 @@ assert_contains "$work/screen-reader.html" 'screen reader' \
 	'[A11Y-02] Slack documents a dedicated screen-reader journey' "$screen_reader_url"
 
 assert_contains "$work/reminders.html" 'Click the To-dos tab in your sidebar.' \
-	'[REMIND-02] personal reminder creation starts in To-dos, which the product still calls Later' "$reminder_help_url"
+	'[REMIND-02] personal reminder creation starts in the To-dos tab' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'Remind me about this' \
 	'[REMIND-01] message and file reminders use the message action' "$reminder_help_url"
 assert_contains "$work/reminders.html" '/remind [#channel] [what] [when]' \
@@ -475,10 +475,12 @@ assert_contains "$work/reminders.html" 'A message that is only visible to you wi
 	'[REMIND-03] /remind list is private to the caller' "$reminder_help_url"
 assert_contains "$work/reminders.html" '9 a.m. in your time zone' \
 	'[REMIND-02] date-only reminder default is local 9 AM' "$reminder_help_url"
+assert_contains "$work/reminders.html" 'Set a default time for reminder notifications' \
+	'[REMIND-02] the default reminder time is a member preference' "$reminder_help_url"
 assert_contains "$work/reminders.html" "Guests can't create channel reminders" \
 	'[REMIND-02] guest reminder boundary' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'see a badge on the' \
-	'[REMIND-04] due personal reminders badge Later and Activity' "$reminder_help_url"
+	'[REMIND-04] due personal reminders badge To-dos and Activity' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'every Monday' \
 	'[REMIND-03] channel reminders accept named weekday recurrence' "$reminder_help_url"
 assert_contains "$work/activity.html" 'personal reminders in Activity' \
@@ -518,12 +520,12 @@ assert_contains "$work/keyboard-navigation.html" 'Ctrl 3' \
 assert_contains "$work/keyboard-navigation.html" 'Ctrl Shift 3' \
 	'[ACTIVITY-01] Slack web on Windows and Linux opens Activity with the third navigation-tab shortcut' "$keyboard_navigation_url"
 
-# Slack is rolling out To-dos and Saved in place of Later; the product still has
-# the Later it replaces (see the LATER-02 row of specs/product-gap-audit.md).
-# These hold the gap to Slack's current wording, so the row is revisited when
+# Slack replaced Later with a To-dos tab and a Saved section of Home, and the
+# product follows (specs/journeys/06-saved-todos-and-reminders.md). These hold
+# that model to Slack's current wording, so the journey is revisited when
 # Slack's articles change again.
 assert_contains "$work/later.html" 'Saved items have moved out of Later (which is now To-dos' \
-	'[LATER-02] Slack is replacing Later with To-dos and Saved' "$later_help_url"
+	'[LATER-02] Later is now To-dos, and saved items moved to Saved' "$later_help_url"
 assert_contains "$work/later.html" 'access them from the Saved section of Home' \
 	'[LATER-01] saved items live in the Saved section of Home' "$later_help_url"
 assert_contains "$work/reminders.html" 'Overdue to-dos with reminders in the past' \
@@ -540,7 +542,7 @@ assert_contains "$work/reminders-add.html" 'have become degraded or useless' \
 assert_contains "$work/reminders-list.html" 'non-recurring reminders' \
 	'[REMIND-API-01] only non-recurring reminders carry time and complete_ts' "$reminder_list_api_url"
 assert_contains "$work/later-api.html" 'There are no direct APIs for Save it for Later to integrate with.' \
-	'[LATER-01 REMIND-API-01] current Later has no direct app API' "$later_api_url"
+	'[LATER-01 REMIND-API-01] saved items and to-dos have no direct app API' "$later_api_url"
 
 # Slack's current reference is the API this project implements, so a method
 # or event Slack adds or retires is a change to adopt. The pinned catalogs in

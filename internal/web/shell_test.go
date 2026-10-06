@@ -35,7 +35,8 @@ func TestEveryDestinationRendersInsideTheWorkspaceFrame(t *testing.T) {
 		{"/app?channel=Cdev", "Home"},
 		{"/app/dms?channel=Cdev", "DMs"},
 		{"/app/activity?channel=Cdev", "Activity"},
-		{"/app/later?channel=Cdev", "Later"},
+		{"/app/todos?channel=Cdev", "To-dos"},
+		{"/app/saved?channel=Cdev", "Home"},
 		{"/app/members?channel=Cdev", ""},
 		{"/app/threads?channel=Cdev", "Home"},
 		{"/app/unreads?channel=Cdev", "Home"},
@@ -236,7 +237,7 @@ func TestStarringMovesAConversationToStarred(t *testing.T) {
 // application's own pages: anything else would be an open redirect.
 func TestReturnTargetAcceptsOnlyThisApplicationsPages(t *testing.T) {
 	for value, want := range map[string]string{
-		"/app/later?channel=Cdev":   "/app/later?channel=Cdev",
+		"/app/todos?channel=Cdev":   "/app/todos?channel=Cdev",
 		"/app":                      "/app",
 		"https://evil.example/app":  "/fallback",
 		"//evil.example/app":        "/fallback",

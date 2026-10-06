@@ -42,6 +42,15 @@ func once(due time.Time) ReminderOccurrence {
 // to accept only a number and answered cannot_parse to every phrase Slack
 // documents.
 func ParseReminderExpression(expression string, now time.Time, location *time.Location) (string, ReminderOccurrence, error) {
+	return ParseReminderExpressionAt(expression, now, location, DefaultReminderClock)
+}
+
+// ParseReminderExpressionAt is ParseReminderExpression with the time of day a
+// reminder set for a day ("tomorrow", "every Tuesday", "on March 3") is
+// delivered at: the member's "Set a default time for reminder notifications"
+// preference (ReminderDefaultClock), which Slack's "Set a reminder" defaults
+// to 9 a.m. in the member's time zone.
+func ParseReminderExpressionAt(expression string, now time.Time, location *time.Location, clock ReminderClock) (string, ReminderOccurrence, error) {
 	localNow := now.In(location)
 	if match := remindInPattern.FindStringSubmatch(expression); match != nil {
 		// "a" and "an" are the spoken form of one: "in an hour" means "in 1 hour".
@@ -74,9 +83,9 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		return strings.TrimSpace(match[1]), once(now.Add(duration)), nil
 	}
 	if match := remindTomorrowPattern.FindStringSubmatch(expression); match != nil {
-		hour, minute, err := parseReminderClock(match[2], 9, 0)
+		hour, minute, err := parseReminderClock(match[2], clock.Hour, clock.Minute)
 		if err != nil {
-			return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
 		tomorrow := localNow.AddDate(0, 0, 1)
 		due, err := reminderLocalTime(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), hour, minute, location)
@@ -85,19 +94,19 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 	if match := remindDatePattern.FindStringSubmatch(expression); match != nil {
 		date, err := time.ParseInLocation("2006-01-02", match[2], location)
 		if err != nil {
-			return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
+		hour, minute, err := parseReminderClock(match[3], clock.Hour, clock.Minute)
 		if err != nil {
-			return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
 		due, err := reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
 		return strings.TrimSpace(match[1]), once(due), err
 	}
 	if match := remindWeekdayPattern.FindStringSubmatch(expression); match != nil {
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
+		hour, minute, err := parseReminderClock(match[3], clock.Hour, clock.Minute)
 		if err != nil {
-			return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
 		due, err := comingWeekday(match[2], hour, minute, localNow, now, location)
 		if err != nil {
@@ -106,9 +115,9 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		return strings.TrimSpace(match[1]), ReminderOccurrence{Due: due, Recurrence: ReminderWeekly, Anchor: due}, nil
 	}
 	if match := remindRecurringPattern.FindStringSubmatch(expression); match != nil {
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
+		hour, minute, err := parseReminderClock(match[3], clock.Hour, clock.Minute)
 		if err != nil {
-			return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
 		recurrence := map[string]ReminderRecurrence{
 			"day": ReminderDaily, "week": ReminderWeekly,
@@ -134,9 +143,9 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		// "on friday" is a single occurrence on the coming Friday, distinct from
 		// "every friday". It shares the coming-weekday resolution with the
 		// recurring form but records no recurrence.
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
+		hour, minute, err := parseReminderClock(match[3], clock.Hour, clock.Minute)
 		if err != nil {
-			return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
 		due, err := comingWeekday(match[2], hour, minute, localNow, now, location)
 		if err != nil {
@@ -150,18 +159,18 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		// "on February 30" — is rejected rather than rolled into March.
 		month := monthByName(match[2])
 		day, _ := strconv.Atoi(match[3])
-		hour, minute, err := parseReminderClock(match[4], 9, 0)
+		hour, minute, err := parseReminderClock(match[4], clock.Hour, clock.Minute)
 		if err != nil {
-			return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
 		due, err := reminderLocalTime(localNow.Year(), month, day, hour, minute, location)
 		if err != nil {
-			return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
 		if !due.After(now) {
 			due, err = reminderLocalTime(localNow.Year()+1, month, day, hour, minute, location)
 			if err != nil {
-				return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+				return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 			}
 		}
 		return strings.TrimSpace(match[1]), once(due), nil
@@ -169,7 +178,7 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 	if match := remindTodayPattern.FindStringSubmatch(expression); match != nil {
 		hour, minute, err := parseReminderClock(match[2], 0, 0)
 		if err != nil {
-			return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
 		due, err := reminderLocalTime(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, location)
 		if err != nil || !due.After(now) {
@@ -177,7 +186,7 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		}
 		return strings.TrimSpace(match[1]), once(due), nil
 	}
-	return "", ReminderOccurrence{}, ErrInvalidLaterReminder
+	return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 }
 
 // comingWeekday resolves the next occurrence of a named weekday at the given
@@ -247,14 +256,14 @@ func parseReminderClock(value string, defaultHour, defaultMinute int) (int, int,
 			return parsed.Hour(), parsed.Minute(), nil
 		}
 	}
-	return 0, 0, ErrInvalidLaterReminder
+	return 0, 0, ErrInvalidReminderRequest
 }
 
 func reminderLocalTime(year int, month time.Month, day, hour, minute int, location *time.Location) (time.Time, error) {
 	value := time.Date(year, month, day, hour, minute, 0, 0, location)
 	local := value.In(location)
 	if local.Year() != year || local.Month() != month || local.Day() != day || local.Hour() != hour || local.Minute() != minute {
-		return time.Time{}, ErrInvalidLaterReminder
+		return time.Time{}, ErrInvalidReminderRequest
 	}
 	return value, nil
 }
@@ -265,17 +274,22 @@ func reminderLocalTime(year int, month time.Month, day, hour, minute int, locati
 // leaves anything of its own in the text position is not one the grammar
 // reads.
 func ParseReminderTime(phrase string, now time.Time, location *time.Location) (ReminderOccurrence, error) {
+	return ParseReminderTimeAt(phrase, now, location, DefaultReminderClock)
+}
+
+// ParseReminderTimeAt is ParseReminderTime at the member's default clock.
+func ParseReminderTimeAt(phrase string, now time.Time, location *time.Location, clock ReminderClock) (ReminderOccurrence, error) {
 	const placeholder = "reminder"
 	phrase = strings.TrimSpace(phrase)
 	if phrase == "" {
-		return ReminderOccurrence{}, ErrInvalidLaterReminder
+		return ReminderOccurrence{}, ErrInvalidReminderRequest
 	}
-	text, occurrence, err := ParseReminderExpression(placeholder+" "+phrase, now, location)
+	text, occurrence, err := ParseReminderExpressionAt(placeholder+" "+phrase, now, location, clock)
 	if err != nil {
 		return ReminderOccurrence{}, err
 	}
 	if text != placeholder {
-		return ReminderOccurrence{}, ErrInvalidLaterReminder
+		return ReminderOccurrence{}, ErrInvalidReminderRequest
 	}
 	return occurrence, nil
 }

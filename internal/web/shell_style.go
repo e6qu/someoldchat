@@ -31,9 +31,9 @@ const shellStyle = `<style>
 html .rail-item[data-rail=files],html .menu-list a[data-more-tab]{display:none}
 html[data-pref-name-display=display] .full-name{display:none}
 .hidden-people{list-style:none;margin:0;padding:0;display:grid;gap:6px}.hidden-people li{display:flex;align-items:center;justify-content:space-between;gap:12px}.hidden-people form{margin:0}.hidden-people button{min-height:28px}
-html[data-pref-nav-dms=false] .rail-item[data-rail=dms],html[data-pref-nav-activity=false] .rail-item[data-rail=activity],html[data-pref-nav-later=false] .rail-item[data-rail=later]{display:none}
+html[data-pref-nav-dms=false] .rail-item[data-rail=dms],html[data-pref-nav-activity=false] .rail-item[data-rail=activity],html[data-pref-nav-todos=false] .rail-item[data-rail=todos]{display:none}
 html[data-pref-nav-files=true] .rail-item[data-rail=files]{display:flex}
-html[data-pref-nav-dms=false] .menu-list a[data-more-tab=dms],html[data-pref-nav-activity=false] .menu-list a[data-more-tab=activity],html[data-pref-nav-later=false] .menu-list a[data-more-tab=later],html:not([data-pref-nav-files=true]) .menu-list a[data-more-tab=files]{display:flex}
+html[data-pref-nav-dms=false] .menu-list a[data-more-tab=dms],html[data-pref-nav-activity=false] .menu-list a[data-more-tab=activity],html[data-pref-nav-todos=false] .menu-list a[data-more-tab=todos],html:not([data-pref-nav-files=true]) .menu-list a[data-more-tab=files]{display:flex}
 html[data-pref-nav-labels=false] .rail-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .rail-item>.icon{box-sizing:content-box;width:20px;height:20px;padding:8px;border-radius:9px}
 .rail-item:hover>.icon,.menu[open]>.rail-item>.icon{background:#ffffff26}

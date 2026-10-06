@@ -423,15 +423,30 @@ var topicRules = []topicRule{
 	{topic: "workflow.staged_discarded", note: "not pinned: discarding a workflow draft is an internal product concept"},
 	{topic: "workflow.step_completed", note: "not pinned: workflow_step_execute postdates the snapshot"},
 	{topic: "workflow.step_failed", note: "not pinned: workflow_step_execute postdates the snapshot"},
-	{topic: "saved_item.created", recipient: true,
-		note: "current Later is private first-party state with no Slack app event; only the saved item's user may receive the internal live-update signal"},
-	{topic: "saved_item.changed", recipient: true,
-		note: "current Later is private first-party state with no Slack app event; only the saved item's user may receive the internal live-update signal"},
-	{topic: "saved_item.removed", recipient: true,
-		note: "current Later is private first-party state with no Slack app event; only the saved item's user may receive the internal live-update signal"},
+	// Saved items, to-dos and channel reminders are private first-party state
+	// with no Slack app event ("There are no direct APIs for Save it for Later
+	// to integrate with"). Each record names its owner in user_id, and only
+	// that member may receive the live-update signal: a to-do's reminder
+	// records carry its text.
+	{topic: "saved_item.created", recipient: true, note: "Saved section of Home: private first-party state with no Slack app event"},
+	{topic: "saved_item.removed", recipient: true, note: "Saved section of Home: private first-party state with no Slack app event"},
+	{topic: "saved_item.cleared", recipient: true, note: "Saved clean-up: private first-party state with no Slack app event"},
+	{topic: "todo.created", recipient: true, note: "To-dos: private first-party state with no Slack app event"},
+	{topic: "todo.changed", recipient: true, note: "To-dos: private first-party state with no Slack app event"},
+	{topic: "todo.deleted", recipient: true, note: "To-dos: private first-party state with no Slack app event"},
+	{topic: "todo.acknowledged", recipient: true, note: "To-dos badge: private first-party state with no Slack app event"},
+	{topic: "todo.reminder_delivered", recipient: true, note: "a to-do's reminder came due: private to its owner; the Activity row and badge are the notification"},
+	{topic: "todo.reminder_failed", recipient: true, note: "a to-do's reminder could not be delivered: private to its owner"},
+	// A channel reminder's records are addressed to the member who set it;
+	// the channel learns of it only from the message Slackbot posts there.
+	{topic: "channel_reminder.created", recipient: true, note: "/remind channel reminder: private to its creator until Slackbot posts it"},
+	{topic: "channel_reminder.deleted", recipient: true, note: "/remind channel reminder: private to its creator"},
+	{topic: "channel_reminder.delivered", recipient: true, note: "/remind channel reminder: the channel sees Slackbot's message, the record is the creator's"},
+	{topic: "channel_reminder.failed", recipient: true, note: "/remind channel reminder: private to its creator"},
 	{topic: "reminder.created", recipient: true, note: "not pinned: reminders have no Slack event; reminder state is private to its target user"},
 	{topic: "reminder.completed", recipient: true, note: "not pinned: reminders have no Slack event; reminder state is private to its target user"},
 	{topic: "reminder.deleted", recipient: true, note: "not pinned: reminders have no Slack event; reminder state is private to its target user"},
+	{topic: "reminder.delivered", recipient: true, note: "not pinned: reminders have no Slack event; the record carries the reminder's text, which only its target user may receive (Slackbot's direct message is the notification)"},
 	{topic: "invite_request.created", note: "not pinned: invite requests have no Slack event"},
 	{topic: "invite_request.approved", note: "not pinned: invite requests have no Slack event"},
 	{topic: "invite_request.denied", note: "not pinned: invite requests have no Slack event"},

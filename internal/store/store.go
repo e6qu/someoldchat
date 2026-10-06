@@ -1232,9 +1232,15 @@ type Store interface {
 	GetSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID) (domain.SavedItem, error)
 	GetSavedItemByMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)
 	ListSavedItemsForMessages(context.Context, domain.WorkspaceID, domain.UserID, []domain.MessageID) ([]domain.SavedItem, error)
-	ListSavedItems(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemState, domain.PageRequest) (domain.SavedItemPage, error)
-	UpdateSavedItem(context.Context, domain.SavedItem, events.Event) (domain.SavedItem, error)
+	// ListSavedItems pages a member's saved items newest first.
+	ListSavedItems(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.SavedItemPage, error)
 	DeleteSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID, events.Event) error
+	// ClearSavedItems removes every one of a member's saved items and reports
+	// how many there were; the event is written only when there were some.
+	ClearSavedItems(context.Context, domain.WorkspaceID, domain.UserID, events.Event) (int, error)
+	// MoveSavedItemToTodo removes the saved item and creates the to-do in one
+	// transaction, so the item is never in both places or in neither.
+	MoveSavedItemToTodo(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID, domain.Todo, events.Event) error
 	CreateBookmark(context.Context, domain.Bookmark, events.Event) error
 	GetBookmark(context.Context, domain.WorkspaceID, domain.ConversationID, domain.BookmarkID) (domain.Bookmark, error)
 	ListBookmarks(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.Bookmark, error)
@@ -1267,19 +1273,42 @@ type Store interface {
 	// EarliestReminder is the next instant a reminder comes due, so a workspace
 	// that is asleep knows when to wake.
 	EarliestReminder(context.Context, domain.WorkspaceID) (time.Time, error)
-	CreateLaterReminder(context.Context, domain.LaterReminder, events.Event) error
-	GetLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) (domain.LaterReminder, error)
-	ListLaterReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderTarget, domain.PageRequest) (domain.LaterReminderPage, error)
-	UpdateLaterReminder(context.Context, domain.LaterReminder, events.Event) (domain.LaterReminder, error)
-	AcknowledgeLaterReminders(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
-	CompleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, time.Time, events.Event) error
-	DeleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, events.Event) error
-	EarliestLaterReminder(context.Context, domain.WorkspaceID) (time.Time, error)
-	ClaimDueLaterReminders(context.Context, domain.WorkspaceID, string, int, time.Duration, time.Time) ([]domain.LaterReminder, error)
-	RenewLaterReminder(context.Context, string, domain.LaterReminderID, time.Duration, time.Time) error
-	MarkLaterReminderDelivered(context.Context, string, domain.LaterReminderID, time.Time, time.Time, events.Event) error
-	MarkLaterReminderFailed(context.Context, string, domain.LaterReminderID, string, time.Time, events.Event) error
-	ReleaseLaterReminder(context.Context, string, domain.LaterReminderID, time.Time, time.Time) error
+	CreateTodo(context.Context, domain.Todo, events.Event) error
+	GetTodo(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoID) (domain.Todo, error)
+	ListTodos(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoQuery) (domain.TodoPage, error)
+	// UpdateTodo writes a to-do's title, details and reminder. A changed
+	// reminder starts its delivery afresh; a to-do whose reminder delivery
+	// holds the lease is reported not found, so an edit and a delivery have
+	// one outcome.
+	UpdateTodo(context.Context, domain.Todo, events.Event) (domain.Todo, error)
+	// SetTodoCompletion marks a to-do done at the given instant, or not done
+	// when it is zero. Marking a done to-do done again keeps its first instant.
+	SetTodoCompletion(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoID, time.Time, events.Event) error
+	DeleteTodo(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoID, events.Event) error
+	// AcknowledgeTodoReminders clears the due-reminder badge: every delivered
+	// reminder of the member's becomes acknowledged, and its Activity rows read.
+	AcknowledgeTodoReminders(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
+	EarliestTodoReminder(context.Context, domain.WorkspaceID) (time.Time, error)
+	ClaimDueTodoReminders(context.Context, domain.WorkspaceID, string, int, time.Duration, time.Time) ([]domain.Todo, error)
+	RenewTodoReminder(context.Context, string, domain.TodoID, time.Duration, time.Time) error
+	// MarkTodoReminderDelivered records the occurrence and, when the member
+	// keeps reminders in Activity, files the Activity row in the same
+	// transaction. A zero next due leaves a one-time reminder's due date in
+	// place: the to-do is now overdue, not done.
+	MarkTodoReminderDelivered(context.Context, string, domain.TodoID, time.Time, time.Time, events.Event) error
+	MarkTodoReminderFailed(context.Context, string, domain.TodoID, string, time.Time, events.Event) error
+	ReleaseTodoReminder(context.Context, string, domain.TodoID, time.Time, time.Time) error
+	CreateChannelReminder(context.Context, domain.ChannelReminder, events.Event) error
+	GetChannelReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ChannelReminderID) (domain.ChannelReminder, error)
+	// ListChannelReminders pages the channel reminders a member created.
+	ListChannelReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ChannelReminderPage, error)
+	DeleteChannelReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ChannelReminderID, events.Event) error
+	EarliestChannelReminder(context.Context, domain.WorkspaceID) (time.Time, error)
+	ClaimDueChannelReminders(context.Context, domain.WorkspaceID, string, int, time.Duration, time.Time) ([]domain.ChannelReminder, error)
+	RenewChannelReminder(context.Context, string, domain.ChannelReminderID, time.Duration, time.Time) error
+	MarkChannelReminderDelivered(context.Context, string, domain.ChannelReminderID, time.Time, time.Time, events.Event) error
+	MarkChannelReminderFailed(context.Context, string, domain.ChannelReminderID, string, time.Time, events.Event) error
+	ReleaseChannelReminder(context.Context, string, domain.ChannelReminderID, time.Time, time.Time) error
 	CreateScheduledMessage(context.Context, domain.ScheduledMessage, events.Event) error
 	CreateScheduledMessageWithinLimit(context.Context, domain.ScheduledMessage, time.Duration, int, events.Event) error
 	ListScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)

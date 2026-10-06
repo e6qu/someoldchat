@@ -236,7 +236,7 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 	reminderSource, ok := chatStore.(scheduler.ReminderSource)
 	if !ok {
 		_ = closer.Close()
-		return Runtime{}, errors.New("selected store does not support Later reminder execution")
+		return Runtime{}, errors.New("selected store does not support to-do and channel reminder execution")
 	}
 	return Runtime{Service: generated.ProvideChatServiceLocal(chatStore, blobStore, config.AppCredentialKey, config.PublicURL), Store: chatStore, Closer: closer, TokenStore: tokenStore, TokenSeeder: tokenSeeder, SessionStore: sessionStore, SessionRevoker: sessionRevoker, SessionSeeder: sessionSeeder, OutboxSource: outboxSource, CleanupSource: cleanupSource, ScheduledSource: scheduledSource, ReminderSource: reminderSource, BlobStore: blobStore}, nil
 }

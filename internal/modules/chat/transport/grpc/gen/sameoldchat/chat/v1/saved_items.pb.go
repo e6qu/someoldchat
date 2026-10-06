@@ -21,6 +21,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// SavedItem is a member's private bookmark in the Saved section of Home.
 type SavedItem struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -28,9 +29,7 @@ type SavedItem struct {
 	UserId            string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	MessageId         string                 `protobuf:"bytes,4,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	ConversationId    string                 `protobuf:"bytes,5,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
-	State             string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"`
 	CreatedAtUnixNano int64                  `protobuf:"varint,7,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
-	UpdatedAtUnixNano int64                  `protobuf:"varint,8,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
 	Message           *Message               `protobuf:"bytes,9,opt,name=message,proto3" json:"message,omitempty"`
 	SourceAvailable   bool                   `protobuf:"varint,10,opt,name=source_available,json=sourceAvailable,proto3" json:"source_available,omitempty"`
 	unknownFields     protoimpl.UnknownFields
@@ -102,23 +101,9 @@ func (x *SavedItem) GetConversationId() string {
 	return ""
 }
 
-func (x *SavedItem) GetState() string {
-	if x != nil {
-		return x.State
-	}
-	return ""
-}
-
 func (x *SavedItem) GetCreatedAtUnixNano() int64 {
 	if x != nil {
 		return x.CreatedAtUnixNano
-	}
-	return 0
-}
-
-func (x *SavedItem) GetUpdatedAtUnixNano() int64 {
-	if x != nil {
-		return x.UpdatedAtUnixNano
 	}
 	return 0
 }
@@ -137,7 +122,7 @@ func (x *SavedItem) GetSourceAvailable() bool {
 	return false
 }
 
-type SaveForLaterRequest struct {
+type AddToSavedRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
@@ -147,20 +132,20 @@ type SaveForLaterRequest struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *SaveForLaterRequest) Reset() {
-	*x = SaveForLaterRequest{}
+func (x *AddToSavedRequest) Reset() {
+	*x = AddToSavedRequest{}
 	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SaveForLaterRequest) String() string {
+func (x *AddToSavedRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SaveForLaterRequest) ProtoMessage() {}
+func (*AddToSavedRequest) ProtoMessage() {}
 
-func (x *SaveForLaterRequest) ProtoReflect() protoreflect.Message {
+func (x *AddToSavedRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -172,33 +157,33 @@ func (x *SaveForLaterRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SaveForLaterRequest.ProtoReflect.Descriptor instead.
-func (*SaveForLaterRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use AddToSavedRequest.ProtoReflect.Descriptor instead.
+func (*AddToSavedRequest) Descriptor() ([]byte, []int) {
 	return file_sameoldchat_chat_v1_saved_items_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *SaveForLaterRequest) GetWorkspaceId() string {
+func (x *AddToSavedRequest) GetWorkspaceId() string {
 	if x != nil {
 		return x.WorkspaceId
 	}
 	return ""
 }
 
-func (x *SaveForLaterRequest) GetUserId() string {
+func (x *AddToSavedRequest) GetUserId() string {
 	if x != nil {
 		return x.UserId
 	}
 	return ""
 }
 
-func (x *SaveForLaterRequest) GetConversationId() string {
+func (x *AddToSavedRequest) GetConversationId() string {
 	if x != nil {
 		return x.ConversationId
 	}
 	return ""
 }
 
-func (x *SaveForLaterRequest) GetTimestamp() string {
+func (x *AddToSavedRequest) GetTimestamp() string {
 	if x != nil {
 		return x.Timestamp
 	}
@@ -373,7 +358,6 @@ type SavedItemsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	State         string                 `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
 	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
 	Cursor        string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	Descending    bool                   `protobuf:"varint,6,opt,name=descending,proto3" json:"descending,omitempty"`
@@ -421,13 +405,6 @@ func (x *SavedItemsRequest) GetWorkspaceId() string {
 func (x *SavedItemsRequest) GetUserId() string {
 	if x != nil {
 		return x.UserId
-	}
-	return ""
-}
-
-func (x *SavedItemsRequest) GetState() string {
-	if x != nil {
-		return x.State
 	}
 	return ""
 }
@@ -513,74 +490,6 @@ func (x *SavedItemPage) GetHasMore() bool {
 	return false
 }
 
-type SetSavedItemStateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	SavedItemId   string                 `protobuf:"bytes,3,opt,name=saved_item_id,json=savedItemId,proto3" json:"saved_item_id,omitempty"`
-	State         string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetSavedItemStateRequest) Reset() {
-	*x = SetSavedItemStateRequest{}
-	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetSavedItemStateRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetSavedItemStateRequest) ProtoMessage() {}
-
-func (x *SetSavedItemStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetSavedItemStateRequest.ProtoReflect.Descriptor instead.
-func (*SetSavedItemStateRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_saved_items_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *SetSavedItemStateRequest) GetWorkspaceId() string {
-	if x != nil {
-		return x.WorkspaceId
-	}
-	return ""
-}
-
-func (x *SetSavedItemStateRequest) GetUserId() string {
-	if x != nil {
-		return x.UserId
-	}
-	return ""
-}
-
-func (x *SetSavedItemStateRequest) GetSavedItemId() string {
-	if x != nil {
-		return x.SavedItemId
-	}
-	return ""
-}
-
-func (x *SetSavedItemStateRequest) GetState() string {
-	if x != nil {
-		return x.State
-	}
-	return ""
-}
-
 type RemoveSavedItemRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -592,7 +501,7 @@ type RemoveSavedItemRequest struct {
 
 func (x *RemoveSavedItemRequest) Reset() {
 	*x = RemoveSavedItemRequest{}
-	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -604,7 +513,7 @@ func (x *RemoveSavedItemRequest) String() string {
 func (*RemoveSavedItemRequest) ProtoMessage() {}
 
 func (x *RemoveSavedItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -617,7 +526,7 @@ func (x *RemoveSavedItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveSavedItemRequest.ProtoReflect.Descriptor instead.
 func (*RemoveSavedItemRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_saved_items_proto_rawDescGZIP(), []int{8}
+	return file_sameoldchat_chat_v1_saved_items_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RemoveSavedItemRequest) GetWorkspaceId() string {
@@ -641,25 +550,179 @@ func (x *RemoveSavedItemRequest) GetSavedItemId() string {
 	return ""
 }
 
+type ClearSavedItemsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClearSavedItemsRequest) Reset() {
+	*x = ClearSavedItemsRequest{}
+	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClearSavedItemsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClearSavedItemsRequest) ProtoMessage() {}
+
+func (x *ClearSavedItemsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClearSavedItemsRequest.ProtoReflect.Descriptor instead.
+func (*ClearSavedItemsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_saved_items_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ClearSavedItemsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ClearSavedItemsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+type ClearSavedItemsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Cleared       int32                  `protobuf:"varint,1,opt,name=cleared,proto3" json:"cleared,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClearSavedItemsResponse) Reset() {
+	*x = ClearSavedItemsResponse{}
+	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClearSavedItemsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClearSavedItemsResponse) ProtoMessage() {}
+
+func (x *ClearSavedItemsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClearSavedItemsResponse.ProtoReflect.Descriptor instead.
+func (*ClearSavedItemsResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_saved_items_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ClearSavedItemsResponse) GetCleared() int32 {
+	if x != nil {
+		return x.Cleared
+	}
+	return 0
+}
+
+type MoveSavedItemToTodoRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	SavedItemId   string                 `protobuf:"bytes,3,opt,name=saved_item_id,json=savedItemId,proto3" json:"saved_item_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MoveSavedItemToTodoRequest) Reset() {
+	*x = MoveSavedItemToTodoRequest{}
+	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MoveSavedItemToTodoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MoveSavedItemToTodoRequest) ProtoMessage() {}
+
+func (x *MoveSavedItemToTodoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_saved_items_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MoveSavedItemToTodoRequest.ProtoReflect.Descriptor instead.
+func (*MoveSavedItemToTodoRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_saved_items_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *MoveSavedItemToTodoRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *MoveSavedItemToTodoRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *MoveSavedItemToTodoRequest) GetSavedItemId() string {
+	if x != nil {
+		return x.SavedItemId
+	}
+	return ""
+}
+
 var File_sameoldchat_chat_v1_saved_items_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_saved_items_proto_rawDesc = "" +
 	"\n" +
-	"%sameoldchat/chat/v1/saved_items.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\"\xfa\x02\n" +
+	"%sameoldchat/chat/v1/saved_items.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\x1a\x1fsameoldchat/chat/v1/todos.proto\"\xdc\x02\n" +
 	"\tSavedItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x04 \x01(\tR\tmessageId\x12'\n" +
-	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\x12\x14\n" +
-	"\x05state\x18\x06 \x01(\tR\x05state\x12/\n" +
-	"\x14created_at_unix_nano\x18\a \x01(\x03R\x11createdAtUnixNano\x12/\n" +
-	"\x14updated_at_unix_nano\x18\b \x01(\x03R\x11updatedAtUnixNano\x126\n" +
+	"\x0fconversation_id\x18\x05 \x01(\tR\x0econversationId\x12/\n" +
+	"\x14created_at_unix_nano\x18\a \x01(\x03R\x11createdAtUnixNano\x126\n" +
 	"\amessage\x18\t \x01(\v2\x1c.sameoldchat.chat.v1.MessageR\amessage\x12)\n" +
 	"\x10source_available\x18\n" +
-	" \x01(\bR\x0fsourceAvailable\"\x98\x01\n" +
-	"\x13SaveForLaterRequest\x12!\n" +
+	" \x01(\bR\x0fsourceAvailableJ\x04\b\x06\x10\aJ\x04\b\b\x10\tR\x05stateR\x14updated_at_unix_nano\"\x96\x01\n" +
+	"\x11AddToSavedRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1c\n" +
@@ -675,38 +738,43 @@ const file_sameoldchat_chat_v1_saved_items_proto_rawDesc = "" +
 	"\vmessage_ids\x18\x03 \x03(\tR\n" +
 	"messageIds\"U\n" +
 	"\x1dSavedItemsForMessagesResponse\x124\n" +
-	"\x05items\x18\x01 \x03(\v2\x1e.sameoldchat.chat.v1.SavedItemR\x05items\"\xb3\x01\n" +
+	"\x05items\x18\x01 \x03(\v2\x1e.sameoldchat.chat.v1.SavedItemR\x05items\"\xaa\x01\n" +
 	"\x11SavedItemsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
-	"\x05state\x18\x03 \x01(\tR\x05state\x12\x14\n" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
 	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12\x1e\n" +
 	"\n" +
 	"descending\x18\x06 \x01(\bR\n" +
-	"descending\"\x81\x01\n" +
+	"descendingJ\x04\b\x03\x10\x04R\x05state\"\x81\x01\n" +
 	"\rSavedItemPage\x124\n" +
 	"\x05items\x18\x01 \x03(\v2\x1e.sameoldchat.chat.v1.SavedItemR\x05items\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x90\x01\n" +
-	"\x18SetSavedItemStateRequest\x12!\n" +
-	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
-	"\rsaved_item_id\x18\x03 \x01(\tR\vsavedItemId\x12\x14\n" +
-	"\x05state\x18\x04 \x01(\tR\x05state\"x\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"x\n" +
 	"\x16RemoveSavedItemRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
-	"\rsaved_item_id\x18\x03 \x01(\tR\vsavedItemId2\xfa\x04\n" +
-	"\x11SavedItemsService\x12X\n" +
-	"\fSaveForLater\x12(.sameoldchat.chat.v1.SaveForLaterRequest\x1a\x1e.sameoldchat.chat.v1.SavedItem\x12f\n" +
+	"\rsaved_item_id\x18\x03 \x01(\tR\vsavedItemId\"T\n" +
+	"\x16ClearSavedItemsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"3\n" +
+	"\x17ClearSavedItemsResponse\x12\x18\n" +
+	"\acleared\x18\x01 \x01(\x05R\acleared\"|\n" +
+	"\x1aMoveSavedItemToTodoRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\"\n" +
+	"\rsaved_item_id\x18\x03 \x01(\tR\vsavedItemId2\xe3\x05\n" +
+	"\x11SavedItemsService\x12T\n" +
+	"\n" +
+	"AddToSaved\x12&.sameoldchat.chat.v1.AddToSavedRequest\x1a\x1e.sameoldchat.chat.v1.SavedItem\x12f\n" +
 	"\x13SavedItemForMessage\x12/.sameoldchat.chat.v1.SavedItemForMessageRequest\x1a\x1e.sameoldchat.chat.v1.SavedItem\x12~\n" +
 	"\x15SavedItemsForMessages\x121.sameoldchat.chat.v1.SavedItemsForMessagesRequest\x1a2.sameoldchat.chat.v1.SavedItemsForMessagesResponse\x12X\n" +
 	"\n" +
-	"SavedItems\x12&.sameoldchat.chat.v1.SavedItemsRequest\x1a\".sameoldchat.chat.v1.SavedItemPage\x12b\n" +
-	"\x11SetSavedItemState\x12-.sameoldchat.chat.v1.SetSavedItemStateRequest\x1a\x1e.sameoldchat.chat.v1.SavedItem\x12e\n" +
-	"\x0fRemoveSavedItem\x12+.sameoldchat.chat.v1.RemoveSavedItemRequest\x1a%.sameoldchat.chat.v1.MutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"SavedItems\x12&.sameoldchat.chat.v1.SavedItemsRequest\x1a\".sameoldchat.chat.v1.SavedItemPage\x12e\n" +
+	"\x0fRemoveSavedItem\x12+.sameoldchat.chat.v1.RemoveSavedItemRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12l\n" +
+	"\x0fClearSavedItems\x12+.sameoldchat.chat.v1.ClearSavedItemsRequest\x1a,.sameoldchat.chat.v1.ClearSavedItemsResponse\x12a\n" +
+	"\x13MoveSavedItemToTodo\x12/.sameoldchat.chat.v1.MoveSavedItemToTodoRequest\x1a\x19.sameoldchat.chat.v1.TodoBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_saved_items_proto_rawDescOnce sync.Once
@@ -720,38 +788,43 @@ func file_sameoldchat_chat_v1_saved_items_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_saved_items_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_saved_items_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_sameoldchat_chat_v1_saved_items_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_sameoldchat_chat_v1_saved_items_proto_goTypes = []any{
 	(*SavedItem)(nil),                     // 0: sameoldchat.chat.v1.SavedItem
-	(*SaveForLaterRequest)(nil),           // 1: sameoldchat.chat.v1.SaveForLaterRequest
+	(*AddToSavedRequest)(nil),             // 1: sameoldchat.chat.v1.AddToSavedRequest
 	(*SavedItemForMessageRequest)(nil),    // 2: sameoldchat.chat.v1.SavedItemForMessageRequest
 	(*SavedItemsForMessagesRequest)(nil),  // 3: sameoldchat.chat.v1.SavedItemsForMessagesRequest
 	(*SavedItemsForMessagesResponse)(nil), // 4: sameoldchat.chat.v1.SavedItemsForMessagesResponse
 	(*SavedItemsRequest)(nil),             // 5: sameoldchat.chat.v1.SavedItemsRequest
 	(*SavedItemPage)(nil),                 // 6: sameoldchat.chat.v1.SavedItemPage
-	(*SetSavedItemStateRequest)(nil),      // 7: sameoldchat.chat.v1.SetSavedItemStateRequest
-	(*RemoveSavedItemRequest)(nil),        // 8: sameoldchat.chat.v1.RemoveSavedItemRequest
-	(*Message)(nil),                       // 9: sameoldchat.chat.v1.Message
-	(*MutationResponse)(nil),              // 10: sameoldchat.chat.v1.MutationResponse
+	(*RemoveSavedItemRequest)(nil),        // 7: sameoldchat.chat.v1.RemoveSavedItemRequest
+	(*ClearSavedItemsRequest)(nil),        // 8: sameoldchat.chat.v1.ClearSavedItemsRequest
+	(*ClearSavedItemsResponse)(nil),       // 9: sameoldchat.chat.v1.ClearSavedItemsResponse
+	(*MoveSavedItemToTodoRequest)(nil),    // 10: sameoldchat.chat.v1.MoveSavedItemToTodoRequest
+	(*Message)(nil),                       // 11: sameoldchat.chat.v1.Message
+	(*MutationResponse)(nil),              // 12: sameoldchat.chat.v1.MutationResponse
+	(*Todo)(nil),                          // 13: sameoldchat.chat.v1.Todo
 }
 var file_sameoldchat_chat_v1_saved_items_proto_depIdxs = []int32{
-	9,  // 0: sameoldchat.chat.v1.SavedItem.message:type_name -> sameoldchat.chat.v1.Message
+	11, // 0: sameoldchat.chat.v1.SavedItem.message:type_name -> sameoldchat.chat.v1.Message
 	0,  // 1: sameoldchat.chat.v1.SavedItemsForMessagesResponse.items:type_name -> sameoldchat.chat.v1.SavedItem
 	0,  // 2: sameoldchat.chat.v1.SavedItemPage.items:type_name -> sameoldchat.chat.v1.SavedItem
-	1,  // 3: sameoldchat.chat.v1.SavedItemsService.SaveForLater:input_type -> sameoldchat.chat.v1.SaveForLaterRequest
+	1,  // 3: sameoldchat.chat.v1.SavedItemsService.AddToSaved:input_type -> sameoldchat.chat.v1.AddToSavedRequest
 	2,  // 4: sameoldchat.chat.v1.SavedItemsService.SavedItemForMessage:input_type -> sameoldchat.chat.v1.SavedItemForMessageRequest
 	3,  // 5: sameoldchat.chat.v1.SavedItemsService.SavedItemsForMessages:input_type -> sameoldchat.chat.v1.SavedItemsForMessagesRequest
 	5,  // 6: sameoldchat.chat.v1.SavedItemsService.SavedItems:input_type -> sameoldchat.chat.v1.SavedItemsRequest
-	7,  // 7: sameoldchat.chat.v1.SavedItemsService.SetSavedItemState:input_type -> sameoldchat.chat.v1.SetSavedItemStateRequest
-	8,  // 8: sameoldchat.chat.v1.SavedItemsService.RemoveSavedItem:input_type -> sameoldchat.chat.v1.RemoveSavedItemRequest
-	0,  // 9: sameoldchat.chat.v1.SavedItemsService.SaveForLater:output_type -> sameoldchat.chat.v1.SavedItem
-	0,  // 10: sameoldchat.chat.v1.SavedItemsService.SavedItemForMessage:output_type -> sameoldchat.chat.v1.SavedItem
-	4,  // 11: sameoldchat.chat.v1.SavedItemsService.SavedItemsForMessages:output_type -> sameoldchat.chat.v1.SavedItemsForMessagesResponse
-	6,  // 12: sameoldchat.chat.v1.SavedItemsService.SavedItems:output_type -> sameoldchat.chat.v1.SavedItemPage
-	0,  // 13: sameoldchat.chat.v1.SavedItemsService.SetSavedItemState:output_type -> sameoldchat.chat.v1.SavedItem
-	10, // 14: sameoldchat.chat.v1.SavedItemsService.RemoveSavedItem:output_type -> sameoldchat.chat.v1.MutationResponse
-	9,  // [9:15] is the sub-list for method output_type
-	3,  // [3:9] is the sub-list for method input_type
+	7,  // 7: sameoldchat.chat.v1.SavedItemsService.RemoveSavedItem:input_type -> sameoldchat.chat.v1.RemoveSavedItemRequest
+	8,  // 8: sameoldchat.chat.v1.SavedItemsService.ClearSavedItems:input_type -> sameoldchat.chat.v1.ClearSavedItemsRequest
+	10, // 9: sameoldchat.chat.v1.SavedItemsService.MoveSavedItemToTodo:input_type -> sameoldchat.chat.v1.MoveSavedItemToTodoRequest
+	0,  // 10: sameoldchat.chat.v1.SavedItemsService.AddToSaved:output_type -> sameoldchat.chat.v1.SavedItem
+	0,  // 11: sameoldchat.chat.v1.SavedItemsService.SavedItemForMessage:output_type -> sameoldchat.chat.v1.SavedItem
+	4,  // 12: sameoldchat.chat.v1.SavedItemsService.SavedItemsForMessages:output_type -> sameoldchat.chat.v1.SavedItemsForMessagesResponse
+	6,  // 13: sameoldchat.chat.v1.SavedItemsService.SavedItems:output_type -> sameoldchat.chat.v1.SavedItemPage
+	12, // 14: sameoldchat.chat.v1.SavedItemsService.RemoveSavedItem:output_type -> sameoldchat.chat.v1.MutationResponse
+	9,  // 15: sameoldchat.chat.v1.SavedItemsService.ClearSavedItems:output_type -> sameoldchat.chat.v1.ClearSavedItemsResponse
+	13, // 16: sameoldchat.chat.v1.SavedItemsService.MoveSavedItemToTodo:output_type -> sameoldchat.chat.v1.Todo
+	10, // [10:17] is the sub-list for method output_type
+	3,  // [3:10] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -764,13 +837,14 @@ func file_sameoldchat_chat_v1_saved_items_proto_init() {
 	}
 	file_sameoldchat_chat_v1_conversation_mutations_proto_init()
 	file_sameoldchat_chat_v1_messages_proto_init()
+	file_sameoldchat_chat_v1_todos_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_saved_items_proto_rawDesc), len(file_sameoldchat_chat_v1_saved_items_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

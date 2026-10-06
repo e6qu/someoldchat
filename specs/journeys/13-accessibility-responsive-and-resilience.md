@@ -24,8 +24,8 @@ script MUST still open beside what opened it.
 
 ## A11Y-02 — Navigate with a screen reader
 
-Workspace navigation, channel/DM lists, conversation, thread, Activity, Later,
-composer, search, modal, and app surfaces have stable landmarks/headings and
+Workspace navigation, channel/DM lists, conversation, thread, Activity, To-dos,
+Saved, composer, search, modal, and app surfaces have stable landmarks/headings and
 concise names. Conversation messages expose author, time, content, edited/
 thread/reaction/file state, and actions without reading decorative duplication.
 Dynamic additions and mutation results use appropriately scoped live

@@ -2014,28 +2014,38 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				created, err := chat.CreateLaterReminder(ctx, "T1", "U1", domain.LaterReminderRequest{
-					Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: due, TimeZone: "UTC",
-					Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor,
+				created, err := chat.CreateTodo(ctx, "T1", "U1", domain.TodoRequest{
+					Title: "pay rent", Reminder: domain.ReminderTiming{
+						DueAt: due, TimeZone: "UTC", Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor,
+					},
 				})
 				if err != nil {
 					return nil, err
 				}
-				updated, err := chat.UpdateLaterReminder(ctx, "T1", "U1", created.ID, domain.LaterReminderRequest{
-					Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: due.AddDate(0, 2, 2), TimeZone: "UTC",
-					Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor.AddDate(0, 2, 0),
+				updated, err := chat.SetTodoReminder(ctx, "T1", "U1", created.ID, domain.ReminderTiming{
+					DueAt: due.AddDate(0, 2, 2), TimeZone: "UTC", Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor.AddDate(0, 2, 0),
 				})
 				if err != nil {
 					return nil, err
 				}
-				_, unrelated := chat.CreateLaterReminder(ctx, "T1", "U1", domain.LaterReminderRequest{
-					Target: domain.LaterReminderPersonal, Text: "pay rent", DueAt: due, TimeZone: "UTC",
-					Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor.AddDate(0, -1, 0),
+				_, unrelated := chat.CreateTodo(ctx, "T1", "U1", domain.TodoRequest{
+					Title: "pay rent", Reminder: domain.ReminderTiming{
+						DueAt: due, TimeZone: "UTC", Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor.AddDate(0, -1, 0),
+					},
 				})
+				channel, err := chat.CreateChannelReminder(ctx, "T1", "U1", domain.ChannelReminderRequest{
+					Channel: "C1", Text: "pay rent", Reminder: domain.ReminderTiming{
+						DueAt: due, TimeZone: "UTC", Recurrence: domain.ReminderMonthly, RecurrenceAnchor: anchor,
+					},
+				})
+				if err != nil {
+					return nil, err
+				}
 				return []any{
 					addedInfo.Time.Equal(due), addedInfo.RecurrenceAnchor.Equal(anchor),
-					created.DueAt.Equal(due), created.RecurrenceAnchor.Equal(anchor),
-					updated.RecurrenceAnchor.Equal(anchor.AddDate(0, 2, 0)), errors.Is(unrelated, domain.ErrInvalidLaterReminder),
+					created.Reminder.DueAt.Equal(due), created.Reminder.RecurrenceAnchor.Equal(anchor),
+					updated.Reminder.RecurrenceAnchor.Equal(anchor.AddDate(0, 2, 0)), errors.Is(unrelated, domain.ErrInvalidReminderRequest),
+					channel.Reminder.RecurrenceAnchor.Equal(anchor),
 				}, nil
 			},
 		},
@@ -7423,47 +7433,99 @@ func parityCases() []parityCase {
 			},
 		},
 		{
-			name: "first-party Later reminder lifecycle",
+			name: "to-do lifecycle: filter, sort, edit reminder, clear due date, done and delete",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				created, err := chat.CreateLaterReminder(ctx, "T1", "U1", domain.LaterReminderRequest{
-					Target: domain.LaterReminderPersonal, Text: "water the plants",
-					DueAt: time.Now().UTC().Add(time.Hour), TimeZone: "Europe/Bucharest",
+				message, err := chat.Post(ctx, "T1", "U1", "C1", "water the plants\nall of them", "", "")
+				if err != nil {
+					return nil, err
+				}
+				created, err := chat.CreateTodo(ctx, "T1", "U1", domain.TodoRequest{
+					SourceChannel: "C1", SourceTimestamp: timestampOf(message),
+					Reminder: domain.ReminderTiming{DueAt: time.Now().UTC().Add(time.Hour), TimeZone: "Europe/Bucharest"},
 				})
 				if err != nil {
 					return nil, err
 				}
-				info, err := chat.LaterReminderInfo(ctx, "T1", "U1", created.ID)
+				plain, err := chat.CreateTodo(ctx, "T1", "U1", domain.TodoRequest{Title: "no reminder", Details: "just a note"})
 				if err != nil {
 					return nil, err
 				}
-				page, err := chat.LaterReminders(ctx, "T1", "U1", domain.LaterReminderPersonal, domain.PageRequest{Limit: 10})
+				info, err := chat.TodoInfo(ctx, "T1", "U1", created.ID)
 				if err != nil {
 					return nil, err
 				}
-				updated, err := chat.UpdateLaterReminder(ctx, "T1", "U1", created.ID, domain.LaterReminderRequest{
-					Target: domain.LaterReminderPersonal, Text: "water every plant",
-					DueAt: time.Now().UTC().Add(2 * time.Hour), TimeZone: "Europe/Bucharest",
-					Recurrence: domain.ReminderWeekly,
+				upcoming, err := chat.Todos(ctx, "T1", "U1", domain.TodoQuery{Reminders: []domain.TodoReminderGroup{domain.TodoUpcoming}, Sort: domain.TodoSortDueDate, Page: domain.PageRequest{Limit: 10}})
+				if err != nil {
+					return nil, err
+				}
+				none, err := chat.Todos(ctx, "T1", "U1", domain.TodoQuery{Reminders: []domain.TodoReminderGroup{domain.TodoNoReminder}, Sort: domain.TodoSortLatestFirst, Page: domain.PageRequest{Limit: 1}})
+				if err != nil {
+					return nil, err
+				}
+				edited, err := chat.EditTodo(ctx, "T1", "U1", plain.ID, domain.TodoEdit{Title: "a note", Details: "edited"})
+				if err != nil {
+					return nil, err
+				}
+				rescheduled, err := chat.SetTodoReminder(ctx, "T1", "U1", created.ID, domain.ReminderTiming{
+					DueAt: time.Now().UTC().Add(2 * time.Hour), TimeZone: "Europe/Bucharest", Recurrence: domain.ReminderWeekly,
 				})
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.AcknowledgeLaterReminders(ctx, "T1", "U1"); err != nil {
-					return nil, err
-				}
-				if err := chat.CompleteLaterReminder(ctx, "T1", "U1", created.ID); err != nil {
-					return nil, err
-				}
-				completed, err := chat.LaterReminderInfo(ctx, "T1", "U1", created.ID)
+				cleared, err := chat.SetTodoReminder(ctx, "T1", "U1", created.ID, domain.ReminderTiming{})
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.DeleteLaterReminder(ctx, "T1", "U1", created.ID); err != nil {
+				_, pastErr := chat.SetTodoReminder(ctx, "T1", "U1", created.ID, domain.ReminderTiming{DueAt: time.Now().UTC().Add(-time.Hour), TimeZone: "UTC"})
+				_, invalidErr := chat.CreateTodo(ctx, "T1", "U1", domain.TodoRequest{Title: " "})
+				_, foreignErr := chat.TodoInfo(ctx, "T1", "U2", created.ID)
+				if err := chat.AcknowledgeTodoReminders(ctx, "T1", "U1"); err != nil {
+					return nil, err
+				}
+				if err := chat.SetTodoDone(ctx, "T1", "U1", created.ID, true); err != nil {
+					return nil, err
+				}
+				done, err := chat.Todos(ctx, "T1", "U1", domain.TodoQuery{Done: true, Page: domain.PageRequest{Limit: 10}})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DeleteTodo(ctx, "T1", "U1", created.ID); err != nil {
+					return nil, err
+				}
+				_, deletedErr := chat.TodoInfo(ctx, "T1", "U1", created.ID)
+				return []any{
+					info.Title, info.Source.MessageID == message.ID, info.Reminder.TimeZone, len(upcoming.Items), len(none.Items), none.HasMore,
+					edited.Title, edited.Details, rescheduled.Reminder.Recurrence, cleared.Reminder.Scheduled(),
+					errors.Is(pastErr, domain.ErrReminderTimeInPast), errors.Is(invalidErr, domain.ErrInvalidTodo), errors.Is(foreignErr, storepkg.ErrNotFound),
+					len(done.Items), done.Items[0].Done(), errors.Is(deletedErr, storepkg.ErrNotFound),
+				}, nil
+			},
+		},
+		{
+			name: "channel reminders are listed and deleted by their creator",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.CreateChannelReminder(ctx, "T1", "U1", domain.ChannelReminderRequest{
+					Channel: "C1", Text: "stand-up", Reminder: domain.ReminderTiming{DueAt: time.Now().UTC().Add(time.Hour), TimeZone: "UTC", Recurrence: domain.ReminderWeekly},
+				})
+				if err != nil {
+					return nil, err
+				}
+				page, err := chat.ChannelReminders(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				other, err := chat.ChannelReminders(ctx, "T1", "U2", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				_, undated := chat.CreateChannelReminder(ctx, "T1", "U1", domain.ChannelReminderRequest{Channel: "C1", Text: "no date"})
+				foreign := chat.DeleteChannelReminder(ctx, "T1", "U2", created.ID)
+				if err := chat.DeleteChannelReminder(ctx, "T1", "U1", created.ID); err != nil {
 					return nil, err
 				}
 				return []any{
-					info.Text, info.Target, info.TimeZone, len(page.Items), page.HasMore,
-					updated.Text, updated.Recurrence, !completed.CompletedAt.IsZero(),
+					len(page.Items), page.Items[0].Text, page.Items[0].Reminder.Recurrence, len(other.Items),
+					errors.Is(undated, domain.ErrInvalidReminderRequest), errors.Is(foreign, storepkg.ErrNotFound),
 				}, nil
 			},
 		},
@@ -7571,13 +7633,25 @@ func parityCases() []parityCase {
 			},
 		},
 		{
-			name: "private Later saved-item lifecycle",
+			name: "Saved: add, list, clean up, and move to To-dos",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				message, err := chat.Post(ctx, "T1", "U1", "C1", "save me for later", "", "")
+				message, err := chat.Post(ctx, "T1", "U1", "C1", "save me", "", "")
 				if err != nil {
 					return nil, err
 				}
-				saved, err := chat.SaveForLater(ctx, "T1", "U1", "C1", timestampOf(message))
+				other, err := chat.Post(ctx, "T1", "U1", "C1", "move me to To-dos", "", "")
+				if err != nil {
+					return nil, err
+				}
+				saved, err := chat.AddToSaved(ctx, "T1", "U1", "C1", timestampOf(message))
+				if err != nil {
+					return nil, err
+				}
+				again, err := chat.AddToSaved(ctx, "T1", "U1", "C1", timestampOf(message))
+				if err != nil {
+					return nil, err
+				}
+				moving, err := chat.AddToSaved(ctx, "T1", "U1", "C1", timestampOf(other))
 				if err != nil {
 					return nil, err
 				}
@@ -7585,25 +7659,41 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				byMessages, err := chat.SavedItemsForMessages(ctx, "T1", "U1", []domain.MessageID{message.ID})
+				byMessages, err := chat.SavedItemsForMessages(ctx, "T1", "U1", []domain.MessageID{message.ID, other.ID})
 				if err != nil {
 					return nil, err
 				}
-				page, err := chat.SavedItems(ctx, "T1", "U1", domain.SavedItemInProgress, domain.PageRequest{Limit: 10})
+				page, err := chat.SavedItems(ctx, "T1", "U1", domain.PageRequest{Limit: 1})
 				if err != nil {
 					return nil, err
 				}
-				completed, err := chat.SetSavedItemState(ctx, "T1", "U1", saved.ID, domain.SavedItemCompleted)
+				todo, err := chat.MoveSavedItemToTodo(ctx, "T1", "U1", moving.ID)
 				if err != nil {
 					return nil, err
 				}
-				if err := chat.RemoveSavedItem(ctx, "T1", "U1", saved.ID); err != nil {
+				_, foreign := chat.MoveSavedItemToTodo(ctx, "T1", "U2", saved.ID)
+				third, err := chat.Post(ctx, "T1", "U1", "C1", "remove me", "", "")
+				if err != nil {
 					return nil, err
 				}
+				removable, err := chat.AddToSaved(ctx, "T1", "U1", "C1", timestampOf(third))
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RemoveSavedItem(ctx, "T1", "U1", removable.ID); err != nil {
+					return nil, err
+				}
+				_, removedTwice := chat.SavedItemForMessage(ctx, "T1", "U1", third.ID)
+				cleared, err := chat.ClearSavedItems(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				_, removed := chat.SavedItemForMessage(ctx, "T1", "U1", message.ID)
 				return []any{
-					saved.State, saved.SourceAvailable, saved.Message.Text,
+					saved.SourceAvailable, saved.Message.Text, again.ID == saved.ID,
 					byMessage.ID == saved.ID, len(byMessages), len(page.Items), page.HasMore,
-					completed.State,
+					todo.Title, todo.Source.MessageID == other.ID, errors.Is(foreign, storepkg.ErrNotFound),
+					errors.Is(removedTwice, storepkg.ErrNotFound), cleared, errors.Is(removed, storepkg.ErrNotFound),
 				}, nil
 			},
 		},

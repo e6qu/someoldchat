@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+
+// ReminderTiming is when a first-party reminder comes due. A zero due instant is no
+// reminder, which only a to-do may have.
+message ReminderTiming {
+  int64 due_at_unix_nano = 1;
+  string timezone = 2;
+  string recurrence = 3;
+  int64 recurrence_anchor_unix_nano = 4;
+}
+
+// ReminderDelivery is what the delivery worker recorded about a reminder.
+message ReminderDelivery {
+  int64 last_delivered_at_unix_nano = 1;
+  int64 acknowledged_at_unix_nano = 2;
+  int64 failed_at_unix_nano = 3;
+  string failure_code = 4;
+}
+
+// Todo is an item in a member's To-dos tab, Slack's replacement for Later.
+message Todo {
+  string id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  string title = 4;
+  string details = 5;
+  string source_message_id = 6;
+  string source_conversation_id = 7;
+  string source_timestamp = 8;
+  ReminderTiming reminder = 9;
+  ReminderDelivery delivery = 10;
+  int64 created_at_unix_nano = 11;
+  int64 updated_at_unix_nano = 12;
+  int64 completed_at_unix_nano = 13;
+}
+
+message CreateTodoRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string title = 3;
+  string details = 4;
+  string source_channel_id = 5;
+  string source_timestamp = 6;
+  ReminderTiming reminder = 7;
+}
+
+message TodoRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string todo_id = 3;
+}
+
+message TodosRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  bool done = 3;
+  // reminders are the To-dos filter's reminder groups: overdue, upcoming and
+  // none. Empty is every group.
+  repeated string reminders = 4;
+  string sort = 5;
+  int64 now_unix_nano = 6;
+  int32 limit = 7;
+  string cursor = 8;
+}
+
+message TodoPage {
+  repeated Todo items = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message EditTodoRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string todo_id = 3;
+  string title = 4;
+  string details = 5;
+}
+
+message SetTodoReminderRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string todo_id = 3;
+  // An absent or zero reminder is Clear due date.
+  ReminderTiming reminder = 4;
+}
+
+message SetTodoDoneRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string todo_id = 3;
+  bool done = 4;
+}
+
+message AcknowledgeTodoRemindersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+service TodosService {
+  rpc CreateTodo(CreateTodoRequest) returns (Todo);
+  rpc TodoInfo(TodoRequest) returns (Todo);
+  rpc Todos(TodosRequest) returns (TodoPage);
+  rpc EditTodo(EditTodoRequest) returns (Todo);
+  rpc SetTodoReminder(SetTodoReminderRequest) returns (Todo);
+  rpc SetTodoDone(SetTodoDoneRequest) returns (MutationResponse);
+  rpc DeleteTodo(TodoRequest) returns (MutationResponse);
+  rpc AcknowledgeTodoReminders(AcknowledgeTodoRemindersRequest) returns (MutationResponse);
+}

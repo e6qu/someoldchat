@@ -115,6 +115,7 @@ service.invalid_profile
 service.invalid_profile_field
 service.invalid_reaction
 service.invalid_reminder
+service.invalid_reminder_request
 service.invalid_remote_file
 service.invalid_retention_duration
 service.invalid_scheduled_status
@@ -125,6 +126,7 @@ service.invalid_slackbot_response
 service.invalid_snooze
 service.invalid_stream_chunks
 service.invalid_timestamp
+service.invalid_todo
 service.invalid_trigger
 service.invalid_trigger_config
 service.invalid_user_group

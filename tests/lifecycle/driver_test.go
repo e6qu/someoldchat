@@ -39,7 +39,6 @@ type driver struct {
 func drivers() map[string]driver {
 	return map[string]driver{
 		"AppApprovalStatus":    appApprovalDriver(),
-		"SavedItemState":       savedItemDriver(),
 		"SharedInviteStatus":   sharedInviteDriver(),
 		"InviteRequestStatus":  inviteRequestDriver(),
 		"ExternalUploadStatus": externalUploadDriver(),
@@ -220,67 +219,6 @@ type errNoTransition struct{}
 
 func (errNoTransition) Error() string {
 	return "the product has no operation that performs this transition"
-}
-
-// savedItemDriver drives a member's own saved item. The machine declares no
-// terminal state — marking something done is not a promise it stays done — so
-// what this asks is the other half: every move the machine allows must actually
-// be taken, and a state the product refuses that the machine permits is a
-// disagreement worth having.
-func savedItemDriver() driver {
-	const (
-		workspace = domain.WorkspaceID("T1")
-		member    = domain.UserID("U-member")
-		channel   = domain.ConversationID("C1")
-		message   = domain.MessageID("M1")
-		item      = domain.SavedItemID("S1")
-	)
-	return driver{
-		start: func(t *testing.T, state string) (service.Messages, bool) {
-			t.Helper()
-			ctx := context.Background()
-			repository := memory.New()
-			now := time.Now().UTC()
-			if err := repository.SeedWorkspace(domain.Workspace{ID: workspace, Name: "test"}); err != nil {
-				t.Fatal(err)
-			}
-			membership := domain.WorkspaceMembership{WorkspaceID: workspace, UserID: member, Role: domain.WorkspaceRoleMember, Active: true}
-			if err := repository.CreateUser(ctx, domain.User{ID: member, WorkspaceID: workspace, Name: "member", Email: "member@example.test"}, membership, events.Event{
-				ID: "E-user", WorkspaceID: workspace, Topic: "user.created", CreatedAt: now,
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if err := repository.CreateConversation(ctx, domain.Conversation{ID: channel, WorkspaceID: workspace, Name: "general"}, member, events.Event{
-				ID: "E-conversation", WorkspaceID: workspace, Topic: "conversation.created", CreatedAt: now,
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if err := repository.CreateMessage(ctx, domain.Message{
-				ID: message, WorkspaceID: workspace, Conversation: channel, AuthorID: member, Text: "saved", CreatedAt: now,
-			}, events.Event{ID: "E-message", WorkspaceID: workspace, Topic: "message.created", CreatedAt: now}, ""); err != nil {
-				t.Fatal(err)
-			}
-			if _, _, err := repository.CreateSavedItem(ctx, domain.SavedItem{
-				ID: item, WorkspaceID: workspace, UserID: member, MessageID: message, Conversation: channel,
-				State: domain.SavedItemState(state), CreatedAt: now, UpdatedAt: now,
-			}, events.Event{ID: "E-saved", WorkspaceID: workspace, Topic: "saved_item.created", CreatedAt: now}); err != nil {
-				t.Fatal(err)
-			}
-			return service.Messages{Store: repository}, true
-		},
-		attempt: func(messages service.Messages, _, to string) error {
-			_, err := messages.SetSavedItemState(context.Background(), workspace, member, item, domain.SavedItemState(to))
-			return err
-		},
-		observe: func(t *testing.T, messages service.Messages) string {
-			t.Helper()
-			current, err := messages.Store.GetSavedItem(context.Background(), workspace, member, item)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return string(current.State)
-		},
-	}
 }
 
 // sharedInviteDriver drives a Slack Connect invitation across two workspaces.

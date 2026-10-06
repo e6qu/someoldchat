@@ -17,7 +17,7 @@ import (
 // The workspace shell: the frame every signed-in workspace page shares.
 //
 // Slack's client is one frame — a rail of destinations on the left (the
-// workspace, Home, DMs, Activity, Later, More, Create and the member's own
+// workspace, Home, DMs, Activity, To-dos, More, Create and the member's own
 // avatar), a top bar holding search and help, and the destination's own panes
 // beside the rail. SameOldChat used to draw that frame only on the conversation
 // page; every other destination was a separate document with a "← Back to chat"
@@ -31,7 +31,7 @@ const (
 	destinationHome     = "home"
 	destinationDMs      = "dms"
 	destinationActivity = "activity"
-	destinationLater    = "later"
+	destinationTodos    = "todos"
 	destinationMore     = "more"
 )
 
@@ -82,8 +82,11 @@ type shellView struct {
 	Timezone string
 	// Language is the locale the page renders in and Languages the ones
 	// Language & region offers.
-	Language       string
-	Languages      []languageOption
+	Language  string
+	Languages []languageOption
+	// ReminderTimes are the choices for Preferences' "Set a default time for
+	// reminder notifications".
+	ReminderTimes  []reminderTimeOption
 	ShowIdentity   bool
 	CanCreate      bool
 	CanSchedule    bool
@@ -203,6 +206,7 @@ func (h Handler) newShell(r *http.Request, principal auth.Principal, request she
 		Keyboard:      keyboardHelp(),
 		Language:      string(requestLocale(r)),
 		Languages:     languageOptions(),
+		ReminderTimes: reminderTimeOptions(),
 		Workspaces:    h.workspaceChoices(r, principal),
 		ShowIdentity:  h.canShowIdentity(),
 		ShowAdmin:     h.canShowWorkspaceAdmin(ctx, principal),

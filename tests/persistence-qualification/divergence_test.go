@@ -2506,8 +2506,7 @@ func retentionDeletesTheSameContentOnEveryProfile(t *testing.T, open opener) {
 	}
 	if _, _, err := f.repository.CreateSavedItem(ctx, domain.SavedItem{
 		ID: domain.SavedItemID("SI-retention-" + f.suffix), WorkspaceID: f.workspaceID, UserID: f.userID,
-		MessageID: lone.ID, Conversation: f.channelID, State: domain.SavedItemInProgress,
-		CreatedAt: base, UpdatedAt: base,
+		MessageID: lone.ID, Conversation: f.channelID, CreatedAt: base,
 	}, f.event("retention-saved", "saved_item.created", string(lone.ID))); err != nil {
 		t.Fatal(err)
 	}
@@ -2548,7 +2547,7 @@ func retentionDeletesTheSameContentOnEveryProfile(t *testing.T, open opener) {
 		t.Fatalf("a swept message is still addressable: %v", err)
 	}
 	// And everything that pointed at it is gone too.
-	if saved, err := f.repository.ListSavedItems(ctx, f.workspaceID, f.userID, domain.SavedItemInProgress, domain.PageRequest{Limit: 10}); err != nil || len(saved.Items) != 0 {
+	if saved, err := f.repository.ListSavedItems(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: 10}); err != nil || len(saved.Items) != 0 {
 		t.Fatalf("saved items=%+v err=%v, want the saved reference swept with its message", saved.Items, err)
 	}
 

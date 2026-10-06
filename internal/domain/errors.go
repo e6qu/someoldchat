@@ -175,12 +175,19 @@ var (
 	ErrInvalidPresence               = errors.New("user presence is invalid")
 	ErrInvalidSnooze                 = errors.New("snooze duration must be between 1 and 1440 minutes")
 	ErrInvalidReminder               = errors.New("reminder text, user, and time are required")
-	ErrInvalidLaterReminder          = errors.New("Later reminder arguments are invalid")
-	ErrInvalidActivitySavedView      = errors.New("activity saved view arguments are invalid")
-	ErrInvalidSidebarSection         = errors.New("sidebar section arguments are invalid")
-	ErrReminderTimeInPast            = errors.New("reminder time is in the past")
-	ErrReminderRecurring             = errors.New("a recurring reminder cannot be marked complete")
-	ErrReminderOwnedByOther          = errors.New("a reminder can only be completed by the member it is for")
+	ErrInvalidReminderRequest        = errors.New("reminder arguments are invalid")
+	// ErrInvalidLaterReminder is ErrInvalidReminderRequest as a chat process
+	// from before To-dos names it across the seam (its key is wire contract).
+	// Nothing in this release returns it; the adapters that classify an
+	// invalid reminder accept it beside ErrInvalidReminderRequest during a
+	// rolling deployment, and it goes once no such process can be running.
+	ErrInvalidLaterReminder     = errors.New("reminder arguments are invalid (reported by a chat process from before To-dos)")
+	ErrInvalidTodo              = errors.New("to-do arguments are invalid")
+	ErrInvalidActivitySavedView = errors.New("activity saved view arguments are invalid")
+	ErrInvalidSidebarSection    = errors.New("sidebar section arguments are invalid")
+	ErrReminderTimeInPast       = errors.New("reminder time is in the past")
+	ErrReminderRecurring        = errors.New("a recurring reminder cannot be marked complete")
+	ErrReminderOwnedByOther     = errors.New("a reminder can only be completed by the member it is for")
 	// The sentinels below each carry one Slack error code their operation's
 	// contract declares, so the handler can name the failure exactly rather
 	// than folding it into a generic invalid or not-found answer.

@@ -396,9 +396,17 @@ func validClientMessageID(value string) bool {
 // times, and its relative presets are the same offsets, so both surfaces
 // resolve a named time the same way.
 func presetLocalTime(preset string, now time.Time, location *time.Location) (time.Time, bool) {
+	return presetLocalTimeAt(preset, now, location, domain.DefaultReminderClock)
+}
+
+// presetLocalTimeAt resolves a named day at the given time of day. A reminder's
+// "Tomorrow" and "Next week" land at the member's default reminder time
+// (Preferences' "Set a default time for reminder notifications"); the schedule
+// menu names 9:00 AM and keeps it.
+func presetLocalTimeAt(preset string, now time.Time, location *time.Location, clock domain.ReminderClock) (time.Time, bool) {
 	local := now.In(location)
-	nineAM := func(day time.Time) time.Time {
-		return time.Date(day.Year(), day.Month(), day.Day(), 9, 0, 0, 0, location)
+	atClock := func(day time.Time) time.Time {
+		return time.Date(day.Year(), day.Month(), day.Day(), clock.Hour, clock.Minute, 0, 0, location)
 	}
 	switch preset {
 	case "20m":
@@ -408,14 +416,14 @@ func presetLocalTime(preset string, now time.Time, location *time.Location) (tim
 	case "3h":
 		return now.Add(3 * time.Hour), true
 	case "tomorrow":
-		return nineAM(local.AddDate(0, 0, 1)), true
+		return atClock(local.AddDate(0, 0, 1)), true
 	case "monday", "nextweek":
 		// Slack's "Next week" is the coming Monday at 9:00 AM.
 		days := (int(time.Monday) - int(local.Weekday()) + 7) % 7
 		if days == 0 {
 			days = 7
 		}
-		return nineAM(local.AddDate(0, 0, days)), true
+		return atClock(local.AddDate(0, 0, days)), true
 	}
 	return time.Time{}, false
 }

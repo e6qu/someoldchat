@@ -479,12 +479,17 @@ type Service interface {
 	AddStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
 	RemoveStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
 	Stars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.StarPage, error)
-	SaveForLater(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.SavedItem, error)
+	AddToSaved(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.SavedItem, error)
 	SavedItemForMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)
 	SavedItemsForMessages(context.Context, domain.WorkspaceID, domain.UserID, []domain.MessageID) ([]domain.SavedItem, error)
-	SavedItems(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemState, domain.PageRequest) (domain.SavedItemPage, error)
-	SetSavedItemState(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID, domain.SavedItemState) (domain.SavedItem, error)
+	SavedItems(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.SavedItemPage, error)
 	RemoveSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID) error
+	// ClearSavedItems is Saved's clean-up "remove all saved items"; it reports
+	// how many it removed.
+	ClearSavedItems(context.Context, domain.WorkspaceID, domain.UserID) (int, error)
+	// MoveSavedItemToTodo is Saved's clean-up "move to To-dos": the item leaves
+	// Saved and becomes a to-do linked to its message, in one step.
+	MoveSavedItemToTodo(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID) (domain.Todo, error)
 	AddBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, domain.BookmarkType, string, string, string, string, string) (domain.Bookmark, error)
 	EditBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID, domain.BookmarkUpdate) (domain.Bookmark, error)
 	Bookmarks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.Bookmark, error)
@@ -494,13 +499,20 @@ type Service interface {
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) error
 	ReminderInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) (domain.Reminder, error)
 	Reminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
-	CreateLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderRequest) (domain.LaterReminder, error)
-	LaterReminderInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) (domain.LaterReminder, error)
-	LaterReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderTarget, domain.PageRequest) (domain.LaterReminderPage, error)
-	UpdateLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, domain.LaterReminderRequest) (domain.LaterReminder, error)
-	AcknowledgeLaterReminders(context.Context, domain.WorkspaceID, domain.UserID) error
-	CompleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) error
-	DeleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) error
+	CreateTodo(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoRequest) (domain.Todo, error)
+	TodoInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoID) (domain.Todo, error)
+	Todos(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoQuery) (domain.TodoPage, error)
+	EditTodo(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoID, domain.TodoEdit) (domain.Todo, error)
+	// SetTodoReminder is Edit reminder; the zero timing is Clear due date.
+	SetTodoReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoID, domain.ReminderTiming) (domain.Todo, error)
+	SetTodoDone(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoID, bool) error
+	DeleteTodo(context.Context, domain.WorkspaceID, domain.UserID, domain.TodoID) error
+	// AcknowledgeTodoReminders clears the due-reminder badge on To-dos and
+	// Activity.
+	AcknowledgeTodoReminders(context.Context, domain.WorkspaceID, domain.UserID) error
+	CreateChannelReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ChannelReminderRequest) (domain.ChannelReminder, error)
+	ChannelReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ChannelReminderPage, error)
+	DeleteChannelReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ChannelReminderID) error
 	ScheduleMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduleMessageWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduleMessageWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, time.Time) (domain.ScheduledMessage, error)

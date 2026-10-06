@@ -111,7 +111,7 @@ test('[ACT-01 A11Y-01] the toolbar and More actions menu follow Slack, by pointe
   const toolbar = message.getByRole('toolbar');
   const names = await toolbar.locator(':scope > button, :scope > a, :scope > form > button, :scope > details > summary').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')));
   expect(names.slice(0, 3).every((name) => /^React with :/.test(name))).toBe(true);
-  expect(names.slice(3)).toEqual(['Add reaction', 'Reply in thread', 'Forward message', 'Save for later', 'More actions']);
+  expect(names.slice(3)).toEqual(['Add reaction', 'Reply in thread', 'Forward message', 'Add to saved', 'More actions']);
 
   const more = message.locator('summary[aria-label="More actions"]');
   await more.focus();
@@ -120,8 +120,10 @@ test('[ACT-01 A11Y-01] the toolbar and More actions menu follow Slack, by pointe
   await expect(menu).toBeVisible();
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
   await expect(menu.getByRole('menuitem')).toHaveText([
-    /Mark unread\s*U/, /Remind me about this/, 'Copy link', /Pin to channel\s*P/, /Edit message\s*E/, /Delete message…\s*delete/,
+    /Mark unread\s*U/, 'Add to saved', /Remind me about this/, 'Copy link', /Pin to channel\s*P/, /Edit message\s*E/, /Delete message…\s*delete/,
   ]);
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Add to saved' })).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(menu.getByRole('menuitem', { name: 'Remind me about this' })).toBeFocused();
   await page.keyboard.press('ArrowRight');
