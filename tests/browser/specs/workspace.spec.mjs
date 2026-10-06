@@ -1992,6 +1992,52 @@ test('[COMP-01 COMP-02] Preferences choose what Enter does and whether to write 
   await expect.poll(async () => (await (await page.request.get('/app')).text()).includes('composer-markup&#34;:&#34;false')).toBe(true);
 });
 
+// Slack asks before @channel, @here or @everyone notifies a channel of at least
+// six members ("Manage who can notify a channel or workspace"). The browser
+// servers' channels are smaller than that and these servers cannot add people,
+// so the page is served with a larger member count, the one fact the dialog
+// reads from the server; the web tests hold the server to the real count.
+// Cancel keeps the message unsent and in the composer, and Send now sends it.
+test('[COMP-01 A11Y-01] a broadcast mention to a channel of six or more asks before it notifies everyone', async ({ page, context }) => {
+  await signIn(context);
+  await page.route((url) => url.pathname === '/app', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace(/data-member-count="\d+"/, 'data-member-count="12"');
+    await route.fulfill({ response, body });
+  });
+  await page.goto(`/app?channel=${CHANNEL}`);
+  const composer = composerEditor(page);
+  const stamp = `broadcast ${Date.now()}`;
+  // The channel's draft follows the member, so an earlier journey's words
+  // can be waiting in the composer: start from an empty one.
+  await composer.fill('');
+  await expect(composerField(page)).toHaveValue('');
+  await composer.pressSequentially('@chann');
+  await page.getByRole('listbox', { name: 'Mention suggestions' }).getByRole('option', { name: /@channel/ }).click();
+  // Choosing the suggestion leaves a space after it, as typing would.
+  await composer.pressSequentially(stamp);
+  await expect(composerField(page)).toHaveValue(`<!channel> ${stamp}`);
+
+  let posts = 0;
+  page.on('request', (request) => { if (request.method() === 'POST' && request.url().includes('/app/message')) posts += 1; });
+  await composer.press('Enter');
+  const dialog = page.getByRole('dialog', { name: /^Notify everyone in #/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('Using @channel will notify all 12 members of this channel.');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+  expect(posts).toBe(0);
+  await expect(composerField(page)).toHaveValue(`<!channel> ${stamp}`);
+  await expect(composer).toBeFocused();
+
+  await composer.press('Enter');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Send now' }).click();
+  const sent = page.locator('#timeline .message').filter({ hasText: stamp });
+  await expect(sent.locator('.mention-broadcast')).toHaveText('@channel');
+  expect(posts).toBe(1);
+});
+
 // Preferences follow the member, as Slack's follow the account: one chosen in
 // one browser is the one a browser the member has never used starts with.
 test('[COMP-01 NAV-06] a preference chosen in one browser follows the member to another', async ({ browser, page, context }) => {
