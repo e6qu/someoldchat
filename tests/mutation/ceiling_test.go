@@ -91,4 +91,8 @@ package mutation
 // 68 to 60: measured after Later became To-dos and Saved. The deactivated
 // fixture user now owns its own to-do, channel reminder and saved item, so
 // the guards, not ownership alone, are what refuse it, and their mutants die.
-const survivingGuardCeiling = 60
+//
+// 60 to 59: measured after the handlers began honouring the arguments the
+// pinned SDKs send; the guards those arguments reach are now exercised by
+// tests that refuse their mutants.
+const survivingGuardCeiling = 59
