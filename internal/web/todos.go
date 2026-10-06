@@ -178,7 +178,7 @@ const todoStyle = `<style>
 // reminderPresetsPartial is the list of suggested reminder times shared by
 // "Remind me about this" and Edit reminder: one form per time, so every
 // choice is one keyboard-operable button, then Custom.
-const reminderPresetsPartial = `{{define "reminder-presets"}}<form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="20m">In 20 minutes</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="1h">In 1 hour</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="3h">In 3 hours</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="tomorrow">Tomorrow</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="next_week">Next week</button></form><hr><form class="todo-form" method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><input type="hidden" name="preset" value="custom"><span class="v-menu-label">Custom</span><label>Date<input type="date" name="date" required></label><label>Time<input type="time" name="time" value="09:00"></label><label>Repeat<select name="recurrence"><option value="">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><button class="v-btn primary" type="submit">Set reminder</button></form>{{end}}
+const reminderPresetsPartial = `{{define "reminder-presets"}}<form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="20m">In 20 minutes</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="1h">In 1 hour</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="3h">In 3 hours</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="tomorrow">Tomorrow</button></form><form method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><button type="submit" name="preset" value="next_week">Next week</button></form><hr><form class="todo-form" method="post" action="{{.URL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="timezone" data-browser-timezone value="UTC"><input type="hidden" name="preset" value="custom"><span class="v-menu-label">Custom</span><label>Date<input type="date" name="date" required></label><label>Time (defaults to your reminder time in Preferences)<input type="time" name="time"></label><label>Repeat<select name="recurrence"><option value="">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><button class="v-btn primary" type="submit">Set reminder</button></form>{{end}}
 {{define "remindMenu"}}<details class="v-menu"><summary class="v-icon" role="button" aria-label="Remind me about {{.Label}}" title="Remind me about this"><span aria-hidden="true">⏰</span></summary><div class="v-menu-list"><span class="v-menu-label">Remind me about this</span>{{template "reminder-presets" .}}</div></details>{{end}}`
 
 const todosMarkup = `{{define "title"}}To-dos · SameOldChat{{end}}
@@ -192,9 +192,9 @@ const todosMarkup = `{{define "title"}}To-dos · SameOldChat{{end}}
 <label>To-do<input name="title" maxlength="3000" required></label>
 <label>Details<textarea name="details" maxlength="4000"></textarea></label>
 <fieldset><legend>Add reminder</legend>
-<label>Remind me<select name="preset"><option value="none">No reminder</option><option value="20m">In 20 minutes</option><option value="1h">In 1 hour</option><option value="3h">In 3 hours</option><option value="tomorrow">Tomorrow at 9:00 AM</option><option value="next_week">Next week (Monday at 9:00 AM)</option><option value="custom">Custom</option></select></label>
+<label>Remind me<select name="preset"><option value="none">No reminder</option><option value="20m">In 20 minutes</option><option value="1h">In 1 hour</option><option value="3h">In 3 hours</option><option value="tomorrow">Tomorrow</option><option value="next_week">Next week (Monday)</option><option value="custom">Custom</option></select></label>
 <label>Custom date<input type="date" name="date"></label>
-<label>Custom time (defaults to 9:00 AM)<input type="time" name="time"></label>
+<label>Custom time (defaults to your reminder time in Preferences)<input type="time" name="time"></label>
 <label>Repeat<select name="recurrence"><option value="">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
 </fieldset>
 <button class="v-btn primary" type="submit">Add</button></form></div></details>
@@ -561,9 +561,10 @@ func (h Handler) channelReminderRow(r *http.Request, principal auth.Principal, f
 }
 
 // reminderTimingFromForm reads a reminder choice: one of Slack's suggested
-// times, Custom (a date, and a time that defaults to 9:00 AM in the member's
-// zone), or none. ok is false with a reason the member can act on.
-func reminderTimingFromForm(fields map[string]string, now time.Time) (domain.ReminderTiming, string, bool) {
+// times, Custom (a date, and a time that defaults to the member's default
+// reminder time, 9:00 AM unless they changed it), or none. ok is false with a
+// reason the member can act on.
+func reminderTimingFromForm(fields map[string]string, now time.Time, clock domain.ReminderClock) (domain.ReminderTiming, string, bool) {
 	timeZone := strings.TrimSpace(fields["timezone"])
 	if timeZone == "" {
 		timeZone = "UTC"
@@ -581,21 +582,22 @@ func reminderTimingFromForm(fields map[string]string, now time.Time) (domain.Rem
 	case "none":
 		return domain.ReminderTiming{}, "", true
 	case "20m", "1h", "3h", "tomorrow", "nextweek":
-		due, _ = presetLocalTime(preset, now, location)
+		due, _ = presetLocalTimeAt(preset, now, location, clock)
 	case "next_week":
-		// Slack's "Next week" is 9:00 on the coming Monday.
-		due, _ = presetLocalTime("monday", now, location)
+		// Slack's "Next week" is the coming Monday, at the member's default
+		// reminder time.
+		due, _ = presetLocalTimeAt("monday", now, location, clock)
 	case "", "custom":
 		date := strings.TrimSpace(fields["date"])
-		clock := strings.TrimSpace(fields["time"])
 		if date == "" && preset == "" {
 			return domain.ReminderTiming{}, "", true
 		}
-		if clock == "" {
-			clock = "09:00"
+		at := strings.TrimSpace(fields["time"])
+		if at == "" {
+			at = clock.String()
 		}
-		due, err = time.ParseInLocation("2006-01-02 15:04", date+" "+clock, location)
-		if err != nil || due.In(location).Format("2006-01-02 15:04") != date+" "+clock {
+		due, err = time.ParseInLocation("2006-01-02 15:04", date+" "+at, location)
+		if err != nil || due.In(location).Format("2006-01-02 15:04") != date+" "+at {
 			return domain.ReminderTiming{}, "Choose a real calendar date and time.", false
 		}
 	default:
@@ -657,7 +659,12 @@ func (h Handler) createTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	timing, reason, ok := reminderTimingFromForm(fields, now)
+	clock, err := h.reminderClock(r.Context(), principal)
+	if err != nil {
+		h.writeStoreError(w, err, "Your reminder preferences are temporarily unavailable.")
+		return
+	}
+	timing, reason, ok := reminderTimingFromForm(fields, now, clock)
 	if !ok {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That reminder time is not valid", reason)
 		return
@@ -735,7 +742,12 @@ func (h Handler) setTodoReminder(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That to-do link is not valid", "Open To-dos and try again.")
 		return
 	}
-	timing, reason, ok := reminderTimingFromForm(fields, time.Now().UTC())
+	clock, err := h.reminderClock(r.Context(), principal)
+	if err != nil {
+		h.writeStoreError(w, err, "Your reminder preferences are temporarily unavailable.")
+		return
+	}
+	timing, reason, ok := reminderTimingFromForm(fields, time.Now().UTC(), clock)
 	if !ok {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That reminder time is not valid", reason)
 		return

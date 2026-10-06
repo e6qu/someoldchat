@@ -12258,7 +12258,11 @@ func (h Handler) channelReminderRequest(ctx context.Context, principal auth.Prin
 	if err != nil {
 		return domain.ChannelReminderRequest{}, domain.ErrInvalidReminderRequest
 	}
-	text, occurrence, err := domain.ParseReminderExpression(expression, now, location)
+	clock, err := h.reminderClock(ctx, principal)
+	if err != nil {
+		return domain.ChannelReminderRequest{}, err
+	}
+	text, occurrence, err := domain.ParseReminderExpressionAt(expression, now, location, clock)
 	if err != nil {
 		return domain.ChannelReminderRequest{}, err
 	}

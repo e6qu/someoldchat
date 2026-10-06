@@ -42,6 +42,15 @@ func once(due time.Time) ReminderOccurrence {
 // to accept only a number and answered cannot_parse to every phrase Slack
 // documents.
 func ParseReminderExpression(expression string, now time.Time, location *time.Location) (string, ReminderOccurrence, error) {
+	return ParseReminderExpressionAt(expression, now, location, DefaultReminderClock)
+}
+
+// ParseReminderExpressionAt is ParseReminderExpression with the time of day a
+// reminder set for a day ("tomorrow", "every Tuesday", "on March 3") is
+// delivered at: the member's "Set a default time for reminder notifications"
+// preference (ReminderDefaultClock), which Slack's "Set a reminder" defaults
+// to 9 a.m. in the member's time zone.
+func ParseReminderExpressionAt(expression string, now time.Time, location *time.Location, clock ReminderClock) (string, ReminderOccurrence, error) {
 	localNow := now.In(location)
 	if match := remindInPattern.FindStringSubmatch(expression); match != nil {
 		// "a" and "an" are the spoken form of one: "in an hour" means "in 1 hour".
@@ -74,7 +83,7 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		return strings.TrimSpace(match[1]), once(now.Add(duration)), nil
 	}
 	if match := remindTomorrowPattern.FindStringSubmatch(expression); match != nil {
-		hour, minute, err := parseReminderClock(match[2], 9, 0)
+		hour, minute, err := parseReminderClock(match[2], clock.Hour, clock.Minute)
 		if err != nil {
 			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
@@ -87,7 +96,7 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		if err != nil {
 			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
+		hour, minute, err := parseReminderClock(match[3], clock.Hour, clock.Minute)
 		if err != nil {
 			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
@@ -95,7 +104,7 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		return strings.TrimSpace(match[1]), once(due), err
 	}
 	if match := remindWeekdayPattern.FindStringSubmatch(expression); match != nil {
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
+		hour, minute, err := parseReminderClock(match[3], clock.Hour, clock.Minute)
 		if err != nil {
 			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
@@ -106,7 +115,7 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		return strings.TrimSpace(match[1]), ReminderOccurrence{Due: due, Recurrence: ReminderWeekly, Anchor: due}, nil
 	}
 	if match := remindRecurringPattern.FindStringSubmatch(expression); match != nil {
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
+		hour, minute, err := parseReminderClock(match[3], clock.Hour, clock.Minute)
 		if err != nil {
 			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
@@ -134,7 +143,7 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		// "on friday" is a single occurrence on the coming Friday, distinct from
 		// "every friday". It shares the coming-weekday resolution with the
 		// recurring form but records no recurrence.
-		hour, minute, err := parseReminderClock(match[3], 9, 0)
+		hour, minute, err := parseReminderClock(match[3], clock.Hour, clock.Minute)
 		if err != nil {
 			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
@@ -150,7 +159,7 @@ func ParseReminderExpression(expression string, now time.Time, location *time.Lo
 		// "on February 30" — is rejected rather than rolled into March.
 		month := monthByName(match[2])
 		day, _ := strconv.Atoi(match[3])
-		hour, minute, err := parseReminderClock(match[4], 9, 0)
+		hour, minute, err := parseReminderClock(match[4], clock.Hour, clock.Minute)
 		if err != nil {
 			return "", ReminderOccurrence{}, ErrInvalidReminderRequest
 		}
@@ -265,12 +274,17 @@ func reminderLocalTime(year int, month time.Month, day, hour, minute int, locati
 // leaves anything of its own in the text position is not one the grammar
 // reads.
 func ParseReminderTime(phrase string, now time.Time, location *time.Location) (ReminderOccurrence, error) {
+	return ParseReminderTimeAt(phrase, now, location, DefaultReminderClock)
+}
+
+// ParseReminderTimeAt is ParseReminderTime at the member's default clock.
+func ParseReminderTimeAt(phrase string, now time.Time, location *time.Location, clock ReminderClock) (ReminderOccurrence, error) {
 	const placeholder = "reminder"
 	phrase = strings.TrimSpace(phrase)
 	if phrase == "" {
 		return ReminderOccurrence{}, ErrInvalidReminderRequest
 	}
-	text, occurrence, err := ParseReminderExpression(placeholder+" "+phrase, now, location)
+	text, occurrence, err := ParseReminderExpressionAt(placeholder+" "+phrase, now, location, clock)
 	if err != nil {
 		return ReminderOccurrence{}, err
 	}

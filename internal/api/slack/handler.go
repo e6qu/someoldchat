@@ -8758,7 +8758,12 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	location := h.memberLocation(r.Context(), principal)
-	schedule, err := reminderSchedule(fields["time"], time.Now().UTC(), location)
+	preferences, err := h.Messages.MemberPreferences(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
+		return
+	}
+	schedule, err := reminderSchedule(fields["time"], time.Now().UTC(), location, domain.ReminderDefaultClock(preferences))
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -13847,10 +13852,10 @@ func (h Handler) memberLocation(ctx context.Context, principal auth.Principal) *
 // 15 minutes", "tomorrow at 9am", "every Thursday", "every day at 9am" - read
 // in the member's zone. Anything else is cannot_parse, as it was for every
 // phrase before.
-func reminderSchedule(raw string, now time.Time, location *time.Location) (domain.ReminderSchedule, error) {
+func reminderSchedule(raw string, now time.Time, location *time.Location, clock domain.ReminderClock) (domain.ReminderSchedule, error) {
 	raw = strings.TrimSpace(raw)
 	if _, err := strconv.ParseInt(raw, 10, 64); err != nil {
-		occurrence, parseErr := domain.ParseReminderTime(raw, now, location)
+		occurrence, parseErr := domain.ParseReminderTimeAt(raw, now, location, clock)
 		if parseErr != nil || !occurrence.Due.After(now) || occurrence.Due.After(now.AddDate(5, 0, 0)) {
 			return domain.ReminderSchedule{}, decodeFailure("cannot_parse", "time is not a timestamp, a number of seconds, or a reminder phrase")
 		}

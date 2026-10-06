@@ -2141,6 +2141,32 @@ test('[COMP-01 NAV-06] a preference chosen in one browser follows the member to 
   }
 });
 
+// Slack's "Set a reminder": a reminder set for a day arrives at 9 a.m. unless
+// the member picks another time under "Set a default time for reminder
+// notifications". The preference follows the member, so it is put back.
+test('[REMIND-02] the default reminder time moves a reminder set for tomorrow', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app/preferences');
+  const choice = page.getByLabel('Set a default time for reminder notifications');
+  await expect(choice).toHaveValue('09:00');
+  await choice.selectOption('07:30');
+  await expect.poll(async () => (await (await page.request.get('/app')).text()).includes('reminder-default-time&#34;:&#34;07:30')).toBe(true);
+  try {
+    await page.goto('/app/todos');
+    const added = `early to-do ${Date.now()}`;
+    await page.getByRole('button', { name: 'Add To-do' }).click();
+    await page.getByLabel('To-do', { exact: true }).first().fill(added);
+    await page.getByLabel('Remind me').selectOption('tomorrow');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await expect(page.getByRole('status')).toHaveText('To-do added.');
+    await expect(page.locator('.todo-item', { hasText: added }).locator('.due-chip')).toContainText('7:30');
+  } finally {
+    await page.goto('/app/preferences');
+    await page.getByLabel('Set a default time for reminder notifications').selectOption('09:00');
+    await expect.poll(async () => (await (await page.request.get('/app')).text()).includes('reminder-default-time&#34;:&#34;09:00')).toBe(true);
+  }
+});
+
 test('[SCHED-01] the schedule menu offers Slack\'s suggested times in the member\'s zone', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

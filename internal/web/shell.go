@@ -82,8 +82,11 @@ type shellView struct {
 	Timezone string
 	// Language is the locale the page renders in and Languages the ones
 	// Language & region offers.
-	Language       string
-	Languages      []languageOption
+	Language  string
+	Languages []languageOption
+	// ReminderTimes are the choices for Preferences' "Set a default time for
+	// reminder notifications".
+	ReminderTimes  []reminderTimeOption
 	ShowIdentity   bool
 	CanCreate      bool
 	CanSchedule    bool
@@ -203,6 +206,7 @@ func (h Handler) newShell(r *http.Request, principal auth.Principal, request she
 		Keyboard:      keyboardHelp(),
 		Language:      string(requestLocale(r)),
 		Languages:     languageOptions(),
+		ReminderTimes: reminderTimeOptions(),
 		Workspaces:    h.workspaceChoices(r, principal),
 		ShowIdentity:  h.canShowIdentity(),
 		ShowAdmin:     h.canShowWorkspaceAdmin(ctx, principal),

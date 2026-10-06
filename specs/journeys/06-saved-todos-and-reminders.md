@@ -67,8 +67,14 @@ scheduled as a message.
 
 "Click the To-dos tab in your sidebar. Click Add To-do … Enter the details of
 your to-do and click Add reminder. Choose a time from the list, or select Custom
-to pick your own. Click Add." A to-do may have no reminder. A custom date
-without a time defaults to 9:00 AM in the member's time zone. "Hover over a
+to pick your own. Click Add." A to-do may have no reminder. A reminder set
+for a day — To-dos' "Tomorrow" and "Next week", a Custom date without a time,
+or a `/remind` phrase such as "tomorrow" or "every Tuesday" — is due at the
+member's default reminder time in their time zone: 9 a.m. unless they changed
+it under Preferences, Notifications, "Set a default time for reminder
+notifications" (`TestDefaultReminderTimeMovesRemindersSetForADay`).
+`reminders.add` reads its phrases the same way. Slack names the drop-down but
+not its entries; offering every half hour of the day is our choice. "Hover over a
 to-do and click Edit reminder. To choose a new due date, select a new time or
 click Custom. To remove a reminder from a to-do, click Clear due date."
 
@@ -211,9 +217,6 @@ being marked done as if it were a one-off.
     answers not found, so delivery and deletion have one outcome
     (`TestTodoCannotBeDeletedWhileDeliveryOwnsTheLease`); a `reminders.add`
     reminder deleted before delivery claims it is never delivered.
-- Not built: Slack's "Set a default time for reminder notifications"
-  preference. The default is 9 a.m. in the member's time zone, as Slack's
-  default is; the preference is recorded in `specs/product-gap-audit.md`.
 - Still missing: browser delivery evidence driven by a deterministic deployed
   worker clock rather than only the real UI plus deterministic service/web
   tests.

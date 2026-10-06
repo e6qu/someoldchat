@@ -316,6 +316,11 @@ const shellPartials = `{{define "shell-open"}}<a class="skip-link" href="#conten
         <li><a href="{{.With "/app/notifications"}}#schedule-heading">Notification schedule</a></li>
         <li><a href="{{.With "/app/notifications"}}#notification-exceptions-heading">Exceptions</a></li>
       </ul>
+      <fieldset><legend>Reminders</legend>
+        <label for="pref-reminder-default-time">Set a default time for reminder notifications</label>
+        <select id="pref-reminder-default-time" class="preference-select" data-preference="reminder-default-time" data-default="09:00" aria-describedby="pref-reminder-default-time-help">{{range .ReminderTimes}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select>
+        <p id="pref-reminder-default-time-help" class="dialog-note">Reminders you set for a day, like “tomorrow” or “every Tuesday”, arrive at this time in your time zone.</p>
+      </fieldset>
     </section>
     <section class="preferences-panel" role="tabpanel" id="pref-vip" aria-labelledby="pref-tab-vip" tabindex="0" hidden>
       <h3>VIP</h3>

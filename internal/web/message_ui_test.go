@@ -179,7 +179,7 @@ func TestMessageMenuActionsCompleteInPlace(t *testing.T) {
 
 func TestNextWeekIsTheComingMondayMorning(t *testing.T) {
 	sunday := time.Date(2026, 9, 27, 15, 0, 0, 0, time.UTC)
-	timing, reason, ok := reminderTimingFromForm(map[string]string{"preset": "nextweek", "timezone": "UTC"}, sunday)
+	timing, reason, ok := reminderTimingFromForm(map[string]string{"preset": "nextweek", "timezone": "UTC"}, sunday, domain.DefaultReminderClock)
 	if !ok {
 		t.Fatal(reason)
 	}
@@ -187,17 +187,28 @@ func TestNextWeekIsTheComingMondayMorning(t *testing.T) {
 		t.Fatalf("next week from Sunday=%s want %s", timing.DueAt, want)
 	}
 	monday := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
-	timing, _, _ = reminderTimingFromForm(map[string]string{"preset": "next_week", "timezone": "UTC"}, monday)
+	timing, _, _ = reminderTimingFromForm(map[string]string{"preset": "next_week", "timezone": "UTC"}, monday, domain.DefaultReminderClock)
 	if want := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC); !timing.DueAt.Equal(want) {
 		t.Fatalf("next week from Monday=%s want %s", timing.DueAt, want)
 	}
 	// A Custom date with no time is 9 a.m. in the member's zone, as Slack's
 	// default reminder time is.
-	timing, _, ok = reminderTimingFromForm(map[string]string{"preset": "custom", "date": "2026-10-07", "timezone": "Europe/Bucharest"}, sunday)
+	timing, _, ok = reminderTimingFromForm(map[string]string{"preset": "custom", "date": "2026-10-07", "timezone": "Europe/Bucharest"}, sunday, domain.DefaultReminderClock)
 	if want := time.Date(2026, 10, 7, 6, 0, 0, 0, time.UTC); !ok || !timing.DueAt.Equal(want) || timing.TimeZone != "Europe/Bucharest" {
 		t.Fatalf("custom date without a time=%+v ok=%v, want %s", timing, ok, want)
 	}
-	if timing, _, ok := reminderTimingFromForm(map[string]string{"preset": "none"}, sunday); !ok || timing.Scheduled() {
+	// A member who set their default reminder time to 7:30 gets it for the
+	// day presets and for a Custom date without a time.
+	early := domain.ReminderClock{Hour: 7, Minute: 30}
+	timing, _, _ = reminderTimingFromForm(map[string]string{"preset": "tomorrow", "timezone": "UTC"}, sunday, early)
+	if want := time.Date(2026, 9, 28, 7, 30, 0, 0, time.UTC); !timing.DueAt.Equal(want) {
+		t.Fatalf("tomorrow at 7:30=%s want %s", timing.DueAt, want)
+	}
+	timing, _, _ = reminderTimingFromForm(map[string]string{"preset": "custom", "date": "2026-10-07", "timezone": "UTC"}, sunday, early)
+	if want := time.Date(2026, 10, 7, 7, 30, 0, 0, time.UTC); !timing.DueAt.Equal(want) {
+		t.Fatalf("custom date at 7:30=%s want %s", timing.DueAt, want)
+	}
+	if timing, _, ok := reminderTimingFromForm(map[string]string{"preset": "none"}, sunday, domain.DefaultReminderClock); !ok || timing.Scheduled() {
 		t.Fatalf("no reminder=%+v ok=%v", timing, ok)
 	}
 	for _, fields := range []map[string]string{
@@ -206,7 +217,7 @@ func TestNextWeekIsTheComingMondayMorning(t *testing.T) {
 		{"preset": "1h", "timezone": "Mars/Olympus"},
 		{"preset": "1h", "recurrence": "hourly"},
 	} {
-		if _, reason, ok := reminderTimingFromForm(fields, sunday); ok || reason == "" {
+		if _, reason, ok := reminderTimingFromForm(fields, sunday, domain.DefaultReminderClock); ok || reason == "" {
 			t.Fatalf("%v was accepted (reason %q)", fields, reason)
 		}
 	}

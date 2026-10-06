@@ -475,6 +475,8 @@ assert_contains "$work/reminders.html" 'A message that is only visible to you wi
 	'[REMIND-03] /remind list is private to the caller' "$reminder_help_url"
 assert_contains "$work/reminders.html" '9 a.m. in your time zone' \
 	'[REMIND-02] date-only reminder default is local 9 AM' "$reminder_help_url"
+assert_contains "$work/reminders.html" 'Set a default time for reminder notifications' \
+	'[REMIND-02] the default reminder time is a member preference' "$reminder_help_url"
 assert_contains "$work/reminders.html" "Guests can't create channel reminders" \
 	'[REMIND-02] guest reminder boundary' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'see a badge on the' \
