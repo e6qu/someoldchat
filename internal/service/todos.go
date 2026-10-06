@@ -127,10 +127,13 @@ func (m Messages) ClearSavedItems(ctx context.Context, workspaceID domain.Worksp
 
 // MoveSavedItemToTodo makes the saved message a to-do titled after it, with
 // no reminder yet; the member adds one from To-dos.
+//
+// Like AddToSaved, its authority is reading the source message: the saved
+// item is looked up as the caller's own, and savedItemWithSource refuses a
+// caller who may not read its conversation, a deactivated one included. A
+// separate workspace check in front would be shadowed by that one for every
+// caller, so it would guard nothing the authorization matrix could observe.
 func (m Messages) MoveSavedItemToTodo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SavedItemID) (domain.Todo, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
-		return domain.Todo{}, err
-	}
 	item, err := m.Store.GetSavedItem(ctx, workspaceID, userID, id)
 	if err != nil {
 		return domain.Todo{}, err

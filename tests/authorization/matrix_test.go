@@ -354,8 +354,16 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 	case reflect.TypeOf(domain.ReminderID("")):
 		return reflect.ValueOf(fixtureReminderID)
 	case reflect.TypeOf(domain.TodoID("")):
+		// As with dialogs below: the deactivated tier is handed its own to-do,
+		// so only its standing, not ownership, can refuse it.
+		if caller == "U-gone" {
+			return reflect.ValueOf(fixtureDeactivatedTodoID)
+		}
 		return reflect.ValueOf(fixtureTodoID)
 	case reflect.TypeOf(domain.ChannelReminderID("")):
+		if caller == "U-gone" {
+			return reflect.ValueOf(fixtureDeactivatedChannelReminderID)
+		}
 		return reflect.ValueOf(fixtureChannelReminderID)
 	case reflect.TypeOf(domain.BookmarkID("")):
 		return reflect.ValueOf(fixtureBookmarkID)
@@ -393,9 +401,12 @@ func fixtureArgument(argument reflect.Type, caller domain.UserID, chosen filling
 		return reflect.ValueOf(fixtureWorkflowRunID)
 	case reflect.TypeOf(domain.SavedItemID("")):
 		// RemoveSavedItem and MoveSavedItemToTodo act on the caller's own saved
-		// item, so the holder is handed its own; other operations that name one
-		// keep the member's.
+		// item, so the holder and the deactivated tier are each handed their
+		// own; other operations that name one keep the member's.
 		if method == "RemoveSavedItem" || method == "MoveSavedItemToTodo" {
+			if caller == "U-gone" {
+				return reflect.ValueOf(fixtureDeactivatedSavedItemID)
+			}
 			return reflect.ValueOf(fixtureHolderSavedItemID)
 		}
 		return reflect.ValueOf(fixtureSavedItemID)
@@ -784,6 +795,20 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 		Reminder:  domain.ReminderTiming{DueAt: at.Add(time.Hour), TimeZone: "UTC", RecurrenceAnchor: at.Add(time.Hour)},
 		CreatedAt: at, UpdatedAt: at,
 	}, event("E-channel-reminder", "channel_reminder.created")))
+	// The deactivated tier's own to-do and channel reminder, made before it was
+	// deactivated. Deactivation leaves them in place, so ownership alone would
+	// admit their owner; the workspace check is what refuses it, and these let
+	// the matrix see that check.
+	seed("deactivated to-do", repository.CreateTodo(ctx, domain.Todo{
+		ID: fixtureDeactivatedTodoID, WorkspaceID: "T1", UserID: "U-gone", Title: "deactivated to-do",
+		Reminder:  domain.ReminderTiming{DueAt: at.Add(time.Hour), TimeZone: "UTC", RecurrenceAnchor: at.Add(time.Hour)},
+		CreatedAt: at, UpdatedAt: at,
+	}, event("E-deactivated-todo", "todo.created")))
+	seed("deactivated channel reminder", repository.CreateChannelReminder(ctx, domain.ChannelReminder{
+		ID: fixtureDeactivatedChannelReminderID, WorkspaceID: "T1", Creator: "U-gone", Channel: "C1", Text: "deactivated channel reminder",
+		Reminder:  domain.ReminderTiming{DueAt: at.Add(time.Hour), TimeZone: "UTC", RecurrenceAnchor: at.Add(time.Hour)},
+		CreatedAt: at, UpdatedAt: at,
+	}, event("E-deactivated-channel-reminder", "channel_reminder.created")))
 	seed("bookmark", repository.CreateBookmark(ctx, domain.Bookmark{
 		ID: fixtureBookmarkID, WorkspaceID: "T1", Conversation: "C1", Title: "fixture bookmark",
 		Type: "link", Link: "https://example.test/bookmark", UpdatedBy: "U-member",
@@ -993,6 +1018,14 @@ func seedFixtureObjects(t *testing.T, repository *memory.Store, at time.Time) {
 	}, event("E-holder-saved", "saved_item.created")); err != nil {
 		t.Fatalf("seed holder saved item: %v", err)
 	}
+	// The deactivated tier's own saved item on the same message, for the same
+	// reason as its dialog: only the workspace check refuses its owner.
+	if _, _, err := repository.CreateSavedItem(ctx, domain.SavedItem{
+		ID: fixtureDeactivatedSavedItemID, WorkspaceID: "T1", UserID: "U-gone", MessageID: fixtureMessageID,
+		Conversation: "C1", CreatedAt: at,
+	}, event("E-deactivated-saved", "saved_item.created")); err != nil {
+		t.Fatalf("seed deactivated saved item: %v", err)
+	}
 	seed("scheduled status", repository.CreateScheduledStatus(ctx, domain.ScheduledStatus{
 		ID: fixtureScheduledStatusID, WorkspaceID: "T1", UserID: "U-owner", StatusText: "away",
 		StartsAt: at.Add(time.Hour), EndsAt: at.Add(2 * time.Hour), CreatedAt: at, UpdatedAt: at,
@@ -1073,12 +1106,16 @@ const (
 	fixtureReminderID        domain.ReminderID        = "F-reminder"
 	fixtureTodoID            domain.TodoID            = "F-todo"
 	fixtureChannelReminderID domain.ChannelReminderID = "F-channel-reminder"
-	fixtureBookmarkID        domain.BookmarkID        = "F-bookmark"
-	fixtureUserGroupID       domain.UserGroupID       = "F-usergroup"
-	fixtureFileID            domain.FileID            = "F-file"
-	fixtureWorkflowID        domain.WorkflowID        = "F-workflow"
-	fixtureAppID             domain.AppID             = "F-app"
-	fixtureDialogID          domain.DialogID          = "F-dialog"
+	// The deactivated tier's own to-do, channel reminder, and saved item.
+	fixtureDeactivatedTodoID            domain.TodoID            = "F-deactivated-todo"
+	fixtureDeactivatedChannelReminderID domain.ChannelReminderID = "F-deactivated-channel-reminder"
+	fixtureDeactivatedSavedItemID       domain.SavedItemID       = "F-deactivated-saved"
+	fixtureBookmarkID                   domain.BookmarkID        = "F-bookmark"
+	fixtureUserGroupID                  domain.UserGroupID       = "F-usergroup"
+	fixtureFileID                       domain.FileID            = "F-file"
+	fixtureWorkflowID                   domain.WorkflowID        = "F-workflow"
+	fixtureAppID                        domain.AppID             = "F-app"
+	fixtureDialogID                     domain.DialogID          = "F-dialog"
 	// fixtureDeactivatedDialogID is the deactivated tier's own dialog.
 	fixtureDeactivatedDialogID domain.DialogID = "F-deactivated-dialog"
 	fixtureHuddleID            domain.CallID   = "F-huddle"
