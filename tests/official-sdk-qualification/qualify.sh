@@ -94,8 +94,8 @@ cp "$root/tests/official-sdk-qualification/node-web-api/qualification.mjs" "$wor
 stop_fixture
 start_fixture
 
-npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/socket-mode@3.0.0')
-require_hash "$work/npm/$npm_tarball" 3d70683ca2872323150747e9611f4de35d9df333bdc6321bb4360c9f1d165fe6
+npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/socket-mode@3.1.0')
+require_hash "$work/npm/$npm_tarball" 9c48f88dae7504c8ba31cbcedca4ffd6b09baa951dd19103255635ba578cb7ec
 npm install --prefix "$work/node-socket-mode" --no-save --ignore-scripts "$work/npm/$npm_tarball"
 cp "$root/tests/official-sdk-qualification/node-socket-mode/qualification.mjs" "$work/node-socket-mode/qualification.mjs"
 (cd "$work/node-socket-mode" && SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ node qualification.mjs)
@@ -110,8 +110,8 @@ cp "$root/tests/official-sdk-qualification/node-rtm-api/qualification.mjs" "$wor
 stop_fixture
 start_fixture
 
-npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/bolt@5.0.0')
-require_hash "$work/npm/$npm_tarball" 62cedd4e4520ce963721d3a82bf6f5c5a9fc6b66b920eaf4d1cf4bb2f483f84b
+npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/bolt@5.1.0')
+require_hash "$work/npm/$npm_tarball" 021ba2a80736c9afe6ef5917a26b2b95eec0f6e46f2d704ccd189560c15567c0
 npm install --prefix "$work/node-bolt" --no-save --ignore-scripts "$work/npm/$npm_tarball"
 cp "$root/tests/official-sdk-qualification/node-bolt/qualification.mjs" "$work/node-bolt/qualification.mjs"
 (cd "$work/node-bolt" && SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ node qualification.mjs)
@@ -134,9 +134,9 @@ PYTHONPATH="$work/python-slack-sdk" SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/a
 stop_fixture
 start_fixture
 
-python3 -m pip download --disable-pip-version-check --no-deps --only-binary=:all: --dest "$work/python" slack-bolt==1.28.0
-python_wheel=$(find "$work/python" -maxdepth 1 -type f -name 'slack_bolt-1.28.0-*.whl' -print -quit)
-require_hash "$python_wheel" 738d1ca5e7c7039b6e18103d29267ced6e18c2517053eff18991fdd593acce5c
+python3 -m pip download --disable-pip-version-check --no-deps --only-binary=:all: --dest "$work/python" slack-bolt==1.30.0
+python_wheel=$(find "$work/python" -maxdepth 1 -type f -name 'slack_bolt-1.30.0-*.whl' -print -quit)
+require_hash "$python_wheel" 81f5bc46e79516d23d5e2a31dded6304dd1b8b6b72c0083f2f31d5d801e262c4
 python3 -m pip install --disable-pip-version-check --no-index --no-deps --target "$work/python-bolt" "$python_wheel"
 PYTHONPATH="$work/python-bolt:$work/python-slack-sdk" SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ python3 "$root/tests/official-sdk-qualification/python-bolt/qualification.py"
 stop_fixture
