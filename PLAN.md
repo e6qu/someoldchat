@@ -62,11 +62,11 @@ The figures below come from `make compatibility-report` and
 
 | Measure | Value |
 |---|---|
-| Current Slack Web API methods implemented | 331 of 331 |
-| …with method-level evidence | 331 of 331 |
-| …`behavior-compatible` or better | 270 of 331 |
-| …`conforms-to-published-source` | 0 of 331 |
-| Recorded known deviations | 92 |
+| Current Slack Web API methods implemented | 340 of 340 |
+| …with method-level evidence | 340 of 340 |
+| …`behavior-compatible` or better | 270 of 340 |
+| …`conforms-to-published-source` | 0 of 340 |
+| Recorded known deviations | 141 |
 | Retained legacy methods implemented | 10 of 10 |
 | User journeys in the normative catalog | 108 |
 | …cited by a browser scenario | 102 of 108 |

@@ -23,12 +23,12 @@ const revision = "bc08db49625630e3585bf2f1322128ea04f2a7f3"
 
 const (
 	currentMethodsPath = "specs/upstream/slack-reference/current-methods.txt"
-	currentMethodsHash = "31cceea100353977626da014a5ed9061a0650291bfc26fc939acdff316a057d4"
+	currentMethodsHash = "4dde26848eec60d5d30911fa7b077e96647e2ae4a51e2718c2c0dabaddac177d"
 	currentEventsPath  = "specs/upstream/slack-reference/current-events.txt"
 	currentEventsHash  = "40ef0fe05a83a6eab16ef021b4a08512a693a6849ce3b2cb8ff8475eef862a22"
 	// The counts change with Slack's reference; the external contract gate
 	// reports every method and event Slack adds or retires.
-	currentMethodsCount = 331
+	currentMethodsCount = 340
 	currentEventsCount  = 153
 )
 
