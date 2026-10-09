@@ -443,6 +443,9 @@ func validateWorkflowPins(root string, paths []string, byID map[string]dependenc
 			if err := validateWorkflowImage(path, index+1, line, byID); err != nil {
 				return err
 			}
+			if err := validateBuildxImage(path, index, lines, byID); err != nil {
+				return err
+			}
 		}
 		if err := validateAptPins(path, lines); err != nil {
 			return err
@@ -454,6 +457,7 @@ func validateWorkflowPins(root string, paths []string, byID map[string]dependenc
 var (
 	workflowVersionKeyPattern = regexp.MustCompile(`^[\t ]*(?:-[\t ]+)?([A-Za-z0-9_.-]*[Vv]ersion)[\t ]*:[\t ]*(.+?)[\t ]*$`)
 	workflowImageKeyPattern   = regexp.MustCompile(`^[\t ]*(?:-[\t ]+)?image[\t ]*:[\t ]*(.+?)[\t ]*$`)
+	buildxDriverImagePattern  = regexp.MustCompile(`^[\t ]*driver-opts[\t ]*:[\t ]*["']?image=([^"'\s]+)["']?[\t ]*$`)
 	floatingRunnerPattern     = regexp.MustCompile(`(^|[^a-z0-9])latest([^a-z0-9]|$)`)
 	exactVersionPattern       = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 	aptPackagePattern         = regexp.MustCompile(`^[a-z0-9][a-z0-9.+-]*$`)
@@ -868,6 +872,39 @@ func validateWorkflowImage(path string, lineNumber int, line string, byID map[st
 	return requireInventoriedImage(fmt.Sprintf("workflow %s:%d", path, lineNumber), reference, byID)
 }
 
+// validateBuildxImage requires every docker/setup-buildx-action step to name
+// its BuildKit image through a single-line `driver-opts: image=...` that is
+// digest-pinned and inventoried. Left unset, the action pulls moby/buildkit
+// from Docker Hub, whose anonymous pull limit the shared runners exhaust.
+func validateBuildxImage(path string, index int, lines []string, byID map[string]dependency) error {
+	repository, _, ok := parseActionUse(lines[index])
+	if !ok || repository != "docker/setup-buildx-action" {
+		return nil
+	}
+	stepIndent := len(lines[index]) - len(strings.TrimLeft(lines[index], " \t"))
+	if !strings.HasPrefix(strings.TrimSpace(lines[index]), "-") {
+		stepIndent -= 2
+	}
+	for next := index + 1; next < len(lines); next++ {
+		line := lines[next]
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		if len(line)-len(strings.TrimLeft(line, " \t")) <= stepIndent {
+			break
+		}
+		match := buildxDriverImagePattern.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		if !hasImageDigest(match[1]) {
+			return fmt.Errorf("workflow %s:%d BuildKit image %q is not pinned by digest", path, next+1, match[1])
+		}
+		return requireInventoriedImage(fmt.Sprintf("workflow %s:%d", path, next+1), match[1], byID)
+	}
+	return fmt.Errorf("workflow %s:%d docker/setup-buildx-action sets no `driver-opts: image=...`, so it would pull BuildKit from Docker Hub", path, index+1)
+}
+
 // validateAptPins requires every package in an apt-get install invocation to
 // carry an explicit "=version". The literal allow-list it replaces could only
 // notice a removed pin, never an added unpinned package.
@@ -1001,6 +1038,9 @@ func validateDockerfiles(root string, byID map[string]dependency) error {
 func requireInventoriedImage(position, reference string, byID map[string]dependency) error {
 	name, tag, digest := splitImageReference(reference)
 	name = normalizeImageName(name)
+	if strings.HasPrefix(name, "docker.io/") {
+		return fmt.Errorf("%s container image %q comes from Docker Hub, whose anonymous pull limit the shared runners exhaust; use public.ecr.aws/docker/library for official images or mirror.gcr.io at the same digest", position, name)
+	}
 	item, ok := byID["container/"+name]
 	if !ok {
 		return fmt.Errorf("%s container image %q is absent from the dependency inventory", position, name)

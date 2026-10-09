@@ -398,9 +398,13 @@ entries:
     license: MIT
     purpose: container publication in CI
     runtime: false
-  - id: container/docker.io/library/golang
+  # Docker Hub limits anonymous pulls per address and the shared CI runners
+  # exhaust it, so container images come from the Amazon ECR Public copy of
+  # Docker's official images or from Google's Docker Hub mirror. Each digest is
+  # the one Docker Hub serves for the tag, which the evidence link shows.
+  - id: container/public.ecr.aws/docker/library/golang
     kind: container-image
-    canonical: docker.io/library/golang
+    canonical: public.ecr.aws/docker/library/golang
     source: https://github.com/docker-library/golang
     version: 1.26.9-bookworm
     revision: sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c
@@ -429,9 +433,9 @@ entries:
     license: Apache-2.0
     purpose: runtime base image for the published container
     runtime: true
-  - id: container/docker.io/docker/dockerfile
+  - id: container/mirror.gcr.io/docker/dockerfile
     kind: container-image
-    canonical: docker.io/docker/dockerfile
+    canonical: mirror.gcr.io/docker/dockerfile
     source: https://github.com/moby/buildkit
     version: "1"
     revision: sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
@@ -442,9 +446,9 @@ entries:
     license: Apache-2.0
     purpose: Dockerfile frontend used by every image build
     runtime: false
-  - id: container/docker.io/library/postgres
+  - id: container/public.ecr.aws/docker/library/postgres
     kind: container-image
-    canonical: docker.io/library/postgres
+    canonical: public.ecr.aws/docker/library/postgres
     source: https://github.com/docker-library/postgres
     version: 18.1
     revision: sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
@@ -454,6 +458,19 @@ entries:
     provenance: registry-digest
     license: PostgreSQL
     purpose: PostgreSQL qualification service in CI
+    runtime: false
+  - id: container/mirror.gcr.io/moby/buildkit
+    kind: container-image
+    canonical: mirror.gcr.io/moby/buildkit
+    source: https://github.com/moby/buildkit
+    version: buildx-stable-1
+    revision: sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+    published_at: 2026-09-30T15:17:55Z
+    evidence: https://hub.docker.com/layers/moby/buildkit/buildx-stable-1/images/sha256-cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+    checksum: sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+    provenance: registry-digest
+    license: Apache-2.0
+    purpose: BuildKit daemon that docker/setup-buildx-action starts in CI
     runtime: false
   - id: terraform-provider/hashicorp/aws
     kind: terraform-provider
