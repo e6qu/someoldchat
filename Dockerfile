@@ -1,12 +1,5 @@
 # syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651 AS build
-
-# go.mod selects Go 1.26.6 for its standard-library security fixes, but
-# golang:1.26.6-bookworm is still inside the 24-hour dependency-admission
-# quarantine. The base stays on the admitted 1.26.5 image and fetches the 1.26.6
-# toolchain to match go.mod; the official image pins GOTOOLCHAIN=local, which
-# would refuse it. Bump the base to 1.26.6 and drop this once it clears quarantine.
-ENV GOTOOLCHAIN=auto
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS build
 
 ARG TARGETOS
 ARG TARGETARCH

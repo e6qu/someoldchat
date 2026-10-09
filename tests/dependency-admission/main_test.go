@@ -38,6 +38,27 @@ func TestValidateRejectsAnEntryInsideTheQuarantine(t *testing.T) {
 	}
 }
 
+func TestValidateAdmitsASecurityFixInsideTheQuarantine(t *testing.T) {
+	value := validInventory()
+	value.Entries[0].PublishedAt = "2026-07-19T12:00:00Z"
+	value.Entries[0].SecurityAdvisory = "GO-2026-6617"
+
+	if err := validate(value, time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("validate() error = %v", err)
+	}
+}
+
+func TestValidateRejectsAMalformedSecurityAdvisory(t *testing.T) {
+	value := validInventory()
+	value.Entries[0].PublishedAt = "2026-07-19T12:00:00Z"
+	value.Entries[0].SecurityAdvisory = "urgent"
+
+	err := validate(value, time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC))
+	if err == nil || !strings.Contains(err.Error(), "is not a GO-, GHSA- or CVE- identifier") {
+		t.Fatalf("validate() error = %v, want advisory format error", err)
+	}
+}
+
 func TestValidateRejectsMissingEvidence(t *testing.T) {
 	value := validInventory()
 	value.Entries[0].Evidence = ""

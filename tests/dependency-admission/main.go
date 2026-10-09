@@ -24,6 +24,7 @@ var (
 	moduleSumPattern     = regexp.MustCompile(`^h1:[A-Za-z0-9+/]+={0,2}$`)
 	sriChecksumPattern   = regexp.MustCompile(`^sha512-[A-Za-z0-9+/]+={0,2}$`)
 	sha256HexPattern     = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	advisoryIDPattern    = regexp.MustCompile(`^(GO-\d{4}-\d+|GHSA(-[23456789cfghjmpqrvwx]{4}){3}|CVE-\d{4}-\d{4,})$`)
 	stableVersionPattern = regexp.MustCompile(`(?i)(?:[-.]alpha(?:[-.]|$)|[-.]beta(?:[-.]|$)|[-.]rc(?:[-.]|$)|[-.]dev(?:[-.]|$))`)
 )
 
@@ -48,6 +49,10 @@ type dependency struct {
 	License     string `yaml:"license"`
 	Purpose     string `yaml:"purpose"`
 	Runtime     bool   `yaml:"runtime"`
+	// SecurityAdvisory names the advisory (GO-…, GHSA-…, CVE-…) this version
+	// fixes. A release that fixes a vulnerability the repository's own scanners
+	// report is admitted without waiting out the quarantine; nothing else is.
+	SecurityAdvisory string `yaml:"security_advisory"`
 }
 
 func main() {
@@ -150,7 +155,10 @@ func validateEntry(item dependency, index int, cutoff time.Time) error {
 	if err != nil {
 		return fmt.Errorf("%s %q has invalid published_at: %w", position, item.ID, err)
 	}
-	if publishedAt.After(cutoff) {
+	if item.SecurityAdvisory != "" && !advisoryIDPattern.MatchString(item.SecurityAdvisory) {
+		return fmt.Errorf("%s %q security_advisory %q is not a GO-, GHSA- or CVE- identifier", position, item.ID, item.SecurityAdvisory)
+	}
+	if publishedAt.After(cutoff) && item.SecurityAdvisory == "" {
 		return fmt.Errorf("%s %q was published at %s, after the quarantine cutoff %s", position, item.ID, publishedAt.UTC().Format(time.RFC3339), cutoff.UTC().Format(time.RFC3339))
 	}
 	if !immutableRevision(item.Revision) {

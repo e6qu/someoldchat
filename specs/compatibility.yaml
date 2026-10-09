@@ -70,11 +70,11 @@ sources:
   - id: slack-current-method-reference
     kind: markdown-index
     upstream: https://docs.slack.dev/llms-sitemap.md
-    revision: sha256:843a0a6667c9336deb541d437d8916de7087bc8f2305576b4371ff47caf61f4d
+    revision: sha256:37b5acb3c9e046ec3c81eba286ce906051ad29df63700444259042a5128f2eaf
     path: specs/upstream/slack-reference/current-methods.txt
-    sha256: 0c591b74d588fa66ecf442fd672243582ecb2ddbf6de03a5652277bdb0b0d996
+    sha256: 4dde26848eec60d5d30911fa7b077e96647e2ae4a51e2718c2c0dabaddac177d
     license: Slack API Terms of Service
-    retrieved_at: 2026-07-28T00:00:00Z
+    retrieved_at: 2026-10-09T00:00:00Z
   - id: slack-current-event-reference
     kind: markdown-index
     upstream: https://docs.slack.dev/llms-sitemap.md

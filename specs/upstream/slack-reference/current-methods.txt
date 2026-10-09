@@ -119,6 +119,15 @@ admin.workflows.search
 admin.workflows.triggers.types.permissions.lookup
 admin.workflows.triggers.types.permissions.set
 admin.workflows.unpublish
+agents.conversations.archive
+agents.conversations.create
+agents.conversations.getcanvas
+agents.conversations.listviews
+agents.conversations.removeview
+agents.conversations.setcanvascontent
+agents.conversations.setcommands
+agents.conversations.setproperties
+agents.conversations.setview
 agents.sessions.rename
 agents.sessions.setstatus
 api.test
