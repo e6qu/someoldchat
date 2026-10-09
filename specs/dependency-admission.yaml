@@ -180,11 +180,12 @@ entries:
     kind: go-module
     canonical: golang.org/x/net
     source: https://go.googlesource.com/net
-    version: v0.58.0
-    revision: acc78e0d2b2c855c0c4fbdcfe5f42a9e3d0f9778
-    published_at: 2026-08-12T17:41:32Z
-    evidence: https://proxy.golang.org/golang.org/x/net/@v/v0.58.0.info
-    checksum: h1:ynWG7rqYi4ccpTEuPZ2QGWHktVEM9DMCj9yzDE0Q7To=
+    version: v0.60.0
+    revision: 18ece0ce30bc35fa81fe72028bf309bb3ff3f4a5
+    published_at: 2026-10-08T17:22:58Z
+    evidence: https://proxy.golang.org/golang.org/x/net/@v/v0.60.0.info
+    checksum: h1:79p50tfZlm0J9YfoDsSi639qSXNGVwEzOPLCxM2FsYU=
+    security_advisory: GO-2026-6617
     provenance: vcs-tag
     license: BSD-3-Clause
     purpose: HTTP and identity protocol support
@@ -401,11 +402,12 @@ entries:
     kind: container-image
     canonical: docker.io/library/golang
     source: https://github.com/docker-library/golang
-    version: 1.26.5-bookworm
-    revision: sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
-    published_at: 2026-07-14T21:31:25Z
-    evidence: https://hub.docker.com/layers/library/golang/1.26.5-bookworm/images/sha256-1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
-    checksum: sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
+    version: 1.26.9-bookworm
+    revision: sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c
+    published_at: 2026-10-08T18:06:01Z
+    evidence: https://hub.docker.com/layers/library/golang/1.26.9-bookworm/images/sha256-d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c
+    checksum: sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c
+    security_advisory: GO-2026-6617
     provenance: registry-digest
     license: BSD-3-Clause AND GPL-2.0-or-later
     purpose: Go toolchain that compiles every shipped binary
