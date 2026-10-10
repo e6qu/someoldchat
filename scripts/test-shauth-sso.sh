@@ -86,6 +86,7 @@ hydra_secret=$(openssl rand -base64 48 | tr -d '\n')
 admin_password=$(openssl rand -base64 48 | tr -d '\n')
 validator_token=$(openssl rand -hex 48)
 validation_status_token=$(openssl rand -hex 48)
+token_hook_token=$(openssl rand -hex 48)
 primary_client_secret=$(openssl rand -hex 32)
 witness_client_secret=$(openssl rand -hex 32)
 primary_api_token=$(openssl rand -hex 32)
@@ -155,7 +156,6 @@ provider_compose() {
 		POSTGRES_PASSWORD="$postgres_password" \
 		HYDRA_SYSTEM_SECRET="$hydra_secret" \
 		HYDRA_DSN="postgres://shauth:${postgres_password}@postgres:5432/hydra?sslmode=disable" \
-		HYDRA_PUBLIC_URL="$provider_origin" \
 		SHAUTH_PUBLIC_URL="$provider_origin" \
 		SHAUTH_DATABASE_URL="postgres://shauth:${postgres_password}@postgres:5432/shauth?sslmode=disable" \
 		GITHUB_CLIENT_ID=someoldchat-integration \
@@ -163,6 +163,7 @@ provider_compose() {
 		SHAUTH_BOOTSTRAP_ADMIN_PASSWORD="$admin_password" \
 		SHAUTH_VALIDATOR_TOKEN="$validator_token" \
 		SHAUTH_VALIDATION_STATUS_TOKEN="$validation_status_token" \
+		SHAUTH_TOKEN_HOOK_TOKEN="$token_hook_token" \
 		SHAUTH_BOOTSTRAP_APPS_JSON="$bootstrap_apps" \
 		docker compose --project-name "$provider_project" --project-directory "$shauth_root" \
 		-f "$shauth_root/compose.yaml" -f "$work_dir/provider-ports.yaml" "$@"
@@ -287,52 +288,52 @@ for origin in "$primary_origin" "$witness_origin"; do
 done
 
 mkdir "$work_dir/validator"
-cp "$shauth_root/validator/validate.mjs" "$shauth_root/validator/security.mjs" "$shauth_root/validator/readiness.mjs" "$work_dir/validator/"
+for module in "$shauth_root"/validator/*.mjs; do
+	case $module in
+	*.test.mjs) ;;
+	*) cp "$module" "$work_dir/validator/" ;;
+	esac
+done
 ln -s "$root/tests/browser/node_modules" "$work_dir/node_modules"
 
-create_bootstraps() {
-	next=$1
-	curl --fail --silent --show-error \
-		--request POST \
-		--header "Authorization: Bearer ${validator_token}" \
-		--header 'Content-Type: application/json' \
-		--data "{\"next\":[\"${next}\",\"/\"]}" \
-		"$provider_origin/internal/validator/browser-bootstraps"
+validator_request() {
+	path=$1
+	shift
+	curl --fail --silent --show-error --request POST \
+		--header "Authorization: Bearer ${validator_token}" "$@" "$provider_origin/internal/validator/$path"
 }
 
-run_direction() {
-	direction=$1
-	if test "$direction" = from_shauth; then
-		bootstraps=$(create_bootstraps /apps)
+# Registering the two applications queues Shauth's own browser validation of
+# each one in both directions, with the other application as the global-logout
+# witness. This drains that queue exactly as Shauth's validator worker does:
+# claim a run, mint the run's browser sessions, drive the browser, and record
+# the outcome with Shauth.
+expected_runs="someoldchat-primary/from_app someoldchat-primary/from_shauth someoldchat-witness/from_app someoldchat-witness/from_shauth"
+completed_runs=
+while job=$(validator_request jobs/claim) && test -n "$job"; do
+	run_id=$(printf '%s' "$job" | jq -r '.id')
+	run_name=$(printf '%s' "$job" | jq -r '.app_slug + "/" + .direction')
+	if test "$(printf '%s' "$job" | jq -r '.direction')" = from_shauth; then
+		next='["/apps","/","/"]'
 	else
-		bootstraps=$(create_bootstraps /)
+		next='["/","/","/"]'
 	fi
-	job=$(jq -cn \
-		--arg direction "$direction" \
-		--arg release "$release_revision" \
-		--arg provider "$provider_origin" \
-		--arg primary "$primary_origin" \
-		--arg witness "$witness_origin" \
-		--argjson bootstraps "$(printf '%s' "$bootstraps" | jq '.urls')" '
-  {
-    id:("someoldchat-" + $direction), managed_app_id:"00000000-0000-4000-8000-000000000101",
-    app_slug:"someoldchat-primary", app_name:"SameOldChat primary", oidc_client_id:"someoldchat-primary",
-    launch_url:($primary + "/"), validation_url:($primary + "/auth/validation"), signed_out_url:($primary + "/signed-out"),
-    logout_bridge_url:($primary + "/auth/shauth/logout/complete"), direction:$direction, release_revision:$release,
-    shauth_url:$provider, bootstrap_urls:$bootstraps,
-    witness:{managed_app_id:"00000000-0000-4000-8000-000000000102", app_slug:"someoldchat-witness", app_name:"SameOldChat witness", oidc_client_id:"someoldchat-witness", launch_url:($witness + "/"), validation_url:($witness + "/auth/validation"), signed_out_url:($witness + "/signed-out"), logout_bridge_url:($witness + "/auth/shauth/logout/complete"), release_revision:$release}
-  }')
-	result=$(printf '%s' "$job" | \
-		SHAUTH_VALIDATION_USERNAME=shauth-validator \
-		SHAUTH_VALIDATION_EMAIL=shauth-validator@localhost.test \
+	bootstraps=$(validator_request browser-bootstraps --header 'Content-Type: application/json' \
+		--data "$(jq -cn --arg run "$run_id" --argjson next "$next" '{run_id:$run, next:$next}')")
+	result=$(printf '%s' "$job" | jq -c --argjson urls "$(printf '%s' "$bootstraps" | jq '.urls')" '. + {bootstrap_urls:$urls}' |
 		node "$work_dir/validator/validate.mjs")
+	validator_request "jobs/$run_id/complete" --header 'Content-Type: application/json' --data "$result" >/dev/null
 	printf '%s\n' "$result" | jq --exit-status '.status == "passed" and .failure == ""' >/dev/null || {
-		printf 'Shauth %s validation failed: %s\n' "$direction" "$(printf '%s' "$result" | jq -r '.failure')" >&2
-		return 1
+		printf 'Shauth validation %s failed: %s\n' "$run_name" "$(printf '%s' "$result" | jq -r '.failure')" >&2
+		exit 1
 	}
-}
-
-run_direction from_app
-run_direction from_shauth
+	completed_runs="${completed_runs}${run_name}
+"
+done
+completed_runs=$(printf '%s' "$completed_runs" | sort | tr '\n' ' ')
+if test "$completed_runs" != "$expected_runs "; then
+	printf 'Shauth queued validations %s; expected exactly %s\n' "$completed_runs" "$expected_runs" >&2
+	exit 1
+fi
 
 printf 'SameOldChat passed direct, catalog, silent SSO, app logout, provider logout, identity, release, fail-closed, and credential-boundary validation against Shauth %s.\n' "$expected_shauth_commit"

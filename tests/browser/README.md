@@ -103,7 +103,11 @@ the same pinned Playwright installation to exercise two real SameOldChat
 relying parties against real Shauth, Ory Hydra, and PostgreSQL services. The
 two applications use distinct databases and dynamically allocated loopback
 ports, while `.localhost` origins preserve secure relying-party origin behavior
-without fixed host-port collisions.
+without fixed host-port collisions. Registering the two applications makes
+Shauth queue its own browser validation of each one, from the application and
+from Shauth's catalog, with the other application as the global-logout witness;
+the script drains that queue the way Shauth's validator worker does and fails
+unless exactly those four runs pass.
 
 The official Slack SDK suites are separate; see
 [`../official-sdk-qualification`](../official-sdk-qualification/README.md).
