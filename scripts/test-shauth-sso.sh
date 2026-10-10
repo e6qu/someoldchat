@@ -5,7 +5,7 @@ set -eu
 unset CDPATH
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 shauth_root=${SHAUTH_SOURCE_DIR:?SHAUTH_SOURCE_DIR must point to the exact Shauth checkout}
-expected_shauth_commit=0fda680cba964e5768ed75a9c3e5b7230c418ca6
+expected_shauth_commit=226ffffb9a046378334098c9bf34cc31776c34d4
 
 for command in awk curl docker git go jq node openssl; do
 	command -v "$command" >/dev/null 2>&1 || {
@@ -24,32 +24,22 @@ test -f "$shauth_root/compose.yaml"
 test -f "$shauth_root/validator/validate.mjs"
 test -d "$root/tests/browser/node_modules/playwright"
 
-# Shauth's compose file and Dockerfile name Docker Hub images, whose anonymous
-# pull limit the shared CI runners exhaust. The same digests Docker Hub serves
-# for those tags come from the Amazon ECR Public copy of Docker's official
-# images instead: PostgreSQL through the compose override below, and the Go
-# builder by tagging the ECR image locally under the name the Dockerfile uses,
-# which the build then resolves without asking Docker Hub.
-shauth_postgres_image=public.ecr.aws/docker/library/postgres:17.5-alpine@sha256:6567bca8d7bc8c82c5922425a0baee57be8402df92bae5eacad5f01ae9544daa
-shauth_go_tag=golang:1.26.5-alpine
-shauth_go_image=public.ecr.aws/docker/library/golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2
-grep -q '^    image: postgres:17\.5-alpine$' "$shauth_root/compose.yaml" || {
-	printf 'Shauth compose.yaml no longer uses postgres:17.5-alpine; update shauth_postgres_image\n' >&2
-	exit 1
-}
-while IFS= read -r base; do
-	case $base in
-	"$shauth_go_tag" | gcr.io/*) ;;
-	*)
-		printf 'Shauth Dockerfile base image %s is neither %s nor outside Docker Hub; update this script\n' "$base" "$shauth_go_tag" >&2
-		exit 1
-		;;
+# Docker Hub limits anonymous pulls per address and the shared CI runners
+# exhaust it, so every image Shauth builds from or runs must name a registry
+# other than Docker Hub. `shauth-local` is the image compose builds from the
+# Dockerfile checked here, not one it pulls.
+while IFS= read -r image; do
+	case $image in
+	"" | shauth-local) continue ;;
+	docker.io/*) ;;
+	*.*/*) continue ;;
 	esac
+	printf 'Shauth pulls %s from Docker Hub; pin it to public.ecr.aws or mirror.gcr.io in Shauth first\n' "$image" >&2
+	exit 1
 done <<EOF
 $(awk '$1 == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; break } }' "$shauth_root/Dockerfile")
+$(awk '$1 == "image:" { print $2 }' "$shauth_root/compose.yaml")
 EOF
-docker pull --quiet "$shauth_go_image" >/dev/null
-docker tag "$shauth_go_image" "$shauth_go_tag"
 
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
@@ -145,7 +135,6 @@ services:
   postgres:
     ports: !override
       - "127.0.0.1:${postgres_port}:5432"
-    image: ${shauth_postgres_image}
   hydra:
     ports: !override
       - "127.0.0.1:${hydra_public_port}:4444"

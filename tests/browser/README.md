@@ -98,7 +98,7 @@ that the suite never runs.
 ## Shauth SSO qualification
 
 `make shauth-sso-qualification` requires `SHAUTH_SOURCE_DIR` to point at a
-Shauth checkout of commit `0fda680cba964e5768ed75a9c3e5b7230c418ca6`. It uses
+Shauth checkout of commit `226ffffb9a046378334098c9bf34cc31776c34d4`. It uses
 the same pinned Playwright installation to exercise two real SameOldChat
 relying parties against real Shauth, Ory Hydra, and PostgreSQL services. The
 two applications use distinct databases and dynamically allocated loopback
