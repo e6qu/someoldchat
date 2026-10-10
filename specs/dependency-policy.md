@@ -126,6 +126,10 @@ executes. Known gaps in that coverage:
   but the two are not compared: the Makefile-to-inventory comparison covers only
   `PROTOC_GEN_GO_GRPC_VERSION` and `GOVULNCHECK_VERSION`. `terraform` is
   compared through its `*.tf` `required_version`, not through the `Makefile`.
+- The PostgreSQL and Go images that the Shauth qualification builds and runs
+  from Shauth's own compose file are pinned by digest in
+  `scripts/test-shauth-sso.sh`, which fails when Shauth names different images,
+  but they have no inventory entry.
 - Indirect Go modules are covered only by `go.sum` checksums and
   `go mod verify`: a bump is integrity-checked but not quarantine-checked.
 
@@ -145,6 +149,13 @@ not exact, and a pinned generator in the `Makefile` whose version disagrees with
 the inventory. Every digest-pinned container image and every provider version
 must additionally match an inventory entry, so a base-image or provider bump is
 subject to the publication quarantine rather than merely being "a digest".
+It also rejects any image that resolves to Docker Hub, whose anonymous pull
+limit the shared CI runners exhaust: official images come from the Amazon ECR
+Public copy of Docker's library (`public.ecr.aws/docker/library`) and other
+Docker Hub images from Google's mirror (`mirror.gcr.io`), at the digest Docker
+Hub serves for the tag. Every `docker/setup-buildx-action` step must name its
+BuildKit image through a digest-pinned, inventoried `driver-opts: image=...`,
+because the action otherwise pulls `moby/buildkit` from Docker Hub.
 `make container-check` additionally validates the publication workflow's own
 shape and its retention behaviour.
 

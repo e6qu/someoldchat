@@ -285,3 +285,36 @@ func TestTheRepositoryWorkflowsSatisfyTheStructureContract(t *testing.T) {
 		t.Fatalf("workflow structure contract: %v", err)
 	}
 }
+
+func TestRequireInventoriedImageRejectsDockerHub(t *testing.T) {
+	digest := "sha256:0123456789012345678901234567890123456789012345678901234567890123"
+	byID := map[string]dependency{
+		"container/docker.io/library/postgres": {Kind: "container-image", Version: "18.1", Revision: digest, Checksum: digest},
+	}
+	for _, reference := range []string{"postgres:18.1@" + digest, "docker.io/library/postgres:18.1@" + digest} {
+		if err := requireInventoriedImage("test", reference, byID); err == nil || !strings.Contains(err.Error(), "Docker Hub") {
+			t.Errorf("requireInventoriedImage(%q) = %v, want a Docker Hub rejection", reference, err)
+		}
+	}
+}
+
+func TestValidateBuildxImageRequiresAPinnedInventoriedBuildKit(t *testing.T) {
+	digest := "sha256:0123456789012345678901234567890123456789012345678901234567890123"
+	byID := map[string]dependency{
+		"container/mirror.gcr.io/moby/buildkit": {Kind: "container-image", Version: "buildx-stable-1", Revision: digest, Checksum: digest},
+	}
+	uses := "      - uses: docker/setup-buildx-action@0123456789012345678901234567890123456789 # v4"
+	pinned := []string{uses, "        with:", "          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1@" + digest, "      - run: true"}
+	if err := validateBuildxImage("ci.yml", 0, pinned, byID); err != nil {
+		t.Fatalf("validateBuildxImage() rejected a pinned BuildKit image: %v", err)
+	}
+	for name, lines := range map[string][]string{
+		"unset":          {uses, "      - with:", "          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1@" + digest},
+		"undigested":     {uses, "        with:", "          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1"},
+		"from-dockerhub": {uses, "        with:", "          driver-opts: image=moby/buildkit:buildx-stable-1@" + digest},
+	} {
+		if err := validateBuildxImage("ci.yml", 0, lines, byID); err == nil {
+			t.Errorf("validateBuildxImage() accepted the %s BuildKit image", name)
+		}
+	}
+}

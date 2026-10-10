@@ -1,7 +1,11 @@
-# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+# syntax=mirror.gcr.io/docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+# The Dockerfile frontend comes from Google's Docker Hub mirror and the Go image
+# from the Amazon ECR Public copy of Docker's official images, both pinned to the
+# digest Docker Hub serves: Docker Hub limits anonymous pulls per address, and
+# the shared CI runners exhaust it.
 # The same pinned builder image as the repository root Dockerfile, so one Go
 # toolchain digest covers every shipped binary instead of two that can drift.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS build
+FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS build
 
 # The builder deliberately runs on $BUILDPLATFORM for speed, so the compiler must
 # be told what to target. Without these the build emitted a host-architecture
