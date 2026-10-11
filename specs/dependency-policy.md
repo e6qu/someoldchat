@@ -159,6 +159,31 @@ because the action otherwise pulls `moby/buildkit` from Docker Hub.
 `make container-check` additionally validates the publication workflow's own
 shape and its retention behaviour.
 
+`make image-pins-check` (`tests/image-pins`) catches container image pins that
+fall behind. The inventory check only proves a pin is the one the inventory
+records and has aged past the quarantine; it never asks a registry whether
+something newer exists. For every image pinned as
+`public.ecr.aws/docker/library/<name>:<tag>@sha256:...` or
+`mirror.gcr.io/<repository>:<tag>@sha256:...` anywhere in the tracked tree
+except Markdown, it reads Docker Hub's tag API and the mirror's manifest, and
+reports:
+
+- **ok**: the pin is the digest Docker Hub serves for the tag, and the mirror
+  serves the same digest.
+- **HELD**: Docker Hub moved the tag, or published a newer release with the same
+  variant and major version (`18.6` after `18.1`, `1.27.2-bookworm` after
+  `1.26.9-bookworm`), less than 24 hours ago.
+- **DRIFT**, which fails: that newer digest or release is at least 24 hours old,
+  or the mirror serves a different digest than the pin.
+
+ECR Public allows one unauthenticated request per second, so the check spaces
+its requests there 1.1 seconds apart. The `Image pins` workflow runs it on every
+pull request, on every push to `main` and daily, so drift shows up without a
+pull request. To bump a pin, take the digest Docker Hub serves, confirm the
+mirror serves the same one (`docker buildx imagetools inspect`), and update the
+image's inventory entry with the new version, digest, publication time and
+evidence link.
+
 A daily job SHOULD propose the newest eligible version after its quarantine has
 elapsed. Updates MUST be narrow, reviewable, and never automatically merged.
 Coupled packages MAY update together when separate versions cannot be tested
