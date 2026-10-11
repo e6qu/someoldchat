@@ -98,12 +98,16 @@ that the suite never runs.
 ## Shauth SSO qualification
 
 `make shauth-sso-qualification` requires `SHAUTH_SOURCE_DIR` to point at a
-Shauth checkout of commit `0fda680cba964e5768ed75a9c3e5b7230c418ca6`. It uses
+Shauth checkout of commit `226ffffb9a046378334098c9bf34cc31776c34d4`. It uses
 the same pinned Playwright installation to exercise two real SameOldChat
 relying parties against real Shauth, Ory Hydra, and PostgreSQL services. The
 two applications use distinct databases and dynamically allocated loopback
 ports, while `.localhost` origins preserve secure relying-party origin behavior
-without fixed host-port collisions.
+without fixed host-port collisions. Registering the two applications makes
+Shauth queue its own browser validation of each one, from the application and
+from Shauth's catalog, with the other application as the global-logout witness;
+the script drains that queue the way Shauth's validator worker does and fails
+unless exactly those four runs pass.
 
 The official Slack SDK suites are separate; see
 [`../official-sdk-qualification`](../official-sdk-qualification/README.md).

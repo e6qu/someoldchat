@@ -5,7 +5,7 @@ set -eu
 unset CDPATH
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 shauth_root=${SHAUTH_SOURCE_DIR:?SHAUTH_SOURCE_DIR must point to the exact Shauth checkout}
-expected_shauth_commit=0fda680cba964e5768ed75a9c3e5b7230c418ca6
+expected_shauth_commit=226ffffb9a046378334098c9bf34cc31776c34d4
 
 for command in awk curl docker git go jq node openssl; do
 	command -v "$command" >/dev/null 2>&1 || {
@@ -24,32 +24,22 @@ test -f "$shauth_root/compose.yaml"
 test -f "$shauth_root/validator/validate.mjs"
 test -d "$root/tests/browser/node_modules/playwright"
 
-# Shauth's compose file and Dockerfile name Docker Hub images, whose anonymous
-# pull limit the shared CI runners exhaust. The same digests Docker Hub serves
-# for those tags come from the Amazon ECR Public copy of Docker's official
-# images instead: PostgreSQL through the compose override below, and the Go
-# builder by tagging the ECR image locally under the name the Dockerfile uses,
-# which the build then resolves without asking Docker Hub.
-shauth_postgres_image=public.ecr.aws/docker/library/postgres:17.5-alpine@sha256:6567bca8d7bc8c82c5922425a0baee57be8402df92bae5eacad5f01ae9544daa
-shauth_go_tag=golang:1.26.5-alpine
-shauth_go_image=public.ecr.aws/docker/library/golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2
-grep -q '^    image: postgres:17\.5-alpine$' "$shauth_root/compose.yaml" || {
-	printf 'Shauth compose.yaml no longer uses postgres:17.5-alpine; update shauth_postgres_image\n' >&2
-	exit 1
-}
-while IFS= read -r base; do
-	case $base in
-	"$shauth_go_tag" | gcr.io/*) ;;
-	*)
-		printf 'Shauth Dockerfile base image %s is neither %s nor outside Docker Hub; update this script\n' "$base" "$shauth_go_tag" >&2
-		exit 1
-		;;
+# Docker Hub limits anonymous pulls per address and the shared CI runners
+# exhaust it, so every image Shauth builds from or runs must name a registry
+# other than Docker Hub. `shauth-local` is the image compose builds from the
+# Dockerfile checked here, not one it pulls.
+while IFS= read -r image; do
+	case $image in
+	"" | shauth-local) continue ;;
+	docker.io/*) ;;
+	*.*/*) continue ;;
 	esac
+	printf 'Shauth pulls %s from Docker Hub; pin it to public.ecr.aws or mirror.gcr.io in Shauth first\n' "$image" >&2
+	exit 1
 done <<EOF
 $(awk '$1 == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; break } }' "$shauth_root/Dockerfile")
+$(awk '$1 == "image:" { print $2 }' "$shauth_root/compose.yaml")
 EOF
-docker pull --quiet "$shauth_go_image" >/dev/null
-docker tag "$shauth_go_image" "$shauth_go_tag"
 
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
@@ -96,6 +86,7 @@ hydra_secret=$(openssl rand -base64 48 | tr -d '\n')
 admin_password=$(openssl rand -base64 48 | tr -d '\n')
 validator_token=$(openssl rand -hex 48)
 validation_status_token=$(openssl rand -hex 48)
+token_hook_token=$(openssl rand -hex 48)
 primary_client_secret=$(openssl rand -hex 32)
 witness_client_secret=$(openssl rand -hex 32)
 primary_api_token=$(openssl rand -hex 32)
@@ -145,7 +136,6 @@ services:
   postgres:
     ports: !override
       - "127.0.0.1:${postgres_port}:5432"
-    image: ${shauth_postgres_image}
   hydra:
     ports: !override
       - "127.0.0.1:${hydra_public_port}:4444"
@@ -166,7 +156,6 @@ provider_compose() {
 		POSTGRES_PASSWORD="$postgres_password" \
 		HYDRA_SYSTEM_SECRET="$hydra_secret" \
 		HYDRA_DSN="postgres://shauth:${postgres_password}@postgres:5432/hydra?sslmode=disable" \
-		HYDRA_PUBLIC_URL="$provider_origin" \
 		SHAUTH_PUBLIC_URL="$provider_origin" \
 		SHAUTH_DATABASE_URL="postgres://shauth:${postgres_password}@postgres:5432/shauth?sslmode=disable" \
 		GITHUB_CLIENT_ID=someoldchat-integration \
@@ -174,6 +163,7 @@ provider_compose() {
 		SHAUTH_BOOTSTRAP_ADMIN_PASSWORD="$admin_password" \
 		SHAUTH_VALIDATOR_TOKEN="$validator_token" \
 		SHAUTH_VALIDATION_STATUS_TOKEN="$validation_status_token" \
+		SHAUTH_TOKEN_HOOK_TOKEN="$token_hook_token" \
 		SHAUTH_BOOTSTRAP_APPS_JSON="$bootstrap_apps" \
 		docker compose --project-name "$provider_project" --project-directory "$shauth_root" \
 		-f "$shauth_root/compose.yaml" -f "$work_dir/provider-ports.yaml" "$@"
@@ -298,52 +288,52 @@ for origin in "$primary_origin" "$witness_origin"; do
 done
 
 mkdir "$work_dir/validator"
-cp "$shauth_root/validator/validate.mjs" "$shauth_root/validator/security.mjs" "$shauth_root/validator/readiness.mjs" "$work_dir/validator/"
+for module in "$shauth_root"/validator/*.mjs; do
+	case $module in
+	*.test.mjs) ;;
+	*) cp "$module" "$work_dir/validator/" ;;
+	esac
+done
 ln -s "$root/tests/browser/node_modules" "$work_dir/node_modules"
 
-create_bootstraps() {
-	next=$1
-	curl --fail --silent --show-error \
-		--request POST \
-		--header "Authorization: Bearer ${validator_token}" \
-		--header 'Content-Type: application/json' \
-		--data "{\"next\":[\"${next}\",\"/\"]}" \
-		"$provider_origin/internal/validator/browser-bootstraps"
+validator_request() {
+	path=$1
+	shift
+	curl --fail --silent --show-error --request POST \
+		--header "Authorization: Bearer ${validator_token}" "$@" "$provider_origin/internal/validator/$path"
 }
 
-run_direction() {
-	direction=$1
-	if test "$direction" = from_shauth; then
-		bootstraps=$(create_bootstraps /apps)
+# Registering the two applications queues Shauth's own browser validation of
+# each one in both directions, with the other application as the global-logout
+# witness. This drains that queue exactly as Shauth's validator worker does:
+# claim a run, mint the run's browser sessions, drive the browser, and record
+# the outcome with Shauth.
+expected_runs="someoldchat-primary/from_app someoldchat-primary/from_shauth someoldchat-witness/from_app someoldchat-witness/from_shauth"
+completed_runs=
+while job=$(validator_request jobs/claim) && test -n "$job"; do
+	run_id=$(printf '%s' "$job" | jq -r '.id')
+	run_name=$(printf '%s' "$job" | jq -r '.app_slug + "/" + .direction')
+	if test "$(printf '%s' "$job" | jq -r '.direction')" = from_shauth; then
+		next='["/apps","/","/"]'
 	else
-		bootstraps=$(create_bootstraps /)
+		next='["/","/","/"]'
 	fi
-	job=$(jq -cn \
-		--arg direction "$direction" \
-		--arg release "$release_revision" \
-		--arg provider "$provider_origin" \
-		--arg primary "$primary_origin" \
-		--arg witness "$witness_origin" \
-		--argjson bootstraps "$(printf '%s' "$bootstraps" | jq '.urls')" '
-  {
-    id:("someoldchat-" + $direction), managed_app_id:"00000000-0000-4000-8000-000000000101",
-    app_slug:"someoldchat-primary", app_name:"SameOldChat primary", oidc_client_id:"someoldchat-primary",
-    launch_url:($primary + "/"), validation_url:($primary + "/auth/validation"), signed_out_url:($primary + "/signed-out"),
-    logout_bridge_url:($primary + "/auth/shauth/logout/complete"), direction:$direction, release_revision:$release,
-    shauth_url:$provider, bootstrap_urls:$bootstraps,
-    witness:{managed_app_id:"00000000-0000-4000-8000-000000000102", app_slug:"someoldchat-witness", app_name:"SameOldChat witness", oidc_client_id:"someoldchat-witness", launch_url:($witness + "/"), validation_url:($witness + "/auth/validation"), signed_out_url:($witness + "/signed-out"), logout_bridge_url:($witness + "/auth/shauth/logout/complete"), release_revision:$release}
-  }')
-	result=$(printf '%s' "$job" | \
-		SHAUTH_VALIDATION_USERNAME=shauth-validator \
-		SHAUTH_VALIDATION_EMAIL=shauth-validator@localhost.test \
+	bootstraps=$(validator_request browser-bootstraps --header 'Content-Type: application/json' \
+		--data "$(jq -cn --arg run "$run_id" --argjson next "$next" '{run_id:$run, next:$next}')")
+	result=$(printf '%s' "$job" | jq -c --argjson urls "$(printf '%s' "$bootstraps" | jq '.urls')" '. + {bootstrap_urls:$urls}' |
 		node "$work_dir/validator/validate.mjs")
+	validator_request "jobs/$run_id/complete" --header 'Content-Type: application/json' --data "$result" >/dev/null
 	printf '%s\n' "$result" | jq --exit-status '.status == "passed" and .failure == ""' >/dev/null || {
-		printf 'Shauth %s validation failed: %s\n' "$direction" "$(printf '%s' "$result" | jq -r '.failure')" >&2
-		return 1
+		printf 'Shauth validation %s failed: %s\n' "$run_name" "$(printf '%s' "$result" | jq -r '.failure')" >&2
+		exit 1
 	}
-}
-
-run_direction from_app
-run_direction from_shauth
+	completed_runs="${completed_runs}${run_name}
+"
+done
+completed_runs=$(printf '%s' "$completed_runs" | sort | tr '\n' ' ')
+if test "$completed_runs" != "$expected_runs "; then
+	printf 'Shauth queued validations %s; expected exactly %s\n' "$completed_runs" "$expected_runs" >&2
+	exit 1
+fi
 
 printf 'SameOldChat passed direct, catalog, silent SSO, app logout, provider logout, identity, release, fail-closed, and credential-boundary validation against Shauth %s.\n' "$expected_shauth_commit"

@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite check-dqlite test test-huddle-media test-race test-load test-load-race test-transport-load test-mutation test-fuzz test-dqlite test-postgres sdk-qualification external-contract-qualification browser-qualification browser-qualification-deps browser-qualification-run shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
+.PHONY: all build build-static build-dqlite check-dqlite test test-huddle-media test-race test-load test-load-race test-transport-load test-mutation test-fuzz test-dqlite test-postgres sdk-qualification external-contract-qualification browser-qualification browser-qualification-deps browser-qualification-run shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check hooks dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -260,6 +260,12 @@ module-startup-check:
 # deployed task would have exited 2 on every start with every gate green.
 task-flags-check:
 	GOCACHE=$(GOCACHE) ./scripts/check-task-definition-flags.sh
+
+# Point git at the versioned hooks in .githooks: the pre-push hook runs
+# dependency-check, so a pin the admission policy rejects never leaves the
+# machine. Before it, the only check ran in CI after the push.
+hooks:
+	git config core.hooksPath .githooks
 
 dependency-check:
 	GOTOOLCHAIN=local GOCACHE=$(GOCACHE) go list -mod=readonly all >/dev/null

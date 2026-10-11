@@ -402,7 +402,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: e6qu/shauth
-          ref: 0fda680cba964e5768ed75a9c3e5b7230c418ca6
+          ref: 226ffffb9a046378334098c9bf34cc31776c34d4
           path: .qualification/shauth
 
       - name: Set up Go

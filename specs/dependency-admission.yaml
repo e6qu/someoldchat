@@ -567,11 +567,11 @@ entries:
     kind: source-checkout
     canonical: e6qu/shauth
     source: https://github.com/e6qu/shauth
-    version: 0fda680cba964e5768ed75a9c3e5b7230c418ca6
-    revision: 0fda680cba964e5768ed75a9c3e5b7230c418ca6
-    published_at: 2026-07-21T14:17:40Z
-    evidence: https://api.github.com/repos/e6qu/shauth/commits/0fda680cba964e5768ed75a9c3e5b7230c418ca6
-    checksum: git:0fda680cba964e5768ed75a9c3e5b7230c418ca6
+    version: 226ffffb9a046378334098c9bf34cc31776c34d4
+    revision: 226ffffb9a046378334098c9bf34cc31776c34d4
+    published_at: 2026-10-10T12:09:53Z
+    evidence: https://api.github.com/repos/e6qu/shauth/commits/226ffffb9a046378334098c9bf34cc31776c34d4
+    checksum: git:226ffffb9a046378334098c9bf34cc31776c34d4
     provenance: github-commit
     license: AGPL-3.0-or-later
     purpose: exact single-sign-on contract executed by the Shauth qualification

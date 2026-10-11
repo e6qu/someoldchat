@@ -126,10 +126,10 @@ executes. Known gaps in that coverage:
   but the two are not compared: the Makefile-to-inventory comparison covers only
   `PROTOC_GEN_GO_GRPC_VERSION` and `GOVULNCHECK_VERSION`. `terraform` is
   compared through its `*.tf` `required_version`, not through the `Makefile`.
-- The PostgreSQL and Go images that the Shauth qualification builds and runs
-  from Shauth's own compose file are pinned by digest in
-  `scripts/test-shauth-sso.sh`, which fails when Shauth names different images,
-  but they have no inventory entry.
+- The images the Shauth qualification builds from and runs through Shauth's own
+  compose file are pinned by digest in Shauth, and
+  `scripts/test-shauth-sso.sh` fails when any of them would come from Docker
+  Hub, but they have no inventory entry here.
 - Indirect Go modules are covered only by `go.sum` checksums and
   `go mod verify`: a bump is integrity-checked but not quarantine-checked.
 

@@ -52,3 +52,12 @@ exceptions, unless the upstream Slack contract explicitly requires 500.
 When context is limited, reduce the work into evidence-backed passes and keep
 the discovered relationships visible in the branch and documentation. Context
 limits are not a reason to discard a related finding.
+
+## Local hooks
+
+Run `make hooks` once per clone. It points git at `.githooks`, whose pre-push
+hook runs `make dependency-check`, so a push whose pins the dependency
+admission policy rejects (an entry younger than its quarantine, a digest that
+no longer matches) is refused locally instead of failing CI's Go checks after
+the push. Never push past it with `--no-verify`; a pin that is too young waits
+until it is old enough.
