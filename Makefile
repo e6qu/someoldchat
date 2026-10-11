@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite check-dqlite test test-huddle-media test-race test-load test-load-race test-transport-load test-mutation test-fuzz test-dqlite test-postgres sdk-qualification external-contract-qualification browser-qualification browser-qualification-deps browser-qualification-run shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check hooks dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
+.PHONY: all build build-static build-dqlite check-dqlite test test-huddle-media test-race test-load test-load-race test-transport-load test-mutation test-fuzz test-dqlite test-postgres sdk-qualification external-contract-qualification browser-qualification browser-qualification-deps browser-qualification-run shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check hooks dependency-check image-pins-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -266,6 +266,12 @@ task-flags-check:
 # machine. Before it, the only check ran in CI after the push.
 hooks:
 	git config core.hooksPath .githooks
+
+# Compares every digest-pinned image with what Docker Hub serves for its tag
+# now. dependency-check is offline and cannot see a pin falling behind.
+image-pins-check:
+	GOCACHE=$(GOCACHE) go test ./tests/image-pins
+	GOCACHE=$(GOCACHE) go run ./tests/image-pins
 
 dependency-check:
 	GOTOOLCHAIN=local GOCACHE=$(GOCACHE) go list -mod=readonly all >/dev/null
